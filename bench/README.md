@@ -1,13 +1,13 @@
-# telar-bench
+# rueca-bench
 
-Benchmark harness for Telar (RFC 0001 §15, RFC 0002 §8). It compares, on the
+Benchmark harness for Rueca (RFC 0001 §15, RFC 0002 §8). It compares, on the
 same inputs and with the same scoring:
 
 | Arm | What it is | How it is driven |
 |---|---|---|
 | `grep` | No graph. BM25 (k1=1.2, b=0.75) over file contents, function bodies and function names (tree-sitter); textual `name(` heuristic for callers/callees | in-process |
 | `cbm` | codebase-memory-mcp **v0.12.0**, official release binary pinned by sha256 in `manifest.toml` (never a binary on `PATH`) | `codebase-memory-mcp cli --quiet <tool> '<json>'`, with `CBM_CACHE_DIR` / `CBM_RUNTIME_DIR` inside `bench/.cache`; one warm `daemon start` per bench process (as in an MCP session; stopped at exit), UI disabled |
-| `telar` | Telar at HEAD | `$TELAR_BIN index <root> --store <dir> --json`, `$TELAR_BIN query <tool> '<json>' --root <root> --store <dir>` (alpha contract, `docs/tools.md`) |
+| `rueca` | Rueca at HEAD | `$RUECA_BIN index <root> --store <dir> --json`, `$RUECA_BIN query <tool> '<json>' --root <root> --store <dir>` (alpha contract, `docs/tools.md`) |
 
 The repository ships **manifests and code only**. Datasets, repositories and
 tool binaries are fetched at runtime at pinned revisions into `bench/.cache`
@@ -17,33 +17,33 @@ tool binaries are fetched at runtime at pinned revisions into `bench/.cache`
 
 ```sh
 # from the repository root
-uv run --project bench telar-bench setup                 # tools, datasets, clones, gold labels
-uv run --project bench telar-bench run --arm all --suite all
-uv run --project bench telar-bench report                # bench/results/*.json + docs/bench/alpha-results.md
+uv run --project bench rueca-bench setup                 # tools, datasets, clones, gold labels
+uv run --project bench rueca-bench run --arm all --suite all
+uv run --project bench rueca-bench report                # bench/results/*.json + docs/bench/alpha-results.md
 ```
 
-- `run --arm {grep,cbm,telar,all|a,b} --suite {s1,s3,all} [--only ID|REPO ...] [--workers N] [--force]`.
+- `run --arm {grep,cbm,rueca,all|a,b} --suite {s1,s3,all} [--only ID|REPO ...] [--workers N] [--force]`.
   Outputs are cached per (arm, instance) in `.cache/runs/`; re-running only
   computes what is missing (`--force` recomputes). Arm failures are recorded
   (and scored as misses), never dropped.
 - `setup --select` regenerates the `[[s1.instances]]` list at the end of
   `manifest.toml` from the selection rules (deterministic).
-- `clean --work` removes worktrees; `clean --runs telar` drops cached Telar outputs.
+- `clean --work` removes worktrees; `clean --runs rueca` drops cached Rueca outputs.
 - Per-call timeouts: 120 s per query, 1800 s per index (`arms/__init__.py`).
 - S1 runs repositories in parallel (`--workers`, default 2), instances of one
   repository sequentially (one partial clone per repository, one detached
   worktree per instance, removed afterwards).
 
-### Telar arm
+### Rueca arm
 
 ```sh
 export PATH="$HOME/.cargo/bin:$PATH"
-cargo build --release -p telar-cli
-TELAR_BIN=$PWD/target/release/telar uv run --project bench telar-bench run --arm telar --suite all
-uv run --project bench telar-bench report
+cargo build --release -p rueca
+RUECA_BIN=$PWD/target/release/rueca uv run --project bench rueca-bench run --arm rueca --suite all
+uv run --project bench rueca-bench report
 ```
 
-Without `TELAR_BIN` the Telar column is reported as *pending*.
+Without `RUECA_BIN` the Rueca column is reported as *pending*.
 
 ### Requirements
 
@@ -51,7 +51,7 @@ Without `TELAR_BIN` the Telar column is reported as *pending*.
 only), network for `setup`. `git-lfs` is not needed: worktrees are created
 with the LFS filter disabled (pointers stay pointers).
 
-**macOS note.** If `uv run` fails with `ModuleNotFoundError: telar_bench`,
+**macOS note.** If `uv run` fails with `ModuleNotFoundError: rueca_bench`,
 macOS has marked files in `bench/.venv` hidden and Python ≥ 3.12 skips hidden
 `.pth` files (editable install). Use a regular install instead:
 `export UV_NO_EDITABLE=1` (the `cache-keys` in `pyproject.toml` make uv
@@ -86,7 +86,7 @@ instances with more assembled gold (below) come first, then
 - `raw` — the issue text, whitespace-collapsed, truncated to 4000 chars.
 
 Graph arms answer with their symbol search (`cbm`: `search_graph` BM25
-`query`, `telar`: `search_symbols`), 100 results; the ranked file list is the
+`query`, `rueca`: `search_symbols`), 100 results; the ranked file list is the
 order of first appearance of each file among the symbol hits, the ranked
 function list is the callable hits. `grep` ranks files by BM25 over file
 contents and functions by BM25 over function bodies (name-only BM25 reported
@@ -99,7 +99,7 @@ as a secondary number).
 | Files | gold patch | modified/deleted files existing at the base commit, source extension of the instance language, not a test path. New files are excluded (cannot be localized). |
 | Functions (27 Python instances) | **LocAgent** `edit_functions` (`czlll/SWE-bench_Lite`) | `path:Class.func` labels, mapped to the tree-sitter definition at the base commit to obtain def lines |
 | Functions (20 TS instances, 13 non-empty) | **SWE-PolyBench** `modified_nodes` | CST node paths (`path->program->kind:name…`); class/interface-only nodes skipped |
-| Functions (34 other instances) | Telar tree-sitter labeler (`gold.py`) | every removed/modified old-side line → innermost enclosing function/method; a pure insertion after old line k → innermost function containing k and k+1 (Python: also the function containing k when the inserted line is indented deeper than its `def`) |
+| Functions (34 other instances) | Rueca tree-sitter labeler (`gold.py`) | every removed/modified old-side line → innermost enclosing function/method; a pure insertion after old line k → innermost function containing k and k+1 (Python: also the function containing k when the inserted line is indented deeper than its `def`) |
 | Context files (22 instances) | **ContextBench** `gold_context` | human-annotated context spans; scored as context-file recall@5/@10 of the ranked files |
 
 Where both an assembled label and the tree-sitter labeler exist, their
@@ -174,7 +174,7 @@ Verified* (2024); Rashid et al., *SWE-PolyBench* (2025); Chen et al.,
 *LocAgent* (ACL 2025); EuniAI, *ContextBench* (2026); Salis et al., *PyCG*
 (ICSE 2021).
 
-Only identifiers (instance ids, commits, revisions) and Telar's own code live
+Only identifiers (instance ids, commits, revisions) and Rueca's own code live
 in this repository. Gold labels and arm outputs stay in `bench/.cache`;
 `bench/results/*.json` contains scores and per-instance metrics, which include
 file paths and function names of the public corpus repositories.
@@ -183,8 +183,8 @@ file paths and function names of the public corpus repositories.
 
 - **Contamination.** All corpus repositories and issues are public and old;
   irrelevant for the deterministic arms, relevant for the future agent suite.
-- **Process-per-call latency.** `cbm` and `telar` are driven one CLI process
-  per query (`cbm` talks to its warm daemon; `telar` opens its segment on every
+- **Process-per-call latency.** `cbm` and `rueca` are driven one CLI process
+  per query (`cbm` talks to its warm daemon; `rueca` opens its segment on every
   call); `grep` runs in process, so its query latency is ~0. Index times were
   measured with up to 3 repositories processed in parallel.
 - **grep shares the gold's extractor.** The `grep` arm and the gold callables

@@ -1,0 +1,13 @@
+[package]
+name = "rueca-model"
+description = "Core data model for Rueca: identifiers, labels, edges, facts, resolved graphs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true

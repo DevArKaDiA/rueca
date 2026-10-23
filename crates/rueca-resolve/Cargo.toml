@@ -1,0 +1,20 @@
+[package]
+name = "rueca-resolve"
+description = "Per-snapshot name and call resolution for Rueca"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rueca-extract.workspace = true
+rueca-model.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+rueca-lang-python.workspace = true
+rueca-lang-typescript.workspace = true

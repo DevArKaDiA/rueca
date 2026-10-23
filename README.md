@@ -1,4 +1,4 @@
-# Telar
+# Rueca
 
 Code intelligence engine for coding agents. One core, three deployment modes:
 
@@ -15,13 +15,13 @@ In: source code and what lives in repositories (README, ADRs, OpenAPI, infra
 manifests, diagrams). Pull requests and issues are a v2 candidate.
 
 Out: Notion, Drive, and other document stores. Agents federate those through
-their own MCP servers; Telar exposes stable symbol IDs
+their own MCP servers; Rueca exposes stable symbol IDs
 (`repo@sha:path#symbol`) so results can be cross-referenced.
 
 ## Parity contract
 
-Telar is built from scratch. codebase-memory-mcp v0.12.0 is the reference
-baseline: for every supported language, Telar must match or beat it on the
+Rueca is built from scratch. codebase-memory-mcp v0.12.0 is the reference
+baseline: for every supported language, Rueca must match or beat it on the
 benchmark (localization, cross-service edges, structural questions) before it
 is recommended as a replacement.
 
@@ -35,10 +35,10 @@ Six tools: `search_symbols`, `search_code`, `get_symbol`, `get_snippet`,
 `trace`, `get_file_outline` — contract in `docs/tools.md`.
 
 ```sh
-cargo build --release -p telar-cli
-target/release/telar index path/to/repo
-target/release/telar query search_symbols '{"query":"session request"}' --root path/to/repo
-target/release/telar mcp --root path/to/repo      # MCP server on stdio
+cargo build --release -p rueca
+target/release/rueca index path/to/repo
+target/release/rueca query search_symbols '{"query":"session request"}' --root path/to/repo
+target/release/rueca mcp --root path/to/repo      # MCP server on stdio
 ```
 
 Benchmark against cbm v0.12.0: `docs/bench/alpha-results.md` (method in
@@ -50,13 +50,13 @@ Python structural questions.
 
 | Crate | Role | Assembled from |
 |---|---|---|
-| `telar-model` | data model, symbol IDs, blob SHA | — |
-| `telar-extract` | `LanguagePack` contract, budgeted parsing | tree-sitter 0.27 |
-| `telar-lang-python` | Python extraction, module resolution | tree-sitter-python; locals query adapted from nvim-treesitter + bloop |
-| `telar-lang-typescript` | TS/TSX/JS extraction | tree-sitter-typescript/javascript; locals from nvim-treesitter; imports via `oxc_resolver` |
-| `telar-resolve` | cross-file resolution with strategy + confidence | design from bloop scope graph, scip-syntax, codanna |
-| `telar-segment` | segment bundle, symbol + trigram search, content packs, catalog | tantivy, roaring, regex-syntax, zstd, memmap2, blake3 |
-| `telar-index` | worktree walk, facts cache, parallel extraction | ignore, rayon, gix |
-| `telar-query` | the six tools | schemars |
-| `telar-mcp` | MCP stdio server | rmcp 3.7 |
-| `telar-cli` | `telar` binary | clap |
+| `rueca-model` | data model, symbol IDs, blob SHA | — |
+| `rueca-extract` | `LanguagePack` contract, budgeted parsing | tree-sitter 0.27 |
+| `rueca-lang-python` | Python extraction, module resolution | tree-sitter-python; locals query adapted from nvim-treesitter + bloop |
+| `rueca-lang-typescript` | TS/TSX/JS extraction | tree-sitter-typescript/javascript; locals from nvim-treesitter; imports via `oxc_resolver` |
+| `rueca-resolve` | cross-file resolution with strategy + confidence | design from bloop scope graph, scip-syntax, codanna |
+| `rueca-segment` | segment bundle, symbol + trigram search, content packs, catalog | tantivy, roaring, regex-syntax, zstd, memmap2, blake3 |
+| `rueca-index` | worktree walk, facts cache, parallel extraction | ignore, rayon, gix |
+| `rueca-query` | the six tools | schemars |
+| `rueca-mcp` | MCP stdio server | rmcp 3.7 |
+| `rueca-cli` | `rueca` binary | clap |

@@ -12,14 +12,14 @@
 For every layer of RFC 0001 this document lists existing crates, projects,
 query collections, datasets and harnesses, with a verdict:
 
-- **Dependency** — use the crate as is, pinned, behind a Telar trait.
-- **Vendor + adapt** — copy files or logic into Telar with attribution.
+- **Dependency** — use the crate as is, pinned, behind a Rueca trait.
+- **Vendor + adapt** — copy files or logic into Rueca with attribution.
 - **Reference** — study the design; do not copy code.
 - **Avoid** — license, maintenance, or fit problem.
 
-Bottom line: roughly two thirds of Telar can be assembled from mature,
+Bottom line: roughly two thirds of Rueca can be assembled from mature,
 permissively licensed parts. What has **no** off-the-shelf solution, and is
-therefore Telar's real engineering work, is:
+therefore Rueca's real engineering work, is:
 
 1. **Name and call resolution** per language (no maintained Rust resolver
    exists; stack-graphs is archived and cannot link with current tree-sitter).
@@ -36,7 +36,7 @@ Section 10 lists the amendments this research implies for RFC 0001.
 
 ## 2. Licensing policy
 
-Telar is Apache-2.0. Rules for everything that enters the repository:
+Rueca is Apache-2.0. Rules for everything that enters the repository:
 
 | Source license | Policy |
 |---|---|
@@ -94,7 +94,7 @@ large grammar set on tree-sitter 0.27, which is a useful compatibility proof.
 | **Helm / Go templates** | ngalaiko `tree-sitter-go-template` (not on crates.io) | MIT | **Vendor** |
 | **YAML** | `tree-sitter-yaml` 0.7.2 | MIT | **Avoid on untrusted input**: unpatched out-of-bounds write (#48) and int16 overflow on long files (#49) |
 
-All grammars live in a `telar-grammars` crate with a golden-corpus test per
+All grammars live in a `rueca-grammars` crate with a golden-corpus test per
 grammar, so an upgrade that renames nodes fails CI instead of silently
 breaking queries.
 
@@ -150,7 +150,7 @@ No maintained, linkable Rust resolver exists.
 | `oxc_resolver` | MIT, 11.24, very active | Exact Node/TS module resolution | **Dependency** for TS/JS imports |
 | ruff crates, rust-analyzer | MIT/Apache | Unstable 0.0.x APIs | Reference |
 
-Telar resolver design (adopted from the above):
+Rueca resolver design (adopted from the above):
 
 1. Per-file scope graph for locals (bloop / scip-syntax model).
 2. Per-language project module resolution (codanna providers; `oxc_resolver`
@@ -169,7 +169,7 @@ non-definition reference to the innermost enclosing callable
 (`enclosing_range`) and classifying call vs. non-call with tree-sitter. A
 third-party measurement of this method on Java found about 60% precision and
 36% recall for call edges, so SCIP improves resolution but does not replace
-Telar's own call extraction.
+Rueca's own call extraction.
 
 | Language | Indexer | License | Status | Enclosing ranges | Verdict |
 |---|---|---|---|---|---|
@@ -179,7 +179,7 @@ Telar's own call extraction.
 | Go | scip-go | Apache-2.0 | 0.2.9, active | Yes (since 2026-09) | Dependency (external tool) |
 | Java | scip-java | Apache-2.0 | 0.13.2, active; full compile required | Yes | Dependency (external tool) |
 | Kotlin | scip-java + scip-kotlinc | Apache-2.0 | Gradle only, no Android, "less mature" | Yes | Partial |
-| **PHP** | scip-php | MIT | Last release 2023, no enclosing ranges, no relationships | No | **Not viable.** Build a small PHPStan extension (collectors, MIT) that emits Telar facts; watch Mago 2.0 |
+| **PHP** | scip-php | MIT | Last release 2023, no enclosing ranges, no relationships | No | **Not viable.** Build a small PHPStan extension (collectors, MIT) that emits Rueca facts; watch Mago 2.0 |
 | **Swift** | — (no SCIP indexer); IndexStoreDB from an Xcode/SwiftPM build | Apache-2.0 | Needs macOS build | — | **Tree-sitter only** in org mode; optional index-store import when the adopter's macOS CI uploads it |
 | Ruby, Dart, Rust | scip-ruby, scip-dart, rust-analyzer scip | Apache-2.0 / MIT | Active | Yes | Tier 2 |
 | C#, C/C++ | scip-dotnet, scip-clang | Apache-2.0 | Active | No | Tier 2/3 |
@@ -191,16 +191,16 @@ Importer components:
 | Symbol grammar | `scip` crate 0.10.0, `scip::symbol` | Apache-2.0 | **Dependency** (symbol parsing) |
 | Protobuf types | own `prost` types generated from `scip.proto` | — | **Build**: the crate pins `protobuf =3.7.2` and has no streaming reader; indexes reach ~2 GB |
 | Prior art | Glean `scip_to_glean` (BSD, Rust); Searchfox `scip-indexer.rs` (MPL-2.0); scip-io (MIT, orchestration) | — | Reference |
-| Evaluation | scip-syntax `evaluate --candidate --ground-truth` | MIT | **Copy the idea**: score Telar's syntactic resolution against SCIP per language |
+| Evaluation | scip-syntax `evaluate --candidate --ground-truth` | MIT | **Copy the idea**: score Rueca's syntactic resolution against SCIP per language |
 
 Rules:
 
-- Telar's own ID stays the primary key. SCIP symbols are stored as aliases,
+- Rueca's own ID stays the primary key. SCIP symbols are stored as aliases,
   with `<version>` dropped from the canonical key.
 - Read both the deprecated and the typed range fields (a real project lost
   all scip-go edges by reading only one).
 - In org mode, indexes are **uploaded from the adopter's CI**, keyed by commit.
-  Telar does not run adopter builds server-side (arbitrary code execution).
+  Rueca does not run adopter builds server-side (arbitrary code execution).
 - `local N` symbols are never graph nodes.
 
 ## 5. Contracts and framework detection
@@ -216,7 +216,7 @@ No maintained, permissive rule library for routes and HTTP clients exists.
 | CodeQL models-as-data YAML | MIT | Java/C#/Go library models | Vendor data with attribution |
 | semgrep-rules, opengrep-rules | non-OSI | — | Avoid |
 
-Rule packs are written by Telar, as `.scm` queries or ast-grep YAML.
+Rule packs are written by Rueca, as `.scm` queries or ast-grep YAML.
 
 ## 6. Storage, search, graph, vectors
 
@@ -230,7 +230,7 @@ Rule packs are written by Telar, as `.scm` queries or ast-grep YAML.
   tantivy + a split bundle with a hotcache (Quickwit), now Apache-2.0.
 - GitHub Blackbird (Rust) shards and deduplicates **by git blob**, and handles
   branches with per-blob visibility; Zoekt uses a per-blob branch bitmask.
-  Both confirm Telar's blob-as-unit design.
+  Both confirm Rueca's blob-as-unit design.
 
 ### 6.2 Components
 
@@ -282,7 +282,7 @@ under `GIT_NO_LAZY_FETCH=1`. Bitbucket Cloud does not support partial clone:
 fall back to depth-1 without filter or to the API.
 
 Host API limits that shape the design: GitHub `compare` caps at 300 files and
-trees truncate at 100,000 entries, so Telar computes its own tree diffs;
+trees truncate at 100,000 entries, so Rueca computes its own tree diffs;
 GitHub does not auto-redeliver failed webhooks, so a reconcile loop is
 mandatory.
 
@@ -311,10 +311,10 @@ has happened.
 The 2026-07-28 spec removes the `initialize` handshake and session IDs, adds
 `server/discover`, and deprecates Dynamic Client Registration in favor of
 Client ID Metadata Documents. **rmcp's auth support is client-side only.**
-Telar builds the resource-server side: RFC 9728 protected-resource metadata,
+Rueca builds the resource-server side: RFC 9728 protected-resource metadata,
 bearer validation with audience check, `WWW-Authenticate` challenges. The spec
 forbids accepting or forwarding other tokens, so a GitHub token cannot be
-Telar's MCP bearer; Telar either validates tokens from an external OIDC
+Rueca's MCP bearer; Rueca either validates tokens from an external OIDC
 provider or runs a minimal embedded authorization server (`oauth2` +
 `jsonwebtoken`) that federates login to GitHub/GitLab and keeps the host token
 server-side.
@@ -342,10 +342,10 @@ features.
 | Hound, Livegrep, OpenGrok | MIT / BSD / CDDL | Anti-patterns at scale (polling, full rebuilds) |
 | Sourcebot | FSL / closed | Reference only, no code |
 
-## 8. Benchmark (telar-bench)
+## 8. Benchmark (rueca-bench)
 
 The repository ships **manifests and scripts only**: instance IDs, commit
-SHAs, Telar's own labels, sha256-pinned tool binaries. Datasets and code are
+SHAs, Rueca's own labels, sha256-pinned tool binaries. Datasets and code are
 fetched at runtime, which keeps the repository Apache-2.0 clean despite
 unlicensed or copyleft upstreams.
 
@@ -358,7 +358,7 @@ unlicensed or copyleft upstreams.
 | 5. Operational | own harness; report medians of 5 runs on fixed runners | — | — |
 
 Arms in every suite: plain grep + file reading, codebase-memory-mcp v0.12.0
-(pinned by sha256), Telar at HEAD, and an issue-only / no-tools control to
+(pinned by sha256), Rueca at HEAD, and an issue-only / no-tools control to
 measure contamination.
 
 Label-building for the gaps: mine merged PRs with linked issues created after
@@ -376,9 +376,9 @@ Large repositories (vscode, kubernetes, linux) for the operational suite only.
 
 ## 9. Assemble vs. build — summary
 
-| Layer | Assembled | Built by Telar |
+| Layer | Assembled | Built by Rueca |
 |---|---|---|
-| Parsing | tree-sitter runtime, ~16 grammar crates, pure-Rust data parsers | `telar-grammars` (vendoring 4 grammars, golden tests) |
+| Parsing | tree-sitter runtime, ~16 grammar crates, pure-Rust data parsers | `rueca-grammars` (vendoring 4 grammars, golden tests) |
 | Extraction | seed queries (upstream, nvim-treesitter, scip-syntax, bloop), ast-grep core | **query packs at graph quality**, data-file extractors |
 | Resolution | `oxc_resolver`, design from bloop / scip-syntax / codanna | **per-language resolver**, project-config readers |
 | Precision | `scip::symbol`, external indexers, pyrefly | streaming SCIP importer, call derivation, PHPStan extension |
@@ -405,9 +405,9 @@ Large repositories (vscode, kubernetes, linux) for the operational suite only.
    deltas.
 3. **§9.3 SCIP.** Add pyrefly (Glean JSON) for Python calls, a PHPStan
    extension for PHP, and index-store import for Swift. Precision artifacts are
-   uploaded from adopter CI; Telar never runs adopter builds server-side.
+   uploaded from adopter CI; Rueca never runs adopter builds server-side.
 4. **§11.4 / §13 MCP and auth.** Target MCP spec 2026-07-28 with legacy
-   support via rmcp. Telar implements the resource-server role; host tokens
+   support via rmcp. Rueca implements the resource-server role; host tokens
    are never MCP bearers.
 5. **§14 Git.** Network operations use the `git` CLI (blobless, depth-1,
    targeted OID fetch); gix for all reads. Service images therefore include

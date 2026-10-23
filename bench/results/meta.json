@@ -1,5 +1,5 @@
 {
- "date": "2026-10-23 02:30 UTC",
+ "date": "2026-10-23 02:52 UTC",
  "machine": {
   "platform": "macOS-26.4.1-arm64-arm-64bit",
   "machine": "arm64",
@@ -12,9 +12,9 @@
   "grep": {
    "available": true,
    "reason": "",
-   "version": "telar-bench bm25 (k1=1.2,b=0.75) + tree-sitter",
+   "version": "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter",
    "recorded_versions": [
-    "telar-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
+    "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
    ]
   },
   "cbm": {
@@ -25,16 +25,16 @@
     "codebase-memory-mcp 0.12.0"
    ]
   },
-  "telar": {
+  "rueca": {
    "available": true,
-   "reason": "TELAR_BIN not set",
-   "version": "telar 0.1.0-alpha.1 (binary sha256 c74d9b10c885)",
+   "reason": "RUECA_BIN not set",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 8d6bc2783fd3)",
    "recorded_versions": [
-    "telar 0.1.0-alpha.1 (binary sha256 c74d9b10c885)"
+    "rueca 0.1.0-alpha.1 (binary sha256 8d6bc2783fd3)"
    ]
   }
  },
- "manifest_sha256": "f8f5ddb14bc3c281e9a16d9ec27b03b81fff750dc20242c9bc6d9ab1752b886a",
+ "manifest_sha256": "308ceb6504e48fcd6efff15c9d6961d064064996701b6d8fe09baf18aa12ead7",
  "manifest_tools": {
   "cbm": {
    "name": "codebase-memory-mcp",
@@ -66,9 +66,9 @@
    "version": "0.5.2",
    "license": "Apache-2.0"
   },
-  "telar": {
-   "name": "telar",
-   "binary": "$TELAR_BIN (e.g. target/release/telar after `cargo build --release -p telar-cli`)",
+  "rueca": {
+   "name": "rueca",
+   "binary": "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)",
    "contract": "docs/tools.md (alpha)"
   }
  }

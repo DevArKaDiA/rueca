@@ -2221,6 +2221,151 @@ dependencies = [
 ]
 
 [[package]]
+name = "rueca"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "rueca-extract",
+ "rueca-index",
+ "rueca-mcp",
+ "rueca-query",
+ "rueca-segment",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rueca-extract"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "rueca-model",
+ "serde",
+ "thiserror",
+ "tree-sitter",
+]
+
+[[package]]
+name = "rueca-index"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "gix",
+ "ignore",
+ "postcard",
+ "rayon",
+ "rueca-extract",
+ "rueca-lang-python",
+ "rueca-lang-typescript",
+ "rueca-model",
+ "rueca-resolve",
+ "rueca-segment",
+ "serde",
+ "tempfile",
+ "tracing",
+ "zstd",
+]
+
+[[package]]
+name = "rueca-lang-python"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "rueca-extract",
+ "rueca-model",
+ "tree-sitter",
+ "tree-sitter-python",
+]
+
+[[package]]
+name = "rueca-lang-typescript"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "oxc_resolver",
+ "rueca-extract",
+ "rueca-model",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-javascript",
+ "tree-sitter-typescript",
+]
+
+[[package]]
+name = "rueca-mcp"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "rmcp",
+ "rueca-extract",
+ "rueca-index",
+ "rueca-query",
+ "rueca-segment",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "rueca-model"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "rueca-query"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "rueca-model",
+ "rueca-segment",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "tempfile",
+]
+
+[[package]]
+name = "rueca-resolve"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "rueca-extract",
+ "rueca-lang-python",
+ "rueca-lang-typescript",
+ "rueca-model",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "rueca-segment"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "blake3",
+ "bytemuck",
+ "fastrand",
+ "globset",
+ "memmap2",
+ "postcard",
+ "regex",
+ "regex-syntax",
+ "roaring",
+ "rueca-model",
+ "serde",
+ "serde_json",
+ "stable_deref_trait",
+ "tantivy",
+ "tempfile",
+ "thiserror",
+ "zstd",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2636,151 +2781,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eac258c2c6390673f2685813afeeafcb8c4e0ee7de8dd3fc46838dcc37263f98"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "telar-cli"
-version = "0.1.0-alpha.1"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap",
- "serde",
- "serde_json",
- "telar-extract",
- "telar-index",
- "telar-mcp",
- "telar-query",
- "telar-segment",
- "tempfile",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "telar-extract"
-version = "0.1.0-alpha.1"
-dependencies = [
- "serde",
- "telar-model",
- "thiserror",
- "tree-sitter",
-]
-
-[[package]]
-name = "telar-index"
-version = "0.1.0-alpha.1"
-dependencies = [
- "anyhow",
- "gix",
- "ignore",
- "postcard",
- "rayon",
- "serde",
- "telar-extract",
- "telar-lang-python",
- "telar-lang-typescript",
- "telar-model",
- "telar-resolve",
- "telar-segment",
- "tempfile",
- "tracing",
- "zstd",
-]
-
-[[package]]
-name = "telar-lang-python"
-version = "0.1.0-alpha.1"
-dependencies = [
- "telar-extract",
- "telar-model",
- "tree-sitter",
- "tree-sitter-python",
-]
-
-[[package]]
-name = "telar-lang-typescript"
-version = "0.1.0-alpha.1"
-dependencies = [
- "oxc_resolver",
- "serde_json",
- "telar-extract",
- "telar-model",
- "tree-sitter",
- "tree-sitter-javascript",
- "tree-sitter-typescript",
-]
-
-[[package]]
-name = "telar-mcp"
-version = "0.1.0-alpha.1"
-dependencies = [
- "anyhow",
- "rmcp",
- "serde_json",
- "telar-extract",
- "telar-index",
- "telar-query",
- "telar-segment",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "telar-model"
-version = "0.1.0-alpha.1"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "telar-query"
-version = "0.1.0-alpha.1"
-dependencies = [
- "anyhow",
- "schemars",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "telar-model",
- "telar-segment",
- "tempfile",
-]
-
-[[package]]
-name = "telar-resolve"
-version = "0.1.0-alpha.1"
-dependencies = [
- "serde_json",
- "telar-extract",
- "telar-lang-python",
- "telar-lang-typescript",
- "telar-model",
- "tracing",
-]
-
-[[package]]
-name = "telar-segment"
-version = "0.1.0-alpha.1"
-dependencies = [
- "blake3",
- "bytemuck",
- "fastrand",
- "globset",
- "memmap2",
- "postcard",
- "regex",
- "regex-syntax",
- "roaring",
- "serde",
- "serde_json",
- "stable_deref_trait",
- "tantivy",
- "telar-model",
- "tempfile",
- "thiserror",
- "zstd",
 ]
 
 [[package]]

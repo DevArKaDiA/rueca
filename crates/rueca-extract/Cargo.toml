@@ -1,0 +1,16 @@
+[package]
+name = "rueca-extract"
+description = "Extractor trait, language-pack registry and tree-sitter helpers for Rueca"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rueca-model.workspace = true
+tree-sitter.workspace = true
+thiserror.workspace = true
+serde.workspace = true

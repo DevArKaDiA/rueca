@@ -8,7 +8,7 @@
 
 ## 1. Summary
 
-Telar is a code intelligence engine for coding agents. It turns source code
+Rueca is a code intelligence engine for coding agents. It turns source code
 into a queryable graph of symbols and relationships, plus full-text and
 content indexes, and serves it over MCP.
 
@@ -25,7 +25,7 @@ changes is where segments live and how indexing is scheduled.
 
 This RFC defines the data model, the indexing pipeline, the storage format,
 the query surface, the component boundaries (as Rust traits and crates), and
-the benchmark that decides when Telar is ready to replace existing tools.
+the benchmark that decides when Rueca is ready to replace existing tools.
 
 ## 2. Motivation
 
@@ -48,7 +48,7 @@ problems:
    exactly what an organization-wide index should answer.
 6. **No permission model.** Every caller sees every repository.
 
-Telar is designed service-first, so that local mode is the degenerate case
+Rueca is designed service-first, so that local mode is the degenerate case
 of the same architecture rather than the other way around.
 
 ## 3. Goals and non-goals
@@ -75,15 +75,15 @@ of the same architecture rather than the other way around.
 ### Non-goals
 
 - N1. Indexing document stores (Notion, Drive, wikis). Agents federate those
-  through their own MCP servers. Telar exposes stable symbol IDs so results
+  through their own MCP servers. Rueca exposes stable symbol IDs so results
   can be cross-referenced.
-- N2. Editing or refactoring code. Telar is read-only.
+- N2. Editing or refactoring code. Rueca is read-only.
 - N3. Supporting every language. Languages are added in tiers (§12) and each
   one is held to the benchmark.
 - N4. Writing a full type checker per language. Precision beyond syntactic
   resolution comes from importing compiler-grade indexes (SCIP) where they
   exist.
-- N5. A hosted product. Telar is software adopters run.
+- N5. A hosted product. Rueca is software adopters run.
 
 ## 4. Concepts
 
@@ -289,7 +289,7 @@ File contents are **not** inside the segment; they live in content packs
 
 All access goes through `SegmentReader` / `SegmentWriter` traits, and
 third-party crates (tantivy, arrow) stay behind them, pinned per format
-version. A `telar export --sqlite` command writes a segment as a SQLite file
+version. A `rueca export --sqlite` command writes a segment as a SQLite file
 for debugging and ad-hoc SQL.
 
 Why not SQLite per segment (the first draft of this RFC): rusqlite cannot
@@ -345,9 +345,9 @@ A language pack is data-first:
   path normalization, qualified-name construction).
 
 Keeping extraction in query files makes packs reviewable by people who know
-the language but not Telar's internals, and keeps per-language code small.
+the language but not Rueca's internals, and keeps per-language code small.
 
-Grammars are pinned in a `telar-grammars` crate. The binary links exactly one
+Grammars are pinned in a `rueca-grammars` crate. The binary links exactly one
 tree-sitter runtime (0.27), so grammars whose published crates require an
 older runtime (Kotlin, Dart, Dockerfile, Helm/Go templates) are vendored at
 pinned commits. Every grammar has a golden-corpus test so an upgrade that
@@ -381,7 +381,7 @@ it, and the benchmark reports both configurations.
 | Go | scip-go | |
 | Java | scip-java | requires a full compile |
 | Kotlin | scip-java + scip-kotlinc | Gradle only, no Android |
-| PHP | Telar PHPStan extension (collectors) emitting Telar facts | scip-php is not viable |
+| PHP | Rueca PHPStan extension (collectors) emitting Rueca facts | scip-php is not viable |
 | Swift | index-store import from an Xcode / SwiftPM build | macOS CI only; otherwise tree-sitter only |
 | Ruby, Dart, Rust, C#, C/C++ | scip-ruby, scip-dart, rust-analyzer, scip-dotnet, scip-clang | tier 2 |
 
@@ -394,10 +394,10 @@ Rules:
 - The importer streams one `Document` at a time (indexes reach ~2 GB), reads
   both deprecated and typed range fields, and ignores occurrences for files
   whose blob differs from the indexed commit.
-- Telar IDs stay primary; SCIP symbols are stored as aliases with the version
+- Rueca IDs stay primary; SCIP symbols are stored as aliases with the version
   component dropped. `local N` symbols never become nodes.
 - In service and org modes, precision artifacts are **uploaded from the
-  adopter's CI**, keyed by commit. Telar never runs adopter builds or
+  adopter's CI**, keyed by commit. Rueca never runs adopter builds or
   dependency installs server-side. Local mode may run installed indexers.
 - Matching edges are upgraded to `Scip` (or `TypeResolved`) strategy;
   heuristic edges contradicted by the precision layer are kept with lowered
@@ -445,7 +445,7 @@ other state.
 
 ### 11.2 Local overlay
 
-In local mode the developer can point Telar at a remote service. The view is
+In local mode the developer can point Rueca at a remote service. The view is
 the remote organization view plus a **local delta segment** built from the
 working tree (including uncommitted changes) against the remote base of the
 current branch. The developer sees the whole organization and their current
@@ -514,17 +514,17 @@ configuration.
   reconcile (GitHub does not redeliver failed webhooks). **Deny by default**
   until a principal has been synced. Every query view is filtered by the
   caller's grants before execution.
-- **MCP authorization (service / org):** Telar is an OAuth 2.1 **resource
+- **MCP authorization (service / org):** Rueca is an OAuth 2.1 **resource
   server** per the MCP 2026-07-28 authorization spec: RFC 9728 protected
   resource metadata, bearer validation with audience check,
   `WWW-Authenticate` challenges and `insufficient_scope` step-up. `rmcp`
-  provides only client-side auth, so this layer is Telar's. Tokens are issued
-  either by an external OIDC provider (Telar validates via JWKS) or by a
+  provides only client-side auth, so this layer is Rueca's. Tokens are issued
+  either by an external OIDC provider (Rueca validates via JWKS) or by a
   minimal embedded authorization server that federates login to GitHub /
   GitLab. **Code-host tokens are never accepted as MCP bearers** and never
   forwarded; they stay server-side for permission sync.
 - **Local:** no network access unless a remote is configured.
-- Content never leaves the deployment. Telar has no telemetry.
+- Content never leaves the deployment. Rueca has no telemetry.
 - **Untrusted input:** extraction runs in isolated worker processes with
   per-blob time, memory, size and nesting limits; tree-sitter cancellation via
   progress callbacks and match limits; data file kinds use pure-Rust parsers
@@ -537,7 +537,7 @@ configuration.
 |---|---|---|---|
 | Connector | working tree watcher | GitHub/GitLab poller | webhooks + reconcile poller |
 | Indexer | in process | in process | N worker processes |
-| Segment store | `~/.cache/telar` | object storage | object storage |
+| Segment store | `~/.cache/rueca` | object storage | object storage |
 | Catalog | SQLite | Postgres | Postgres |
 | Query engine | in process | in process | N stateless query nodes |
 | MCP | stdio | HTTP | HTTP behind a load balancer |
@@ -545,23 +545,23 @@ configuration.
 | Git network | — (working tree) | `git` CLI | `git` CLI |
 
 All three are the same binary with different configuration
-(`telar local`, `telar serve`, `telar worker` / `telar query`).
+(`rueca local`, `rueca serve`, `rueca worker` / `rueca query`).
 
 **Git transport.** All object reads (trees, blob SHAs, tree diffs, rev-walk,
 status, ignore rules) use `gix`. Network operations shell out to the `git`
 CLI (≥ 2.49), because gix has no partial-clone support and libgit2 cannot
-open partial clones. Per repository Telar keeps a bare, blobless, depth-1
+open partial clones. Per repository Rueca keeps a bare, blobless, depth-1
 cache: fetch the new commit with `--filter=blob:none`, diff trees with gix,
 fetch exactly the changed blob OIDs, read them with `GIT_NO_LAZY_FETCH=1`
 (the Zoekt indexserver pattern). Caches expire by time rather than repack.
 Hosts without partial clone (Bitbucket Cloud) fall back to depth-1 fetches or
-the host API. Telar computes its own tree diffs (host compare APIs truncate).
+the host API. Rueca computes its own tree diffs (host compare APIs truncate).
 Service and org images therefore include `git`; the local binary stays fully
 static.
 
 ## 15. Benchmark and adoption gate
 
-`telar-bench` is part of the repository and runs in CI.
+`rueca-bench` is part of the repository and runs in CI.
 
 **Corpus:** public repositories at pinned commits, at least two per tier-1
 language, plus a polyglot microservice system for cross-service edges
@@ -578,15 +578,15 @@ language, plus a polyglot microservice system for cross-service edges
 3. **Structural questions** — callers, callees, hubs, dependency manifests,
    call chains, with gold answers derived and reviewed per repository.
 4. **Agent end-to-end** — the same agent and model answer a fixed question
-   set with Telar vs. with only file reading and grep. Metrics: answer quality
+   set with Rueca vs. with only file reading and grep. Metrics: answer quality
    (graded), tokens, tool calls.
 5. **Operational** — index time, peak memory, segment and pack bytes per
    repository, query latency p50/p95.
 
 **Baselines:** codebase-memory-mcp v0.12.0 and plain file exploration, run
-outside Telar with recorded outputs.
+outside Rueca with recorded outputs.
 
-**Adoption gate:** for a given language, Telar is recommended over the
+**Adoption gate:** for a given language, Rueca is recommended over the
 baseline when it matches or beats it on suites 1–3 and is not worse than
 10% on suite 4. Results are published per release.
 
@@ -596,25 +596,25 @@ Cargo workspace:
 
 | Crate | Responsibility |
 |---|---|
-| `telar-model` | IDs, labels, edge types, facts, provenance — no I/O |
-| `telar-grammars` | pinned and vendored grammars, golden-corpus tests |
-| `telar-extract` | extractor trait, tree-sitter runtime, query-file loader |
-| `telar-lang-*` | one crate per language pack |
-| `telar-packs` | framework and file-kind packs, contract canonicalization |
-| `telar-scip` | SCIP import |
-| `telar-resolve` | per-snapshot and delta resolution |
-| `telar-segment` | segment and content-pack formats, reader/writer traits |
-| `telar-catalog` | catalog trait, SQLite and Postgres implementations |
-| `telar-source` | connectors: local, GitHub, GitLab, Bitbucket |
-| `telar-index` | pipeline orchestration and jobs |
-| `telar-orglink` | contract matching and org-link segments |
-| `telar-query` | views, operations, openCypher subset |
-| `telar-mcp` | MCP server, stdio and Streamable HTTP |
-| `telar-cli` | the `telar` binary |
-| `telar-bench` | corpus management, suites, reports |
+| `rueca-model` | IDs, labels, edge types, facts, provenance — no I/O |
+| `rueca-grammars` | pinned and vendored grammars, golden-corpus tests |
+| `rueca-extract` | extractor trait, tree-sitter runtime, query-file loader |
+| `rueca-lang-*` | one crate per language pack |
+| `rueca-packs` | framework and file-kind packs, contract canonicalization |
+| `rueca-scip` | SCIP import |
+| `rueca-resolve` | per-snapshot and delta resolution |
+| `rueca-segment` | segment and content-pack formats, reader/writer traits |
+| `rueca-catalog` | catalog trait, SQLite and Postgres implementations |
+| `rueca-source` | connectors: local, GitHub, GitLab, Bitbucket |
+| `rueca-index` | pipeline orchestration and jobs |
+| `rueca-orglink` | contract matching and org-link segments |
+| `rueca-query` | views, operations, openCypher subset |
+| `rueca-mcp` | MCP server, stdio and Streamable HTTP |
+| `rueca-cli` (package `rueca`) | the `rueca` binary |
+| `rueca-bench` | corpus management, suites, reports |
 
-Dependency rule: `telar-model` depends on nothing internal; extractors depend
-only on `telar-model` and `telar-extract`; nothing below `telar-query` knows
+Dependency rule: `rueca-model` depends on nothing internal; extractors depend
+only on `rueca-model` and `rueca-extract`; nothing below `rueca-query` knows
 about MCP.
 
 Core traits (sketch):
@@ -654,7 +654,7 @@ trait Catalog: Send + Sync { /* repos, refs, snapshots, segments, grants, jobs *
 
 ## 18. Alternatives considered
 
-- **Wrap codebase-memory-mcp.** Fastest path to capability, but it ties Telar
+- **Wrap codebase-memory-mcp.** Fastest path to capability, but it ties Rueca
   to a large C codebase with a local-machine data model (SQLite file per
   project, sources read from checkouts). Rejected; it remains the benchmark
   baseline.

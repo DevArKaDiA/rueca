@@ -11,7 +11,7 @@ unless marked optional.
   repository id (`local/<dir>`, `github.com/o/r`). Default: the server's
   `--root`, else the only indexed root, else an error listing indexed roots.
 - **Symbol IDs**: `<repo>@<commit>:<path>#<local-qualified-name>`
-  (`telar_model::symbol_id`). Tools accept an `id`, a global
+  (`rueca_model::symbol_id`). Tools accept an `id`, a global
   `qualified_name`, or a suffix of it (`Session.request`), in that order of
   precedence.
 - **Qualified names**: Python `pkg.mod.Class.method`; ECMAScript
@@ -130,18 +130,18 @@ Result: `{ "path", "language", "line_count", "symbols": [ brief + "signature" + 
 ## CLI
 
 ```
-telar index [PATH] [--store DIR] [--repo ID] [--json]
+rueca index [PATH] [--store DIR] [--repo ID] [--json]
     Index the working tree at PATH (default: current dir). Prints a summary
     (or the IndexReport as JSON).
 
-telar query <TOOL> '<JSON ARGS>' [--root PATH] [--store DIR]
+rueca query <TOOL> '<JSON ARGS>' [--root PATH] [--store DIR]
     Run one tool and print its JSON result. Same semantics as MCP.
 
-telar mcp [--root PATH] [--store DIR] [--no-auto-index]
+rueca mcp [--root PATH] [--store DIR] [--no-auto-index]
     MCP server on stdio. Indexes --root first if it has no segment.
 
-telar status [--store DIR] [--json]
+rueca status [--store DIR] [--json]
     List indexed roots with repo, commit, node/edge/file counts, age.
 ```
 
-Store default: `$TELAR_HOME`, else `~/.cache/telar`.
+Store default: `$RUECA_HOME`, else `~/.cache/rueca`.
