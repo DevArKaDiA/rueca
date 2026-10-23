@@ -22,6 +22,10 @@ jobs:
           missing=0
           for sha in $(git rev-list --no-merges "$BASE..$HEAD"); do
             author="$(git log -1 --format='%an <%ae>' "$sha")"
+            # Bot commits (Dependabot, etc.) are exempt.
+            case "$(git log -1 --format='%ae' "$sha")" in
+              *"[bot]@users.noreply.github.com") continue ;;
+            esac
             if ! git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$sha" | grep -qF "$author"; then
               echo "::error::Commit $sha is missing 'Signed-off-by: $author'"
               missing=1
