@@ -1,0 +1,51 @@
+name: Bug report
+description: Wrong result, crash, or unexpected behaviour
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the command or MCP tool call and its output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: A public repository (and commit) or a minimal snippet that reproduces the problem.
+      placeholder: |
+        rueca index .
+        rueca query trace '{"qualified_name":"pkg.mod.f"}'
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options: [Python, TypeScript, TSX, JavaScript, Not language-specific]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Rueca version
+      description: Output of `rueca --version`
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 26 arm64 / Ubuntu 24.04 x86_64
+  - type: input
+    id: client
+    attributes:
+      label: MCP client (if relevant)
+      placeholder: Claude Code, VS Code, Cursor, …

@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest a tool, capability or improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you (or your agent) trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What would you like Rueca to do? Example tool calls and outputs help.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

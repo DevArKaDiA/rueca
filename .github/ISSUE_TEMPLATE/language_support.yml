@@ -1,0 +1,22 @@
+name: Language support
+description: Request or propose support for a new language
+labels: [language]
+body:
+  - type: input
+    id: language
+    attributes:
+      label: Language
+    validations:
+      required: true
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use case
+      description: Which repositories would you use it on? Public examples help us benchmark.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Grammar, module system, existing SCIP indexer, frameworks worth detecting, willingness to contribute.

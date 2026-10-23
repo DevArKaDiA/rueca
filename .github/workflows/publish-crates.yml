@@ -1,0 +1,29 @@
+name: Publish crates
+
+# Publishes every workspace crate to crates.io when a GitHub release is
+# published (cargo-dist creates the release from a `v*` tag).
+# Uses crates.io Trusted Publishing (OIDC); configure it once per crate on
+# crates.io after the first manual publish. See docs/releasing.md.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish --workspace --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
