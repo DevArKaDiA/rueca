@@ -1,0 +1,12 @@
+[package]
+name = "telar-mcp"
+description = "MCP server for Telar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+telar-query.workspace = true
+telar-index.workspace = true
+anyhow.workspace = true

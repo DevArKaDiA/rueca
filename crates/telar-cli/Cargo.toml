@@ -1,0 +1,17 @@
+[package]
+name = "telar-cli"
+description = "The telar binary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "telar"
+path = "src/main.rs"
+
+[dependencies]
+telar-index.workspace = true
+telar-query.workspace = true
+telar-mcp.workspace = true
+anyhow.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "telar-index"
+description = "Indexing pipeline for Telar: walk, extract, resolve, write"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+telar-extract.workspace = true
+telar-model.workspace = true
+telar-resolve.workspace = true
+telar-segment.workspace = true
+telar-lang-python.workspace = true
+telar-lang-typescript.workspace = true
+anyhow.workspace = true
+serde.workspace = true
