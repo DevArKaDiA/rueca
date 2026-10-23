@@ -9,7 +9,8 @@
 ## Checklist
 
 - [ ] Tests added or updated
-- [ ] Docs updated in the same PR (crate docs, `docs/tools.md`, RFC / `docs/decisions.md`, `CHANGELOG.md`)
+- [ ] PR title follows Conventional Commits (it becomes the changelog entry)
+- [ ] Docs updated in the same PR (crate docs, `docs/tools.md`, RFC / `docs/decisions.md`)
 - [ ] Benchmark run if extraction, resolution or ranking changed (numbers below)
 - [ ] Commits signed off (`git commit -s`, see CONTRIBUTING.md)
 

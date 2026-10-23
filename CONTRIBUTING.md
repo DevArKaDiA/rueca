@@ -42,16 +42,30 @@ cargo run -p rueca -- index path/to/repo
 cargo run -p rueca -- query search_symbols '{"query":"parse"}' --root path/to/repo --pretty
 ```
 
+## Branching
+
+Trunk-based development:
+
+- `main` is the only long-lived branch. It is protected (PR + CI required,
+  linear history) and always releasable.
+- Work on short-lived branches off `main`: `feat/…`, `fix/…`, `docs/…`,
+  `perf/…`, `refactor/…`, `ci/…`. Forks work the same way.
+- PRs are **squash-merged**; the PR title becomes the commit on `main`.
+- There are no `develop` or permanent release branches. Releases are cut from
+  `main` by merging the release PR (see [docs/releasing.md](docs/releasing.md)).
+  If an older version ever needs a patch, a `release/X.Y` branch is cut from
+  its tag and fixes are cherry-picked onto it.
+
 ## Pull requests
 
 - Keep PRs focused; one logical change per PR.
 - Add or update tests. Extraction and resolution changes need a fixture that
   shows the new behaviour.
-- **Docs ship with code**: update crate docs, `docs/tools.md`, the relevant
-  RFC or `docs/decisions.md`, and `CHANGELOG.md` (Unreleased section) in the
-  same PR.
+- **Docs ship with code**: update crate docs, `docs/tools.md` and the
+  relevant RFC or `docs/decisions.md` in the same PR. `CHANGELOG.md` is
+  generated from PR titles at release time.
 - CI must pass: fmt, clippy (`-D warnings`), tests on Linux and macOS, MSRV,
-  and `cargo deny`.
+  rustdoc, `cargo deny`, DCO and the PR title check.
 - If a change affects extraction or resolution quality, run the benchmark
   (`bench/README.md`) and include before/after numbers. Report regressions
   honestly; they are not automatically blockers.
@@ -69,11 +83,14 @@ This adds `Signed-off-by: Your Name <you@example.com>` to the message. A CI
 check rejects PRs with commits that lack it. To fix a branch:
 `git rebase --signoff main`.
 
-### Commit messages
+### PR titles and commit messages
 
-[Conventional Commits](https://www.conventionalcommits.org/) style is
-preferred: `feat:`, `fix:`, `docs:`, `perf:`, `refactor:`, `test:`,
-`chore:`, with the crate as scope when it helps (`fix(segment): …`).
+PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/)
+(checked in CI): `feat:`, `fix:`, `perf:`, `refactor:`, `docs:`, `test:`,
+`build:`, `ci:`, `chore:`, `revert:`, optionally with the crate as scope
+(`fix(segment): …`) and `!` for breaking changes (`feat(query)!: …`). They
+drive the changelog and the next version. Commit messages inside a PR are
+free-form but the same style is appreciated.
 
 ## Licensing of contributions
 
