@@ -1,5 +1,33 @@
 # Decisions log
 
+## 2026-10-22 — Alpha 1 (local mode) shipped; deviations from RFC 0001/0002
+
+Alpha scope: local mode, one binary, MCP over stdio, Python + TS/JS, six tools.
+Built by assembling the RFC 0002 components; deviations, all documented in the
+crate docs:
+
+- Node/file tables are postcard, not Arrow IPC (behind the reader; swap later).
+- Trigram content index is Telar's own (sorted keys + roaring postings) rather
+  than a tantivy n-gram field; `fst` not used (keys are fixed width).
+- tantivy symbol index is embedded in the bundle and served through a
+  read-only bundle directory (Quickwit pattern); doc id = node id for
+  deterministic tie-breaks.
+- Local catalog is `catalog.json`, not SQLite.
+- `oxc_resolver` pinned to 11.23 (11.24 needs Rust 1.95; MSRV is 1.90), run
+  over a virtual file system built from the snapshot's paths and configs.
+- Local-binding detection uses vendored locals queries (nvim-treesitter,
+  bloop; see NOTICE). scip-syntax Python locals is empty upstream.
+- Git reads via gix; `dirty` is computed by comparing indexed blob SHAs with
+  the HEAD tree instead of gix status.
+- Benchmark Python call gold: scip-python + PyCG, not pyrefly. Function
+  localization gold reuses LocAgent and SWE-PolyBench labels where available.
+
+Results in `docs/bench/alpha-results.md`: parity gate not met. Telar leads
+cbm on TS/JS callers/callees F1 and on query latency (~10 ms vs ~440 ms per
+call), trails on S1 localization ranking (and both graph tools trail BM25), on
+Python callees, and on JS named function expressions passed as arguments
+(express definition-found 56%).
+
 ## 2026-10-20 — Scope: code only
 
 Telar indexes code and repository-resident docs. External document stores

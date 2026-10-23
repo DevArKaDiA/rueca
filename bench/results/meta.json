@@ -1,0 +1,75 @@
+{
+ "date": "2026-10-23 02:30 UTC",
+ "machine": {
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "cpu": "Apple M4 Pro",
+  "cpus": "14",
+  "memory_gb": 48,
+  "python": "3.12.13"
+ },
+ "arms": {
+  "grep": {
+   "available": true,
+   "reason": "",
+   "version": "telar-bench bm25 (k1=1.2,b=0.75) + tree-sitter",
+   "recorded_versions": [
+    "telar-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
+   ]
+  },
+  "cbm": {
+   "available": true,
+   "reason": "",
+   "version": "codebase-memory-mcp 0.12.0",
+   "recorded_versions": [
+    "codebase-memory-mcp 0.12.0"
+   ]
+  },
+  "telar": {
+   "available": true,
+   "reason": "TELAR_BIN not set",
+   "version": "telar 0.1.0-alpha.1 (binary sha256 c74d9b10c885)",
+   "recorded_versions": [
+    "telar 0.1.0-alpha.1 (binary sha256 c74d9b10c885)"
+   ]
+  }
+ },
+ "manifest_sha256": "f8f5ddb14bc3c281e9a16d9ec27b03b81fff750dc20242c9bc6d9ab1752b886a",
+ "manifest_tools": {
+  "cbm": {
+   "name": "codebase-memory-mcp",
+   "version": "0.12.0",
+   "release": "https://github.com/DeusData/codebase-memory-mcp/releases/tag/v0.12.0",
+   "license": "MIT",
+   "index_mode": "full",
+   "cli": "codebase-memory-mcp cli --quiet <tool> '<json>'",
+   "binaries": {
+    "darwin-arm64": {
+     "url": "https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.0/codebase-memory-mcp-darwin-arm64.tar.gz",
+     "archive_sha256": "1be41a9dd6902e3633eb0b280189117dc3db3be623bdd3dd4c6ea74372b5a50b",
+     "binary_sha256": "d26ba94b11b79f727923eaadb811e044a52618ae6d303670df5467f1e6c25015"
+    },
+    "linux-amd64": {
+     "url": "https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.0/codebase-memory-mcp-linux-amd64.tar.gz",
+     "archive_sha256": "2c0a3f3314874e2315ed169165f1fdf74d9628c7f8b301579b900fcc6d7bcd9c",
+     "binary_sha256": "cedf9a2a1f8f523c62864ce2dfc791bb51b43c97845a1c3a6fe908a8bf64009b"
+    }
+   }
+  },
+  "scip_python": {
+   "npm": "@sourcegraph/scip-python",
+   "version": "0.6.8",
+   "license": "MIT"
+  },
+  "scip_typescript": {
+   "npm": "@sourcegraph/scip-typescript",
+   "version": "0.5.2",
+   "license": "Apache-2.0"
+  },
+  "telar": {
+   "name": "telar",
+   "binary": "$TELAR_BIN (e.g. target/release/telar after `cargo build --release -p telar-cli`)",
+   "contract": "docs/tools.md (alpha)"
+  }
+ }
+}

@@ -1,0 +1,880 @@
+# telar-bench manifest (RFC 0001 §15, RFC 0002 §8).
+#
+# Only identifiers live here: dataset revisions, instance ids, repository
+# commits, tool versions and sha256 pins. Dataset content and repository code
+# are fetched at runtime into bench/.cache and never committed.
+
+[bench]
+schema = 1
+alpha_languages = ["python", "typescript", "javascript"]
+
+# ---------------------------------------------------------------- tools
+
+[tools.cbm]
+name = "codebase-memory-mcp"
+version = "0.12.0"
+release = "https://github.com/DeusData/codebase-memory-mcp/releases/tag/v0.12.0"
+license = "MIT"
+index_mode = "full"  # index_repository default (all passes + semantic)
+cli = "codebase-memory-mcp cli --quiet <tool> '<json>'"
+
+[tools.cbm.binaries.darwin-arm64]
+url = "https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.0/codebase-memory-mcp-darwin-arm64.tar.gz"
+archive_sha256 = "1be41a9dd6902e3633eb0b280189117dc3db3be623bdd3dd4c6ea74372b5a50b"
+binary_sha256 = "d26ba94b11b79f727923eaadb811e044a52618ae6d303670df5467f1e6c25015"
+
+[tools.cbm.binaries.linux-amd64]
+url = "https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.0/codebase-memory-mcp-linux-amd64.tar.gz"
+archive_sha256 = "2c0a3f3314874e2315ed169165f1fdf74d9628c7f8b301579b900fcc6d7bcd9c"
+binary_sha256 = "cedf9a2a1f8f523c62864ce2dfc791bb51b43c97845a1c3a6fe908a8bf64009b"
+
+[tools.scip_python]
+npm = "@sourcegraph/scip-python"
+version = "0.6.8"
+license = "MIT"
+
+[tools.scip_typescript]
+npm = "@sourcegraph/scip-typescript"
+version = "0.5.2"
+license = "Apache-2.0"
+
+[tools.telar]
+name = "telar"
+binary = "$TELAR_BIN (e.g. target/release/telar after `cargo build --release -p telar-cli`)"
+contract = "docs/tools.md (alpha)"
+
+# ---------------------------------------------------------------- datasets
+# Fetched from Hugging Face at the pinned revision and verified by sha256.
+
+[datasets.swe_bench_verified]
+hf = "princeton-nlp/SWE-bench_Verified"
+revision = "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+file = "data/test-00000-of-00001.parquet"
+sha256 = "a45b1fe4e2f0c8390b2b2938ac83e92ed5979000856808f3679c07812e9e6dcd"
+card_license = "none stated on the dataset card"
+citation = "Jimenez et al., SWE-bench (ICLR 2024); OpenAI, SWE-bench Verified (2024)"
+
+[datasets.swe_bench_lite]
+hf = "SWE-bench/SWE-bench_Lite"
+revision = "b0dde1093fe417d83b7184254edf8199c1f0dff5"
+file = "data/test-00000-of-00001.parquet"
+sha256 = "438e281d80587aa7be470896ce410557002fde02d2ceee3e099331d308f62dd3"
+card_license = "none stated on the dataset card"
+citation = "Jimenez et al., SWE-bench (ICLR 2024)"
+
+[datasets.swe_polybench]
+hf = "AmazonScience/SWE-PolyBench"
+revision = "d56445f9940eae4e9d2974ec66820c2f1d7754e6"
+file = "test.csv"
+sha256 = "17ad661b20e9af1e2067fbbc2e2658a21137d56693570d1d07f966d8bc0408b7"
+card_license = "MIT"
+citation = "Rashid et al., SWE-PolyBench (Amazon Science, 2025)"
+gold_column = "modified_nodes"  # assembled function-level gold (CST node paths)
+
+[datasets.swe_bench_multilingual]
+hf = "SWE-bench/SWE-bench_Multilingual"
+revision = "846e647b9f33c0b51b739d005d13d85493c9af09"
+file = "data/test-00000-of-00001.parquet"
+sha256 = "92abca7cb527b41a9f66d03a26ce441ff7319e3a49f985998fd56be4bb9b08b2"
+card_license = "MIT"
+citation = "SWE-bench Multilingual (SWE-bench team, 2025)"
+
+# Assembled localization gold (RFC 0002 §8/§9). Used for gold labels only;
+# issue text / patches still come from the source dataset of each instance.
+
+[datasets.locagent_lite]
+hf = "czlll/SWE-bench_Lite"
+revision = "97f9af8814fe7eb15dcd9b2abaa9010e1eadda63"
+file = "data/test-00000-of-00001.parquet"
+sha256 = "008ac523001de665d3f1e4f4179587dcd68dd7b2f2d5bd878a5385e3e938b59d"
+columns = ["instance_id", "repo", "edit_functions", "added_functions"]
+card_license = "none stated on the dataset card; LocAgent code (gersteinlab/LocAgent) is Apache-2.0"
+citation = "Chen et al., LocAgent: Graph-Guided LLM Agents for Code Localization (ACL 2025)"
+role = "function-level edit gold (`edit_functions`) for SWE-bench Lite instances"
+
+[datasets.contextbench]
+hf = "Contextbench/ContextBench"
+revision = "c2855792b006af41c67202d33883fb9d46362853"
+file = "data/full.parquet"
+sha256 = "2f56535bdc73eb8a68bf4ebb49789d8e9cd4f219ea60df6290b85278aee61ca8"
+id_column = "original_inst_id"
+columns = ["original_inst_id", "repo", "base_commit", "gold_context", "source"]
+card_license = "none stated on the dataset card; ContextBench code (EuniAI/ContextBench) is Apache-2.0"
+citation = "ContextBench (EuniAI, 2026)"
+role = "human-annotated gold context spans (secondary S1 metric: context-file recall)"
+
+# ---------------------------------------------------------------- S1 localization
+# Instance selection: candidates are instances of the listed repos whose gold
+# patch modifies at least one existing, non-test source file of the language.
+# Order = sha256(instance_id) ascending; the first `quota` are taken; earlier
+# datasets in `sources` win on duplicate ids. `telar-bench select` regenerates
+# the [[s1.instances]] list at the end of this file.
+
+[s1]
+kw_max_tokens = 12
+result_limit = 100
+# Selection priority inside each repo quota: instances with more assembled
+# gold (LocAgent edit_functions, SWE-PolyBench modified_nodes, ContextBench
+# gold context) first, then sha256(instance_id) ascending.
+gold_assets = ["locagent_lite", "contextbench"]
+
+[[s1.repos]]
+repo = "psf/requests"
+language = "python"
+quota = 8
+sources = ["swe_bench_verified", "swe_bench_lite"]
+
+[[s1.repos]]
+repo = "pallets/flask"
+language = "python"
+quota = 3
+sources = ["swe_bench_verified", "swe_bench_lite"]
+
+[[s1.repos]]
+repo = "pylint-dev/pylint"
+language = "python"
+quota = 8
+sources = ["swe_bench_verified", "swe_bench_lite"]
+
+[[s1.repos]]
+repo = "pytest-dev/pytest"
+language = "python"
+quota = 11
+sources = ["swe_bench_verified", "swe_bench_lite"]
+
+[[s1.repos]]
+repo = "sphinx-doc/sphinx"
+language = "python"
+quota = 10
+sources = ["swe_bench_verified", "swe_bench_lite"]
+
+[[s1.repos]]
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+quota = 10
+sources = ["swe_polybench"]
+
+[[s1.repos]]
+repo = "coder/code-server"
+language = "typescript"
+quota = 10
+sources = ["swe_polybench"]
+
+[[s1.repos]]
+repo = "vuejs/core"
+language = "typescript"
+quota = 5
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "preactjs/preact"
+language = "javascript"
+quota = 10
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "axios/axios"
+language = "javascript"
+quota = 6
+sources = ["swe_bench_multilingual"]
+
+# ---------------------------------------------------------------- S3 structural
+# Gold call edges from SCIP indexes at pinned commits (RFC 0002 §4.2).
+
+[s3]
+sample_per_repo = 50
+seed = 20261022
+min_lines = 3
+
+[[s3.repos]]
+repo = "psf/requests"
+language = "python"
+tag = "v2.34.2"
+commit = "6e83187b8feb273ed4c6cdab5efd8d54901dfab3"
+include = ["src/requests/"]
+indexer = "scip_python"
+args = ["index", ".", "--project-name", "requests", "--project-version", "2.34.2"]
+
+[[s3.repos]]
+repo = "pallets/flask"
+language = "python"
+tag = "3.1.3"
+commit = "22d924701a6ae2e4cd01e9a15bbaf3946094af65"
+include = ["src/flask/"]
+indexer = "scip_python"
+args = ["index", ".", "--project-name", "flask", "--project-version", "3.1.3"]
+
+[[s3.repos]]
+repo = "honojs/hono"
+language = "typescript"
+tag = "v4.13.13"
+commit = "08a023cbfde55b434fb0fb30fae35d42e4bf20aa"
+include = ["src/"]
+indexer = "scip_typescript"
+args = ["index"]
+
+[[s3.repos]]
+repo = "expressjs/express"
+language = "javascript"
+tag = "v5.3.0"
+commit = "cf6722bf89a86905281d9160b6482e08166b5ef0"
+include = ["lib/", "index.js"]
+indexer = "scip_typescript"
+args = ["index", "--infer-tsconfig"]
+
+# PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
+[s3.pycg]
+repo = "vitsalis/PyCG"
+commit = "8d5dc40837803beef1d8d379fbf2cdad6cd94641"
+path = "micro-benchmark/snippets"
+license = "Apache-2.0"
+citation = "Salis et al., PyCG: Practical Call Graph Generation in Python (ICSE 2021)"
+
+# --- generated by `telar-bench select`; do not edit below this line ---
+[[s1.instances]]
+id = "psf__requests-2317"
+repo = "psf/requests"
+language = "python"
+base_commit = "091991be0da19de9108dbe5e3752917fea3d7fdc"
+dataset = "swe_bench_verified"
+assets = ["locagent_lite", "contextbench"]
+
+[[s1.instances]]
+id = "psf__requests-2674"
+repo = "psf/requests"
+language = "python"
+base_commit = "0be38a0c37c59c4b66ce908731da15b401655113"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "psf__requests-2931"
+repo = "psf/requests"
+language = "python"
+base_commit = "5f7a3a74aab1625c2bb65f643197ee885e3da576"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "psf__requests-1963"
+repo = "psf/requests"
+language = "python"
+base_commit = "110048f9837f8441ea536804115e80b69f400277"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "psf__requests-863"
+repo = "psf/requests"
+language = "python"
+base_commit = "a0df2cbb10419037d11d04352b3175405ab52941"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "psf__requests-1142"
+repo = "psf/requests"
+language = "python"
+base_commit = "22623bd8c265b78b161542663ee980738441c307"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "psf__requests-1766"
+repo = "psf/requests"
+language = "python"
+base_commit = "847735553aeda6e6633f2b32e14ba14ba86887a4"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "psf__requests-5414"
+repo = "psf/requests"
+language = "python"
+base_commit = "39d0fdd9096f7dceccbc8f82e1eda7dd64717a8e"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "pallets__flask-5063"
+repo = "pallets/flask"
+language = "python"
+base_commit = "182ce3dd15dfa3537391c3efaf9c3ff407d134d4"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pallets__flask-4992"
+repo = "pallets/flask"
+language = "python"
+base_commit = "4c288bc97ea371817199908d0d9b12de9dae327e"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pallets__flask-4045"
+repo = "pallets/flask"
+language = "python"
+base_commit = "d8c37f43724cd9fb0870f77877b7c4c7e38a19e0"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pylint-dev__pylint-7114"
+repo = "pylint-dev/pylint"
+language = "python"
+base_commit = "397c1703e8ae6349d33f7b99f45b2ccaf581e666"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pylint-dev__pylint-7080"
+repo = "pylint-dev/pylint"
+language = "python"
+base_commit = "3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0"
+dataset = "swe_bench_verified"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pylint-dev__pylint-7228"
+repo = "pylint-dev/pylint"
+language = "python"
+base_commit = "d597f252915ddcaaa15ccdfcb35670152cb83587"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pylint-dev__pylint-4970"
+repo = "pylint-dev/pylint"
+language = "python"
+base_commit = "40cc2ffd7887959157aaf469e09585ec2be7f528"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "pylint-dev__pylint-7993"
+repo = "pylint-dev/pylint"
+language = "python"
+base_commit = "e90702074e68e20dc8e5df5013ee3ecf22139c3e"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pylint-dev__pylint-6903"
+repo = "pylint-dev/pylint"
+language = "python"
+base_commit = "ca80f03a43bc39e4cc2c67dc99817b3c9f13b8a6"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "pylint-dev__pylint-5859"
+repo = "pylint-dev/pylint"
+language = "python"
+base_commit = "182cc539b8154c0710fcea7e522267e42eba8899"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pylint-dev__pylint-4551"
+repo = "pylint-dev/pylint"
+language = "python"
+base_commit = "99589b08de8c5a2c6cc61e13a37420a868c80599"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-7432"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "e6e300e729dd33956e5448d8be9a0b1540b4e53a"
+dataset = "swe_bench_verified"
+assets = ["locagent_lite", "contextbench"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-7490"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "7f7a36478abe7dd1fa993b115d22606aa0e35e88"
+dataset = "swe_bench_verified"
+assets = ["locagent_lite", "contextbench"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-9359"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "e2ee3144ed6e241dea8d96215fcdca18b3892551"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-5631"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "cb828ebe70b4fa35cd5f9a7ee024272237eab351"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-7168"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "4787fd64a4ca0dba5528b5651bddd254102fe9f3"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-8906"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "69356d20cfee9a81972dcbf93d8caf9eabe113e8"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-11143"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "6995257cf470d2143ad1683824962de4071c0eb7"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-5495"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "1aefb24b37c30fba8fd79a744829ca16e252f340"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-5103"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "10ca84ffc56c2dd2d9dc4bd71b7b898e083500cd"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-8365"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "4964b468c83c06971eb743fbc57cc404f760c573"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "pytest-dev__pytest-7373"
+repo = "pytest-dev/pytest"
+language = "python"
+base_commit = "7b77fc086aab8b3a8ebc890200371884555eea1e"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-8595"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "b19bce971e82f2497d67fdacdeca8db08ae0ba56"
+dataset = "swe_bench_verified"
+assets = ["locagent_lite", "contextbench"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-11445"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "71db08c05197545944949d5aa76cd340e7143627"
+dataset = "swe_bench_verified"
+assets = ["locagent_lite", "contextbench"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-8721"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "82ef497a8c88f0f6e50d84520e7276bfbf65025d"
+dataset = "swe_bench_verified"
+assets = ["locagent_lite", "contextbench"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-9230"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "567ff22716ac258b9edd2c1711d766b440ac0b11"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-9711"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "81a4fd973d4cfcb25d01a7b0be62cdb28f82406d"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-8056"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "e188d56ed1248dead58f3f8018c0e9a3f99193f7"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-8273"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "88b81a06eb635a1596617f8971fa97a84c069e93"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-10325"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "7bdc11e87c7d86dcc2a087eccb7a7c129a473415"
+dataset = "swe_bench_lite"
+assets = ["locagent_lite"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-7454"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "aca3f825f2e4a8817190f3c885a242a285aa0dba"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sphinx-doc__sphinx-9320"
+repo = "sphinx-doc/sphinx"
+language = "python"
+base_commit = "e05cef574b8f23ab1b57f57e7da6dee509a4e230"
+dataset = "swe_bench_verified"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-553"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "a63c976dc77137d6b67d718560a4b9847907880c"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-116"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "ca366ee12d1f0f9bba4ae8ada0ccb43f865f84aa"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-211"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "a33596831e8762a985aad6902539c108d0ddfc82"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-853"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "daea6623fd691d52e6ff1ce440f6a7d29b9d3adb"
+dataset = "swe_polybench"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-188"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "5e6bfb2f9e6aa220262d9b90c19bb46463829c9a"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-774"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "8699f39ce17693a73cb7669cd2476729baea17a9"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-236"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "b696cbcbf00a1cb1d13f409fc2ca69e63600b6b8"
+dataset = "swe_polybench"
+assets = []
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-849"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "4f58205d1d139dd2c296aaa8a01cb98383a7ea0a"
+dataset = "swe_polybench"
+assets = []
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-417"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "02bac50589b69d0159c3d71fa1e4b0b3c10cf413"
+dataset = "swe_polybench"
+assets = []
+
+[[s1.instances]]
+id = "tailwindlabs__tailwindcss-463"
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+base_commit = "737e0628dac5f0bfde43337ecf35927375e842ea"
+dataset = "swe_polybench"
+assets = []
+
+[[s1.instances]]
+id = "coder__code-server-4923"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "78658f1cf48a5e019a82cde937cfa8feed8b986b"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes", "contextbench"]
+
+[[s1.instances]]
+id = "coder__code-server-6278"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "5d3c9edce436d11d51aa1e586c11eaa49d626dc2"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes", "contextbench"]
+
+[[s1.instances]]
+id = "coder__code-server-6225"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "74af05dfbe0d5085ad2d1b71685cac4638372657"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "coder__code-server-6115"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "a44bd71043d5550f751ff6d06d6ea16ac2742118"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "coder__code-server-3304"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "8e21eb51b318ff375477743460f1f62043aecc80"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "coder__code-server-6423"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "913fc3086678a9f265bdcb8ebbc68c1c199c33a7"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "coder__code-server-3277"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "f8d8ad38c166d74332fb71adbce5f08c14bfc7e3"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "coder__code-server-5707"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "ca182b9fb51e2b1683d6e154ba5086fc7e8c3238"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "coder__code-server-5633"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "71a127a62befeff1d55efe70be8f182e01cb29b6"
+dataset = "swe_polybench"
+assets = []
+
+[[s1.instances]]
+id = "coder__code-server-4970"
+repo = "coder/code-server"
+language = "typescript"
+base_commit = "77296c7187998408a7cfc793974494262aa4a634"
+dataset = "swe_polybench"
+assets = []
+
+[[s1.instances]]
+id = "vuejs__core-11899"
+repo = "vuejs/core"
+language = "typescript"
+base_commit = "706d4ac1d0210b2d9134b3228280187fe02fc971"
+dataset = "swe_bench_multilingual"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "vuejs__core-11739"
+repo = "vuejs/core"
+language = "typescript"
+base_commit = "cb843e0be31f9e563ccfc30eca0c06f2a224b505"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "vuejs__core-11870"
+repo = "vuejs/core"
+language = "typescript"
+base_commit = "67d6596d40b1807b9cd8eb0d9282932ea77be3c0"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "vuejs__core-11589"
+repo = "vuejs/core"
+language = "typescript"
+base_commit = "3653bc0f45d6fedf84e29b64ca52584359c383c0"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "vuejs__core-11915"
+repo = "vuejs/core"
+language = "typescript"
+base_commit = "d0b513eb463f580e29378e43d112ff6859aa366e"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-4182"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "66cb6a78776b263a2fe4d1283426e699961095d2"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-3763"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "e968a5a4000dfa9bec7e8d7b26543b23def6d29d"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-4152"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "9c5a82efcc3dcbd0035c694817a3022d81264687"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-3345"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "e0e17046753fe09881dfb8d5a69b44933d1fa1ea"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-2757"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "b17a932342bfdeeaf1dc0fbe4f436c83e258d6c8"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-3739"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "2cafedee2ddf7c73795e887ef1970df4be2bca90"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-3562"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "0b9a9275b47e446106e6e97c78011896f7db2a61"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-4245"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "13b0afb7a28adb3149d7125fb2b9c16edbcf8e94"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-3454"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "00c8d1ff1498084c15408cf0014d4c7facdb5dd7"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "preactjs__preact-3062"
+repo = "preactjs/preact"
+language = "javascript"
+base_commit = "7556b61bd0d9f72bbd906c3abaebf2b1c9aeacbf"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "axios__axios-5316"
+repo = "axios/axios"
+language = "javascript"
+base_commit = "65e8d1e28ce829f47a837e45129730e541950d3c"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "axios__axios-5085"
+repo = "axios/axios"
+language = "javascript"
+base_commit = "85740c3e7a1fa48346dfcbd4497f463ccb1c1b05"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "axios__axios-6539"
+repo = "axios/axios"
+language = "javascript"
+base_commit = "c6cce43cd94489f655f4488c5a50ecaf781c94f2"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "axios__axios-4731"
+repo = "axios/axios"
+language = "javascript"
+base_commit = "c30252f685e8f4326722de84923fcbc8cf557f06"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "axios__axios-5892"
+repo = "axios/axios"
+language = "javascript"
+base_commit = "ae003913a39f3bdf9bbbd8f71a1ed681fd044d8b"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "axios__axios-4738"
+repo = "axios/axios"
+language = "javascript"
+base_commit = "9bb016f95e6de871a44f3276fd06562704a0abb0"
+dataset = "swe_bench_multilingual"
+assets = []

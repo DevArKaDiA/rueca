@@ -1,9 +1,158 @@
-//! TypeScript / TSX / JavaScript language pack. See `telar_extract::LanguagePack`.
+//! TypeScript / TSX / JavaScript language pack for Telar.
+//!
+//! Grammars: `tree-sitter-typescript` 0.23 (`LANGUAGE_TYPESCRIPT` for
+//! `.ts/.mts/.cts`, `LANGUAGE_TSX` for `.tsx`) and `tree-sitter-javascript`
+//! 0.25 (`.js/.jsx/.mjs/.cjs`, JSX included). See
+//! `telar_extract::LanguagePack` for the contract.
+//!
+//! What is assembled and what is Telar code (RFC 0002 §3.4, §4.1, §9):
+//!
+//! - **Local bindings** come from vendored, adapted `locals.scm` queries
+//!   (nvim-treesitter, Apache-2.0, plus one tree-sitter-javascript pattern,
+//!   MIT); provenance in `queries/README.md`, semantics in `locals.rs`.
+//! - **Import resolution** is `oxc_resolver` over a virtual file system built
+//!   from `ProjectFiles` (no disk access); see `resolve.rs`.
+//! - Definitions, containment and qualified names, imports, inheritance and
+//!   calls with receivers are Telar code (`extract.rs`).
+//!
+//! # Definitions
+//!
+//! Qualified names are module-relative (`UserService.findById`); the
+//! resolver prefixes the module (`src/user/service:UserService.findById`).
+//!
+//! | Source | Label | Notes |
+//! |---|---|---|
+//! | `function f` / `function* g` (also `declare function`) | `Function` | TS overload signatures followed by their implementation yield one definition |
+//! | `const f = () => …` / `= function …` / `= forwardRef(…)` / `memo` / `observer` | `Function` | |
+//! | `class` / `abstract class` / `const A = class …` | `Class` | `bases` = `extends` expression text, `implements` = implemented type names (type arguments dropped) |
+//! | method, getter / setter (a get/set pair is one), constructor, abstract / signature member | `Method` | |
+//! | class field | `Field`; `Method` when initialised with a function (`onClick = () => …`) | TS parameter properties (`constructor(private repo: Repo)`) are `Field`s too |
+//! | `interface` | `Interface` | `bases` = `extends` types; property signatures → `Field`, method signatures → `Method` |
+//! | `type X = …` | `TypeAlias` | object-type members become `Field` / `Method` children |
+//! | `enum` | `Enum` | members → `Constant` children |
+//! | `namespace N {}` / `module N {}` / `declare module "m" {}` | `Module` | inner declarations are qualified by it (`N.helper`); everything inside `declare module "m"` is exported |
+//! | other module-level `const` | `Constant` if `UPPER_CASE`, else `Variable` | `let` / `var` → `Variable`; destructuring gives one per name |
+//! | methods / function-valued pairs of a module-level object literal (`export const api = { get() {} }`) | `Method` children of the variable | |
+//! | CommonJS `module.exports = function f`, `exports.x = function`, `X.prototype.y = function`, `X.y = function` | `Function`, or `Method` of a module-level `X` | |
+//! | `describe` / `it` / `test` (also `context`, `suite`, `specify`, `fit`, `xit`, `.each`, `.only`, `.skip`, `.todo`) with a string first argument and a function argument | `Test` | `is_test`; qualified name = describe chain joined by ` > ` (dots in titles become `_`); references inside get the test as `enclosing` |
+//!
+//! - `exported`: `export` declarations, `export { a, b as c }`,
+//!   `export default x`, `export = x`, `module.exports = x` /
+//!   `module.exports = { a, b }` / `exports.x = …`. Members inherit their
+//!   owner's flag. `export default function foo` is `foo`; anonymous defaults
+//!   are named `default`.
+//! - `span` covers the `export` keyword and decorators; `name_span` is the
+//!   identifier.
+//! - `signature`: one line, from the declaration start to its body (`{` or
+//!   `=>`), whitespace collapsed, parameter decorators removed, ≤ 200 chars.
+//! - `doc`: the `/** … */` JSDoc block immediately before the declaration
+//!   (only whitespace in between), delimiters and leading `*` stripped,
+//!   ≤ 1000 chars.
+//! - `decorators`: decorator expressions without `@`, whitespace collapsed.
+//!
+//! # References
+//!
+//! `enclosing` is the innermost definition (`None` at module level).
+//!
+//! - `Call`: `f()`, `a.b.c()`, `a?.b()` → name = last identifier, receiver =
+//!   object text (≤ 200 chars). Calls whose root is a global builtin
+//!   (`console.log`, `Promise.all`, `JSON.parse`) are skipped unless the name
+//!   is shadowed locally. Capitalized JSX tags (`<Button/>`, `<Foo.Bar/>`)
+//!   are `Call`s too.
+//! - `New`: `new Foo()`; `Throw`: `throw new X()` (also a `New`).
+//! - `Type`: type identifiers in annotations, generics, `implements`,
+//!   `extends` (classes and interfaces), `satisfies`, `as`, skipping builtin
+//!   types and type parameters in scope.
+//! - `Decorator`: `@Injectable()` → `Injectable`; `@a.b()` → `b` / `a`.
+//! - `Read`: identifiers and plain member chains (`a.b`, `this.x`) in value
+//!   position (arguments, return values, initialisers, assignment right-hand
+//!   sides, JSX expressions, spreads, ternaries, binary operands) whose root
+//!   is neither a local binding nor a global builtin. Deduplicated per
+//!   `(enclosing, receiver, name)`.
+//! - `Write`: `this.x = …` → name `x`, receiver `this`.
+//! - At most 20,000 references per file.
+//!
+//! # Imports
+//!
+//! `module` is the raw specifier, `relative_level` is always 0.
+//!
+//! | Source | `names` | `module_alias` | flags |
+//! |---|---|---|---|
+//! | `import x from "m"` | `default` as `x` | | |
+//! | `import { a, b as c } from "m"` | `a`, `b` as `c` | | |
+//! | `import * as ns from "m"` | | `ns` | |
+//! | `import "m"` | | | |
+//! | `import type { T } from "m"` | `T` | | `type_only` |
+//! | `import { a, type T } from "m"` | two imports: `a`, and `T` with `type_only` | | |
+//! | `import x = require("m")` | | `x` | |
+//! | `export { a as b } from "m"` | `a` as `b` | | `reexport` |
+//! | `export * from "m"` | `*` | | `reexport` |
+//! | `export * as ns from "m"` | | `ns` | `reexport` |
+//! | `const x = require("m")` / `await import("m")` | | `x` | |
+//! | `const { a, b: c } = require("m")` | `a`, `b` as `c` | | |
+//! | `const y = require("m").y` | `y` | | |
+//! | `require("m")` / `import("m")` elsewhere | | | |
+//!
+//! Mixed value/type imports are split so `type_only` stays exact per name.
+//!
+//! # Locals
+//!
+//! A read is local when the name is bound by the current function or an
+//! enclosing one: parameters, `const` / `let` / `var` (block scopes are
+//! flattened into their function), destructuring at any depth, `catch`
+//! parameters, `for … of / in` targets, nested function and class names,
+//! named function expressions. Module-level declarations are module symbols,
+//! not locals, except inside blocks. Type parameters are tracked separately.
+//!
+//! # Module names and import resolution
+//!
+//! [`LanguagePack::module_name`] is the path without its final extension
+//! (`src/util/index.ts` → `src/util/index`, `x.d.ts` → `x`).
+//!
+//! [`LanguagePack::resolve_import`] runs `oxc_resolver` with extensions
+//! `.ts .tsx .d.ts .js .jsx .mjs .cjs .mts .cts .json`, extension aliases
+//! `.js → .ts .tsx .js`, `.jsx → .tsx .jsx`, `.mjs → .mts .mjs`,
+//! `.cjs → .cts .cjs`, main fields `types module main`, conditions
+//! `types import require default node`, and automatic tsconfig discovery
+//! (nearest `tsconfig.json`, or `jsconfig.json`, owning the file; `extends`,
+//! `baseUrl`, `paths`, project references). Workspace packages (any
+//! `package.json` with a `name`) resolve by name, through their `exports` /
+//! `types` / `module` / `main`; when those point at an uncommitted build
+//! directory (`dist/`, `lib/`, …) the matching `src/` file is used. Third-party
+//! packages, Node builtins and anything outside `ProjectFiles::paths` are
+//! `None`. Details in `resolve.rs`.
+//!
+//! # Deviations and limitations
+//!
+//! - Class fields initialised with a function (`onClick = () => …`) are
+//!   `Method`s, not `Field`s: they are called like methods.
+//! - Dots in test titles become `_` in qualified names (`.` is the member
+//!   separator); `name` keeps the title.
+//! - Block scoping is flattened to function level for locals (a `const` in an
+//!   inner block shadows module symbols in the whole function).
+//! - Calls to local bindings are still emitted (the resolver can link them to
+//!   nested definitions); only reads of locals are suppressed.
+//! - `.d.ts` files are extracted like any TypeScript file.
+//! - Grammar gaps (tree-sitter-typescript 0.23.2, the latest release): newer
+//!   syntax such as `export type * from` yields parse errors; extraction
+//!   continues around them and `parse_errors` counts them.
+//! - `oxc_resolver` is pinned to the 11.x line compatible with the workspace
+//!   MSRV (Rust 1.90): 11.23 (11.24 requires Rust 1.95).
 
-use telar_extract::{Budget, ExtractError, LanguagePack, ProjectFiles};
+mod builtins;
+mod extract;
+mod locals;
+mod resolve;
+
+use std::time::Instant;
+
+use telar_extract::{Budget, ExtractError, LanguagePack, ProjectFiles, count_errors, line_count};
 use telar_model::{FileFacts, Import, Language};
 
-/// ECMAScript pack (TypeScript, TSX, JavaScript/JSX). Construct with `TypeScriptPack::default()`.
+pub use extract::MAX_REFS;
+
+/// ECMAScript pack (TypeScript, TSX, JavaScript/JSX). Stateless apart from a
+/// process-wide resolver cache; construct with `TypeScriptPack`.
 #[derive(Debug, Default)]
 pub struct TypeScriptPack;
 
@@ -11,22 +160,39 @@ impl LanguagePack for TypeScriptPack {
     fn languages(&self) -> &'static [Language] {
         &[Language::TypeScript, Language::Tsx, Language::JavaScript]
     }
+
     fn extractor_version(&self) -> u32 {
         1
     }
-    fn extract(&self, _path: &str, _language: Language, _source: &[u8], _budget: &Budget) -> Result<FileFacts, ExtractError> {
-        todo!("typescript extraction")
+
+    fn extract(&self, _path: &str, language: Language, source: &[u8], budget: &Budget) -> Result<FileFacts, ExtractError> {
+        let grammar = locals::grammar(language).ok_or(ExtractError::Unsupported(language))?;
+        let query = locals::locals_query(language)?;
+        let tree = telar_extract::parse(&grammar, source, budget)?;
+        let root = tree.root_node();
+        let locals = locals::Locals::compute(query, root, source, Instant::now() + budget.max_parse_time);
+        let mut facts = extract::extract_tree(root, source, budget.max_depth, &locals);
+        facts.parse_errors = count_errors(&tree);
+        facts.line_count = line_count(source);
+        Ok(facts)
     }
-    fn module_name(&self, _path: &str, _project: &ProjectFiles) -> String {
-        todo!()
+
+    fn module_name(&self, path: &str, _project: &ProjectFiles) -> String {
+        resolve::module_name(path)
     }
-    fn resolve_import(&self, _from_path: &str, _import: &Import, _project: &ProjectFiles) -> Option<String> {
-        todo!()
+
+    fn resolve_import(&self, from_path: &str, import: &Import, project: &ProjectFiles) -> Option<String> {
+        resolve::resolver_for(project).resolve(from_path, &import.module)
     }
-    fn is_builtin(&self, _name: &str) -> bool {
-        todo!()
+
+    fn is_builtin(&self, name: &str) -> bool {
+        builtins::is_builtin(name)
     }
+
     fn self_receivers(&self) -> &'static [&'static str] {
         &["this"]
     }
 }
+
+#[cfg(test)]
+mod tests;

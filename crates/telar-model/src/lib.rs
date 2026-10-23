@@ -507,17 +507,17 @@ impl ResolvedGraph {
             if e.src >= n || e.dst >= n {
                 return Err(format!("edge {i} endpoint out of range"));
             }
-            if let Some((f, _)) = e.meta.evidence {
-                if f as usize >= self.files.len() {
-                    return Err(format!("edge {i} evidence file out of range"));
-                }
+            if let Some((f, _)) = e.meta.evidence
+                && f as usize >= self.files.len()
+            {
+                return Err(format!("edge {i} evidence file out of range"));
             }
         }
         for (i, node) in self.nodes.iter().enumerate() {
-            if let Some(f) = node.file {
-                if f as usize >= self.files.len() {
-                    return Err(format!("node {i} file out of range"));
-                }
+            if let Some(f) = node.file
+                && f as usize >= self.files.len()
+            {
+                return Err(format!("node {i} file out of range"));
             }
         }
         for (i, f) in self.files.iter().enumerate() {

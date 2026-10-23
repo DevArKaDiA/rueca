@@ -12,3 +12,7 @@ telar-model.workspace = true
 tree-sitter.workspace = true
 tree-sitter-typescript = "0.23"
 tree-sitter-javascript = "0.25"
+# TS/JS module resolution (RFC 0002 §4.1). 11.23 is the newest 11.x that
+# builds with the workspace MSRV (1.90); 11.24 needs Rust 1.95.
+oxc_resolver = "11.23"
+serde_json.workspace = true

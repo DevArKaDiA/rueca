@@ -14,4 +14,16 @@ path = "src/main.rs"
 telar-index.workspace = true
 telar-query.workspace = true
 telar-mcp.workspace = true
+telar-segment.workspace = true
+telar-extract.workspace = true
 anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"
+serde_json.workspace = true

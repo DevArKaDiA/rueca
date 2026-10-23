@@ -3,3 +3,26 @@ Copyright 2026 The Telar Authors
 
 This product includes software developed by third parties. Vendored files carry
 SPDX headers identifying their origin and license; see each file.
+
+Vendored tree-sitter queries
+----------------------------
+
+crates/telar-lang-python/queries/locals.scm
+  Adapted from nvim-treesitter, runtime/queries/python/locals.scm,
+  https://github.com/nvim-treesitter/nvim-treesitter (commit 29212d826054bb2948fa9d3a99eca9bf6a050eb2).
+  Copyright nvim-treesitter contributors. Licensed under the Apache License, Version 2.0.
+  Portions adapted from bloop, server/bleep/src/intelligence/language/python/scopes.scm,
+  https://github.com/BloopAI/bloop (commit 431e9e82c5a293c40f22aadb3615c3aa387af82e).
+  Copyright BloopAI. Licensed under the Apache License, Version 2.0.
+  Modified for Telar (see the file header for the list of changes).
+
+crates/telar-lang-typescript/queries/*-locals.scm
+  Adapted from nvim-treesitter (https://github.com/nvim-treesitter/nvim-treesitter,
+  commit 29212d826054bb2948fa9d3a99eca9bf6a050eb2), Copyright the nvim-treesitter
+  contributors, licensed under the Apache License, Version 2.0.
+  Modified for Telar (see each file header for the list of changes).
+
+crates/telar-lang-typescript/queries/ecma-locals.scm
+  Contains a pattern from tree-sitter-javascript
+  (https://github.com/tree-sitter/tree-sitter-javascript, v0.25.0),
+  Copyright (c) 2014 Max Brunsfeld, licensed under the MIT License.
