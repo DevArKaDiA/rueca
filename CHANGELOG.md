@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Project logo and brand assets (`assets/logo/`).
+
 ## [0.1.0-alpha.1] - 2026-10-22
 
 First public alpha: local mode.
