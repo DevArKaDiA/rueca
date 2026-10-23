@@ -19,3 +19,5 @@ hosting = "github"
 install-updater = false
 # Dependabot may bump actions in the generated release.yml; don't fail on it.
 allow-dirty = ["ci"]
+# Releases are dispatched by release-plz after it tags (see release-plz.yml).
+dispatch-releases = true

@@ -7,11 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Project logo and brand assets (`assets/logo/`).
-
-## [0.1.0-alpha.1] - 2026-10-22
+## [0.1.0-alpha.1] - 2026-10-23
 
 First public alpha: local mode.
 
@@ -29,6 +25,9 @@ First public alpha: local mode.
   content index, zstd content packs; content-addressed facts cache.
 - Benchmark harness against codebase-memory-mcp v0.12.0 and a BM25 baseline
   (`bench/`), with published alpha results.
+- Project logo and brand assets (`assets/logo/`).
+- Automated releases: release-plz (versions, changelog, crates.io, tag) and
+  cargo-dist (binaries, installer, GitHub release).
 
 [Unreleased]: https://github.com/DevArKaDiA/rueca/compare/v0.1.0-alpha.1...HEAD
 [0.1.0-alpha.1]: https://github.com/DevArKaDiA/rueca/releases/tag/v0.1.0-alpha.1
