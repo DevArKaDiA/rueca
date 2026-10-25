@@ -4,8 +4,8 @@
   resolver, wave R of §12) is **implemented**, and so are the data formats,
   file kinds and the code ↔ config bridge (waves 1, 2a and 2b:
   `rueca-lang-data` plus the Python, TS/JS and PHP packs) — see the
-  *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. The Go, C/C++ and
-  Java packs are pending.
+  *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. Go (§10.2) has
+  landed; the C/C++ and Java packs are pending.
 - Created: 2026-10-24
 - Depends on: RFC 0001 (architecture), RFC 0002 (building blocks)
 - Research date: 2026-10-24. Crate versions, licenses and dependency
@@ -693,6 +693,51 @@ hook has a fake-pack example in `rueca-resolve/tests/hooks.rs`.
 | Heuristic | interface dispatch, method values, function-typed fields, generics (type parameters ignored) |
 | Precision | scip-go 0.2.9 (Apache-2.0) |
 | Bench | S1: SWE-bench Multilingual Go, 42 tasks (caddy 14, prometheus 8, gin 8, hugo 7, terraform 5; MIT); Multi-SWE-bench Go. S3: scip-go gold on gin and cli/cli (RFC 0002 corpus) |
+
+*Implemented* (wave 3, status `preview`: gate items 1–3 and 6 met, the
+benchmark entry and parity row — items 4–5 — are pending):
+`rueca-lang-go` (`tree-sitter-go` 0.25.0, vendored `locals.scm` adapted
+from nvim-treesitter and bloop) as designed above, registered in the
+default registry. Refinements and deviations, documented in the crate
+docs:
+
+- **Binding names.** No hook lets a pack read another file's `package`
+  clause, so an unaliased import binds its conventional name (last element
+  without `/vN`, `.vN`, `go-` / `-go`); because Go rejects unused imports,
+  an import whose conventional name is never used in the file is re-bound
+  to the unexplained qualifier its path contains (`jsoniter` for
+  `github.com/json-iterator/go`), else to the only unexplained qualifier.
+- **External test packages** are marked by a `Package` definition in the
+  facts (`package x_test`), which `module_name_for` reads.
+- **Typed receivers** go beyond the table: the named result of a function
+  of the same file, type assertions, type-switch cases, struct-field chains
+  (`s.store.Get()`), `err` as `error` by convention, and chains through a
+  package-qualified type or an import (`c.Request.Header.Set()` →
+  `http.Request.Header`) are written so a third-party type resolves as
+  external instead of a name guess. Types are file-local.
+- **Type aliases** (`type A = B`) list `B` as a base, so `B`'s members are
+  found through `A`.
+- **Interfaces**: the post-pass is the Go-only `go` module of
+  `rueca-resolve` (wired with one call after `OVERRIDES`); it also emits
+  `OVERRIDES` (heuristic 0.5) from each covering method to the interface
+  method, counts promoted methods, matches an interface that embeds one
+  outside the project on its known methods when it has at least two, and
+  keeps at most 64 implementers per interface (first by qualified name).
+- `facts_depend_on_path` is true (`is_test` depends on `_test.go`).
+- Env and config reads of §7.2 ship with the pack (`os.Getenv`,
+  `os.LookupEnv`, viper `Get*` with `viper:<SetConfigName>` namespaces).
+- Not done: the `go.mod` data kind (the pack reads `go.mod` / `go.work`
+  only as resolver input), build tags and cgo, the benchmark suites.
+
+Smoke repositories (`rueca-lang-go/tests/real_repo.rs`, shallow clones,
+2026-10-24): gin `0f09c3a` — 99 files, 2,091 definitions, 13,840
+references, 0 parse errors; urfave/cli v3 `7166c48` — 79 files, 1,801
+definitions, 12,312 references, 1 file with parse errors (`new(0)`, Go
+1.26 syntax the 0.25 grammar predates). Resolution (`rueca index`): gin
+39.9 % resolved (type_resolved 7.7 %, heuristic 3.8 %), 49.0 % external,
+4.0 % builtin, 7.2 % unresolved; cli 54.6 % resolved (type_resolved
+15.3 %, heuristic 0.8 %), 38.0 % external, 4.3 % builtin, 3.1 %
+unresolved.
 
 ### 10.3 C and C++
 

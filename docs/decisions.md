@@ -37,6 +37,29 @@ the crate docs and the RFC's *Implemented* notes:
   polyglot service) and changes only where JSON files gained a language
   (`php/laravel/composer.json`); no existing code fixture reads env vars.
 
+## 2026-10-24 — Go pack (preview): file-local receiver types, heuristic interfaces
+
+Go landed as `rueca-lang-go` (RFC 0003 §10.2) on the wave R hooks, without
+changes to the model, the contract or the generic resolver beyond wiring
+one Go-only post-pass (`rueca-resolve` `go` module). Choices worth
+recording:
+
+- **Module name = import path**, from every `go.mod` (and local
+  `replace` of `go.mod` / `go.work`); an external test package is marked by
+  a `Package` definition so `module_name_for` can append `_test`.
+- **Import binding names are inferred in the file.** A pack cannot read the
+  target's `package` clause, so the conventional name is used and, because
+  Go rejects unused imports, an import whose conventional name is never used
+  is re-bound to the qualifier the file does use.
+- **Receivers are typed from the file's declarations only** (`$type:T`),
+  including struct-field chains; chains that reach a package-qualified type
+  or an import are written relative to it so third-party calls are
+  external, not 0.5 name guesses. This is what keeps unresolved references
+  at 3–7 % on gin and urfave/cli.
+- **Implicit interfaces are a heuristic** (`IMPLEMENTS` and `OVERRIDES` at
+  0.5), names only, capped at 64 implementers per interface.
+- Status `preview` until the S1/S3 benchmark rows exist (RFC 0003 §3).
+
 ## 2026-10-24 — Wave R: shared model, contract and resolver for RFC 0003
 
 The groundwork every RFC 0003 pack needs landed before the packs, so the

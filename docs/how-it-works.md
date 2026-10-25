@@ -9,8 +9,9 @@ live in the crate docs (`rueca-segment`). Structured data (config keys,
 env vars, the code ↔ config bridge) and the extension to Go, C/C++ and Java
 are designed in [RFC 0003](rfcs/0003-structured-data-and-languages.md); this
 document changes as each part lands. Structured data and the bridge are
-implemented (§4.2–§4.4, §5); the resolver rules for Go, C/C++ and Java are
-implemented and marked *packs pending* where no shipped pack uses them yet.
+implemented (§4.2–§4.4, §5); Go is built on the shared resolver rules;
+the rules for C/C++ and Java are implemented and marked *packs pending*
+where no shipped pack uses them yet.
 
 Contents:
 
@@ -132,7 +133,7 @@ disappears. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-markdown`, `rueca-lang-data`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-markdown`, `rueca-lang-data`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -177,11 +178,26 @@ What packs deliberately do and don't do:
   `@param User $user`), and `$this->repo` has the declared type of property
   `$repo` (typed, promoted or `@var`). Variable scopes come from a vendored
   `locals.scm`; variables themselves are never references.
+- **Go receivers are typed from the file's declarations.** A Go method is
+  declared outside its type (`func (s *Server) Start()`, possibly in
+  another file of the package), so the pack names it `Server.Start` at top
+  level and rewrites its receiver variable to the reserved `$self`. Calls on
+  other variables carry what the file declares about them as `$type:T`: a
+  typed parameter (`c *gin.Context`, also in function literals), `var x
+  T`, `x := T{}` / `&T{}` / `new(T)`, the named result of a function of the
+  same file, the constructor convention `x := NewT()` (a heuristic), a type
+  assertion, a type-switch `case`, a struct field of a type declared in the
+  file (`s.store.Get()` with `store *store.Store`). Chains that reach a
+  package-qualified type (`c.Request.Header.Set()` with `Request
+  *http.Request`) are written relative to that type, so a third-party type
+  makes the call external rather than a name guess. Type parameters are
+  scoped by the locals query and never become references.
 - **Tests are definitions too**: `test_*` functions and `Test*` classes in
   Python; `describe` / `it` / `test` blocks in JS/TS and Pest become `Test`
   nodes whose qualified name is the describe chain; PHPUnit `test*`,
   `@test` and `#[Test]` methods of `*Test` / `*TestCase` subclasses are
-  tests.
+  tests; Go `Test…`, `Benchmark…`, `Fuzz…` and `Example…` functions of
+  `_test.go` files are tests.
 - **Named function expressions are definitions** in JS/TS wherever they
   appear (`app.use(function handler() {})`, `defineGetter(req, "query",
   function query() {})`, `return function timing() {}`): a `Function` child
@@ -299,7 +315,12 @@ Two per-language hooks, still without guessing symbols:
   a Java `package` clause, a Go `package x_test`): Python walks up `__init__.py` packages and source
   roots (`src/`, `pyproject` package dirs) → `shop.http`. ECMAScript strips
   the extension → `src/util/index`. PHP returns nothing (definitions already
-  carry their declared namespace, which may differ from the path).
+  carry their declared namespace, which may differ from the path). Go
+  returns the package's **import path**: the `module` of the nearest
+  `go.mod` plus the directory (`github.com/gin-gonic/gin/binding`), with
+  `_test` appended for an external test package (`package gin_test`, read
+  from the file's facts); every file of a directory with one module name is
+  one package (`module_scope` = `Package`).
 - `resolve_import(from, import)`: maps a specifier to a project file or to
   *nothing* (third-party, builtin). Python follows relative levels and source
   roots (`from .http` in `shop/api.py` → `shop/http.py`). TS/JS uses
@@ -318,7 +339,14 @@ Two per-language hooks, still without guessing symbols:
   `autoload-dev` (`psr-4`, `psr-0`, `classmap`) of every `composer.json`
   (monorepos included), falling back to the unique `User.php` whose
   directories match the namespace; `require` / `include` with static paths
-  (`__DIR__ . '/x.php'`) resolve relative to the file.
+  (`__DIR__ . '/x.php'`) resolve relative to the file. Go maps an import
+  path to the package **directory** through every `go.mod` (longest module
+  path wins) and the local `replace` directives of `go.mod` / `go.work`;
+  standard library and third-party paths resolve to nothing. An unaliased
+  import binds the conventional name (last path element without `/vN`,
+  `go-`, `.vN`); since Go rejects unused imports, an import whose
+  conventional name is never used is re-bound to the qualifier the file
+  does use (`jsoniter` for `github.com/json-iterator/go`).
 
 Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0);
 for documents that means "links to" (docs → docs, code files, images).
@@ -371,8 +399,9 @@ order; the first one that succeeds wins and stamps the edge:
 alpha for Python and ECMAScript.)
 
 Rungs and rules that the RFC 0003 packs opt into (Python, ECMAScript, PHP
-and Markdown resolve exactly as above; Terraform uses directory scope; the
-rest are *packs pending* until the Go, C/C++ and Java packs land):
+and Markdown resolve exactly as above; Terraform uses directory scope; Go
+uses package scope, directory imports, `$self` and `$type:`; the rest are
+*packs pending* until the C/C++ and Java packs land):
 
 | Rule | Hook | Effect | Confidence |
 |---|---|---|---|
@@ -383,7 +412,10 @@ rest are *packs pending* until the Go, C/C++ and Java packs land):
 | declarations | `Definition::is_declaration` | a C/C++ prototype or in-class declaration is replaced by its unique body | as the rung |
 | overloads | `overloads` | `parse(String)` / `parse(Reader)` chosen by the call's argument count, else all linked | as the rung, × 0.8 when several |
 | overrides | `overrides` | `OVERRIDES` from a method to the same-named (same-arity) method of each base | `type_resolved` 0.90 |
-| includes | C/C++ family | `#include` is a transitive star import | as rung 3 | A reference to a builtin, a name bound to an external module, or a
+| includes | C/C++ family | `#include` is a transitive star import | as rung 3 |
+| implicit interfaces | Go family | a type whose method names (own and promoted through embedding) cover an interface's gets `IMPLEMENTS` to it and `OVERRIDES` from each covering method; ≤ 64 implementers per interface | `heuristic` 0.50 |
+
+A reference to a builtin, a name bound to an external module, or a
 `self` member that does not exist **stops** resolution: it is counted as an
 expected miss, never fuzzy-matched. For JS/TS, "builtin" includes web and
 runtime globals that a project could also define (`Request`, `Response`,
@@ -426,7 +458,9 @@ In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
 | `EnvVar`, `ConfigKey` | `READS` (the bridge, below) |
 | `DataRef` | `REFERENCES` (data pointers, below) |
 
-**The code ↔ config bridge and data pointers** (RFC 0003 §6–§7). These
+**The code ↔ config bridge and data pointers** (RFC 0003 §6–§7; Go emits
+env var reads — `os.Getenv("X")`, `os.LookupEnv` — and viper config key
+reads). These
 references never go through the
 ladder: they match exact names only, so an env var or a key path can never
 be fuzzy-matched to a code symbol.
@@ -486,8 +520,9 @@ then points the indexed root at it. Query time never reads the working tree.
 |---|---|
 | `Repository`, `Folder`, `File` | the walk (every listed file, any language) |
 | `Module` | TS `namespace` / `declare module` |
-| `Class`, `Interface`, `Trait`, `Enum`, `TypeAlias` | class / interface / PHP trait / enum / type declarations |
-| `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters |
+| `Class`, `Interface`, `Trait`, `Struct`, `Enum`, `TypeAlias` | class / interface / PHP trait / Go struct / enum / type declarations |
+| `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters; Go methods (`Server.Start`, attached to their type through the package) and interface methods |
+| `Package` | Go external test packages (`package x_test`), marking the module |
 | `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, PHP properties (`$email`, also promoted constructor parameters), module-level assignments (`UPPER_CASE` → `Constant`), PHP `const` / `define()` / enum cases |
 | `Test` | JS/TS `describe` / `it` / `test` blocks and Pest tests (Python and PHPUnit tests are `Function` / `Method` / `Class` with `is_test: true`) |
 | `Section` | Markdown headings, nested by `DEFINES` |
@@ -508,7 +543,10 @@ reads by code and by config that reads env) and `WRITES` from env var
 providers form the code ↔ config bridge; `REFERENCES` also carries data
 pointers (`$ref`, aliases, `depends_on`, Terraform traversals), and
 `INHERITS` YAML merges, compose `extends` and Dockerfile `FROM <stage>`.
-`OVERRIDES` is produced once a pack opts in (*packs pending*: Java, C++).
+`OVERRIDES` come from Go's implicit interfaces (heuristic) and, once their
+packs land, Java / C++ overrides. Go embedding (struct fields and
+interfaces) and type aliases are `INHERITS`; Go `IMPLEMENTS` edges are
+inferred (heuristic 0.5).
 Python, ECMAScript and PHP reads of ordinary names stay `REFERENCES`.
 
 **Edge metadata**: `confidence` (0–1), `strategy`, and `evidence` (file +
@@ -735,8 +773,9 @@ gaps show up on real repositories.
 | Markdown sections and links (`pulldown-cmark`) | `rueca-lang-markdown` | crate docs, `src/links.rs` |
 | Structured data, file kinds, data pointers | `rueca-lang-data` | crate docs (mapping tables), `src/emit.rs`, `src/kinds/` |
 | PHP extraction, name resolution, Composer autoload | `rueca-lang-php` | crate docs, `src/names.rs`, `src/composer.rs` |
+| Go extraction, receivers, `go.mod` module model | `rueca-lang-go` | crate docs, `src/locals.rs`, `src/modules.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
-| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers) |
+| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
 | Tools | `rueca-query` | `src/tools.rs` |
 | MCP / CLI | `rueca-mcp`, `rueca` | `serve_stdio`, `src/main.rs` |

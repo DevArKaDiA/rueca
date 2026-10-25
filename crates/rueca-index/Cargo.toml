@@ -19,6 +19,7 @@ rueca-lang-typescript.workspace = true
 rueca-lang-markdown.workspace = true
 rueca-lang-php.workspace = true
 rueca-lang-data.workspace = true
+rueca-lang-go.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 tracing.workspace = true

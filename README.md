@@ -21,8 +21,8 @@ tree into the context window.
 agent can follow.
 
 > **Status: alpha (`0.1.0-alpha.1`).** Local mode only, Python,
-> TypeScript/JavaScript and PHP, plus Markdown and structured configuration.
-> Formats and tool shapes may change before 1.0. See
+> TypeScript/JavaScript, PHP and Go, plus Markdown and structured
+> configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
 ## Features
@@ -44,7 +44,9 @@ agent can follow.
 
 Languages: Python, TypeScript, TSX, JavaScript (incl. JSX, CommonJS, ESM),
 PHP (incl. HTML templates, Composer PSR-4 / PSR-0 autoload, PHPUnit and Pest
-tests).
+tests), Go (preview: `go.mod` / `go.work` import paths, packages across
+files, methods with typed receivers, embedding, implicit interfaces as
+heuristic `IMPLEMENTS`, generics, `go test` functions).
 Documents: Markdown headings become `Section` symbols and file links become
 `IMPORTS` edges, in the same graph as the code.
 Configuration: JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
@@ -141,9 +143,10 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
 2. **Resolve** — references are linked across files through imports
    (TS/JS module resolution by [`oxc_resolver`](https://github.com/oxc-project/oxc-resolver),
    including `tsconfig` paths and workspace packages; PHP names through
-   `namespace` / `use` and Composer autoload), re-export chains,
-   `self`/`this` with base classes and traits, declared receiver types
-   (PHP), and same-module scope, each with a confidence.
+   `namespace` / `use` and Composer autoload; Go import paths through
+   `go.mod`), re-export chains, `self`/`this` with base classes and traits,
+   declared receiver types (PHP, Go), package and same-module scope, each
+   with a confidence.
 3. **Store** — the graph is written as one immutable segment file: CSR
    adjacency, an embedded [tantivy](https://github.com/quickwit-oss/tantivy)
    symbol index with code-aware tokenization, and a trigram index over
@@ -189,7 +192,7 @@ Contributions that move these numbers are very welcome.
 
 - Receiver typing from assignments; structural tie-breaks for same-name
   definitions; Python call-edge recall.
-- More languages (Go, Java, Kotlin, Swift, Rust, …).
+- More languages (C/C++, Java, Kotlin, Swift, Rust, …); Go benchmark row.
 - Optional compiler-grade precision from SCIP indexes.
 - Service mode (object storage, MCP over HTTP) and an org-wide mode over
   GitHub / GitLab / Bitbucket with mirrored permissions.
@@ -208,6 +211,7 @@ See [RFC 0001](docs/rfcs/0001-architecture.md) for the full plan.
 | [`rueca-lang-markdown`](crates/rueca-lang-markdown) | Markdown sections and file links |
 | [`rueca-lang-php`](crates/rueca-lang-php) | PHP extraction, name resolution and Composer autoload |
 | [`rueca-lang-data`](crates/rueca-lang-data) | structured data: keys, file kinds, data pointers, env var providers |
+| [`rueca-lang-go`](crates/rueca-lang-go) | Go extraction, receivers and the `go.mod` module model |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |
 | [`rueca-segment`](crates/rueca-segment) | segment format, search, content packs, catalog |
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
