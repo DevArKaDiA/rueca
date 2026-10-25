@@ -1,8 +1,11 @@
-//! Prints the masked ranges of files: `cargo run -p rueca-lang-cpp --example masked -- <paths…>`.
+//! Prints the ranges preprocessing rewrites (masked macros, dropped `#if`
+//! branches, repairs): `cargo run -p rueca-lang-cpp --example masked -- <paths…>`
+//! (`.c` files as C, everything else as C++).
 fn main() {
     for path in std::env::args().skip(1) {
         let src = std::fs::read(&path).expect("read");
-        let masked = rueca_lang_cpp::mask_macros(&src);
+        let language = if path.ends_with(".c") { rueca_model::Language::C } else { rueca_model::Language::Cpp };
+        let masked = rueca_lang_cpp::preprocessed(&src, language).expect("preprocess");
         let mut i = 0;
         while i < src.len() {
             if src[i] != masked[i] {

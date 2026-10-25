@@ -24,9 +24,12 @@
 //! Reserved texts a pack may put in facts:
 //!
 //! - Receivers: [`SELF_RECEIVER`] (`$self`, a pack-normalized self
-//!   receiver; list it in [`LanguagePack::self_receivers`]) and
-//!   [`type_receiver`] (`$type:T`, a receiver whose type `T` the file
-//!   declares, constructs or returns; any pack may use it).
+//!   receiver; list it in [`LanguagePack::self_receivers`]),
+//!   [`type_receiver`] (`$type:T`, a receiver whose declared type `T` is
+//!   known in the file), [`namespace_receiver`] (`$ns:a::b`, a C++
+//!   namespace-qualified name) and [`member_receiver`] (`$member:a.b`, a
+//!   chain of members of the enclosing type whose types are declared in
+//!   another file).
 //! - Call and `New` names: [`with_arg_types`] (`value$args:long,?`, the
 //!   static types of the arguments, for choosing overloads; the resolver
 //!   strips it before any lookup).
@@ -141,6 +144,36 @@ pub fn split_arg_types(name: &str) -> (&str, Option<Vec<&str>>) {
         Some((n, _)) => (n, None),
         None => (name, None),
     }
+}
+
+/// Prefix of a namespace-qualified name (C++): `$ns:<path>` means "the
+/// name was written `path::name` and `path` is a namespace" (`$ns:` alone
+/// for `::name`). The resolver looks up the global qualified name
+/// `path::name`, then `path::name` inside each namespace enclosing the
+/// reference (innermost first), else resolves the bare name through the
+/// usual rungs except implicit self (a qualified name is never an implicit
+/// member). Overload suffixes are optional.
+pub const NAMESPACE_RECEIVER_PREFIX: &str = "$ns:";
+
+/// `$ns:<path>` receiver text.
+pub fn namespace_receiver(path: &str) -> String {
+    format!("{NAMESPACE_RECEIVER_PREFIX}{path}")
+}
+
+/// Prefix of a member-chain receiver: `$member:a.b` means "the receiver
+/// is member `a` of the enclosing type (implicit self, or `this->a`), then
+/// member `b` of `a`'s declared type". A pack emits it when the members'
+/// types are declared in another file (C++ class fields in a header used in
+/// an out-of-line body in a `.cpp`). The resolver finds each member through
+/// the enclosing type and its bases, takes the declared type from the
+/// member's first `Type` reference, and looks the name up in the last
+/// type; when the first segment is not a member it resolves like an
+/// unknown receiver.
+pub const MEMBER_RECEIVER_PREFIX: &str = "$member:";
+
+/// `$member:<chain>` receiver text (`chain` = member names joined by `.`).
+pub fn member_receiver(chain: &str) -> String {
+    format!("{MEMBER_RECEIVER_PREFIX}{chain}")
 }
 
 /// `DataRef` receiver: the reference name is a global qualified name

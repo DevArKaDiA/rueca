@@ -10,7 +10,7 @@
 //! makes any other reading invalid C/C++:
 //!
 //! 1. **Bare line**: the only token on its line, after `;`, `{`, `}`, `:`, a
-//!    preprocessor line or the start of the file, and followed by an
+//!    preprocessor line, a masked macro or the start of the file, and followed by an
 //!    identifier, `~`, `[`, a preprocessor line or the end of the file
 //!    (`FMT_BEGIN_NAMESPACE`, `Q_OBJECT`, `G_BEGIN_DECLS`). Not before
 //!    `}`, `,` or an operator (a last enumerator, an expression).
@@ -48,12 +48,14 @@
 //! 9. **Macro before a parameter**: containing `_`, after `(` or `,` and
 //!    before a type and a name (`f(EV_P_ ev_io *w)`).
 //!
-//! In addition, when the branches of an `#if` group leave braces unbalanced
-//! (a function header written once per branch), the group is replaced by
-//! the code of its first branch (directives and other branches blanked); every `#if` / `#elif` condition is replaced by `1`
-//! (conditions are never evaluated, and the grammars cannot parse many of
-//! them: `__has_include(<x>)`, `FOO(clang::attr)`), and block comments
-//! inside directives are blanked (they break the grammars' macro bodies).
+//! In addition, every `#if` / `#elif` condition is replaced by `1` (the
+//! grammars cannot parse many of them: `__has_include(<x>)`,
+//! `FOO(clang::attr)`; which branches the parser sees is `cond.rs`'s
+//! decision, from the original conditions), the null directive (`#` alone)
+//! is blanked, and block comments inside directives are blanked when code
+//! follows them on the directive (they break the grammars' macro bodies; a
+//! trailing one stays, so a valueless `#define X` keeps its line end).
+//! This is the first stage of `preprocess.rs`.
 //! The rules apply at declaration level (file, namespace, `extern "C"` and
 //! class bodies) where noted; function bodies are left alone, so no call
 //! or read is lost there.
@@ -66,19 +68,22 @@
 const MAX_ARG_TOKENS: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum Kind {
     Ident,
     /// A preprocessor line (`#…` with its continuation lines).
     Directive,
+    /// A string or character literal (only from [`lex_literals`]).
+    Literal,
+    /// Punctuation; `Punct(b'0')` is a number.
     Punct(u8),
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Tok {
-    start: usize,
-    end: usize,
-    line: u32,
-    kind: Kind,
+pub(crate) struct Tok {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) line: u32,
+    pub(crate) kind: Kind,
 }
 
 /// Keywords that cannot follow a type name in a declaration (rule 3).
@@ -159,7 +164,19 @@ const NOT_A_NAME: &[&str] = &[
 /// Keywords after which a declaration specifier may follow (rule 3).
 const SPECIFIERS: &[&str] = &["constexpr", "explicit", "extern", "friend", "inline", "static", "template", "virtual"];
 
-fn lex(src: &[u8]) -> Vec<Tok> {
+/// Tokens of `src` without string and character literals (the masking
+/// rules look at code tokens only).
+pub(crate) fn lex(src: &[u8]) -> Vec<Tok> {
+    lex_impl(src, false)
+}
+
+/// Tokens of `src` with string and character literals as [`Kind::Literal`]
+/// (an encoding prefix such as `u8` or `L` is part of the literal).
+pub(crate) fn lex_literals(src: &[u8]) -> Vec<Tok> {
+    lex_impl(src, true)
+}
+
+fn lex_impl(src: &[u8], literals: bool) -> Vec<Tok> {
     let mut toks = Vec::new();
     let mut i = 0;
     let mut line = 0u32;
@@ -178,11 +195,30 @@ fn lex(src: &[u8]) -> Vec<Tok> {
             continue;
         }
         if at_line_start && c == b'#' {
-            // Preprocessor line, with `\` continuations.
+            // Preprocessor line, with `\` continuations; a block comment
+            // that starts on it may run over several lines (the line ends
+            // after the comment).
             let start = i;
             let first_line = line;
             loop {
                 while i < n && src[i] != b'\n' {
+                    if src[i] == b'/' && src.get(i + 1) == Some(&b'*') {
+                        i += 2;
+                        while i + 1 < n && !(src[i] == b'*' && src[i + 1] == b'/') {
+                            if src[i] == b'\n' {
+                                line += 1;
+                            }
+                            i += 1;
+                        }
+                        i = (i + 2).min(n);
+                        continue;
+                    }
+                    if src[i] == b'/' && src.get(i + 1) == Some(&b'/') {
+                        while i < n && src[i] != b'\n' {
+                            i += 1;
+                        }
+                        break;
+                    }
                     i += 1;
                 }
                 let mut j = i;
@@ -218,7 +254,11 @@ fn lex(src: &[u8]) -> Vec<Tok> {
             continue;
         }
         if c == b'"' || c == b'\'' {
+            let (start, first_line) = (i, line);
             i = skip_quoted(src, i, &mut line);
+            if literals {
+                toks.push(Tok { start, end: i, line: first_line, kind: Kind::Literal });
+            }
             continue;
         }
         if c.is_ascii_alphabetic() || c == b'_' {
@@ -229,7 +269,18 @@ fn lex(src: &[u8]) -> Vec<Tok> {
             let word = &src[start..i];
             // Raw string literal: R"delim( … )delim" (also u8R, LR, uR, UR).
             if i < n && src[i] == b'"' && matches!(word, b"R" | b"u8R" | b"LR" | b"uR" | b"UR") {
+                let first_line = line;
                 i = skip_raw(src, i, &mut line);
+                if literals {
+                    toks.push(Tok { start, end: i, line: first_line, kind: Kind::Literal });
+                }
+                continue;
+            }
+            // Encoding prefix of a literal: u8"…", L'x'.
+            if literals && i < n && matches!(src[i], b'"' | b'\'') && matches!(word, b"L" | b"u" | b"U" | b"u8") {
+                let first_line = line;
+                i = skip_quoted(src, i, &mut line);
+                toks.push(Tok { start, end: i, line: first_line, kind: Kind::Literal });
                 continue;
             }
             toks.push(Tok { start, end: i, line, kind: Kind::Ident });
@@ -292,7 +343,7 @@ fn skip_raw(src: &[u8], i: usize, line: &mut u32) -> usize {
 }
 
 /// Upper-case macro-looking identifier of at least `min` bytes.
-fn is_macro(word: &[u8], min: usize) -> bool {
+pub(crate) fn is_macro(word: &[u8], min: usize) -> bool {
     word.len() >= min
         && word[0].is_ascii_uppercase()
         && word.iter().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || *b == b'_')
@@ -346,7 +397,7 @@ fn matching_open(toks: &[Tok], close: usize) -> Option<usize> {
 /// For every token, whether it is at declaration level: every enclosing
 /// brace opens a namespace, an `extern "C"` block or a class body (not a
 /// function body or an initializer).
-fn declaration_levels(toks: &[Tok], src: &[u8]) -> Vec<bool> {
+pub(crate) fn declaration_levels(toks: &[Tok], src: &[u8]) -> Vec<bool> {
     let text = |t: &Tok| &src[t.start..t.end];
     let mut stack: Vec<bool> = Vec::new();
     let mut out = Vec::with_capacity(toks.len());
@@ -427,15 +478,26 @@ pub(crate) fn plan(src: &[u8]) -> Plan {
             if let Some(range) = include_test_condition(src, &toks[i]) {
                 conditions.push(range);
             }
+            // The null directive (`#` alone) is valid C the grammars reject.
+            let line = &src[toks[i].start..toks[i].end];
+            if line[1..].iter().all(|b| b.is_ascii_whitespace() || *b == b'\\') {
+                out.push((toks[i].start, toks[i].end));
+                continue;
+            }
             // Block comments inside a directive (`#define F(x) (x) /* … */ \`)
-            // break the grammar's macro bodies.
+            // break the grammar's macro bodies. A trailing one stays: blanked,
+            // it would leave spaces where the grammar wants the line end
+            // right after a valueless `#define X`.
             let line = &src[toks[i].start..toks[i].end];
             let mut k = 0;
             while let Some(open) = line[k..].windows(2).position(|w| w == b"/*") {
                 let a = k + open;
                 let Some(close) = line[a + 2..].windows(2).position(|w| w == b"*/") else { break };
                 let b = a + 2 + close + 2;
-                out.push((toks[i].start + a, toks[i].start + b));
+                let trailing = line[b..].iter().all(|c| c.is_ascii_whitespace());
+                if !trailing {
+                    out.push((toks[i].start + a, toks[i].start + b));
+                }
                 k = b;
             }
             // `#ifdef __cplusplus` / `extern "C" {` / `#endif` and the matching
@@ -487,8 +549,8 @@ pub(crate) fn plan(src: &[u8]) -> Plan {
         if is_macro(text(&toks[i]), 3) {
             let alone = prev.is_none_or(|p| p.line < toks[i].line || p.kind == Kind::Directive)
                 && next.is_none_or(|n| n.line > toks[i].line);
-            let prev_ok =
-                prev.is_none_or(|p| matches!(p.kind, Kind::Directive | Kind::Punct(b';' | b'{' | b'}' | b':')));
+            let prev_ok = prev_masked
+                || prev.is_none_or(|p| matches!(p.kind, Kind::Directive | Kind::Punct(b';' | b'{' | b'}' | b':')));
             let next_ok =
                 next.is_none_or(|n| matches!(n.kind, Kind::Ident | Kind::Directive | Kind::Punct(b'~' | b'[')));
             if alone && prev_ok && next_ok {
@@ -676,14 +738,13 @@ pub(crate) fn plan(src: &[u8]) -> Plan {
             }
         }
     }
-    out.extend(unbalanced_branches(&toks, src));
     out.sort_unstable();
     Plan { blanks: out, conditions }
 }
 
 /// Directive kind of a preprocessor line: `if` (also `ifdef` / `ifndef`),
 /// `elif` (also `elifdef` / `elifndef`), `else`, `endif`, or `None`.
-fn directive_kind(line: &[u8]) -> Option<&'static str> {
+pub(crate) fn directive_kind(line: &[u8]) -> Option<&'static str> {
     let rest = line.get(1..)?;
     let start = rest.iter().position(|b| !matches!(b, b' ' | b'\t'))?;
     let word: Vec<u8> = rest[start..].iter().take_while(|b| b.is_ascii_alphabetic()).copied().collect();
@@ -696,58 +757,8 @@ fn directive_kind(line: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// `#if` groups whose branches leave braces unbalanced (a function header
-/// written twice, `#if A void f(int a) { #else void f() { #endif`): every
-/// branch after the first is blanked, so the parser sees one header.
-fn unbalanced_branches(toks: &[Tok], src: &[u8]) -> Vec<(usize, usize)> {
-    struct Group {
-        /// Directive token index of each branch.
-        branches: Vec<usize>,
-        /// Brace balance of each branch (nested groups included).
-        balance: Vec<i32>,
-    }
-    let mut out = Vec::new();
-    let mut stack: Vec<Group> = Vec::new();
-    for (i, t) in toks.iter().enumerate() {
-        match t.kind {
-            Kind::Directive => match directive_kind(&src[t.start..t.end]) {
-                Some("if") => stack.push(Group { branches: vec![i], balance: vec![0] }),
-                Some("elif" | "else") => {
-                    if let Some(g) = stack.last_mut() {
-                        g.branches.push(i);
-                        g.balance.push(0);
-                    }
-                }
-                Some("endif") => {
-                    let Some(g) = stack.pop() else { continue };
-                    let total: i32 = g.balance[0];
-                    if let Some(parent) = stack.last_mut()
-                        && let Some(b) = parent.balance.last_mut()
-                    {
-                        *b += total;
-                    }
-                    if g.branches.len() > 1 && g.balance.iter().any(|b| *b != 0) {
-                        // Keep only the first branch's code, without the
-                        // directives around it.
-                        out.push((toks[g.branches[0]].start, toks[g.branches[0]].end));
-                        out.push((toks[g.branches[1]].start, t.end));
-                    }
-                }
-                _ => {}
-            },
-            Kind::Punct(c @ (b'{' | b'}')) => {
-                if let Some(b) = stack.last_mut().and_then(|g| g.balance.last_mut()) {
-                    *b += if c == b'{' { 1 } else { -1 };
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
 /// `#ifdef __cplusplus` / `#if defined(__cplusplus)`.
-fn is_cplusplus_test(line: &[u8]) -> bool {
+pub(crate) fn is_cplusplus_test(line: &[u8]) -> bool {
     let words: Vec<&[u8]> =
         line.split(|b| !(b.is_ascii_alphanumeric() || *b == b'_')).filter(|w| !w.is_empty()).collect();
     matches!(words.as_slice(), [b"ifdef", b"__cplusplus"] | [b"if", b"defined", b"__cplusplus"])
@@ -802,7 +813,7 @@ fn include_test_condition(src: &[u8], t: &Tok) -> Option<(usize, usize)> {
 }
 
 /// Index of the `)` matching the `(` at `open`, within [`MAX_ARG_TOKENS`].
-fn matching_paren(toks: &[Tok], open: usize) -> Option<usize> {
+pub(crate) fn matching_paren(toks: &[Tok], open: usize) -> Option<usize> {
     let mut depth = 0i32;
     for (k, t) in toks.iter().enumerate().skip(open).take(MAX_ARG_TOKENS) {
         match t.kind {
@@ -871,6 +882,11 @@ mod tests {
         );
         assert_eq!(masked_words("class A {\n  Q_OBJECT\npublic:\n};\n"), ["Q_OBJECT"]);
         assert_eq!(masked_words("#include <x>\nG_BEGIN_DECLS\nint g;\n"), ["G_BEGIN_DECLS"]);
+        // After a masked statement-like call.
+        assert_eq!(
+            masked_words("}\nFMT_PRAGMA_GCC(pop_options)\nFMT_END_EXPORT\nFMT_END_NAMESPACE\n"),
+            ["FMT_PRAGMA_GCC(pop_options)", "FMT_END_EXPORT", "FMT_END_NAMESPACE"]
+        );
         // Last enumerator, expression continuation, statement macro with `;`.
         assert!(masked_words("enum E {\n  A,\n  LAST\n};\n").is_empty());
         assert!(masked_words("int x = a +\n  FOO\n  + 1;\n").is_empty());
@@ -957,10 +973,8 @@ mod tests {
         assert!(masked_words("typedef unsigned long MY_ULONG;").is_empty());
         assert_eq!(masked_words("static void cb(EV_P_ ev_io *w, int r);"), ["EV_P_"]);
         assert_eq!(masked_words("int f(char *argv[] G_UNUSED);"), ["G_UNUSED"]);
-        let split =
-            "#if OLD\nvoid f(int a) {\n#else\nvoid f() {\n#endif\n  g();\n}\n#ifdef X\nint a;\n#else\nint b;\n#endif\n";
-        assert_eq!(masked_words(split), ["#if OLD", "#else\nvoid f() {\n#endif"]);
         assert!(masked_words("void f(MY_TYPE x, int y);").is_empty());
+        assert_eq!(masked_words("int a;\n#\nint b;\n"), ["#"]);
         let m = mask(b"#if __has_include(<a.h>) \\\n  || 0\nint x;\n").unwrap();
         assert_eq!(String::from_utf8(m).unwrap(), "#if 1                    \\\n      \nint x;\n");
     }
@@ -974,6 +988,7 @@ mod tests {
         assert!(mask(b"int x;").is_none());
         let m = mask(b"#define F(x) ((x) /* note */ \\\n  + 1)\n").unwrap();
         assert_eq!(String::from_utf8(m).unwrap(), "#define F(x) ((x)            \\\n  + 1)\n");
+        assert!(mask(b"#define X /* trailing\n note */\nint y;\n").is_none());
         let inc = includes(b"#include \"a.h\"\n  #  include <b/c.h> // x\n/* #include \"no.h\" */\n#include FOO\n#include_next <d.h>\n");
         let mods: Vec<&str> = inc.iter().map(|(m, ..)| m.as_str()).collect();
         assert_eq!(mods, ["a.h", "<b/c.h>"]);

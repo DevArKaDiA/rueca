@@ -55,6 +55,105 @@ pub(crate) fn params_arity(params: &str) -> (u32, Option<u32>) {
     if p.contains("...") { (count - 1, None) } else { (count, Some(count)) }
 }
 
+/// Arity range of a C/C++ callable from its signature: the parameter list
+/// that follows `name` (after any `template <…>` head). Parameters with a
+/// default value are optional; `...` (C varargs or a parameter pack) makes
+/// it variadic; `()` and `(void)` take none. `None` when no list is found.
+pub(crate) fn signature_arity(sig: &str, name: &str) -> Option<(u32, Option<u32>)> {
+    let bytes = sig.as_bytes();
+    // Skip a template head.
+    let mut from = 0;
+    if sig.starts_with("template") {
+        let mut depth = 0i32;
+        for (i, c) in sig.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        from = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut at = from;
+    let open = loop {
+        let k = at + sig.get(at..)?.find(name)?;
+        let end = k + name.len();
+        let boundary = k == 0 || !word(bytes[k - 1]) || !word(name.as_bytes()[0]);
+        let rest = sig[end..].trim_start();
+        if boundary && rest.starts_with('(') {
+            break sig.len() - rest.len();
+        }
+        at = end;
+    };
+    let mut depth = 0i32;
+    let mut close = None;
+    for (i, c) in sig[open..].char_indices() {
+        match c {
+            '(' | '<' | '[' | '{' => depth += 1,
+            ')' | '>' | ']' | '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(open + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let params = sig[open + 1..close?].trim();
+    if params.is_empty() || params == "void" {
+        return Some((0, Some(0)));
+    }
+    let (mut min, mut max, mut variadic) = (0u32, 0u32, false);
+    let mut depth = 0i32;
+    let mut start = 0;
+    let mut parts = Vec::new();
+    for (i, c) in params.char_indices() {
+        match c {
+            '(' | '<' | '[' | '{' => depth += 1,
+            ')' | '>' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&params[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&params[start..]);
+    for p in parts {
+        let p = p.trim();
+        if p.contains("...") {
+            variadic = true;
+            continue;
+        }
+        max += 1;
+        // A default value: a top-level `=` (not `==`, `<=`, `>=`, `!=`).
+        let mut depth = 0i32;
+        let pb = p.as_bytes();
+        let has_default = pb.iter().enumerate().any(|(i, &c)| {
+            match c {
+                b'(' | b'<' | b'[' | b'{' => depth += 1,
+                b')' | b'>' | b']' | b'}' => depth -= 1,
+                _ => {}
+            }
+            c == b'='
+                && depth == 0
+                && pb.get(i + 1) != Some(&b'=')
+                && !matches!(i.checked_sub(1).map(|j| pb[j]), Some(b'=' | b'<' | b'>' | b'!'))
+        });
+        if !has_default {
+            min += 1;
+        }
+    }
+    Some((min, if variadic { None } else { Some(max) }))
+}
+
 /// The type name written in a `$type:` receiver or a base list, without
 /// pointers, references, qualifiers, array and generic arguments:
 /// `*http.Server` → `http.Server`, `const std::vector<int>&` → `std::vector`.
@@ -76,6 +175,125 @@ pub(crate) fn normalize_type_text(text: &str) -> &str {
         t = &t[..i];
     }
     t.trim_end_matches(['*', '&', '?']).trim()
+}
+
+/// The namespace path a macro definition opens: `#define FMT_BEGIN_NAMESPACE
+/// namespace fmt { inline namespace v12 {` → `fmt::v12` (and `fmt`, the
+/// path without inline namespaces); `Some("")` when it opens no namespace
+/// (`#define FMT_BEGIN_EXPORT`, `extern "C" {`).
+fn namespace_expansion(signature: &str, name: &str) -> Option<(String, String)> {
+    let rest = signature.strip_prefix('#')?.trim_start().strip_prefix("define")?.trim_start().strip_prefix(name)?;
+    if rest.starts_with('(') {
+        return None;
+    }
+    let spaced = rest.replace('{', " { ");
+    let words: Vec<&str> = spaced.split_whitespace().collect();
+    let (mut path, mut visible) = (Vec::new(), Vec::new());
+    let mut inline = false;
+    let mut i = 0;
+    while i < words.len() {
+        match words[i] {
+            "inline" => {
+                inline = true;
+                i += 1;
+            }
+            "export" => i += 1,
+            "namespace" if words.get(i + 2) == Some(&"{") => {
+                let segs = words[i + 1].split("::").filter(|s| !s.is_empty());
+                for seg in segs {
+                    path.push(seg);
+                    if !inline {
+                        visible.push(seg);
+                    }
+                }
+                inline = false;
+                i += 3;
+            }
+            _ => return Some((String::new(), String::new())),
+        }
+    }
+    Some((path.join("::"), visible.join("::")))
+}
+
+/// C/C++ namespace macros (before nodes are built): a pack writes the
+/// definitions inside a masked `FMT_BEGIN_NAMESPACE` … `FMT_END_NAMESPACE`
+/// region with the segment `${FMT_BEGIN_NAMESPACE}`, because the macro is
+/// usually defined in another file. Every such segment, in qualified names
+/// and receivers, becomes the namespaces the macro's definition opens
+/// anywhere in the snapshot (`fmt::v12`), or goes when the definition is
+/// unknown or opens none.
+///
+/// Returns the (path, path without inline namespaces) pairs that differ
+/// (`fmt::v12`, `fmt`): exact qualified-name lookups see through inline
+/// namespaces, as C++ does.
+pub(crate) fn expand_namespace_macros(files: &mut [FileInput]) -> Vec<(String, String)> {
+    let is_c = |f: &FileInput| f.language.map(Language::family) == Some(LanguageFamily::C);
+    if !files
+        .iter()
+        .filter(|f| is_c(f))
+        .filter_map(|f| f.facts.as_ref())
+        .any(|x| x.definitions.iter().any(|d| d.qualified_name.contains("${")))
+    {
+        return Vec::new();
+    }
+    let mut map: BTreeMap<String, String> = BTreeMap::new();
+    let mut aliases: Vec<(String, String)> = Vec::new();
+    for f in files.iter().filter(|f| is_c(f)) {
+        for d in f.facts.iter().flat_map(|x| x.definitions.iter()) {
+            if d.label != Label::Constant {
+                continue;
+            }
+            let Some(sig) = d.signature.as_deref() else { continue };
+            if let Some((path, visible)) = namespace_expansion(sig, &d.name) {
+                let e = map.entry(d.name.clone()).or_default();
+                if e.is_empty() && !path.is_empty() {
+                    if visible != path && !aliases.iter().any(|(p, _)| *p == path) {
+                        aliases.push((path.clone(), visible));
+                    }
+                    *e = path;
+                }
+            }
+        }
+    }
+    let rewrite = |text: &str| -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(start) = rest.find("${") {
+            let Some(len) = rest[start..].find('}') else { break };
+            let name = &rest[start + 2..start + len];
+            let path = map.get(name).map_or("", String::as_str);
+            out.push_str(&rest[..start]);
+            let mut after = &rest[start + len + 1..];
+            if path.is_empty() {
+                // Drop the segment and its separator.
+                after = after.strip_prefix("::").unwrap_or_else(|| {
+                    if out.ends_with("::") {
+                        out.truncate(out.len() - 2);
+                    }
+                    after
+                });
+            } else {
+                out.push_str(path);
+            }
+            rest = after;
+        }
+        out.push_str(rest);
+        out
+    };
+    for f in files.iter_mut().filter(|f| is_c(f)) {
+        let Some(facts) = f.facts.as_mut() else { continue };
+        for d in &mut facts.definitions {
+            if d.qualified_name.contains("${") {
+                d.qualified_name = rewrite(&d.qualified_name);
+            }
+        }
+        for r in &mut facts.references {
+            if let Some(recv) = r.receiver.as_mut().filter(|r| r.contains("${")) {
+                *recv = rewrite(recv);
+            }
+        }
+    }
+    aliases
 }
 
 /// Splits a qualified type text on its last `::` or `.` separator.
@@ -289,6 +507,13 @@ impl<'a> Resolver<'a> {
         for v in self.by_name.values_mut() {
             v.retain(|n| !body_of.contains_key(n));
         }
+        let mut declared_in: HashMap<NodeId, Vec<FileId>> = HashMap::new();
+        for (&d, &b) in &body_of {
+            if let Some(file) = self.nodes[d as usize].file {
+                declared_in.entry(b).or_default().push(file);
+            }
+        }
+        self.declared_in = declared_in;
         self.body_of = body_of;
     }
 
@@ -299,9 +524,14 @@ impl<'a> Resolver<'a> {
 
     /// Overloads of packs with `overloads()`: definitions whose local name
     /// ends with a parameter suffix, grouped by (family, global qualified
-    /// name without the suffix).
+    /// name without the suffix). C++ callables without a suffix join the
+    /// group of their name too: a pack suffixes overloads per file, so an
+    /// overload set split across files (`vformat` in two headers) has bare
+    /// members. Bare members alone form a set only when their arities
+    /// differ (two same-name functions of different files with one
+    /// signature are not overloads of each other).
     fn build_overload_sets(&mut self) {
-        let mut groups: BTreeMap<(String, String), Vec<NodeId>> = BTreeMap::new();
+        let mut groups: BTreeMap<(String, String), (Vec<NodeId>, bool)> = BTreeMap::new();
         for i in 0..self.files.len() {
             if !self.packs[i].is_some_and(|p| p.overloads()) {
                 continue;
@@ -312,17 +542,30 @@ impl<'a> Resolver<'a> {
                     continue;
                 }
                 let node = &self.nodes[n as usize];
-                let Some((base, _)) = overload_suffix(&node.qualified_name) else { continue };
+                let (base, suffixed) = match overload_suffix(&node.qualified_name) {
+                    Some((base, _)) => (base, true),
+                    None if node.language == Some(Language::Cpp) && node.label.is_callable() => {
+                        (node.qualified_name.as_str(), false)
+                    }
+                    None => continue,
+                };
                 let family = format!("{:?}", self.families[i]);
-                let v = groups.entry((family, base.to_string())).or_default();
+                let (v, any_suffixed) = groups.entry((family, base.to_string())).or_default();
+                *any_suffixed |= suffixed;
                 if !v.contains(&n) {
                     v.push(n);
                 }
             }
         }
-        for (_, set) in groups {
+        for (_, (set, any_suffixed)) in groups {
             if set.len() < 2 {
                 continue;
+            }
+            if !any_suffixed {
+                let first = self.def_arity(set[0]);
+                if set.iter().all(|&n| self.def_arity(n) == first) {
+                    continue;
+                }
             }
             let id = self.overload_sets.len();
             for &n in &set {
@@ -332,9 +575,43 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// Arity range of a definition from its overload suffix.
+    /// Arity range of a definition: from its C/C++ signature (default
+    /// arguments are optional, `...` and parameter packs variadic), else
+    /// from its overload suffix.
     fn def_arity(&self, n: NodeId) -> Option<(u32, Option<u32>)> {
-        overload_suffix(&self.nodes[n as usize].qualified_name).map(|(_, p)| params_arity(p))
+        let node = &self.nodes[n as usize];
+        let from_signature = match node.language.map(Language::family) {
+            Some(LanguageFamily::C) => node.signature.as_deref().and_then(|s| signature_arity(s, &node.name)),
+            _ => None,
+        };
+        from_signature.or_else(|| overload_suffix(&node.qualified_name).map(|(_, p)| params_arity(p)))
+    }
+
+    /// Files whose declarations a C/C++ file `f` sees: itself and what it
+    /// includes, transitively (depth ≤ 10). Memoized.
+    fn visible_files(&self, f: FileId) -> std::rc::Rc<HashSet<FileId>> {
+        if let Some(v) = self.visible_memo.borrow().get(&f) {
+            return v.clone();
+        }
+        let mut seen: HashSet<FileId> = HashSet::from([f]);
+        let mut level = vec![f];
+        for _ in 0..MAX_DEPTH {
+            let mut next = Vec::new();
+            for &t in &level {
+                for &i in self.import_targets[t as usize].iter().flatten() {
+                    if seen.insert(i) {
+                        next.push(i);
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            level = next;
+        }
+        let v = std::rc::Rc::new(seen);
+        self.visible_memo.borrow_mut().insert(f, v.clone());
+        v
     }
 
     /// Expands a resolved target to its overloads (RFC 0003 §10.1): those
@@ -342,8 +619,13 @@ impl<'a> Resolver<'a> {
     /// types when the pack reports them (`args`, see [`overload_by_types`]);
     /// one candidate keeps the confidence, several are all linked × 0.8,
     /// and no fitting one links the whole set × 0.8.
+    /// For a C/C++ reference of file `from`, only the overloads declared in
+    /// files it sees (itself and its includes, transitively) are candidates,
+    /// when there are any: C++ overload resolution only considers visible
+    /// declarations.
     pub(crate) fn expand_overloads(
         &self,
+        from: FileId,
         target: NodeId,
         arity: Option<u32>,
         args: Option<&[&str]>,
@@ -351,7 +633,19 @@ impl<'a> Resolver<'a> {
         confidence: f32,
     ) -> Vec<(NodeId, Strategy, f32)> {
         let Some(&set) = self.overload_of.get(&target) else { return vec![(target, strategy, confidence)] };
-        let set = &self.overload_sets[set];
+        let all = self.overload_sets[set].as_slice();
+        let visible_only: Vec<NodeId>;
+        let set: &[NodeId] = if self.families[from as usize] == Some(LanguageFamily::C) {
+            let visible = self.visible_files(from);
+            let sees = |n: NodeId| {
+                self.nodes[n as usize].file.is_some_and(|x| visible.contains(&x))
+                    || self.declared_in.get(&n).is_some_and(|fs| fs.iter().any(|x| visible.contains(x)))
+            };
+            visible_only = all.iter().copied().filter(|&n| sees(n)).collect();
+            if visible_only.is_empty() { all } else { &visible_only }
+        } else {
+            all
+        };
         let fits = |n: NodeId, a: u32| match self.def_arity(n) {
             Some((min, max)) => a >= min && max.is_none_or(|m| a <= m),
             None => true,
@@ -439,6 +733,175 @@ impl<'a> Resolver<'a> {
         let v = std::rc::Rc::new(out);
         self.star_memo.borrow_mut().insert(target, v.clone());
         v
+    }
+
+    // -- C++ namespaces ------------------------------------------------------
+
+    /// C/C++ nodes by global qualified name without overload suffix (built
+    /// on first use).
+    fn nodes_by_base_qn(&self) -> &HashMap<String, Vec<NodeId>> {
+        self.by_base_qn.get_or_init(|| {
+            let mut m: HashMap<String, Vec<NodeId>> = HashMap::new();
+            for (i, n) in self.nodes.iter().enumerate() {
+                if n.language.map(Language::family) != Some(LanguageFamily::C) || n.file.is_none() {
+                    continue;
+                }
+                let base = overload_suffix(&n.qualified_name).map_or(n.qualified_name.as_str(), |(b, _)| b);
+                m.entry(base.to_string()).or_default().push(i as NodeId);
+                // Through inline namespaces: `fmt::v12::format` is also `fmt::format`.
+                for (path, visible) in &self.inline_aliases {
+                    if let Some(rest) = base.strip_prefix(path.as_str()).and_then(|r| r.strip_prefix("::")) {
+                        let alias = if visible.is_empty() { rest.to_string() } else { format!("{visible}::{rest}") };
+                        m.entry(alias).or_default().push(i as NodeId);
+                    }
+                }
+            }
+            m
+        })
+    }
+
+    /// The scopes enclosing a C/C++ reference, innermost first: the
+    /// qualified-name prefixes of its innermost enclosing definition
+    /// (`a::b` and `a` for a reference inside `a::b::f`).
+    fn enclosing_scopes(&self, f: FileId, scope: Option<LocalDefId>) -> Vec<String> {
+        let Some(s) = scope else { return Vec::new() };
+        let qn = &self.nodes[self.node_of(f, s) as usize].qualified_name;
+        let qn = overload_suffix(qn).map_or(qn.as_str(), |(b, _)| b);
+        let mut segs: Vec<&str> = Vec::new();
+        let (mut depth, mut start) = (0i32, 0usize);
+        let bytes = qn.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'<' | b'(' => depth += 1,
+                b'>' | b')' => depth -= 1,
+                b':' if depth == 0 && bytes.get(i + 1) == Some(&b':') => {
+                    segs.push(&qn[start..i]);
+                    start = i + 2;
+                    i += 1;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        (1..=segs.len()).rev().map(|k| segs[..k].join("::")).collect()
+    }
+
+    /// The node with global qualified name `qn` (overload suffix optional),
+    /// preferring one of file `f` (`same_module` 0.90, else
+    /// `import_resolved` 0.95, like rungs 4 and 3).
+    fn by_exact_name(&self, f: FileId, qn: &str) -> Option<Outcome> {
+        let nodes = self.nodes_by_base_qn().get(qn)?;
+        let n = nodes.iter().copied().find(|&n| self.nodes[n as usize].file == Some(f)).or(nodes.first().copied())?;
+        Some(if self.nodes[n as usize].file == Some(f) {
+            Outcome::Hit(n, Strategy::SameModule, 0.9)
+        } else {
+            Outcome::Hit(n, Strategy::ImportResolved, 0.95)
+        })
+    }
+
+    /// Rung 1c (C family): a receiver-less name inside `a::b::f` is
+    /// `a::b::name`, else `a::name` (C++ looks names up in the enclosing
+    /// namespaces, innermost first).
+    pub(crate) fn namespace_scope(&self, f: FileId, scope: Option<LocalDefId>, name: &str) -> Option<Outcome> {
+        if self.families[f as usize] != Some(LanguageFamily::C) {
+            return None;
+        }
+        self.enclosing_scopes(f, scope).iter().find_map(|p| self.by_exact_name(f, &format!("{p}::{name}")))
+    }
+
+    /// `$ns:path` receiver: `path::name` looked up from the innermost
+    /// enclosing namespace outwards, then globally (`$ns:::a`, written
+    /// `::a::name`, and `$ns:` for `::name` are global only); else the bare
+    /// name through imports, the same file and unique names (never an
+    /// implicit member).
+    pub(crate) fn resolve_namespaced(
+        &self,
+        f: FileId,
+        item: &RefItem<'_>,
+        scope: Option<LocalDefId>,
+        path: &str,
+    ) -> Outcome {
+        let name = item.name;
+        let (global, path) = match path.strip_prefix("::") {
+            Some(p) => (true, p),
+            None => (path.is_empty(), path),
+        };
+        let qualified = if path.is_empty() { name.to_string() } else { format!("{path}::{name}") };
+        if !global {
+            for p in self.enclosing_scopes(f, scope) {
+                if let Some(hit) = self.by_exact_name(f, &format!("{p}::{qualified}")) {
+                    return hit;
+                }
+            }
+        }
+        if let Some(hit) = self.by_exact_name(f, &qualified) {
+            return hit;
+        }
+        match self.envs[f as usize].get(name) {
+            Some(Some(Target::Symbol(n))) => return Outcome::Hit(*n, Strategy::ImportResolved, 0.95),
+            Some(Some(_)) => return Outcome::External,
+            Some(None) | None => {}
+        }
+        if let Some(n) = self.module_def(f, name) {
+            return Outcome::Hit(n, Strategy::SameModule, 0.9);
+        }
+        self.unique_name(f, item.kind, name, false)
+    }
+
+    // -- member chains -------------------------------------------------------
+
+    /// Declared type of a member (field) node: its first `Type` reference
+    /// (in source order) resolved in the member's file.
+    fn member_type(&self, member: NodeId) -> TypeLookup {
+        let Some(g) = self.nodes[member as usize].file else { return TypeLookup::Unknown };
+        let Some(j) = self.def_node[g as usize].iter().position(|&n| n == member) else {
+            return TypeLookup::Unknown;
+        };
+        let j = j as LocalDefId;
+        let refs = self.files[g as usize].facts.as_ref().map_or(&[][..], |x| x.references.as_slice());
+        let Some(r) =
+            refs.iter().filter(|r| r.kind == RefKind::Type && r.enclosing == Some(j)).min_by_key(|r| r.span.start_byte)
+        else {
+            return TypeLookup::Unknown;
+        };
+        let text = match r.receiver.as_deref() {
+            Some(q) => format!("{q}::{}", r.name),
+            None => r.name.clone(),
+        };
+        self.resolve_type_text(g, self.parents[g as usize][j as usize], &text)
+    }
+
+    /// `$member:a.b` receiver: member `a` of the enclosing type, member `b`
+    /// of `a`'s declared type, then `name` in the last type (`type_resolved`
+    /// 0.85). A first segment that is no member resolves like an unknown
+    /// receiver (the unique-method rung).
+    pub(crate) fn resolve_member_chain(
+        &self,
+        f: FileId,
+        item: &RefItem<'_>,
+        scope: Option<LocalDefId>,
+        chain: &str,
+    ) -> Outcome {
+        let fallback = || self.unique_name(f, item.kind, item.name, true);
+        let Some(mut ty) = self.enclosing_type(f, scope).or_else(|| self.receiver_type_from_name(f, scope)) else {
+            return fallback();
+        };
+        for (k, seg) in chain.split('.').enumerate() {
+            let Some((member, _)) = self.find_member(ty, seg, Want::Value) else {
+                return if k == 0 { fallback() } else { Outcome::Miss };
+            };
+            match self.member_type(self.prefer_body(member)) {
+                TypeLookup::Found(t) => ty = t,
+                TypeLookup::External => return Outcome::External,
+                TypeLookup::Unknown => return fallback(),
+            }
+        }
+        match self.find_member(ty, item.name, Want::of(item.kind)) {
+            Some((n, _)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+            None if self.type_is_open(ty) => Outcome::External,
+            None => Outcome::Miss,
+        }
     }
 
     // -- receivers -----------------------------------------------------------
@@ -606,6 +1069,7 @@ impl<'a> Resolver<'a> {
     /// parameter list), narrowed to the one with the same parameter types
     /// when exactly one has them; all of them when the counts are unknown.
     /// `type_resolved` 0.90.
+    /// A C/C++ declaration stands for its body at either end.
     pub(crate) fn override_edges(&mut self) {
         let mut out = Vec::new();
         for i in 0..self.files.len() {
@@ -636,7 +1100,9 @@ impl<'a> Resolver<'a> {
                         None => vec![found],
                     };
                     for c in self.override_targets(method, own.as_deref(), &cands) {
-                        out.push((method, c, fid, d.name_span));
+                        // Between bodies when they exist (C++ out-of-line
+                        // definitions): what `trace` reaches from calls.
+                        out.push((self.prefer_body(method), self.prefer_body(c), fid, d.name_span));
                     }
                 }
             }
@@ -919,6 +1385,42 @@ mod tests {
         assert_eq!(params_arity("String"), (1, Some(1)));
         assert_eq!(params_arity("Map<K, V>, int"), (2, Some(2)));
         assert_eq!(params_arity("String, Object..."), (1, None));
+    }
+
+    #[test]
+    fn signature_arities() {
+        assert_eq!(signature_arity("int f(int a, int b = 0)", "f"), Some((1, Some(2))));
+        assert_eq!(signature_arity("void f(void)", "f"), Some((0, Some(0))));
+        assert_eq!(signature_arity("int printf(const char* fmt, ...)", "printf"), Some((1, None)));
+        assert_eq!(
+            signature_arity(
+                "template <typename T, typename F = std::function<void(int)>> auto f(T&&... args) -> int",
+                "f"
+            ),
+            Some((0, None))
+        );
+        assert_eq!(
+            signature_arity(
+                "auto write(OutputIt out, monostate, format_specs = {}, locale_ref = {}) -> OutputIt",
+                "write"
+            ),
+            Some((2, Some(4)))
+        );
+        assert_eq!(signature_arity("bool operator==(const Money& o) const", "operator=="), Some((1, Some(1))));
+        assert_eq!(signature_arity("#define MAX(a, b) ((a) > (b) ? (a) : (b))", "MAX"), Some((2, Some(2))));
+        assert_eq!(signature_arity("void g(std::map<int, int> m, int x = a >= b)", "g"), Some((1, Some(2))));
+        assert_eq!(signature_arity("struct prefix_f", "f"), None);
+    }
+
+    #[test]
+    fn namespace_macro_expansions() {
+        let e = |sig: &str, name: &str| namespace_expansion(sig, name).map(|(p, v)| format!("{p}|{v}"));
+        let fmt = "#define FMT_BEGIN_NAMESPACE namespace fmt { inline namespace v12 {";
+        assert_eq!(e(fmt, "FMT_BEGIN_NAMESPACE").as_deref(), Some("fmt::v12|fmt"));
+        assert_eq!(e("# define NS_BEGIN namespace a::b {", "NS_BEGIN").as_deref(), Some("a::b|a::b"));
+        assert_eq!(e("#define FMT_BEGIN_EXPORT", "FMT_BEGIN_EXPORT").as_deref(), Some("|"));
+        assert_eq!(e("#define G_BEGIN_DECLS extern \"C\" {", "G_BEGIN_DECLS").as_deref(), Some("|"));
+        assert_eq!(e("#define F(x) namespace x {", "F"), None);
     }
 
     #[test]

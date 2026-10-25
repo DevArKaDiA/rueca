@@ -27,6 +27,7 @@ public:
     explicit Circle(double r);
     double area() const override;
     double radius() const;
+    double reach() const;
     Point center() const { return center_; }
 
 private:

@@ -29,6 +29,9 @@ int next_id() {
 
 double geo::Circle::radius() const { return r_; }
 
+// `center_` is declared in the header: its type comes from there.
+double geo::Circle::reach() const { return r_ + center_.norm() + this->center_.norm(); }
+
 double geo::Point::norm() const { return x * x + y * y; }
 
 geo::Point geo::operator+(const Point& a, const Point& b) { return Point{a.x + b.x, a.y + b.y}; }
