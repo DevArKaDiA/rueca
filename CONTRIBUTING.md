@@ -12,7 +12,7 @@ documentation fixes are all welcome.
   an RFC in [`docs/rfcs/`](docs/rfcs/).
 - **Security issues**: do not open a public issue; see [SECURITY.md](SECURITY.md).
 
-Read [RFC 0001](docs/rfcs/0001-architecture.md),
+Read [how Rueca works](docs/how-it-works.md), [RFC 0001](docs/rfcs/0001-architecture.md),
 [RFC 0002](docs/rfcs/0002-building-blocks.md), [the decisions log](docs/decisions.md)
 and [the tool contract](docs/tools.md) before a non-trivial change: they are
 short and explain why things are the way they are. In particular, RFC 0002

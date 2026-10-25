@@ -133,6 +133,10 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    zstd-compressed, content-addressed file packs.
 4. **Serve** — the six tools run against the memory-mapped segment.
 
+The full method — what is extracted, how references are resolved, the graph
+schema, and exactly what each tool reads — is in
+[docs/how-it-works.md](docs/how-it-works.md).
+
 Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
 [building blocks (RFC 0002)](docs/rfcs/0002-building-blocks.md),
 [decisions log](docs/decisions.md).
