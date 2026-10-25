@@ -220,6 +220,7 @@ impl<'a> Resolver<'a> {
     /// Package scope: a top-level `T.m` (a Go method declared outside its
     /// type, possibly in another file) is a member of type `T`.
     fn build_package_members(&mut self) {
+        let mut found = Vec::new();
         for i in 0..self.files.len() {
             let fid = i as FileId;
             if self.package_of[i].is_none() {
@@ -236,9 +237,11 @@ impl<'a> Resolver<'a> {
                 if !self.nodes[t as usize].label.is_type() {
                     continue;
                 }
-                let node = self.def_node[i][j as usize];
-                self.members.entry(t).or_default().entry(d.name.clone()).or_insert(node);
+                found.push((t, d, self.def_node[i][j as usize]));
             }
+        }
+        for (t, d, node) in found {
+            self.add_member(t, &d.name, node, d.label);
         }
     }
 
@@ -333,12 +336,16 @@ impl<'a> Resolver<'a> {
         overload_suffix(&self.nodes[n as usize].qualified_name).map(|(_, p)| params_arity(p))
     }
 
-    /// Expands a resolved target to its overloads: the one matching `arity`,
-    /// else all candidates at × 0.8 (RFC 0003 §10.1).
+    /// Expands a resolved target to its overloads (RFC 0003 §10.1): those
+    /// whose parameter count fits `arity`, narrowed by the static argument
+    /// types when the pack reports them (`args`, see [`overload_by_types`]);
+    /// one candidate keeps the confidence, several are all linked × 0.8,
+    /// and no fitting one links the whole set × 0.8.
     pub(crate) fn expand_overloads(
         &self,
         target: NodeId,
         arity: Option<u32>,
+        args: Option<&[&str]>,
         strategy: Strategy,
         confidence: f32,
     ) -> Vec<(NodeId, Strategy, f32)> {
@@ -348,10 +355,19 @@ impl<'a> Resolver<'a> {
             Some((min, max)) => a >= min && max.is_none_or(|m| a <= m),
             None => true,
         };
-        let chosen: Vec<NodeId> = match arity {
+        let mut chosen: Vec<NodeId> = match arity {
             Some(a) => set.iter().copied().filter(|&n| fits(n, a)).collect(),
             None => Vec::new(),
         };
+        if chosen.len() > 1
+            && let Some(args) = args
+        {
+            let typed: Vec<(NodeId, Vec<String>)> =
+                chosen.iter().filter_map(|&n| Some((n, self.param_types(n)?))).collect();
+            if typed.len() == chosen.len() {
+                chosen = overload_by_types(&typed, args);
+            }
+        }
         match chosen.len() {
             1 => vec![(chosen[0], strategy, confidence)],
             0 => set.iter().map(|&n| (n, strategy, confidence * OVERLOAD_FANOUT)).collect(),
@@ -430,11 +446,17 @@ impl<'a> Resolver<'a> {
     /// types, innermost first, through their bases; for a method body
     /// declared outside its type (C++ `void Foo::bar() {}`), the type named
     /// by its qualified-name prefix.
-    pub(crate) fn implicit_member(&self, f: FileId, scope: Option<LocalDefId>, name: &str) -> Option<Outcome> {
+    pub(crate) fn implicit_member(
+        &self,
+        f: FileId,
+        scope: Option<LocalDefId>,
+        name: &str,
+        want: Want,
+    ) -> Option<Outcome> {
         if !self.packs[f as usize].is_some_and(|p| p.implicit_self()) {
             return None;
         }
-        let member = |class: NodeId| match self.find_member(class, name) {
+        let member = |class: NodeId| match self.find_member(class, name, want) {
             Some((n, false)) => Some(Outcome::Hit(n, Strategy::TypeResolved, 0.9)),
             Some((n, true)) => Some(Outcome::Hit(n, Strategy::TypeResolved, 0.85)),
             None => None,
@@ -499,6 +521,7 @@ impl<'a> Resolver<'a> {
             span: Span::default(),
             decorated: None,
             arity: None,
+            arg_types: None,
         };
         let outcome = match split_qualified(t) {
             Some((qualifier, name)) => {
@@ -531,7 +554,7 @@ impl<'a> Resolver<'a> {
     /// external; an unknown `T` falls back to the unique-method rung.
     pub(crate) fn resolve_typed(&self, f: FileId, item: &RefItem<'_>, scope: Option<LocalDefId>, ty: &str) -> Outcome {
         match self.resolve_type_text(f, scope, ty) {
-            TypeLookup::Found(t) => match self.find_member(t, item.name) {
+            TypeLookup::Found(t) => match self.find_member(t, item.name, Want::of(item.kind)) {
                 Some((n, _)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
                 None if self.type_is_open(t) => Outcome::External,
                 None => Outcome::Miss,
@@ -562,9 +585,26 @@ impl<'a> Resolver<'a> {
 
     // -- OVERRIDES -----------------------------------------------------------
 
+    /// Parameter types of a callable, normalized ([`normalize_param_type`]):
+    /// from its overload suffix, else from the parameter list of its
+    /// signature (`String fromJson(Reader json, Type typeOfT)`), when the
+    /// pack wrote one. `None` when neither is known.
+    pub(crate) fn param_types(&self, n: NodeId) -> Option<Vec<String>> {
+        let node = &self.nodes[n as usize];
+        if let Some((_, params)) = overload_suffix(&node.qualified_name) {
+            return Some(split_params(params).into_iter().map(|p| normalize_param_type(p, false)).collect());
+        }
+        let params = signature_params(node.signature.as_deref()?, &node.name)?;
+        Some(split_params(params).into_iter().map(|p| normalize_param_type(p, true)).collect())
+    }
+
     /// `OVERRIDES` (packs with `overrides()`): a method of a type → the
-    /// method with the same name (and arity, when both are known) found in
-    /// each resolved base, `type_resolved` 0.90.
+    /// method with the same name found in each resolved base, paired by
+    /// signature when the base has several overloads: the overloads whose
+    /// parameter count matches (overload suffix, else the signature's
+    /// parameter list), narrowed to the one with the same parameter types
+    /// when exactly one has them; all of them when the counts are unknown.
+    /// `type_resolved` 0.90.
     pub(crate) fn override_edges(&mut self) {
         let mut out = Vec::new();
         for i in 0..self.files.len() {
@@ -583,24 +623,19 @@ impl<'a> Resolver<'a> {
                 }
                 let class = self.node_of(fid, p);
                 let method = self.node_of(fid, j as LocalDefId);
-                let own = self.def_arity(method);
+                // Constructors are not overridden.
+                if d.name == defs[p as usize].name {
+                    continue;
+                }
+                let own = self.param_types(method);
                 for &b in self.bases.get(&class).map_or(&[][..], |v| v.as_slice()) {
-                    let Some((found, _)) = self.find_member(b, &d.name) else { continue };
-                    let cands = match self.overload_of.get(&found) {
+                    let Some((found, _)) = self.find_member(b, &d.name, Want::Call) else { continue };
+                    let cands: Vec<NodeId> = match self.overload_of.get(&found) {
                         Some(&s) => self.overload_sets[s].clone(),
                         None => vec![found],
                     };
-                    for c in cands {
-                        if c == method || !self.nodes[c as usize].label.is_callable() {
-                            continue;
-                        }
-                        let same_arity = match (own, self.def_arity(c)) {
-                            (Some(a), Some(b)) => a == b,
-                            _ => true,
-                        };
-                        if same_arity {
-                            out.push((method, c, fid, d.name_span));
-                        }
+                    for c in self.override_targets(method, own.as_deref(), &cands) {
+                        out.push((method, c, fid, d.name_span));
                     }
                 }
             }
@@ -610,6 +645,245 @@ impl<'a> Resolver<'a> {
             self.add_edge(src, dst, EdgeKind::Overrides, meta);
         }
     }
+
+    /// The candidates (same-named methods of a base) that `method`, with
+    /// parameter types `own`, overrides (see [`Self::override_edges`]).
+    fn override_targets(&self, method: NodeId, own: Option<&[String]>, cands: &[NodeId]) -> Vec<NodeId> {
+        let arity = |types: &[String]| match types.last() {
+            Some(t) if t.ends_with("...") => (types.len() as u32 - 1, None),
+            _ => (types.len() as u32, Some(types.len() as u32)),
+        };
+        let mut same_arity = Vec::new();
+        let mut same_types = Vec::new();
+        for &c in cands {
+            if c == method || !self.nodes[c as usize].label.is_callable() {
+                continue;
+            }
+            let theirs = self.param_types(c);
+            match (own, theirs.as_deref()) {
+                (Some(a), Some(b)) => {
+                    if arity(a) != arity(b) {
+                        continue;
+                    }
+                    if a == b {
+                        same_types.push(c);
+                    }
+                }
+                _ if cands.len() > 1 => {
+                    // Several overloads and no way to pair: keep the
+                    // overload-suffix arity rule (all when unknown).
+                    let (x, y) = (self.def_arity(method), self.def_arity(c));
+                    if x.is_some() && y.is_some() && x != y {
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            same_arity.push(c);
+        }
+        if same_types.len() == 1 { same_types } else { same_arity }
+    }
+}
+
+/// Primitive types of Java and C-family languages, in widening order
+/// (`byte` → `short` → `int` → `long` → `float` → `double`; `char` → `int`).
+const PRIMITIVES: &[&str] = &["byte", "short", "char", "int", "long", "float", "double", "boolean"];
+
+/// Whether an argument of static type `arg` can be passed to a parameter
+/// of type `param` (both normalized). `false` only when it certainly
+/// cannot: a primitive that does not widen to the parameter, a primitive
+/// for `String` or the reverse, or a class other than `String` for
+/// `String` (which is final). Class to class is always possible: the
+/// subtype relation is not known.
+fn may_accept(param: &str, arg: &str) -> bool {
+    let param = param.strip_suffix("...").unwrap_or(param);
+    if param == arg {
+        return true;
+    }
+    let prim = |t: &str| PRIMITIVES.contains(&t);
+    match (prim(param), prim(arg)) {
+        (true, true) => {
+            let rank = |t: &str| match t {
+                "byte" => 0,
+                "short" | "char" => 1,
+                "int" => 2,
+                "long" => 3,
+                "float" => 4,
+                "double" => 5,
+                _ => -1,
+            };
+            let (p, a) = (rank(param), rank(arg));
+            a >= 0 && p >= a && !(param == "char" && arg != "char") && !(arg == "char" && param == "short")
+        }
+        // Boxing: `int` → `Integer`, `Number`, `Object`, …; never `String`.
+        (false, true) => param != "String",
+        (true, false) => arg != "String",
+        (false, false) => param != "String" || arg == "String",
+    }
+}
+
+/// Overloads for a call with static argument types `args` (`?` unknown):
+/// those whose parameters may accept every known argument
+/// ([`may_accept`]), and of those the only one whose parameter types equal
+/// the known argument types, when there is exactly one (an exact match is
+/// the most specific applicable overload). All of `typed` when none
+/// accepts the arguments (the types were wrong).
+pub(crate) fn overload_by_types(typed: &[(NodeId, Vec<String>)], args: &[&str]) -> Vec<NodeId> {
+    let known = |i: usize| args.get(i).copied().filter(|a| *a != "?");
+    let param = |params: &[String], i: usize| -> Option<String> {
+        match params.get(i) {
+            Some(p) => Some(p.clone()),
+            // Variadic tail: the element type.
+            None => params.last().filter(|p| p.ends_with("...")).cloned(),
+        }
+    };
+    let accepts = |params: &[String]| {
+        (0..args.len()).all(|i| match (known(i), param(params, i)) {
+            (Some(a), Some(p)) => {
+                may_accept(&p, a) || may_accept(p.strip_suffix("...").unwrap_or(&p), a.trim_end_matches("[]"))
+            }
+            _ => true,
+        })
+    };
+    let exact = |params: &[String]| {
+        (0..args.len()).all(|i| match (known(i), params.get(i)) {
+            (Some(a), Some(p)) => normalize_param_type(a, false) == *p,
+            (None, Some(_)) => true,
+            _ => false,
+        }) && params.len() == args.len()
+    };
+    let compatible: Vec<&(NodeId, Vec<String>)> = typed.iter().filter(|(_, p)| accepts(p)).collect();
+    if compatible.is_empty() {
+        return typed.iter().map(|(n, _)| *n).collect();
+    }
+    let exact: Vec<NodeId> = compatible.iter().filter(|(_, p)| exact(p)).map(|(n, _)| *n).collect();
+    if exact.len() == 1 && (0..args.len()).any(|i| known(i).is_some()) {
+        return exact;
+    }
+    compatible.into_iter().map(|(n, _)| *n).collect()
+}
+
+/// The parameter list written after `name(` in a signature, without the
+/// parentheses (`String fromJson(Reader json, Type t)` → `Reader json, Type t`).
+fn signature_params<'s>(signature: &'s str, name: &str) -> Option<&'s str> {
+    let ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    let mut from = 0;
+    while let Some(i) = signature[from..].find(name).map(|i| i + from) {
+        from = i + name.len();
+        let before_ok = !signature[..i].ends_with(ident);
+        if !before_ok || !signature[from..].starts_with('(') {
+            continue;
+        }
+        let open = from;
+        let mut depth = 0i32;
+        for (k, c) in signature[open..].char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(&signature[open + 1..open + k]);
+                    }
+                }
+                _ => {}
+            }
+        }
+        return None;
+    }
+    None
+}
+
+/// Splits a parameter list on its top-level commas; `""` and `void` are
+/// empty.
+fn split_params(params: &str) -> Vec<&str> {
+    let p = params.trim();
+    if p.is_empty() || p == "void" {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let (mut depth, mut start) = (0i32, 0usize);
+    for (i, c) in p.char_indices() {
+        match c {
+            '<' | '(' | '[' | '{' => depth += 1,
+            '>' | ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(p[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(p[start..].trim());
+    out
+}
+
+/// A parameter's type in a comparable form: annotations, modifiers
+/// (`final`, `const`), a default value, generic or template arguments,
+/// qualifiers (`java.util.Map.Entry` → `Entry`, `std::string` → `string`)
+/// and whitespace removed; arrays, varargs, pointers and references kept.
+/// `named`: the text ends with the parameter name (a signature), which is
+/// dropped when another token precedes it.
+pub(crate) fn normalize_param_type(param: &str, named: bool) -> String {
+    let p = param;
+    // Annotations (`@Nullable`, `@Size(max = 3)`) and modifiers.
+    let mut text = String::new();
+    let mut depth = 0i32;
+    let mut skipping = false;
+    for c in p.chars() {
+        if skipping {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        skipping = false;
+                    }
+                }
+                c if depth == 0 && c.is_whitespace() => skipping = false,
+                _ => {}
+            }
+            continue;
+        }
+        if c == '@' {
+            skipping = true;
+            continue;
+        }
+        text.push(c);
+    }
+    // A default value (C++ `int n = 0`).
+    let text = text.split('=').next().unwrap_or(&text);
+    let mut tokens: Vec<&str> = text
+        .split(|c: char| c.is_whitespace())
+        .filter(|t| !t.is_empty() && !matches!(*t, "final" | "const" | "volatile" | "struct" | "class" | "enum"))
+        .collect();
+    if named && tokens.len() > 1 {
+        let last = tokens[tokens.len() - 1];
+        if last.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
+            tokens.pop();
+        }
+    }
+    let joined: String = tokens.concat();
+    // Generic / template arguments.
+    let mut out = String::new();
+    let mut depth = 0i32;
+    for c in joined.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    // Qualifiers: keep the last segment (`...` varargs is not a qualifier).
+    let (core, varargs) = match out.strip_suffix("...") {
+        Some(c) => (c.to_string(), true),
+        None => (out, false),
+    };
+    let core = match core.rfind(['.', ':']) {
+        Some(i) => core[i + 1..].to_string(),
+        None => core,
+    };
+    if varargs { format!("{core}...") } else { core }
 }
 
 #[cfg(test)]
@@ -640,5 +914,53 @@ mod tests {
         assert_eq!(split_qualified("ns::Foo"), Some(("ns", "Foo")));
         assert_eq!(split_qualified("a.b.C"), Some(("a.b", "C")));
         assert_eq!(split_qualified("Foo"), None);
+    }
+
+    #[test]
+    fn overloads_chosen_by_argument_types() {
+        let set = |v: &[&[&str]]| -> Vec<(NodeId, Vec<String>)> {
+            v.iter().enumerate().map(|(i, p)| (i as NodeId, p.iter().map(|s| s.to_string()).collect())).collect()
+        };
+        // value(String) / value(boolean) / value(long) / value(double) / value(Number)
+        let value = set(&[&["String"], &["boolean"], &["long"], &["double"], &["Number"]]);
+        assert_eq!(overload_by_types(&value, &["long"]), vec![2]);
+        assert_eq!(overload_by_types(&value, &["boolean"]), vec![1]);
+        // `int` widens to long / double and boxes to Number: no exact match.
+        assert_eq!(overload_by_types(&value, &["int"]), vec![2, 3, 4]);
+        assert_eq!(overload_by_types(&value, &["?"]), vec![0, 1, 2, 3, 4]);
+        // JsonSyntaxException(String) / (Throwable): a caught exception is not a String.
+        let ctor = set(&[&["String"], &["Throwable"]]);
+        assert_eq!(overload_by_types(&ctor, &["IOException"]), vec![1]);
+        assert_eq!(overload_by_types(&ctor, &["String"]), vec![0]);
+        // fromJson(String, Class) / (String, Type) / (Reader, Type).
+        let from = set(&[&["String", "Class"], &["String", "Type"], &["Reader", "Type"]]);
+        assert_eq!(overload_by_types(&from, &["String", "Class"]), vec![0]);
+        assert_eq!(overload_by_types(&from, &["String", "?"]), vec![0, 1, 2]);
+        // Varargs.
+        let total = set(&[&["int..."], &["int", "int"]]);
+        assert_eq!(overload_by_types(&total, &["int", "int"]), vec![1]);
+        // Wrong types: keep every candidate.
+        assert_eq!(overload_by_types(&set(&[&["int"], &["long"]]), &["String"]), vec![0, 1]);
+        assert!(may_accept("Object", "int") && may_accept("long", "char") && !may_accept("char", "int"));
+        assert!(!may_accept("String", "StringBuilder") && may_accept("CharSequence", "String"));
+    }
+
+    #[test]
+    fn parameter_types_for_overrides() {
+        assert_eq!(
+            signature_params("public Foo fromJson(Reader in, Type t) throws X", "fromJson"),
+            Some("Reader in, Type t")
+        );
+        assert_eq!(signature_params("void toJson(Object src)", "Json"), None);
+        assert_eq!(signature_params("int f()", "f"), Some(""));
+        assert_eq!(split_params("Map<K, V> m, int n"), vec!["Map<K, V> m", "int n"]);
+        assert!(split_params(" void ").is_empty());
+        assert_eq!(normalize_param_type("final @Nullable java.util.Map.Entry<K, V> e", true), "Entry");
+        assert_eq!(normalize_param_type("@Size(max = 3) String s", true), "String");
+        assert_eq!(normalize_param_type("Object... args", true), "Object...");
+        assert_eq!(normalize_param_type("byte[] b", true), "byte[]");
+        assert_eq!(normalize_param_type("const std::string& s = \"\"", true), "string&");
+        assert_eq!(normalize_param_type("String", false), "String");
+        assert_eq!(normalize_param_type("int", true), "int");
     }
 }

@@ -10,11 +10,13 @@
 use std::collections::{HashMap, HashSet};
 
 use rueca_extract::tree_sitter::{self, Node};
-use rueca_extract::{Budget, ExtractError, count_errors, line_count, span_of, type_receiver};
+use rueca_extract::{
+    Budget, ExtractError, count_errors, line_count, span_of, split_arg_types, type_receiver, with_arg_types,
+};
 use rueca_model::{Definition, FileFacts, Import, ImportedName, Label, LocalDefId, RefKind, Reference, Span};
 
 use crate::locals::{self, Locals};
-use crate::types::{class_of_type, named_children, parameter_types, strip_type_text, text};
+use crate::types::{class_of_type, is_primitive, named_children, parameter_types, strip_type_text, suffix_type, text};
 
 /// Hard cap on references per file.
 pub const MAX_REFS: usize = 20_000;
@@ -27,10 +29,6 @@ const MAX_SIGNATURE: usize = 200;
 const MAX_DOC: usize = 1000;
 /// Maximum characters of a raw (untyped) receiver text.
 const MAX_RECEIVER: usize = 200;
-
-/// Receiver used for `this` / `super` inside an anonymous class body, whose
-/// members are not definitions.
-pub(crate) const ANONYMOUS_CLASS: &str = "class@anonymous";
 
 /// Test annotations on methods (JUnit 4 / 5, TestNG).
 const TEST_ANNOTATIONS: &[&str] = &["ParameterizedTest", "RepeatedTest", "Test", "TestFactory", "TestTemplate"];
@@ -77,7 +75,7 @@ pub(crate) fn extract(source: &[u8], budget: &Budget) -> Result<FileFacts, Extra
         enc: None,
         types: Vec::new(),
         type_params: Vec::new(),
-        anon: 0,
+        anon_counts: HashMap::new(),
         locals,
         file_types: Vec::new(),
         package: String::new(),
@@ -109,12 +107,25 @@ struct FileType {
     parent: Option<usize>,
 }
 
+/// Declared return type of a method.
+#[derive(Clone, PartialEq)]
+struct Returns {
+    /// The class (`Map.Entry`, `com.x.Foo`) for receivers; `None` for
+    /// primitives and arrays.
+    class: Option<String>,
+    /// Overload-suffix form (`int`, `Entry`, `byte[]`), for argument types.
+    ty: String,
+}
+
 /// A named type being visited.
 struct TypeCtx {
     def: LocalDefId,
     name: String,
     /// Field name → declared class (`None` for primitives and arrays).
     fields: HashMap<String, Option<String>>,
+    /// Field name → declared type in overload-suffix form (`int`,
+    /// `String[]`), for argument types.
+    field_types: HashMap<String, String>,
     /// Simple name of the superclass, if declared.
     superclass: Option<String>,
     /// Members are implicitly public (interfaces, annotation types).
@@ -129,8 +140,11 @@ struct TypeCtx {
     has_tests: bool,
     /// Index into `file_types` (`None` for local classes).
     file_type: Option<usize>,
-    /// Names of the callable members (methods, constructors).
-    methods: HashSet<String>,
+    /// Callable members (methods, constructors) by name → their declared
+    /// return type when every overload declares the same one.
+    methods: HashMap<String, Option<Returns>>,
+    /// Declared inside test code (an anonymous class in a test method).
+    in_test: bool,
     /// Record components' parameter types (`int,String`), for the compact
     /// constructor's overload suffix.
     record_params: Option<String>,
@@ -149,8 +163,9 @@ struct Extractor<'s> {
     types: Vec<TypeCtx>,
     /// Generic type parameters in scope.
     type_params: Vec<String>,
-    /// > 0 inside an anonymous class body.
-    anon: u32,
+    /// Anonymous classes named so far per (enclosing definition, base
+    /// name), for their `Base$N` names.
+    anon_counts: HashMap<(Option<LocalDefId>, String), u32>,
     locals: Locals,
     /// Named types declared in this file (top-level and member types, not
     /// local classes), for fully qualified `$type:` receivers.
@@ -333,15 +348,6 @@ impl<'s> Extractor<'s> {
         }
     }
 
-    /// Global qualified name of a file type.
-    fn fq(&self, i: usize) -> String {
-        if self.package.is_empty() {
-            self.file_types[i].qn.clone()
-        } else {
-            format!("{}.{}", self.package, self.file_types[i].qn)
-        }
-    }
-
     /// The file type a simple type name denotes at this point: an enclosing
     /// type, a member type of an enclosing type (innermost first), else a
     /// top-level type of the file.
@@ -356,11 +362,6 @@ impl<'s> Extractor<'s> {
             }
         }
         self.file_types.iter().position(|f| f.parent.is_none() && f.name == name)
-    }
-
-    /// Whether `name` is the declared superclass of an enclosing type.
-    fn is_enclosing_superclass(&self, name: &str) -> bool {
-        self.types.iter().any(|t| t.superclass.as_deref() == Some(name))
     }
 
     /// The package clause, recorded as the file's first import with no
@@ -456,8 +457,9 @@ impl<'s> Extractor<'s> {
             .refs
             .iter()
             .filter(|r| r.receiver.is_none() && matches!(r.kind, RefKind::Call | RefKind::Read))
-            .filter(|r| !declared.contains(r.name.as_str()) && !self.static_members.contains(&r.name))
-            .map(|r| r.name.clone())
+            .map(|r| split_arg_types(&r.name).0)
+            .filter(|n| !declared.contains(n) && !self.static_members.contains(*n))
+            .map(str::to_string)
             .take(MAX_STATIC_NAMES)
             .collect();
         for name in names {
@@ -511,10 +513,102 @@ impl<'s> Extractor<'s> {
     /// declares it: `Some(Some(class))`, `Some(None)` when untyped
     /// (primitive, array), `None` when no enclosing type declares it.
     fn field_class(&self, name: &str) -> Option<Option<String>> {
-        if self.anon > 0 && self.types.is_empty() {
-            return None;
-        }
         self.types.iter().rev().find_map(|t| t.fields.get(name).cloned())
+    }
+
+    /// Declared return class of method `name` of the innermost enclosing
+    /// type that declares it (every overload must agree), for receivers that
+    /// are calls of this file's methods (`getAsSingleElement().get()`).
+    fn method_return_class(&self, name: &str) -> Option<String> {
+        self.method_returns_of(name).and_then(|r| r.class)
+    }
+
+    fn method_returns_of(&self, name: &str) -> Option<Returns> {
+        self.types.iter().rev().find_map(|t| t.methods.get(name)).cloned().flatten()
+    }
+
+    /// Declared type of a field of an enclosing type (overload-suffix form).
+    fn field_type(&self, name: &str) -> Option<String> {
+        self.types.iter().rev().find(|t| t.fields.contains_key(name)).and_then(|t| t.field_types.get(name).cloned())
+    }
+
+    /// Static type of an argument expression in overload-suffix form, when
+    /// the file says it: literals, locals, parameters and fields with a
+    /// declared type, `this`, `new T()`, casts, class literals, string
+    /// concatenations, comparisons and calls of this file's methods.
+    fn arg_type(&self, node: Node<'_>) -> Option<String> {
+        let pos = node.start_byte() as u32;
+        let t = self.text(node);
+        let ty = match node.kind() {
+            "string_literal" => "String".to_string(),
+            "character_literal" => "char".to_string(),
+            "true" | "false" => "boolean".to_string(),
+            "decimal_integer_literal" | "hex_integer_literal" | "octal_integer_literal" | "binary_integer_literal" => {
+                (if t.ends_with(['l', 'L']) { "long" } else { "int" }).to_string()
+            }
+            "decimal_floating_point_literal" | "hex_floating_point_literal" => {
+                (if t.ends_with(['f', 'F']) { "float" } else { "double" }).to_string()
+            }
+            "parenthesized_expression" => return self.arg_type(node.named_child(0)?),
+            "cast_expression" => suffix_type(self.text(node.child_by_field_name("type")?)),
+            "object_creation_expression" => {
+                if named_children(node).iter().any(|c| c.kind() == "class_body") {
+                    return None;
+                }
+                suffix_type(self.text(node.child_by_field_name("type")?))
+            }
+            "class_literal" => "Class".to_string(),
+            "this" => self.types.last()?.name.clone(),
+            "identifier" => match self.locals.lookup(t, pos) {
+                Some(b) => b.ty.clone()?,
+                None => self.field_type(t)?,
+            },
+            "field_access" => {
+                let obj = node.child_by_field_name("object")?;
+                let field = node.child_by_field_name("field")?;
+                if obj.kind() != "this" {
+                    return None;
+                }
+                self.types.last()?.field_types.get(self.text(field))?.clone()
+            }
+            "binary_expression" => {
+                let op = node.child_by_field_name("operator").map(|o| o.kind())?;
+                match op {
+                    "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => "boolean".to_string(),
+                    "+" => {
+                        let l = node.child_by_field_name("left").and_then(|l| self.arg_type(l));
+                        let r = node.child_by_field_name("right").and_then(|r| self.arg_type(r));
+                        if l.as_deref() == Some("String") || r.as_deref() == Some("String") {
+                            "String".to_string()
+                        } else {
+                            return None;
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            "instanceof_expression" => "boolean".to_string(),
+            "unary_expression" if t.trim_start().starts_with('!') => "boolean".to_string(),
+            "method_invocation" => {
+                let own = node.child_by_field_name("object").is_none_or(|o| o.kind() == "this");
+                let name = self.text(node.child_by_field_name("name")?);
+                if !own {
+                    return None;
+                }
+                self.method_returns_of(name)?.ty
+            }
+            _ => return None,
+        };
+        (!ty.is_empty()).then_some(ty)
+    }
+
+    /// `name` with the static types of the arguments of `args` (see
+    /// `rueca_extract::with_arg_types`).
+    fn with_args(&self, name: &str, args: Option<Node<'_>>) -> String {
+        let Some(args) = args else { return name.to_string() };
+        let types: Vec<Option<String>> =
+            named_children(args).into_iter().filter(|c| !is_comment(c.kind())).map(|a| self.arg_type(a)).collect();
+        with_arg_types(name, &types)
     }
 
     /// A fully qualified type text (`com.x.Foo.Inner`) without its package
@@ -553,41 +647,15 @@ impl<'s> Extractor<'s> {
         path
     }
 
-    /// Whether field `name` of the innermost enclosing type that declares
-    /// it shares its name with a method of that type: a `Read` / `Write`
-    /// would then resolve to the method (the resolver keeps one member per
-    /// name), so none is reported.
-    fn field_clashes(&self, name: &str) -> bool {
-        self.types.iter().rev().find(|t| t.fields.contains_key(name)).is_some_and(|t| t.methods.contains(name))
-    }
-
     /// `$type:` receiver for a class text, unless it is a type parameter.
-    ///
-    /// A type declared in this file is written fully qualified, and the
-    /// direct superclass of the innermost type becomes `super`: with
-    /// implicit `this`, a bare type name that is also the name of an
-    /// enclosing or inherited class reaches that class's constructor (a
-    /// member named like the class) before the type itself. A fully
-    /// qualified class is bound by a synthetic import (see [`Self::unqualify`]).
+    /// The text is written as in the source (a fully qualified class is
+    /// bound by a synthetic import, see [`Self::unqualify`]); the resolver
+    /// looks a type name up as a type, never as a constructor.
     fn typed(&mut self, class: Option<String>, span: Span) -> Option<String> {
         let c = self.unqualify(&class?, span);
-        let (head, rest) = match c.split_once('.') {
-            Some((h, r)) => (h, Some(r)),
-            None => (c.as_str(), None),
-        };
+        let head = c.split('.').next().unwrap_or(&c);
         if self.is_type_param(head) {
             return None;
-        }
-        if let Some(i) = self.visible_type(head) {
-            let fq = self.fq(i);
-            return Some(type_receiver(&match rest {
-                Some(r) => format!("{fq}.{r}"),
-                None => fq,
-            }));
-        }
-        if rest.is_none() && self.anon == 0 && self.types.last().is_some_and(|t| t.superclass.as_deref() == Some(head))
-        {
-            return Some("super".to_string());
         }
         Some(type_receiver(&c))
     }
@@ -625,7 +693,6 @@ impl<'s> Extractor<'s> {
         let pos = object.start_byte() as u32;
         let span = span_of(object);
         match object.kind() {
-            "this" | "super" if self.anon > 0 => ANONYMOUS_CLASS.to_string(),
             "this" => "this".to_string(),
             "super" => "super".to_string(),
             "identifier" => {
@@ -652,7 +719,7 @@ impl<'s> Extractor<'s> {
                         self.typed(Some(outer.clone()), span).unwrap_or(outer)
                     }
                     // `this.field`
-                    (Some(o), Some(f)) if o.kind() == "this" && f.kind() == "identifier" && self.anon == 0 => {
+                    (Some(o), Some(f)) if o.kind() == "this" && f.kind() == "identifier" => {
                         let name = self.text(f);
                         match self.types.last().and_then(|t| t.fields.get(name).cloned()) {
                             Some(class) => self.typed(class, span).unwrap_or_else(|| self.raw(object)),
@@ -683,24 +750,30 @@ impl<'s> Extractor<'s> {
                 if anonymous { self.raw(object) } else { self.typed(class, span).unwrap_or_else(|| self.raw(object)) }
             }
             "string_literal" => type_receiver("String"),
+            // `m().x()` where `m` is a method of an enclosing type of this
+            // file with a declared return class.
+            "method_invocation" => {
+                let own = object.child_by_field_name("object").is_none_or(|o| o.kind() == "this");
+                let name = object.child_by_field_name("name").map(|n| self.text(n));
+                match name.filter(|_| own).and_then(|n| self.method_return_class(n)) {
+                    Some(class) => self.typed(Some(class), span).unwrap_or_else(|| self.raw(object)),
+                    None => self.raw(object),
+                }
+            }
             _ => self.raw(object),
         }
     }
 
     /// Name and receiver of a class type node (`Foo`, `a.b.Foo`,
-    /// `Outer.Inner<T>`), for `Type` / `New` / `Throw` references.
-    ///
-    /// Except for `New` (where reaching the constructor is right), a bare
-    /// name that is an enclosing type is qualified by its outer type, and a
-    /// self-reference of a top-level type or a reference to an enclosing
-    /// type's superclass gives nothing (`INHERITS` already links them): with
-    /// implicit `this` both would reach a constructor instead of the type.
-    fn type_name(&mut self, ty: Node<'_>, for_new: bool) -> Option<(String, Option<String>)> {
+    /// `Outer.Inner<T>`), for `Type` / `New` / `Throw` references. A
+    /// qualifier that is a type visible here is a `$type:` receiver, so the
+    /// resolver finds member types of enclosing and inherited classes.
+    fn type_name(&mut self, ty: Node<'_>) -> Option<(String, Option<String>)> {
         let class = match ty.kind() {
             "type_identifier" | "scoped_type_identifier" | "generic_type" => class_of_type(ty, self.source)?,
             "annotated_type" => {
                 let inner = named_children(ty).into_iter().find(|c| !is_annotation(c.kind()))?;
-                return self.type_name(inner, for_new);
+                return self.type_name(inner);
             }
             _ => return None,
         };
@@ -718,19 +791,7 @@ impl<'s> Extractor<'s> {
                 };
                 (n.to_string(), Some(receiver))
             }
-            None if for_new => (class, None),
-            None => {
-                let enclosing = self.types.iter().any(|t| t.name == class && t.file_type.is_some());
-                if enclosing {
-                    let i = self.visible_type(&class)?;
-                    let parent = self.file_types[i].parent?;
-                    (class, Some(type_receiver(&self.fq(parent))))
-                } else if self.is_enclosing_superclass(&class) {
-                    return None;
-                } else {
-                    (class, None)
-                }
-            }
+            None => (class, None),
         })
     }
 
@@ -746,7 +807,7 @@ impl<'s> Extractor<'s> {
         }
         match ty.kind() {
             "type_identifier" | "scoped_type_identifier" => {
-                if let Some((name, receiver)) = self.type_name(ty, false) {
+                if let Some((name, receiver)) = self.type_name(ty) {
                     self.push_ref(kind, &name, receiver, span_of(ty), None);
                 }
                 // Generic arguments inside a scoped type (`Outer<A>.Inner<B>`).
@@ -761,7 +822,7 @@ impl<'s> Extractor<'s> {
                 }
             }
             "generic_type" => {
-                if let Some((name, receiver)) = self.type_name(ty, false) {
+                if let Some((name, receiver)) = self.type_name(ty) {
                     self.push_ref(kind, &name, receiver, span_of(ty), None);
                 }
                 self.visit_type_args(ty, depth + 1);
@@ -998,7 +1059,7 @@ impl<'s> Extractor<'s> {
                 if let Some(e) = node.named_child(0)
                     && e.kind() == "object_creation_expression"
                     && let Some(t) = e.child_by_field_name("type")
-                    && let Some((name, receiver)) = self.type_name(t, false)
+                    && let Some((name, receiver)) = self.type_name(t)
                 {
                     self.push_ref(RefKind::Throw, &name, receiver, span_of(t), None);
                 }
@@ -1087,7 +1148,7 @@ impl<'s> Extractor<'s> {
         if self.locals.is_local(name, node.start_byte() as u32) {
             return;
         }
-        if (self.field_class(name).is_some() || is_screaming(name)) && !self.field_clashes(name) {
+        if self.field_class(name).is_some() || is_screaming(name) {
             self.push_ref(RefKind::Read, name, None, span_of(node), None);
         }
     }
@@ -1099,7 +1160,6 @@ impl<'s> Extractor<'s> {
                     let name = self.text(left);
                     if !self.locals.is_local(name, left.start_byte() as u32)
                         && (self.field_class(name).is_some() || is_screaming(name))
-                        && !self.field_clashes(name)
                     {
                         self.push_ref(RefKind::Write, name, None, span_of(left), None);
                     }
@@ -1111,7 +1171,7 @@ impl<'s> Extractor<'s> {
                         let receiver = self.receiver(o);
                         let typed = receiver == "this" || receiver.starts_with("$type:");
                         let name = self.text(f);
-                        if typed && !(receiver == "this" && self.field_clashes(name)) {
+                        if typed {
                             self.push_ref(RefKind::Write, name, Some(receiver), span_of(f), None);
                         }
                         match o.kind() {
@@ -1166,9 +1226,7 @@ impl<'s> Extractor<'s> {
             && named_children(node).iter().any(|c| c.kind() == "super" && Some(*c) != object);
         let receiver = match object {
             None => None,
-            Some(o) if qualified_super && o.kind() == "identifier" && self.anon == 0 => {
-                Some(type_receiver(self.text(o)))
-            }
+            Some(o) if qualified_super && o.kind() == "identifier" => Some(type_receiver(self.text(o))),
             Some(o) => Some(self.receiver(o)),
         };
         let first_string = args.and_then(|a| named_children(a).into_iter().find(|c| !is_comment(c.kind())));
@@ -1199,7 +1257,8 @@ impl<'s> Extractor<'s> {
             }
         }
         if !bridged {
-            self.push_ref(RefKind::Call, &name, receiver, span_of(name_node), arity);
+            let named = self.with_args(&name, args);
+            self.push_ref(RefKind::Call, &named, receiver, span_of(name_node), arity);
         }
 
         if let Some(o) = object {
@@ -1224,10 +1283,7 @@ impl<'s> Extractor<'s> {
     /// package heads are not reads).
     fn visit_identifier_receiver(&mut self, node: Node<'_>) {
         let name = self.text(node);
-        if !self.locals.is_local(name, node.start_byte() as u32)
-            && self.field_class(name).is_some()
-            && !self.field_clashes(name)
-        {
+        if !self.locals.is_local(name, node.start_byte() as u32) && self.field_class(name).is_some() {
             self.push_ref(RefKind::Read, name, None, span_of(node), None);
         }
     }
@@ -1235,11 +1291,14 @@ impl<'s> Extractor<'s> {
     fn visit_new(&mut self, node: Node<'_>, depth: usize) {
         let args = node.child_by_field_name("arguments");
         let body = named_children(node).into_iter().find(|c| c.kind() == "class_body");
-        if let Some(t) = node.child_by_field_name("type") {
-            if let Some((name, receiver)) = self.type_name(t, body.is_none()) {
+        let ty = node.child_by_field_name("type");
+        if let Some(t) = ty {
+            if let Some((name, receiver)) = self.type_name(t) {
                 // An anonymous class body names its base: a type reference.
-                let kind = if body.is_some() { RefKind::Type } else { RefKind::New };
-                let arity = if body.is_some() { None } else { Self::arity(args) };
+                let (kind, arity, name) = match body {
+                    Some(_) => (RefKind::Type, None, name),
+                    None => (RefKind::New, Self::arity(args), self.with_args(&name, args)),
+                };
                 self.push_ref(kind, &name, receiver, span_of(t), arity);
             }
             self.visit_type_args(t, depth);
@@ -1258,7 +1317,8 @@ impl<'s> Extractor<'s> {
             self.visit_children(a, depth);
         }
         if let Some(b) = body {
-            self.visit_anonymous_body(b, depth);
+            let base = ty.and_then(|t| class_of_type(t, self.source)).map(|c| self.unqualify(&c, span_of(node)));
+            self.visit_anonymous_class(node, base, ty.unwrap_or(node), b, depth);
         }
     }
 
@@ -1268,7 +1328,6 @@ impl<'s> Extractor<'s> {
     fn visit_explicit_ctor(&mut self, node: Node<'_>, depth: usize) {
         let args = node.child_by_field_name("arguments");
         if let Some(c) = node.child_by_field_name("constructor")
-            && self.anon == 0
             && let Some(t) = self.types.last()
         {
             let target = match c.kind() {
@@ -1277,6 +1336,7 @@ impl<'s> Extractor<'s> {
                 _ => None,
             };
             if let Some((name, receiver)) = target {
+                let name = self.with_args(&name, args);
                 self.push_ref(RefKind::Call, &name, Some(receiver.to_string()), span_of(c), Self::arity(args));
             }
         }
@@ -1306,7 +1366,7 @@ impl<'s> Extractor<'s> {
         if is_new {
             if is_type || target.kind() == "identifier" || target.kind() == "field_access" {
                 let name_recv = if is_type {
-                    self.type_name(target, true)
+                    self.type_name(target)
                 } else {
                     let p = self.text(target);
                     let p: String = p.split_whitespace().collect();
@@ -1360,10 +1420,8 @@ impl<'s> Extractor<'s> {
         }
         match obj.kind() {
             "this" | "super" => {
-                if self.anon == 0 && !(obj.kind() == "this" && self.field_clashes(name)) {
-                    let r = self.text(obj).to_string();
-                    self.push_ref(RefKind::Read, name, Some(r), span_of(field), None);
-                }
+                let r = self.text(obj).to_string();
+                self.push_ref(RefKind::Read, name, Some(r), span_of(field), None);
             }
             "identifier" | "field_access" => {
                 if let Some(path) = self.identifier_path(obj) {
@@ -1375,7 +1433,7 @@ impl<'s> Extractor<'s> {
                         if receiver.starts_with("$type:") {
                             self.push_ref(RefKind::Read, name, Some(receiver), span_of(field), None);
                         }
-                        if head_field && !self.field_clashes(head) {
+                        if head_field {
                             self.push_ref(RefKind::Read, head, None, span_of(obj), None);
                         }
                     } else if head_local || head_field {
@@ -1505,8 +1563,7 @@ impl<'s> Extractor<'s> {
 
     /// Whether members declared in the innermost type are implicitly public.
     fn in_implicit_public(&self) -> bool {
-        self.anon == 0
-            && self.types.last().is_some_and(|t| t.implicit_public)
+        self.types.last().is_some_and(|t| t.implicit_public)
             && self.enc.is_some_and(|e| Some(e) == self.types.last().map(|t| t.def))
     }
 
@@ -1588,6 +1645,9 @@ impl<'s> Extractor<'s> {
             ["Test", "Tests", "IT", "TestCase", "ITCase"].iter().any(|s| name.ends_with(s) && name.len() > s.len());
         let class_level_test = ann_names.iter().any(|a| a == "Test");
         let test_class = test_name || class_level_test || ann_names.iter().any(|a| a == "Nested");
+        // A local class in test code is test code.
+        let in_test =
+            self.enc.is_some_and(|e| self.defs[e as usize].is_test) || self.types.last().is_some_and(|t| t.in_test);
 
         let parent = self.enc;
         let exported = self.exported(&keywords);
@@ -1604,15 +1664,13 @@ impl<'s> Extractor<'s> {
             bases,
             implements,
             exported,
-            is_test: test_class && label == Label::Class,
+            is_test: (test_class && label == Label::Class) || in_test,
             is_declaration: false,
         };
         let id = self.push_def(def);
 
         let saved_enc = self.enc;
-        let saved_anon = self.anon;
         self.enc = Some(id);
-        self.anon = 0;
         for a in &annotations {
             self.visit_annotation(*a, true, depth + 1);
         }
@@ -1632,6 +1690,7 @@ impl<'s> Extractor<'s> {
             def: id,
             name: name.clone(),
             fields: HashMap::new(),
+            field_types: HashMap::new(),
             superclass: superclass_name,
             implicit_public: label == Label::Interface,
             test_class,
@@ -1639,20 +1698,18 @@ impl<'s> Extractor<'s> {
             class_level_test,
             has_tests: false,
             record_params: node.child_by_field_name("parameters").map(|p| parameter_types(p, self.source)),
-            methods: HashSet::new(),
+            methods: HashMap::new(),
+            in_test,
         });
 
-        // Record components are fields (emitted after the members, like
-        // fields; their types are known to the members).
+        // Record components are fields, before the members (source order).
         let components = node.child_by_field_name("parameters").filter(|_| kind == "record_declaration");
         if let Some(params) = components {
             self.collect_record_components(params);
+            self.visit_record_components(params, depth + 1);
         }
         if let Some(b) = body {
             self.visit_body(b, depth + 1);
-        }
-        if let Some(params) = components {
-            self.visit_record_components(params, depth + 1);
         }
 
         let ctx = self.types.pop().expect("pushed");
@@ -1661,7 +1718,6 @@ impl<'s> Extractor<'s> {
         }
         self.type_params.truncate(mark);
         self.enc = saved_enc;
-        self.anon = saved_anon;
     }
 
     /// `Type` references for the generic arguments in a base list.
@@ -1683,8 +1739,12 @@ impl<'s> Extractor<'s> {
             }
             let Some(n) = p.child_by_field_name("name") else { continue };
             let class = p.child_by_field_name("type").and_then(|t| class_of_type(t, self.source));
+            let ty = p.child_by_field_name("type").map(|t| suffix_type(self.text(t)));
             let name = self.text(n).to_string();
             if let Some(t) = self.types.last_mut() {
+                if let Some(ty) = ty {
+                    t.field_types.insert(name.clone(), ty);
+                }
                 t.fields.insert(name, class);
             }
         }
@@ -1764,24 +1824,34 @@ impl<'s> Extractor<'s> {
         for m in members {
             match m.kind() {
                 "field_declaration" | "constant_declaration" => {
-                    let class = m.child_by_field_name("type").and_then(|t| class_of_type(t, self.source));
+                    let ty = m.child_by_field_name("type");
+                    let class = ty.and_then(|t| class_of_type(t, self.source));
+                    let base = ty.map(|t| suffix_type(self.text(t)));
                     for d in named_children(m).into_iter().filter(|c| c.kind() == "variable_declarator") {
                         let Some(n) = d.child_by_field_name("name") else { continue };
-                        let c = if d.child_by_field_name("dimensions").is_some() { None } else { class.clone() };
-                        fields.push((self.text(n).to_string(), c));
+                        let dims = d.child_by_field_name("dimensions");
+                        let c = if dims.is_some() { None } else { class.clone() };
+                        let t = base.clone().map(|b| {
+                            let dims: String = dims.map(|x| self.text(x)).unwrap_or("").split_whitespace().collect();
+                            format!("{b}{dims}")
+                        });
+                        fields.push((self.text(n).to_string(), c, t));
                     }
                 }
                 "enum_constant" => {
                     if let Some(n) = m.child_by_field_name("name") {
                         let owner = self.types.last().map(|t| t.name.clone());
-                        fields.push((self.text(n).to_string(), owner));
+                        fields.push((self.text(n).to_string(), owner.clone(), owner));
                     }
                 }
                 _ => {}
             }
         }
         if let Some(t) = self.types.last_mut() {
-            for (n, c) in fields {
+            for (n, c, ty) in fields {
+                if let Some(ty) = ty {
+                    t.field_types.entry(n.clone()).or_insert(ty);
+                }
                 t.fields.entry(n).or_insert(c);
             }
         }
@@ -1794,24 +1864,62 @@ impl<'s> Extractor<'s> {
         }
         let type_name = self.types.last().map(|t| t.name.clone()).unwrap_or_default();
         let counts = self.callable_counts(body, &type_name);
+        let returns = self.method_returns(body);
         if let Some(t) = self.types.last_mut() {
-            t.methods = counts.keys().cloned().collect();
+            t.methods = counts.keys().map(|k| (k.clone(), returns.get(k).cloned().flatten())).collect();
         }
         self.collect_fields(body);
-        self.visit_members(body, &counts, false, depth);
-        self.visit_members(body, &counts, true, depth);
+        self.visit_members(body, &counts, depth);
     }
 
-    /// Members of a body. Fields are emitted after the other members
-    /// (`fields` pass): a field and a method may share a name (`code` and
-    /// `code()`), and the resolver keeps the first member of each name, so
-    /// calls must find the method.
-    fn visit_members(&mut self, body: Node<'_>, counts: &HashMap<String, usize>, fields: bool, depth: usize) {
-        for m in named_children(body) {
-            let is_field = matches!(m.kind(), "field_declaration" | "constant_declaration");
-            if is_field != fields && m.kind() != "enum_body_declarations" {
-                continue;
+    /// Declared return class of each method of a body (`None` when the
+    /// overloads disagree, or for primitives, arrays and the method's own
+    /// type parameters).
+    fn method_returns(&self, body: Node<'_>) -> HashMap<String, Option<Returns>> {
+        let mut out: HashMap<String, Option<Returns>> = HashMap::new();
+        let mut members = named_children(body);
+        if let Some(decls) = members.iter().position(|c| c.kind() == "enum_body_declarations") {
+            let inner = named_children(members[decls]);
+            members.extend(inner);
+        }
+        for m in members.into_iter().filter(|m| m.kind() == "method_declaration") {
+            let Some(name) = m.child_by_field_name("name").map(|n| self.text(n).to_string()) else { continue };
+            let own_params: Vec<&str> = m
+                .child_by_field_name("type_parameters")
+                .map(|tp| {
+                    named_children(tp)
+                        .into_iter()
+                        .filter_map(|p| named_children(p).into_iter().find(|c| c.kind() == "type_identifier"))
+                        .map(|id| self.text(id))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let ret = m.child_by_field_name("type").and_then(|t| {
+                let ty = suffix_type(self.text(t));
+                let head = ty.split(['.', '[']).next().unwrap_or(&ty);
+                if own_params.contains(&head) || ty == "void" {
+                    return None;
+                }
+                let class = class_of_type(t, self.source).filter(|c| !is_primitive(c));
+                Some(Returns { class, ty })
+            });
+            match out.get(&name) {
+                Some(prev) if *prev != ret => {
+                    out.insert(name, None);
+                }
+                Some(_) => {}
+                None => {
+                    out.insert(name, ret);
+                }
             }
+        }
+        out
+    }
+
+    /// Members of a body, in source order (the resolver keeps a field and a
+    /// method with one name apart, `code` and `code()`).
+    fn visit_members(&mut self, body: Node<'_>, counts: &HashMap<String, usize>, depth: usize) {
+        for m in named_children(body) {
             match m.kind() {
                 "method_declaration" | "annotation_type_element_declaration" => {
                     let overloaded = m
@@ -1826,7 +1934,7 @@ impl<'s> Extractor<'s> {
                 }
                 "field_declaration" | "constant_declaration" => self.visit_field(m, depth + 1),
                 "enum_constant" => self.visit_enum_constant(m, depth + 1),
-                "enum_body_declarations" => self.visit_members(m, counts, fields, depth + 1),
+                "enum_body_declarations" => self.visit_members(m, counts, depth + 1),
                 k if is_type_decl(k) => self.visit_type_decl(m, depth + 1),
                 // Static and instance initializers run as the class.
                 "static_initializer" | "block" => self.visit_children(m, depth + 1),
@@ -1858,12 +1966,7 @@ impl<'s> Extractor<'s> {
     fn visit_method_as(&mut self, node: Node<'_>, overloaded: bool, depth: usize) {
         let Some(name_node) = node.child_by_field_name("name") else { return };
         let name = self.text(name_node).to_string();
-        let in_type = self.anon == 0 && self.types.last().is_some_and(|t| Some(t.def) == self.enc);
-        if self.anon > 0 {
-            // Methods of anonymous classes are not definitions; their code
-            // belongs to the enclosing definition.
-            return self.visit_callable_parts(node, depth);
-        }
+        let in_type = self.types.last().is_some_and(|t| Some(t.def) == self.enc);
         let (keywords, annotations) = self.modifiers(node);
         let ann_names = self.annotation_names(&annotations);
         let params = node.child_by_field_name("parameters");
@@ -1873,7 +1976,8 @@ impl<'s> Extractor<'s> {
         }
         let body = node.child_by_field_name("body");
         let end = body.map_or(node.end_byte(), |b| b.start_byte());
-        let is_test = in_type && self.is_test_method(&ann_names, &name, &keywords);
+        let is_test = in_type
+            && (self.is_test_method(&ann_names, &name, &keywords) || self.types.last().is_some_and(|t| t.in_test));
         if is_test && let Some(t) = self.types.last_mut() {
             t.has_tests = true;
         }
@@ -1910,17 +2014,9 @@ impl<'s> Extractor<'s> {
         let mark = self.push_type_params(node, depth + 1);
         for c in named_children(node) {
             match c.kind() {
-                "modifiers" => {
-                    if self.anon > 0 {
-                        self.visit_modifiers(c, false, depth + 1);
-                    }
-                }
-                "type_parameters" | "identifier" | "dimensions" => {}
-                k if is_annotation(k) => {
-                    if self.anon > 0 {
-                        self.visit_annotation(c, false, depth + 1);
-                    }
-                }
+                // Annotations of the definition are visited as decorators.
+                "modifiers" | "type_parameters" | "identifier" | "dimensions" => {}
+                k if is_annotation(k) => {}
                 "formal_parameters" => self.visit_children(c, depth + 1),
                 "throws" => self.visit_type_as(c, RefKind::Throw, depth + 1),
                 "block" | "constructor_body" => self.visit_children(c, depth + 1),
@@ -1933,9 +2029,6 @@ impl<'s> Extractor<'s> {
     }
 
     fn visit_ctor(&mut self, node: Node<'_>, overloaded: bool, depth: usize) {
-        if self.anon > 0 {
-            return self.visit_callable_parts(node, depth);
-        }
         let Some(t) = self.types.last() else { return };
         let type_name = t.name.clone();
         let name_node = node.child_by_field_name("name");
@@ -1980,9 +2073,6 @@ impl<'s> Extractor<'s> {
     }
 
     fn visit_field(&mut self, node: Node<'_>, depth: usize) {
-        if self.anon > 0 {
-            return self.visit(node, depth);
-        }
         let (keywords, annotations) = self.modifiers(node);
         let ty = node.child_by_field_name("type");
         let type_text = ty.map_or(String::new(), |t| collapse(self.text(t)));
@@ -2079,30 +2169,85 @@ impl<'s> Extractor<'s> {
         if let Some(a) = args {
             // `RED("r")` calls the enum's constructor.
             if let Some(t) = self.types.last() {
-                let enum_name = t.name.clone();
+                let enum_name = self.with_args(&t.name.clone(), Some(a));
                 self.push_ref(RefKind::Call, &enum_name, Some("this".into()), span_of(n), Self::arity(Some(a)));
             }
             self.visit_children(a, depth + 1);
         }
         if let Some(b) = node.child_by_field_name("body") {
-            self.visit_anonymous_body(b, depth + 1);
+            // A constant body is an anonymous subclass of the enum.
+            let enum_name = self.types.last().map(|t| t.name.clone()).unwrap_or_default();
+            self.visit_anonymous_class(node, Some(enum_name), n, b, depth + 1);
         }
         self.enc = saved;
     }
 
-    /// The body of an anonymous class (or of an enum constant): its members
-    /// are not definitions; their code belongs to the enclosing definition.
-    fn visit_anonymous_body(&mut self, body: Node<'_>, depth: usize) {
-        self.anon += 1;
-        for m in named_children(body) {
-            match m.kind() {
-                "method_declaration" | "constructor_declaration" => self.visit_callable_parts(m, depth + 1),
-                k if is_type_decl(k) => self.visit_type_decl(m, depth + 1),
-                k if is_comment(k) => {}
-                _ => self.visit(m, depth + 1),
-            }
+    /// An anonymous class (`new T(…) { … }`, an enum constant body) is a
+    /// `Class` named `T$N` (the `N`-th anonymous `T` in its enclosing
+    /// definition, which is its parent), with `T` as its base, so its
+    /// methods are definitions, `this` / implicit `this` inside it find its
+    /// own and inherited members first, and its overrides get `OVERRIDES`.
+    /// `owner` is the node whose extent it covers, `name_node` its base type
+    /// (the name span).
+    fn visit_anonymous_class(
+        &mut self,
+        owner: Node<'_>,
+        base: Option<String>,
+        name_node: Node<'_>,
+        body: Node<'_>,
+        depth: usize,
+    ) {
+        if depth > self.max_depth {
+            return;
         }
-        self.anon -= 1;
+        let base_name = base.as_deref().map_or("Object", |b| b.rsplit('.').next().unwrap_or(b)).to_string();
+        let n = {
+            let c = self.anon_counts.entry((self.enc, base_name.clone())).or_insert(0);
+            *c += 1;
+            *c
+        };
+        let name = format!("{base_name}${n}");
+        let in_test =
+            self.enc.is_some_and(|e| self.defs[e as usize].is_test) || self.types.last().is_some_and(|t| t.in_test);
+        let header = String::from_utf8_lossy(&self.source[owner.start_byte()..body.start_byte()]);
+        let def = Definition {
+            label: Label::Class,
+            name: name.clone(),
+            qualified_name: self.child_qn(&name),
+            parent: self.enc,
+            span: span_of(owner),
+            name_span: span_of(name_node),
+            signature: Some(truncate_chars(collapse(&header), MAX_SIGNATURE)),
+            doc: None,
+            decorators: Vec::new(),
+            bases: base.into_iter().collect(),
+            implements: Vec::new(),
+            exported: false,
+            is_test: in_test,
+            is_declaration: false,
+        };
+        let id = self.push_def(def);
+        let saved = self.enc;
+        self.enc = Some(id);
+        self.types.push(TypeCtx {
+            file_type: None,
+            def: id,
+            name,
+            fields: HashMap::new(),
+            field_types: HashMap::new(),
+            superclass: Some(base_name),
+            implicit_public: false,
+            test_class: false,
+            junit3: false,
+            class_level_test: false,
+            has_tests: false,
+            record_params: None,
+            methods: HashMap::new(),
+            in_test,
+        });
+        self.visit_body(body, depth + 1);
+        self.types.pop();
+        self.enc = saved;
     }
 }
 

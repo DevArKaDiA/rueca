@@ -2,7 +2,13 @@
 //! docs.
 
 use super::*;
+use rueca_extract::split_arg_types;
 use rueca_model::{Definition, Label, RefKind, Reference};
+
+/// A reference's name without its argument types.
+fn bare(r: &Reference) -> &str {
+    split_arg_types(&r.name).0
+}
 
 fn facts(src: &str) -> FileFacts {
     JavaPack::default().extract("A.java", Language::Java, src.as_bytes(), &Budget::default()).expect("extract")
@@ -20,7 +26,7 @@ fn qns(f: &FileFacts) -> Vec<String> {
 }
 
 fn refs<'f>(f: &'f FileFacts, kind: RefKind, name: &str) -> Vec<&'f Reference> {
-    f.references.iter().filter(|r| r.kind == kind && r.name == name).collect()
+    f.references.iter().filter(|r| r.kind == kind && bare(r) == name).collect()
 }
 
 /// (kind, receiver, name) of every reference, for compact assertions.
@@ -30,7 +36,7 @@ fn ref_triples(f: &FileFacts) -> Vec<(RefKind, Option<String>, String)> {
 
 #[track_caller]
 fn has_ref(f: &FileFacts, kind: RefKind, receiver: Option<&str>, name: &str) {
-    let found = f.references.iter().any(|r| r.kind == kind && r.name == name && r.receiver.as_deref() == receiver);
+    let found = f.references.iter().any(|r| r.kind == kind && bare(r) == name && r.receiver.as_deref() == receiver);
     assert!(found, "missing {kind:?} {receiver:?} {name}; have {:#?}", ref_triples(f));
 }
 
@@ -173,8 +179,13 @@ fn enums_constants_and_bodies() {
     assert!(red.exported);
     assert_eq!(red.doc.as_deref(), Some("Red."));
     def(&f, "Color.PLAIN");
-    // Constant bodies are anonymous classes: no definitions.
-    assert!(!f.definitions.iter().any(|d| d.name == "helper"));
+    // Constant bodies are anonymous subclasses of the enum: a class
+    // `Color$1` under the constant, whose methods are definitions.
+    let body = def(&f, "Color.BLUE.Color$1");
+    assert_eq!(body.label, Label::Class);
+    assert_eq!(body.bases, vec!["Color"]);
+    assert_eq!(def(&f, "Color.BLUE.Color$1.helper").label, Label::Method);
+    def(&f, "Color.BLUE.Color$1.code");
     // Constants with arguments call the enum's constructor.
     let ctor_calls = refs(&f, RefKind::Call, "Color");
     assert!(ctor_calls.iter().any(|r| r.receiver.as_deref() == Some("this") && r.arity == Some(1)));
@@ -184,9 +195,9 @@ fn enums_constants_and_bodies() {
     def(&f, "Color.Color(String)");
     def(&f, "Color.Color()");
     assert_eq!(f.definitions.iter().filter(|d| d.qualified_name == "Color.code").count(), 2);
-    // Code in the constant body belongs to the constant.
+    // Code in the constant body belongs to its methods.
     let helper = refs(&f, RefKind::Call, "helper");
-    assert_eq!(enclosing_qn(&f, helper[0]), Some("Color.BLUE"));
+    assert_eq!(enclosing_qn(&f, helper[0]), Some("Color.BLUE.Color$1.code"));
 }
 
 #[test]
@@ -265,8 +276,8 @@ fn fields_and_constants() {
     // Initializers belong to their field.
     let get = refs(&f, RefKind::Call, "get");
     assert_eq!(enclosing_qn(&f, get[0]), Some("A.log"));
-    // `A.class` inside `A` is a self-reference: not reported.
-    lacks_ref(&f, RefKind::Type, "A");
+    // `A.class` inside `A` is a type reference like any other.
+    has_ref(&f, RefKind::Type, None, "A");
     has_ref(&f, RefKind::Type, None, "Logger");
 }
 
@@ -348,13 +359,14 @@ class Service extends BaseService {
     has_ref(&f, RefKind::Call, Some("Objects"), "hash");
     assert_eq!(refs(&f, RefKind::Call, "hash")[0].arity, Some(3));
     has_ref(&f, RefKind::Call, Some("$type:String"), "length");
-    has_ref(&f, RefKind::Call, Some("lookup()"), "chain");
+    // A call on the result of this file's method: its declared return type.
+    has_ref(&f, RefKind::Call, Some("$type:Object"), "chain");
     has_ref(&f, RefKind::Call, Some("$type:Cache"), "get");
-    // The direct superclass is looked up through `super` (implicit this
-    // would reach its constructor first); this file's own class is fully
-    // qualified.
-    assert!(refs(&f, RefKind::Call, "handle").iter().filter(|r| r.receiver.as_deref() == Some("super")).count() == 2);
-    has_ref(&f, RefKind::Call, Some("$type:app.Service"), "audit");
+    // Types are written as in the source, the superclass and this file's
+    // own class included (the resolver never takes a type name for a
+    // constructor).
+    has_ref(&f, RefKind::Call, Some("$type:BaseService"), "handle");
+    has_ref(&f, RefKind::Call, Some("$type:Service"), "audit");
     // Reads of fields used as receivers.
     has_ref(&f, RefKind::Read, None, "repo");
     has_ref(&f, RefKind::Read, Some("this"), "repo");
@@ -402,8 +414,10 @@ fn constructors_new_throw_and_types() {
     // An anonymous class names its base as a type.
     has_ref(&f, RefKind::Type, Some("Outer"), "Nested");
     lacks_ref(&f, RefKind::New, "Nested");
-    // A self-reference of a top-level class is not a type reference.
-    lacks_ref(&f, RefKind::Type, "A");
+    // An anonymous class is a definition named after its base.
+    let anon = def(&f, "A.make.Nested$1");
+    assert_eq!(anon.label, Label::Class);
+    assert_eq!(anon.bases, vec!["Outer.Nested"]);
 }
 
 #[test]
@@ -464,12 +478,18 @@ fn method_references_lambdas_and_anonymous_classes() {
     // Lambda parameters are locals: untyped, or typed when declared.
     has_ref(&f, RefKind::Call, Some("x"), "toString");
     has_ref(&f, RefKind::Call, Some("$type:Item"), "check");
-    // Anonymous classes: no definitions, `this` is unknown, code belongs to
-    // the enclosing method.
-    assert!(!f.definitions.iter().any(|d| d.name == "inner" || d.name == "count"));
+    // Anonymous classes are classes named after their base (`Runnable$1`,
+    // child of the enclosing method): their members are definitions and
+    // `this` inside them is the anonymous class.
+    let anon = def(&f, "A.run.Runnable$1");
+    assert_eq!((anon.label, anon.bases.clone()), (Label::Class, vec!["Runnable".to_string()]));
+    assert_eq!(anon.signature.as_deref(), Some("new Runnable()"));
+    assert_eq!(def(&f, "A.run.Runnable$1.run").label, Label::Method);
+    assert_eq!(def(&f, "A.run.Runnable$1.inner").label, Label::Method);
+    assert_eq!(def(&f, "A.run.Runnable$1.count").label, Label::Field);
     let tick = refs(&f, RefKind::Call, "tick")[0];
-    assert_eq!(tick.receiver.as_deref(), Some(extract::ANONYMOUS_CLASS));
-    assert_eq!(enclosing_qn(&f, tick), Some("A.run"));
+    assert_eq!(tick.receiver.as_deref(), Some("this"));
+    assert_eq!(enclosing_qn(&f, tick), Some("A.run.Runnable$1.run"));
     has_ref(&f, RefKind::Type, None, "Runnable");
 }
 
@@ -657,7 +677,7 @@ class C {
 }
 
 #[test]
-fn enclosing_types_do_not_reach_constructors() {
+fn types_are_written_as_in_the_source() {
     let f = facts(
         r#"package p;
 class Outer extends Base {
@@ -670,15 +690,99 @@ class Outer extends Base {
 }
 "#,
     );
-    // Self-references of a top-level class and its superclass are not types.
-    lacks_ref(&f, RefKind::Type, "Outer");
-    lacks_ref(&f, RefKind::Type, "Base");
-    // A nested class referring to itself is qualified by its outer class.
-    has_ref(&f, RefKind::Type, Some("$type:p.Outer"), "Node");
-    // Receivers of these types: fully qualified, or `super`.
-    has_ref(&f, RefKind::Call, Some("$type:p.Outer"), "self");
-    has_ref(&f, RefKind::Call, Some("super"), "run");
-    has_ref(&f, RefKind::Call, Some("$type:p.Outer.Node"), "next");
+    // Self-references and the superclass are ordinary type references (the
+    // resolver looks type names up as types, never as constructors).
+    has_ref(&f, RefKind::Type, None, "Outer");
+    has_ref(&f, RefKind::Type, None, "Base");
+    has_ref(&f, RefKind::Type, None, "Node");
+    has_ref(&f, RefKind::Call, Some("$type:Outer"), "self");
+    has_ref(&f, RefKind::Call, Some("$type:Base"), "run");
+    has_ref(&f, RefKind::Call, Some("$type:Node"), "next");
+}
+
+#[test]
+fn fields_and_methods_with_one_name_are_both_reported() {
+    let f = facts(
+        r#"class Color {
+    private final String code;
+    Color(String code) { this.code = code; }
+    public String code() { return code; }
+    String show() { return code() + this.code; }
+}
+"#,
+    );
+    // Members in source order: the field first.
+    let order: Vec<(Label, &str)> =
+        f.definitions.iter().skip(1).take(3).map(|d| (d.label, d.qualified_name.as_str())).collect();
+    assert_eq!(
+        order,
+        vec![(Label::Field, "Color.code"), (Label::Method, "Color.Color"), (Label::Method, "Color.code")]
+    );
+    // Reads and writes of the field are reported although a method shares
+    // its name (the resolver keeps them apart).
+    has_ref(&f, RefKind::Write, Some("this"), "code");
+    has_ref(&f, RefKind::Read, Some("this"), "code");
+    has_ref(&f, RefKind::Read, None, "code");
+    has_ref(&f, RefKind::Call, None, "code");
+}
+
+#[test]
+fn calls_carry_static_argument_types() {
+    let f = facts(
+        r#"class W {
+    private boolean flag;
+    private String[] names;
+    void w(JsonWriter out, long n, int[] xs, String... rest) throws IOException {
+        out.value(n);
+        out.value(flag);
+        out.value("x" + n);
+        out.value(1.5f);
+        out.value(compute());
+        out.value(this.names);
+        out.value(rest);
+        out.value(null, 'c', 2L, xs, new Item(), (Number) null, W.class, n > 1);
+        out.flush();
+        throw new JsonSyntaxException(new IOException("x"));
+    }
+    double compute() { return 0; }
+}
+"#,
+    );
+    let names: Vec<&str> = f.references.iter().filter(|r| bare(r) == "value").map(|r| r.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec![
+            "value$args:long",
+            "value$args:boolean",
+            "value$args:String",
+            "value$args:float",
+            "value$args:double",
+            "value$args:String[]",
+            "value$args:String[]",
+            "value$args:?,char,long,int[],Item,Number,Class,boolean",
+        ]
+    );
+    // No argument: the bare name.
+    has_ref(&f, RefKind::Call, Some("$type:JsonWriter"), "flush");
+    assert!(f.references.iter().any(|r| r.name == "flush"));
+    assert!(f.references.iter().any(|r| r.kind == RefKind::New && r.name == "JsonSyntaxException$args:IOException"));
+}
+
+#[test]
+fn calls_on_own_method_results_are_typed() {
+    let f = facts(
+        r#"class JsonArray {
+    private JsonElement single() { return null; }
+    private <T> T any() { return null; }
+    int count() { return 0; }
+    boolean asBoolean() { return single().getAsBoolean() && this.single().isNull() && any().x(); }
+}
+"#,
+    );
+    has_ref(&f, RefKind::Call, Some("$type:JsonElement"), "getAsBoolean");
+    has_ref(&f, RefKind::Call, Some("$type:JsonElement"), "isNull");
+    // The method's own type parameter is not a receiver type.
+    has_ref(&f, RefKind::Call, Some("any()"), "x");
 }
 
 // ---------------------------------------------------------------------------

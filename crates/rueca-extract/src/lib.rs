@@ -108,6 +108,37 @@ pub fn type_receiver(ty: &str) -> String {
     format!("{TYPE_RECEIVER_PREFIX}{ty}")
 }
 
+/// Separator between a call's name and the static types of its arguments:
+/// `value$args:long`, `fromJson$args:String,?` (see [`with_arg_types`]).
+/// `$args:` cannot occur in an identifier of any supported language. The
+/// resolver strips it before every lookup and uses the types only to choose
+/// among overloads (RFC 0003 §10.1): an overload whose parameter type
+/// cannot accept a known argument type is dropped, and of the rest the one
+/// whose parameter types equal the known argument types wins.
+pub const ARG_TYPES_SEPARATOR: &str = "$args:";
+
+/// A `Call` / `New` reference name carrying the static types of its
+/// arguments, in the pack's overload-suffix form (`int`, `String`,
+/// `byte[]`); `None` is an unknown type, written `?`. Returns the bare name
+/// when no type is known.
+pub fn with_arg_types(name: &str, types: &[Option<String>]) -> String {
+    if types.iter().all(Option::is_none) {
+        return name.to_string();
+    }
+    let list: Vec<&str> = types.iter().map(|t| t.as_deref().unwrap_or("?")).collect();
+    format!("{name}{ARG_TYPES_SEPARATOR}{}", list.join(","))
+}
+
+/// Splits a reference name written by [`with_arg_types`] into the name and
+/// the argument types (`?` = unknown).
+pub fn split_arg_types(name: &str) -> (&str, Option<Vec<&str>>) {
+    match name.split_once(ARG_TYPES_SEPARATOR) {
+        Some((n, list)) if !list.is_empty() => (n, Some(list.split(',').collect())),
+        Some((n, _)) => (n, None),
+        None => (name, None),
+    }
+}
+
 /// `DataRef` receiver: the reference name is a global qualified name
 /// (`pyproject` `[project.scripts]` → `pkg.mod.main`).
 pub const DATA_REF_QN: &str = "$qn";
@@ -448,6 +479,16 @@ pub fn first_line(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn argument_types_in_names() {
+        assert_eq!(with_arg_types("value", &[Some("long".into())]), "value$args:long");
+        assert_eq!(with_arg_types("f", &[Some("String".into()), None]), "f$args:String,?");
+        assert_eq!(with_arg_types("f", &[None, None]), "f");
+        assert_eq!(with_arg_types("f", &[]), "f");
+        assert_eq!(split_arg_types("f$args:String,?"), ("f", Some(vec!["String", "?"])));
+        assert_eq!(split_arg_types("f"), ("f", None));
+    }
 
     #[test]
     fn line_counting() {

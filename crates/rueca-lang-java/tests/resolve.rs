@@ -74,9 +74,10 @@ fn package_scope_on_demand_and_static_imports() {
     g.has(&start, &c("Circle"), EdgeKind::Calls, Strategy::ImportResolved, 0.95);
     g.has(&start, &c("Color.parse"), EdgeKind::Calls, Strategy::ImportResolved, 0.85);
     g.has(&start, &c("Color.RED"), EdgeKind::References, Strategy::ImportResolved, 0.85);
-    // Single static import of an overloaded method: both arities match → fan-out × 0.8.
-    g.has(&start, &c("Util.max(int,int)"), EdgeKind::Calls, Strategy::ImportResolved, 0.95 * 0.8);
-    g.has(&start, &c("Util.max(long,long)"), EdgeKind::Calls, Strategy::ImportResolved, 0.95 * 0.8);
+    // Single static import of an overloaded method: both arities match, the
+    // argument types (`int n`, `3`) pick `max(int,int)`.
+    g.has(&start, &c("Util.max(int,int)"), EdgeKind::Calls, Strategy::ImportResolved, 0.95);
+    g.lacks(&start, &c("Util.max(long,long)"), EdgeKind::Calls);
     // Static on-demand import (`import static com.acme.core.Util.*`).
     g.has(&start, &c("Util.join"), EdgeKind::Calls, Strategy::ImportResolved, 0.95);
     // A nested class imported by name.
