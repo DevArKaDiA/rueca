@@ -1,0 +1,59 @@
+# release-plz configuration: https://release-plz.dev/docs/config
+#
+# All crates share one version (the workspace version) and are released
+# together. Only the `rueca` package is tagged (`vX.Y.Z`) and owns the root
+# CHANGELOG.md; GitHub releases and binaries are created by cargo-dist, which
+# release-plz.yml dispatches after tagging.
+
+[workspace]
+git_release_enable = false
+git_tag_enable = false
+changelog_update = false
+pr_branch_prefix = "release-plz-"
+# Publish whenever main has a version not yet on crates.io. Versions only
+# change through the release PR, so in practice: merging it releases.
+release_always = true
+
+[[package]]
+name = "rueca"
+version_group = "rueca"
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "rueca-model"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-extract"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-lang-python"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-lang-typescript"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-resolve"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-segment"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-index"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-query"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-mcp"
+version_group = "rueca"
