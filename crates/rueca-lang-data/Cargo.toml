@@ -1,0 +1,36 @@
+[package]
+name = "rueca-lang-data"
+description = "Structured data pack for Rueca: JSON, YAML, TOML, .env, INI, .properties, XML kinds, HCL/Terraform and Dockerfile, with file kinds and the code-config bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["json", "yaml", "toml", "xml", "hcl", "dockerfile"]
+json = ["dep:jsonc-parser"]
+yaml = ["dep:saphyr-parser"]
+toml = ["dep:toml_edit"]
+xml = ["dep:roxmltree"]
+hcl = ["dep:hcl-edit"]
+dockerfile = []
+
+[dependencies]
+rueca-extract.workspace = true
+rueca-model.workspace = true
+# Pure-Rust, span-preserving parsers (RFC 0003 §8). `.env`, INI,
+# `.properties` and Dockerfile use small parsers in `src/formats/`.
+jsonc-parser = { version = "0.34.0", default-features = false, optional = true }
+saphyr-parser = { version = "0.2.2", optional = true }
+# Default features keep the recursion guard (`unbounded` must stay off).
+toml_edit = { version = "0.25.17", default-features = false, features = ["parse"], optional = true }
+roxmltree = { version = "0.21.2", optional = true }
+hcl-edit = { version = "0.9.8", optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+saphyr = "0.2.2"
+toml = "1.1.8"

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <groupId>com.acme</groupId>
+  <artifactId>shop</artifactId>
+  <modules>
+    <module>core</module>
+  </modules>
+  <dependencies>
+    <!-- Web layer. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+    </dependency>
+  </dependencies>
+</project>

@@ -1,0 +1,8 @@
+server:
+  port: 8080
+spring.datasource:
+  url: ${DB_URL:jdbc:postgresql://localhost/shop}
+  username: ${spring.application.name}
+spring:
+  application:
+    name: shop

@@ -1,0 +1,16 @@
+{
+  "name": "@acme/shop",
+  "version": "1.2.0",
+  "main": "./web/server.ts",
+  "bin": { "shop": "./web/cli.js" },
+  "exports": { ".": { "import": "./web/server.ts", "types": "./web/types.d.ts" } },
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@types/node": "^20.0.0",
+    "config": "^3.3.0"
+  }
+}

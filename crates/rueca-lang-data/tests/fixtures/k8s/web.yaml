@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: web
+          image: acme/shop:1.2.0
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: shop-secrets
+                  key: database-url
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: shop-config
+                  key: LOG_LEVEL
+            - name: QUEUE
+              value: default
+          envFrom:
+            - configMapRef:
+                name: shop-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  ports:
+    - name: http
+      port: 80

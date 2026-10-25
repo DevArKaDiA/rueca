@@ -1,0 +1,15 @@
+[project]
+name = "shop"
+version = "0.1.0"
+dependencies = ["requests>=2"]
+
+# Console entry points.
+[project.scripts]
+shop = "app.main:main"
+
+[tool.ruff]
+line-length = 100
+
+[[tool.mypy.overrides]]
+module = "app.*"
+strict = true
