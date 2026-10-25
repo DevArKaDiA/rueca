@@ -70,6 +70,11 @@ final tool list; that list moves to a later RFC, and the six-tool contract in
 
 ### 3.1 The gate
 
+> *Amended by [RFC 0004](0004-quality-and-benchmark.md) (2026-10-25):
+> "supported" is renamed `stable` and also requires the metric floors of
+> RFC 0004 §6; the parity row becomes the scorecard row (RFC 0004 §9) and
+> "at parity" is no longer a gate.*
+
 A language or data format is **supported** when all of the following ship in
 the same release. Each item is a checkbox in the language's tracking issue.
 

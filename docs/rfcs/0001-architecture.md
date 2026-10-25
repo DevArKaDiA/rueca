@@ -587,6 +587,10 @@ language, plus a polyglot microservice system for cross-service edges
 **Baselines:** codebase-memory-mcp v0.12.0 and plain file exploration, run
 outside Rueca with recorded outputs.
 
+> *Amended by [RFC 0004](0004-quality-and-benchmark.md) (2026-10-25): the
+> adoption gate below is replaced by absolute floors per metric family;
+> baselines are published as reference and suite 4 moves to the roadmap.*
+
 **Adoption gate:** for a given language, Rueca is recommended over the
 baseline when it matches or beats it on suites 1–3 and is not worse than
 10% on suite 4. Results are published per release.

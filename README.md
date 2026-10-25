@@ -168,6 +168,7 @@ schema, and exactly what each tool reads — is in
 Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
 [building blocks (RFC 0002)](docs/rfcs/0002-building-blocks.md),
 [structured data and the next languages (RFC 0003)](docs/rfcs/0003-structured-data-and-languages.md),
+[quality bar and benchmark (RFC 0004)](docs/rfcs/0004-quality-and-benchmark.md),
 [decisions log](docs/decisions.md).
 
 ## Benchmark
@@ -190,23 +191,38 @@ coverage and the code ↔ config bridge. Full results:
 | Definition found | 100 | 98.2 | 98.9 |
 | Median query latency | ~0 s | 0.43 s | **0.01 s** |
 
-Parity with cbm per language (every metric ≥ cbm, strict): **PHP ✅ 13/13**,
-**Java ✅ 13/13**, Go 11/13, TS/JS 9/10, Python 8/13, C++ 8/13, C 3/13.
-Configuration: key recall 100% (YAML, JSON) and 99.6% (HCL) vs 1–25% for
-cbm; env-var bridge precision / recall 100 / 98.6 vs 99.5 / 86.7. C and C++
-are held back by parsing without a preprocessor. Contributions that move
-these numbers are very welcome.
+Against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md),
+from the current numbers: Go meets every structural, micro and localization
+floor; PHP misses only the micro-benchmark floor by about one point; Python
+lacks a valid micro-benchmark and TS/JS misses callee recall (70 vs 75);
+Java misses precision (86–88 vs 90); C and C++ miss several floors (parsing
+without a preprocessor). Configuration meets its floors: key recall 100%
+(YAML, JSON) and 99.6% (HCL), env-var bridge precision / recall 100 / 98.6.
+codebase-memory-mcp is published alongside as reference. The per-language
+scorecard (RFC 0004 §9) replaces this paragraph once the rebuilt benchmark
+lands. Contributions that move these numbers are very welcome.
 
 ## Roadmap
 
-- Receiver typing from assignments; structural tie-breaks for same-name
-  definitions; Python call-edge recall.
-- More languages (C/C++, Kotlin, Swift, Rust, …); Go and Java benchmark rows.
-- Optional compiler-grade precision from SCIP indexes.
-- Service mode (object storage, MCP over HTTP) and an org-wide mode over
-  GitHub / GitLab / Bitbucket with mirrored permissions.
+Where Rueca is going, in order. Each stage has a design document; the
+quality bar every language must meet is defined in
+[RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) (deterministic metrics,
+absolute floors and aspirational targets).
 
-See [RFC 0001](docs/rfcs/0001-architecture.md) for the full plan.
+| Stage | What it delivers | Status |
+|---|---|---|
+| **Local mode** | One binary, MCP over stdio, six tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
+| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)) | ✅ landed, most languages `preview` |
+| **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | 🚧 in progress |
+| **First public release** | `0.1.0` on crates.io and GitHub Releases once every language is `stable` | ⏳ next |
+| **Retrieval** | Vector baseline in the bench; hybrid retrieval in Rueca (BM25 over code + static embeddings + graph signals) aimed at the localization targets | 🗺️ planned |
+| **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
+| **Service mode** | One container, segments in object storage, MCP over HTTP | 🗺️ planned |
+| **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
+| **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |
+
+More languages (Kotlin, Swift, Rust, Ruby, C#, …) follow the same gate once
+the first release is out.
 
 ## Workspace
 
