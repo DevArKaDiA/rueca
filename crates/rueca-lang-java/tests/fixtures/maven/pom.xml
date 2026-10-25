@@ -1,0 +1,11 @@
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.acme</groupId>
+  <artifactId>parent</artifactId>
+  <packaging>pom</packaging>
+  <modules>
+    <module>core</module>
+    <module>app</module>
+    <!-- <module>retired</module> -->
+  </modules>
+</project>

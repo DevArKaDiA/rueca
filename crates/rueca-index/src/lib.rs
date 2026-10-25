@@ -113,12 +113,13 @@ pub struct PhaseTimings {
 }
 
 /// Language packs shipped with this build (Python, TypeScript/TSX/JavaScript,
-/// PHP, Markdown, Go, and the structured data formats of `rueca-lang-data`).
+/// PHP, Java, Markdown, Go, and the structured data formats of `rueca-lang-data`).
 pub fn default_registry() -> Registry {
     let mut r = Registry::new();
     r.register(Box::new(rueca_lang_python::PythonPack));
     r.register(Box::new(rueca_lang_typescript::TypeScriptPack));
     r.register(Box::new(rueca_lang_php::PhpPack::default()));
+    r.register(Box::new(rueca_lang_java::JavaPack::default()));
     r.register(Box::new(rueca_lang_markdown::MarkdownPack));
     r.register(Box::new(rueca_lang_go::GoPack::default()));
     r.register(Box::new(rueca_lang_data::DataPack));

@@ -4,8 +4,8 @@
   resolver, wave R of §12) is **implemented**, and so are the data formats,
   file kinds and the code ↔ config bridge (waves 1, 2a and 2b:
   `rueca-lang-data` plus the Python, TS/JS and PHP packs) — see the
-  *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. Go (§10.2) has
-  landed; the C/C++ and Java packs are pending.
+  *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. Go (§10.2) and
+  Java (§10.4) have landed; the C/C++ pack is pending.
 - Created: 2026-10-24
 - Depends on: RFC 0001 (architecture), RFC 0002 (building blocks)
 - Research date: 2026-10-24. Crate versions, licenses and dependency
@@ -771,6 +771,43 @@ One pack crate (`rueca-lang-c`) for both languages, family `C`.
 | Heuristic | dependency injection, reflection, Lombok-generated members, lambdas and method references, anonymous classes (attached to the enclosing method) |
 | Precision | scip-java 0.13.2 (Apache-2.0), full compile |
 | Bench | S1: SWE-PolyBench Java 165 (MIT) and SWE-bench Multilingual Java 43 (lombok 17, gson 9, lucene 9, druid 5, …). S3: scip-java gold on gson and spring-petclinic |
+
+*Implemented* (`rueca-lang-java`, status `preview`: gate items 1–3 and 6
+met; the bench entry and parity row, items 4–5, are pending). As designed,
+with these choices (crate docs list them all):
+
+- **Package from facts.** The `package` clause is recorded as the file's
+  first import with no names, and `module_name_for` reads it; the default
+  package is the empty module. Without facts the path under a source root
+  is used.
+- **Source roots** are `…/src/<set>/java` at any depth plus
+  `<sourceDirectory>` / `<testSourceDirectory>` of every `pom.xml` and
+  literal `srcDir(s)` of every `build.gradle(.kts)`; `<modules>` and
+  `settings.gradle` `include`s only break ties. Imports that miss every
+  root fall back to the package-path suffix match. Single-type and static
+  imports resolve to the class file, on-demand imports to the package
+  directory.
+- **Synthetic imports**: a fully qualified type in code (`com.x.Owner`)
+  and every bare name under a static on-demand import (`import static
+  a.b.C.*`) are recorded as single imports, so they resolve like the
+  explicit forms (implicit `this` still wins).
+- **Overload suffixes** are `(String,int)`: simple type names, generics
+  removed, arrays and varargs kept, no spaces; open question 4 is left as
+  stated (a second overload renames the first).
+- **Constructors and implicit `this`.** With constructors as members named
+  like the class, a bare type name that is an enclosing class or its
+  superclass reaches the constructor through the implicit-self rung. The
+  pack works around it (fully qualified `$type:` for types of the file,
+  `super` for the direct superclass, no self-references); a resolver rule
+  that skips constructors in type lookups would remove the workaround.
+  Likewise a field and a method with one name share one member slot, so
+  fields are emitted after methods.
+- **Bridge**: `System.getenv`, Spring `@Value` placeholders and
+  `Environment.getProperty` with file-local evidence; relaxed binding off
+  (open question 8).
+- Measured on gson and jackson-core (crate docs): 0 parse errors, 45.9% /
+  66.6% of references resolved, 12.5% / 3.1% unresolved (mostly calls on
+  call results), ~0.4 s / ~0.6 s to index.
 
 ### 10.5 Risks
 

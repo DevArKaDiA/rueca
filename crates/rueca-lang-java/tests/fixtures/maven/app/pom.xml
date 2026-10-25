@@ -1,0 +1,6 @@
+<project>
+  <artifactId>app</artifactId>
+  <dependencies>
+    <dependency><artifactId>core</artifactId></dependency>
+  </dependencies>
+</project>

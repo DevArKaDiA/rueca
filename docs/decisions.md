@@ -60,6 +60,40 @@ recording:
   0.5), names only, capped at 64 implementers per interface.
 - Status `preview` until the S1/S3 benchmark rows exist (RFC 0003 §3).
 
+## 2026-10-25 — Java: packages from the package clause, constructors vs implicit `this`
+
+Java support (`rueca-lang-java`, `tree-sitter-java` 0.23.5, status
+`preview` until its benchmark entry) is the first pack on the wave R hooks:
+package scope, implicit `this`, `$type:` receivers, overloads by arity and
+`OVERRIDES`. No resolver, model or query code changed. Choices:
+
+- **The package clause is an import without names.** `module_name_for`
+  reads the package from the facts, which carry no other place for it; a
+  `Package` definition would have added one node per file. Source roots
+  (Maven / Gradle conventions at any depth, declared `sourceDirectory` /
+  `srcDirs`, then a package-path suffix match) only map imports to files
+  and name files without facts.
+- **Synthetic imports.** Fully qualified types in code and names under a
+  static on-demand import are recorded as single imports, so the generic
+  ladder resolves them like explicit imports (34 jackson-core test classes
+  extend a fully qualified base; static on-demand imports took its
+  unresolved share from 8.9% to 3.1%).
+- **Constructors are members named like their class (wave R)**, so with
+  implicit `this` a bare type name equal to an enclosing class or its
+  superclass reaches the constructor. The pack writes types of the file
+  fully qualified in `$type:` receivers, uses `super` for the direct
+  superclass and drops self-references; a field and a method with one
+  name share one member slot, so fields are emitted last. A resolver rule
+  that ignores constructors and fields in type and call lookups would make
+  both workarounds unnecessary (follow-up).
+- **Bridge facts** (`System.getenv`, Spring `@Value` / `Environment`) need
+  file-local evidence (the Spring import, an unshadowed `System`); relaxed
+  binding stays off.
+- **JDK names are builtins** for the unique-name and unique-method rungs:
+  `java.lang` and common `java.util` / `java.io` / … types, JDK package
+  heads, and `Object` / collection / stream / string method names, so an
+  untyped `list.stream()` never links to the only project `stream()`.
+
 ## 2026-10-24 — Wave R: shared model, contract and resolver for RFC 0003
 
 The groundwork every RFC 0003 pack needs landed before the packs, so the
