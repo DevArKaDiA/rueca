@@ -58,8 +58,8 @@ Two ideas carry the whole design:
 | **Definition** | A named thing declared in a file (class, function, method, field, variable, constant, interface, type alias, enum, test…), with its span, signature, docstring and parent. |
 | **Reference** | A use of a name: a call, `new`, type annotation, decorator, `raise`/`throw`, read or write. Has a name, an optional receiver (`self`, `app`, `a.b`) and the definition that encloses it. |
 | **Import** | A module specifier plus imported names (`from .http import Session`). |
-| **Module name** | How other files refer to a file: Python `shop.http`; ECMAScript `src/util/index` (path without extension); Markdown `docs/guide.md` (path with extension). |
-| **Qualified name** | Global name of a definition: module name + separator + local name. Python `shop.http.Session.send`; ECMAScript `src/util/index:formatAmount`; Markdown `docs/guide.md:Install > Linux`. |
+| **Module name** | How other files refer to a file: Python `shop.http`; ECMAScript `src/util/index` (path without extension); Markdown `docs/guide.md` (path with extension). PHP files have none: code refers to classes and functions by namespace, never to files. |
+| **Qualified name** | Global name of a definition: module name + separator + local name. Python `shop.http.Session.send`; ECMAScript `src/util/index:formatAmount`; Markdown `docs/guide.md:Install > Linux`; PHP the fully qualified name, members after `::` (`App\Models\User::save`). |
 | **Node / edge** | The resolved graph. Nodes are definitions plus `Repository` / `Folder` / `File`; edges are typed relations between them. |
 | **Strategy / confidence** | How a reference edge was resolved, and how much to trust it (0–1). |
 | **Segment** | The immutable file that stores one snapshot's graph and indexes. |
@@ -129,7 +129,7 @@ disappears. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-markdown`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-markdown`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -160,9 +160,25 @@ What packs deliberately do and don't do:
   scope; JS hoisting). This removes most noise before resolution.
 - **No cross-file knowledge.** `Session` in `api.py` is just a name with no
   receiver. The pack does not know it is a class.
+- **PHP names are qualified at extraction.** PHP resolves every class,
+  function and constant name at compile time from two things in the file
+  itself: the current `namespace` and its `use` imports. The PHP pack applies
+  those rules, so `new User` under `use App\Models\User` is reported as the
+  name `User` in namespace `\App\Models\`, `strlen()` inside
+  `namespace App` as "`App\strlen`, else global `strlen`", and `User::find()`
+  as member `find` of class `\App\Models\User`. This is still one-file
+  knowledge; which file defines `App\Models\User` is the resolver's job. The
+  pack also types receivers from declarations in the same file: `$user` in
+  `$user->save()` holds a `User` when every binding of `$user` in its scope
+  says so (typed parameter, `catch (User $e)`, `$user = new User`, docblock
+  `@param User $user`), and `$this->repo` has the declared type of property
+  `$repo` (typed, promoted or `@var`). Variable scopes come from a vendored
+  `locals.scm`; variables themselves are never references.
 - **Tests are definitions too**: `test_*` functions and `Test*` classes in
-  Python; `describe` / `it` / `test` blocks in JS/TS become `Test` nodes
-  whose qualified name is the describe chain.
+  Python; `describe` / `it` / `test` blocks in JS/TS and Pest become `Test`
+  nodes whose qualified name is the describe chain; PHPUnit `test*`,
+  `@test` and `#[Test]` methods of `*Test` / `*TestCase` subclasses are
+  tests.
 - **Named function expressions are definitions** in JS/TS wherever they
   appear (`app.use(function handler() {})`, `defineGetter(req, "query",
   function query() {})`, `return function timing() {}`): a `Function` child
@@ -202,7 +218,8 @@ Two per-language hooks, still without guessing symbols:
 
 - `module_name(path)`: Python walks up `__init__.py` packages and source
   roots (`src/`, `pyproject` package dirs) → `shop.http`. ECMAScript strips
-  the extension → `src/util/index`.
+  the extension → `src/util/index`. PHP returns nothing (definitions already
+  carry their declared namespace, which may differ from the path).
 - `resolve_import(from, import)`: maps a specifier to a project file or to
   *nothing* (third-party, builtin). Python follows relative levels and source
   roots (`from .http` in `shop/api.py` → `shop/http.py`). TS/JS uses
@@ -216,6 +233,12 @@ Two per-language hooks, still without guessing symbols:
   path is percent-decoded and tried as written, with `.md`, `x.html` →
   `x.md`, and as a directory (`README.md`, `index.md`, …); a bare path that
   misses is retried from the root.
+  PHP maps
+  a `use App\Models\User` to its file through Composer `autoload` /
+  `autoload-dev` (`psr-4`, `psr-0`, `classmap`) of every `composer.json`
+  (monorepos included), falling back to the unique `User.php` whose
+  directories match the namespace; `require` / `include` with static paths
+  (`__DIR__ . '/x.php'`) resolve relative to the file.
 
 Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0);
 for documents that means "links to" (docs → docs, code files, images).
@@ -239,7 +262,10 @@ checks its own definitions, then its re-exports (`export { x } from`,
 `__init__.py`), transitively and cycle-safe up to depth 10. An ECMAScript
 `default` import binds a definition named `default`, else the module's
 explicit `default` re-export (`export default x`), else a heuristic (the
-exported class or function named after the file, else the only export).
+exported class or function named after the file, else the only export). PHP files have
+no binding environment: their names arrive qualified (§4.2), and the
+resolver looks them up in an index of PHP classes, functions and constants
+by fully qualified name (case-insensitive where PHP is).
 
 **The strategy ladder.** Each reference is resolved by trying strategies in
 order; the first one that succeeds wins and stamps the edge:
@@ -258,14 +284,31 @@ order; the first one that succeeds wins and stamps the edge:
 | 6 | unique method (`heuristic`) | call with an unknown receiver; exactly one method with that name (≥ 4 chars, not a common builtin method like `keys`, `then`) | 0.50 |
 
 (Strategy 5, receiver typing from assignments, is not implemented in the
-alpha.) A reference to a builtin, a name bound to an external module, or a
+alpha for Python and ECMAScript.) A reference to a builtin, a name bound to an external module, or a
 `self` member that does not exist **stops** resolution: it is counted as an
 expected miss, never fuzzy-matched. For JS/TS, "builtin" includes web and
 runtime globals that a project could also define (`Request`, `Response`,
 `Headers`, `Event`, `crypto`, …): an imported or same-module `Request` still
 resolves through rungs 1–4, but an unbound one is never matched to a project
 type by unique name. Calls to a class also call its
-`__init__` / `constructor` (confidence × 0.95).
+`__init__` / `constructor` / `__construct` (confidence × 0.95).
+
+PHP references use the same rungs with PHP receivers:
+
+| Strategy (edge `strategy`) | Applies when | Confidence |
+|---|---|---|
+| name (`import_resolved`) | class, function or constant by fully qualified name (`new User`, `format_money()`, `User::class`) | 0.95 |
+| global fallback (`import_resolved`) | unqualified function / constant not in the current namespace (`helper()` → global `helper`) | 0.90 |
+| autoload file (`import_resolved`) | class not indexed under that name, found in the file Composer maps it to | 0.80 |
+| static member (`import_resolved`) | `User::find()`, `Status::Active`, `Config::$cache` (through parents, traits, interfaces) | 0.85 |
+| typed receiver (`type_resolved`) | `$user->save()` / `$this->repo->find()` with a declared class (§4.2) | 0.85 |
+| `$this` / `self` / `static` / `parent` (`type_resolved`) | as `self` / `super` above | 0.90 / 0.85 |
+| unique method (`heuristic`) | any other receiver | 0.50 |
+
+A PHP name outside the project (a vendor namespace such as `Illuminate\…`
+in an application, `\DateTime`) is external or builtin; a member missing
+from a class that extends, uses or implements vendor code (an Eloquent
+model's `where`, a test's `assertSame`) is external too.
 
 In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
 → 0.95; `Session().request` has an unknown receiver, so only rung 6 applies
@@ -313,10 +356,10 @@ then points the indexed root at it. Query time never reads the working tree.
 |---|---|
 | `Repository`, `Folder`, `File` | the walk (every listed file, any language) |
 | `Module` | TS `namespace` / `declare module` |
-| `Class`, `Interface`, `Enum`, `TypeAlias` | class / interface / enum / type declarations |
+| `Class`, `Interface`, `Trait`, `Enum`, `TypeAlias` | class / interface / PHP trait / enum / type declarations |
 | `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters |
-| `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, module-level assignments (`UPPER_CASE` → `Constant`) |
-| `Test` | JS/TS `describe` / `it` / `test` blocks (Python tests are `Function` / `Method` / `Class` with `is_test: true`) |
+| `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, PHP properties (`$email`, also promoted constructor parameters), module-level assignments (`UPPER_CASE` → `Constant`), PHP `const` / `define()` / enum cases |
+| `Test` | JS/TS `describe` / `it` / `test` blocks and Pest tests (Python and PHPUnit tests are `Function` / `Method` / `Class` with `is_test: true`) |
 | `Section` | Markdown headings, nested by `DEFINES` |
 
 Every symbol node carries: name, qualified name, file, span, language,
@@ -340,8 +383,8 @@ All six tools first pick the segment (the `repo` argument, the server's
 1. `id` → parse `repo@commit:path#local.name` and find that definition in
    that file (the commit is ignored, so ids survive re-indexing);
 2. else `qualified_name` → exact match in the qualified-name index, then
-   suffix match on a `.` / `:` / `/` boundary (`Session.send` finds
-   `shop.http.Session.send`);
+   suffix match on a `.` / `:` / `/` / `\` boundary (`Session.send` finds
+   `shop.http.Session.send`, `User::save` finds `App\Models\User::save`);
 3. else `name` → name index, optionally narrowed by `path`.
 
 When several nodes match, the pick is deterministic (non-test, exported,
@@ -496,7 +539,10 @@ Known gaps behind low-confidence or missing edges, in rough order of impact:
 - Python MRO is approximated depth-first (differs from C3 only for diamond
   inheritance).
 - Dynamic dispatch, decorators that replace functions, `getattr`,
-  dependency injection containers.
+  dependency injection containers. In PHP: magic methods (`__call`,
+  `__callStatic`, `__get`), Laravel facades and the service container,
+  dynamic properties, `$this->$name()`, and properties declared only in a
+  parent class in another file (no receiver type).
 - Same-name definitions: a bare-name `search_symbols` lookup of `get` or
   `add_url_rule` ranks them by text only (shorter, denser matches first);
   nothing structural (base class, call count) breaks the tie yet.
@@ -533,6 +579,7 @@ gaps show up on real repositories.
 | Python extraction, module names, imports | `rueca-lang-python` | crate docs, `queries/locals.scm` |
 | TS/TSX/JS extraction, `oxc_resolver` | `rueca-lang-typescript` | crate docs, `src/resolve.rs` |
 | Markdown sections and links (`pulldown-cmark`) | `rueca-lang-markdown` | crate docs, `src/links.rs` |
+| PHP extraction, name resolution, Composer autoload | `rueca-lang-php` | crate docs, `src/names.rs`, `src/composer.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
 | Resolution | `rueca-resolve` | crate docs (strategy table) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |

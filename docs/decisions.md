@@ -68,6 +68,35 @@ Inline code spans are deliberately not emitted as references: the resolver's
 unique-name fallback would turn prose into 0.6-confidence noise edges.
 Anchor → section references, front-matter titles and MDX are future work.
 
+## 2026-10-24 — PHP: names qualified at extraction, no file modules
+
+PHP support (`rueca-lang-php`, `tree-sitter-php` 0.25) departs from the
+Python / ECMAScript shape in three documented ways:
+
+- **Qualified names are PHP names.** A PHP file may declare several
+  namespaces, or one that differs from its Composer path, and code never
+  refers to files. Local qualified names therefore carry the declared
+  namespace (`App\Models\User::save`, properties `::$email`) and
+  `module_name` is empty, so global names, symbol ids and suffix lookups
+  (`User::save`) all use the real PHP name. PSR-4 / PSR-0 is used where it
+  belongs: mapping an imported class to its file (`resolve_import`).
+- **Name resolution happens in the pack.** PHP resolves names at compile
+  time from the file's `namespace` and `use` statements only, so the pack
+  reports names fully qualified (receiver encoding in the crate's `names`
+  module) and the resolver looks them up in an index by fully qualified
+  name instead of building per-file binding environments. Python and
+  ECMAScript resolution is unchanged; PHP is dispatched by language family.
+- **Receiver typing from declarations.** The pack types `$x->m()` when every
+  binding of `$x` declares or constructs one class (typed or docblock
+  parameters, `catch`, `new`), and `$this->prop->m()` from the property's
+  declared type, using a vendored `locals.scm` for variable scopes. These
+  edges are `type_resolved` (0.85); the generic "strategy 5" (typing from
+  arbitrary assignments) is still open for all languages.
+
+Traits are recorded as bases (`INHERITS`) so their members are found
+through the using class; `parent::` reuses the `super` lookup. scip-php
+remains non-viable as a precision layer (RFC 0002 §4.2).
+
 ## 2026-10-22 — Project renamed from Telar to Rueca
 
 `telar` is taken on crates.io by an unrelated Rust UI framework with its own
