@@ -672,13 +672,13 @@ and overloads from R). Each code wave adds its language's bridge facts
 (§7.2) as part of extraction. With three parallel streams the whole plan is
 roughly 7–9 calendar weeks; serial, about 15–20 engineer-weeks.
 
-**Release point (recommendation, open question 1).** The first public
-release ships when waves 0–3 are `supported`: Python, TS/JS, PHP,
-Markdown, every data format of this RFC with the bridge, and Go. C/C++ and
-Java ship in that release as `preview` if their gate is not met, and become
-`supported` in following minor releases. Rationale: C/C++ carries the most
-risk (§10.5); holding the release on it delays feedback on everything
-else, and the status column makes the difference explicit to adopters.
+**Release point (decided 2026-10-24).** The first public release ships
+after **every** wave of this RFC is `supported`, Java included: Python,
+TS/JS, PHP, Markdown, every data format with the bridge, Go, C++, C and
+Java. No language ships as `preview` in the first release. (The draft
+recommended releasing after Go with C/C++/Java as `preview`, to get
+feedback earlier and contain the C/C++ risk of §10.5; the maintainer chose
+one complete release instead.)
 
 ## 13. Amendments to RFC 0001 (applied on acceptance)
 
@@ -716,8 +716,7 @@ else, and the status column makes the difference explicit to adopters.
 
 ## 15. Open questions
 
-1. **Release point**: ship the first public release after Go (recommended)
-   or hold it until C/C++ and Java are `supported`?
+1. ~~**Release point**~~ — decided 2026-10-24: after Java (§12).
 2. Should `module_name` receive the file's facts (`module_name(path, facts,
    project)`)? It would let Java read the `package` clause, Go the package
    name and PHP the namespace directly, instead of inferring from paths.

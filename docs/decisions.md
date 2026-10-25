@@ -12,8 +12,10 @@ and code that reads env vars or config keys is linked to them with `READS`
 (providers with `WRITES`). A language is "supported" only when it meets the
 release gate (extraction, import resolution, tests, bench entry, published
 parity row vs cbm v0.12.0, docs). The design, parsers, phasing and the
-recommended release point are in
-[RFC 0003](rfcs/0003-structured-data-and-languages.md) (draft).
+release point are in
+[RFC 0003](rfcs/0003-structured-data-and-languages.md). **The first public
+release ships after Java**, with every language above `supported` (none as
+`preview`).
 
 ## 2026-10-22 — Project renamed from Telar to Rueca
 
