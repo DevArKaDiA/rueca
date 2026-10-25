@@ -1,5 +1,5 @@
 {
- "date": "2026-10-25 02:17 UTC",
+ "date": "2026-10-25 02:55 UTC",
  "machine": {
   "platform": "macOS-26.4.1-arm64-arm-64bit",
   "machine": "arm64",
@@ -28,13 +28,48 @@
   "rueca": {
    "available": true,
    "reason": "",
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 45bac6854a67)",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a)",
    "recorded_versions": [
-    "rueca 0.1.0-alpha.1 (binary sha256 45bac6854a67)"
+    "rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a)"
    ]
   }
  },
- "manifest_sha256": "308ceb6504e48fcd6efff15c9d6961d064064996701b6d8fe09baf18aa12ead7",
+ "versions_by_group": {
+  "ts/js": {
+   "grep": [
+    "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
+   ],
+   "cbm": [
+    "codebase-memory-mcp 0.12.0"
+   ],
+   "rueca": [
+    "rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a)"
+   ]
+  },
+  "php": {
+   "grep": [
+    "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
+   ],
+   "cbm": [
+    "codebase-memory-mcp 0.12.0"
+   ],
+   "rueca": [
+    "rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a)"
+   ]
+  },
+  "python": {
+   "grep": [
+    "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
+   ],
+   "cbm": [
+    "codebase-memory-mcp 0.12.0"
+   ],
+   "rueca": [
+    "rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a)"
+   ]
+  }
+ },
+ "manifest_sha256": "43d84f21c7d593855bdc1a501ae668b3c466066cd2a66d24c9087c9dba3571e6",
  "manifest_tools": {
   "cbm": {
    "name": "codebase-memory-mcp",
@@ -66,10 +101,24 @@
    "version": "0.5.2",
    "license": "Apache-2.0"
   },
+  "phpstan": {
+   "name": "phpstan",
+   "version": "2.3.2",
+   "license": "MIT",
+   "url": "https://github.com/phpstan/phpstan/releases/download/2.3.2/phpstan.phar",
+   "sha256": "0ded687c44b1f9d0346f7f00fa505212b018efe532b2b18e3a72f6e16feb32be"
+  },
+  "php_image": {
+   "name": "php:8.3-cli (Docker official image)",
+   "image": "php@sha256:98d555ff97b3865140ad31032508c3ca089fa97a8944b14ca9dc03ea05d788cd",
+   "license": "PHP-3.01 (run as a separate process; nothing vendored)"
+  },
   "rueca": {
    "name": "rueca",
    "binary": "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)",
-   "contract": "docs/tools.md (alpha)"
+   "contract": "docs/tools.md (alpha)",
+   "results_python_ts": "0.1.0-alpha.1 (binary sha256 8d6bc2783fd3\u2026)",
+   "results_php": "feat/lang-php @ aaf83850ee99 (binary sha256 eb2c20eb23e2acce0c5b0c57f1d5a68a52eec0bbb314706a0f8091129922c0a6)"
   }
  }
 }
