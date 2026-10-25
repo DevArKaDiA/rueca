@@ -18,3 +18,4 @@ tracing.workspace = true
 serde_json.workspace = true
 rueca-lang-python.workspace = true
 rueca-lang-typescript.workspace = true
+rueca-lang-php.workspace = true

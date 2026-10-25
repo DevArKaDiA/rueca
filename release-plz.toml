@@ -39,6 +39,10 @@ name = "rueca-lang-typescript"
 version_group = "rueca"
 
 [[package]]
+name = "rueca-lang-php"
+version_group = "rueca"
+
+[[package]]
 name = "rueca-resolve"
 version_group = "rueca"
 

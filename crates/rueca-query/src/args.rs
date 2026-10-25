@@ -94,8 +94,9 @@ pub struct SearchCodeArgs {
 pub struct GetSymbolArgs {
     /// Symbol id as returned by other tools (`<repo>@<commit>:<path>#<name>`). Takes precedence.
     pub id: Option<String>,
-    /// Global qualified name (`pkg.mod.Class.method`, `src/util/index:Class.method`)
-    /// or a suffix of it on `.`/`:`/`/` boundaries (`Class.method`, `util:helper`).
+    /// Global qualified name (`pkg.mod.Class.method`, `src/util/index:Class.method`,
+    /// `App\Models\User::save`) or a suffix of it on `.`/`:`/`/`/`\` boundaries
+    /// (`Class.method`, `util:helper`, `User::save`).
     pub qualified_name: Option<String>,
     /// Simple name (`method`). Narrow it with `path` when ambiguous.
     pub name: Option<String>,

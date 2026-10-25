@@ -67,6 +67,11 @@ impl View {
         if is_container(node.label) {
             return None;
         }
+        // PHP names carry their namespace and use `::` for members: the
+        // global qualified name is the local one (`App\Models\User::save`).
+        if node.language.map(|l| l.family()) == Some(LanguageFamily::Php) {
+            return Some(node.qualified_name.clone());
+        }
         let mut parts = vec![node.name.as_str()];
         let mut cur = id;
         for _ in 0..256 {

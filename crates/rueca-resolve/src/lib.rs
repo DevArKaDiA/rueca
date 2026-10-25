@@ -11,7 +11,9 @@
 //!   file (even for unsupported languages), and one node per [`Definition`].
 //! - Definition nodes get a global qualified name: `pack.module_name(path)` +
 //!   separator + local qualified name. The separator is `.` for Python and `:`
-//!   for ECMAScript (paths may contain dots). Identical `(label,
+//!   for ECMAScript (paths may contain dots). An empty module name keeps the
+//!   local name: PHP definitions carry their namespace already
+//!   (`App\Models\User::save`). Identical `(label,
 //!   qualified_name, file)` triples are merged, keeping the first definition
 //!   (Python redefinitions); later local ids map to the kept node.
 //! - Structural edges (`Syntactic`, 1.0): `CONTAINS` Repository→Folder/File and
@@ -39,6 +41,10 @@
 //!   exported top-level definition), namespace imports bind the module.
 //! - Imports of non-project modules bind the name as *external*: references
 //!   through such names are reported unresolved and are never fuzzy-matched.
+//! - PHP files have no environment: the pack applies `namespace` and `use`
+//!   at extraction and reports names fully qualified (see *PHP* below). PHP
+//!   `use` imports still produce `IMPORTS` edges through
+//!   `pack.resolve_import` (Composer autoload).
 //!
 //! Looking a name up in a module checks its own top-level definitions, then
 //! its re-exports (`export { x } from`, `export * from`, `export * as ns
@@ -84,10 +90,42 @@
 //! Python MRO (C3 linearization differs only for diamonds) and is exact for
 //! ECMAScript single inheritance.
 //!
+//! # PHP
+//!
+//! PHP references arrive with their names already qualified by the pack
+//! (receiver encoding in `rueca-lang-php`, module `names`). The resolver
+//! keeps an index of PHP classes / interfaces / traits / enums and functions
+//! (case-insensitive) and namespace constants by fully qualified name, and
+//! resolves each reference by its receiver:
+//!
+//! | Receiver | Meaning | Edge strategy | Confidence |
+//! |---|---|---|---|
+//! | `\A\B\` + `C` | symbol `A\B\C` by name | `ImportResolved` | 0.95 |
+//! | `A\B\` + `f` | unqualified function / constant in namespace `A\B`: `A\B\f`, else the global `f` | `ImportResolved` | 0.95 / 0.90 |
+//! | `\A\B\` + `C`, class not indexed | the class named `C` in the file Composer autoloading maps `A\B\C` to | `ImportResolved` | 0.80 |
+//! | `\A\C` + `m` | static member of class `A\C` (`X::m()`, `X::CONST`, `X::$p`) | `ImportResolved` | 0.85 |
+//! | `\A\C->` + `m` | member of an instance whose class is declared (typed parameter / property, `new`, docblock) | `TypeResolved` | 0.85 |
+//! | `$this`, `self`, `static` | member of the enclosing class (strategy 2) | `TypeResolved` | 0.90 / 0.85 |
+//! | `parent` | member of a base of the enclosing class | `TypeResolved` | 0.85 |
+//! | anything else (`$repo`, `foo()->bar`) | unique method name (strategy 6) | `Heuristic` | 0.50 |
+//!
+//! Members are found through the parent class, used traits (listed in
+//! `Definition::bases`, so they also get `INHERITS` edges) and implemented
+//! interfaces (for constants). A name that is not in the index is a builtin
+//! (`strlen`, `\Exception`), a miss when its first namespace segment is one
+//! the project declares, and external otherwise (vendor code is not
+//! indexed). A missing member of an *open* type — one that extends, uses or
+//! implements something outside the project, a trait, or an enum — is
+//! external too (inherited from vendor code or builtin); a missing member of
+//! a closed project class (magic `__call` / `__callStatic`) falls back to
+//! the unique method name. `$this` outside any class (Pest closures) is
+//! external.
+//!
 //! # Edge kinds
 //!
 //! `Call`/`New` → `CALLS` (a call that targets a class also `CALLS` its
-//! `__init__`/`constructor`, own or inherited, confidence × 0.95);
+//! `__init__`/`constructor` — PHP: `__construct` — own or inherited,
+//! confidence × 0.95);
 //! `Decorator` → `DECORATES` from the decorator to the decorated definition;
 //! `Type`/`Read` → `REFERENCES`, except references that come from a class's own
 //! base list, which become `INHERITS` / `IMPLEMENTS`; `Throw` → `THROWS`;
@@ -106,8 +144,10 @@
 //!
 //! [`ResolveStats`] counts every reference (plus decorators synthesized from
 //! `Definition::decorators` when a pack reports no decorator references), the
-//! resolved ones per strategy, and two classes of expected misses: builtins and
-//! names reached through non-project modules. Unresolved references are logged
+//! resolved ones per strategy, and two classes of expected misses: builtins
+//! (PHP: also names behind a namespace qualifier, `App\strlen`) and names
+//! reached through non-project modules (PHP: third-party namespaces and
+//! members of open types). Unresolved references are logged
 //! at `trace` level (`tracing` target `rueca_resolve`).
 //!
 //! # Prior art
@@ -122,7 +162,7 @@
 //! No code is copied; the algorithms are re-implemented over Rueca's facts.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use rueca_extract::{LanguagePack, ProjectFiles, Registry};
 use rueca_model::{
@@ -275,6 +315,8 @@ struct Resolver<'a> {
     envs: Vec<Env>,
     /// Resolved base classes (INHERITS targets) per class node, in order.
     bases: HashMap<NodeId, Vec<NodeId>>,
+    /// PHP symbols by fully qualified name (see [`PhpIndex`]).
+    php: PhpIndex,
 
     /// Key: (module, name, reached through `export *`).
     lookup_memo: RefCell<HashMap<(FileId, String, bool), Option<Target>>>,
@@ -327,6 +369,42 @@ fn split_decorator(text: &str) -> Option<(Option<&str>, &str)> {
         None => t,
     };
     split_base(t)
+}
+
+/// Splits a PHP fully qualified name from `Definition::bases` /
+/// `implements` (`\App\Models\Model`) into the namespace-qualifier
+/// encoding of PHP references: (`\App\Models\`, `Model`).
+fn split_php_name(text: &str) -> Option<(Option<&str>, &str)> {
+    let t = text.trim();
+    if !t.starts_with('\\') {
+        return None;
+    }
+    let idx = t.rfind('\\')?;
+    let name = &t[idx + 1..];
+    if name.is_empty() || !is_ident(name) {
+        return None;
+    }
+    Some((Some(&t[..=idx]), name))
+}
+
+/// PHP symbols by fully qualified name. Class and function names are
+/// case-insensitive in PHP (keys lowercased); constants are not.
+#[derive(Default)]
+struct PhpIndex {
+    /// Classes, interfaces, traits, enums.
+    types: HashMap<String, Vec<NodeId>>,
+    functions: HashMap<String, Vec<NodeId>>,
+    /// Namespace constants and `define()` constants (not class constants).
+    constants: HashMap<String, Vec<NodeId>>,
+    /// Lowercase first namespace segments of project definitions (`app`,
+    /// `illuminate`): names under them that are not found are misses, names
+    /// elsewhere are third-party (external).
+    roots: HashSet<String>,
+    /// Types whose members may come from outside the project: classes with
+    /// a parent, trait or interface that is not a project symbol, traits
+    /// (their `$this` is the using class) and enums (builtin `from`,
+    /// `cases`, `$value`). Missing members of these are external.
+    open: HashSet<NodeId>,
 }
 
 fn normalize_stem(s: &str) -> String {
@@ -514,6 +592,7 @@ impl<'a> Resolver<'a> {
             import_targets: Vec::new(),
             envs: Vec::new(),
             bases: HashMap::new(),
+            php: PhpIndex::default(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
@@ -521,6 +600,7 @@ impl<'a> Resolver<'a> {
         };
         r.build_nodes(snapshot);
         r.build_tables();
+        r.build_php_index();
         r
     }
 
@@ -534,6 +614,10 @@ impl<'a> Resolver<'a> {
 
     fn is_python(&self, f: FileId) -> bool {
         self.families[f as usize] == Some(LanguageFamily::Python)
+    }
+
+    fn is_php(&self, f: FileId) -> bool {
+        self.families[f as usize] == Some(LanguageFamily::Php)
     }
 
     fn node_of(&self, f: FileId, local: LocalDefId) -> NodeId {
@@ -1084,6 +1168,12 @@ impl<'a> Resolver<'a> {
             let fid = i as FileId;
             let python = self.is_python(fid);
             let mut env = Env::new();
+            // PHP names arrive fully qualified (the pack applies `use`), so
+            // PHP files have no binding environment.
+            if self.is_php(fid) {
+                envs.push(env);
+                continue;
+            }
             for (k, imp) in self.imports(fid).iter().enumerate() {
                 if imp.reexport && !python {
                     continue;
@@ -1100,6 +1190,218 @@ impl<'a> Resolver<'a> {
             envs.push(env);
         }
         self.envs = envs;
+    }
+
+    // -- PHP -----------------------------------------------------------------
+
+    fn build_php_index(&mut self) {
+        let mut index = PhpIndex::default();
+        for i in 0..self.files.len() {
+            let fid = i as FileId;
+            if !self.is_php(fid) {
+                continue;
+            }
+            let defs = self.defs(fid);
+            for (j, d) in defs.iter().enumerate() {
+                let node = self.def_node[i][j];
+                let qn = &self.nodes[node as usize].qualified_name;
+                let in_type = self.parents[i][j].is_some_and(|p| defs[p as usize].label.is_type());
+                if matches!(d.label, Label::Trait | Label::Enum) {
+                    index.open.insert(node);
+                }
+                let (map, key) = match d.label {
+                    l if l.is_type() => (&mut index.types, qn.to_lowercase()),
+                    Label::Function => (&mut index.functions, qn.to_lowercase()),
+                    Label::Constant if !in_type => (&mut index.constants, qn.clone()),
+                    _ => continue,
+                };
+                if let Some((root, _)) = key.split_once('\\') {
+                    index.roots.insert(root.to_lowercase());
+                }
+                let v = map.entry(key).or_default();
+                if !v.contains(&node) {
+                    v.push(node);
+                }
+            }
+        }
+        self.php = index;
+    }
+
+    /// First non-test node with this fully qualified name, else the first.
+    fn php_pick(map: &HashMap<String, Vec<NodeId>>, key: &str, nodes: &[Node]) -> Option<NodeId> {
+        let v = map.get(key)?;
+        v.iter().copied().find(|&n| !nodes[n as usize].is_test).or_else(|| v.first().copied())
+    }
+
+    /// A PHP symbol by fully qualified name, for a reference of `kind`.
+    fn php_symbol(&self, kind: RefKind, fqn: &str) -> Option<NodeId> {
+        let lower = fqn.to_lowercase();
+        match kind {
+            RefKind::Call => Self::php_pick(&self.php.functions, &lower, &self.nodes),
+            // Constants, then `X::class` reads of a class.
+            RefKind::Read => Self::php_pick(&self.php.constants, fqn, &self.nodes)
+                .or_else(|| Self::php_pick(&self.php.types, &lower, &self.nodes)),
+            RefKind::Write => None,
+            _ => Self::php_pick(&self.php.types, &lower, &self.nodes),
+        }
+    }
+
+    /// A PHP class by fully qualified name; failing that, the class of that
+    /// short name declared in the file Composer autoloading maps it to.
+    fn php_class(&self, f: FileId, fqn: &str) -> Option<(NodeId, bool)> {
+        if let Some(n) = Self::php_pick(&self.php.types, &fqn.to_lowercase(), &self.nodes) {
+            return Some((n, true));
+        }
+        let short = fqn.rsplit('\\').next().unwrap_or(fqn);
+        if !fqn.contains('\\') && self.packs[f as usize].is_some_and(|p| p.is_builtin(short)) {
+            return None;
+        }
+        let file = self.resolve_module(f, 0, fqn)?;
+        self.top_level_def(file, short).filter(|&n| self.nodes[n as usize].label.is_type()).map(|n| (n, false))
+    }
+
+    /// Whether a fully qualified name lives under a namespace the project
+    /// declares (so a miss is a miss, not a third-party name).
+    fn php_in_project(&self, fqn: &str) -> bool {
+        fqn.split_once('\\').is_some_and(|(root, _)| self.php.roots.contains(&root.to_lowercase()))
+    }
+
+    /// Whether a type (or one of its project bases) is open: its members may
+    /// be declared outside the project (see [`PhpIndex::open`]).
+    fn php_is_open(&self, class: NodeId) -> bool {
+        let mut stack = vec![(class, 0usize)];
+        let mut seen = Vec::new();
+        while let Some((c, depth)) = stack.pop() {
+            if self.php.open.contains(&c) {
+                return true;
+            }
+            if depth >= MAX_DEPTH || seen.contains(&c) {
+                continue;
+            }
+            seen.push(c);
+            for &b in self.bases.get(&c).map_or(&[][..], |v| v.as_slice()) {
+                stack.push((b, depth + 1));
+            }
+        }
+        false
+    }
+
+    /// A PHP member lookup that missed: external when the class is open (or
+    /// unknown, as for `$this` in a Pest closure), else `fallback`.
+    fn php_member_miss(&self, class: Option<NodeId>, fallback: impl FnOnce() -> Outcome) -> Outcome {
+        match class {
+            Some(c) if !self.php_is_open(c) => fallback(),
+            _ => Outcome::External,
+        }
+    }
+
+    /// Member `name` of the class enclosing `scope` (`$this`, `self`, `static`).
+    fn self_member(&self, f: FileId, scope: Option<LocalDefId>, name: &str) -> Outcome {
+        match self.enclosing_type(f, scope).and_then(|c| self.find_member(c, name)) {
+            Some((n, false)) => Outcome::Hit(n, Strategy::TypeResolved, 0.9),
+            Some((n, true)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+            None => Outcome::Miss,
+        }
+    }
+
+    /// Member `name` of a base of the class enclosing `scope` (`super`, `parent`).
+    fn super_member(&self, f: FileId, scope: Option<LocalDefId>, name: &str) -> Outcome {
+        let found = self
+            .enclosing_type(f, scope)
+            .and_then(|c| self.bases.get(&c)?.iter().find_map(|&b| self.find_member(b, name)));
+        match found {
+            Some((n, _)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+            None => Outcome::Miss,
+        }
+    }
+
+    /// PHP references (receiver encoding documented in `rueca-lang-php`):
+    ///
+    /// - `\A\B\` + `C`: the symbol `A\B\C` (`ImportResolved` 0.95);
+    ///   classes not in the index are looked up in the file Composer maps
+    ///   them to (0.80).
+    /// - `A\B\` + `f` (unqualified function or constant in a namespace):
+    ///   `A\B\f`, then the global `f` (0.90).
+    /// - `\A\C` + `m`: static member of class `A\C` (`ImportResolved`
+    ///   0.85); `\A\C->` + `m`: member of a typed instance (`TypeResolved`
+    ///   0.85). Members are searched through parents, traits and interfaces.
+    /// - `$this` / `self` / `static`: member of the enclosing class;
+    ///   `parent`: member of its bases.
+    /// - Anything else: unknown receiver (unique method name, 0.50).
+    ///
+    /// Names that are not found are builtins (`strlen`), misses (under a
+    /// project namespace) or external (third-party namespaces, vendor
+    /// classes). A missing member of an *open* class (one extending or using
+    /// something outside the project, a trait, an enum) is external: it is
+    /// most likely inherited from vendor code. A missing member of a closed
+    /// project class (magic `__call` / `__callStatic`) falls back to the
+    /// unique-method heuristic.
+    fn resolve_php(&self, f: FileId, item: &RefItem<'_>, scope: Option<LocalDefId>) -> Outcome {
+        let name = item.name;
+        let pack = self.packs[f as usize];
+        let Some(receiver) = item.receiver.map(str::trim) else {
+            if let Some(n) = self.local_scope(f, scope, name) {
+                return Outcome::Hit(n, Strategy::SameModule, 0.95);
+            }
+            if let Some(n) = self.top_level_def(f, name) {
+                return Outcome::Hit(n, Strategy::SameModule, 0.9);
+            }
+            return self.unique_name(f, item.kind, name, false);
+        };
+        let selfs: &[&str] = pack.map_or(&[], |p| p.self_receivers());
+        if selfs.contains(&receiver) || receiver == "parent" {
+            let outcome =
+                if receiver == "parent" { self.super_member(f, scope, name) } else { self.self_member(f, scope, name) };
+            return match outcome {
+                Outcome::Miss => self.php_member_miss(self.enclosing_type(f, scope), || Outcome::Miss),
+                hit => hit,
+            };
+        }
+        // Namespace qualifier: a class, function or constant by name.
+        if let Some(qualifier) = receiver.strip_suffix('\\') {
+            let (exact, ns) = match qualifier.strip_prefix('\\') {
+                Some(ns) => (true, ns),
+                None => (false, qualifier),
+            };
+            let fqn = if ns.is_empty() { name.to_string() } else { format!("{ns}\\{name}") };
+            if let Some(n) = self.php_symbol(item.kind, &fqn) {
+                return Outcome::Hit(n, Strategy::ImportResolved, 0.95);
+            }
+            if !exact
+                && !ns.is_empty()
+                && let Some(n) = self.php_symbol(item.kind, name)
+            {
+                return Outcome::Hit(n, Strategy::ImportResolved, 0.9);
+            }
+            if exact
+                && !matches!(item.kind, RefKind::Call | RefKind::Write)
+                && let Some((n, false)) = self.php_class(f, &fqn)
+            {
+                return Outcome::Hit(n, Strategy::ImportResolved, 0.8);
+            }
+            if pack.is_some_and(|p| p.is_builtin(name)) || self.php_in_project(&fqn) {
+                return Outcome::Miss;
+            }
+            return Outcome::External;
+        }
+        // Class member: `\A\C` (static) or `\A\C->` (typed instance).
+        if let Some(class) = receiver.strip_prefix('\\') {
+            let (class, instance) = match class.strip_suffix("->") {
+                Some(c) => (c, true),
+                None => (class, false),
+            };
+            return match self.php_class(f, class) {
+                Some((c, _)) => match self.find_member(c, name) {
+                    Some((n, _)) if instance => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+                    Some((n, _)) => Outcome::Hit(n, Strategy::ImportResolved, 0.85),
+                    None => self.php_member_miss(Some(c), || self.unique_name(f, item.kind, name, true)),
+                },
+                None if self.php_in_project(class) => self.unique_name(f, item.kind, name, true),
+                None => Outcome::External,
+            };
+        }
+        // Unknown receiver (`$repo`, `foo()->bar`, `class@anonymous`).
+        self.unique_name(f, item.kind, name, true)
     }
 
     // -- members and bases ---------------------------------------------------
@@ -1144,9 +1446,11 @@ impl<'a> Resolver<'a> {
                 let class = self.node_of(fid, j as LocalDefId);
                 let scope = self.parents[i][j];
                 let lists = [(EdgeKind::Inherits, &d.bases), (EdgeKind::Implements, &d.implements)];
+                let php = self.is_php(fid);
                 for (kind, list) in lists {
                     for text in list.iter() {
-                        let Some((receiver, name)) = split_base(text) else { continue };
+                        let split = if php { split_php_name(text) } else { split_base(text) };
+                        let Some((receiver, name)) = split else { continue };
                         let item = RefItem {
                             kind: RefKind::Type,
                             name,
@@ -1155,13 +1459,19 @@ impl<'a> Resolver<'a> {
                             span: d.name_span,
                             decorated: None,
                         };
-                        if let Outcome::Hit(target, strategy, confidence) = self.resolve_item(fid, &item, scope) {
+                        let outcome = self.resolve_item(fid, &item, scope);
+                        if php && !matches!(outcome, Outcome::Hit(..)) {
+                            // A parent, trait or interface outside the project.
+                            self.php.open.insert(class);
+                        }
+                        if let Outcome::Hit(target, strategy, confidence) = outcome {
                             if target == class {
                                 continue;
                             }
                             let meta = EdgeMeta { confidence, strategy, evidence: Some((fid, d.name_span)) };
                             self.add_edge(class, target, kind, meta);
-                            if kind == EdgeKind::Inherits {
+                            // PHP: interface constants are members of implementing classes.
+                            if kind == EdgeKind::Inherits || php {
                                 let v = self.bases.entry(class).or_default();
                                 if !v.contains(&target) {
                                     v.push(target);
@@ -1230,6 +1540,9 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_item(&self, f: FileId, item: &RefItem<'_>, scope: Option<LocalDefId>) -> Outcome {
+        if self.is_php(f) {
+            return self.resolve_php(f, item, scope);
+        }
         let name = item.name;
         let pack = self.packs[f as usize];
         let selfs: &[&str] = pack.map_or(&[], |p| p.self_receivers());
@@ -1479,7 +1792,12 @@ impl<'a> Resolver<'a> {
                     path = %self.files[f as usize].path,
                     "unresolved"
                 );
-                if item.receiver.is_none() && self.packs[f as usize].is_some_and(|p| p.is_builtin(item.name)) {
+                // PHP reports builtins with a namespace qualifier (`App\`, `\`).
+                let unqualified = match item.receiver {
+                    None => true,
+                    Some(r) => self.is_php(f) && r.ends_with('\\'),
+                };
+                if unqualified && self.packs[f as usize].is_some_and(|p| p.is_builtin(item.name)) {
                     self.stats.references_builtin += 1;
                 }
                 return;
@@ -1503,7 +1821,11 @@ impl<'a> Resolver<'a> {
             EdgeKind::Calls => {
                 self.add_edge(caller, target, EdgeKind::Calls, meta);
                 if self.nodes[target as usize].label.is_type() {
-                    let ctor = self.find_member(target, "__init__").or_else(|| self.find_member(target, "constructor"));
+                    let ctor = if self.is_php(f) {
+                        self.find_member(target, "__construct")
+                    } else {
+                        self.find_member(target, "__init__").or_else(|| self.find_member(target, "constructor"))
+                    };
                     if let Some((c, _)) = ctor {
                         let m = EdgeMeta { confidence: confidence * 0.95, ..meta };
                         self.add_edge(caller, c, EdgeKind::Calls, m);

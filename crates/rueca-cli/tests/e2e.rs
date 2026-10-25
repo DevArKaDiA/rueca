@@ -221,3 +221,64 @@ fn typescript_index_then_every_tool() {
     assert!(r["text"].as_str().unwrap().starts_with("export function run(): string {"), "{r}");
     assert_eq!((r["start_line"].as_u64(), r["end_line"].as_u64()), (Some(3), Some(6)));
 }
+
+/// PHP end to end: Composer PSR-4, fully qualified names as symbol ids.
+#[test]
+fn php_index_then_every_tool() {
+    let p = python_project();
+    add_php(&p);
+    index(&p);
+    let save_id = "local/proj@worktree:app/Models/User.php#App\\Models\\User::save";
+
+    let r = query(&p, "search_symbols", json!({"query": "user save", "language": "php"}));
+    assert_eq!(r["results"][0]["qualified_name"], "App\\Models\\User::save", "{r}");
+    assert_eq!(r["results"][0]["id"], save_id);
+
+    let r = query(&p, "get_symbol", json!({"qualified_name": "User::save"}));
+    assert_eq!(r["symbol"]["id"], save_id, "{r}");
+    assert_eq!(r["symbol"]["language"], "php");
+    assert_eq!(r["symbol"]["signature"], "public function save(): bool");
+    assert_eq!(r["parent"]["qualified_name"], "App\\Models\\User");
+    assert_eq!(r["callers_count"], 1, "{r}");
+    assert_eq!(r["callees_count"], 1, "{r}");
+    assert_eq!(query(&p, "get_symbol", json!({"id": save_id}))["symbol"], r["symbol"]);
+    let r = query(&p, "get_symbol", json!({"qualified_name": "App\\Models\\User"}));
+    assert_eq!(r["symbol"]["doc"], "An account.");
+    assert_eq!(
+        qns(&r["children"]),
+        [
+            "App\\Models\\User::$email",
+            "App\\Models\\User::__construct",
+            "App\\Models\\User::save",
+            "App\\Models\\User::validate"
+        ]
+    );
+
+    // `$user = new User(...)` types `$user`: the call is type-resolved.
+    let r = query(&p, "trace", json!({"qualified_name": "User::save", "direction": "callers"}));
+    assert_eq!(qns(&r["nodes"]), ["App\\Http\\UserController::store"], "{r}");
+    assert_eq!(r["edges"][0]["strategy"], "type_resolved", "{r}");
+    let r = query(&p, "trace", json!({"qualified_name": "UserController::store", "direction": "callees"}));
+    let callees = qns(&r["nodes"]);
+    for expected in ["App\\Models\\User", "App\\Models\\User::__construct", "App\\Models\\User::save"] {
+        assert!(callees.contains(&expected.to_string()), "{r}");
+    }
+
+    // `use App\\Models\\User` resolves through composer.json (PSR-4).
+    let r = query(
+        &p,
+        "trace",
+        json!({"qualified_name": "app/Http/UserController.php", "direction": "callees", "edge_types": ["IMPORTS"]}),
+    );
+    assert_eq!(qns(&r["nodes"]), ["app/Models/User.php"], "{r}");
+
+    let r = query(&p, "get_file_outline", json!({"path": "app/Models/User.php"}));
+    assert_eq!(qns(&r["symbols"]), ["App\\Models\\User"], "{r}");
+    assert_eq!(r["symbols"][0]["children"].as_array().unwrap().len(), 4, "{r}");
+
+    let r = query(&p, "search_code", json!({"pattern": "validate()", "language": "php"}));
+    assert_eq!(r["matches"][0]["symbol"]["qualified_name"], "App\\Models\\User::save", "{r}");
+
+    let r = query(&p, "get_snippet", json!({"id": save_id}));
+    assert!(r["text"].as_str().unwrap().trim_start().starts_with("public function save(): bool"), "{r}");
+}

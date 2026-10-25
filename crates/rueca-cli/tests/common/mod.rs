@@ -83,6 +83,57 @@ pub fn add_typescript(p: &Project) {
     write(&p.root, "web/src/app.ts", APP_TS);
 }
 
+const COMPOSER_JSON: &str = r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#;
+
+const USER_PHP: &str = r#"<?php
+
+namespace App\Models;
+
+/** An account. */
+class User
+{
+    public function __construct(private string $email)
+    {
+    }
+
+    public function save(): bool
+    {
+        return $this->validate();
+    }
+
+    private function validate(): bool
+    {
+        return $this->email !== '';
+    }
+}
+"#;
+
+const CONTROLLER_PHP: &str = r#"<?php
+
+namespace App\Http;
+
+use App\Models\User;
+
+class UserController
+{
+    public function store(string $email): User
+    {
+        $user = new User($email);
+        $user->save();
+
+        return $user;
+    }
+}
+"#;
+
+/// A Composer project: `composer.json` (PSR-4 `App\` → `app/`), a model and
+/// a controller.
+pub fn add_php(p: &Project) {
+    write(&p.root, "composer.json", COMPOSER_JSON);
+    write(&p.root, "app/Models/User.php", USER_PHP);
+    write(&p.root, "app/Http/UserController.php", CONTROLLER_PHP);
+}
+
 pub fn rueca(store: &Path) -> Command {
     let mut c = Command::cargo_bin("rueca").unwrap();
     c.arg("--store").arg(store).env_remove("RUECA_LOG").env_remove("RUECA_HOME");
