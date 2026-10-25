@@ -286,9 +286,11 @@ fn ids(hits: &[rueca_segment::SymbolHit]) -> Vec<u32> {
 #[test]
 fn symbol_search_camel_case_and_exact_first() {
     let (_d, _g, seg) = open_fixture();
+    // The method ranks first; the variable of the same name is demoted by
+    // its label prior but still listed.
     let hits = seg.search_symbols(&sym("user by id")).unwrap();
-    let top: Vec<u32> = ids(&hits).into_iter().take(2).collect();
-    assert!(top.contains(&8) && top.contains(&12), "{hits:?}");
+    assert_eq!(hits[0].node, 8, "{hits:?}");
+    assert!(ids(&hits).contains(&12), "{hits:?}");
 
     let hits = seg.search_symbols(&sym("getUserById")).unwrap();
     let mut top2: Vec<u32> = ids(&hits).into_iter().take(2).collect();

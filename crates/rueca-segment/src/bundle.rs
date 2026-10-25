@@ -136,6 +136,18 @@ impl Bundle {
         Self::from_mmap(Arc::new(mmap), version)
     }
 
+    /// Format version in the header of the bundle file at `path`, without
+    /// validating the rest of the file.
+    pub fn peek_version(path: &Path) -> Result<u32> {
+        use std::io::Read;
+        let mut head = [0u8; HEADER_LEN];
+        File::open(path)?.read_exact(&mut head).map_err(|_| corrupt("short header"))?;
+        if &head[..8] != SEG_MAGIC {
+            return Err(corrupt("bad magic (not a .rcseg file)"));
+        }
+        le_u32(&head, 8).ok_or_else(|| corrupt("short header"))
+    }
+
     pub fn from_mmap(mmap: Arc<Mmap>, version: u32) -> Result<Bundle> {
         let b: &[u8] = &mmap[..];
         if b.len() < HEADER_LEN || &b[..8] != SEG_MAGIC {

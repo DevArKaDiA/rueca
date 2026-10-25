@@ -140,7 +140,7 @@ impl Inner {
             return Err(corrupt("ngrams.text_files out of range"));
         }
 
-        let symbols = SymbolIndex::open(&bundle, n)?;
+        let symbols = SymbolIndex::open(&bundle, &nodes, &files)?;
         Ok(Inner {
             meta,
             nodes,
