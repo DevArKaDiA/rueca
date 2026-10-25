@@ -128,6 +128,11 @@ license = "PHP-3.01 (run as a separate process; nothing vendored)"
 name = "rueca"
 binary = "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)"
 contract = "docs/tools.md (alpha)"
+# Binaries behind the published Rueca numbers (also recorded per language in
+# the report). Python/TS: main at release 0.1.0-alpha.1. PHP: the language-pack
+# branch, built with `cargo build --release -p rueca` (macOS arm64).
+results_python_ts = "0.1.0-alpha.1 (binary sha256 8d6bc2783fd3…)"
+results_php = "feat/lang-php @ aaf83850ee99 (binary sha256 eb2c20eb23e2acce0c5b0c57f1d5a68a52eec0bbb314706a0f8091129922c0a6)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.

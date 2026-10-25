@@ -52,6 +52,12 @@ RUECA_BIN=$PWD/target/release/rueca uv run --project bench rueca-bench run --arm
 uv run --project bench rueca-bench report
 ```
 
+A language pack still on a branch is benchmarked the same way: build that
+branch (e.g. in a temporary worktree with its own `CARGO_TARGET_DIR`) and run
+`--arm rueca --lang <family>` with `RUECA_BIN` pointing at it. The report
+lists the Rueca binary per language, and `manifest.toml` (`[tools.rueca]`)
+records which binary produced the published numbers.
+
 Without `RUECA_BIN` the Rueca column is reported as *pending*; a language
 whose Rueca outputs are missing shows *pending* in its own column and is left
 out of `overall` (which pools only languages every arm has results for), so

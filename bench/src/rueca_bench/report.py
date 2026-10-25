@@ -86,6 +86,22 @@ def _recorded_versions(name: str) -> list[str]:
     return sorted(vers)
 
 
+def versions_by_group() -> dict:
+    """{group: {arm: [versions]}} from cached outputs, so a report that mixes
+    binaries across languages (e.g. a language pack on a branch) says so."""
+    out: dict = defaultdict(lambda: defaultdict(set))
+    for suite in ("s1", "s3"):
+        for name in ARM_NAMES:
+            for p in sorted((RUNS_DIR / suite / name).glob("*.json")):
+                rec = read_json(p)
+                if rec.get("arm_version") and rec.get("language"):
+                    try:
+                        out[lang_group(rec["language"])][name].add(rec["arm_version"])
+                    except KeyError:
+                        continue
+    return {g: {a: sorted(v) for a, v in d.items()} for g, d in out.items()}
+
+
 def arm_status() -> dict:
     """Versions are taken from the cached outputs (what was actually run);
     the live binary is only consulted when nothing has been run yet."""
@@ -447,14 +463,32 @@ def _s3v(*path: str, micro: bool = False):
     return get
 
 
+# Columns shown in the parity table (key metrics) ...
 PARITY_KEYS = [
     ("S1 kw file Acc@5", _s1v("kw", "file_acc@5")),
     ("S1 kw func Acc@10", _s1v("kw", "func_acc@10")),
     ("S1 raw file Acc@5", _s1v("raw", "file_acc@5")),
+    ("S1 raw func Acc@10", _s1v("raw", "func_acc@10")),
     ("S3 definition found", _s3v("definition_found")),
     ("S3 callers F1", _s3v("callers", "f1")),
     ("S3 callees F1", _s3v("callees", "f1")),
     ("S3 micro callees F1", _s3v("callees", "f1", micro=True)),
+]
+# ... and every metric of the delta view, which decides the status.
+GATE_METRICS = [
+    _s1v("kw", "file_acc@1"),
+    _s1v("kw", "file_acc@5"),
+    _s1v("kw", "func_acc@10"),
+    _s1v("raw", "file_acc@5"),
+    _s1v("raw", "func_acc@10"),
+    _s3v("definition_found"),
+    _s3v("callers", "f1"),
+    _s3v("callees", "f1"),
+    _s3v("callees", "micro_recall"),
+    _s3v("lookup_acc@1"),
+    _s3v("definition_found", micro=True),
+    _s3v("callers", "f1", micro=True),
+    _s3v("callees", "f1", micro=True),
 ]
 
 
@@ -643,6 +677,9 @@ def render(meta: dict, s1: dict, s3: dict) -> str:
         repos_n = {r["repo"] for r in s1["per_instance"] if r["group"] == fam.label}
         L.append(f"- S1: {n_inst} instances over {len(repos_n)} repositories; sources: {spec.get('s1_sources', 'see bench/README.md')}.")
         L.append(f"- S3 gold: {spec.get('s3_gold', 'see bench/README.md')}.")
+        vers = meta.get("versions_by_group", {}).get(fam.label, {})
+        if vers.get("rueca"):
+            L.append(f"- Rueca binary for this language: {'; '.join(vers['rueca'])}.")
         if spec.get("notes"):
             L.append(f"- Notes: {spec['notes']}")
         L.append("")
@@ -679,15 +716,15 @@ def render(meta: dict, s1: dict, s3: dict) -> str:
     L.append("")
     L.append(
         "Gate (README, RFC 0001 §15): a language is supported when Rueca matches or beats codebase-memory-mcp v0.12.0. "
-        "Each cell is rueca / cbm / grep (percentages); status ✅ when Rueca ≥ cbm on every key metric with data, ❌ otherwise "
-        "(count of metrics met in brackets), *pending* without Rueca results. Suite 4 (agent end-to-end) is not part of the alpha."
+        "Each cell is rueca / cbm / grep (percentages). Status: ✅ when Rueca ≥ cbm on every metric of the delta view below "
+        "(13 metrics where data exists; count met in brackets), ❌ otherwise, *pending* without Rueca results. "
+        "Samples are small, so a miss of a few points is within noise but still counts. Suite 4 (agent end-to-end) is not part of the alpha."
     )
     L.append("")
     L.append("| Language | " + " | ".join(t for t, _ in PARITY_KEYS) + " | Status |")
     L.append("|---|" + "---|" * len(PARITY_KEYS) + "---|")
     for fam in fams:
         cells = []
-        met = total = 0
         rueca_any = False
         for _, get in PARITY_KEYS:
             r, c, gp = (get(s1, s3, arm, fam.label) for arm in ("rueca", "cbm", "grep"))
@@ -695,8 +732,10 @@ def render(meta: dict, s1: dict, s3: dict) -> str:
                 cells.append("—")
                 continue
             cells.append(f"{_f(r) if r is not None else 'pending'} / {_f(c)} / {_f(gp)}")
-            if r is not None:
-                rueca_any = True
+            rueca_any = rueca_any or r is not None
+        met = total = 0
+        for get in GATE_METRICS:
+            r, c = (get(s1, s3, arm, fam.label) for arm in ("rueca", "cbm"))
             if r is not None and c is not None:
                 total += 1
                 met += int(r - c >= -1e-9)
@@ -781,6 +820,7 @@ def report() -> None:
         "date": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "machine": machine_info(),
         "arms": arm_status(),
+        "versions_by_group": versions_by_group(),
         "manifest_sha256": sha256_file(MANIFEST_PATH),
         "manifest_tools": load_manifest()["tools"],
     }
