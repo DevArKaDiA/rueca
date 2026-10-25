@@ -81,13 +81,15 @@ impl View {
         }
         parts.reverse();
         let chain = parts.join(".");
-        // Without DEFINES edges the chain is just the name; for ECMAScript the
-        // global name carries the local part after the first colon.
+        // Without DEFINES edges the chain is just the name; outside Python the
+        // global name carries the local part after the first module separator.
         let qn = &node.qualified_name;
-        let consistent = qn == &chain || qn.ends_with(&format!(".{chain}")) || qn.ends_with(&format!(":{chain}"));
+        let family = node.language.map(|l| l.family());
+        let sep = family.map_or(".", LanguageFamily::module_separator);
+        let consistent = qn == &chain || qn.ends_with(&format!(".{chain}")) || qn.ends_with(&format!("{sep}{chain}"));
         if !consistent
-            && node.language.map(|l| l.family()) == Some(LanguageFamily::EcmaScript)
-            && let Some((_, local)) = qn.split_once(':')
+            && family.is_some_and(|f| f != LanguageFamily::Python)
+            && let Some((_, local)) = qn.split_once(sep)
         {
             return Some(local.to_string());
         }
@@ -281,7 +283,7 @@ impl View {
                 let b = n.qualified_name.as_bytes()[n.qualified_name.len() - q.len() - 1];
                 // `/` lets ECMAScript names drop leading module directories
                 // (`util:formatAmount` for `src/util:formatAmount`).
-                b == b'.' || b == b':' || b == b'/'
+                b == b'.' || b == b':' || b == b'/' || b == b'\\'
             })
             .collect()
     }

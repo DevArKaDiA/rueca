@@ -586,10 +586,7 @@ impl<'a> Resolver<'a> {
         for (i, f) in self.files.iter().enumerate() {
             let fid = i as FileId;
             let defs = self.defs(fid);
-            let sep = match self.families[i] {
-                Some(LanguageFamily::Python) => ".",
-                _ => ":",
-            };
+            let sep = self.families[i].map_or(":", LanguageFamily::module_separator);
             let module = &self.module_names[i];
             let mut map = Vec::with_capacity(defs.len());
             for d in defs {
