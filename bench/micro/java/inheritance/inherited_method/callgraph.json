@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Depot.dispatch": [
+    "app/Main.java:Truck.load",
+    "app/Main.java:Vehicle.honk"
+  ],
+  "app/Main.java:Truck.load": [],
+  "app/Main.java:Vehicle.honk": []
+}

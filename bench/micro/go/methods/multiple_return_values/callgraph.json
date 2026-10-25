@@ -1,0 +1,11 @@
+{
+  "main.go:File.Close": [],
+  "main.go:Open": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:File.Close",
+    "main.go:Open"
+  ]
+}

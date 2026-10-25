@@ -1,0 +1,6 @@
+{
+  "app/Main.java:Lexer.next": [
+    "app/Main.java:Token.value"
+  ],
+  "app/Main.java:Token.value": []
+}

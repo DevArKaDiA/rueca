@@ -1,0 +1,10 @@
+{
+  "main.go:Reader.read": [],
+  "main.go:Writer.Flush": [
+    "main.go:Writer.read"
+  ],
+  "main.go:Writer.read": [],
+  "main.go:main": [
+    "main.go:Writer.Flush"
+  ]
+}

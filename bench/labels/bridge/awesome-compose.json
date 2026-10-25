@@ -1,0 +1,480 @@
+{
+ "description": "Hand-checked env bridge labels (rueca-bench, Apache-2.0). reads: (path, function, env): the innermost named function (or <module>) that reads the variable with a string-literal name through a standard env API (os.Getenv/LookupEnv, os.environ[...]/.get/in, os.getenv, process.env.X/['X'], System.getenv(...)/System.getenv().get*(...)); line is informative. writes: (path, env, line): entries that set the variable: Kubernetes container env / initContainers, compose environment (list or mapping), Dockerfile ENV (every pair; line = the instruction's first line) and .env files. Not labelled: names built at run time (wrappers such as mustMapEnv(&x, \"NAME\")), C# code, Helm templates, config keys.",
+ "repo": "docker/awesome-compose",
+ "commit": "30f4b7f6a6c3b0c0ecf4d4efb0de203c48d11562",
+ "reads": [
+  {
+   "path": "nginx-flask-mongo/flask/server.py",
+   "function": "<module>",
+   "env": "FLASK_SERVER_PORT",
+   "line": 21
+  },
+  {
+   "path": "nginx-wsgi-flask/flask/wsgi.py",
+   "function": "<module>",
+   "env": "FLASK_SERVER_PORT",
+   "line": 5
+  },
+  {
+   "path": "react-express-mongodb/backend/config/config.js",
+   "function": "<module>",
+   "env": "NODE_ENV",
+   "line": 1
+  },
+  {
+   "path": "react-express-mongodb/backend/db/index.js",
+   "function": "connectWithRetry",
+   "env": "MONGODB_URI",
+   "line": 17
+  },
+  {
+   "path": "react-express-mongodb/frontend/src/serviceWorker.js",
+   "function": "register",
+   "env": "NODE_ENV",
+   "line": 24
+  },
+  {
+   "path": "react-express-mongodb/frontend/src/serviceWorker.js",
+   "function": "register",
+   "env": "PUBLIC_URL",
+   "line": 26
+  },
+  {
+   "path": "react-express-mongodb/frontend/src/serviceWorker.js",
+   "function": "register",
+   "env": "PUBLIC_URL",
+   "line": 35
+  },
+  {
+   "path": "react-express-mysql/backend/healthcheck.js",
+   "function": "<module>",
+   "env": "PORT",
+   "line": 6
+  },
+  {
+   "path": "react-express-mysql/backend/src/config.js",
+   "function": "<module>",
+   "env": "DATABASE_HOST",
+   "line": 8
+  },
+  {
+   "path": "react-express-mysql/backend/src/config.js",
+   "function": "<module>",
+   "env": "DATABASE_PORT",
+   "line": 9
+  },
+  {
+   "path": "react-express-mysql/backend/src/config.js",
+   "function": "<module>",
+   "env": "DATABASE_DB",
+   "line": 10
+  },
+  {
+   "path": "react-express-mysql/backend/src/config.js",
+   "function": "<module>",
+   "env": "DATABASE_USER",
+   "line": 11
+  },
+  {
+   "path": "react-express-mysql/backend/src/config.js",
+   "function": "<module>",
+   "env": "DATABASE_PASSWORD",
+   "line": 12
+  },
+  {
+   "path": "react-express-mysql/backend/src/config.js",
+   "function": "<module>",
+   "env": "DATABASE_PASSWORD",
+   "line": 13
+  },
+  {
+   "path": "react-express-mysql/backend/src/config.js",
+   "function": "<module>",
+   "env": "PORT",
+   "line": 16
+  },
+  {
+   "path": "react-express-mysql/frontend/src/serviceWorker.js",
+   "function": "register",
+   "env": "NODE_ENV",
+   "line": 24
+  },
+  {
+   "path": "react-express-mysql/frontend/src/serviceWorker.js",
+   "function": "register",
+   "env": "PUBLIC_URL",
+   "line": 26
+  },
+  {
+   "path": "react-express-mysql/frontend/src/serviceWorker.js",
+   "function": "register",
+   "env": "PUBLIC_URL",
+   "line": 35
+  },
+  {
+   "path": "react-java-mysql/frontend/src/serviceWorker.ts",
+   "function": "register",
+   "env": "NODE_ENV",
+   "line": 29
+  },
+  {
+   "path": "react-java-mysql/frontend/src/serviceWorker.ts",
+   "function": "register",
+   "env": "PUBLIC_URL",
+   "line": 32
+  },
+  {
+   "path": "react-java-mysql/frontend/src/serviceWorker.ts",
+   "function": "register",
+   "env": "PUBLIC_URL",
+   "line": 43
+  }
+ ],
+ "writes": [
+  {
+   "path": "fastapi/compose.yaml",
+   "env": "PORT",
+   "line": 8
+  },
+  {
+   "path": "gitea-postgres/compose.yaml",
+   "env": "DB_TYPE",
+   "line": 5
+  },
+  {
+   "path": "gitea-postgres/compose.yaml",
+   "env": "DB_HOST",
+   "line": 6
+  },
+  {
+   "path": "gitea-postgres/compose.yaml",
+   "env": "DB_NAME",
+   "line": 7
+  },
+  {
+   "path": "gitea-postgres/compose.yaml",
+   "env": "DB_USER",
+   "line": 8
+  },
+  {
+   "path": "gitea-postgres/compose.yaml",
+   "env": "DB_PASSWD",
+   "line": 9
+  },
+  {
+   "path": "gitea-postgres/compose.yaml",
+   "env": "POSTGRES_USER",
+   "line": 18
+  },
+  {
+   "path": "gitea-postgres/compose.yaml",
+   "env": "POSTGRES_PASSWORD",
+   "line": 19
+  },
+  {
+   "path": "gitea-postgres/compose.yaml",
+   "env": "POSTGRES_DB",
+   "line": 20
+  },
+  {
+   "path": "nginx-flask-mongo/compose.yaml",
+   "env": "FLASK_SERVER_ADDR",
+   "line": 7
+  },
+  {
+   "path": "nginx-flask-mongo/compose.yaml",
+   "env": "FLASK_SERVER_PORT",
+   "line": 22
+  },
+  {
+   "path": "nginx-flask-mysql/backend/Dockerfile",
+   "env": "FLASK_APP",
+   "line": 11
+  },
+  {
+   "path": "nginx-flask-mysql/backend/Dockerfile",
+   "env": "FLASK_ENV",
+   "line": 12
+  },
+  {
+   "path": "nginx-flask-mysql/backend/Dockerfile",
+   "env": "FLASK_RUN_PORT",
+   "line": 13
+  },
+  {
+   "path": "nginx-flask-mysql/backend/Dockerfile",
+   "env": "FLASK_RUN_HOST",
+   "line": 14
+  },
+  {
+   "path": "nginx-flask-mysql/compose.yaml",
+   "env": "MYSQL_DATABASE",
+   "line": 21
+  },
+  {
+   "path": "nginx-flask-mysql/compose.yaml",
+   "env": "MYSQL_ROOT_PASSWORD_FILE",
+   "line": 22
+  },
+  {
+   "path": "nginx-golang-mysql/backend/Dockerfile",
+   "env": "CGO_ENABLED",
+   "line": 6
+  },
+  {
+   "path": "nginx-golang-mysql/backend/Dockerfile",
+   "env": "GOPATH",
+   "line": 7
+  },
+  {
+   "path": "nginx-golang-mysql/backend/Dockerfile",
+   "env": "GOCACHE",
+   "line": 8
+  },
+  {
+   "path": "nginx-golang-mysql/compose.yaml",
+   "env": "MYSQL_DATABASE",
+   "line": 29
+  },
+  {
+   "path": "nginx-golang-mysql/compose.yaml",
+   "env": "MYSQL_ROOT_PASSWORD_FILE",
+   "line": 30
+  },
+  {
+   "path": "nginx-golang-postgres/backend/Dockerfile",
+   "env": "CGO_ENABLED",
+   "line": 6
+  },
+  {
+   "path": "nginx-golang-postgres/backend/Dockerfile",
+   "env": "GOPATH",
+   "line": 7
+  },
+  {
+   "path": "nginx-golang-postgres/backend/Dockerfile",
+   "env": "GOCACHE",
+   "line": 8
+  },
+  {
+   "path": "nginx-golang-postgres/compose.yaml",
+   "env": "POSTGRES_DB",
+   "line": 21
+  },
+  {
+   "path": "nginx-golang-postgres/compose.yaml",
+   "env": "POSTGRES_PASSWORD_FILE",
+   "line": 22
+  },
+  {
+   "path": "nginx-wsgi-flask/compose.yaml",
+   "env": "FLASK_SERVER_ADDR",
+   "line": 8
+  },
+  {
+   "path": "nginx-wsgi-flask/flask/Dockerfile",
+   "env": "VIRTUAL_ENV",
+   "line": 21
+  },
+  {
+   "path": "nginx-wsgi-flask/flask/Dockerfile",
+   "env": "PATH",
+   "line": 25
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "POSTGRES_USER",
+   "line": 1
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "POSTGRES_PW",
+   "line": 2
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "POSTGRES_DB",
+   "line": 3
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "PGADMIN_MAIL",
+   "line": 4
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "PGADMIN_PW",
+   "line": 5
+  },
+  {
+   "path": "postgresql-pgadmin/compose.yaml",
+   "env": "POSTGRES_USER",
+   "line": 6
+  },
+  {
+   "path": "postgresql-pgadmin/compose.yaml",
+   "env": "POSTGRES_PASSWORD",
+   "line": 7
+  },
+  {
+   "path": "postgresql-pgadmin/compose.yaml",
+   "env": "POSTGRES_DB",
+   "line": 8
+  },
+  {
+   "path": "postgresql-pgadmin/compose.yaml",
+   "env": "PGADMIN_DEFAULT_EMAIL",
+   "line": 17
+  },
+  {
+   "path": "postgresql-pgadmin/compose.yaml",
+   "env": "PGADMIN_DEFAULT_PASSWORD",
+   "line": 18
+  },
+  {
+   "path": "react-express-mysql/backend/Dockerfile",
+   "env": "NODE_ENV",
+   "line": 9
+  },
+  {
+   "path": "react-express-mysql/backend/Dockerfile",
+   "env": "PORT",
+   "line": 15
+  },
+  {
+   "path": "react-express-mysql/compose.yaml",
+   "env": "DATABASE_DB",
+   "line": 10
+  },
+  {
+   "path": "react-express-mysql/compose.yaml",
+   "env": "DATABASE_USER",
+   "line": 11
+  },
+  {
+   "path": "react-express-mysql/compose.yaml",
+   "env": "DATABASE_PASSWORD",
+   "line": 12
+  },
+  {
+   "path": "react-express-mysql/compose.yaml",
+   "env": "DATABASE_HOST",
+   "line": 13
+  },
+  {
+   "path": "react-express-mysql/compose.yaml",
+   "env": "NODE_ENV",
+   "line": 14
+  },
+  {
+   "path": "react-express-mysql/compose.yaml",
+   "env": "MYSQL_DATABASE",
+   "line": 45
+  },
+  {
+   "path": "react-express-mysql/compose.yaml",
+   "env": "MYSQL_ROOT_PASSWORD_FILE",
+   "line": 46
+  },
+  {
+   "path": "react-express-mysql/frontend/Dockerfile",
+   "env": "CI",
+   "line": 5
+  },
+  {
+   "path": "react-express-mysql/frontend/Dockerfile",
+   "env": "PORT",
+   "line": 6
+  },
+  {
+   "path": "react-java-mysql/compose.yaml",
+   "env": "MYSQL_HOST",
+   "line": 8
+  },
+  {
+   "path": "react-java-mysql/compose.yaml",
+   "env": "MYSQL_DATABASE",
+   "line": 21
+  },
+  {
+   "path": "react-java-mysql/compose.yaml",
+   "env": "MYSQL_ROOT_PASSWORD_FILE",
+   "line": 22
+  },
+  {
+   "path": "react-java-mysql/frontend/Dockerfile",
+   "env": "CI",
+   "line": 14
+  },
+  {
+   "path": "react-java-mysql/frontend/Dockerfile",
+   "env": "PORT",
+   "line": 15
+  },
+  {
+   "path": "sparkjava-mysql/compose.yaml",
+   "env": "MYSQL_DATABASE",
+   "line": 19
+  },
+  {
+   "path": "sparkjava-mysql/compose.yaml",
+   "env": "MYSQL_ROOT_PASSWORD_FILE",
+   "line": 20
+  },
+  {
+   "path": "spring-postgres/compose.yaml",
+   "env": "POSTGRES_DB",
+   "line": 7
+  },
+  {
+   "path": "spring-postgres/compose.yaml",
+   "env": "POSTGRES_DB",
+   "line": 20
+  },
+  {
+   "path": "spring-postgres/compose.yaml",
+   "env": "POSTGRES_PASSWORD_FILE",
+   "line": 21
+  },
+  {
+   "path": "wordpress-mysql/compose.yaml",
+   "env": "MYSQL_ROOT_PASSWORD",
+   "line": 12
+  },
+  {
+   "path": "wordpress-mysql/compose.yaml",
+   "env": "MYSQL_DATABASE",
+   "line": 13
+  },
+  {
+   "path": "wordpress-mysql/compose.yaml",
+   "env": "MYSQL_USER",
+   "line": 14
+  },
+  {
+   "path": "wordpress-mysql/compose.yaml",
+   "env": "MYSQL_PASSWORD",
+   "line": 15
+  },
+  {
+   "path": "wordpress-mysql/compose.yaml",
+   "env": "WORDPRESS_DB_HOST",
+   "line": 25
+  },
+  {
+   "path": "wordpress-mysql/compose.yaml",
+   "env": "WORDPRESS_DB_USER",
+   "line": 26
+  },
+  {
+   "path": "wordpress-mysql/compose.yaml",
+   "env": "WORDPRESS_DB_PASSWORD",
+   "line": 27
+  },
+  {
+   "path": "wordpress-mysql/compose.yaml",
+   "env": "WORDPRESS_DB_NAME",
+   "line": 28
+  }
+ ]
+}

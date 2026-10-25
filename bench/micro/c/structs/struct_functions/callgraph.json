@@ -1,0 +1,8 @@
+{
+  "point.c:origin_distance": [
+    "point.c:point_init",
+    "point.c:point_len2"
+  ],
+  "point.c:point_init": [],
+  "point.c:point_len2": []
+}

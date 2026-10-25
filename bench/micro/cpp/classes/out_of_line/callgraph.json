@@ -1,0 +1,8 @@
+{
+  "main.cpp:render": [
+    "widget.cpp:Widget::draw",
+    "widget.cpp:Widget::size"
+  ],
+  "widget.cpp:Widget::draw": [],
+  "widget.cpp:Widget::size": []
+}

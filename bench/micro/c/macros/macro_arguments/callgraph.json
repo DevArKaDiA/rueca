@@ -1,0 +1,8 @@
+{
+  "max.c:biggest": [
+    "max.c:left",
+    "max.c:right"
+  ],
+  "max.c:left": [],
+  "max.c:right": []
+}

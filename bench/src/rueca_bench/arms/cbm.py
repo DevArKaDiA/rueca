@@ -285,5 +285,52 @@ class CbmArm(Arm):
     def lookup(self, h: Handle, name: str, limit: int = 10) -> CallResult:
         return self._search(h, {"query": name}, limit)
 
+    # -- data suite ----------------------------------------------------------------
+
+    def _rows(self, h: Handle, query: str) -> tuple[list[list], str | None]:
+        """All rows of a Cypher query (follows the snapshot cursor)."""
+        args: dict[str, Any] = {"project": h.state["project"], "query": query, "format": "json", "max_rows": 99998, "max_output_tokens": 1000000}
+        rows: list[list] = []
+        for _ in range(200):
+            data, _, err = self._call("query_graph", args)
+            if err or not isinstance(data, dict):
+                return rows, err or "bad response"
+            rows += data.get("rows", [])
+            cur = data.get("next_cursor")
+            if not data.get("has_more") or not cur:
+                break
+            args["cursor"] = cur
+        return rows, None
+
+    def data_nodes(self, h: Handle, files: list[str]) -> CallResult:
+        t0 = time.perf_counter()
+        want = set(files)
+        rows, err = self._rows(h, "MATCH (n) RETURN n.label, n.name, n.file_path, n.start_line")
+        hits = [
+            {"path": p, "name": nm, "label": lb, "start_line": int(s)}
+            for lb, nm, p, s in rows
+            if p in want and lb not in ("File", "Folder", "Module", "Project") and str(s).isdigit() and int(s) > 0
+        ]
+        return CallResult(err is None, time.perf_counter() - t0, hits=hits, error=err)
+
+    def env_edges(self, h: Handle, names: list[str]) -> CallResult:
+        """cbm `CONFIGURES` edges: `env_access` (code -> canonical
+        `__env__NAME`) are reads; `env_set` (resource -> per-container
+        `...#env/<container>/NAME` at the entry's line) are writes."""
+        t0 = time.perf_counter()
+        rows, err = self._rows(
+            h,
+            "MATCH (a)-[r:CONFIGURES]->(b) RETURN a.label, a.name, a.file_path, a.start_line, b.name, b.qualified_name, b.file_path, b.start_line, r.strategy",
+        )
+        reads, writes = [], []
+        for alb, aname, apath, aline, bname, bqn, bpath, bline, strat in rows:
+            if strat == "env_access" and str(bqn).startswith("__env__"):
+                func = aname if alb in ("Function", "Method") else "<module>"
+                reads.append({"path": apath, "function": func, "env": bqn[len("__env__"):], "line": int(aline) if str(aline).isdigit() else None})
+            elif strat == "env_set":
+                env = str(bqn).rsplit("/", 1)[-1]
+                writes.append({"path": bpath or apath, "env": env, "line": int(bline) if str(bline).isdigit() else None})
+        return CallResult(err is None, time.perf_counter() - t0, error=err, extra={"reads": reads, "writes": [w for w in writes if w["line"]]})
+
     def cleanup(self, h: Handle) -> None:
         self._call("delete_project", {"project": h.state["project"]})

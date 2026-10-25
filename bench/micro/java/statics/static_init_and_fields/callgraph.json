@@ -1,0 +1,7 @@
+{
+  "app/Main.java:Registry.load": [],
+  "app/Main.java:Registry.refresh": [
+    "app/Main.java:Registry.register"
+  ],
+  "app/Main.java:Registry.register": []
+}

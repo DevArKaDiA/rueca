@@ -1,0 +1,10 @@
+{
+  "app/Logger.java:Job.run": [
+    "app/Logger.java:Logger.log@4",
+    "app/Logger.java:Logger.log@8"
+  ],
+  "app/Logger.java:Logger.log@4": [
+    "app/Logger.java:Logger.log@8"
+  ],
+  "app/Logger.java:Logger.log@8": []
+}

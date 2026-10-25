@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Cart.total": [
+    "app/Main.java:Item.active",
+    "app/Main.java:Item.price"
+  ],
+  "app/Main.java:Item.active": [],
+  "app/Main.java:Item.price": []
+}

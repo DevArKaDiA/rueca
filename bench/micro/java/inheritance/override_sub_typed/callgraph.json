@@ -1,0 +1,7 @@
+{
+  "app/Main.java:FileReader.read": [],
+  "app/Main.java:Loader.load": [
+    "app/Main.java:FileReader.read"
+  ],
+  "app/Main.java:Reader.read": []
+}

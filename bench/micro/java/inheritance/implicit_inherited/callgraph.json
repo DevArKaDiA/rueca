@@ -1,0 +1,6 @@
+{
+  "app/Main.java:Controller.render": [],
+  "app/Main.java:HomeController.index": [
+    "app/Main.java:Controller.render"
+  ]
+}

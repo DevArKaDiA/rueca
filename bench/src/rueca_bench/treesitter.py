@@ -10,6 +10,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 
+import tree_sitter_c
+import tree_sitter_cpp
+import tree_sitter_go
+import tree_sitter_java
 import tree_sitter_javascript
 import tree_sitter_php
 import tree_sitter_python
@@ -22,6 +26,10 @@ from .common import load_manifest
 # "<module>:<function>"`. Adding a grammar = a pinned dependency in
 # pyproject.toml, one import above, one entry here and the manifest data.
 _BINDINGS = {
+    "tree_sitter_c": tree_sitter_c,
+    "tree_sitter_cpp": tree_sitter_cpp,
+    "tree_sitter_go": tree_sitter_go,
+    "tree_sitter_java": tree_sitter_java,
     "tree_sitter_javascript": tree_sitter_javascript,
     "tree_sitter_php": tree_sitter_php,
     "tree_sitter_python": tree_sitter_python,
@@ -36,7 +44,8 @@ def _grammars() -> dict[str, dict]:
 
 @lru_cache(maxsize=None)
 def _ext_map() -> list[tuple[str, str]]:
-    """(extension, grammar), longest extension first."""
+    """(extension, grammar), longest extension first; grammars sharing an
+    extension (C and C++ `.h`) keep manifest order."""
     pairs = [(ext, name) for name, g in _grammars().items() for ext in g.get("extensions", [])]
     return sorted(pairs, key=lambda p: (-len(p[0]), p[0]))
 
@@ -50,15 +59,24 @@ def _language(kind: str) -> Language:
     return Language(getattr(_BINDINGS[mod], fn)())
 
 
-def grammar_for(path: str) -> str | None:
+def grammar_for(path: str, language: str | None = None) -> str | None:
+    """Grammar of a path. When several grammars claim the extension (`.h`:
+    C and C++), the one whose `languages` lists the instance `language` wins;
+    without a hint, the first declared in the manifest."""
+    first = None
     for ext, name in _ext_map():
         if path.endswith(ext):
-            return name
-    return None
+            if first is None:
+                first = (ext, name)
+            elif ext != first[0]:
+                break
+            if language is None or language in _grammars()[name].get("languages", [name]):
+                return name
+    return first[1] if first else None
 
 
-def parse(path: str, source: bytes):
-    kind = grammar_for(path)
+def parse(path: str, source: bytes, language: str | None = None):
+    kind = grammar_for(path, language)
     if kind is None:
         return None
     parser = Parser(_language(kind))
@@ -90,14 +108,19 @@ def _text(node: Node | None) -> str:
     return node.text.decode("utf-8", errors="replace")
 
 
-def extract_functions(path: str, source: bytes) -> list[Func]:
-    kind = grammar_for(path)
+def extract_functions(path: str, source: bytes, language: str | None = None) -> list[Func]:
+    kind = grammar_for(path, language)
     if kind is None:
         return []
-    tree = parse(path, source)
+    tree = parse(path, source, language)
     spec = _grammars()[kind]
-    if spec.get("labeler", "nesting") == "ecma":
+    labeler = spec.get("labeler", "nesting")
+    if labeler == "ecma":
         return _ecma_functions(tree.root_node)
+    if labeler == "go":
+        return _go_functions(tree.root_node)
+    if labeler == "c":
+        return _c_functions(tree.root_node, spec)
     return _nesting_functions(tree.root_node, spec)
 
 
@@ -242,6 +265,122 @@ def _ecma_functions(root: Node) -> list[Func]:
     return out
 
 
+def _func(name: str, qualname: str, label: str, decl: Node, name_node: Node, outer: Node | None = None) -> Func:
+    outer = outer or decl
+    return Func(
+        name=name,
+        qualname=qualname,
+        label=label,
+        start=decl.start_point[0] + 1,
+        end=decl.end_point[0] + 1,
+        def_line=name_node.start_point[0] + 1,
+        outer_start=outer.start_point[0] + 1,
+        indent=decl.start_point[1],
+    )
+
+
+def _go_receiver_type(recv: Node | None) -> str:
+    """`func (s *Server[T]) M()` -> `Server`."""
+    if recv is None:
+        return ""
+    for p in recv.named_children:
+        if p.type != "parameter_declaration":
+            continue
+        t = p.child_by_field_name("type")
+        while t is not None and t.type in ("pointer_type", "generic_type", "parenthesized_type"):
+            nxt = t.child_by_field_name("type") if t.type == "generic_type" else None
+            t = nxt or (t.named_children[0] if t.named_children else None)
+        return _text(t) if t is not None else ""
+    return ""
+
+
+def _go_functions(root: Node) -> list[Func]:
+    """Go: `func F()` -> Function `F`; `func (s *T) M()` -> Method `T.M`
+    (receiver type name, pointer and type arguments stripped). Function
+    literals are not definitions (their calls belong to the enclosing
+    function)."""
+    out: list[Func] = []
+    for node in _walk(root):
+        if node.type not in ("function_declaration", "method_declaration"):
+            continue
+        nn = node.child_by_field_name("name")
+        name = _text(nn)
+        if not name:
+            continue
+        if node.type == "method_declaration":
+            recv = _go_receiver_type(node.child_by_field_name("receiver"))
+            out.append(_func(name, f"{recv}.{name}" if recv else name, "Method", node, nn))
+        else:
+            out.append(_func(name, name, "Function", node, nn))
+    return out
+
+
+_C_DECLARATOR_WRAPPERS = {
+    "pointer_declarator",
+    "reference_declarator",
+    "parenthesized_declarator",
+    "attributed_declarator",
+}
+_C_SCOPES = {"namespace_definition", "class_specifier", "struct_specifier", "union_specifier"}
+
+
+def _c_declarator_name(decl: Node | None) -> tuple[list[str], Node | None]:
+    """Function definition declarator -> (qualified parts, name node).
+    `void A::b()` -> (["A", "b"], b); `~A()` -> (["~A"], ...);
+    `operator==` -> (["operator=="], ...)."""
+    d = decl
+    while d is not None and d.type in _C_DECLARATOR_WRAPPERS:
+        d = d.child_by_field_name("declarator") or (d.named_children[0] if d.named_children else None)
+    if d is None or d.type != "function_declarator":
+        return [], None
+    n = d.child_by_field_name("declarator")
+    parts: list[str] = []
+    while n is not None and n.type == "qualified_identifier":
+        scope = n.child_by_field_name("scope")
+        if scope is not None:
+            parts.append(_text(scope.child_by_field_name("name") or scope) if scope.type == "template_type" else _text(scope))
+        n = n.child_by_field_name("name")
+    if n is None:
+        return [], None
+    if n.type in ("template_function", "template_method"):
+        n = n.child_by_field_name("name") or n
+    parts.append(_text(n).replace(" ", ""))
+    return parts, n
+
+
+def _c_functions(root: Node, spec: dict) -> list[Func]:
+    """C / C++: every `function_definition` (a body, not a prototype) is a
+    callable; its qualified name joins enclosing named namespaces and
+    classes / structs and the declarator's own scope with `::`
+    (`fmt::v11::detail::write`, out-of-line `Foo::bar`). Anonymous namespaces
+    add nothing. Inside a class body or with a declarator scope it is a
+    `Method`, else a `Function`. Macros are not callables."""
+    sep = spec.get("separator", "::")
+    out: list[Func] = []
+    for node in _walk(root):
+        if node.type != "function_definition":
+            continue
+        parts, nn = _c_declarator_name(node.child_by_field_name("declarator"))
+        if nn is None or not parts[-1]:
+            continue
+        scopes: list[str] = []
+        in_class = False
+        anc = node.parent
+        while anc is not None:
+            if anc.type in _C_SCOPES:
+                n = anc.child_by_field_name("name")
+                if n is not None:
+                    scopes.append(_text(n))
+                if anc.type != "namespace_definition":
+                    in_class = True
+            anc = anc.parent
+        label = "Method" if in_class or len(parts) > 1 else "Function"
+        qual = sep.join([*reversed(scopes), *parts])
+        outer = node.parent if node.parent is not None and node.parent.type == "template_declaration" else node
+        out.append(_func(parts[-1], qual, label, node, nn, outer))
+    return out
+
+
 def innermost(funcs: list[Func], line: int) -> Func | None:
     best: Func | None = None
     for f in funcs:
@@ -273,6 +412,35 @@ def utf16_col_to_byte(line_text: str, col: int) -> int:
     return len(line_text.encode("utf-8"))
 
 
+def _field_child(node: Node, field: str) -> Node | None:
+    """`field` child of a node; `@0` / `@-1` = first / last named child
+    (children the grammar leaves unnamed: Java `generic_type`,
+    `scoped_type_identifier`)."""
+    if field in ("@0", "@-1"):
+        kids = node.named_children
+        return (kids[0] if field == "@0" else kids[-1]) if kids else None
+    return node.child_by_field_name(field)
+
+
+def _is_callee(node: Node, calls: dict[str, str], members: dict[str, str], depth: int = 0) -> bool:
+    """Data-driven call-site test (manifest `[grammars.<name>]` `calls` /
+    `members`): `node` is the callee when it is the `calls[parent.type]`
+    child of its parent (`call_expression.function`, Java
+    `method_invocation.name`), or the `members[parent.type]` child of a
+    parent that is itself a callee (`s.M` in `s.M()`, `ns::f` in `ns::f()`,
+    `F[int]` in `F[int]()`)."""
+    parent = node.parent
+    if parent is None or depth > 8:
+        return False
+    f = calls.get(parent.type)
+    if f is not None and _field_child(parent, f) == node:
+        return True
+    f = members.get(parent.type)
+    if f is not None and _field_child(parent, f) == node:
+        return _is_callee(parent, calls, members, depth + 1)
+    return False
+
+
 def is_call_site(tree, grammar: str, line0: int, byte_col: int, end_byte_col: int) -> bool:
     node = tree.root_node.named_descendant_for_point_range((line0, byte_col), (line0, max(byte_col, end_byte_col - 1)))
     if node is None:
@@ -280,6 +448,9 @@ def is_call_site(tree, grammar: str, line0: int, byte_col: int, end_byte_col: in
     parent = node.parent
     if parent is None:
         return False
+    spec = _grammars().get(grammar, {})
+    if "calls" in spec:
+        return _is_callee(node, spec["calls"], spec.get("members", {}))
     if grammar == "python":
         if parent.type == "call" and parent.child_by_field_name("function") == node:
             return True

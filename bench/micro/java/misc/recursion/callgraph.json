@@ -1,0 +1,11 @@
+{
+  "app/Main.java:MathOps.fact": [
+    "app/Main.java:MathOps.fact"
+  ],
+  "app/Main.java:MathOps.isEven": [
+    "app/Main.java:MathOps.isOdd"
+  ],
+  "app/Main.java:MathOps.isOdd": [
+    "app/Main.java:MathOps.isEven"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "main.go:Handler.Call": [],
+  "main.go:main": [
+    "main.go:Handler.Call"
+  ],
+  "main.go:ping": []
+}

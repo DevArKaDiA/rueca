@@ -1,0 +1,6 @@
+{
+  "app/Service.java:Repository.save": [],
+  "app/Service.java:Service.store": [
+    "app/Service.java:Repository.save"
+  ]
+}

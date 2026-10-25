@@ -73,6 +73,19 @@ class Arm:
     def lookup(self, h: Handle, name: str, limit: int = 10) -> CallResult:
         raise NotImplementedError
 
+    # -- data-format suite (data.py) ----------------------------------------
+
+    def data_nodes(self, h: Handle, files: list[str]) -> CallResult:
+        """Every node the arm has in the given data files: hits of
+        {path, name, label, start_line}."""
+        raise NotImplementedError
+
+    def env_edges(self, h: Handle, names: list[str]) -> CallResult:
+        """Env bridge edges: extra = {"reads": [{path, function, env, line}],
+        "writes": [{path, env, line}]}; `names` are candidate variable names
+        for arms that cannot enumerate env vars."""
+        raise NotImplementedError
+
     def cleanup(self, h: Handle) -> None:
         pass
 

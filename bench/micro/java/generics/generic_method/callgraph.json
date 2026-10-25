@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Dictionary.firstLength": [
+    "app/Main.java:Lists.first",
+    "app/Main.java:Word.length"
+  ],
+  "app/Main.java:Lists.first": [],
+  "app/Main.java:Word.length": []
+}

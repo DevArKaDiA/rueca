@@ -1,0 +1,8 @@
+{
+  "main.cpp:Writer::write@3": [],
+  "main.cpp:Writer::write@4": [],
+  "main.cpp:Writer::write@5": [],
+  "main.cpp:save": [
+    "main.cpp:Writer::write@4"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "main.cpp:Point::Point@3": [],
+  "main.cpp:Point::Point@4": [],
+  "main.cpp:anywhere": [
+    "main.cpp:Point::Point@4"
+  ],
+  "main.cpp:on_axis": [
+    "main.cpp:Point::Point@3"
+  ]
+}

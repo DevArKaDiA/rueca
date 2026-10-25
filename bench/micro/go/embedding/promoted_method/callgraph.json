@@ -1,0 +1,9 @@
+{
+  "main.go:Base.Hello": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:Base.Hello"
+  ]
+}

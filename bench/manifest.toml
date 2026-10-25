@@ -7,6 +7,17 @@
 [bench]
 schema = 2
 alpha_languages = ["python", "typescript", "javascript"]
+# Families pooled in the report's `overall` column (the alpha headline).
+# Languages added later are reported in their own columns and parity rows,
+# so the published overall numbers stay comparable across releases.
+overall = ["python", "ecma", "php"]
+
+# Clone mode (corpus.py): `shallow` = true makes every new clone an empty
+# promisor repository that fetches each pinned commit with
+# `--depth=1 --filter=blob:none` (one tree per commit instead of the whole
+# history). Existing clones keep their mode.
+[corpus]
+shallow = true
 
 # ---------------------------------------------------------------- languages
 # Adding a language is data (bench/README.md, "Adding a language"). A family
@@ -15,6 +26,7 @@ alpha_languages = ["python", "typescript", "javascript"]
 # file name) are pooled into one test-path heuristic used for gold and arms.
 
 [languages.python]
+status = "supported"  # RFC 0003 §3.1 release-gate status
 label = "python"
 members = ["python"]
 extensions = [".py", ".pyi"]
@@ -23,6 +35,7 @@ s1_sources = "SWE-bench Verified + Lite (LocAgent function labels, ContextBench 
 s3_gold = "scip-python 0.6.8 (requests, flask) and the PyCG micro-benchmark"
 
 [languages.ecma]
+status = "supported"  # RFC 0003 §3.1 release-gate status
 label = "ts/js"
 members = ["typescript", "javascript"]
 extensions = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]
@@ -32,6 +45,7 @@ s1_sources = "SWE-PolyBench (modified_nodes function labels) + SWE-bench Multili
 s3_gold = "scip-typescript 0.5.2 (hono, express)"
 
 [languages.php]
+status = "supported"  # RFC 0003 §3.1 release-gate status
 label = "php"
 members = ["php"]
 extensions = [".php"]
@@ -39,6 +53,46 @@ test_files = ['.*Test\.php$']
 s1_sources = "SWE-bench Multilingual (all four PHP repositories) + SWE-rebench V2 (three small libraries, LLM screen code A); function gold from the tree-sitter labeler (no assembled PHP function labels exist)"
 s3_gold = "PHPStan 2.3.2 + rueca-bench collector (monolog 3.9.0, commonmark 2.8.3; no viable SCIP indexer for PHP) and the rueca-bench PHP micro-benchmark (60 hand-labelled snippets)"
 notes = "PHPStan gold follows declared and phpdoc types without vendor code; interface-typed receivers resolve to the interface method (no expansion to implementations)."
+
+[languages.go]
+status = "text"  # RFC 0003 §3.1 release-gate status
+label = "go"
+members = ["go"]
+extensions = [".go"]
+test_files = ['.*_test\.go$']
+test_dirs = ["testdata"]
+s1_sources = "SWE-bench Multilingual (all 42 Go instances: caddy, gin, prometheus, hugo, terraform); function gold from the tree-sitter labeler"
+s3_gold = "scip-go 0.2.9 (gin v1.11.0, urfave/cli v3.9.1) and the rueca-bench Go micro-benchmark"
+notes = "Go methods are named `Type.method` (receiver type, pointer stripped). scip-go resolves interface calls to the interface method only."
+
+[languages.java]
+status = "text"  # RFC 0003 §3.1 release-gate status
+label = "java"
+members = ["java"]
+extensions = [".java"]
+test_files = ['.*Tests?\.java$', '.*TestCase\.java$', '^Test[A-Z].*\.java$']
+s1_sources = "SWE-PolyBench Java (modified_nodes function labels; gson, dubbo, rocketmq, apollo) + SWE-bench Multilingual (gson, lombok)"
+s3_gold = "the rueca-bench Java micro-benchmark (scip-java needs a JDK and a full Maven/Gradle build; see bench/README.md)"
+notes = "No repository-level Java gold yet: the micro-benchmark is the only S3 set."
+
+[languages.c]
+status = "text"  # RFC 0003 §3.1 release-gate status
+label = "c"
+members = ["c"]
+extensions = [".c", ".h"]
+test_files = ['^test_.*\.c$', '.*_test\.c$']
+s1_sources = "SWE-bench Multilingual (all 30 C instances: redis, jq, micropython, valkey); function gold from the tree-sitter labeler"
+s3_gold = "scip-clang 0.4.1 (cJSON v1.7.19, bench-synthesized compile_commands.json) and the rueca-bench C/C++ micro-benchmark (C snippets)"
+
+[languages.cpp]
+status = "text"  # RFC 0003 §3.1 release-gate status
+label = "cpp"
+members = ["cpp"]
+extensions = [".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx", ".h"]
+test_files = ['.*[_-]test\.(cc|cpp|cxx)$', '^test[_-].*\.(cc|cpp|cxx)$']
+s1_sources = "SWE-bench Multilingual (all 12 C++ instances: fmt, nlohmann/json) + Multi-SWE-bench C++ (fmt, nlohmann/json, Catch2, simdjson); function gold from the tree-sitter labeler"
+s3_gold = "scip-clang 0.4.1 (fmt 12.1.0, bench-synthesized compile_commands.json) and the rueca-bench C/C++ micro-benchmark (C++ snippets)"
+notes = "`.h` headers belong to the instance language (C or C++); the bench parses them with that grammar."
 
 # Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
 # callables). `binding` = Python package (pinned in pyproject.toml) and
@@ -77,6 +131,51 @@ callables = { function_definition = "Function", method_declaration = "Method" }
 containers = ["class_declaration", "interface_declaration", "trait_declaration", "enum_declaration"]
 separator = "::"
 flat_functions = ["function_definition"]
+
+# Go: code-backed labeler (method names come from the receiver type).
+# `calls` / `members` drive SCIP call-site classification (treesitter.py:
+# _is_callee): a reference is a call when it is the `calls[parent]` child of
+# its parent, or the `members[parent]` child of a callee.
+[grammars.go]
+binding = "tree_sitter_go:language"
+package = "tree-sitter-go 0.25.0 (MIT)"
+extensions = [".go"]
+labeler = "go"
+separator = "."
+calls = { call_expression = "function" }
+members = { selector_expression = "field", index_expression = "operand", parenthesized_expression = "@0" }
+
+[grammars.java]
+binding = "tree_sitter_java:language"
+package = "tree-sitter-java 0.23.5 (MIT)"
+extensions = [".java"]
+callables = { method_declaration = "Method", constructor_declaration = "Method", compact_constructor_declaration = "Method" }
+containers = ["class_declaration", "interface_declaration", "enum_declaration", "record_declaration", "annotation_type_declaration"]
+separator = "."
+calls = { method_invocation = "name", object_creation_expression = "type", explicit_constructor_invocation = "constructor" }
+members = { generic_type = "@0", scoped_type_identifier = "@-1" }
+
+# C and C++ share the code-backed `c` labeler; `.h` goes to the grammar whose
+# `languages` lists the instance language (C++ when there is no hint).
+[grammars.cpp]
+binding = "tree_sitter_cpp:language"
+package = "tree-sitter-cpp 0.23.4 (MIT)"
+languages = ["cpp"]
+extensions = [".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx", ".h"]
+labeler = "c"
+separator = "::"
+calls = { call_expression = "function", new_expression = "type" }
+members = { field_expression = "field", qualified_identifier = "name", template_function = "name", template_method = "name", parenthesized_expression = "@0" }
+
+[grammars.c]
+binding = "tree_sitter_c:language"
+package = "tree-sitter-c 0.24.2 (MIT)"
+languages = ["c"]
+extensions = [".c", ".h"]
+labeler = "c"
+separator = "::"
+calls = { call_expression = "function" }
+members = { field_expression = "field", parenthesized_expression = "@0" }
 
 # ---------------------------------------------------------------- tools
 
@@ -124,14 +223,68 @@ name = "php:8.3-cli (Docker official image)"
 image = "php@sha256:98d555ff97b3865140ad31032508c3ca089fa97a8944b14ca9dc03ea05d788cd"
 license = "PHP-3.01 (run as a separate process; nothing vendored)"
 
+# Go S3 gold: scip-go release binary (needs `go` on PATH; module
+# dependencies are downloaded into bench/.cache/go by `go` itself, verified
+# against go.sum).
+[tools.scip_go]
+name = "scip-go"
+version = "0.2.9"
+license = "Apache-2.0"
+release = "https://github.com/scip-code/scip-go/releases/tag/v0.2.9"
+
+[tools.scip_go.binaries.darwin-arm64]
+url = "https://github.com/scip-code/scip-go/releases/download/v0.2.9/scip-go-darwin-arm64.tar.gz"
+archive_sha256 = "3d8a0c14d0617debcf0c38debe4532d201c89c38a85eaac641da2200bb36d68f"
+binary_sha256 = "1a9752b163c49550a1b604e474bc50c2336b268d493b59ac0147d3c1d4a4ec9d"
+member = "scip-go"
+
+[tools.scip_go.binaries.linux-amd64]
+url = "https://github.com/scip-code/scip-go/releases/download/v0.2.9/scip-go-linux-amd64.tar.gz"
+archive_sha256 = "4ec4e45ecdbe6f43055ed555254e049f46f28389ade438db3d59679651fa1292"
+member = "scip-go"
+
+# C / C++ S3 gold: scip-clang release binary over a compile_commands.json the
+# bench writes for the pinned files (no build is run).
+[tools.scip_clang]
+name = "scip-clang"
+version = "0.4.1"
+license = "Apache-2.0"
+release = "https://github.com/sourcegraph/scip-clang/releases/tag/v0.4.1"
+
+[tools.scip_clang.binaries.darwin-arm64]
+url = "https://github.com/sourcegraph/scip-clang/releases/download/v0.4.1/scip-clang-arm64-darwin"
+binary_sha256 = "34a2eb7a5ef9bbe9849cded59f4eb22a2331bd5b64a5cec2b17ee09b8aa515de"
+
+# Java S3 gold: scip-java's javac plugin (embedded in the pinned launcher)
+# run by javac in the official Eclipse Temurin JDK image (pinned by digest,
+# `--network=none`, read-only sources), then `scip-java aggregate`. No build
+# tool runs; compile-only jars come from `[artifacts]` (sha256-pinned).
+[tools.scip_java]
+name = "scip-java"
+version = "0.13.2"
+license = "Apache-2.0"
+release = "https://github.com/scip-code/scip-java/releases/tag/v0.13.2"
+image = "eclipse-temurin@sha256:23cc5734ff46e776f51ce66eb9ee08444fd47caabec0a95b7eb6e94be2d3696d"
+image_name = "eclipse-temurin:21-jdk (Docker official image; GPL-2.0 with Classpath Exception, run as a separate process)"
+
+[tools.scip_java.binaries.any]
+url = "https://github.com/scip-code/scip-java/releases/download/v0.13.2/scip-java-v0.13.2"
+binary_sha256 = "5248136592d19ea2c468f64ebd18587d32de7c961536ff19346f8a025af1d13c"
+
+[artifacts.error_prone_annotations]
+url = "https://repo1.maven.org/maven2/com/google/errorprone/error_prone_annotations/2.50.0/error_prone_annotations-2.50.0.jar"
+sha256 = "4667724877f1d37a689202da191e23efa7657c62eef93ccdac406eccfe5cdd0a"
+license = "Apache-2.0"
+role = "compile-only dependency of gson (annotations), for the scip-java gold"
+
 [tools.rueca]
 name = "rueca"
 binary = "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)"
 contract = "docs/tools.md (alpha)"
-# Binary behind the published Rueca numbers (all languages): main after the
-# alpha.2 quality pass + PHP + Markdown, `cargo build --release -p rueca`
-# (macOS arm64).
-results = "main @ 508436b + bench harness (binary sha256 d0fb41d6d77a31cc6b2c0a48157b75daae20444be6499f1603f9130fba7c292d)"
+# Binary behind the published Rueca numbers (every language and suite):
+# main after the Go, Java, C/C++ and data packs, `cargo build --release -p
+# rueca` (macOS arm64).
+results = "main @ 65ae154 (binary sha256 9db30d82e36b7e1a84dde8dc06296febe9dcdb90389c52d4c0054a17fe0e9eb9)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -181,6 +334,24 @@ role = "S1 PHP issues and patches on small repositories (automatically mined, LL
 # keep only rows the dataset's own LLM screen rated well specified (code A)
 row_filter = { "meta.llm_metadata.code" = ["A"] }
 filter_repos = true  # 38k rows, 20 languages: read only the S1 repositories sourced from it
+
+# Multi-SWE-bench (ByteDance-Seed): one JSONL per repository; README: "licensed
+# under CC0 ... your use of that data must comply with [the upstream
+# projects'] respective licenses". Supplements SWE-bench Multilingual's 12 C++
+# instances.
+[datasets.multi_swe_bench_cpp]
+hf = "ByteDance-Seed/Multi-SWE-bench"
+revision = "56ff018c04a38e27ada1e9d0a6d5839a51f88f0d"
+format = "multi_swe_bench"
+card_license = "CC0 (dataset README; upstream repository licenses apply)"
+citation = "Zan et al., Multi-SWE-bench: A Multilingual Benchmark for Issue Resolving (2025)"
+role = "S1 C++ issues and patches (fmt, nlohmann/json, Catch2, simdjson)"
+
+[datasets.multi_swe_bench_cpp.files]
+"cpp/fmtlib__fmt_dataset.jsonl" = "7d060ca46ba6343373aa68ced7fcca70e2ce0addac7ec610c47d2bbfcfed6762"
+"cpp/nlohmann__json_dataset.jsonl" = "bdc33098e920b20fcdef5680953a723c171bd8f53608e8cecad305e96495a93c"
+"cpp/catchorg__Catch2_dataset.jsonl" = "a2fad917a116bca66692129bfa91bbf6d1e8563dd0bbd7fd82732d6a82f3048f"
+"cpp/simdjson__simdjson_dataset.jsonl" = "0a7aba551a76754fd088c5eccbab4caae025bdf6cdae2faa05a9f7b5f11994c2"
 
 # Assembled localization gold (RFC 0002 §8/§9). Used for gold labels only;
 # issue text / patches still come from the source dataset of each instance.
@@ -326,6 +497,127 @@ language = "php"
 quota = 4
 sources = ["swe_rebench_v2"]
 
+# Go: every SWE-bench Multilingual Go instance.
+
+[[s1.repos]]
+repo = "caddyserver/caddy"
+language = "go"
+quota = 14
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "gin-gonic/gin"
+language = "go"
+quota = 8
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "prometheus/prometheus"
+language = "go"
+quota = 8
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "gohugoio/hugo"
+language = "go"
+quota = 7
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "hashicorp/terraform"
+language = "go"
+quota = 5
+sources = ["swe_bench_multilingual"]
+
+# Java: SWE-PolyBench (assembled modified_nodes gold) on small/medium
+# repositories + SWE-bench Multilingual. Left out for size: lucene, druid,
+# trino (multi-GB histories / checkouts).
+
+[[s1.repos]]
+repo = "google/gson"
+language = "java"
+quota = 10
+sources = ["swe_polybench", "swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "projectlombok/lombok"
+language = "java"
+quota = 8
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "apache/dubbo"
+language = "java"
+quota = 8
+sources = ["swe_polybench"]
+
+[[s1.repos]]
+repo = "apache/rocketmq"
+language = "java"
+quota = 8
+sources = ["swe_polybench"]
+
+[[s1.repos]]
+repo = "apolloconfig/apollo"
+language = "java"
+quota = 6
+sources = ["swe_polybench"]
+
+# C: every SWE-bench Multilingual C instance.
+
+[[s1.repos]]
+repo = "redis/redis"
+language = "c"
+quota = 12
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "jqlang/jq"
+language = "c"
+quota = 9
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "micropython/micropython"
+language = "c"
+quota = 5
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "valkey-io/valkey"
+language = "c"
+quota = 4
+sources = ["swe_bench_multilingual"]
+
+# C++: every SWE-bench Multilingual C++ instance (12), supplemented by
+# Multi-SWE-bench C++ (SWE-bench Multilingual first: `source_priority`).
+
+[[s1.repos]]
+repo = "fmtlib/fmt"
+language = "cpp"
+quota = 14
+sources = ["swe_bench_multilingual", "multi_swe_bench_cpp"]
+source_priority = true
+
+[[s1.repos]]
+repo = "nlohmann/json"
+language = "cpp"
+quota = 10
+sources = ["swe_bench_multilingual", "multi_swe_bench_cpp"]
+source_priority = true
+
+[[s1.repos]]
+repo = "catchorg/Catch2"
+language = "cpp"
+quota = 8
+sources = ["multi_swe_bench_cpp"]
+
+[[s1.repos]]
+repo = "simdjson/simdjson"
+language = "cpp"
+quota = 6
+sources = ["multi_swe_bench_cpp"]
+
 # ---------------------------------------------------------------- S3 structural
 # Gold call edges from SCIP indexes (`gold = "scip"`, default) or, for PHP,
 # the bench's PHPStan collector (`gold = "phpstan"`) at pinned commits
@@ -389,6 +681,57 @@ commit = "1902f60f984235023acbe03db6ad614a37b3c3e7"
 include = ["src/"]
 gold = "phpstan"
 
+# Go: scip-go gold (RFC 0003 §10.2).
+[[s3.repos]]
+repo = "gin-gonic/gin"
+language = "go"
+tag = "v1.11.0"
+commit = "6ad6205e9c94a4b8a320219e28c37c29d22a7a2c"
+include = [""]
+indexer = "scip_go"
+args = ["--output", "{out}"]
+
+[[s3.repos]]
+repo = "urfave/cli"
+language = "go"
+tag = "v3.9.1"
+commit = "0ad38592ac44f2245175f1324bdb4288b5937797"
+include = [""]
+indexer = "scip_go"
+args = ["--output", "{out}"]
+
+# Java: scip-java gold (javac + scip-java plugin, no build tool).
+[[s3.repos]]
+repo = "google/gson"
+language = "java"
+tag = "gson-parent-2.15.0"
+commit = "fcd416909db2bea96eb916bcfb2d0a83cb9b86c3"
+include = ["gson/src/main/java/"]
+indexer = "scip_java"
+javac = { sources = ["gson/src/main/java", "gson/src/main/java-templates"], classpath = ["error_prone_annotations"] }
+
+# C / C++: scip-clang gold over a bench-synthesized compile_commands.json
+# (translation units listed below plus one TU including every public header).
+[[s3.repos]]
+repo = "fmtlib/fmt"
+language = "cpp"
+tag = "12.1.0"
+commit = "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f"
+include = ["include/", "src/"]
+indexer = "scip_clang"
+args = ["--compdb-path={compdb}", "--index-output-path={out}"]
+compdb = { std = "c++17", includes = ["include"], files = ["src/format.cc", "src/os.cc"], all_headers = ["include/fmt"] }
+
+[[s3.repos]]
+repo = "DaveGamble/cJSON"
+language = "c"
+tag = "v1.7.19"
+commit = "c859b25da02955fef659d658b8f324b5cde87be3"
+include = ["cJSON.c", "cJSON.h", "cJSON_Utils.c", "cJSON_Utils.h"]
+indexer = "scip_clang"
+args = ["--compdb-path={compdb}", "--index-output-path={out}"]
+compdb = { std = "c99", includes = ["."], files = ["cJSON.c", "cJSON_Utils.c"] }
+
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
 [[s3.micro]]
 name = "pycg"
@@ -411,6 +754,84 @@ language = "php"
 format = "rueca"
 local = "micro/php"
 license = "Apache-2.0"
+
+# Go / Java / C / C++ micro-benchmarks: Rueca's own hand-labelled snippets
+# (Apache-2.0), same format; answer-key conventions in bench/README.md.
+# Overloads (Java, C++) are told apart as `path:Qualified@<name line>`.
+[[s3.micro]]
+name = "go-micro"
+title = "Go micro-benchmark (rueca-bench)"
+language = "go"
+format = "rueca"
+local = "micro/go"
+license = "Apache-2.0"
+crosscheck = "scip_go"
+
+[[s3.micro]]
+name = "java-micro"
+title = "Java micro-benchmark (rueca-bench)"
+language = "java"
+format = "rueca"
+local = "micro/java"
+license = "Apache-2.0"
+crosscheck = "scip_java"
+
+[[s3.micro]]
+name = "c-micro"
+title = "C micro-benchmark (rueca-bench)"
+language = "c"
+format = "rueca"
+local = "micro/c"
+license = "Apache-2.0"
+crosscheck = "scip_clang"
+
+[[s3.micro]]
+name = "cpp-micro"
+title = "C++ micro-benchmark (rueca-bench)"
+language = "cpp"
+format = "rueca"
+local = "micro/cpp"
+license = "Apache-2.0"
+crosscheck = "scip_clang"
+
+# ---------------------------------------------------------------- data formats
+# RFC 0003 §3.3 (bench/README.md, "Data formats"): key recall and span line
+# accuracy against reference parsers (json grammar, PyYAML, tomllib,
+# python-hcl2), kinds covered, and env bridge precision / recall against
+# hand-checked labels (bench/labels/bridge/). `include` = data files in
+# scope; `bridge_scope` = where readers (code) and providers (manifests)
+# are scored.
+
+[data]
+# RFC 0003 §3.1 status per data format (no data pack on main yet)
+status = { json = "text", yaml = "text", toml = "text", hcl = "text" }
+
+[[data.repos]]
+name = "online-boutique"
+repo = "GoogleCloudPlatform/microservices-demo"
+tag = "v0.10.7"
+commit = "5b608cb1dfe317d05e4f1bb8c99b7618452fde87"
+license = "Apache-2.0"
+include = [""]
+bridge = "labels/bridge/online-boutique.json"
+bridge_scope = { readers = ["src/"], providers = ["kubernetes-manifests/", "src/"] }
+
+[[data.repos]]
+name = "awesome-compose"
+repo = "docker/awesome-compose"
+commit = "30f4b7f6a6c3b0c0ecf4d4efb0de203c48d11562"
+license = "CC0-1.0"
+include = ["nginx-wsgi-flask/", "nginx-flask-mongo/", "nginx-flask-mysql/", "react-express-mysql/", "react-express-mongodb/", "nginx-golang-postgres/", "nginx-golang-mysql/", "spring-postgres/", "fastapi/", "react-java-mysql/", "sparkjava-mysql/", "django/", "flask-redis/", "wordpress-mysql/", "postgresql-pgadmin/", "gitea-postgres/"]
+bridge = "labels/bridge/awesome-compose.json"
+bridge_scope = { readers = ["nginx-wsgi-flask/", "nginx-flask-mongo/", "nginx-flask-mysql/", "react-express-mysql/", "react-express-mongodb/", "nginx-golang-postgres/", "nginx-golang-mysql/", "spring-postgres/", "fastapi/", "react-java-mysql/", "sparkjava-mysql/", "django/", "flask-redis/", "wordpress-mysql/", "postgresql-pgadmin/", "gitea-postgres/"], providers = ["nginx-wsgi-flask/", "nginx-flask-mongo/", "nginx-flask-mysql/", "react-express-mysql/", "react-express-mongodb/", "nginx-golang-postgres/", "nginx-golang-mysql/", "spring-postgres/", "fastapi/", "react-java-mysql/", "sparkjava-mysql/", "django/", "flask-redis/", "wordpress-mysql/", "postgresql-pgadmin/", "gitea-postgres/"] }
+
+[[data.repos]]
+name = "terraform-aws-vpc"
+repo = "terraform-aws-modules/terraform-aws-vpc"
+tag = "v6.7.3"
+commit = "b3abd6df2ecf052451a361ed55b8f06f8742a795"
+license = "Apache-2.0"
+include = [""]
 
 # --- generated by `rueca-bench select`; do not edit below this line ---
 [[s1.instances]]
@@ -1380,3 +1801,1195 @@ language = "php"
 base_commit = "b7a7af3a23a818dcc5836e62e93e4b9ce4704481"
 dataset = "swe_rebench_v2"
 assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-5761"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "0a6d3333b2c92553e66c93c14d3258a790aac639"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-6051"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "4181c79a8130a59c40c76437e15265452422ccb1"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-6411"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "59cbb2c83a03b6fe352ae0b5d05581d9148a4d24"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-6115"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "4512be49a9fa55270e9afa632be9ff6c9560c455"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-5995"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "c839a98ff527932fd14460829142c486f4531a7b"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-4943"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "7f6a328b4744bbdd5ee07c5eccb3f897390ff982"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-6370"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "198f4385d2f72ccdd853825270f601bea7a7a190"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-6345"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "f6d2c293e752254769efe21c8d06a16ebad4845e"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-5626"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "0e2c7e1d35b287fc0e56d6db2951f791e09b5a37"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-5870"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "fae195ac7eb9f4b0e9436384cd0529a11355e367"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-6288"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "d129ae6aec6af2182217ee8a235f4df8cd2bbfde"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-4774"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "f7be0ee10131f25620a2f64af7e3ded43eae2049"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-5404"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "960150bb034dc9a549ee7289b1a4eb4abafeb30a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "caddyserver__caddy-6350"
+repo = "caddyserver/caddy"
+language = "go"
+base_commit = "a52917a37dcc40eda1ff5034103d4a89883de2aa"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gin-gonic__gin-2755"
+repo = "gin-gonic/gin"
+language = "go"
+base_commit = "f2bbdfe9f26d84cb994f381050692a9e4553bf75"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gin-gonic__gin-1805"
+repo = "gin-gonic/gin"
+language = "go"
+base_commit = "70a0aba3e423246be37462cfdaedd510c26c566e"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gin-gonic__gin-3820"
+repo = "gin-gonic/gin"
+language = "go"
+base_commit = "9f598a31aafb92d675f38f1c8371e4ac76f858bf"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gin-gonic__gin-3227"
+repo = "gin-gonic/gin"
+language = "go"
+base_commit = "51aea73ba0f125f6cacc3b4b695efdf21d9c634f"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gin-gonic__gin-1957"
+repo = "gin-gonic/gin"
+language = "go"
+base_commit = "09a3650c97ca7ef3a542d428a9fb2c8da8c18002"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gin-gonic__gin-3741"
+repo = "gin-gonic/gin"
+language = "go"
+base_commit = "c2ba8f19ec19914b73290c53a32de479cd463555"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gin-gonic__gin-2121"
+repo = "gin-gonic/gin"
+language = "go"
+base_commit = "2ee0e963942d91be7944dfcc07dc8c02a4a78566"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gin-gonic__gin-4003"
+repo = "gin-gonic/gin"
+language = "go"
+base_commit = "9c081de9cdd1948f521d47d170d18cbc2981c33a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "prometheus__prometheus-10633"
+repo = "prometheus/prometheus"
+language = "go"
+base_commit = "64fc3e58fec13af55968db89a484b9e0c5425bd6"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "prometheus__prometheus-10720"
+repo = "prometheus/prometheus"
+language = "go"
+base_commit = "89de30a0b754f4eb54fb543037683f3db6cda109"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "prometheus__prometheus-9248"
+repo = "prometheus/prometheus"
+language = "go"
+base_commit = "1fb3c1b5980d2ae3f844b6b9ae2ad38117710aa0"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "prometheus__prometheus-11859"
+repo = "prometheus/prometheus"
+language = "go"
+base_commit = "5ec1b4baaf01dae0b22567db53886c83b74e0e76"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "prometheus__prometheus-12874"
+repo = "prometheus/prometheus"
+language = "go"
+base_commit = "9071913fd99fcdea9ea069b277f2be66b08e549c"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "prometheus__prometheus-13845"
+repo = "prometheus/prometheus"
+language = "go"
+base_commit = "25a8d576717f4a69290d6f6755b4a90cfaab08ff"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "prometheus__prometheus-14861"
+repo = "prometheus/prometheus"
+language = "go"
+base_commit = "9f57f14d6c5e3c10ed212010cb34522458f43d64"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "prometheus__prometheus-15142"
+repo = "prometheus/prometheus"
+language = "go"
+base_commit = "16bba78f1549cfd7909b61ebd7c55c822c86630b"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gohugoio__hugo-12171"
+repo = "gohugoio/hugo"
+language = "go"
+base_commit = "a322282e70c2935c79f9c0f5c593bfdd032eb964"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gohugoio__hugo-12343"
+repo = "gohugoio/hugo"
+language = "go"
+base_commit = "060cce0a910ffd9dc4e92efbe758fc5f187c3145"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gohugoio__hugo-12562"
+repo = "gohugoio/hugo"
+language = "go"
+base_commit = "c8dac67defbb512877e974814e196782989b8214"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gohugoio__hugo-12579"
+repo = "gohugoio/hugo"
+language = "go"
+base_commit = "9c4e14eb4f890d2a3caad2dcd9209609b7274914"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gohugoio__hugo-12448"
+repo = "gohugoio/hugo"
+language = "go"
+base_commit = "196132753649e6e714f05c83122737cabd0da310"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "gohugoio__hugo-12768"
+repo = "gohugoio/hugo"
+language = "go"
+base_commit = "83235262d06a060bd22c168b3413903667b8aeb6"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "hashicorp__terraform-34900"
+repo = "hashicorp/terraform"
+language = "go"
+base_commit = "f2e4cb411ed6dfd36fd4f9960a74d8f29c7b8882"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "hashicorp__terraform-35543"
+repo = "hashicorp/terraform"
+language = "go"
+base_commit = "24833a2b062126a71ef30a86a6d1fc3823afdfdb"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "hashicorp__terraform-34814"
+repo = "hashicorp/terraform"
+language = "go"
+base_commit = "310331bdc6b747b68b2e2dd6be257dfc78677973"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "hashicorp__terraform-35611"
+repo = "hashicorp/terraform"
+language = "go"
+base_commit = "047c1af0b4a9e1e650f3811d011bcb92b2ceb15a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "hashicorp__terraform-34580"
+repo = "hashicorp/terraform"
+language = "go"
+base_commit = "8faa757e20d8df6c458a002c6bd4e1bc26f41581"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "google__gson-1703"
+repo = "google/gson"
+language = "java"
+base_commit = "6d2557d5d1a8ac498f2bcee20e5053c93b33ecce"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes", "contextbench"]
+
+[[s1.instances]]
+id = "google__gson-769"
+repo = "google/gson"
+language = "java"
+base_commit = "1f803bd37de5890f6da53f0b1a1b631eea4d1b8f"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "google__gson-1989"
+repo = "google/gson"
+language = "java"
+base_commit = "fe30b85224316cabf19f5dd3223843437c297802"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "google__gson-1904"
+repo = "google/gson"
+language = "java"
+base_commit = "97938283a77707cdf231a7ebdcbee937f289ad31"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "google__gson-2475"
+repo = "google/gson"
+language = "java"
+base_commit = "7b5629bcfca156051253db7d6f6510db5862a967"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "google__gson-2214"
+repo = "google/gson"
+language = "java"
+base_commit = "28609089faa747f2ad5730281c14093ab40d6fda"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "google__gson-2337"
+repo = "google/gson"
+language = "java"
+base_commit = "0adcdc80d5ef3a40086a8abd6e2f55164a7c2597"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "google__gson-2004"
+repo = "google/gson"
+language = "java"
+base_commit = "ba96d53bad35f7466073f14cb3d89d09383e1a2d"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "google__gson-2134"
+repo = "google/gson"
+language = "java"
+base_commit = "96ab171eb48dcea94fd9b8f425f65c531e6c3aad"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "google__gson-2158"
+repo = "google/gson"
+language = "java"
+base_commit = "924c496b95deceadab0a01ea28b7023a096dc2ec"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "projectlombok__lombok-3326"
+repo = "projectlombok/lombok"
+language = "java"
+base_commit = "9e6f66c557205bff3c87eefb4c7a7631d0b89ff0"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "projectlombok__lombok-3602"
+repo = "projectlombok/lombok"
+language = "java"
+base_commit = "f3a4b1b4151a9dd1646f1b170c17f5f29903f45a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "projectlombok__lombok-3009"
+repo = "projectlombok/lombok"
+language = "java"
+base_commit = "8bbac04478cb088eedceb4c63dcb45e30f0948ed"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "projectlombok__lombok-3042"
+repo = "projectlombok/lombok"
+language = "java"
+base_commit = "5155060ddf48b683a902b9d354d0fd07df7a79a1"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "projectlombok__lombok-2792"
+repo = "projectlombok/lombok"
+language = "java"
+base_commit = "9b3e84717d301d7a6829420f5849cf1465e73131"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "projectlombok__lombok-3422"
+repo = "projectlombok/lombok"
+language = "java"
+base_commit = "dbd6ad41df78e1c1491be60ec0166ceb3bd8bb05"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "projectlombok__lombok-3486"
+repo = "projectlombok/lombok"
+language = "java"
+base_commit = "28e5ddb075b61525ba686f3ed6ecbf7f762fc558"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "projectlombok__lombok-3371"
+repo = "projectlombok/lombok"
+language = "java"
+base_commit = "13642eb896ae6dbbaebab6df3c3758296102ead8"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "apache__dubbo-11255"
+repo = "apache/dubbo"
+language = "java"
+base_commit = "d8e6dfa42a22e9c21697ad37709abec7ae33895b"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__dubbo-3013"
+repo = "apache/dubbo"
+language = "java"
+base_commit = "3e6ae66fde6db2edb139e59d3c5530c9196b4144"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__dubbo-2801"
+repo = "apache/dubbo"
+language = "java"
+base_commit = "acfc86f1ad036f0e0198a04b4cb7bcf9608045f2"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__dubbo-3093"
+repo = "apache/dubbo"
+language = "java"
+base_commit = "95fc75a05fbbdc23319e49dc9fd54084def3bb92"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__dubbo-6498"
+repo = "apache/dubbo"
+language = "java"
+base_commit = "fb5761683729f63c715e39c78a8b7b75278050c9"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__dubbo-3855"
+repo = "apache/dubbo"
+language = "java"
+base_commit = "b7bd6ada884f49be2676fdf044741ddee2af8443"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__dubbo-8414"
+repo = "apache/dubbo"
+language = "java"
+base_commit = "63baa5c0432ad3f51ea7e583f0b0af4863804238"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__dubbo-4170"
+repo = "apache/dubbo"
+language = "java"
+base_commit = "9168543d855f287720fcd257f68ee0acccb95170"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__rocketmq-5633"
+repo = "apache/rocketmq"
+language = "java"
+base_commit = "e5fadc7db7c4a5c098e5f912a19fd71cba3dde3d"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__rocketmq-7426"
+repo = "apache/rocketmq"
+language = "java"
+base_commit = "b9ffe0f9576f68b8a37cf3e2f68051658ae5a9a2"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__rocketmq-7823"
+repo = "apache/rocketmq"
+language = "java"
+base_commit = "f525a34f6151b8ea9a91db49d3f55db636e070f8"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__rocketmq-6651"
+repo = "apache/rocketmq"
+language = "java"
+base_commit = "fad3dece7b88bc62c5beae1a492917bfd85d87ed"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__rocketmq-3881"
+repo = "apache/rocketmq"
+language = "java"
+base_commit = "b606d9c638c2b9bf018d9a9968fdc9e5d6acf07f"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__rocketmq-5865"
+repo = "apache/rocketmq"
+language = "java"
+base_commit = "7fc327eb90d7cbd2509cf89f342b7076b90533db"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__rocketmq-4122"
+repo = "apache/rocketmq"
+language = "java"
+base_commit = "ead6274b3e8016ee2fa75cf0dc201b5581ee7a34"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apache__rocketmq-7544"
+repo = "apache/rocketmq"
+language = "java"
+base_commit = "00965d8c11833237d5c9cd925664a1c456493cee"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apolloconfig__apollo-4464"
+repo = "apolloconfig/apollo"
+language = "java"
+base_commit = "63c16c117a869426f2cbbfdaa099de449789fd18"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apolloconfig__apollo-4207"
+repo = "apolloconfig/apollo"
+language = "java"
+base_commit = "96ee53a2c98da763ef0e7557af33c03a8d2ae297"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apolloconfig__apollo-4199"
+repo = "apolloconfig/apollo"
+language = "java"
+base_commit = "7fb6b8b818ed4c9d82c95086d78b6049d1292604"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apolloconfig__apollo-4568"
+repo = "apolloconfig/apollo"
+language = "java"
+base_commit = "526a93506ee380a009dc20a9ab870a37367f983f"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apolloconfig__apollo-1894"
+repo = "apolloconfig/apollo"
+language = "java"
+base_commit = "b794f38a8f80df4448e8354da915ff0911e89ed1"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "apolloconfig__apollo-4119"
+repo = "apolloconfig/apollo"
+language = "java"
+base_commit = "b2c101aaecd34339afcc4844311f37280d03d48e"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes"]
+
+[[s1.instances]]
+id = "redis__redis-10068"
+repo = "redis/redis"
+language = "c"
+base_commit = "e88f6acb94c77c9a5b81f0b2a8bd132b2a5c3d3c"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-11734"
+repo = "redis/redis"
+language = "c"
+base_commit = "45d3310694406fb0f338f7c639cda9754edb88f8"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-11510"
+repo = "redis/redis"
+language = "c"
+base_commit = "a4bcdbcfd3a055eb6320f31e5c710931708a9501"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-9733"
+repo = "redis/redis"
+language = "c"
+base_commit = "77d3c6bff30331fb94a8570adc29872368e15ca2"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-11279"
+repo = "redis/redis"
+language = "c"
+base_commit = "eedb8b172474dd7776d9bbb0f2954a1394027289"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-13115"
+repo = "redis/redis"
+language = "c"
+base_commit = "4979cf02ff83e90ced80db5111452a4c3e082c3a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-11631"
+repo = "redis/redis"
+language = "c"
+base_commit = "df327b8bd56023931cd41e233f8703de7bbaa82c"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-10764"
+repo = "redis/redis"
+language = "c"
+base_commit = "843a4cdc075a5b251e1b154f8013a9e0abe1038b"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-12272"
+repo = "redis/redis"
+language = "c"
+base_commit = "7f0a7f0a69318788edeca5a55ce05e278fdaa90b"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-12472"
+repo = "redis/redis"
+language = "c"
+base_commit = "6abfda54c380c07ea0d460706833929654fac25a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-10095"
+repo = "redis/redis"
+language = "c"
+base_commit = "1e25bdf7808bb400f2dc552ec0d6690d1b340d23"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "redis__redis-13338"
+repo = "redis/redis"
+language = "c"
+base_commit = "94b9072e44af0bae8cfe2de5cfa4af7b8e399759"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jqlang__jq-2728"
+repo = "jqlang/jq"
+language = "c"
+base_commit = "87e3dfddb80015bd71259a4a295ca73bed398bd2"
+dataset = "swe_bench_multilingual"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "jqlang__jq-2919"
+repo = "jqlang/jq"
+language = "c"
+base_commit = "7f547827e47b5ade563a293329deb4226496d72f"
+dataset = "swe_bench_multilingual"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "jqlang__jq-2235"
+repo = "jqlang/jq"
+language = "c"
+base_commit = "b8816caf0a7f58c6483f4344e222a6fea47732e8"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jqlang__jq-2750"
+repo = "jqlang/jq"
+language = "c"
+base_commit = "98f709d0c1fd87a8b6a3e10c679442667712b264"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jqlang__jq-2650"
+repo = "jqlang/jq"
+language = "c"
+base_commit = "d8072564c28d38d29aa0a7c416621f02c19f7f44"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jqlang__jq-2658"
+repo = "jqlang/jq"
+language = "c"
+base_commit = "c077b95ba2dcaafee39e302cc086bf99fa9248d0"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jqlang__jq-2598"
+repo = "jqlang/jq"
+language = "c"
+base_commit = "4dc2a2fb9df94ec45d107b798173c7db9c695a7f"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jqlang__jq-2681"
+repo = "jqlang/jq"
+language = "c"
+base_commit = "c08ecbaf239592018a2050b8515040d4a9f2e7aa"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jqlang__jq-2839"
+repo = "jqlang/jq"
+language = "c"
+base_commit = "f86566b2631b777c0d0c9a4572eb21146a14829b"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "micropython__micropython-15898"
+repo = "micropython/micropython"
+language = "c"
+base_commit = "b0ba151102a6c1b2e0e4c419c6482a64677c9b40"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "micropython__micropython-12158"
+repo = "micropython/micropython"
+language = "c"
+base_commit = "c0d4c604e6a140c0f2967e1b43fd94d0b029c73f"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "micropython__micropython-10095"
+repo = "micropython/micropython"
+language = "c"
+base_commit = "cc26bf7406dac7822de347d14a9935c101d7e8aa"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "micropython__micropython-13039"
+repo = "micropython/micropython"
+language = "c"
+base_commit = "fce8d9fd55409ab1027beee5671bc653fb5beb97"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "micropython__micropython-13569"
+repo = "micropython/micropython"
+language = "c"
+base_commit = "2d7fb9a715d8c9f1f7ba73a62cfd587fa6ffc24a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "valkey-io__valkey-928"
+repo = "valkey-io/valkey"
+language = "c"
+base_commit = "5d97f5133c271313cd5a172617e8af1fe845e0e2"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "valkey-io__valkey-790"
+repo = "valkey-io/valkey"
+language = "c"
+base_commit = "35a188833335332980a16239ac2efebf241c8a6a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "valkey-io__valkey-1842"
+repo = "valkey-io/valkey"
+language = "c"
+base_commit = "4de8cf3567b4dfd3a541219462b22d46c730c4b4"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "valkey-io__valkey-1499"
+repo = "valkey-io/valkey"
+language = "c"
+base_commit = "93b701d8d48eaf87077e707dd77eaaed0e66900f"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fmtlib__fmt-2317"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "ece4b4b33a96db77beccca3957505e689cbc4279"
+dataset = "swe_bench_multilingual"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-3248"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "840ec8569ddb304345f082bb82d733742f431504"
+dataset = "swe_bench_multilingual"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-3750"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "5471a2426c432503bdadeab0c03df387bea97463"
+dataset = "swe_bench_multilingual"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-3158"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "80f8d34427d40ec5e7ce3b10ededc46bd4bd5759"
+dataset = "swe_bench_multilingual"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-4286"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "e3ddede6c4ee818825c4e5a6dfa1d384860c27d9"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-4055"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "1408f1824d6a23643e178ee6e46478fb550a0963"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-967"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "bf1f1c73e39c7ee6581ee0d5bb2471856a14bdb2"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-3260"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "2622cd23e69b67316cf678a97c268a874774c0e1"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-493"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "c03f55ec3a0511611fa7f0537f858544a0ed03bd"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-1663"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "8d9d528bf52c60864802844e8acf16db09dae19a"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-1390"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "d6eede9e085f0b36edcf0a2f6dff5f7875181019"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-3732"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "f5750892436a667fe622e5ecc8a02c15a5d9bc88"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-1361"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "a5abe5d95cb8a8015913be9748a9661f3e1fbda8"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fmtlib__fmt-3271"
+repo = "fmtlib/fmt"
+language = "cpp"
+base_commit = "bfc0924eacaa3c6163eb872c8948098565464192"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-4536"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "e6cafa573aac6ed9227f752a5371c0b3f436307d"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-2576"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "6f551930e5c7ef397056de121c0da82f77573cca"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-2258"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "cbafed349493dd8b072b5c1c5ac7f7c0ef0ed7df"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-3590"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "d1d79b930d7c10b76f03db0c30392527e5230995"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-2212"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "8575fdf9ad41844692b18fb9db4d28fea4e9282a"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-3523"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "b6d00d18974358ab1d55dcc3379d0ee3052deb4e"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-1555"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "b21c04c93893bb8e277eaff9d54cfe28bc6ca131"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-2989"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "bbdb29c6583e9e68f7f2bdce59a7384f061e0e32"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-1821"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "3790bd9ae059a8c3700ff90895c487dba19b6092"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nlohmann__json-2352"
+repo = "nlohmann/json"
+language = "cpp"
+base_commit = "b888afe5f45f0ac6381aa5fa93bba7b5fc035354"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "catchorg__Catch2-1608"
+repo = "catchorg/Catch2"
+language = "cpp"
+base_commit = "979bbf03bb00bc55ca09783791b5091a2247df68"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "catchorg__Catch2-1448"
+repo = "catchorg/Catch2"
+language = "cpp"
+base_commit = "62460fafe6b54c3173bc5cbc46d05a5f071017ff"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "catchorg__Catch2-1422"
+repo = "catchorg/Catch2"
+language = "cpp"
+base_commit = "1faccd601d904a951142d8fba82914a8325b764e"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "catchorg__Catch2-1614"
+repo = "catchorg/Catch2"
+language = "cpp"
+base_commit = "9c741fe96073ed620ffc032afbed1f3c789d2b68"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "catchorg__Catch2-2187"
+repo = "catchorg/Catch2"
+language = "cpp"
+base_commit = "2cb5210caf35bf8fc29ade2e5570cc0f37537951"
+dataset = "multi_swe_bench_cpp"
+assets = []
+
+[[s1.instances]]
+id = "catchorg__Catch2-2394"
+repo = "catchorg/Catch2"
+language = "cpp"
+base_commit = "1a8a793178d50b74b0f9a0adb3eec937b61039a9"
+dataset = "multi_swe_bench_cpp"
+assets = []
+
+[[s1.instances]]
+id = "catchorg__Catch2-2128"
+repo = "catchorg/Catch2"
+language = "cpp"
+base_commit = "65c9a1d31a338f28ef93cd61c475efc40f6cc42e"
+dataset = "multi_swe_bench_cpp"
+assets = []
+
+[[s1.instances]]
+id = "catchorg__Catch2-1609"
+repo = "catchorg/Catch2"
+language = "cpp"
+base_commit = "bd703dd74be7fd2413eb0c01662a491bcebea430"
+dataset = "multi_swe_bench_cpp"
+assets = []
+
+[[s1.instances]]
+id = "simdjson__simdjson-545"
+repo = "simdjson/simdjson"
+language = "cpp"
+base_commit = "e4e89fe27a37a1abf70387d07adfb3b1b9f115ef"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "simdjson__simdjson-2016"
+repo = "simdjson/simdjson"
+language = "cpp"
+base_commit = "74bb7b2533af3f063d0794fe3962fb5226c27751"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "simdjson__simdjson-1667"
+repo = "simdjson/simdjson"
+language = "cpp"
+base_commit = "47a62db55936e29e1966a26a9aadb5f28237ae37"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "simdjson__simdjson-1615"
+repo = "simdjson/simdjson"
+language = "cpp"
+base_commit = "40cba172ed66584cf670c98202ed474a316667e3"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "simdjson__simdjson-1712"
+repo = "simdjson/simdjson"
+language = "cpp"
+base_commit = "cebe3fb299a4ea6787a11d8700a9933cc838bcfb"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "simdjson__simdjson-1695"
+repo = "simdjson/simdjson"
+language = "cpp"
+base_commit = "35158257c6e79d908723f1a7023362a718579c4f"
+dataset = "multi_swe_bench_cpp"
+assets = ["contextbench"]

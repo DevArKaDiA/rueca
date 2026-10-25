@@ -1,0 +1,7 @@
+{
+  "app/Main.java:DbStore.save": [],
+  "app/Main.java:FileStore.save": [],
+  "app/Main.java:Saver.persist": [
+    "app/Main.java:FileStore.save"
+  ]
+}

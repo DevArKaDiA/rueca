@@ -1,0 +1,9 @@
+{
+  "main.cpp:Logger::log": [],
+  "main.cpp:Logger::~Logger": [],
+  "main.cpp:TimedLogger::log": [
+    "main.cpp:Logger::log",
+    "main.cpp:TimedLogger::stamp"
+  ],
+  "main.cpp:TimedLogger::stamp": []
+}

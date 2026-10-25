@@ -1,0 +1,716 @@
+{
+ "repos": {
+  "online-boutique": {
+   "grep": {
+    "arm_version": "rueca-bench env regexes + tree-sitter",
+    "index_seconds": null,
+    "bridge": {
+     "reads": {
+      "tp": 60,
+      "pred": 60,
+      "gold": 63,
+      "precision": 1.0,
+      "recall": 0.9523809523809523,
+      "f1": 0.975609756097561
+     },
+     "writes": {
+      "tp": 35,
+      "pred": 70,
+      "gold": 61,
+      "precision": 0.5,
+      "recall": 0.5737704918032787,
+      "f1": 0.5343511450381679
+     },
+     "all": {
+      "tp": 95,
+      "pred": 130,
+      "gold": 124,
+      "precision": 0.7307692307692307,
+      "recall": 0.7661290322580645,
+      "f1": 0.748031496062992
+     },
+     "reads_missed": [
+      "src/adservice/src/main/java/hipstershop/AdService.java|start|PORT",
+      "src/emailservice/email_server.py|<module>|DISABLE_PROFILER",
+      "src/recommendationservice/recommendation_server.py|<module>|DISABLE_PROFILER"
+     ],
+     "reads_spurious": []
+    }
+   },
+   "cbm": {
+    "arm_version": "codebase-memory-mcp 0.12.0",
+    "index_seconds": 0.9316982080054004,
+    "keys": {
+     "yaml": {
+      "keys": 2582,
+      "covered": 29,
+      "exact": 29,
+      "files": 89,
+      "recall": 0.011231603408210689,
+      "span_accuracy": 1.0
+     },
+     "hcl": {
+      "keys": 131,
+      "covered": 26,
+      "exact": 26,
+      "files": 8,
+      "recall": 0.1984732824427481,
+      "span_accuracy": 1.0
+     },
+     "json": {
+      "keys": 152,
+      "covered": 46,
+      "exact": 46,
+      "files": 5,
+      "recall": 0.3026315789473684,
+      "span_accuracy": 1.0
+     }
+    },
+    "kinds": {
+     "kubernetes": {
+      "format": "yaml",
+      "files": 72,
+      "with_kind_nodes": 72
+     },
+     "terraform": {
+      "format": "hcl",
+      "files": 8,
+      "with_kind_nodes": 0
+     },
+     "github-actions": {
+      "format": "yaml",
+      "files": 9,
+      "with_kind_nodes": 0
+     },
+     "package.json": {
+      "format": "json",
+      "files": 2,
+      "with_kind_nodes": 0
+     }
+    },
+    "bridge": {
+     "reads": {
+      "tp": 56,
+      "pred": 57,
+      "gold": 63,
+      "precision": 0.9824561403508771,
+      "recall": 0.8888888888888888,
+      "f1": 0.9333333333333333
+     },
+     "writes": {
+      "tp": 55,
+      "pred": 55,
+      "gold": 61,
+      "precision": 1.0,
+      "recall": 0.9016393442622951,
+      "f1": 0.9482758620689655
+     },
+     "all": {
+      "tp": 111,
+      "pred": 112,
+      "gold": 124,
+      "precision": 0.9910714285714286,
+      "recall": 0.8951612903225806,
+      "f1": 0.9406779661016949
+     },
+     "reads_missed": [
+      "src/adservice/src/main/java/hipstershop/AdService.java|initStats|DISABLE_STATS",
+      "src/adservice/src/main/java/hipstershop/AdService.java|initTracing|DISABLE_TRACING",
+      "src/adservice/src/main/java/hipstershop/AdService.java|start|PORT",
+      "src/emailservice/email_server.py|<module>|DISABLE_PROFILER",
+      "src/frontend/packaging_info.go|init|PACKAGING_SERVICE_URL",
+      "src/paymentservice/server.js|<module>|PORT",
+      "src/recommendationservice/recommendation_server.py|<module>|DISABLE_PROFILER"
+     ],
+     "reads_spurious": [
+      "src/frontend/deployment_details.go|init|PACKAGING_SERVICE_URL"
+     ]
+    }
+   },
+   "rueca": {
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
+    "index_seconds": 0.677514874987537,
+    "keys": {
+     "yaml": {
+      "keys": 2582,
+      "covered": 2582,
+      "exact": 2582,
+      "files": 89,
+      "recall": 1.0,
+      "span_accuracy": 1.0
+     },
+     "hcl": {
+      "keys": 131,
+      "covered": 127,
+      "exact": 127,
+      "files": 8,
+      "recall": 0.9694656488549618,
+      "span_accuracy": 1.0
+     },
+     "json": {
+      "keys": 152,
+      "covered": 152,
+      "exact": 152,
+      "files": 5,
+      "recall": 1.0,
+      "span_accuracy": 1.0
+     }
+    },
+    "kinds": {
+     "kubernetes": {
+      "format": "yaml",
+      "files": 72,
+      "with_kind_nodes": 51
+     },
+     "terraform": {
+      "format": "hcl",
+      "files": 8,
+      "with_kind_nodes": 3
+     },
+     "github-actions": {
+      "format": "yaml",
+      "files": 9,
+      "with_kind_nodes": 5
+     },
+     "package.json": {
+      "format": "json",
+      "files": 2,
+      "with_kind_nodes": 0
+     }
+    },
+    "bridge": {
+     "reads": {
+      "tp": 60,
+      "pred": 60,
+      "gold": 63,
+      "precision": 1.0,
+      "recall": 0.9523809523809523,
+      "f1": 0.975609756097561
+     },
+     "writes": {
+      "tp": 61,
+      "pred": 61,
+      "gold": 61,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+     },
+     "all": {
+      "tp": 121,
+      "pred": 121,
+      "gold": 124,
+      "precision": 1.0,
+      "recall": 0.9758064516129032,
+      "f1": 0.9877551020408163
+     },
+     "reads_missed": [
+      "src/adservice/src/main/java/hipstershop/AdService.java|start|PORT",
+      "src/emailservice/email_server.py|<module>|DISABLE_PROFILER",
+      "src/recommendationservice/recommendation_server.py|<module>|DISABLE_PROFILER"
+     ],
+     "reads_spurious": []
+    }
+   }
+  },
+  "awesome-compose": {
+   "grep": {
+    "arm_version": "rueca-bench env regexes + tree-sitter",
+    "index_seconds": null,
+    "bridge": {
+     "reads": {
+      "tp": 17,
+      "pred": 17,
+      "gold": 17,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+     },
+     "writes": {
+      "tp": 46,
+      "pred": 46,
+      "gold": 69,
+      "precision": 1.0,
+      "recall": 0.6666666666666666,
+      "f1": 0.8
+     },
+     "all": {
+      "tp": 63,
+      "pred": 63,
+      "gold": 86,
+      "precision": 1.0,
+      "recall": 0.7325581395348837,
+      "f1": 0.8456375838926175
+     },
+     "reads_missed": [],
+     "reads_spurious": []
+    }
+   },
+   "cbm": {
+    "arm_version": "codebase-memory-mcp 0.12.0",
+    "index_seconds": 0.9543685000098776,
+    "keys": {
+     "yaml": {
+      "keys": 266,
+      "covered": 7,
+      "exact": 7,
+      "files": 21,
+      "recall": 0.02631578947368421,
+      "span_accuracy": 1.0
+     },
+     "json": {
+      "keys": 167,
+      "covered": 29,
+      "exact": 29,
+      "files": 10,
+      "recall": 0.17365269461077845,
+      "span_accuracy": 1.0
+     }
+    },
+    "kinds": {
+     "compose": {
+      "format": "yaml",
+      "files": 16,
+      "with_kind_nodes": 16
+     },
+     "package.json": {
+      "format": "json",
+      "files": 5,
+      "with_kind_nodes": 0
+     }
+    },
+    "bridge": {
+     "reads": {
+      "tp": 17,
+      "pred": 17,
+      "gold": 17,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+     },
+     "writes": {
+      "tp": 54,
+      "pred": 54,
+      "gold": 69,
+      "precision": 1.0,
+      "recall": 0.782608695652174,
+      "f1": 0.878048780487805
+     },
+     "all": {
+      "tp": 71,
+      "pred": 71,
+      "gold": 86,
+      "precision": 1.0,
+      "recall": 0.8255813953488372,
+      "f1": 0.9044585987261146
+     },
+     "reads_missed": [],
+     "reads_spurious": []
+    }
+   },
+   "rueca": {
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
+    "index_seconds": 0.6984215000120457,
+    "keys": {
+     "yaml": {
+      "keys": 266,
+      "covered": 266,
+      "exact": 266,
+      "files": 21,
+      "recall": 1.0,
+      "span_accuracy": 1.0
+     },
+     "json": {
+      "keys": 167,
+      "covered": 167,
+      "exact": 167,
+      "files": 10,
+      "recall": 1.0,
+      "span_accuracy": 1.0
+     }
+    },
+    "kinds": {
+     "compose": {
+      "format": "yaml",
+      "files": 16,
+      "with_kind_nodes": 16
+     },
+     "package.json": {
+      "format": "json",
+      "files": 5,
+      "with_kind_nodes": 0
+     }
+    },
+    "bridge": {
+     "reads": {
+      "tp": 17,
+      "pred": 17,
+      "gold": 17,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+     },
+     "writes": {
+      "tp": 69,
+      "pred": 69,
+      "gold": 69,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+     },
+     "all": {
+      "tp": 86,
+      "pred": 86,
+      "gold": 86,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+     },
+     "reads_missed": [],
+     "reads_spurious": []
+    }
+   }
+  },
+  "terraform-aws-vpc": {
+   "grep": {
+    "arm_version": "rueca-bench env regexes + tree-sitter",
+    "index_seconds": null
+   },
+   "cbm": {
+    "arm_version": "codebase-memory-mcp 0.12.0",
+    "index_seconds": 2.4603863340162206,
+    "keys": {
+     "yaml": {
+      "keys": 143,
+      "covered": 5,
+      "exact": 5,
+      "files": 6,
+      "recall": 0.03496503496503497,
+      "span_accuracy": 1.0
+     },
+     "json": {
+      "keys": 3,
+      "covered": 3,
+      "exact": 3,
+      "files": 1,
+      "recall": 1.0,
+      "span_accuracy": 1.0
+     },
+     "hcl": {
+      "keys": 7099,
+      "covered": 1770,
+      "exact": 1770,
+      "files": 77,
+      "recall": 0.2493308916748838,
+      "span_accuracy": 1.0
+     }
+    },
+    "kinds": {
+     "github-actions": {
+      "format": "yaml",
+      "files": 5,
+      "with_kind_nodes": 0
+     },
+     "terraform": {
+      "format": "hcl",
+      "files": 77,
+      "with_kind_nodes": 0
+     }
+    }
+   },
+   "rueca": {
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
+    "index_seconds": 0.40262291600811295,
+    "keys": {
+     "yaml": {
+      "keys": 143,
+      "covered": 143,
+      "exact": 143,
+      "files": 6,
+      "recall": 1.0,
+      "span_accuracy": 1.0
+     },
+     "json": {
+      "keys": 3,
+      "covered": 3,
+      "exact": 3,
+      "files": 1,
+      "recall": 1.0,
+      "span_accuracy": 1.0
+     },
+     "hcl": {
+      "keys": 7099,
+      "covered": 7071,
+      "exact": 7071,
+      "files": 77,
+      "recall": 0.9960557825045782,
+      "span_accuracy": 1.0
+     }
+    },
+    "kinds": {
+     "github-actions": {
+      "format": "yaml",
+      "files": 5,
+      "with_kind_nodes": 3
+     },
+     "terraform": {
+      "format": "hcl",
+      "files": 77,
+      "with_kind_nodes": 20
+     }
+    }
+   }
+  }
+ },
+ "formats": {
+  "yaml": {
+   "cbm": {
+    "keys": 2991,
+    "covered": 41,
+    "exact": 41,
+    "files": 116,
+    "recall": 0.013707790036776997,
+    "span_accuracy": 1.0
+   },
+   "rueca": {
+    "keys": 2991,
+    "covered": 2991,
+    "exact": 2991,
+    "files": 116,
+    "recall": 1.0,
+    "span_accuracy": 1.0
+   }
+  },
+  "hcl": {
+   "cbm": {
+    "keys": 7230,
+    "covered": 1796,
+    "exact": 1796,
+    "files": 85,
+    "recall": 0.2484094052558783,
+    "span_accuracy": 1.0
+   },
+   "rueca": {
+    "keys": 7230,
+    "covered": 7198,
+    "exact": 7198,
+    "files": 85,
+    "recall": 0.9955739972337483,
+    "span_accuracy": 1.0
+   }
+  },
+  "json": {
+   "cbm": {
+    "keys": 322,
+    "covered": 78,
+    "exact": 78,
+    "files": 16,
+    "recall": 0.2422360248447205,
+    "span_accuracy": 1.0
+   },
+   "rueca": {
+    "keys": 322,
+    "covered": 322,
+    "exact": 322,
+    "files": 16,
+    "recall": 1.0,
+    "span_accuracy": 1.0
+   }
+  }
+ },
+ "bridge": {
+  "grep": {
+   "reads": {
+    "tp": 77,
+    "pred": 77,
+    "gold": 80,
+    "precision": 1.0,
+    "recall": 0.9625
+   },
+   "writes": {
+    "tp": 81,
+    "pred": 116,
+    "gold": 130,
+    "precision": 0.6982758620689655,
+    "recall": 0.6230769230769231
+   },
+   "all": {
+    "tp": 158,
+    "pred": 193,
+    "gold": 210,
+    "precision": 0.8186528497409327,
+    "recall": 0.7523809523809524,
+    "f1": 0.7841191066997518
+   }
+  },
+  "cbm": {
+   "reads": {
+    "tp": 73,
+    "pred": 74,
+    "gold": 80,
+    "precision": 0.9864864864864865,
+    "recall": 0.9125
+   },
+   "writes": {
+    "tp": 109,
+    "pred": 109,
+    "gold": 130,
+    "precision": 1.0,
+    "recall": 0.8384615384615385
+   },
+   "all": {
+    "tp": 182,
+    "pred": 183,
+    "gold": 210,
+    "precision": 0.994535519125683,
+    "recall": 0.8666666666666667,
+    "f1": 0.9262086513994912
+   }
+  },
+  "rueca": {
+   "reads": {
+    "tp": 77,
+    "pred": 77,
+    "gold": 80,
+    "precision": 1.0,
+    "recall": 0.9625
+   },
+   "writes": {
+    "tp": 130,
+    "pred": 130,
+    "gold": 130,
+    "precision": 1.0,
+    "recall": 1.0
+   },
+   "all": {
+    "tp": 207,
+    "pred": 207,
+    "gold": 210,
+    "precision": 1.0,
+    "recall": 0.9857142857142858,
+    "f1": 0.9928057553956835
+   }
+  }
+ },
+ "kinds": {
+  "kubernetes": {
+   "cbm": {
+    "format": "yaml",
+    "files": 72,
+    "with_kind_nodes": 72
+   },
+   "rueca": {
+    "format": "yaml",
+    "files": 72,
+    "with_kind_nodes": 51
+   }
+  },
+  "terraform": {
+   "cbm": {
+    "format": "hcl",
+    "files": 85,
+    "with_kind_nodes": 0
+   },
+   "rueca": {
+    "format": "hcl",
+    "files": 85,
+    "with_kind_nodes": 23
+   }
+  },
+  "github-actions": {
+   "cbm": {
+    "format": "yaml",
+    "files": 14,
+    "with_kind_nodes": 0
+   },
+   "rueca": {
+    "format": "yaml",
+    "files": 14,
+    "with_kind_nodes": 8
+   }
+  },
+  "package.json": {
+   "cbm": {
+    "format": "json",
+    "files": 7,
+    "with_kind_nodes": 0
+   },
+   "rueca": {
+    "format": "json",
+    "files": 7,
+    "with_kind_nodes": 0
+   }
+  },
+  "compose": {
+   "cbm": {
+    "format": "yaml",
+    "files": 16,
+    "with_kind_nodes": 16
+   },
+   "rueca": {
+    "format": "yaml",
+    "files": 16,
+    "with_kind_nodes": 16
+   }
+  }
+ },
+ "gold": {
+  "online-boutique": {
+   "repo": "GoogleCloudPlatform/microservices-demo",
+   "commit": "5b608cb1dfe317d05e4f1bb8c99b7618452fde87",
+   "data_files": 118,
+   "skipped": {
+    "lockfile": 2,
+    "template": 14
+   },
+   "reference_keys": {
+    "hcl": 131,
+    "json": 152,
+    "yaml": 2582
+   },
+   "kinds": [
+    "github-actions",
+    "kubernetes",
+    "package.json",
+    "terraform"
+   ],
+   "bridge_reads": 66,
+   "bridge_writes": 61
+  },
+  "awesome-compose": {
+   "repo": "docker/awesome-compose",
+   "commit": "30f4b7f6a6c3b0c0ecf4d4efb0de203c48d11562",
+   "data_files": 36,
+   "skipped": {
+    "lockfile": 5
+   },
+   "reference_keys": {
+    "json": 167,
+    "yaml": 266
+   },
+   "kinds": [
+    "compose",
+    "package.json"
+   ],
+   "bridge_reads": 21,
+   "bridge_writes": 69
+  },
+  "terraform-aws-vpc": {
+   "repo": "terraform-aws-modules/terraform-aws-vpc",
+   "commit": "b3abd6df2ecf052451a361ed55b8f06f8742a795",
+   "data_files": 84,
+   "skipped": {},
+   "reference_keys": {
+    "hcl": 7099,
+    "json": 3,
+    "yaml": 143
+   },
+   "kinds": [
+    "github-actions",
+    "terraform"
+   ],
+   "bridge_reads": 0,
+   "bridge_writes": 0
+  }
+ },
+ "failures": []
+}

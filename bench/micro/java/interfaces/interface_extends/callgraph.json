@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Channel.write": [],
+  "app/Main.java:Closeable2.close": [],
+  "app/Main.java:Session.finish": [
+    "app/Main.java:Channel.write",
+    "app/Main.java:Closeable2.close"
+  ]
+}

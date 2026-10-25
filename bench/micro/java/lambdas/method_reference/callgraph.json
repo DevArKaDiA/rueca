@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Pipeline.quiet": [
+    "app/Main.java:Text.lower"
+  ],
+  "app/Main.java:Pipeline.shout": [],
+  "app/Main.java:Text.lower": [],
+  "app/Main.java:Text.upper": []
+}

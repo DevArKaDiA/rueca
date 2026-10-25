@@ -1,0 +1,6 @@
+{
+  "main.cpp:Money::operator==": [],
+  "main.cpp:Money::same": [
+    "main.cpp:Money::operator=="
+  ]
+}

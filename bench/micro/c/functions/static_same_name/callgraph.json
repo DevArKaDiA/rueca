@@ -1,0 +1,14 @@
+{
+  "a.c:a_run": [
+    "a.c:helper"
+  ],
+  "a.c:helper": [],
+  "b.c:b_run": [
+    "b.c:helper"
+  ],
+  "b.c:helper": [],
+  "main.c:main": [
+    "a.c:a_run",
+    "b.c:b_run"
+  ]
+}

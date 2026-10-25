@@ -1,0 +1,10 @@
+{
+  "calc.c:calc": [
+    "calc.c:dbl",
+    "calc.c:inc",
+    "calc.c:sum"
+  ],
+  "calc.c:dbl": [],
+  "calc.c:inc": [],
+  "calc.c:sum": []
+}

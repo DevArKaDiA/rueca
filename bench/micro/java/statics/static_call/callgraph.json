@@ -1,0 +1,6 @@
+{
+  "app/Main.java:Clock.now": [],
+  "app/Main.java:Timer.elapsed": [
+    "app/Main.java:Clock.now"
+  ]
+}

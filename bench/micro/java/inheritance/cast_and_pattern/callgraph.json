@@ -1,0 +1,9 @@
+{
+  "app/Main.java:Cat.purr": [],
+  "app/Main.java:Owner.maybe": [
+    "app/Main.java:Cat.purr"
+  ],
+  "app/Main.java:Owner.pet": [
+    "app/Main.java:Cat.purr"
+  ]
+}

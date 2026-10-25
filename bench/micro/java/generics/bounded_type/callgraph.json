@@ -1,0 +1,7 @@
+{
+  "app/Main.java:Figure.area": [],
+  "app/Main.java:Square.area": [],
+  "app/Main.java:Stats.sum": [
+    "app/Main.java:Figure.area"
+  ]
+}

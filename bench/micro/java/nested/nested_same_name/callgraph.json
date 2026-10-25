@@ -1,0 +1,7 @@
+{
+  "app/Main.java:Client.get": [
+    "app/Main.java:Http.Request.send"
+  ],
+  "app/Main.java:Ftp.Request.send": [],
+  "app/Main.java:Http.Request.send": []
+}

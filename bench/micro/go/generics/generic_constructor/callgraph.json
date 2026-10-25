@@ -1,0 +1,11 @@
+{
+  "main.go:Box.Get": [],
+  "main.go:NewBox": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:Box.Get",
+    "main.go:NewBox"
+  ]
+}

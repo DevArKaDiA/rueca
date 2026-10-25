@@ -16,7 +16,9 @@ from pathlib import Path
 from .arms.cbm import cbm_binary, cbm_platform_key
 from .common import BIN_DIR, CACHE, lang_family, load_manifest, log, sha256_file
 from .corpus import ensure_commit
-from .datasets import fetch_dataset, select_instances, write_instances
+from .data import build_data_gold
+from .data import repos as data_repos
+from .datasets import fetch_dataset, merge_instances, select_instances, write_instances
 from .phpstan import docker_available, fetch_phpstan
 from .s1 import instances, s1_gold
 from .s3 import build_micro_gold, build_repo_gold, suites
@@ -70,10 +72,12 @@ def setup(select: bool = False, workers: int = 4, skip_s3: bool = False, languag
     `[languages]` keys); selection (`--select`) always covers every repo so the
     generated instance list stays deterministic."""
     fetch_cbm()
-    for key in (load_manifest()["datasets"] if select else _datasets_for(languages)):
+    for key in (load_manifest()["datasets"] if select and not languages else _datasets_for(languages)):
         fetch_dataset(key)
     if select or not instances():
-        write_instances(select_instances())
+        # with --lang, only those families are (re)selected; the others keep
+        # their instances exactly as listed
+        write_instances(merge_instances(instances(), select_instances(languages), languages))
     insts = [i for i in instances() if not languages or lang_family(i["language"]) in languages]
     by_repo: dict[str, list[dict]] = {}
     for i in insts:
@@ -88,6 +92,15 @@ def setup(select: bool = False, workers: int = 4, skip_s3: bool = False, languag
         list(ex.map(_gold, by_repo.values()))
     log(f"s1 gold ready for {len(insts)} instances")
     if skip_s3:
+        return
+    if not languages or "data" in languages:
+        for spec in data_repos():
+            try:
+                build_data_gold(spec)
+            except Exception as exc:
+                log(f"data gold FAILED for {spec['name']}: {exc}")
+    languages = {x for x in languages if x != "data"} if languages else None
+    if languages == set():
         return
     sets = suites(languages)
     if any(not micro and spec.get("gold") == "phpstan" for _, spec, micro in sets):

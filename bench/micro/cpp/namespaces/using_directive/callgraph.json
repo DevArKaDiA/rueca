@@ -1,0 +1,7 @@
+{
+  "main.cpp:caller": [
+    "main.cpp:util::helper"
+  ],
+  "main.cpp:other::helper2": [],
+  "main.cpp:util::helper": []
+}

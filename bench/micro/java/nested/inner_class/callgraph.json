@@ -1,0 +1,11 @@
+{
+  "app/Main.java:Tree.Node.Node": [],
+  "app/Main.java:Tree.Node.depth": [
+    "app/Main.java:Tree.size"
+  ],
+  "app/Main.java:Tree.size": [],
+  "app/Main.java:Tree.walk": [
+    "app/Main.java:Tree.Node.Node",
+    "app/Main.java:Tree.Node.depth"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "lib/v2impl/impl.go:Do": [
+    "lib/v2impl/impl.go:square"
+  ],
+  "lib/v2impl/impl.go:square": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "lib/v2impl/impl.go:Do"
+  ]
+}

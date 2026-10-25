@@ -1,0 +1,7 @@
+{
+  "app/Main.java:Main.area": [
+    "lib/MathUtil.java:MathUtil.square"
+  ],
+  "lib/MathUtil.java:MathUtil.cube": [],
+  "lib/MathUtil.java:MathUtil.square": []
+}

@@ -1,0 +1,8 @@
+{
+  "main.cpp:Parser::parse@3": [],
+  "main.cpp:Parser::parse@4": [],
+  "main.cpp:parse_all": [
+    "main.cpp:Parser::parse@3",
+    "main.cpp:Parser::parse@4"
+  ]
+}

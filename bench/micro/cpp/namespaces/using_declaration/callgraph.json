@@ -1,0 +1,7 @@
+{
+  "main.cpp:format": [
+    "main.cpp:util::trim"
+  ],
+  "main.cpp:util::pad": [],
+  "main.cpp:util::trim": []
+}

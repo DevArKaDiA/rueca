@@ -1,0 +1,7 @@
+{
+  "app/Main.java:Main.load": [
+    "data/Parser.java:Parser.parse"
+  ],
+  "data/Parser.java:Parser.parse": [],
+  "legacy/Parser.java:Parser.parse": []
+}

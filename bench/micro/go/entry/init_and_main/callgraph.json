@@ -1,0 +1,10 @@
+{
+  "main.go:init": [
+    "main.go:setup"
+  ],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [],
+  "main.go:setup": []
+}

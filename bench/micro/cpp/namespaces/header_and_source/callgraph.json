@@ -1,0 +1,8 @@
+{
+  "geo.cpp:geo::area": [],
+  "geo.cpp:geo::perimeter": [],
+  "main.cpp:both": [
+    "geo.cpp:geo::area",
+    "geo.cpp:geo::perimeter"
+  ]
+}

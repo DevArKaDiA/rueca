@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Main.validate": [
+    "lib/Checks.java:Checks.notEmpty",
+    "lib/Checks.java:Checks.positive"
+  ],
+  "lib/Checks.java:Checks.notEmpty": [],
+  "lib/Checks.java:Checks.positive": []
+}

@@ -1,0 +1,10 @@
+{
+  "app/Main.java:Box.get": [],
+  "app/Main.java:Box.put": [],
+  "app/Main.java:Fruit.name": [],
+  "app/Main.java:Pantry.take": [
+    "app/Main.java:Box.get",
+    "app/Main.java:Box.put",
+    "app/Main.java:Fruit.name"
+  ]
+}

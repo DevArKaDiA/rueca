@@ -1,0 +1,10 @@
+{
+  "app/Main.java:Address.city": [],
+  "app/Main.java:Directory.cityOf": [
+    "app/Main.java:Address.city",
+    "app/Main.java:Directory.find",
+    "app/Main.java:User.address"
+  ],
+  "app/Main.java:Directory.find": [],
+  "app/Main.java:User.address": []
+}

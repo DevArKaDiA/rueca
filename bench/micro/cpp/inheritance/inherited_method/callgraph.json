@@ -1,0 +1,8 @@
+{
+  "main.cpp:Base::id": [],
+  "main.cpp:Derived::extra": [],
+  "main.cpp:describe": [
+    "main.cpp:Base::id",
+    "main.cpp:Derived::extra"
+  ]
+}

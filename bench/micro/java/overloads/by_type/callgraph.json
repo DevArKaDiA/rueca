@@ -1,0 +1,11 @@
+{
+  "app/Printer.java:Client.show": [
+    "app/Printer.java:Printer.print@7"
+  ],
+  "app/Printer.java:Client.showNumber": [
+    "app/Printer.java:Printer.print@4"
+  ],
+  "app/Printer.java:Printer.print@10": [],
+  "app/Printer.java:Printer.print@4": [],
+  "app/Printer.java:Printer.print@7": []
+}

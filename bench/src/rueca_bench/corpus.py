@@ -1,4 +1,15 @@
-"""One partial clone per repository; detached worktrees per commit."""
+"""One partial clone per repository; detached worktrees per commit.
+
+Two clone modes (manifest `[corpus] shallow`):
+- full partial clone (`--filter=blob:none`): all commits and trees, blobs on
+  demand — the alpha default;
+- shallow (repositories listed in `[corpus] shallow`, or every new clone
+  when it is `true`): an empty repository with `origin` as a promisor remote;
+  each needed commit is fetched with `--depth=1 --filter=blob:none` (the
+  Zoekt fetch pattern of RFC 0002 §7.1), so large histories (hugo,
+  terraform, redis, ...) cost one tree per pinned commit instead of their
+  whole history. Blobs are fetched on checkout / `git show`.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +18,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from .common import REPOS_DIR, WORK_DIR, log, named_lock, run, safe_name
+from .common import REPOS_DIR, WORK_DIR, load_manifest, log, named_lock, run, safe_name
 
 
 # LFS pointers stay pointers (git-lfs need not be installed; binaries are
@@ -19,12 +30,34 @@ def repo_dir(repo: str) -> Path:
     return REPOS_DIR / repo.replace("/", "__")
 
 
+def _shallow_wanted(repo: str) -> bool:
+    cfg = load_manifest().get("corpus", {}).get("shallow", False)
+    return cfg is True or (isinstance(cfg, list) and repo in cfg)
+
+
+def is_shallow(path: Path) -> bool:
+    return (path / ".git" / "shallow").exists() or (path / ".git" / "rueca-bench-shallow").exists()
+
+
 def ensure_clone(repo: str) -> Path:
     path = repo_dir(repo)
     with named_lock(f"git:{repo}"):
         if (path / ".git").exists() or (path / "HEAD").exists():
             return path
         path.parent.mkdir(parents=True, exist_ok=True)
+        if _shallow_wanted(repo):
+            log(f"init {repo} (shallow, blob:none)")
+            path.mkdir(parents=True, exist_ok=True)
+            run(["git", "init", "--quiet", str(path)], timeout=60, check=True)
+            for cmd in (
+                ["git", "remote", "add", "origin", f"https://github.com/{repo}.git"],
+                ["git", "config", "remote.origin.promisor", "true"],
+                ["git", "config", "remote.origin.partialclonefilter", "blob:none"],
+                ["git", "config", "extensions.partialClone", "origin"],
+            ):
+                run(cmd, cwd=path, timeout=60, check=True)
+            (path / ".git" / "rueca-bench-shallow").write_text("shallow, one commit per fetch\n")
+            return path
         log(f"clone {repo} (blob:none)")
         run(
             [
@@ -48,7 +81,8 @@ def ensure_commit(repo: str, commit: str) -> None:
         if run(["git", "cat-file", "-e", f"{commit}^{{commit}}"], cwd=path).rc == 0:
             return
         log(f"fetch {repo}@{commit[:10]}")
-        run(["git", "fetch", "--quiet", "--filter=blob:none", "origin", commit], cwd=path, timeout=900, check=True)
+        depth = ["--depth=1"] if is_shallow(path) else []
+        run(["git", "fetch", "--quiet", *depth, "--filter=blob:none", "origin", commit], cwd=path, timeout=900, check=True)
 
 
 def git_show(repo: str, commit: str, rel_path: str) -> str | None:

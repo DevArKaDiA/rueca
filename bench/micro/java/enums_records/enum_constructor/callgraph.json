@@ -1,0 +1,6 @@
+{
+  "app/Main.java:Planet.Planet": [
+    "app/Main.java:Planet.check"
+  ],
+  "app/Main.java:Planet.check": []
+}

@@ -1,0 +1,8 @@
+{
+  "main.cpp:Widget::Widget": [],
+  "main.cpp:Widget::size": [],
+  "main.cpp:make": [
+    "main.cpp:Widget::Widget",
+    "main.cpp:Widget::size"
+  ]
+}

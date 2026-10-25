@@ -1,0 +1,10 @@
+{
+  "impl.c:api_value": [
+    "impl.c:base_value"
+  ],
+  "impl.c:base_value": [],
+  "main.c:main": [
+    "impl.c:api_value",
+    "impl.c:base_value"
+  ]
+}

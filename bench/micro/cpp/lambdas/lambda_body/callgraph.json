@@ -1,0 +1,6 @@
+{
+  "main.cpp:compute": [
+    "main.cpp:trace"
+  ],
+  "main.cpp:trace": []
+}

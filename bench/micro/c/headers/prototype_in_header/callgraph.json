@@ -1,0 +1,9 @@
+{
+  "main.c:main": [
+    "mathx.c:square"
+  ],
+  "mathx.c:cube": [
+    "mathx.c:square"
+  ],
+  "mathx.c:square": []
+}

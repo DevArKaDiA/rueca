@@ -1,0 +1,13 @@
+{
+  "main.cpp:Service::Service": [
+    "main.cpp:Service::init"
+  ],
+  "main.cpp:Service::init": [],
+  "main.cpp:Service::shutdown": [],
+  "main.cpp:Service::~Service": [
+    "main.cpp:Service::shutdown"
+  ],
+  "main.cpp:boot": [
+    "main.cpp:Service::Service"
+  ]
+}

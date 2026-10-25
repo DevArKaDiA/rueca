@@ -1,0 +1,10 @@
+{
+  "main.go:Server.Start": [],
+  "main.go:Server.Stop": [],
+  "main.go:main": [
+    "main.go:stopAll"
+  ],
+  "main.go:stopAll": [
+    "main.go:Server.Stop"
+  ]
+}

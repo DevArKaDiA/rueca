@@ -1,0 +1,10 @@
+{
+  "main.cpp:Branch::leaf": [],
+  "main.cpp:Leaf::weight": [],
+  "main.cpp:Tree::branch": [],
+  "main.cpp:weigh": [
+    "main.cpp:Branch::leaf",
+    "main.cpp:Leaf::weight",
+    "main.cpp:Tree::branch"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "cli.c:parse_args": [],
+  "cli.c:run": [
+    "cli.c:usage"
+  ],
+  "cli.c:usage": [],
+  "main.c:main": [
+    "cli.c:parse_args",
+    "cli.c:run"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "main.c:tile": [
+    "shapes.c:area_rect"
+  ],
+  "shapes.c:area_rect": [],
+  "shapes.c:area_square": []
+}

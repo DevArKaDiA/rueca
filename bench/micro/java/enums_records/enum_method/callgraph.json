@@ -1,0 +1,9 @@
+{
+  "app/Main.java:Color.label": [],
+  "app/Main.java:Palette.any": [
+    "app/Main.java:Color.label"
+  ],
+  "app/Main.java:Palette.first": [
+    "app/Main.java:Color.label"
+  ]
+}

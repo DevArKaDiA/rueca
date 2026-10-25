@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Outer.Config.defaults": [],
+  "app/Main.java:Outer.Config.timeout": [],
+  "app/Main.java:Outer.wait2": [
+    "app/Main.java:Outer.Config.defaults",
+    "app/Main.java:Outer.Config.timeout"
+  ]
+}

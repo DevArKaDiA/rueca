@@ -118,9 +118,9 @@ def compute_s1_gold(repo: str, base_commit: str, patch: str, language: str) -> d
             skipped.append({"path": path, "reason": "missing-at-base"})
             continue
         gold_files.append(path)
-        if grammar_for(path) is None:
+        if grammar_for(path, language) is None:
             continue
-        funcs = extract_functions(path, src.encode("utf-8"))
+        funcs = extract_functions(path, src.encode("utf-8"), language)
         for f in functions_for_patch(fp, funcs, python=path.endswith((".py", ".pyi"))):
             d = f.as_dict()
             d["path"] = path
@@ -142,20 +142,32 @@ def compute_s1_gold(repo: str, base_commit: str, patch: str, language: str) -> d
 _NON_CALLABLE_KINDS = ("class", "interface", "enum", "type_alias", "module", "namespace")
 
 
-def _funcs_at(repo: str, base: str, path: str, cache: dict) -> list[Func] | None:
+def _funcs_at(repo: str, base: str, path: str, cache: dict, language: str | None = None) -> list[Func] | None:
     if path not in cache:
         src = git_show(repo, base, path)
-        cache[path] = None if src is None else extract_functions(path, src.encode("utf-8"))
+        cache[path] = None if src is None else extract_functions(path, src.encode("utf-8"), language)
     return cache[path]
 
 
-def _map_label(funcs: list[Func], qual: str) -> Func | None:
+def _map_label(funcs: list[Func], qual: str, strip_type_prefix: bool = False) -> Func | None:
     exact = [f for f in funcs if f.qualname == qual]
     if exact:
         return min(exact, key=lambda f: f.start)
     last = qual.rsplit(".", 1)[-1]
     by_name = [f for f in funcs if f.name == last]
-    return by_name[0] if len(by_name) == 1 else None
+    if len(by_name) == 1:
+        return by_name[0]
+    if strip_type_prefix and "_" in last:
+        # SWE-PolyBench Java node names often carry the return type:
+        # `method_declaration:String_buildKey` is method `buildKey`.
+        head = qual[: -len(last)]
+        rest = last
+        while "_" in rest:
+            rest = rest.split("_", 1)[1]
+            f = _map_label(funcs, head + rest)
+            if f is not None:
+                return f
+    return None
 
 
 def parse_list(raw) -> list[str]:
@@ -203,8 +215,8 @@ def assembled_functions(source: str, labels: list[str], repo: str, base: str, la
             qual = ".".join(names)
         if not candidate_path(path, language):
             continue
-        funcs = _funcs_at(repo, base, path, cache)
-        f = _map_label(funcs or [], qual)
+        funcs = _funcs_at(repo, base, path, cache, language)
+        f = _map_label(funcs or [], qual, strip_type_prefix=source == "polybench" and language == "java")
         if f is None:
             unmapped.append(lab)
             continue

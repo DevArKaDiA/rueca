@@ -1,0 +1,8 @@
+{
+  "main.cpp:Animal::speak": [],
+  "main.cpp:Animal::~Animal": [],
+  "main.cpp:Cat::speak": [],
+  "main.cpp:meow": [
+    "main.cpp:Cat::speak"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "main.go:ID.String": [],
+  "main.go:Stringify": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:Stringify"
+  ]
+}

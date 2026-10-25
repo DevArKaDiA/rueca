@@ -1,0 +1,14 @@
+{
+  "main.go:Base.Hello": [],
+  "main.go:Derived.Hello": [],
+  "main.go:main": [
+    "main.go:viaField",
+    "main.go:viaOuter"
+  ],
+  "main.go:viaField": [
+    "main.go:Base.Hello"
+  ],
+  "main.go:viaOuter": [
+    "main.go:Derived.Hello"
+  ]
+}

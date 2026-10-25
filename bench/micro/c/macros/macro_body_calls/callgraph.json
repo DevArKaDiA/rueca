@@ -1,0 +1,7 @@
+{
+  "log.c:log_msg": [],
+  "log.c:loud": [
+    "log.c:log_msg"
+  ],
+  "log.c:quiet": []
+}

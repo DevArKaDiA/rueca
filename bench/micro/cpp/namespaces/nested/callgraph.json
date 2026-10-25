@@ -1,0 +1,13 @@
+{
+  "main.cpp:outer::inner::deep": [],
+  "main.cpp:outer::shallow": [
+    "main.cpp:outer::inner::deep"
+  ],
+  "main.cpp:top": [
+    "main.cpp:outer::shallow",
+    "main.cpp:x::y::modern"
+  ],
+  "main.cpp:x::y::modern": [
+    "main.cpp:outer::inner::deep"
+  ]
+}

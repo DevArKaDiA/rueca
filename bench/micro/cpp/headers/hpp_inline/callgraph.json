@@ -1,0 +1,9 @@
+{
+  "main.cpp:eight": [
+    "util.hpp:quad"
+  ],
+  "util.hpp:quad": [
+    "util.hpp:twice"
+  ],
+  "util.hpp:twice": []
+}

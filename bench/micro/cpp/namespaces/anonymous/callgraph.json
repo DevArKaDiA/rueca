@@ -1,0 +1,6 @@
+{
+  "main.cpp:api::reveal": [
+    "main.cpp:secret"
+  ],
+  "main.cpp:secret": []
+}

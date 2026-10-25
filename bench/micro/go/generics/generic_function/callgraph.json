@@ -1,0 +1,13 @@
+{
+  "main.go:Map": [],
+  "main.go:explicit": [
+    "main.go:Map"
+  ],
+  "main.go:inferred": [
+    "main.go:Map"
+  ],
+  "main.go:main": [
+    "main.go:explicit",
+    "main.go:inferred"
+  ]
+}

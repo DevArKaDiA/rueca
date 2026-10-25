@@ -1,0 +1,10 @@
+{
+  "main.cpp:emit_number": [
+    "main.cpp:put@1"
+  ],
+  "main.cpp:emit_text": [
+    "main.cpp:put@2"
+  ],
+  "main.cpp:put@1": [],
+  "main.cpp:put@2": []
+}

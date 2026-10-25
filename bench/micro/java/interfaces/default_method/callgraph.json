@@ -1,0 +1,10 @@
+{
+  "app/Main.java:English.name": [],
+  "app/Main.java:Greeter.greet": [
+    "app/Main.java:Greeter.name"
+  ],
+  "app/Main.java:Greeter.name": [],
+  "app/Main.java:Hall.welcome": [
+    "app/Main.java:Greeter.greet"
+  ]
+}

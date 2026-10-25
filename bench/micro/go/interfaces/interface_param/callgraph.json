@@ -1,0 +1,8 @@
+{
+  "main.go:English.Greet": [],
+  "main.go:Spanish.Greet": [],
+  "main.go:main": [
+    "main.go:say"
+  ],
+  "main.go:say": []
+}

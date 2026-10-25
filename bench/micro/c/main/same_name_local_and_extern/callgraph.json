@@ -1,0 +1,11 @@
+{
+  "lib.c:format": [],
+  "lib.c:lib_entry": [
+    "lib.c:format"
+  ],
+  "main.c:format_local": [],
+  "main.c:main": [
+    "lib.c:lib_entry",
+    "main.c:format_local"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "main.go:Logger.Log": [],
+  "main.go:Service.Run": [
+    "main.go:Logger.Log"
+  ],
+  "main.go:main": [
+    "main.go:Service.Run"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Calc.run": [
+    "app/Main.java:Op.apply@17"
+  ],
+  "app/Main.java:Op.apply@12": [],
+  "app/Main.java:Op.apply@17": [],
+  "app/Main.java:Op.apply@6": []
+}

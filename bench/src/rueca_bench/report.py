@@ -1,7 +1,14 @@
 """`rueca-bench report`: score cached arm outputs against gold.
 
-Writes bench/results/{meta,s1,s3}.json and docs/bench/alpha-results.md.
+Writes bench/results/{meta,s1,s3,data}.json and docs/bench/alpha-results.md.
 Failures count as misses (zero scores) and are listed, never dropped.
+
+Results are additive across checkouts: an (arm, instance) or (arm, S3 set)
+whose raw output is not in this cache keeps its published entry from
+bench/results/*.json (S1 per-instance rows, S3 per-question rows or, for
+entries published before rows were stored, the set's aggregates), so adding
+a language never requires re-running — or silently drops — the others. The
+report says which entries were carried.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from .common import (
     sha256_file,
     write_json,
 )
+from . import data as data_mod
 from .metrics import mean, median, p95, prf, score_files, score_functions
 from .s1 import instances as s1_instances
 from .s3 import MICRO_SUITES, gold_path, prediction_in_scope, suites
@@ -43,15 +51,39 @@ def language_groups() -> list[str]:
     return [f.label for f in families().values()]
 
 
+def overall_scope() -> set[str] | None:
+    """Labels of the families the `overall` column may pool (manifest
+    `[bench] overall`); None = every family."""
+    keys = load_manifest().get("bench", {}).get("overall")
+    if keys is None:
+        return None
+    return {families()[k].label for k in keys if k in families()}
+
+
 def common_groups(rows_by_arm: dict[str, set[str]]) -> list[str]:
     """Groups in which every arm that produced any result has results: the
-    `overall` column pools only these, so an arm that is still pending for a
-    language does not make the overall numbers incomparable."""
+    `overall` column pools only these (restricted to `[bench] overall`), so
+    an arm that is still pending for a language — or a language added after
+    the alpha — does not make the overall numbers incomparable."""
     present = [g for g in rows_by_arm.values() if g]
     if not present:
         return []
     shared = set.intersection(*present)
-    return [g for g in language_groups() if g in shared]
+    scope = overall_scope()
+    return [g for g in language_groups() if g in shared and (scope is None or g in scope)]
+
+
+# --- published results (carry-forward) ---------------------------------------------
+
+
+def load_published() -> dict:
+    """bench/results/*.json as last written (read before this report
+    overwrites them)."""
+    out = {}
+    for name in ("meta", "s1", "s3"):
+        p = RESULTS_DIR / f"{name}.json"
+        out[name] = read_json(p) if p.exists() else {}
+    return out
 
 
 # --- metadata -------------------------------------------------------------------
@@ -78,7 +110,7 @@ def machine_info() -> dict:
 
 def _recorded_versions(name: str) -> list[str]:
     vers: set[str] = set()
-    for suite in ("s1", "s3"):
+    for suite in ("s1", "s3", "data"):
         for p in sorted((RUNS_DIR / suite / name).glob("*.json")):
             v = read_json(p).get("arm_version")
             if v:
@@ -86,10 +118,15 @@ def _recorded_versions(name: str) -> list[str]:
     return sorted(vers)
 
 
-def versions_by_group() -> dict:
+def versions_by_group(published: dict | None = None, carried_groups: set[str] | None = None) -> dict:
     """{group: {arm: [versions]}} from cached outputs, so a report that mixes
-    binaries across languages (e.g. a language pack on a branch) says so."""
+    binaries across languages (e.g. a language pack on a branch) says so.
+    Groups whose results were carried keep their published versions."""
     out: dict = defaultdict(lambda: defaultdict(set))
+    for g, d in ((published or {}).get("versions_by_group") or {}).items():
+        if carried_groups and g in carried_groups:
+            for a, vs in d.items():
+                out[g][a].update(vs)
     for suite in ("s1", "s3"):
         for name in ARM_NAMES:
             for p in sorted((RUNS_DIR / suite / name).glob("*.json")):
@@ -129,17 +166,54 @@ def _ctx_recall(ranked: list[str], ctx: list[str]) -> dict:
     return {f"ctx_recall@{k}": len(s & set(ranked[:k])) / len(s) for k in CTX_KS}
 
 
-def score_s1() -> dict:
+def _gold_summary(gold: dict) -> dict:
+    return {
+        "function_source": gold.get("function_source"),
+        "n_files": len(gold["files"]),
+        "n_functions": len(gold["functions"]),
+        "has_context": bool(gold.get("context_files")),
+        "jaccard": gold["labeler_agreement"]["jaccard"] if "labeler_agreement" in gold else None,
+        "assembled_unmapped": len(gold.get("assembled_unmapped", [])),
+        "assembled_labels": gold.get("assembled_labels", 0),
+    }
+
+
+def _summary_from_row(row: dict) -> dict:
+    """Gold summary of a carried instance, from its published score row."""
+    return {
+        "function_source": row.get("function_source"),
+        "n_files": row.get("n_gold_files", 0),
+        "n_functions": row.get("n_gold_functions", 0),
+        "has_context": bool(row.get("context")),
+        "jaccard": None,
+        "assembled_unmapped": 0,
+        "assembled_labels": 0,
+    }
+
+
+def score_s1(published: dict | None = None) -> dict:
     insts = s1_instances()
+    published = published or {}
+    pub_rows = {(r["arm"], r["variant"], r["id"]): r for r in published.get("per_instance", [])}
+    pub_gold = published.get("gold_per_instance", {})
     per: list[dict] = []
+    summaries: dict[str, dict] = {}
+    carried: Counter = Counter()
     for inst in insts:
         gp = GOLD_DIR / "s1" / f"{safe_name(inst['id'])}.json"
-        if not gp.exists():
-            continue
-        gold = read_json(gp)
+        gold = read_json(gp) if gp.exists() else None
+        if gold is not None:
+            summaries[inst["id"]] = _gold_summary(gold)
         for arm in ARM_NAMES:
             rp = RUNS_DIR / "s1" / arm / f"{safe_name(inst['id'])}.json"
-            if not rp.exists():
+            if not rp.exists() or gold is None:
+                old = [pub_rows.get((arm, v, inst["id"])) for v in VARIANTS]
+                old = [dict(r, group=lang_group(inst["language"])) for r in old if r]
+                if old:
+                    per.extend(old)
+                    carried[(arm, lang_group(inst["language"]))] += 1
+                    if inst["id"] not in summaries:
+                        summaries[inst["id"]] = pub_gold.get(inst["id"]) or _summary_from_row(old[0])
                 continue
             rec = read_json(rp)
             for variant in VARIANTS:
@@ -221,28 +295,47 @@ def score_s1() -> dict:
             for repo in sorted({r["repo"] for r in rows}):
                 t[f"repo:{repo}"] = agg([r for r in rows if r["repo"] == repo])
 
-    golds = [read_json(GOLD_DIR / "s1" / f"{safe_name(i['id'])}.json") for i in insts if (GOLD_DIR / "s1" / f"{safe_name(i['id'])}.json").exists()]
-    agree = [g["labeler_agreement"]["jaccard"] for g in golds if "labeler_agreement" in g]
-    gold_stats = {
-        "instances": len(insts),
-        "by_language": dict(Counter(i["language"] for i in insts)),
-        "by_group": dict(Counter(lang_group(i["language"]) for i in insts)),
-        "by_repo": dict(Counter(i["repo"] for i in insts)),
-        "by_dataset": dict(Counter(i["dataset"] for i in insts)),
-        "function_source": dict(Counter(g["function_source"] for g in golds)),
-        "with_function_gold": sum(1 for g in golds if g["functions"]),
-        "with_context_gold": sum(1 for g in golds if g.get("context_files")),
-        "labeler_agreement_jaccard_mean": mean(agree),
-        "labeler_agreement_n": len(agree),
-        "assembled_unmapped": sum(len(g.get("assembled_unmapped", [])) for g in golds),
-        "assembled_labels": sum(g.get("assembled_labels", 0) for g in golds),
-        "mean_gold_files": mean(len(g["files"]) for g in golds),
-        "mean_gold_functions": mean(len(g["functions"]) for g in golds if g["functions"]),
-    }
+    golds = [summaries[i["id"]] for i in insts if i["id"] in summaries]
+    agree = [g["jaccard"] for g in golds if g.get("jaccard") is not None]
+
+    def stats(sel: list[dict], ginsts: list[dict]) -> dict:
+        ag = [g["jaccard"] for g in sel if g.get("jaccard") is not None]
+        return {
+            "instances": len(ginsts),
+            "by_language": dict(Counter(i["language"] for i in ginsts)),
+            "by_group": dict(Counter(lang_group(i["language"]) for i in ginsts)),
+            "by_repo": dict(Counter(i["repo"] for i in ginsts)),
+            "by_dataset": dict(Counter(i["dataset"] for i in ginsts)),
+            "function_source": dict(Counter(g["function_source"] for g in sel)),
+            "with_function_gold": sum(1 for g in sel if g["n_functions"]),
+            "with_context_gold": sum(1 for g in sel if g["has_context"]),
+            "labeler_agreement_jaccard_mean": mean(ag),
+            "labeler_agreement_n": len(ag),
+            "assembled_unmapped": sum(g.get("assembled_unmapped", 0) for g in sel),
+            "assembled_labels": sum(g.get("assembled_labels", 0) for g in sel),
+            "mean_gold_files": mean(g["n_files"] for g in sel),
+            "mean_gold_functions": mean(g["n_functions"] for g in sel if g["n_functions"]),
+        }
+
+    gold_stats = stats(golds, insts)
+    gold_stats["per_group"] = {}
+    for grp in language_groups():
+        gi = [i for i in insts if lang_group(i["language"]) == grp]
+        if gi:
+            gold_stats["per_group"][grp] = stats([summaries[i["id"]] for i in gi if i["id"] in summaries], gi)
+    del agree
     failures = [
         {k: r[k] for k in ("arm", "variant", "id", "error")} for r in per if not r["ok"]
     ]
-    return {"table": table, "per_instance": per, "gold": gold_stats, "failures": failures, "overall_groups": overall_groups}
+    return {
+        "table": table,
+        "per_instance": per,
+        "gold": gold_stats,
+        "gold_per_instance": summaries,
+        "carried": {f"{a}:{g}": n for (a, g), n in sorted(carried.items())},
+        "failures": failures,
+        "overall_groups": overall_groups,
+    }
 
 
 # --- S3 -------------------------------------------------------------------------------
@@ -311,17 +404,48 @@ def _agg_s3(rows: list[dict]) -> dict:
     return out
 
 
-def score_s3() -> dict:
+def score_s3(published: dict | None = None) -> dict:
+    published = published or {}
+    pub_suite = published.get("per_suite", {})
+    pub_rows = published.get("rows", {})
+    pub_groups = published.get("groups", {})
+    pub_gold = published.get("gold", {})
     per_suite: dict = {}
     pooled: dict = defaultdict(lambda: defaultdict(list))
+    agg_carried: dict = defaultdict(set)  # arm -> groups carried as aggregates (no rows)
+    rows_out: dict = defaultdict(dict)
+    carried: list[str] = []
     gold_info: dict = {}
     failures: list[dict] = []
     micro_by_group: dict[str, str] = {}
     for name, spec, micro in suites():
         gp = gold_path(name)
-        if not gp.exists():
-            gold_info[name] = {"missing": True, "language": spec["language"], "repo": spec.get("repo"), "micro": micro, "title": spec.get("title", name)}
-            continue
+        grp = lang_group(spec["language"])
+        if not gp.exists() or not any((RUNS_DIR / "s3" / a / f"{safe_name(name)}.json").exists() for a in ARM_NAMES):
+            # nothing to score here: keep the published set, if any
+            if name in pub_gold and any(name in pub_suite.get(a, {}) for a in ARM_NAMES):
+                gold_info[name] = dict(pub_gold[name], carried=True)
+                if micro:
+                    micro_by_group.setdefault(grp, name)
+                for arm in ARM_NAMES:
+                    res = pub_suite.get(arm, {}).get(name)
+                    if res is None:
+                        continue
+                    per_suite.setdefault(arm, {})[name] = res
+                    carried.append(f"{arm}:{name}")
+                    failures += [f for f in published.get("failures", []) if f.get("arm") == arm and f.get("suite") == name]
+                    rows = pub_rows.get(arm, {}).get(name)
+                    if rows is not None:
+                        rows_out[arm][name] = rows
+                    if not micro:
+                        if rows is not None:
+                            pooled[arm][grp].extend(rows)
+                        else:
+                            agg_carried[arm].add(grp)
+                continue
+            if not gp.exists():
+                gold_info[name] = {"missing": True, "language": spec["language"], "repo": spec.get("repo"), "micro": micro, "title": spec.get("title", name)}
+                continue
         gold = read_json(gp)
         is_micro = gold.get("suite") in MICRO_SUITES
         if is_micro:
@@ -338,6 +462,8 @@ def score_s3() -> dict:
             }
             if "phpstan_agreement" in gold:
                 gold_info[name]["phpstan_agreement"] = {k: v for k, v in gold["phpstan_agreement"].items() if k != "per_snippet"}
+            if "crosscheck" in gold:
+                gold_info[name]["crosscheck"] = {k: v for k, v in gold["crosscheck"].items() if k != "per_snippet"}
         else:
             gold_info[name] = {
                 "repo": gold["repo"],
@@ -353,6 +479,18 @@ def score_s3() -> dict:
         for arm in ARM_NAMES:
             rp = RUNS_DIR / "s3" / arm / f"{safe_name(name)}.json"
             if not rp.exists():
+                res = pub_suite.get(arm, {}).get(name)
+                if res is not None and pub_gold.get(name, {}).get("commit") == gold.get("commit"):
+                    per_suite.setdefault(arm, {})[name] = res
+                    carried.append(f"{arm}:{name}")
+                    rows = pub_rows.get(arm, {}).get(name)
+                    if rows is not None:
+                        rows_out[arm][name] = rows
+                    if not is_micro:
+                        if rows is not None:
+                            pooled[arm][grp].extend(rows)
+                        else:
+                            agg_carried[arm].add(grp)
                 continue
             rec = read_json(rp)
             if is_micro:
@@ -370,6 +508,7 @@ def score_s3() -> dict:
                         answers = srec["answers"]
                         idx.append(srec.get("index_seconds"))
                     rows += _score_answers(answers, g, meta)
+                rows_out[arm][name] = rows
                 res = _agg_s3(rows)
                 res["index_s_median"] = median(idx)
                 res["snippets_failed"] = sum(1 for f in failures if f["arm"] == arm and f["suite"] == name)
@@ -380,16 +519,27 @@ def score_s3() -> dict:
                 else:
                     answers = rec["answers"]
                 rows = _score_answers(answers, gold, gold)
+                rows_out[arm][name] = rows
                 res = _agg_s3(rows)
                 res["index_seconds"] = rec.get("index_seconds")
                 res["status"] = rec.get("status")
                 pooled[arm][lang_group(gold["language"])].extend(rows)
             per_suite.setdefault(arm, {})[name] = res
-    overall_groups = common_groups({arm: set(d) for arm, d in pooled.items()})
+    arms_with = set(pooled) | set(agg_carried)
+    overall_groups = common_groups({arm: set(pooled.get(arm, {})) | agg_carried.get(arm, set()) for arm in arms_with})
     groups = {}
-    for arm, d in pooled.items():
+    for arm in arms_with:
+        d = pooled.get(arm, {})
         groups[arm] = {g: _agg_s3(rows) for g, rows in d.items()}
-        groups[arm][OVERALL] = _agg_s3([r for g in overall_groups for r in d.get(g, [])])
+        for g in agg_carried.get(arm, ()):
+            # published before per-question rows were stored: keep the aggregate
+            if g in pub_groups.get(arm, {}):
+                groups[arm][g] = pub_groups[arm][g]
+        if any(g in agg_carried.get(arm, ()) for g in overall_groups):
+            same = list(published.get("overall_groups") or []) == overall_groups
+            groups[arm][OVERALL] = pub_groups.get(arm, {}).get(OVERALL) if same else {"n": 0}
+        else:
+            groups[arm][OVERALL] = _agg_s3([r for g in overall_groups for r in d.get(g, [])])
     return {
         "per_suite": per_suite,
         "groups": groups,
@@ -397,6 +547,8 @@ def score_s3() -> dict:
         "failures": failures,
         "overall_groups": overall_groups,
         "micro_by_group": micro_by_group,
+        "carried": carried,
+        "rows": {a: dict(v) for a, v in rows_out.items()},
     }
 
 
@@ -523,7 +675,187 @@ def _gold_set_row(name: str, gi: dict) -> str:
     return f"| {gi['repo']} | {gi['language']} | `{gi['commit'][:10]}` | {gi['indexer']} | {gi['callables']} | {gi['edges']} | {gi['sample']} |"
 
 
-def render(meta: dict, s1: dict, s3: dict) -> str:
+def _noise_band(n: int | None) -> float | None:
+    """Points within which a gap is noise for a rate measured on n items:
+    one standard error of a proportion at p = 0.5 (50 / sqrt(n))."""
+    return 50.0 / n**0.5 if n else None
+
+
+def _cell_delta(r, c, band: float | None) -> tuple[str, bool | None]:
+    if r is None or c is None:
+        return ("pending" if r is None else f"pending / {_f(c)}"), None
+    d = 100 * (r - c)
+    ok = d >= -1e-9 or (band is not None and d >= -band)
+    mark = "✅" if d >= -1e-9 else ("≈" if ok else "❌")
+    return f"{_f(r)} / {_f(c)} / {d:+.1f} {mark}", ok
+
+
+def _render_rfc_parity(L: list[str], s1: dict, s3: dict, data: dict) -> None:
+    """Parity rows in the RFC 0003 §3.2 format (one per language, one per
+    data format), next to the per-metric view above."""
+    man = load_manifest()
+    L.append("## Parity rows (RFC 0003 §3.2)")
+    L.append("")
+    L.append(
+        "One row per language: Rueca / cbm v0.12.0 / Δ (points), S1 on the keyword query. A cell is ✅ when Δ ≥ 0, ≈ when the gap is "
+        "within the noise band printed for its sample size (one standard error of a proportion at 50 %, i.e. 50/√n points), ❌ otherwise; "
+        "*At parity* needs every cell ✅ or ≈. *Status* is the release-gate status of RFC 0003 §3.1, kept in the manifest "
+        "(`[languages.<family>] status`): `supported`, `preview` or `text` (no pack on main)."
+    )
+    L.append("")
+    L.append("| Language | Status | S1 n | File Acc@5 R / cbm / Δ | Func Acc@10 R / cbm / Δ | S3 gold | S3 n | Def. found R / cbm / Δ | Callers F1 R / cbm / Δ | Callees F1 R / cbm / Δ | Index s (median) R / cbm | At parity |")
+    L.append("|---|---|---:|---|---|---|---:|---|---|---|---|---|")
+    for key, fam in families().items():
+        spec = man["languages"][key]
+        kw = {a: s1["table"].get(a, {}).get("kw", {}).get(fam.label) for a in ("rueca", "cbm")}
+        g3 = {a: s3["groups"].get(a, {}).get(fam.label) for a in ("rueca", "cbm")}
+        mname = s3["micro_by_group"].get(fam.label)
+        m3 = {a: s3["per_suite"].get(a, {}).get(mname) if mname else None for a in ("rueca", "cbm")}
+        n1 = (kw["cbm"] or kw["rueca"] or {}).get("n")
+        nf = (kw["cbm"] or kw["rueca"] or {}).get("n_func")
+        if not n1 and not (g3["cbm"] or {}).get("n") and not (m3["cbm"] or {}).get("n"):
+            continue
+        # S3: repository gold when it exists, else the micro-benchmark
+        golds = [gi for gi in s3["gold"].values() if gi.get("language") in fam.members and not gi.get("missing")]
+        src = g3 if any(not gi.get("micro") for gi in golds) else m3
+        n3 = (src["cbm"] or src["rueca"] or {}).get("n")
+        gdesc = "; ".join(
+            sorted({f"{gi['indexer']} ({', '.join(sorted(x['repo'].split('/')[1] for x in golds if not x.get('micro') and x.get('indexer') == gi['indexer']))})" for gi in golds if not gi.get("micro")})
+        )
+        if src is m3:
+            gdesc = (gdesc + "; " if gdesc else "") + "micro-benchmark only"
+        cells, oks = [], []
+        for get, n in (
+            (lambda a: (kw[a] or {}).get("file_acc@5"), n1),
+            (lambda a: (kw[a] or {}).get("func_acc@10"), nf),
+            (lambda a: (src[a] or {}).get("definition_found"), n3),
+            (lambda a: ((src[a] or {}).get("callers") or {}).get("f1"), ((src["cbm"] or {}).get("callers") or {}).get("n")),
+            (lambda a: ((src[a] or {}).get("callees") or {}).get("f1"), ((src["cbm"] or {}).get("callees") or {}).get("n")),
+        ):
+            txt, ok = _cell_delta(get("rueca"), get("cbm"), _noise_band(n))
+            cells.append(txt)
+            oks.append(ok)
+        idx = f"{_f((kw['rueca'] or {}).get('index_s_median'), False) if kw['rueca'] else 'pending'} / {_f((kw['cbm'] or {}).get('index_s_median'), False)}"
+        if any(o is None for o in oks[:1]) and kw["rueca"] is None:
+            verdict = "pending (no Rueca results)"
+        elif all(o is not False for o in oks):
+            verdict = "✅"
+        else:
+            verdict = "❌ (" + ", ".join(t for t, o in zip(("S1 file", "S1 func", "S3 def", "S3 callers", "S3 callees"), oks) if o is False) + ")"
+        L.append(
+            f"| {fam.label} | {spec.get('status', '—')} | {n1 or '—'} | {cells[0]} | {cells[1]} | {gdesc or '—'} | {n3 or '—'} | {cells[2]} | {cells[3]} | {cells[4]} | {idx} | {verdict} |"
+        )
+    L.append("")
+    if data.get("formats"):
+        L.append("Data formats (RFC 0003 §3.3; details in *Data formats* below). Key recall and span accuracy are Rueca / cbm; bridge P / R pool every corpus repository (env reads and writes).")
+        L.append("")
+        L.append("| Format | Status | Key recall vs reference (R / cbm) | Span line accuracy (R / cbm) | Kinds covered (R / cbm) | Bridge P / R (Rueca) | Bridge P / R (cbm) | At parity |")
+        L.append("|---|---|---|---|---|---|---|---|")
+        status = man.get("data", {}).get("status", {})
+        br = data.get("bridge", {})
+
+        def pr(arm):
+            a = (br.get(arm) or {}).get("all")
+            return f"{_f(a['precision'])} / {_f(a['recall'])}" if a else "pending"
+
+        for fmt, arms in sorted(data["formats"].items()):
+            r, c = arms.get("rueca"), arms.get("cbm")
+            kinds = sorted(k for k, v in data.get("kinds", {}).items() if any(x.get("format") == fmt for x in v.values()))
+            kc = []
+            for k in kinds:
+                v = data["kinds"][k]
+                rr = v.get("rueca", {})
+                cc = v.get("cbm", {})
+                kc.append(f"{k} {rr.get('with_kind_nodes', '–') if rr else '–'}/{cc.get('with_kind_nodes', '–')} of {(cc or rr).get('files')}")
+            bridge_fmt = fmt == "yaml"
+            if r is None:
+                verdict = "pending (no Rueca results)"
+            else:
+                ok = (r.get("recall") or 0) >= (c.get("recall") or 0) if c else True
+                if bridge_fmt and br.get("rueca") and br.get("cbm"):
+                    ok = ok and (br["rueca"]["all"]["f1"] >= br["cbm"]["all"]["f1"])
+                verdict = "✅" if ok else "❌"
+            L.append(
+                f"| {fmt} | {status.get(fmt, 'text')} | {_f((r or {}).get('recall')) if r else 'pending'} / {_f((c or {}).get('recall'))} "
+                f"| {_f((r or {}).get('span_accuracy')) if r else 'pending'} / {_f((c or {}).get('span_accuracy'))} | {'; '.join(kc) or '—'} "
+                f"| {pr('rueca') if bridge_fmt else '—'} | {pr('cbm') if bridge_fmt else '—'} | {verdict} |"
+            )
+        L.append("")
+
+
+def _render_data(L: list[str], data: dict, meta: dict) -> None:
+    L.append("## Data formats (RFC 0003 §3.3)")
+    L.append("")
+    L.append(
+        "Reference keys = leaf keys of every in-scope data file from a reference parser (JSON grammar, PyYAML, tomllib, python-hcl2; HCL attributes "
+        "and labelled blocks). A key is covered when the arm has a node in that file with the same name starting inside the key's span; span "
+        "accuracy = covered keys whose node starts on the key's line. Bridge labels: `bench/labels/bridge/` (hand-checked). Percentages."
+    )
+    L.append("")
+    vers = sorted({(a, r.get("arm_version")) for d in data["repos"].values() for a, r in d.items() if r.get("arm_version")})
+    for a, v in vers:
+        L.append(f"- Arm `{a}` on this suite: {v}.")
+    L.append("")
+    L.append("| Corpus | Commit | Data files (skipped) | Reference keys | Kinds | Bridge labels (reads / writes) |")
+    L.append("|---|---|---:|---|---|---:|")
+    for name, gi in data["gold"].items():
+        if gi.get("missing"):
+            L.append(f"| {name} | | gold missing | | | |")
+            continue
+        sk = sum(gi["skipped"].values())
+        L.append(
+            f"| {gi['repo']} | `{gi['commit'][:10]}` | {gi['data_files']} ({sk}: {', '.join(f'{k} {v}' for k, v in gi['skipped'].items()) or '—'}) "
+            f"| {', '.join(f'{k} {v}' for k, v in gi['reference_keys'].items())} | {', '.join(gi['kinds']) or '—'} | {gi['bridge_reads']} / {gi['bridge_writes']} |"
+        )
+    L.append("")
+    L.append("| Format | Arm | Files | Reference keys | Covered | Key recall | Span line accuracy |")
+    L.append("|---|---|---:|---:|---:|---:|---:|")
+    for fmt, arms in sorted(data["formats"].items()):
+        for arm in ("cbm", "rueca"):
+            a = arms.get(arm)
+            if not a:
+                L.append(f"| {fmt} | {arm} | pending | | | | |")
+                continue
+            L.append(f"| {fmt} | {arm} | {a['files']} | {a['keys']} | {a['covered']} | {_f(a['recall'])} | {_f(a['span_accuracy'])} |")
+    L.append("")
+    if data.get("kinds"):
+        L.append("Kinds covered: files of each kind on which the arm emitted a kind node (`Resource`, `Image`, `EnvVar`, `Route`).")
+        L.append("")
+        L.append("| Kind | Format | Files | cbm | rueca |")
+        L.append("|---|---|---:|---:|---:|")
+        for kind, v in sorted(data["kinds"].items()):
+            any_ = next(iter(v.values()))
+            L.append(f"| {kind} | {any_['format']} | {any_['files']} | {v.get('cbm', {}).get('with_kind_nodes', 'pending')} | {v.get('rueca', {}).get('with_kind_nodes', 'pending')} |")
+        L.append("")
+    L.append("Env bridge (reads: `(file, function, variable)`; writes: `(manifest, variable, line ±1)`):")
+    L.append("")
+    L.append("| Corpus | Arm | Reads P | Reads R | Writes P | Writes R | All P | All R | All F1 |")
+    L.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
+    rows = [(n, a, r.get("bridge")) for n, d in data["repos"].items() for a, r in d.items()]
+    for n, a, b in sorted(rows, key=lambda x: (x[0], ("grep", "cbm", "rueca").index(x[1]))):
+        if not b:
+            continue
+        L.append(
+            f"| {n} | {a} | {_f(b['reads']['precision'])} | {_f(b['reads']['recall'])} | {_f(b['writes']['precision'])} | {_f(b['writes']['recall'])} "
+            f"| {_f(b['all']['precision'])} | {_f(b['all']['recall'])} | {_f(b['all']['f1'])} |"
+        )
+    for a in ("grep", "cbm", "rueca"):
+        b = data["bridge"].get(a)
+        if b:
+            L.append(
+                f"| **all** | {a} | {_f(b['reads']['precision'])} | {_f(b['reads']['recall'])} | {_f(b['writes']['precision'])} | {_f(b['writes']['recall'])} "
+                f"| {_f(b['all']['precision'])} | {_f(b['all']['recall'])} | {_f(b['all']['f1'])} |"
+            )
+        else:
+            L.append(f"| **all** | {a} | pending | | | | | | |")
+    L.append("")
+    for f in data.get("failures", []):
+        L.append(f"- Data `{f['arm']}` {f['repo']}: {f['error'][:200]}")
+    if data.get("failures"):
+        L.append("")
+
+
+def render(meta: dict, s1: dict, s3: dict, data: dict | None = None) -> str:
     arms = _arm_cols(meta["arms"])
     head_arms = []
     for a in arms:
@@ -548,9 +880,23 @@ def render(meta: dict, s1: dict, s3: dict) -> str:
     L.append(f"- Manifest sha256: `{meta['manifest_sha256'][:16]}…`")
     L.append("- Every arm sees the same worktree and the same query string; ranked outputs are post-filtered identically (source extension of the instance language, non-test path).")
     if s1.get("overall_groups") and s1["overall_groups"] != s1_groups:
+        scope = overall_scope()
+        if scope is not None and set(s1_groups) - scope:
+            L.append(
+                f"- `overall` pools {', '.join(s1['overall_groups'])} (manifest `[bench] overall`: the alpha languages, for which every arm has results); "
+                "languages added since are reported in their own columns and parity rows."
+            )
+        else:
+            L.append(
+                f"- `overall` pools the languages for which every arm has results ({', '.join(s1['overall_groups'])}); "
+                "a language where an arm is still pending is reported in its own column only."
+            )
+    if meta.get("carried_groups"):
+        cf = meta.get("carried_from") or {}
+        mc = cf.get("machine") or {}
         L.append(
-            f"- `overall` pools the languages for which every arm has results ({', '.join(s1['overall_groups'])}); "
-            "a language where an arm is still pending is reported in its own column only."
+            f"- Carried forward from the published results of {cf.get('date', '?')} ({mc.get('cpu', '?')}): raw outputs not in this run's cache "
+            f"for {', '.join(meta['carried_groups'])} (`bench/results/*.json` keeps per-instance rows; see `bench/README.md`, *Additive results*)."
         )
     L.append("")
 
@@ -565,26 +911,35 @@ def render(meta: dict, s1: dict, s3: dict) -> str:
         f"Tree-sitter labeler vs assembled labels: mean Jaccard {_f(g['labeler_agreement_jaccard_mean'])}% over {g['labeler_agreement_n']} instances."
     )
     L.append("")
+    # one table per chunk of languages: the `overall` languages with the
+    # overall column first, then the others four at a time
+    scope = overall_scope()
+    first = [g for g in groups_s1 if g == OVERALL or scope is None or g in scope]
+    rest = [g for g in groups_s1 if g not in first]
+    chunks = [first] + [rest[i : i + 4] for i in range(0, len(rest), 4)]
     for variant, title in (("kw", "keyword query"), ("raw", "raw issue text")):
         L.append(f"### S1, {title} (`{variant}`) — percentages")
         L.append("")
-        cols = [(a, grp) for grp in groups_s1 for a in arms]
-        L.append("| Metric | " + " | ".join(f"{grp}: {head_arms[arms.index(a)]}" for a, grp in cols) + " |")
-        L.append("|---|" + "---:|" * len(cols))
-        ns = []
-        for a, grp in cols:
-            t = s1["table"].get(a, {}).get(variant, {}).get(grp, {})
-            ns.append(str(t.get("n", "—")) if t else "pending")
-        L.append("| n instances | " + " | ".join(ns) + " |")
-        for label, key in S1_METRICS:
-            cells = []
-            for grp in groups_s1:
-                vals = []
-                for a in arms:
-                    t = s1["table"].get(a, {}).get(variant, {}).get(grp)
-                    vals.append(_f(t.get(key)) if t else "pending")
-                cells += _bold_best(vals)
-            L.append(f"| {label} | " + " | ".join(cells) + " |")
+        for ci, chunk in enumerate(chunks):
+            if ci:
+                L.append("")
+            cols = [(a, grp) for grp in chunk for a in arms]
+            L.append("| Metric | " + " | ".join(f"{grp}: {head_arms[arms.index(a)]}" for a, grp in cols) + " |")
+            L.append("|---|" + "---:|" * len(cols))
+            ns = []
+            for a, grp in cols:
+                t = s1["table"].get(a, {}).get(variant, {}).get(grp, {})
+                ns.append(str(t.get("n", "—")) if t else "pending")
+            L.append("| n instances | " + " | ".join(ns) + " |")
+            for label, key in S1_METRICS:
+                cells = []
+                for grp in chunk:
+                    vals = []
+                    for a in arms:
+                        t = s1["table"].get(a, {}).get(variant, {}).get(grp)
+                        vals.append(_f(t.get(key)) if t else "pending")
+                    cells += _bold_best(vals)
+                L.append(f"| {label} | " + " | ".join(cells) + " |")
         L.append("")
     L.append("### S1 cost (seconds)")
     L.append("")
@@ -647,6 +1002,19 @@ def render(meta: dict, s1: dict, s3: dict) -> str:
             )
         else:
             L.append(f"{title}: PHPStan cross-check not run ({ag.get('reason')}).")
+        L.append("")
+    for gi in s3["gold"].values():
+        cc = gi.get("crosscheck")
+        if not cc:
+            continue
+        if cc.get("available"):
+            L.append(
+                f"{gi['title']}: answer key vs {cc['tool']} (same edge derivation as the repository gold) — {cc['agree']} of {cc['edges_key']} "
+                f"hand-labelled edges found by SCIP (recall {_f(cc['recall'])}%), {cc['edges_scip'] - cc['agree']} extra SCIP edges "
+                f"(precision {_f(cc['precision'])}%); {cc['snippets_identical']} snippets identical."
+            )
+        else:
+            L.append(f"{gi['title']}: SCIP cross-check not run ({cc.get('reason')}).")
         L.append("")
     L.append("Macro P/R/F1 average over questions whose gold set for that direction is non-empty; micro P/R pool all predicted/gold edges (so spurious edges on functions with no gold edges count against precision). Percentages.")
     L.append("")
@@ -790,8 +1158,14 @@ def render(meta: dict, s1: dict, s3: dict) -> str:
                 cells.append(cell(*vals))
             L.append(f"| {'S3 (micro)' if micro else 'S3 (repo gold)'} | {label} | " + " | ".join(cells) + " |")
     L.append("")
-    L.append("S3 repo gold = SCIP (Python, TS/JS) or the PHPStan extractor (PHP); S3 micro = PyCG (Python) or the PHP micro-benchmark.")
+    L.append(
+        "S3 repo gold = SCIP (scip-python, scip-typescript, scip-go, scip-clang) or the PHPStan extractor (PHP); "
+        "S3 micro = PyCG (Python) or the rueca-bench micro-benchmarks (PHP, Go, Java, C, C++)."
+    )
     L.append("")
+    _render_rfc_parity(L, s1, s3, data or {})
+    if data and data.get("gold"):
+        _render_data(L, data, meta)
 
     # ---- failures
     L.append("## Failures and gaps")
@@ -816,20 +1190,39 @@ def render(meta: dict, s1: dict, s3: dict) -> str:
 
 
 def report() -> None:
+    published = load_published()
+    s1 = score_s1(published["s1"])
+    s3 = score_s3(published["s3"])
+    data = data_mod.score()
+    carried_groups = {k.split(":", 1)[1] for k in s1.get("carried", {})}
+    for k in s3.get("carried", []):
+        name = k.split(":", 1)[1]
+        spec = next((sp for n, sp, _ in suites() if n == name), None)
+        if spec:
+            carried_groups.add(lang_group(spec["language"]))
+    carried_arms = {k.split(":", 1)[0] for k in s1.get("carried", {})} | {k.split(":", 1)[0] for k in s3.get("carried", [])}
+    arms = arm_status()
+    pub_arms = published["meta"].get("arms", {})
+    for a, st in arms.items():
+        # Only arms with carried results keep their published versions.
+        if a in carried_arms and pub_arms.get(a):
+            vers = sorted(set(st["recorded_versions"]) | set(pub_arms[a].get("recorded_versions", [])))
+            st.update(recorded_versions=vers, version="; ".join(vers) if vers else st["version"], available=st["available"] or bool(vers))
     meta = {
         "date": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "machine": machine_info(),
-        "arms": arm_status(),
-        "versions_by_group": versions_by_group(),
+        "arms": arms,
+        "versions_by_group": versions_by_group(published["meta"], carried_groups),
         "manifest_sha256": sha256_file(MANIFEST_PATH),
         "manifest_tools": load_manifest()["tools"],
+        "carried_groups": sorted(carried_groups),
+        "carried_from": {k: published["meta"].get(k) for k in ("date", "machine")} if carried_groups else None,
     }
-    s1 = score_s1()
-    s3 = score_s3()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     write_json(RESULTS_DIR / "meta.json", meta)
     write_json(RESULTS_DIR / "s1.json", s1)
     write_json(RESULTS_DIR / "s3.json", s3)
+    write_json(RESULTS_DIR / "data.json", data)
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    (DOCS_DIR / "alpha-results.md").write_text(render(meta, s1, s3))
-    log(f"wrote {RESULTS_DIR}/{{meta,s1,s3}}.json and {DOCS_DIR / 'alpha-results.md'}")
+    (DOCS_DIR / "alpha-results.md").write_text(render(meta, s1, s3, data))
+    log(f"wrote {RESULTS_DIR}/{{meta,s1,s3,data}}.json and {DOCS_DIR / 'alpha-results.md'}")

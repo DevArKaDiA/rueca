@@ -194,7 +194,7 @@ def in_scope(path: str, include: list[str]) -> bool:
     return any(path == p or path.startswith(p) for p in include) and not is_test_path(path) and grammar_for(path) is not None
 
 
-def derive_call_graph(root: Path, docs: list[Doc], include: list[str]) -> dict:
+def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language: str | None = None) -> dict:
     callables: dict[str, dict] = {}  # fid -> func dict (+ path)
     by_file: dict[str, list[dict]] = {}
     sym_to_fid: dict[str, str] = {}
@@ -212,9 +212,9 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str]) -> dict:
         if not src_path.is_file():
             continue
         data = src_path.read_bytes()
-        trees[d.path] = parse(d.path, data)
+        trees[d.path] = parse(d.path, data, language)
         texts[d.path] = data.decode("utf-8", errors="replace").split("\n")
-        funcs = extract_functions(d.path, data)
+        funcs = extract_functions(d.path, data, language)
         lines_ = texts[d.path]
         lst = []
         stubs = []
@@ -272,7 +272,7 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str]) -> dict:
         tree = trees.get(d.path)
         if tree is None:
             continue
-        grammar = "python" if grammar_for(d.path) == "python" else "ecma"
+        grammar = grammar_for(d.path, language)
         lines = texts[d.path]
         funcs = by_file.get(d.path, [])
         for o in d.occurrences:

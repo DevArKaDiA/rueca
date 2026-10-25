@@ -1,0 +1,11 @@
+{
+  "main.go:Point.Move": [],
+  "main.go:Point.Sum": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:Point.Move",
+    "main.go:Point.Sum"
+  ]
+}

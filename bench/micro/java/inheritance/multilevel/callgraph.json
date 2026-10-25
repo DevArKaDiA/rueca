@@ -1,0 +1,10 @@
+{
+  "app/Main.java:A.ping": [],
+  "app/Main.java:C.call": [
+    "app/Main.java:A.ping"
+  ],
+  "app/Main.java:Runner.go": [
+    "app/Main.java:A.ping",
+    "app/Main.java:C.call"
+  ]
+}
