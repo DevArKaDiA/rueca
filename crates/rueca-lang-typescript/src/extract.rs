@@ -80,6 +80,8 @@ impl NewDef {
 
 pub(crate) struct Extractor<'s> {
     src: &'s [u8],
+    /// `./<own file name>`: module of self re-export imports.
+    self_specifier: String,
     max_depth: usize,
     defs: Vec<Definition>,
     refs: Vec<Reference>,
@@ -111,9 +113,12 @@ enum Next<'t> {
     Child(Node<'t>),
 }
 
-pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], max_depth: usize, locals: &Locals) -> FileFacts {
+/// `path` is the file's repository-relative path; only its file name is used,
+/// as the specifier of self re-exports (`./<file name>`).
+pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], path: &str, max_depth: usize, locals: &Locals) -> FileFacts {
     let mut ex = Extractor {
         src,
+        self_specifier: format!("./{}", path.rsplit('/').next().unwrap_or(path)),
         max_depth,
         defs: Vec::new(),
         refs: Vec::new(),
@@ -127,7 +132,11 @@ pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], max_depth: usize, locals:
         accessors: HashSet::new(),
     };
     let ctx = Ctx { parent: None, top: true, ambient: false };
-    ex.walk_children(root, ctx, 0);
+    if root.kind() == "ERROR" {
+        ex.error_region(root, ctx, 0, false);
+    } else {
+        ex.walk_children(root, ctx, 0);
+    }
     if !ex.export_names.is_empty() {
         // Indirect exports are only known at the end; members (methods,
         // fields, enum constants) inherit the flag like direct exports do.
@@ -502,11 +511,22 @@ impl<'s> Extractor<'s> {
                 }
                 self.walk_children(n, ctx, depth)
             }
+            "function_expression" | "function" | "generator_function" if field(n, "name").is_some() => {
+                self.named_function_expression(n, ctx, depth)
+            }
             "arrow_function" | "function_expression" | "function" | "generator_function" | "method_definition" => {
                 self.function_body(n, ctx.parent, ctx, depth)
             }
             "call_expression" => self.call(n, ctx, depth),
             "decorator" => self.decorator_ref(n, ctx, depth),
+            "ERROR" => self.error_region(n, ctx, depth, false),
+            // Generic signatures and function types declare their own type
+            // parameters (`<P extends string>(path: P) => R`).
+            "call_signature" | "construct_signature" | "function_type" | "constructor_type" => {
+                let mark = self.push_type_params(n);
+                self.walk_children(n, ctx, depth);
+                self.type_params.truncate(mark);
+            }
             "class" => self.class(n, n, &[], None, ctx, depth, false),
             _ => match self.visit(n, ctx, depth) {
                 Next::Done => {}
@@ -514,6 +534,119 @@ impl<'s> Extractor<'s> {
                 Next::Child(c) => self.walk(c, ctx, depth + 1),
             },
         }
+    }
+
+    /// A parse-error region. tree-sitter-typescript 0.23 cannot parse a
+    /// generic call signature that starts a new line after another member
+    /// (`interface H<E> { (a: E): R \n <P>(p: P): R }`): the rest of the
+    /// declaration is split into fragments (`type_parameters`,
+    /// `formal_parameters`, nested `ERROR`s) that follow it as siblings, and
+    /// the error can climb up to the whole file. Statements inside the region
+    /// are walked normally; each fragment is attributed to the declaration
+    /// before it, with that declaration's type parameters and those of earlier
+    /// `type_parameters` fragments in scope, so `E`, `P`, … in the fragments
+    /// are not reported as type references.
+    #[inline(never)]
+    /// `nested`: a fragment of an enclosing region, whose type parameters stay
+    /// in scope for the fragments that follow it.
+    fn error_region(&mut self, n: Node<'_>, ctx: Ctx, depth: usize, nested: bool) {
+        if depth >= self.max_depth {
+            return;
+        }
+        let base = self.type_params.len();
+        let mut owner = ctx;
+        if !nested {
+            // The declaration the region continues, right before it.
+            let mut prev = n.prev_named_sibling();
+            while let Some(p) = prev.filter(|p| p.kind() == "comment") {
+                prev = p.prev_named_sibling();
+            }
+            if let Some(p) = prev {
+                owner = self.fragment_owner(p, ctx);
+            }
+        }
+        for c in named_children(n) {
+            let k = c.kind();
+            if k == "comment" {
+                continue;
+            }
+            let statement = k.ends_with("_statement")
+                || k.ends_with("_declaration")
+                || matches!(k, "internal_module" | "module" | "ambient_declaration");
+            if !statement {
+                match k {
+                    "ERROR" => self.error_region(c, owner, depth + 1, true),
+                    "type_parameters" => {
+                        for p in named_children(c) {
+                            if p.kind() == "type_parameter"
+                                && let Some(name) = field(p, "name")
+                            {
+                                let t = self.text(name);
+                                self.type_params.push(t);
+                            }
+                        }
+                        self.walk(c, owner, depth + 1);
+                    }
+                    _ => self.walk(c, owner, depth + 1),
+                }
+                continue;
+            }
+            self.type_params.truncate(base);
+            self.walk(c, ctx, depth + 1);
+            owner = self.fragment_owner(c, ctx);
+        }
+        if !nested {
+            self.type_params.truncate(base);
+        }
+    }
+
+    /// A named function expression in any position not already handled as a
+    /// definition (call arguments, `return`, operands): `defineGetter(req,
+    /// "query", function query() {})`, `app.use(function handler() {})`,
+    /// `return async function timing(c, next) {}`. It becomes a `Function`
+    /// child of the enclosing definition; its doc is the JSDoc before the
+    /// statement holding it.
+    #[inline(never)]
+    fn named_function_expression(&mut self, n: Node<'_>, ctx: Ctx, depth: usize) {
+        let Some(name_node) = field(n, "name") else { return self.function_body(n, ctx.parent, ctx, depth) };
+        let mut nd = NewDef::new(Label::Function, self.text(name_node), span_of(n), span_of(name_node));
+        nd.signature = self.fn_signature(n);
+        let mut anchor = n;
+        for _ in 0..4 {
+            match anchor.parent() {
+                Some(p) if !matches!(p.kind(), "statement_block" | "program" | "class_body") => anchor = p,
+                _ => break,
+            }
+            if anchor.kind().ends_with("_statement") {
+                break;
+            }
+        }
+        nd.doc = self.doc_before(n).or_else(|| self.doc_before(anchor));
+        let id = self.add_def(nd, ctx.parent);
+        self.function_body(n, Some(id), ctx, depth);
+    }
+
+    /// For a statement followed by error fragments: pushes the type parameters
+    /// of the declaration it holds and returns the context fragments are
+    /// attributed to (that declaration when it is top-level, else `ctx`).
+    fn fragment_owner(&mut self, stmt: Node<'_>, ctx: Ctx) -> Ctx {
+        let decl = if stmt.kind() == "export_statement" { field(stmt, "declaration") } else { Some(stmt) };
+        let Some(d) = decl.filter(|d| {
+            matches!(
+                d.kind(),
+                "interface_declaration" | "type_alias_declaration" | "class_declaration" | "abstract_class_declaration"
+            )
+        }) else {
+            return ctx;
+        };
+        self.push_type_params(d);
+        if ctx.parent.is_none()
+            && let Some(name) = field(d, "name")
+            && let Some(&id) = self.top_level.get(&self.text(name))
+        {
+            return Ctx { parent: Some(id), top: false, ambient: false };
+        }
+        ctx
     }
 
     /// Module-level `a = b` statements (CommonJS exports, prototype methods).
@@ -1505,7 +1638,11 @@ impl<'s> Extractor<'s> {
             match v.kind() {
                 "identifier" => {
                     let t = self.text(v);
-                    self.export_names.insert(t);
+                    self.export_names.insert(t.clone());
+                    if lefts_text.iter().any(|t| t == "module.exports") {
+                        // `import x from "./this"` binds `module.exports` (ESM interop).
+                        self.self_reexport(t, "default".into(), span_of(a));
+                    }
                     return false;
                 }
                 "object" => {
@@ -1646,6 +1783,17 @@ impl<'s> Extractor<'s> {
         self.imports.push(Import { module, relative_level: 0, names, module_alias, type_only, reexport, span });
     }
 
+    /// `export default local` / `export { local as exported }` without
+    /// `from`: a re-export of the file's own `local` under `exported`, so the
+    /// resolver binds `import exported from "./this"` exactly instead of
+    /// guessing the default export. Plain `export { a }` needs no fact (the
+    /// name is unchanged; `exported` flags carry it).
+    fn self_reexport(&mut self, local: String, exported: String, span: Span) {
+        let module = self.self_specifier.clone();
+        let names = vec![ImportedName { name: local, alias: Some(exported) }];
+        self.push_import(module, names, None, false, true, span);
+    }
+
     fn import_statement(&mut self, n: Node<'_>) {
         let span = span_of(n);
         let stmt_type = has_token(n, "type") || has_token(n, "typeof");
@@ -1781,7 +1929,8 @@ impl<'s> Extractor<'s> {
             }
             if v.kind() == "identifier" {
                 let t = self.text(v);
-                self.export_names.insert(t);
+                self.export_names.insert(t.clone());
+                self.self_reexport(t, "default".into(), span_of(n));
                 return;
             }
             self.read(value, ctx, depth + 1);
@@ -1797,7 +1946,12 @@ impl<'s> Extractor<'s> {
                             && let Some(nm) = field(spec, "name")
                         {
                             let t = self.text(nm);
-                            self.export_names.insert(t);
+                            self.export_names.insert(t.clone());
+                            if let Some(alias) = field(spec, "alias").map(|a| self.member_name(a))
+                                && alias != t
+                            {
+                                self.self_reexport(t, alias, span_of(n));
+                            }
                         }
                     }
                 }

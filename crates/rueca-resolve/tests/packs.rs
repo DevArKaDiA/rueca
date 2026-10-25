@@ -355,3 +355,34 @@ fn typescript_local_export_of_import_and_commonjs() {
     assert_eq!(g.edge(run, helper, Calls), (Strategy::ImportResolved, 0.95));
     assert_eq!(g.edge(g.file("lib/use.js"), g.file("lib/util.js"), Imports).0, Strategy::ImportResolved);
 }
+
+/// `export default x` / `export { a as b }` are recorded by the TypeScript
+/// pack as re-exports of the file's own names, so default and renamed
+/// imports bind exactly (the default-export heuristic would pick the class
+/// named after the file).
+#[test]
+fn typescript_self_reexports_bind_default_and_renamed_imports() {
+    let out = build(&[
+        (
+            "src/user.ts",
+            "export class User {}\nexport function helper() {}\nfunction main() {}\nexport default helper;\nexport { main as start };\n",
+        ),
+        ("src/app.ts", "import h, { start } from './user';\nexport function run() { h(); start(); }\n"),
+        (
+            "lib/express.js",
+            "function createApplication() {}\nfunction other() {}\nmodule.exports = createApplication;\n",
+        ),
+        ("lib/index.js", "import e from './express';\nexport function boot() { e(); }\n"),
+    ]);
+    let g = G(&out.graph);
+    let run = g.id("src/app.ts", "run");
+    assert_eq!(g.edge(run, g.id("src/user.ts", "helper"), EdgeKind::Calls).0, Strategy::ImportResolved);
+    assert_eq!(g.edge(run, g.id("src/user.ts", "main"), EdgeKind::Calls).0, Strategy::ImportResolved);
+    let user = g.id("src/user.ts", "User");
+    assert!(!out.graph.edges.iter().any(|e| e.src == run && e.dst == user), "default bound to the class");
+    let boot = g.id("lib/index.js", "boot");
+    assert_eq!(g.edge(boot, g.id("lib/express.js", "createApplication"), EdgeKind::Calls).0, Strategy::ImportResolved);
+    // A self re-export never yields an IMPORTS self-loop.
+    let f = g.file("src/user.ts");
+    assert!(!out.graph.edges.iter().any(|e| e.src == f && e.dst == f));
+}
