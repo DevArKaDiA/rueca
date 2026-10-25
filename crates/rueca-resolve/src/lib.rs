@@ -170,6 +170,16 @@
 //!   same name (and arity) found in each resolved base (`TypeResolved`
 //!   0.90). For these families `IMPLEMENTS` targets also contribute members.
 //!
+//! # Go
+//!
+//! Go interfaces are implicit: a Go type whose method names (own and
+//! promoted through embedding) cover an in-project interface's gets
+//! `IMPLEMENTS` to it and `OVERRIDES` from each covering method
+//! (`Heuristic` 0.5; an interface embedding one outside the project needs
+//! two known methods; at most 64 implementers per interface; see the `go`
+//! module). Nothing else is Go-specific: package scope, `$self` and
+//! `$type:` are the hooks above.
+//!
 //! # Bridge and data references (RFC 0003 §6–§7)
 //!
 //! Handled outside the ladder (exact matches only, never name matching; see
@@ -242,6 +252,7 @@ use rueca_model::{
 };
 
 mod bridge;
+mod go;
 mod hooks;
 
 /// One file of the snapshot as seen by the resolver.
@@ -295,6 +306,7 @@ pub fn resolve(
     r.build_envs();
     r.resolve_bases();
     r.override_edges();
+    r.go_implicit_interfaces();
     r.resolve_references();
     r.env_provider_edges();
     r.tests_edges();

@@ -31,10 +31,10 @@ unless marked optional.
   Terraform `infra/main.tf:aws_s3_bucket.logs`, `var.region`); Laravel
   config keys of `config/<file>.php` are PHP definitions, so their name is
   the key path alone (`name`, id `config/app.php#name`); canonical env vars
-  `$env:DATABASE_URL`. Planned for the RFC 0003 code packs (the model and
-  the tools already accept them): Go
-  `github.com/gin-gonic/gin.Engine.ServeHTTP` (import path, dot, local
-  name), Java `com.example.Owner.getPets` (package, dot, local name;
+  `$env:DATABASE_URL`; Go `github.com/gin-gonic/gin.Engine.ServeHTTP`
+  (package import path, dot, local name; methods are `Type.Method`, the
+  symbol id is `gin.go#Engine.ServeHTTP`). Planned for the remaining
+  RFC 0003 code packs (the model and the tools already accept them): Java `com.example.Owner.getPets` (package, dot, local name;
   overloads `Parser.parse(String)`), C/C++ `fmt::v11::format_to`
   (namespace and class path, no module).
 - **Brief symbol** (used inside results):
@@ -69,11 +69,11 @@ other definitions with the same text score. Ranking details:
 Result: `{ "results": [ brief + "signature" (opt) + "score" ], "truncated", "next_offset" }`
 
 **Language names** (`search_symbols`, `search_code`): `python`,
-`typescript`, `tsx`, `javascript`, `php`, `markdown`, the data languages
+`typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`, the data languages
 `json` (JSONC included), `yaml`, `toml`, `dotenv`, `ini`, `properties`,
 `xml` (`pom.xml`, `*.csproj`, `AndroidManifest.xml` only), `hcl`
 (Terraform / OpenTofu included) and `dockerfile`; and, for the code packs
-RFC 0003 adds, `go`, `cpp`, `c`, `java`. A language whose pack is not in
+RFC 0003 adds, `cpp`, `c`, `java`. A language whose pack is not in
 this build is accepted and matches nothing (its files are
 content-searchable without a language filter).
 
@@ -173,7 +173,10 @@ Edge types beyond calls: `["INHERITS"]` walks a class hierarchy,
 `["IMPORTS"]` file dependencies (`File` → `File`, and `File` → `Folder` for
 imports of a directory: a Go or Java package, a Terraform module), `["TESTS"]`
 the tests of a function, `["OVERRIDES"]` the methods an override replaces
-(callers: the overrides of a method; Java and C/C++). The code ↔ config
+(callers: the overrides of a method; Java and C/C++, and Go methods that
+implicitly implement an interface method, heuristic 0.5). Go types also
+get heuristic `IMPLEMENTS` edges to the interfaces whose methods they
+cover, so `get_symbol` `subtypes` of a Go interface lists its implementers. The code ↔ config
 bridge (RFC 0003 §7) uses `READS` / `WRITES`:
 
 ```json

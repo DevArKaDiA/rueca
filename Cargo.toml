@@ -19,6 +19,7 @@ rueca-lang-typescript = { path = "crates/rueca-lang-typescript", version = "0.1.
 rueca-lang-markdown = { path = "crates/rueca-lang-markdown", version = "0.1.0-alpha.1" }
 rueca-lang-php = { path = "crates/rueca-lang-php", version = "0.1.0-alpha.1" }
 rueca-lang-data = { path = "crates/rueca-lang-data", version = "0.1.0-alpha.1" }
+rueca-lang-go = { path = "crates/rueca-lang-go", version = "0.1.0-alpha.1" }
 rueca-resolve = { path = "crates/rueca-resolve", version = "0.1.0-alpha.1" }
 rueca-segment = { path = "crates/rueca-segment", version = "0.1.0-alpha.1" }
 rueca-index = { path = "crates/rueca-index", version = "0.1.0-alpha.1" }
