@@ -107,6 +107,17 @@ pub(crate) struct Extractor<'s> {
     env: crate::bridge::EnvApi,
     /// `(parent, name)` of accessors already emitted, so a get/set pair yields one Method.
     accessors: HashSet<(Option<u32>, String)>,
+    /// Module-level names bound by imports and function / class
+    /// declarations: they shadow builtins (`import { fetch } from "./http"`).
+    shadowing: HashSet<String>,
+    /// Indices of `Call` / `New` references whose callee is a local binding
+    /// (a parameter, a variable): kept only when a nested definition of
+    /// that name exists (see [`extract_tree`]).
+    local_calls: Vec<usize>,
+    /// Definitions made from a function assigned to a plain name
+    /// (`handler = () => {}`): the name may hold other values, so they do
+    /// not keep calls of that local name.
+    assigned: HashSet<u32>,
 }
 
 /// Owner key that never has bindings (signature-only members).
@@ -153,6 +164,9 @@ pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], path: &str, max_depth: us
         top_level: HashMap::new(),
         accessors: HashSet::new(),
         env: crate::bridge::EnvApi::scan(root, src),
+        shadowing: module_bindings(root, src),
+        local_calls: Vec::new(),
+        assigned: HashSet::new(),
     };
     let ctx = Ctx { parent: None, top: true, ambient: false };
     if root.kind() == "ERROR" {
@@ -177,7 +191,64 @@ pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], path: &str, max_depth: us
             }
         }
     }
+    ex.drop_local_calls();
     FileFacts { definitions: ex.defs, references: ex.refs, imports: ex.imports, parse_errors: 0, line_count: 0 }
+}
+
+/// Module-level names bound by project imports (relative or aliased
+/// specifiers, also `const x = require("./x")`) and by function and class
+/// declarations. Names imported from packages (`expect` from `vitest`) stay
+/// builtins.
+fn module_bindings(root: Node<'_>, src: &[u8]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let text = |n: Node<'_>| text_of(n, src).into_owned();
+    let project = |spec: Option<Node<'_>>| {
+        spec.is_some_and(|s| {
+            let t = text(s);
+            let t = t.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+            t.starts_with('.') || t.starts_with('/') || t.starts_with("@/") || t.starts_with("~/") || t.starts_with('#')
+        })
+    };
+    for st in named_children(root) {
+        let st = if st.kind() == "export_statement" { field(st, "declaration").unwrap_or(st) } else { st };
+        match st.kind() {
+            "import_statement" if project(field(st, "source")) => {
+                for clause in named_children(st).into_iter().filter(|c| c.kind() == "import_clause") {
+                    for c in named_children(clause) {
+                        match c.kind() {
+                            "identifier" => {
+                                out.insert(text(c));
+                            }
+                            "namespace_import" => out.extend(c.named_child(0).map(text)),
+                            "named_imports" => {
+                                for spec in named_children(c) {
+                                    out.extend(field(spec, "alias").or_else(|| field(spec, "name")).map(text));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            "function_declaration" | "generator_function_declaration" | "class_declaration" => {
+                out.extend(field(st, "name").map(text));
+            }
+            "lexical_declaration" | "variable_declaration" => {
+                for d in named_children(st) {
+                    let is_require = field(d, "value").map(unwrap_value).is_some_and(|v| {
+                        v.kind() == "call_expression"
+                            && field(v, "function").is_some_and(|f| matches!(text(f).as_str(), "require" | "import"))
+                            && project(field(v, "arguments").and_then(|a| a.named_child(0)))
+                    });
+                    if is_require && let Some(n) = field(d, "name").filter(|n| n.kind() == "identifier") {
+                        out.insert(text(n));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +532,9 @@ impl<'s> Extractor<'s> {
     /// Whether a callee's root is a builtin global (and not shadowed locally).
     fn builtin_root(&self, callee: Node<'_>) -> bool {
         match self.root_ident(callee) {
-            Some(r) => r != "this" && r != "super" && is_builtin(&r) && !self.is_local(&r),
+            Some(r) => {
+                r != "this" && r != "super" && is_builtin(&r) && !self.is_local(&r) && !self.shadowing.contains(&r)
+            }
             None => false,
         }
     }
@@ -545,6 +618,8 @@ impl<'s> Extractor<'s> {
                 self.function_body(n, ctx.parent, ctx, depth)
             }
             "call_expression" => self.call(n, ctx, depth),
+            "object" => self.object_members(n, ctx.parent, ctx, depth),
+            "assignment_expression" if self.function_assignment(n, ctx, depth) => {}
             "decorator" => self.decorator_ref(n, ctx, depth),
             "ERROR" => self.error_region(n, ctx, depth, false),
             // Generic signatures and function types declare their own type
@@ -714,6 +789,9 @@ impl<'s> Extractor<'s> {
                     && !self.builtin_root(c)
                     && let Some((name, recv)) = self.callee_parts(c)
                 {
+                    if recv.is_none() && self.is_local(&name) {
+                        self.local_calls.push(self.refs.len());
+                    }
                     self.push_ref(RefKind::New, name, recv, ctx.parent, span_of(n));
                 }
                 Next::Children
@@ -1510,7 +1588,7 @@ impl<'s> Extractor<'s> {
             && iv.kind() == "object"
             && let Some(owner) = first_id
         {
-            self.object_members(iv, owner, vctx, depth + 1);
+            self.object_members(iv, Some(owner), vctx, depth + 1);
             // Wrappers like `as const` / `satisfies T` still carry type refs.
             if iv.id() != v.id() {
                 for ch in named_children(v) {
@@ -1575,35 +1653,38 @@ impl<'s> Extractor<'s> {
                 .is_some_and(|a| named_children(a).into_iter().any(|x| is_function_value(unwrap_value(x))))
     }
 
-    /// Methods of an object literal assigned to a module-level variable.
-    fn object_members(&mut self, obj: Node<'_>, owner: u32, ctx: Ctx, depth: usize) {
+    /// Methods and function-valued pairs of an object literal: `Method`
+    /// children of `owner` (the variable it is assigned to at module level,
+    /// else the enclosing definition), or top-level `Function`s without one
+    /// (`module.exports = { start() {} }`, `register({ setup() {} })`).
+    #[inline(never)]
+    fn object_members(&mut self, obj: Node<'_>, owner: Option<u32>, ctx: Ctx, depth: usize) {
         if depth >= self.max_depth {
             return;
         }
-        let exported = self.defs[owner as usize].exported;
+        let exported = owner.is_some_and(|o| self.defs[o as usize].exported);
+        let label = if owner.is_some() { Label::Method } else { Label::Function };
         for m in named_children(obj) {
             match m.kind() {
                 "method_definition" => {
                     let Some(name_node) = field(m, "name") else { continue };
                     let name = self.member_name(name_node);
-                    if (has_token(m, "get") || has_token(m, "set"))
-                        && !self.accessors.insert((Some(owner), name.clone()))
-                    {
-                        self.function_body(m, Some(owner), ctx, depth);
+                    if (has_token(m, "get") || has_token(m, "set")) && !self.accessors.insert((owner, name.clone())) {
+                        self.function_body(m, owner, ctx, depth);
                         continue;
                     }
-                    let mut nd = NewDef::new(Label::Method, name, span_of(m), span_of(name_node));
+                    let mut nd = NewDef::new(label, name, span_of(m), span_of(name_node));
                     nd.signature = self.fn_signature(m);
                     nd.doc = self.doc_before(m);
                     nd.exported = exported;
-                    let id = self.add_def(nd, Some(owner));
+                    let id = self.add_def(nd, owner);
                     self.function_body(m, Some(id), ctx, depth);
                 }
                 "pair" => {
                     let (Some(k), Some(v)) = (field(m, "key"), field(m, "value")) else { continue };
                     let fv = unwrap_value(v);
                     if is_function_value(fv) {
-                        let mut nd = NewDef::new(Label::Method, self.member_name(k), span_of(m), span_of(k));
+                        let mut nd = NewDef::new(label, self.member_name(k), span_of(m), span_of(k));
                         let head = self.header(m.start_byte(), v.start_byte(), &[], MAX_SIGNATURE);
                         nd.signature = match (head, self.fn_signature(fv)) {
                             (Some(h), Some(t)) => Some(truncate_chars(format!("{h} {t}"), MAX_SIGNATURE)),
@@ -1611,7 +1692,7 @@ impl<'s> Extractor<'s> {
                         };
                         nd.doc = self.doc_before(m);
                         nd.exported = exported;
-                        let id = self.add_def(nd, Some(owner));
+                        let id = self.add_def(nd, owner);
                         self.function_body(fv, Some(id), ctx, depth);
                     } else {
                         self.walk(m, ctx, depth + 1);
@@ -1693,6 +1774,18 @@ impl<'s> Extractor<'s> {
                                 {
                                     let t = self.text(pv);
                                     self.export_names.insert(t);
+                                } else if let (Some(k), Some(pv)) = (field(m, "key"), field(m, "value"))
+                                    && is_function_value(unwrap_value(pv))
+                                {
+                                    // `{ stop: () => {} }`: the top-level function `stop`.
+                                    let t = self.member_name(k);
+                                    self.export_names.insert(t);
+                                }
+                            }
+                            "method_definition" => {
+                                if let Some(k) = field(m, "name") {
+                                    let t = self.member_name(k);
+                                    self.export_names.insert(t);
                                 }
                             }
                             _ => {}
@@ -1706,6 +1799,10 @@ impl<'s> Extractor<'s> {
                         Some(nn) => (self.text(nn), span_of(nn)),
                         None => ("default".to_string(), span_of(lefts[0])),
                     };
+                    if name != "default" && lefts_text.iter().any(|t| t == "module.exports") {
+                        // `require("./this")` / `import x from "./this"` bind it.
+                        self.self_reexport(name.clone(), "default".into(), span_of(a));
+                    }
                     if k == "class" {
                         self.class(v, a, &[], Some((name, name_span)), ctx, depth, true);
                     } else {
@@ -1939,6 +2036,20 @@ impl<'s> Extractor<'s> {
             return;
         }
         if let Some(decl) = field(n, "declaration") {
+            // `export default function load() {}` / `export default class C {}`.
+            if has_token(n, "default")
+                && matches!(
+                    decl.kind(),
+                    "function_declaration"
+                        | "generator_function_declaration"
+                        | "class_declaration"
+                        | "abstract_class_declaration"
+                )
+                && let Some(nn) = field(decl, "name")
+            {
+                let t = self.text(nn);
+                self.self_reexport(t, "default".into(), span_of(n));
+            }
             return self.declaration(decl, n, &decorators, ctx, depth + 1, true);
         }
         if let Some(value) = field(n, "value") {
@@ -1952,6 +2063,9 @@ impl<'s> Extractor<'s> {
                         ("default".to_string(), span_of(kw))
                     }
                 };
+                if name != "default" {
+                    self.self_reexport(name.clone(), "default".into(), span_of(n));
+                }
                 let mut nd = NewDef::new(Label::Function, name, span_of(n), name_span);
                 nd.signature = self.fn_signature(v);
                 nd.doc = self.doc_before(n);
@@ -1960,7 +2074,29 @@ impl<'s> Extractor<'s> {
                 return self.function_body(v, Some(id), ctx, depth + 1);
             }
             if v.kind() == "class" {
+                if let Some(nn) = field(v, "name") {
+                    let t = self.text(nn);
+                    self.self_reexport(t, "default".into(), span_of(n));
+                }
                 return self.class(v, n, &decorators, None, ctx, depth + 1, true);
+            }
+            if v.kind() == "object" && ctx.parent.is_none() {
+                // `export default { start() {} }`: a `default` variable owning
+                // the methods, so `import app from "./app"; app.start()` resolves.
+                let kw = children(n).into_iter().find(|c| c.kind() == "default").unwrap_or(v);
+                let mut nd = NewDef::new(Label::Variable, "default".into(), span_of(n), span_of(kw));
+                nd.doc = self.doc_before(n);
+                nd.exported = true;
+                let id = self.add_def(nd, None);
+                let inner = Ctx { parent: Some(id), top: false, ambient: false };
+                if v.id() != value.id() {
+                    for ch in named_children(value) {
+                        if ch.id() != v.id() {
+                            self.walk(ch, inner, depth + 1);
+                        }
+                    }
+                }
+                return self.object_members(v, Some(id), inner, depth + 1);
             }
             if v.kind() == "identifier" {
                 let t = self.text(v);
@@ -2109,25 +2245,136 @@ impl<'s> Extractor<'s> {
             let id = self.add_def(nd, parent);
             return self.walk_children(n, Ctx { parent: Some(id), top: false, ambient: false }, depth);
         }
-        if !matches!(callee.kind(), "super" | "import")
+        if callee.kind() == "super" {
+            // `super(…)`: the nearest explicit constructor of the bases.
+            self.push_ref(RefKind::Call, "constructor".into(), Some("super".into()), ctx.parent, span_of(n));
+        } else if let Some(name) = self.own_export_member(callee) {
+            // `exports.decode(…)` / `module.exports.decode(…)` in the module itself.
+            self.push_ref(RefKind::Call, name, None, ctx.parent, span_of(n));
+        } else if callee.kind() != "import"
             && !self.builtin_root(callee)
             && let Some((name, recv)) = self.callee_parts(callee)
         {
             let typed = match callee.kind() {
-                "member_expression" => field(callee, "object").and_then(|o| self.receiver_type(o)),
+                "member_expression" => field(callee, "object").and_then(|o| self.receiver_type(o, 0)),
                 _ => None,
             };
             let recv = typed.map(|t| type_receiver(&t)).or(recv);
+            if recv.is_none() && self.is_local(&name) {
+                self.local_calls.push(self.refs.len());
+            }
             self.push_ref(RefKind::Call, name, recv, ctx.parent, span_of(n));
         }
         self.walk_children(n, ctx, depth)
+    }
+
+    /// `exports.x` / `module.exports.x` (with `exports` / `module` not
+    /// local): the module's own export `x`.
+    fn own_export_member(&self, callee: Node<'_>) -> Option<String> {
+        if callee.kind() != "member_expression" {
+            return None;
+        }
+        let o = field(callee, "object")?;
+        let p = field(callee, "property")?;
+        let ot = self.text(o);
+        let root = if ot == "exports" {
+            "exports"
+        } else if ot.split_whitespace().collect::<String>() == "module.exports" {
+            "module"
+        } else {
+            return None;
+        };
+        (p.kind() == "property_identifier" && !self.is_local(root)).then(|| self.text(p))
+    }
+
+    /// Drops the calls of local bindings recorded in `local_calls` unless a
+    /// definition with that name is nested in the call's enclosing
+    /// definition or one of its ancestors (`const step = () => …; step()`):
+    /// a parameter or variable holding a function (`run(fn) { fn() }`) is
+    /// not the module's function of the same name.
+    fn drop_local_calls(&mut self) {
+        if self.local_calls.is_empty() {
+            return;
+        }
+        let nested: HashSet<(Option<u32>, &str)> = self
+            .defs
+            .iter()
+            .enumerate()
+            .filter(|(i, d)| d.label != Label::Method && !self.assigned.contains(&(*i as u32)))
+            .map(|(_, d)| (d.parent, d.name.as_str()))
+            .collect();
+        let mut drop = vec![false; self.refs.len()];
+        for &i in &self.local_calls {
+            let r = &self.refs[i];
+            let mut cur = r.enclosing;
+            let mut keep = nested.contains(&(None, r.name.as_str())) && cur.is_none();
+            for _ in 0..256 {
+                let Some(e) = cur else { break };
+                if nested.contains(&(Some(e), r.name.as_str())) {
+                    keep = true;
+                    break;
+                }
+                cur = self.defs.get(e as usize).and_then(|d| d.parent);
+            }
+            drop[i] = !keep;
+        }
+        let mut k = 0;
+        self.refs.retain(|_| {
+            k += 1;
+            !drop[k - 1]
+        });
+    }
+
+    /// A named or arrow function assigned to a name or member anywhere but
+    /// module-level statements (handled by [`Extractor::top_assignment`]):
+    /// `desc.value = function () {…}`, `this.onTick = () => {…}`,
+    /// `handler = () => {…}`. It becomes a `Function` child of the enclosing
+    /// definition, named like the assigned name or property; outside any
+    /// definition, CommonJS and prototype patterns are tried first.
+    fn function_assignment(&mut self, a: Node<'_>, ctx: Ctx, depth: usize) -> bool {
+        let (Some(left), Some(right)) = (field(a, "left"), field(a, "right")) else { return false };
+        let v = unwrap_value(right);
+        if !is_function_value(v) {
+            return false;
+        }
+        let name_node = match left.kind() {
+            "identifier" => left,
+            "member_expression" => match field(left, "property") {
+                Some(p) if p.kind() == "property_identifier" => p,
+                _ => return false,
+            },
+            _ => return false,
+        };
+        if ctx.parent.is_none() && self.top_assignment(a, ctx, depth) {
+            return true;
+        }
+        if left.kind() == "member_expression" {
+            if field(left, "object").is_some_and(|o| o.kind() == "this") {
+                let name = self.text(name_node);
+                self.push_ref(RefKind::Write, name, Some("this".into()), ctx.parent, span_of(left));
+            }
+            self.walk(left, ctx, depth + 1);
+        }
+        let stmt = a.parent().filter(|p| p.kind() == "expression_statement").unwrap_or(a);
+        let mut nd = NewDef::new(Label::Function, self.text(name_node), span_of(stmt), span_of(name_node));
+        nd.signature = self.fn_signature(v).map(|t| format!("{} = {}", self.collapsed(left, MAX_SIGNATURE), t));
+        nd.doc = self.doc_before(stmt);
+        let id = self.add_def(nd, ctx.parent);
+        if left.kind() == "identifier" {
+            self.assigned.insert(id);
+        }
+        self.function_body(v, Some(id), ctx, depth);
+        true
     }
 
     /// The type of a call's receiver expression when the file says it
     /// (`types.rs`): a local, parameter or module-level binding with a
     /// declared or constructed type, `this.field` of the enclosing class,
     /// or `new T()` / `v as T` itself.
-    fn receiver_type(&self, obj: Node<'_>) -> Option<String> {
+    fn receiver_type(&self, obj: Node<'_>, depth: usize) -> Option<String> {
+        if depth > 16 {
+            return None;
+        }
         match obj.kind() {
             "identifier" => {
                 let name = self.text(obj);
@@ -2150,10 +2397,36 @@ impl<'s> Extractor<'s> {
                 let inner = obj.named_child(0)?;
                 match inner.kind() {
                     "new_expression" | "as_expression" | "type_assertion" => self.constructed_type(inner),
-                    _ => self.receiver_type(inner),
+                    _ => self.receiver_type(inner, depth + 1),
                 }
             }
             "new_expression" => self.constructed_type(obj),
+            // `make().m()`, `C.create().m()`, `x.map(f).get()`: the declared
+            // return type of a function or method of the file (`types.rs`).
+            "call_expression" => {
+                let f = field(obj, "function")?;
+                match f.kind() {
+                    "identifier" => {
+                        let name = self.text(f);
+                        if self.is_local(&name) {
+                            return None;
+                        }
+                        self.types.function_return(&name).map(str::to_string)
+                    }
+                    "member_expression" => {
+                        let o = field(f, "object")?;
+                        let method = self.text(field(f, "property")?);
+                        let ot = self.text(o);
+                        let class = if o.kind() == "identifier" && !self.is_local(&ot) && self.types.is_class(&ot) {
+                            ot
+                        } else {
+                            self.receiver_type(o, depth + 1)?
+                        };
+                        self.types.method_return(&class, &method).map(str::to_string)
+                    }
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }

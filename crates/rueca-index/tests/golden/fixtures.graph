@@ -1439,4 +1439,4 @@
 {"src":570,"dst":557,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[63,{"start_byte":1131,"end_byte":1137,"start_line":45,"start_col":21,"end_line":45,"end_col":27}]}}
 {"src":571,"dst":552,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[63,{"start_byte":1816,"end_byte":1833,"start_line":68,"start_col":20,"end_line":68,"end_col":37}]}}
 {"src":572,"dst":557,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[63,{"start_byte":1877,"end_byte":1883,"start_line":73,"start_col":13,"end_line":73,"end_col":19}]}}
-# stats total=293 resolved=132 builtin=19 external=91 by_strategy={"contract": 26, "heuristic": 7, "import_resolved": 32, "same_module": 19, "syntactic": 13, "type_resolved": 30, "unique_name": 5}
+# stats total=291 resolved=132 builtin=19 external=91 by_strategy={"contract": 26, "heuristic": 7, "import_resolved": 32, "same_module": 19, "syntactic": 13, "type_resolved": 30, "unique_name": 5}

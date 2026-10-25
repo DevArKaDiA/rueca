@@ -792,7 +792,7 @@ fn local_exports_are_self_reexports() {
 #[test]
 fn pack_metadata() {
     let p = TypeScriptPack;
-    assert_eq!(p.extractor_version(), 4);
+    assert_eq!(p.extractor_version(), 5);
     assert_eq!(p.self_receivers(), &["this"]);
     assert!(p.is_builtin("console") && p.is_builtin("Promise") && p.is_builtin("Record"));
     assert!(!p.is_builtin("UserService"));
@@ -1291,4 +1291,165 @@ function render(name, options) {
 "#,
     );
     assert_eq!(call_receiver(&f, "render"), vec![Some("$type:View".into()), Some("other".into())]);
+}
+
+#[test]
+fn receivers_typed_from_bounds_elements_and_returns() {
+    let f = facts(
+        "src/zoo.ts",
+        r#"export class Animal { speak(): string { return ""; } }
+export class Dog extends Animal {
+  fetch(): string { return ""; }
+  self(): this { return this; }
+  static make(): Dog { return new Dog(); }
+}
+export class Box<T> {
+  map<U>(f: (v: T) => U): Box<U> { return new Box(); }
+  get(): T { return this.v; }
+}
+export function chorus<T extends Animal>(xs: T[], ys: Array<Dog>) {
+  xs.map((x) => x.speak());
+  ys.forEach(function (y) { y.fetch(); });
+  for (const z of ys) { z.fetch(); }
+  for (const w of xs) { w.speak(); }
+}
+export function walk<D extends Dog, R extends Record<string, D>>(d: D, r: R) {
+  d.fetch();
+  r.keys();
+}
+function makeBox(): Box<number> { return new Box(); }
+function makeCounter() { return { next: () => 1 }; }
+export function use() {
+  makeBox().map(f).get();
+  const c = makeCounter();
+  c.next();
+  Dog.make().self().fetch();
+  const d = Dog.make();
+  d.speak();
+}
+"#,
+    );
+    let ty = |s: &str| Some(format!("$type:{s}"));
+    assert_eq!(call_receiver(&f, "speak"), vec![ty("Animal"), ty("Animal"), ty("Dog")]);
+    assert_eq!(call_receiver(&f, "fetch"), vec![ty("Dog"), ty("Dog"), ty("Dog"), ty("Dog")]);
+    // A bound that is a builtin type is no type.
+    assert_eq!(call_receiver(&f, "keys"), vec![Some("r".into())]);
+    assert_eq!(call_receiver(&f, "map"), vec![Some("xs".into()), ty("Box")]);
+    assert_eq!(call_receiver(&f, "get"), vec![ty("Box")]);
+    // A function returning an object literal types its result as itself.
+    assert_eq!(call_receiver(&f, "next"), vec![ty("makeCounter")]);
+    assert_eq!(call_receiver(&f, "self"), vec![ty("Dog")]);
+}
+
+#[test]
+fn object_literal_methods_and_assigned_functions_are_definitions() {
+    let f = facts(
+        "src/counter.ts",
+        r#"export function makeCounter() {
+  const step = () => 1;
+  return {
+    next: () => step(),
+    peek() { return 0; },
+    get size() { return 1; },
+    set size(v: number) {},
+  };
+}
+export default {
+  start() { return 1; },
+};
+export function logged(tag: string) {
+  return function (_t: object, key: string, desc: PropertyDescriptor) {
+    desc.value = function () { trace(tag); };
+  };
+}
+export class Timer {
+  constructor() {
+    this.onTick = () => { tick(); };
+  }
+}
+"#,
+    );
+    let next = def(&f, "makeCounter.next");
+    assert_eq!(next.label, Label::Method);
+    assert_eq!(next.parent, Some(id(&f, "makeCounter")));
+    assert_eq!(def(&f, "makeCounter.peek").label, Label::Method);
+    assert_eq!(f.definitions.iter().filter(|d| d.qualified_name == "makeCounter.size").count(), 1);
+    let step = refs(&f, RefKind::Call, "step");
+    assert_eq!(step[0].enclosing, Some(id(&f, "makeCounter.next")));
+    // `export default { … }`: a `default` variable owning the methods.
+    assert_eq!(def(&f, "default").label, Label::Variable);
+    assert_eq!(def(&f, "default.start").label, Label::Method);
+    // Functions assigned to members are named by the member.
+    let value = def(&f, "logged.value");
+    assert_eq!(value.label, Label::Function);
+    assert_eq!(refs(&f, RefKind::Call, "trace")[0].enclosing, Some(id(&f, "logged.value")));
+    assert_eq!(refs(&f, RefKind::Call, "tick")[0].enclosing, Some(id(&f, "Timer.constructor.onTick")));
+    assert!(has_ref(&f, RefKind::Write, "onTick", Some("this")));
+}
+
+#[test]
+fn commonjs_object_exports_and_own_export_calls() {
+    let f = facts(
+        "lib/service.js",
+        r#"function helper(x) { return x; }
+module.exports = {
+  start() { return helper(1); },
+  stop: () => helper(0),
+  helper,
+};
+module.exports.read = function (p) { return exports.decode(p) + module.exports.stop(); };
+exports.decode = (raw) => raw;
+"#,
+    );
+    for name in ["start", "stop", "read", "decode"] {
+        let d = def(&f, name);
+        assert!(d.exported && d.parent.is_none(), "{name}");
+    }
+    assert!(has_ref(&f, RefKind::Call, "decode", None));
+    assert!(has_ref(&f, RefKind::Call, "stop", None));
+    let log = facts("lib/log.js", "module.exports = function log(m) { return m; };\n");
+    let reexport = log.imports.iter().find(|i| i.reexport).expect("default re-export");
+    assert_eq!(names(reexport), vec![n("log", Some("default"))]);
+    let loader = facts("src/loader.ts", "export function cache() {}\nexport default function load() { cache(); }\n");
+    let reexport = loader.imports.iter().find(|i| i.reexport).expect("default re-export");
+    assert_eq!(names(reexport), vec![n("load", Some("default"))]);
+}
+
+#[test]
+fn super_calls_local_callees_and_shadowed_builtins() {
+    let f = facts(
+        "src/app.ts",
+        r#"import { fetch } from "./http";
+import { expect } from "vitest";
+export function fn(): number { return 1; }
+export class User extends Model {
+  constructor(id: string) {
+    super(id);
+  }
+}
+export function run(fn: () => number, Cls: typeof User): number {
+  const inner = () => 2;
+  let later;
+  later = () => 3;
+  new Cls();
+  expect(fn() + inner() + later());
+  return fetch("x");
+}
+export function direct(): number {
+  return fn();
+}
+"#,
+    );
+    assert!(has_ref(&f, RefKind::Call, "constructor", Some("super")));
+    // A parameter (or a plain variable) holding a function is not the module's `fn`.
+    let fn_calls = refs(&f, RefKind::Call, "fn");
+    assert_eq!(fn_calls.len(), 1);
+    assert_eq!(fn_calls[0].enclosing, Some(id(&f, "direct")));
+    assert!(refs(&f, RefKind::New, "Cls").is_empty());
+    assert!(refs(&f, RefKind::Call, "later").is_empty());
+    // A nested definition keeps the call.
+    assert_eq!(refs(&f, RefKind::Call, "inner").len(), 1);
+    // A project import shadows a builtin; a package import does not.
+    assert_eq!(refs(&f, RefKind::Call, "fetch").len(), 1);
+    assert!(refs(&f, RefKind::Call, "expect").is_empty());
 }
