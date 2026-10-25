@@ -3,9 +3,10 @@
 //! normalized (`$self`) receivers, implicit self, star imports of packages
 //! and C/C++ includes, declarations vs bodies, overloads and `OVERRIDES`.
 //!
-//! Every rule here is keyed on a hook a pack opts into (or on facts only the
-//! new packs emit), so Python, ECMAScript, PHP and Markdown resolve exactly
-//! as before.
+//! Every rule here is keyed on a hook a pack opts into or on facts a pack
+//! chooses to emit (`$type:` receivers, argument types in names): Python,
+//! ECMAScript and PHP use typed receivers too, the other hooks are for the
+//! RFC 0003 languages.
 
 use super::*;
 

@@ -73,15 +73,16 @@
 //! | 3 | Imported class | receiver is an imported class (static member) | `ImportResolved` | 0.85 |
 //! | 4 | Same module | no receiver; top-level definition of the same file | `SameModule` | 0.90 |
 //! | 4 | Same-module class | receiver is a top-level class of the same file | `SameModule` | 0.85 |
+//! | 5 | Typed receiver | receiver `$type:T`: `T` resolves as an exact global qualified type name, else like a `Type` reference through the ladder; the member through its bases (see *RFC 0003 hooks*) | `TypeResolved` | 0.85 |
 //! | 6 | Unique name | no receiver; exactly one compatible non-test definition with that name in the same language family, not a builtin | `UniqueName` | 0.60 |
 //! | 6 | Unique method | call with an unknown receiver; exactly one compatible method with that name, name ≥ 4 chars, not a builtin and not a common builtin-type method (`update`, `keys`, `then`, `forEach`, …) | `Heuristic` | 0.50 |
 //! | — | Constructor | a `Call`/`New` that hits a class also calls its `__init__` / `constructor` (own or inherited) | as the class edge | × 0.95 |
 //!
-//! (Strategy 5, constructor-based receiver typing, needs assignment facts and
-//! is not implemented in the alpha; packs of typed languages report declared
-//! receiver types as `$type:T`, see *RFC 0003 hooks*.) Self receivers that miss, and names bound
-//! to external modules or builtin objects, stop resolution without falling back
-//! to strategy 6.
+//! Strategy 5 needs no assignment facts: packs type receivers in the file
+//! (declarations, constructions, annotated returns; every pack's crate docs
+//! say which) and report them as `$type:T`. Self receivers that miss, and
+//! names bound to external modules or builtin objects, stop resolution
+//! without falling back to strategy 6.
 //!
 //! Label compatibility for strategy 6: without a receiver, `Call`/`Decorator`
 //! → Function, Class (a bare call never targets a method); `New` → Class,
@@ -95,6 +96,20 @@
 //! depth-first, left-to-right (cycle-safe, depth ≤ 10). This approximates the
 //! Python MRO (C3 linearization differs only for diamonds) and is exact for
 //! ECMAScript single inheritance.
+//!
+//! **Members by kind.** A type keeps one member per name *and kind*:
+//! callables, nested types and values (fields, properties, constants), so a
+//! field and a method with one name (Java `code` / `code()`) do not hide
+//! each other. The reference kind decides the order: `Call` / `New` /
+//! `Decorator` look for a callable, then a type, then a value; `Read` /
+//! `Write` for a value, then a callable that is not a constructor, then a
+//! type; `Type` references and receiver paths for a type, then a value,
+//! then a callable that is not a constructor. Each slot is searched through
+//! the whole hierarchy before the next. A constructor is a callable named
+//! like the type that declares it (Java, C/C++), so it is reached by calls
+//! only: a type name equal to an enclosing class or its superclass is the
+//! type. An ECMAScript `Function` that owns methods (prototype assignments)
+//! is a type for `this` and for `$type:` receivers.
 //!
 //! # PHP
 //!
@@ -130,7 +145,9 @@
 //! # RFC 0003 hooks
 //!
 //! Opt-in behaviour for the next languages (`rueca-extract` crate docs list
-//! the hooks); none of it applies to Python, ECMAScript, PHP or Markdown.
+//! the hooks); of it, only `$type:` receivers apply to Python, ECMAScript
+//! and PHP (their packs type receivers in the file too), nothing to
+//! Markdown.
 //!
 //! - **Package scope** (`ModuleScope::Package`: files of one family with the
 //!   same module name; `ModuleScope::Directory`: files of one language in a
@@ -163,12 +180,24 @@
 //!   candidates.
 //! - **Overloads** (`overloads`): definitions whose qualified name ends in a
 //!   parameter suffix (`parse(String)`) are grouped by (family, name without
-//!   suffix); a reference that hits one is linked to the overload whose
-//!   arity matches `Reference::arity`, else to all of them (× 0.8).
-//!   Constructors of Java and C/C++ are the members named like the class.
+//!   suffix); a reference that hits one is linked to the overloads whose
+//!   arity fits `Reference::arity`, narrowed by the static argument types a
+//!   pack writes into the name (`value$args:long,?`,
+//!   `rueca_extract::with_arg_types`): overloads that cannot accept a known
+//!   argument type are dropped (a primitive that does not widen, a
+//!   non-`String` class for `String`; class to class is always possible),
+//!   then the one whose parameter types equal the known argument types, else
+//!   the one whose parameters pass to every other's (the narrowest
+//!   primitives), wins. One candidate keeps the confidence; several are all
+//!   linked × 0.8; none fitting links the whole set × 0.8. Constructors of
+//!   Java and C/C++ are the members named like the class.
 //! - **`OVERRIDES`** (`overrides`): a method of a type → the method with the
-//!   same name (and arity) found in each resolved base (`TypeResolved`
-//!   0.90). For these families `IMPLEMENTS` targets also contribute members.
+//!   same name in each resolved base (`TypeResolved` 0.90), paired by
+//!   signature when the base has overloads: the parameter count must match
+//!   (overload suffix, else the parameter list of the definition's
+//!   signature), and among several, the overload with the same normalized
+//!   parameter types wins. Constructors override nothing. For these families
+//!   `IMPLEMENTS` targets also contribute members.
 //!
 //! # Go
 //!

@@ -152,9 +152,10 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    `go.mod`; Java packages and imports through Maven / Gradle source roots; C/C++
    `#include` through `compile_commands.json` include directories),
    re-export chains, `self`/`this` with base classes and traits,
-   declared receiver types (PHP, Go, Java, C/C++), declarations to bodies (C/C++), overloads by
-   argument count, package and same-module scope (implicit `this` in Java), each
-   with a confidence.
+   receiver types the file declares or constructs (every code language:
+   `c: Context`, `const app = new Hono()`, `x = Session()`), declarations to
+   bodies (C/C++), overloads by argument count and type, package and
+   same-module scope (implicit `this` in Java), each with a confidence.
 3. **Store** — the graph is written as one immutable segment file: CSR
    adjacency, an embedded [tantivy](https://github.com/quickwit-oss/tantivy)
    symbol index with code-aware tokenization, and a trigram index over

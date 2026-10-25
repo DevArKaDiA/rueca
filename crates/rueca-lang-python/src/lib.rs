@@ -46,6 +46,20 @@
 //!   receivers (`get().x()`) use their one-line source text (≤ 200 chars) and
 //!   are also visited. Calls are emitted for every callee (builtins included;
 //!   the resolver filters with [`LanguagePack::is_builtin`]).
+//! - **Typed receivers** (`types.rs`): `x.m()` gets the receiver `$type:T`
+//!   when the file says `x` is a `T` — a parameter or variable annotation
+//!   (`req: Request`, `x: Foo = …`; `Optional[Foo]`, `Union[Foo, None]`,
+//!   `Foo | None`, `Annotated[Foo, …]` and string forward references are
+//!   unwrapped), or, without one, every binding and assignment of `x` in
+//!   its function (or module) being a call of a class-like name
+//!   (`x = Session()`, `x = models.Model()`: last segment capitalized, not a
+//!   builtin) or of a function / method of this file with a return
+//!   annotation (`ctx = self.request_context(env)`, `x = make()`,
+//!   `x = Factory.create()`). `self.x.m()` uses the attribute's type
+//!   (class-body annotations and assignments, `self.x = …` in any method);
+//!   `Foo().m()`, `self.make().m()` and `make().m()` type their receiver
+//!   the same way. Any other binding of the name (`for`, `with`, `except`,
+//!   `:=`, tuple targets, imports, `global`) leaves it untyped.
 //! - `Decorator`: last identifier of the decorator callee, receiver = prefix
 //!   (`@app.route("/x")` → `route` / `app`). Arguments are visited normally.
 //! - `Throw`: `raise X` / `raise X(…)` → `X` (local variables such as

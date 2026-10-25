@@ -25,8 +25,11 @@
 //!
 //! - Receivers: [`SELF_RECEIVER`] (`$self`, a pack-normalized self
 //!   receiver; list it in [`LanguagePack::self_receivers`]) and
-//!   [`type_receiver`] (`$type:T`, a receiver whose declared type `T` is
-//!   known in the file).
+//!   [`type_receiver`] (`$type:T`, a receiver whose type `T` the file
+//!   declares, constructs or returns; any pack may use it).
+//! - Call and `New` names: [`with_arg_types`] (`value$args:long,?`, the
+//!   static types of the arguments, for choosing overloads; the resolver
+//!   strips it before any lookup).
 //! - `DataRef` receivers: [`DATA_REF_QN`] and [`DATA_REF_ANY`] (see
 //!   `rueca_model::RefKind::DataRef`).
 //! - [`ExtractError::Skipped`] to keep a file listed but unextracted with a
@@ -95,9 +98,10 @@ pub enum ExtractError {
 /// method's local qualified-name prefix (`Server` for `Server.Handle`).
 pub const SELF_RECEIVER: &str = "$self";
 
-/// Prefix of a typed receiver: `$type:<T>` means "the receiver's declared
-/// type is `T`" (a local, parameter or field declared with a type in the
-/// same file). `T` is written as in source (`Server`, `http.Server`,
+/// Prefix of a typed receiver: `$type:<T>` means "the receiver's type is
+/// `T`" as the file says it: a local, parameter or field declared with a
+/// type, a value constructed from `T` (`x = new T()`, Python `x = T()`), or
+/// the declared return type of a function or method of the same file. `T` is written as in source (`Server`, `http.Server`,
 /// `ns::Foo`, `List<String>`); generic arguments, pointers and references
 /// are ignored. The resolver resolves `T` like a `Type` reference and looks
 /// the member up in it (`type_resolved`, 0.85).
@@ -317,15 +321,18 @@ pub trait LanguagePack: Send + Sync {
     /// When true, definitions of this pack may be overloaded: overloads carry
     /// a parameter suffix in their local qualified name (`Parser.parse(String)`,
     /// `Parser.parse(Reader)`; non-overloaded names stay bare) and the
-    /// resolver chooses among them by `Reference::arity`, else links all of
-    /// them at × 0.8 confidence (RFC 0003 §10.1).
+    /// resolver chooses among them by `Reference::arity` and by the argument
+    /// types a reference name carries ([`with_arg_types`]), else links all
+    /// of the remaining ones at × 0.8 confidence (RFC 0003 §10.1).
     fn overloads(&self) -> bool {
         false
     }
 
     /// When true, the resolver adds `OVERRIDES` edges from a method to the
-    /// method of a resolved base type with the same name (and the same arity
-    /// when both are known), `type_resolved` 0.90 (RFC 0003 §10.1).
+    /// method of a resolved base type with the same name, paired by
+    /// signature when the base has overloads (same parameter count from the
+    /// overload suffix or the definition's signature, then the same
+    /// parameter types), `type_resolved` 0.90 (RFC 0003 §10.1).
     fn overrides(&self) -> bool {
         false
     }
