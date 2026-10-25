@@ -3,3 +3,4 @@
 /bench/work
 /bench/.venv
 *.rcseg
+!crates/rueca-segment/tests/fixtures/**/*.rcseg

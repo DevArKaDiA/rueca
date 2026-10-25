@@ -285,6 +285,7 @@ fn sections(text: &str, lines: &LineIndex, headings: &[Heading]) -> Vec<Definiti
             implements: Vec::new(),
             exported: true,
             is_test: false,
+            is_declaration: false,
         });
         stack.push((h.level, id));
     }

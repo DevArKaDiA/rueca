@@ -1,5 +1,47 @@
 # Decisions log
 
+## 2026-10-24 — Wave R: shared model, contract and resolver for RFC 0003
+
+The groundwork every RFC 0003 pack needs landed before the packs, so the
+data / bridge, Go, C/C++ and Java work can proceed in parallel without
+touching `rueca-model`, `rueca-extract` or the generic resolver and query
+code ([RFC 0003](rfcs/0003-structured-data-and-languages.md) §9.2, §9.3,
+§10.1; details in the *Implemented* notes there and in the crate docs).
+
+- **Additive on disk.** `Language`, `Label`, `RefKind` and `Strategy`
+  variants are appended (enum indexes are pinned by a test). Segment format
+  stays 2: a store written before the change is committed as a fixture and
+  must keep opening with identical tables; the new optional component
+  `files.modules` (module name per file, for symbol ids of Go and Java) is
+  ignored by older readers. A segment that uses a new variant is rejected by
+  an older build as corrupt rather than misread.
+- **Facts format 2.** `Definition::is_declaration` and `Reference::arity`
+  (needed to choose overloads, which §10.1 requires and §9.3 did not list)
+  change the positional postcard encoding, so `FACTS_FORMAT` is part of the
+  facts cache key: old entries are re-extracted once, never misdecoded.
+- **Detection without a pack is not a language.** `Language::from_path`
+  recognizes every RFC 0003 file, but the indexer records a language only
+  when a pack for it is registered; until then such files stay plain text,
+  exactly as before. `.h` is C++ when the snapshot has C++ sources.
+- **Open question 2 decided**: `module_name_for(path, facts, project)` is an
+  additive hook defaulting to `module_name`. Other refinements, all
+  defaulted: `module_scope(language)` with a `Directory` variant
+  (Terraform), `overloads()`, `overrides()`, `facts_depend_on_path()` (data
+  kinds are chosen by file name; the cache key then includes the path),
+  `ExtractError::Skipped(reason)`.
+- **`$self` is opt-in.** It is a valid identifier in JavaScript, PHP and
+  Java, so it is honoured only for packs that list it in
+  `self_receivers()`; `$type:` cannot collide and is reserved for all
+  non-PHP packs.
+- **Behaviour of the shipped languages is unchanged**: every rule is keyed
+  on a hook or on facts only the new packs emit. Evidence: a golden graph of
+  every language fixture (`rueca-index/tests/golden`) committed before the
+  change, and byte-identical graphs before and after on four real
+  repositories (Python, TypeScript, PHP with Markdown; ~280k graph lines).
+- The RFC's lockfile additions (§4.5) are excluded by the walk now; the
+  `Key` / `Document` default-label rule (§11) and `readers_count` /
+  `writers_count` (§7.4) are in the tools.
+
 ## 2026-10-24 — Language order for the first release
 
 Before the first public release, languages land in this order: PHP,

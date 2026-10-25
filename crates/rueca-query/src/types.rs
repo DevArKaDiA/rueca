@@ -84,6 +84,12 @@ pub struct GetSymbolResult {
     pub subtypes: Vec<Brief>,
     pub callers_count: u32,
     pub callees_count: u32,
+    /// `EnvVar` and `Key` symbols only: distinct nodes that read it (incoming `READS`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readers_count: Option<u32>,
+    /// `EnvVar` and `Key` symbols only: distinct nodes that set it (incoming `WRITES`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub writers_count: Option<u32>,
     /// Other matches when the lookup was ambiguous (max 20).
     pub candidates: Vec<Brief>,
 }

@@ -72,7 +72,8 @@
 //! | `meta` | JSON | [`SegmentMeta`] (`bytes` is stored as 0; the reader reports the file size) |
 //! | `nodes` | postcard `Vec<Node>` | node table, index = [`NodeId`] |
 //! | `files` | postcard `Vec<FileEntry>` | file table, index = [`FileId`] |
-//! | `edge_meta` | `[EdgeMetaRec; E]`, 36 B each | `f32 confidence, u8 strategy, u8 has_evidence, [u8;2] pad, u32 evidence_file, [u32;6] evidence span` (start_byte, end_byte, start_line, start_col, end_line, end_col); strategy = `Strategy` declaration order |
+//! | `files.modules` (optional) | postcard `Vec<String>` | module name per file as its pack computed it (`""` = none); absent in segments written before RFC 0003 wave R ([`Segment::module_of`] returns `None`) |
+//! | `edge_meta` | `[EdgeMetaRec; E]`, 36 B each | `f32 confidence, u8 strategy, u8 has_evidence, [u8;2] pad, u32 evidence_file, [u32;6] evidence span` (start_byte, end_byte, start_line, start_col, end_line, end_col); strategy = `Strategy` declaration order (0 `syntactic` … 6 `heuristic`, 7 `contract`) |
 //! | `adj.out.offsets` | `[u32; N+1]` | CSR row offsets by source node |
 //! | `adj.out.targets` | `[u32; E]` | destination node per entry; rows sorted by (kind, dst, edge index) |
 //! | `adj.out.kinds` | `[u8; E]` | [`EdgeKind::index`] per entry |
@@ -88,6 +89,14 @@
 //! | `ngrams.offsets` | `[u64; K+1]` | byte offsets into `ngrams.postings` |
 //! | `ngrams.postings` | roaring bitmaps | per key, the serialized bitmap of file ids containing it |
 //! | `ngrams.text_files` | roaring bitmap | file ids that are indexed text (the universe for scans) |
+//!
+//! Enum values are stored by declaration index: `Label`, `Language` and
+//! `Strategy` variants are only ever appended (RFC 0003 added `Key`,
+//! `Document`, `Resource`, `Image`, the data and Go / C / C++ / Java
+//! languages and `Contract` without a format bump), so older segments decode
+//! unchanged; a segment that uses a newer variant is rejected as corrupt by
+//! an older reader. `tests/compat.rs` opens a store written before those
+//! additions.
 //!
 //! Fixed-width arrays are read zero-copy from the map (`bytemuck`); the
 //! `nodes`/`files` tables are decoded once at open. Edge kinds are filtered
@@ -130,7 +139,9 @@
 //! `*.test.*`, `*.spec.*`), multiplied together, 1 otherwise. Priors are
 //! computed from the node table at open (a tantivy `tweak_score` collector).
 //!
-//! Labels and language are exact-term filters; `path_glob` is a post-filter
+//! Labels and language are exact-term filters (an empty label list excludes
+//! `File`, `Folder`, `Module`, `Repository`, and `Key` / `Document` unless the
+//! language is a data language); `path_glob` is a post-filter
 //! with over-fetching. Results are ordered by score descending, then node id
 //! ascending (tantivy breaks ties by doc address, which equals node id, also
 //! under `tweak_score`, so pagination is exact). The index is served through
@@ -367,7 +378,8 @@ pub struct EdgeRef {
 #[derive(Debug, Clone, Default)]
 pub struct SymbolQuery {
     pub text: String,
-    /// Empty = all labels except `File`/`Folder`/`Module` (and `Repository`).
+    /// Empty = all labels except `File`/`Folder`/`Module` (and `Repository`),
+    /// and except `Key`/`Document` unless `language` is a data language.
     pub labels: Vec<Label>,
     /// Glob on the file path (`src/**/*.py`).
     pub path_glob: Option<String>,
@@ -467,6 +479,12 @@ impl Segment {
     }
     pub fn file_by_path(&self, path: &str) -> Option<FileId> {
         self.inner.file_by_path(path)
+    }
+    /// Module name of `file` as its language pack computed it (`""` for no
+    /// module), or `None` when the segment predates the `files.modules`
+    /// component or the file id is out of range.
+    pub fn module_of(&self, file: FileId) -> Option<&str> {
+        self.inner.modules.as_ref()?.get(file as usize).map(String::as_str)
     }
     /// Outgoing edges of `node`, optionally filtered by kind, in stable order.
     ///

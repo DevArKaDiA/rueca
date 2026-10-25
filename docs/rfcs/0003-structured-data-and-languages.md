@@ -1,6 +1,8 @@
 # RFC 0003 — Structured data and the next languages
 
-- Status: Draft
+- Status: Draft; the shared groundwork (§9.2 contract, §9.3 model, §10.1
+  resolver, wave R of §12) is **implemented** — see the *Implemented*
+  notes in those sections. Language and format packs are pending.
 - Created: 2026-10-24
 - Depends on: RFC 0001 (architecture), RFC 0002 (building blocks)
 - Research date: 2026-10-24. Crate versions, licenses and dependency
@@ -533,6 +535,21 @@ resolves `T` like a `Type` reference, then looks the member up in it
 (`type_resolved`, 0.85). It needs no assignment facts, only the pack's
 file-local declaration scan.
 
+*Implemented* (wave R) as listed, with these refinements, all defaulted:
+`module_scope(language)` takes the language (one pack serves several:
+Terraform is directory-scoped, YAML is not) and has a third variant,
+`ModuleScope::Directory` (every file of one language in a directory, for
+Terraform modules whose files keep their path as module name); `overloads()`
+and `overrides()` opt into §10.1 items 4–5; `facts_depend_on_path()` adds
+the path to the facts cache key for packs whose output depends on it (data
+kinds chosen by name); `ExtractError::Skipped(reason)` reports the §4.5
+skips as `skipped:<reason>`; `module_name_for(path, facts, project)` answers
+open question 2 (§15). `$self` is honoured for packs that list it in
+`self_receivers()` (JavaScript, Java and PHP allow `$self` as an identifier,
+so it cannot be reserved for everyone). `ProjectFiles::max_config_bytes`
+allows 8 MiB for `compile_commands.json`. `.csproj` is not loaded: no
+planned resolver reads it.
+
 ### 9.3 Model changes
 
 | Item | Change | Additive |
@@ -544,6 +561,20 @@ file-local declaration scan.
 | `Strategy` | append `Contract` | yes |
 | `EdgeKind` | none; `READS` starts being produced | yes |
 | `Definition` | add `is_declaration: bool` (C/C++ prototypes and in-class method declarations) | **no**: postcard facts are positional. Lands with a `FACTS_FORMAT` constant added to the facts cache key, so the change re-extracts once instead of failing to decode |
+| `Reference` | add `arity: Option<u32>` (call argument count, for §10.1 overload choice) | **no**, same facts-format bump (`FACTS_FORMAT` = 2) |
+| `ResolvedGraph` | add `modules: Vec<String>` (module name per file), stored in an optional segment component `files.modules` | yes: readers ignore unknown components; older segments read as "unknown" |
+
+*Implemented* (wave R). All `Language` variants landed at once (with
+`Language::ALL`, `parse`, name-based detection and `header_language` for
+`.h`); `Label::is_data_detail()` marks `Key` / `Document`; `RefKind::DataRef`
+receivers are `None` (same file, then same package), an import specifier,
+`$qn` (a global qualified name) or `$any` (any data file); `ConfigKey`
+namespaces are `spring`, `laravel`, `dotnet`, `node-config`, `viper` and
+`viper:<config name>`. The segment format stays 2: a store written before
+the change opens unchanged (`rueca-segment/tests/compat.rs`), and enum
+variant indexes are pinned by a test in `rueca-model`. `files.modules`
+lets tools split Go and Java qualified names (import paths and packages
+contain dots) into module and local name for symbol ids.
 
 ## 10. Code languages: Go, C/C++, Java
 
@@ -567,6 +598,20 @@ bloop (Go, Java) / scip-syntax (Go, Java), adapted as in RFC 0002 §3.4.
 5. `OVERRIDES` edges (in the model, not produced yet): a method in a
    subtype with the name (and arity) of a base method. `trace` callers of an
    interface method can then add `OVERRIDES` to reach implementations.
+
+*Implemented* (wave R; `rueca-resolve` crate docs, *RFC 0003 hooks*):
+package and directory scope, directory imports (a package-scoped import
+binds the package whose module name is the specifier, else the largest in
+the directory), `$type:` and `$self` receivers, implicit self as rung 1b,
+`is_declaration` → unique body, overloads (`Reference::arity`, fan-out
+× 0.8; constructors of Java and C/C++ are the members named like the
+class) and `OVERRIDES` (`type_resolved` 0.90). Also generic, for the packs
+that need them: C/C++ includes as transitive star imports, member imports
+`C.m` (Java `import static`), the bridge of §7.3 and the data pointers of §6
+(`rueca-resolve` `bridge` module), and in `rueca-query` symbol ids for every
+new family, the `$env` pseudo-path, optional overload suffixes in lookups,
+`readers_count` / `writers_count` and the default-label rule of §11. Each
+hook has a fake-pack example in `rueca-resolve/tests/hooks.rs`.
 
 ### 10.2 Go
 
@@ -660,7 +705,7 @@ including tests and docs, excluding review.
 | 1 | **JSON, YAML**: model additions (§9.3 except `is_declaration`), `rueca-lang-data` core (tree, key paths, emit, budgets), JSON/JSONC + YAML front ends, kinds `package.json`, tsconfig, `composer.json`, `search_symbols` default-label rule, key-recall test | 0 (model) | 2–3 |
 | 2a | **Other config formats**: TOML, `.env`, INI, `.properties`, HCL (definitions), Dockerfile, XML kinds; `pyproject` | 1 | 2 |
 | 2b | **Bridge and infra kinds**: `EnvVar` / `ConfigKey` facts in Python, TS/JS and PHP packs; canonical env vars, `READS` / `WRITES`, `Strategy::Contract`; compose, k8s, GitHub Actions, OpenAPI, JSON Schema, Spring/.NET config scopes; S2 bridge labels | 1 | 3 |
-| R | **Shared resolver work** (§10.1) | 0 | 1–2 |
+| R | **Shared resolver work** (§10.1) — *done*, with the §9.2 contract and §9.3 model | 0 | 1–2 |
 | 3 | **Go** (+ `go.mod` kind, Terraform references) | R | 2–3 |
 | 4 | **C++ then C** (one pack; C++ tested first, per the maintainer's order) | R (implicit self, overloads), `is_declaration` | 3–4 |
 | 5 | **Java** (+ `pom.xml` / Gradle roots) | R | 2–3 |
@@ -717,9 +762,11 @@ one complete release instead.)
 ## 15. Open questions
 
 1. ~~**Release point**~~ — decided 2026-10-24: after Java (§12).
-2. Should `module_name` receive the file's facts (`module_name(path, facts,
-   project)`)? It would let Java read the `package` clause, Go the package
-   name and PHP the namespace directly, instead of inferring from paths.
+2. ~~Should `module_name` receive the file's facts?~~ — decided 2026-10-24
+   (wave R): yes, as an additive defaulted hook,
+   `module_name_for(path, facts, project)`, which the resolver calls and
+   which defaults to `module_name(path, project)`. Existing packs are
+   unchanged; Java reads its `package` clause, Go its `package x_test`.
 3. Declaration ↔ body link for C/C++: is "references prefer the body"
    enough, or is a dedicated edge (`IMPLEMENTS` reuse vs a new `DECLARES`)
    worth adding for `get_symbol`?

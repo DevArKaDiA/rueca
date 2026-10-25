@@ -9,11 +9,14 @@
 //! - One `Repository` node (qualified name = repo id), one `Folder` node per
 //!   directory that (transitively) contains files, one `File` node per input
 //!   file (even for unsupported languages), and one node per [`Definition`].
-//! - Definition nodes get a global qualified name: `pack.module_name(path)` +
-//!   separator + local qualified name. The separator is `.` for Python and `:`
-//!   for ECMAScript (paths may contain dots). An empty module name keeps the
-//!   local name: PHP definitions carry their namespace already
-//!   (`App\Models\User::save`). Identical `(label,
+//! - Definition nodes get a global qualified name:
+//!   `pack.module_name_for(path, facts)` + separator + local qualified name.
+//!   The separator is the family's (`LanguageFamily::module_separator`): `.`
+//!   for Python, Go and Java, `:` for ECMAScript, Markdown and data (paths
+//!   may contain dots). An empty module name keeps the local name: PHP and
+//!   C/C++ definitions carry their namespace already
+//!   (`App\Models\User::save`, `ns::Foo::bar`). The module name of every
+//!   file is returned in `ResolvedGraph::modules`. Identical `(label,
 //!   qualified_name, file)` triples are merged, keeping the first definition
 //!   (Python redefinitions); later local ids map to the kept node.
 //! - Structural edges (`Syntactic`, 1.0): `CONTAINS` Repository→Folder/File and
@@ -21,7 +24,9 @@
 //!   parent→child definition.
 //! - `IMPORTS` File→File for every import that resolves to a project file
 //!   (`ImportResolved`, 1.0, evidence = import span). Python `from m import x`
-//!   where `m.x` is a submodule also imports that submodule.
+//!   where `m.x` is a submodule also imports that submodule. An import that
+//!   resolves to a directory gives `IMPORTS` File→Folder (see *RFC 0003
+//!   hooks*).
 //!
 //! # Binding environments
 //!
@@ -73,7 +78,8 @@
 //! | — | Constructor | a `Call`/`New` that hits a class also calls its `__init__` / `constructor` (own or inherited) | as the class edge | × 0.95 |
 //!
 //! (Strategy 5, constructor-based receiver typing, needs assignment facts and
-//! is not implemented in the alpha.) Self receivers that miss, and names bound
+//! is not implemented in the alpha; packs of typed languages report declared
+//! receiver types as `$type:T`, see *RFC 0003 hooks*.) Self receivers that miss, and names bound
 //! to external modules or builtin objects, stop resolution without falling back
 //! to strategy 6.
 //!
@@ -121,6 +127,68 @@
 //! the unique method name. `$this` outside any class (Pest closures) is
 //! external.
 //!
+//! # RFC 0003 hooks
+//!
+//! Opt-in behaviour for the next languages (`rueca-extract` crate docs list
+//! the hooks); none of it applies to Python, ECMAScript, PHP or Markdown.
+//!
+//! - **Package scope** (`ModuleScope::Package`: files of one family with the
+//!   same module name; `ModuleScope::Directory`: files of one language in a
+//!   directory). Rung 4 and module lookups search the file, then the other
+//!   files of its package (`SameModule` 0.90); a top-level `T.m` is a member
+//!   of type `T` of the package (Go methods); imports stay file-scoped and
+//!   are not re-exported.
+//! - **Directory imports**: `resolve_import` may return a directory. The
+//!   import gets `IMPORTS` File→Folder and, for a package-scoped importer,
+//!   binds the package in that directory (the one whose module name is the
+//!   import specifier, else the largest). A star import of a package binds
+//!   its exported top-level names; so does a C/C++ include, transitively
+//!   (depth ≤ 10). An imported name `C.m` binds member `m` of `C` (Java
+//!   `import static`).
+//! - **Implicit self** (`implicit_self`): rung 1b, after local scope and
+//!   before imports — a receiver-less name is a member of the enclosing
+//!   types, innermost first, through bases (`TypeResolved` 0.90 / 0.85); a
+//!   method body outside its type (`void Foo::bar() {}`) uses the type
+//!   whose global name is its own minus the last segment.
+//! - **`$self`** in `self_receivers()`: the receiver type is the enclosing
+//!   type, else the type named by the method's qualified-name prefix (Go).
+//! - **`$type:T`** receivers (strategy 5 for typed languages): `T` resolves as
+//!   an exact global qualified type name, else as a `Type` reference through
+//!   the ladder; the member is looked up through bases (`TypeResolved`
+//!   0.85). A member missing from a type with a base outside the project is
+//!   external; an unknown `T` falls back to the unique-method rung.
+//! - **Declarations** (`Definition::is_declaration`): a declaration whose
+//!   global qualified name has exactly one body in the same family is
+//!   replaced by that body as a target, and leaves the strategy-6
+//!   candidates.
+//! - **Overloads** (`overloads`): definitions whose qualified name ends in a
+//!   parameter suffix (`parse(String)`) are grouped by (family, name without
+//!   suffix); a reference that hits one is linked to the overload whose
+//!   arity matches `Reference::arity`, else to all of them (× 0.8).
+//!   Constructors of Java and C/C++ are the members named like the class.
+//! - **`OVERRIDES`** (`overrides`): a method of a type → the method with the
+//!   same name (and arity) found in each resolved base (`TypeResolved`
+//!   0.90). For these families `IMPLEMENTS` targets also contribute members.
+//!
+//! # Bridge and data references (RFC 0003 §6–§7)
+//!
+//! Handled outside the ladder (exact matches only, never name matching; see
+//! the `bridge` module):
+//!
+//! | Reference | Target | Edge | Strategy | Confidence |
+//! |---|---|---|---|---|
+//! | `EnvVar` | canonical `$env:NAME` (file-less `EnvVar` node, created when anything reads or sets `NAME`) | `READS` | `Contract` | 0.95 |
+//! | `EnvVar` definition (provider) | canonical `$env:NAME` | `WRITES` | `Syntactic` | 1.0 |
+//! | `ConfigKey` with a known namespace | every `Key` with that key path in the namespace's config files (`spring`, `laravel`, `dotnet`, `node-config`, `viper[:name]`) | `READS` | `Contract` | 0.90 |
+//! | `ConfigKey`, no scope match | the only `Key` with that key path | `READS` | `UniqueName` | 0.60 |
+//! | `DataRef`, no receiver | key path in the same file / its package | `REFERENCES` | `Syntactic` / `SameModule` | 1.0 / 0.95 |
+//! | `DataRef`, receiver = an import specifier | key path in the imported file | `REFERENCES` | `ImportResolved` | 0.95 |
+//! | `DataRef`, `$qn` / `$any` | exact global qualified name / unique key path in any data file | `REFERENCES` | `ImportResolved` / `UniqueName` | 0.95 / 0.60 |
+//! | base of a data definition (`key.path`, `<specifier>#key.path`) | as `DataRef` | `INHERITS` | as `DataRef` | as `DataRef` |
+//!
+//! Several candidates outside a scope resolve to nothing. `Key` and
+//! `Document` definitions are never strategy-6 candidates.
+//!
 //! # Edge kinds
 //!
 //! `Call`/`New` → `CALLS` (a call that targets a class also `CALLS` its
@@ -129,7 +197,8 @@
 //! `Decorator` → `DECORATES` from the decorator to the decorated definition;
 //! `Type`/`Read` → `REFERENCES`, except references that come from a class's own
 //! base list, which become `INHERITS` / `IMPLEMENTS`; `Throw` → `THROWS`;
-//! `Write` → `WRITES`. `Definition::bases` / `implements` are also resolved
+//! `Write` → `WRITES`; `EnvVar` / `ConfigKey` → `READS`, `DataRef` →
+//! `REFERENCES` (see above). `Definition::bases` / `implements` are also resolved
 //! directly (as `Type` references in the class's outer scope) into `INHERITS` /
 //! `IMPLEMENTS`. A test definition that `CALLS` a non-test definition also
 //! gets a `TESTS` edge with the same provenance.
@@ -161,14 +230,19 @@
 //! codanna's per-language resolvers (Apache-2.0, <https://github.com/bartolli/codanna>).
 //! No code is copied; the algorithms are re-implemented over Rueca's facts.
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use rueca_extract::{LanguagePack, ProjectFiles, Registry};
+use rueca_extract::{
+    DATA_REF_ANY, DATA_REF_QN, LanguagePack, ModuleScope, ProjectFiles, Registry, SELF_RECEIVER, TYPE_RECEIVER_PREFIX,
+};
 use rueca_model::{
     Definition, Edge, EdgeKind, EdgeMeta, FileEntry, FileFacts, FileId, Import, Label, Language, LanguageFamily,
-    LocalDefId, Node, NodeId, RefKind, Reference, ResolvedGraph, SnapshotInfo, Span, Strategy,
+    LocalDefId, Node, NodeId, RefKind, Reference, ResolvedGraph, SnapshotInfo, Span, Strategy, env_var_qualified_name,
 };
+
+mod bridge;
+mod hooks;
 
 /// One file of the snapshot as seen by the resolver.
 #[derive(Debug, Clone)]
@@ -220,9 +294,13 @@ pub fn resolve(
     r.import_edges();
     r.build_envs();
     r.resolve_bases();
+    r.override_edges();
     r.resolve_references();
+    r.env_provider_edges();
     r.tests_edges();
 
+    let modules: Vec<String> =
+        r.packs.iter().zip(&r.module_names).map(|(p, m)| if p.is_some() { m.clone() } else { String::new() }).collect();
     let Resolver { nodes, edges, stats, line_counts, file_node, .. } = r;
     let file_entries = files
         .iter()
@@ -238,7 +316,7 @@ pub fn resolve(
         })
         .collect();
     let edges = edges.into_iter().map(|((src, kind, dst), meta)| Edge { src, dst, kind, meta }).collect();
-    ResolveOutput { graph: ResolvedGraph { snapshot, nodes, edges, files: file_entries }, stats }
+    ResolveOutput { graph: ResolvedGraph { snapshot, nodes, edges, files: file_entries, modules }, stats }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +355,8 @@ struct RefItem<'a> {
     span: Span,
     /// For decorators: the decorated definition, when already known.
     decorated: Option<LocalDefId>,
+    /// Call arity, when the pack reports it (overload choice).
+    arity: Option<u32>,
 }
 
 struct Resolver<'a> {
@@ -317,6 +397,35 @@ struct Resolver<'a> {
     bases: HashMap<NodeId, Vec<NodeId>>,
     /// PHP symbols by fully qualified name (see [`PhpIndex`]).
     php: PhpIndex,
+
+    // RFC 0003 hooks (see the `hooks` and `bridge` modules).
+    /// Per file: index into `packages` for package-scoped files.
+    package_of: Vec<Option<u32>>,
+    /// Files of each package, in path order.
+    packages: Vec<Vec<FileId>>,
+    /// Packages with a file directly in a directory.
+    packages_by_dir: HashMap<String, Vec<u32>>,
+    /// Names bound by a star import of a file (see `star_exports`).
+    star_memo: RefCell<HashMap<FileId, hooks::StarNames>>,
+    /// Per file, per import: `Folder` node of a directory import.
+    import_folders: Vec<Vec<Option<NodeId>>>,
+    /// Non-PHP types with a base that is not a project symbol: a missing
+    /// member is external, not a miss (typed receivers, implicit self).
+    open_types: HashSet<NodeId>,
+    /// Declaration node (C/C++ `is_declaration`) → the unique body with the
+    /// same global qualified name.
+    body_of: HashMap<NodeId, NodeId>,
+    /// Overload sets (index into `overload_sets`) of overloaded definitions.
+    overload_of: HashMap<NodeId, usize>,
+    overload_sets: Vec<Vec<NodeId>>,
+    /// Canonical env var nodes by name (RFC 0003 §7.1).
+    env_nodes: BTreeMap<String, NodeId>,
+    /// `Key` definitions by local key path, for config key reads.
+    keys_by_path: HashMap<&'a str, Vec<NodeId>>,
+    /// Per data file: definition by local qualified name (key path).
+    data_by_local: Vec<HashMap<&'a str, NodeId>>,
+    /// Every node by global qualified name, built on first use.
+    by_qn: OnceCell<HashMap<String, Vec<NodeId>>>,
 
     /// Key: (module, name, reached through `export *`).
     lookup_memo: RefCell<HashMap<(FileId, String, bool), Option<Target>>>,
@@ -549,6 +658,8 @@ fn compatible(kind: RefKind, label: Label, with_receiver: bool) -> bool {
         RefKind::Throw => label == Class,
         RefKind::Read => !matches!(label, Repository | Folder | File | Module | Package),
         RefKind::Write => false,
+        // Bridge and data references never go through name matching.
+        RefKind::EnvVar | RefKind::ConfigKey | RefKind::DataRef => false,
     }
 }
 
@@ -562,7 +673,7 @@ impl<'a> Resolver<'a> {
             .iter()
             .zip(&packs)
             .map(|(f, p)| match p {
-                Some(p) => p.module_name(&f.path, project),
+                Some(p) => p.module_name_for(&f.path, f.facts.as_ref(), project),
                 None => f.path.rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or_else(|| f.path.clone()),
             })
             .collect();
@@ -593,14 +704,30 @@ impl<'a> Resolver<'a> {
             envs: Vec::new(),
             bases: HashMap::new(),
             php: PhpIndex::default(),
+            package_of: Vec::new(),
+            packages: Vec::new(),
+            packages_by_dir: HashMap::new(),
+            star_memo: RefCell::new(HashMap::new()),
+            import_folders: Vec::new(),
+            open_types: HashSet::new(),
+            body_of: HashMap::new(),
+            overload_of: HashMap::new(),
+            overload_sets: Vec::new(),
+            env_nodes: BTreeMap::new(),
+            keys_by_path: HashMap::new(),
+            data_by_local: Vec::new(),
+            by_qn: OnceCell::new(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
             stats: ResolveStats::default(),
         };
+        r.build_packages();
         r.build_nodes(snapshot);
         r.build_tables();
         r.build_php_index();
+        r.build_env_nodes();
+        r.build_hook_tables();
         r
     }
 
@@ -747,7 +874,9 @@ impl<'a> Resolver<'a> {
                 }
             }
             for (j, d) in defs.iter().enumerate() {
-                if d.is_test || d.label == Label::Test {
+                // Keys are reached by exact key paths only (config reads,
+                // data pointers), never by name matching.
+                if d.is_test || d.label == Label::Test || d.label.is_data_detail() {
                     continue;
                 }
                 // Definitions local to a function or test body are only
@@ -777,8 +906,14 @@ impl<'a> Resolver<'a> {
                     .collect(),
             );
             let mut by_name: HashMap<&'a str, (bool, NodeId)> = HashMap::new();
+            let package_scoped = self.package_of[i].is_some();
             for &j in &top {
                 let d = &defs[j as usize];
+                // Package scope: `T.m` declared outside `T` (Go methods) is a
+                // member of `T`, not a module-level name.
+                if package_scoped && d.qualified_name != d.name {
+                    continue;
+                }
                 let node = self.def_node[i][j as usize];
                 match by_name.get(d.name.as_str()) {
                     Some((true, _)) => {}
@@ -801,21 +936,30 @@ impl<'a> Resolver<'a> {
             self.top_level.push(top);
         }
 
-        // Import targets.
+        // Import targets: a project file, or a directory (`Folder` node,
+        // bound to its package when the importer is package-scoped).
         let mut targets = Vec::with_capacity(self.files.len());
+        let mut folders = Vec::with_capacity(self.files.len());
         for (i, f) in self.files.iter().enumerate() {
             let fid = i as FileId;
-            let t: Vec<Option<FileId>> = match self.packs[i] {
-                Some(pack) => self
-                    .imports(fid)
-                    .iter()
-                    .map(|imp| pack.resolve_import(&f.path, imp, self.project).and_then(|p| self.file_id(&p)))
-                    .collect(),
-                None => vec![None; self.imports(fid).len()],
-            };
+            let n = self.imports(fid).len();
+            let (mut t, mut d) = (vec![None; n], vec![None; n]);
+            if let Some(pack) = self.packs[i] {
+                for (k, imp) in self.imports(fid).iter().enumerate() {
+                    let Some(p) = pack.resolve_import(&f.path, imp, self.project) else { continue };
+                    if let Some(file) = self.file_id(&p) {
+                        t[k] = Some(file);
+                    } else if let Some(folder) = self.folder_node(&p) {
+                        d[k] = Some(folder);
+                        t[k] = self.package_in_dir(fid, &p, &imp.module);
+                    }
+                }
+            }
             targets.push(t);
+            folders.push(d);
         }
         self.import_targets = targets;
+        self.import_folders = folders;
     }
 
     fn file_id(&self, path: &str) -> Option<FileId> {
@@ -885,7 +1029,9 @@ impl<'a> Resolver<'a> {
             for (k, imp) in self.imports(fid).iter().enumerate() {
                 let meta =
                     EdgeMeta { confidence: 1.0, strategy: Strategy::ImportResolved, evidence: Some((fid, imp.span)) };
-                if let Some(t) = self.import_targets[i][k] {
+                if let Some(folder) = self.import_folders[i][k] {
+                    self.add_edge(fnode, folder, EdgeKind::Imports, meta);
+                } else if let Some(t) = self.import_targets[i][k] {
                     self.add_edge(fnode, self.file_node[t as usize], EdgeKind::Imports, meta);
                 }
                 if self.is_python(fid) {
@@ -997,7 +1143,7 @@ impl<'a> Resolver<'a> {
         visited: &mut Vec<(FileId, String)>,
     ) -> Option<Target> {
         let python = self.is_python(f);
-        if let Some(n) = self.top_level_def(f, name) {
+        if let Some(n) = self.module_def(f, name) {
             return Some(Target::Symbol(n));
         }
         // Re-exports, in order. Explicit names first (including a module's
@@ -1055,8 +1201,10 @@ impl<'a> Resolver<'a> {
         // export only as a flag, so an imported name that another module
         // imports from here is taken to be exported — valid code guarantees it).
         let mut found = None;
+        // Package imports are file-scoped (Go, Java): not re-exported.
+        let package_scoped = self.package_of[f as usize].is_some();
         for (k, imp) in imports.iter().enumerate() {
-            if imp.reexport || via_star {
+            if imp.reexport || via_star || package_scoped {
                 continue;
             }
             if let Some(b) = self.import_binding(f, k, Some(name), visited).pop() {
@@ -1124,6 +1272,11 @@ impl<'a> Resolver<'a> {
                 }
                 let Some(t) = target else { continue };
                 if !python {
+                    // Package imports (Go dot import, Java on-demand) and
+                    // C/C++ includes (transitively).
+                    if self.star_binds(f, t) {
+                        out.extend(self.star_exports(t, want));
+                    }
                     continue;
                 }
                 // Python star import: exported top-level definitions.
@@ -1136,12 +1289,26 @@ impl<'a> Resolver<'a> {
                 }
                 continue;
             }
-            let local = n.alias.as_deref().unwrap_or(&n.name);
+            // `C.m` (a member import) binds `m`.
+            let local = match (&n.alias, python) {
+                (Some(a), _) => a.as_str(),
+                (None, false) => n.name.rsplit('.').next().unwrap_or(&n.name),
+                (None, true) => n.name.as_str(),
+            };
             if !wants(local) {
                 continue;
             }
             let bound = match target {
-                Some(t) => self.lookup_in_module(t, &n.name, visited),
+                Some(t) => match n.name.split_once('.') {
+                    // `C.m`: a member of an imported type (Java `import static`).
+                    Some((head, rest)) if !python => match self.lookup_in_module(t, head, visited) {
+                        Some(Target::Symbol(c)) => {
+                            self.walk(f, Target::Symbol(c), &rest.split('.').collect::<Vec<_>>())
+                        }
+                        other => other,
+                    },
+                    _ => self.lookup_in_module(t, &n.name, visited),
+                },
                 None => None,
             };
             let bound = match bound {
@@ -1447,10 +1614,31 @@ impl<'a> Resolver<'a> {
                 let scope = self.parents[i][j];
                 let lists = [(EdgeKind::Inherits, &d.bases), (EdgeKind::Implements, &d.implements)];
                 let php = self.is_php(fid);
+                let family = self.families[i];
+                if family == Some(LanguageFamily::Data) {
+                    for text in &d.bases {
+                        if let Outcome::Hit(target, strategy, confidence) = self.data_base(fid, text)
+                            && target != class
+                        {
+                            let meta = EdgeMeta { confidence, strategy, evidence: Some((fid, d.name_span)) };
+                            self.add_edge(class, target, EdgeKind::Inherits, meta);
+                        }
+                    }
+                    continue;
+                }
+                // Implemented interfaces contribute members (default
+                // methods, constants) in PHP and the RFC 0003 languages.
+                let implements_members =
+                    php || !matches!(family, Some(LanguageFamily::Python | LanguageFamily::EcmaScript) | None);
                 for (kind, list) in lists {
                     for text in list.iter() {
                         let split = if php { split_php_name(text) } else { split_base(text) };
-                        let Some((receiver, name)) = split else { continue };
+                        let Some((receiver, name)) = split else {
+                            if !php && !text.contains('=') {
+                                self.open_types.insert(class);
+                            }
+                            continue;
+                        };
                         let item = RefItem {
                             kind: RefKind::Type,
                             name,
@@ -1458,20 +1646,26 @@ impl<'a> Resolver<'a> {
                             enclosing: scope,
                             span: d.name_span,
                             decorated: None,
+                            arity: None,
                         };
                         let outcome = self.resolve_item(fid, &item, scope);
-                        if php && !matches!(outcome, Outcome::Hit(..)) {
+                        if !matches!(outcome, Outcome::Hit(..)) {
                             // A parent, trait or interface outside the project.
-                            self.php.open.insert(class);
+                            if php {
+                                self.php.open.insert(class);
+                            } else {
+                                self.open_types.insert(class);
+                            }
                         }
                         if let Outcome::Hit(target, strategy, confidence) = outcome {
+                            let target = self.prefer_body(target);
                             if target == class {
                                 continue;
                             }
                             let meta = EdgeMeta { confidence, strategy, evidence: Some((fid, d.name_span)) };
                             self.add_edge(class, target, kind, meta);
                             // PHP: interface constants are members of implementing classes.
-                            if kind == EdgeKind::Inherits || php {
+                            if kind == EdgeKind::Inherits || implements_members {
                                 let v = self.bases.entry(class).or_default();
                                 if !v.contains(&target) {
                                     v.push(target);
@@ -1551,27 +1745,38 @@ impl<'a> Resolver<'a> {
             if let Some(n) = self.local_scope(f, scope, name) {
                 return Outcome::Hit(n, Strategy::SameModule, 0.95);
             }
+            // 1b. Implicit self (`implicit_self` packs): enclosing class member.
+            if let Some(hit) = self.implicit_member(f, scope, name) {
+                return hit;
+            }
             // 3. Imported binding.
             match self.envs[f as usize].get(name) {
                 Some(Some(Target::Symbol(n))) => return Outcome::Hit(*n, Strategy::ImportResolved, 0.95),
                 Some(Some(_)) => return Outcome::External,
                 Some(None) | None => {}
             }
-            // 4. Same module.
-            if let Some(n) = self.top_level_def(f, name) {
+            // 4. Same module (the whole package for package-scoped packs).
+            if let Some(n) = self.module_def(f, name) {
                 return Outcome::Hit(n, Strategy::SameModule, 0.9);
             }
             // 6. Unique name.
             return self.unique_name(f, item.kind, name, false);
         };
 
-        // 2. Self receiver.
+        // 2. Self receiver (`$self`: also a method declared outside its type).
         if selfs.contains(&receiver) {
-            return match self.enclosing_type(f, scope).and_then(|c| self.find_member(c, name)) {
+            let class = self
+                .enclosing_type(f, scope)
+                .or_else(|| if receiver == SELF_RECEIVER { self.receiver_type_from_name(f, scope) } else { None });
+            return match class.and_then(|c| self.find_member(c, name)) {
                 Some((n, false)) => Outcome::Hit(n, Strategy::TypeResolved, 0.9),
                 Some((n, true)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
                 None => Outcome::Miss,
             };
+        }
+        // 5. Typed receiver: `$type:T` (declared type known in the file).
+        if let Some(ty) = receiver.strip_prefix(TYPE_RECEIVER_PREFIX) {
+            return self.resolve_typed(f, item, scope, ty);
         }
         if receiver == "super()" || receiver == "super" {
             let found = self
@@ -1605,7 +1810,7 @@ impl<'a> Resolver<'a> {
                 Some(None) => {}
                 // 4. Receiver is a class of the same module.
                 None => {
-                    let local = self.top_level_def(f, head);
+                    let local = self.module_def(f, head);
                     if local.is_none() && pack.is_some_and(|p| p.is_builtin(head)) {
                         // `console.log`, `Math.max`, `str.join`: a builtin object.
                         return Outcome::External;
@@ -1719,6 +1924,7 @@ impl<'a> Resolver<'a> {
                     enclosing: valid(r.enclosing),
                     span: r.span,
                     decorated: None,
+                    arity: r.arity,
                 })
                 .collect();
             // Packs that do not report decorator references: synthesize them
@@ -1734,6 +1940,7 @@ impl<'a> Resolver<'a> {
                                 enclosing: self.parents[i][j],
                                 span: d.name_span,
                                 decorated: Some(j as LocalDefId),
+                                arity: None,
                             });
                         }
                     }
@@ -1749,6 +1956,10 @@ impl<'a> Resolver<'a> {
         self.stats.references_total += 1;
         let fnode = self.file_node[f as usize];
         let caller = item.enclosing.map_or(fnode, |e| self.node_of(f, e));
+        if matches!(item.kind, RefKind::EnvVar | RefKind::ConfigKey | RefKind::DataRef) {
+            self.resolve_bridge(f, item, caller);
+            return;
+        }
         let base = match item.kind {
             RefKind::Type | RefKind::Read => self.base_ref(f, item),
             _ => None,
@@ -1805,34 +2016,68 @@ impl<'a> Resolver<'a> {
         };
         self.stats.references_resolved += 1;
         *self.stats.resolved_by_strategy.entry(strategy.as_str().to_string()).or_default() += 1;
-        let meta = EdgeMeta { confidence, strategy, evidence: Some((f, item.span)) };
-        match edge_kind {
-            EdgeKind::Decorates => {
-                if let Some(dst) = dst_override {
-                    self.add_edge(target, dst, EdgeKind::Decorates, meta);
-                }
-            }
-            EdgeKind::Inherits | EdgeKind::Implements => {
-                let src = src.unwrap_or(caller);
-                if src != target {
-                    self.add_edge(src, target, edge_kind, meta);
-                }
-            }
-            EdgeKind::Calls => {
-                self.add_edge(caller, target, EdgeKind::Calls, meta);
-                if self.nodes[target as usize].label.is_type() {
-                    let ctor = if self.is_php(f) {
-                        self.find_member(target, "__construct")
-                    } else {
-                        self.find_member(target, "__init__").or_else(|| self.find_member(target, "constructor"))
-                    };
-                    if let Some((c, _)) = ctor {
-                        let m = EdgeMeta { confidence: confidence * 0.95, ..meta };
-                        self.add_edge(caller, c, EdgeKind::Calls, m);
+        // Declarations → their body; overloads → by arity (RFC 0003 §10).
+        let target = self.prefer_body(target);
+        for (target, strategy, confidence) in self.expand_overloads(target, item.arity, strategy, confidence) {
+            let meta = EdgeMeta { confidence, strategy, evidence: Some((f, item.span)) };
+            match edge_kind {
+                EdgeKind::Decorates => {
+                    if let Some(dst) = dst_override {
+                        self.add_edge(target, dst, EdgeKind::Decorates, meta);
                     }
                 }
+                EdgeKind::Inherits | EdgeKind::Implements => {
+                    let src = src.unwrap_or(caller);
+                    if src != target {
+                        self.add_edge(src, target, edge_kind, meta);
+                    }
+                }
+                EdgeKind::Calls => {
+                    self.add_edge(caller, target, EdgeKind::Calls, meta);
+                    if self.nodes[target as usize].label.is_type() {
+                        let ctor = match self.families[f as usize] {
+                            Some(LanguageFamily::Php) => self.find_member(target, "__construct"),
+                            // Constructors are members named like the class.
+                            Some(LanguageFamily::Java | LanguageFamily::C) => {
+                                let name = self.nodes[target as usize].name.clone();
+                                self.members.get(&target).and_then(|m| m.get(&name)).map(|&c| (c, false))
+                            }
+                            _ => {
+                                self.find_member(target, "__init__").or_else(|| self.find_member(target, "constructor"))
+                            }
+                        };
+                        if let Some((c, _)) = ctor {
+                            let c = self.prefer_body(c);
+                            for (c, s, conf) in self.expand_overloads(c, item.arity, strategy, confidence * 0.95) {
+                                let m = EdgeMeta { confidence: conf, strategy: s, ..meta };
+                                self.add_edge(caller, c, EdgeKind::Calls, m);
+                            }
+                        }
+                    }
+                }
+                kind => self.add_edge(caller, target, kind, meta),
             }
-            kind => self.add_edge(caller, target, kind, meta),
+        }
+    }
+
+    /// `EnvVar` / `ConfigKey` → `READS`, `DataRef` → `REFERENCES` (see the
+    /// `bridge` module); several targets are all linked.
+    fn resolve_bridge(&mut self, f: FileId, item: &RefItem<'_>, caller: NodeId) {
+        let (targets, external) = self.bridge_targets(f, item);
+        let Some(&(_, strategy, _)) = targets.first() else {
+            if external {
+                self.stats.references_external += 1;
+            } else {
+                tracing::trace!(kind = ?item.kind, name = item.name, path = %self.files[f as usize].path, "unresolved");
+            }
+            return;
+        };
+        self.stats.references_resolved += 1;
+        *self.stats.resolved_by_strategy.entry(strategy.as_str().to_string()).or_default() += 1;
+        let kind = if item.kind == RefKind::DataRef { EdgeKind::References } else { EdgeKind::Reads };
+        for (target, strategy, confidence) in targets {
+            let meta = EdgeMeta { confidence, strategy, evidence: Some((f, item.span)) };
+            self.add_edge(caller, target, kind, meta);
         }
     }
 

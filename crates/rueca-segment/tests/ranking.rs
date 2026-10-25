@@ -156,6 +156,7 @@ fn build(sources: &[(&str, &str)], defs: Vec<Def>) -> (tempfile::TempDir, Segmen
         nodes,
         edges: vec![],
         files,
+        modules: vec![],
     };
     let mem = Mem(sources.iter().map(|(p, c)| (p.to_string(), c.as_bytes().to_vec())).collect());
     let dir = tempfile::tempdir().unwrap();

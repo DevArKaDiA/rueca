@@ -38,6 +38,14 @@
 //! Symbol ids use the module-local name computed by walking `DEFINES` parents
 //! up to the `File` node; PHP names are already file-independent, so a PHP
 //! id carries the fully qualified name (`…/User.php#App\Models\User::save`).
+//! For data, Go, C/C++ and Java symbols the local name is the qualified name
+//! minus the file's module name recorded in the segment (`files.modules`):
+//! `…/handle.go#Server.Handle`, `…/Parser.java#Parser.parse(String)`,
+//! `…/foo.cpp#ns::Foo::bar`, `…/app.yaml#server.port`. Canonical env vars
+//! have no file and use the pseudo-path `$env` (`…@c:$env#DATABASE_URL`).
+//! Qualified-name suffixes also match after a key-path accessor
+//! (`["DATABASE_URL"]`), and for Java and C/C++ an overload's parameter
+//! suffix is optional (`Parser.parse` → every `parse(…)` overload).
 //!
 //! # Interpretations of `docs/tools.md`
 //!
@@ -156,7 +164,8 @@ name. Each match has the 1-based line, the line text, optional context lines and
 (`symbol`). Example: {\"pattern\": \"retry_after\", \"path_glob\": \"**/*.py\", \"context_lines\": 2}";
 
 const DESC_GET_SYMBOL: &str = "Details of one symbol: signature, docstring, exported/test flags, its parent \
-container, children (methods, nested definitions), base types, subtypes and caller/callee counts. Name it by `id` \
+container, children (methods, nested definitions), base types, subtypes and caller/callee counts (plus reader/writer \
+counts for env vars and config keys). Name it by `id` \
 (from another tool's result), by `qualified_name` (or a suffix such as `Session.request`), or by `name` (+ `path` to \
 disambiguate). Other matches of an ambiguous lookup are listed in `candidates`. \
 Example: {\"qualified_name\": \"InvoiceService.issue\"}";
@@ -171,7 +180,8 @@ both, up to `depth` hops (default 2). Every edge carries a confidence (0–1), t
 site (path + 1-based line); raise `min_confidence` to drop guesses. Tests are left out (counted in \
 `tests_excluded`) unless `include_tests` is true; `labels` keeps only some neighbour labels (e.g. [\"Function\", \
 \"Method\"]). A `File` caller is module-level code; a `Class` callee is a constructor call. Other relations can be \
-followed with `edge_types` (e.g. [\"CALLS\", \"INHERITS\", \"IMPORTS\", \"TESTS\"]). Use it for impact analysis \
+followed with `edge_types` (e.g. [\"CALLS\", \"INHERITS\", \"IMPORTS\", \"TESTS\"]; [\"READS\", \"WRITES\"] for who \
+reads or sets an env var or config key). Use it for impact analysis \
 before changing a function. \
 Example: {\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\", \"depth\": 3}";
 

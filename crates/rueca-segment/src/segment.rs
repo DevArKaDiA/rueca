@@ -30,6 +30,8 @@ pub(crate) struct Inner {
     pub meta: SegmentMeta,
     pub nodes: Vec<Node>,
     pub files: Vec<FileEntry>,
+    /// Module name per file (optional component `files.modules`).
+    pub modules: Option<Vec<String>>,
     out: Adj,
     inc: Adj,
     edge_meta: Range<usize>,
@@ -70,6 +72,17 @@ impl Inner {
             postcard::from_bytes(bundle.bytes("files")?).map_err(|e| corrupt(format!("files: {e}")))?;
         graph::validate_tables(&nodes, &files)?;
         let (n, f) = (nodes.len(), files.len());
+        // Optional (added without a format bump): absent in older segments.
+        let modules: Option<Vec<String>> = match bundle.bytes("files.modules") {
+            Ok(b) => {
+                let m: Vec<String> = postcard::from_bytes(b).map_err(|e| corrupt(format!("files.modules: {e}")))?;
+                if m.len() != f {
+                    return Err(corrupt("files.modules length"));
+                }
+                Some(m)
+            }
+            Err(_) => None,
+        };
         if meta.node_count as usize != n || meta.file_count as usize != f {
             return Err(corrupt("meta counts disagree with tables"));
         }
@@ -145,6 +158,7 @@ impl Inner {
             meta,
             nodes,
             files,
+            modules,
             out,
             inc,
             edge_meta,

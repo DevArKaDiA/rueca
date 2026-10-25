@@ -90,6 +90,7 @@ impl Builder {
                 nodes: vec![],
                 edges: vec![],
                 files: vec![],
+                modules: vec![],
             },
             sources: HashMap::new(),
         }

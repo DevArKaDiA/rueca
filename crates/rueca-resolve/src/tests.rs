@@ -168,6 +168,7 @@ impl F {
             implements: vec![],
             exported,
             is_test: false,
+            is_declaration: false,
         });
         (self.facts.definitions.len() - 1) as u32
     }
@@ -181,6 +182,7 @@ impl F {
             receiver: receiver.map(Into::into),
             enclosing,
             span: sp(a, a + 1),
+            arity: None,
         });
     }
     fn call(&mut self, name: &str, receiver: Option<&str>, enclosing: Option<u32>, a: u32) {

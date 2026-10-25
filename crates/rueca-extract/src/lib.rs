@@ -6,6 +6,32 @@
 //! The generic resolver (`rueca-resolve`) combines facts from every file of a
 //! snapshot using these two hooks.
 //!
+//! # Hooks for the next languages (RFC 0003 §9.2)
+//!
+//! Every hook below has a default that keeps the alpha behaviour, so a pack
+//! overrides only what its language needs:
+//!
+//! | Hook | Default | Override when |
+//! |---|---|---|
+//! | [`LanguagePack::module_name_for`] | [`LanguagePack::module_name`] | the module comes from the file itself (Java `package`, Go `package x_test`) |
+//! | [`LanguagePack::module_scope`] | [`ModuleScope::File`] | names are visible across the files of a package or directory without imports (Go, Java, Terraform) |
+//! | [`LanguagePack::implicit_self`] | `false` | methods call members without `this` (C++, Java) |
+//! | [`LanguagePack::overloads`] | `false` | several definitions share a name in one scope (Java, C++) |
+//! | [`LanguagePack::overrides`] | `false` | the resolver should add `OVERRIDES` edges (Java, C++) |
+//! | [`LanguagePack::facts_depend_on_path`] | `false` | extraction reads the path, not only the bytes (data file kinds chosen by name) |
+//! | [`LanguagePack::resolve_import`] returning a directory | — | the import names a package or folder (Go, Java on-demand, Terraform modules) |
+//!
+//! Reserved texts a pack may put in facts:
+//!
+//! - Receivers: [`SELF_RECEIVER`] (`$self`, a pack-normalized self
+//!   receiver; list it in [`LanguagePack::self_receivers`]) and
+//!   [`type_receiver`] (`$type:T`, a receiver whose declared type `T` is
+//!   known in the file).
+//! - `DataRef` receivers: [`DATA_REF_QN`] and [`DATA_REF_ANY`] (see
+//!   `rueca_model::RefKind::DataRef`).
+//! - [`ExtractError::Skipped`] to keep a file listed but unextracted with a
+//!   reason (`skipped:data-shape`).
+//!
 //! This crate also provides tree-sitter helpers shared by every pack:
 //! budget-limited parsing, span conversion, and node text access.
 
@@ -51,6 +77,62 @@ pub enum ExtractError {
     Unsupported(Language),
     #[error("invalid query: {0}")]
     Query(String),
+    /// The pack decided not to extract the file (RFC 0003 §4.5: `data`,
+    /// `generated`, `data-size`, `data-shape`). The indexer records status
+    /// `skipped:<reason>`; the file stays listed and content-searchable.
+    #[error("skipped: {0}")]
+    Skipped(String),
+}
+
+// ---------------------------------------------------------------------------
+// Reserved texts in facts
+// ---------------------------------------------------------------------------
+
+/// Pack-normalized self receiver (RFC 0003 §9.2). Go names its receiver per
+/// method (`func (s *Server)`); the pack rewrites it to `$self` and lists
+/// `$self` in [`LanguagePack::self_receivers`]. For `$self` the resolver
+/// finds the receiver type from the enclosing type definition, else from the
+/// method's local qualified-name prefix (`Server` for `Server.Handle`).
+pub const SELF_RECEIVER: &str = "$self";
+
+/// Prefix of a typed receiver: `$type:<T>` means "the receiver's declared
+/// type is `T`" (a local, parameter or field declared with a type in the
+/// same file). `T` is written as in source (`Server`, `http.Server`,
+/// `ns::Foo`, `List<String>`); generic arguments, pointers and references
+/// are ignored. The resolver resolves `T` like a `Type` reference and looks
+/// the member up in it (`type_resolved`, 0.85).
+pub const TYPE_RECEIVER_PREFIX: &str = "$type:";
+
+/// `$type:<ty>` receiver text.
+pub fn type_receiver(ty: &str) -> String {
+    format!("{TYPE_RECEIVER_PREFIX}{ty}")
+}
+
+/// `DataRef` receiver: the reference name is a global qualified name
+/// (`pyproject` `[project.scripts]` → `pkg.mod.main`).
+pub const DATA_REF_QN: &str = "$qn";
+
+/// `DataRef` receiver: the key path may be in any data file of the snapshot
+/// (Kubernetes `configMapKeyRef` to a ConfigMap in another manifest).
+pub const DATA_REF_ANY: &str = "$any";
+
+/// How files share a module namespace (RFC 0003 §9.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModuleScope {
+    /// Every file is its own module (Python, ECMAScript, Markdown, data).
+    #[default]
+    File,
+    /// Every file of the same family with the same module name is one
+    /// package (Go and Java): unqualified names resolve across its files, an
+    /// import of its directory binds all of them, and top-level definitions
+    /// named `T.m` are members of type `T` even when declared in another
+    /// file of the package (Go methods).
+    Package,
+    /// Like [`ModuleScope::Package`], but the package is every file of the
+    /// same language in one directory, whatever its module name (Terraform:
+    /// a module is the `.tf` files of a directory while each file keeps its
+    /// path as module name).
+    Directory,
 }
 
 // ---------------------------------------------------------------------------
@@ -66,7 +148,10 @@ pub struct ProjectFiles {
     /// Contents of small configuration files that affect module resolution,
     /// keyed by repository-relative path: `tsconfig*.json`, `jsconfig.json`,
     /// `package.json`, `pyproject.toml`, `setup.cfg`, `setup.py`,
-    /// `composer.json`.
+    /// `composer.json`, `go.mod`, `go.work`, `pom.xml`, `build.gradle(.kts)`,
+    /// `settings.gradle(.kts)`, `compile_commands.json`, `compile_flags.txt`
+    /// (see [`ProjectFiles::is_config_file`], size limits in
+    /// [`ProjectFiles::max_config_bytes`]).
     pub configs: BTreeMap<String, String>,
 }
 
@@ -78,13 +163,45 @@ impl ProjectFiles {
     /// Config file names the indexer must load into [`ProjectFiles::configs`].
     pub fn is_config_file(path: &str) -> bool {
         let name = path.rsplit('/').next().unwrap_or(path);
-        name == "package.json"
-            || name == "jsconfig.json"
-            || name == "pyproject.toml"
-            || name == "setup.cfg"
-            || name == "setup.py"
-            || name == "composer.json"
-            || (name.starts_with("tsconfig") && name.ends_with(".json"))
+        matches!(
+            name,
+            "package.json"
+                | "jsconfig.json"
+                | "pyproject.toml"
+                | "setup.cfg"
+                | "setup.py"
+                | "composer.json"
+                // Go (RFC 0003 §10.2)
+                | "go.mod"
+                | "go.work"
+                // Java (§10.4)
+                | "pom.xml"
+                | "build.gradle"
+                | "build.gradle.kts"
+                | "settings.gradle"
+                | "settings.gradle.kts"
+                // C / C++ (§10.3)
+                | "compile_commands.json"
+                | "compile_flags.txt"
+        ) || (name.starts_with("tsconfig") && name.ends_with(".json"))
+    }
+
+    /// Largest config file the indexer loads for `path`: 8 MiB for
+    /// `compile_commands.json` (one entry per translation unit), 1 MiB
+    /// otherwise.
+    pub fn max_config_bytes(path: &str) -> u64 {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        if name == "compile_commands.json" { 8 * 1024 * 1024 } else { 1024 * 1024 }
+    }
+
+    /// Whether `path` is a directory of the snapshot (some file lives under it).
+    /// The empty path is the repository root.
+    pub fn is_dir(&self, path: &str) -> bool {
+        if path.is_empty() {
+            return !self.paths.is_empty();
+        }
+        let prefix = format!("{}/", path.trim_end_matches('/'));
+        self.paths.range(prefix.clone()..).next().is_some_and(|p| p.starts_with(&prefix))
     }
 }
 
@@ -115,20 +232,82 @@ pub trait LanguagePack: Send + Sync {
     /// `pkg` for `pkg/__init__.py`). ECMAScript: the path without extension
     /// (`src/util/index`). An empty module name means the local qualified
     /// names are already global (PHP: definitions carry their namespace,
-    /// `App\Models\User::save`).
+    /// `App\Models\User::save`; C/C++).
     fn module_name(&self, path: &str, project: &ProjectFiles) -> String;
+
+    /// The module name of `path`, given the file's facts (`None` when the
+    /// file was not extracted). This is what the resolver calls; the default
+    /// ignores the facts and returns [`LanguagePack::module_name`]. Override
+    /// it when the module is declared in the file rather than implied by
+    /// its path: Java reads its `package` clause, Go its `package x_test`
+    /// (RFC 0003 open question 2, decided in favour of this additive hook).
+    fn module_name_for(&self, path: &str, facts: Option<&FileFacts>, project: &ProjectFiles) -> String {
+        let _ = facts;
+        self.module_name(path, project)
+    }
 
     /// Resolves an import written in `from_path` to the repository-relative
     /// path of the imported file, if it is part of the project. Returns `None`
     /// for third-party / builtin modules.
+    ///
+    /// The result may also be a **directory** (no trailing `/`; `""` is the
+    /// repository root): a Go package, a Java on-demand import, a Terraform
+    /// module source, a compose build context. The resolver then adds an
+    /// `IMPORTS` edge from the file to the `Folder` node and, for
+    /// [`ModuleScope::Package`] packs, binds the package of that directory
+    /// (its files of the same family with one module name).
     fn resolve_import(&self, from_path: &str, import: &Import, project: &ProjectFiles) -> Option<String>;
 
     /// Names that are always in scope (builtins, globals). References to
     /// them are never reported as unresolved and never fuzzy-matched.
     fn is_builtin(&self, name: &str) -> bool;
 
-    /// Receiver texts that denote "the current instance" (`self`, `cls`, `this`).
+    /// Receiver texts that denote "the current instance" (`self`, `cls`, `this`;
+    /// [`SELF_RECEIVER`] for packs that normalize receivers).
     fn self_receivers(&self) -> &'static [&'static str];
+
+    /// Whether files of `language` share module namespaces by package or
+    /// directory (RFC 0003 §9.2). Takes the language because one pack may
+    /// serve several (the data pack: Terraform is directory-scoped, YAML is
+    /// not).
+    fn module_scope(&self, language: Language) -> ModuleScope {
+        let _ = language;
+        ModuleScope::File
+    }
+
+    /// When true, a receiver-less reference inside a method is first looked
+    /// up as a member of the enclosing class (and its bases, then outer
+    /// classes), after local scope and before imports: `type_resolved` 0.90
+    /// (0.85 when inherited). C++ and Java call members without `this`.
+    fn implicit_self(&self) -> bool {
+        false
+    }
+
+    /// When true, definitions of this pack may be overloaded: overloads carry
+    /// a parameter suffix in their local qualified name (`Parser.parse(String)`,
+    /// `Parser.parse(Reader)`; non-overloaded names stay bare) and the
+    /// resolver chooses among them by `Reference::arity`, else links all of
+    /// them at × 0.8 confidence (RFC 0003 §10.1).
+    fn overloads(&self) -> bool {
+        false
+    }
+
+    /// When true, the resolver adds `OVERRIDES` edges from a method to the
+    /// method of a resolved base type with the same name (and the same arity
+    /// when both are known), `type_resolved` 0.90 (RFC 0003 §10.1).
+    fn overrides(&self) -> bool {
+        false
+    }
+
+    /// Whether [`LanguagePack::extract`] output depends on `path` as well as
+    /// the bytes (a data file's kind is chosen by name: `compose.yaml`,
+    /// `.github/workflows/*.yml`, `application.yml`; files under
+    /// `fixtures/` are skipped). The facts cache is keyed by blob, so such
+    /// packs get the path in the key too; identical files at two paths are
+    /// then extracted once per path.
+    fn facts_depend_on_path(&self) -> bool {
+        false
+    }
 }
 
 /// Registry of packs, keyed by language.
@@ -284,5 +463,33 @@ mod tests {
         assert!(ProjectFiles::is_config_file("pyproject.toml"));
         assert!(ProjectFiles::is_config_file("packages/core/composer.json"));
         assert!(!ProjectFiles::is_config_file("src/config.json"));
+        for p in [
+            "go.mod",
+            "tools/go.work",
+            "pom.xml",
+            "app/build.gradle",
+            "app/build.gradle.kts",
+            "settings.gradle",
+            "settings.gradle.kts",
+            "build/compile_commands.json",
+            "compile_flags.txt",
+        ] {
+            assert!(ProjectFiles::is_config_file(p), "{p}");
+        }
+        assert!(!ProjectFiles::is_config_file("go.sum"));
+        assert!(!ProjectFiles::is_config_file("App.csproj"));
+        assert_eq!(ProjectFiles::max_config_bytes("build/compile_commands.json"), 8 * 1024 * 1024);
+        assert_eq!(ProjectFiles::max_config_bytes("go.mod"), 1024 * 1024);
+    }
+
+    #[test]
+    fn directories() {
+        let p = ProjectFiles {
+            paths: ["a/b/c.go", "a/bb.go", "z.txt"].into_iter().map(String::from).collect(),
+            configs: Default::default(),
+        };
+        assert!(p.is_dir("a") && p.is_dir("a/b") && p.is_dir(""));
+        assert!(!p.is_dir("a/b/c.go") && !p.is_dir("a/bb") && !p.is_dir("b"));
+        assert_eq!(type_receiver("http.Server"), "$type:http.Server");
     }
 }
