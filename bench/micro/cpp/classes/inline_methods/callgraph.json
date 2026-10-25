@@ -1,0 +1,8 @@
+{
+  "main.cpp:Counter::inc": [],
+  "main.cpp:Counter::value": [],
+  "main.cpp:tally": [
+    "main.cpp:Counter::inc",
+    "main.cpp:Counter::value"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "main.cpp:Stack::empty": [],
+  "main.cpp:Stack::push": [],
+  "main.cpp:fill": [
+    "main.cpp:Stack::empty",
+    "main.cpp:Stack::push"
+  ]
+}

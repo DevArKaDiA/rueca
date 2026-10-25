@@ -1,0 +1,585 @@
+{
+ "description": "Hand-checked env bridge labels (rueca-bench, Apache-2.0). reads: (path, function, env) \u2014 the innermost named function (or <module>) that reads the variable with a string-literal name through a standard env API (os.Getenv/LookupEnv, os.environ[...]/.get/in, os.getenv, process.env.X/['X'], System.getenv(...)/System.getenv().get*(...)); line is informative. writes: (path, env, line) \u2014 manifest entries that set the variable (Kubernetes container env / initContainers, compose `environment` list or mapping), line = the entry's line. Not labelled: names built at run time (wrappers such as mustMapEnv(&x, \"NAME\")), C# code, Helm templates.",
+ "repo": "GoogleCloudPlatform/microservices-demo",
+ "commit": "5b608cb1dfe317d05e4f1bb8c99b7618452fde87",
+ "reads": [
+  {
+   "path": "src/adservice/src/main/java/hipstershop/AdService.java",
+   "function": "start",
+   "env": "PORT",
+   "line": 54
+  },
+  {
+   "path": "src/adservice/src/main/java/hipstershop/AdService.java",
+   "function": "initStats",
+   "env": "DISABLE_STATS",
+   "line": 196
+  },
+  {
+   "path": "src/adservice/src/main/java/hipstershop/AdService.java",
+   "function": "initTracing",
+   "env": "DISABLE_TRACING",
+   "line": 210
+  },
+  {
+   "path": "src/checkoutservice/main.go",
+   "function": "main",
+   "env": "ENABLE_TRACING",
+   "line": 90
+  },
+  {
+   "path": "src/checkoutservice/main.go",
+   "function": "main",
+   "env": "ENABLE_PROFILER",
+   "line": 98
+  },
+  {
+   "path": "src/checkoutservice/main.go",
+   "function": "main",
+   "env": "PORT",
+   "line": 106
+  },
+  {
+   "path": "src/checkoutservice/main.go",
+   "function": "main",
+   "env": "PORT",
+   "line": 107
+  },
+  {
+   "path": "src/currencyservice/server.js",
+   "function": "<module>",
+   "env": "DISABLE_PROFILER",
+   "line": 28
+  },
+  {
+   "path": "src/currencyservice/server.js",
+   "function": "<module>",
+   "env": "ENABLE_TRACING",
+   "line": 50
+  },
+  {
+   "path": "src/currencyservice/server.js",
+   "function": "<module>",
+   "env": "COLLECTOR_SERVICE_ADDR",
+   "line": 61
+  },
+  {
+   "path": "src/currencyservice/server.js",
+   "function": "<module>",
+   "env": "OTEL_SERVICE_NAME",
+   "line": 65
+  },
+  {
+   "path": "src/currencyservice/server.js",
+   "function": "<module>",
+   "env": "PORT",
+   "line": 83
+  },
+  {
+   "path": "src/emailservice/email_server.py",
+   "function": "start",
+   "env": "PORT",
+   "line": 129
+  },
+  {
+   "path": "src/emailservice/email_server.py",
+   "function": "initStackdriverProfiling",
+   "env": "GCP_PROJECT_ID",
+   "line": 142
+  },
+  {
+   "path": "src/emailservice/email_server.py",
+   "function": "<module>",
+   "env": "DISABLE_PROFILER",
+   "line": 171
+  },
+  {
+   "path": "src/emailservice/email_server.py",
+   "function": "<module>",
+   "env": "ENABLE_TRACING",
+   "line": 181
+  },
+  {
+   "path": "src/emailservice/email_server.py",
+   "function": "<module>",
+   "env": "COLLECTOR_SERVICE_ADDR",
+   "line": 182
+  },
+  {
+   "path": "src/frontend/handlers.go",
+   "function": "<module>",
+   "env": "FRONTEND_MESSAGE",
+   "line": 46
+  },
+  {
+   "path": "src/frontend/handlers.go",
+   "function": "<module>",
+   "env": "CYMBAL_BRANDING",
+   "line": 47
+  },
+  {
+   "path": "src/frontend/handlers.go",
+   "function": "<module>",
+   "env": "ENABLE_ASSISTANT",
+   "line": 48
+  },
+  {
+   "path": "src/frontend/handlers.go",
+   "function": "homeHandler",
+   "env": "ENV_PLATFORM",
+   "line": 93
+  },
+  {
+   "path": "src/frontend/handlers.go",
+   "function": "homeHandler",
+   "env": "BANNER_COLOR",
+   "line": 115
+  },
+  {
+   "path": "src/frontend/main.go",
+   "function": "main",
+   "env": "BASE_URL",
+   "line": 111
+  },
+  {
+   "path": "src/frontend/main.go",
+   "function": "main",
+   "env": "ENABLE_TRACING",
+   "line": 113
+  },
+  {
+   "path": "src/frontend/main.go",
+   "function": "main",
+   "env": "ENABLE_PROFILER",
+   "line": 120
+  },
+  {
+   "path": "src/frontend/main.go",
+   "function": "main",
+   "env": "PORT",
+   "line": 128
+  },
+  {
+   "path": "src/frontend/main.go",
+   "function": "main",
+   "env": "PORT",
+   "line": 129
+  },
+  {
+   "path": "src/frontend/main.go",
+   "function": "main",
+   "env": "LISTEN_ADDR",
+   "line": 131
+  },
+  {
+   "path": "src/frontend/middleware.go",
+   "function": "ensureSessionID",
+   "env": "ENABLE_SINGLE_SHARED_SESSION",
+   "line": 90
+  },
+  {
+   "path": "src/frontend/packaging_info.go",
+   "function": "init",
+   "env": "PACKAGING_SERVICE_URL",
+   "line": 43
+  },
+  {
+   "path": "src/paymentservice/index.js",
+   "function": "<module>",
+   "env": "DISABLE_PROFILER",
+   "line": 21
+  },
+  {
+   "path": "src/paymentservice/index.js",
+   "function": "<module>",
+   "env": "ENABLE_TRACING",
+   "line": 34
+  },
+  {
+   "path": "src/paymentservice/index.js",
+   "function": "<module>",
+   "env": "COLLECTOR_SERVICE_ADDR",
+   "line": 47
+  },
+  {
+   "path": "src/paymentservice/index.js",
+   "function": "<module>",
+   "env": "OTEL_SERVICE_NAME",
+   "line": 52
+  },
+  {
+   "path": "src/paymentservice/index.js",
+   "function": "<module>",
+   "env": "PORT",
+   "line": 70
+  },
+  {
+   "path": "src/paymentservice/server.js",
+   "function": "<module>",
+   "env": "PORT",
+   "line": 104
+  },
+  {
+   "path": "src/productcatalogservice/catalog_loader.go",
+   "function": "loadCatalog",
+   "env": "ALLOYDB_CLUSTER_NAME",
+   "line": 37
+  },
+  {
+   "path": "src/productcatalogservice/catalog_loader.go",
+   "function": "loadCatalogFromAlloyDB",
+   "env": "PROJECT_ID",
+   "line": 88
+  },
+  {
+   "path": "src/productcatalogservice/catalog_loader.go",
+   "function": "loadCatalogFromAlloyDB",
+   "env": "REGION",
+   "line": 89
+  },
+  {
+   "path": "src/productcatalogservice/catalog_loader.go",
+   "function": "loadCatalogFromAlloyDB",
+   "env": "ALLOYDB_CLUSTER_NAME",
+   "line": 90
+  },
+  {
+   "path": "src/productcatalogservice/catalog_loader.go",
+   "function": "loadCatalogFromAlloyDB",
+   "env": "ALLOYDB_INSTANCE_NAME",
+   "line": 91
+  },
+  {
+   "path": "src/productcatalogservice/catalog_loader.go",
+   "function": "loadCatalogFromAlloyDB",
+   "env": "ALLOYDB_DATABASE_NAME",
+   "line": 92
+  },
+  {
+   "path": "src/productcatalogservice/catalog_loader.go",
+   "function": "loadCatalogFromAlloyDB",
+   "env": "ALLOYDB_TABLE_NAME",
+   "line": 93
+  },
+  {
+   "path": "src/productcatalogservice/catalog_loader.go",
+   "function": "loadCatalogFromAlloyDB",
+   "env": "ALLOYDB_SECRET_NAME",
+   "line": 94
+  },
+  {
+   "path": "src/productcatalogservice/server.go",
+   "function": "main",
+   "env": "ENABLE_TRACING",
+   "line": 69
+  },
+  {
+   "path": "src/productcatalogservice/server.go",
+   "function": "main",
+   "env": "DISABLE_PROFILER",
+   "line": 78
+  },
+  {
+   "path": "src/productcatalogservice/server.go",
+   "function": "main",
+   "env": "EXTRA_LATENCY",
+   "line": 88
+  },
+  {
+   "path": "src/productcatalogservice/server.go",
+   "function": "main",
+   "env": "PORT",
+   "line": 115
+  },
+  {
+   "path": "src/productcatalogservice/server.go",
+   "function": "main",
+   "env": "PORT",
+   "line": 116
+  },
+  {
+   "path": "src/recommendationservice/recommendation_server.py",
+   "function": "initStackdriverProfiling",
+   "env": "GCP_PROJECT_ID",
+   "line": 46
+  },
+  {
+   "path": "src/recommendationservice/recommendation_server.py",
+   "function": "<module>",
+   "env": "DISABLE_PROFILER",
+   "line": 101
+  },
+  {
+   "path": "src/recommendationservice/recommendation_server.py",
+   "function": "<module>",
+   "env": "ENABLE_TRACING",
+   "line": 114
+  },
+  {
+   "path": "src/recommendationservice/recommendation_server.py",
+   "function": "<module>",
+   "env": "COLLECTOR_SERVICE_ADDR",
+   "line": 116
+  },
+  {
+   "path": "src/recommendationservice/recommendation_server.py",
+   "function": "<module>",
+   "env": "PORT",
+   "line": 130
+  },
+  {
+   "path": "src/recommendationservice/recommendation_server.py",
+   "function": "<module>",
+   "env": "PRODUCT_CATALOG_SERVICE_ADDR",
+   "line": 131
+  },
+  {
+   "path": "src/shippingservice/main.go",
+   "function": "main",
+   "env": "DISABLE_TRACING",
+   "line": 57
+  },
+  {
+   "path": "src/shippingservice/main.go",
+   "function": "main",
+   "env": "DISABLE_PROFILER",
+   "line": 65
+  },
+  {
+   "path": "src/shippingservice/main.go",
+   "function": "main",
+   "env": "PORT",
+   "line": 73
+  },
+  {
+   "path": "src/shippingservice/main.go",
+   "function": "main",
+   "env": "DISABLE_STATS",
+   "line": 84
+  },
+  {
+   "path": "src/shoppingassistantservice/shoppingassistantservice.py",
+   "function": "<module>",
+   "env": "PROJECT_ID",
+   "line": 27
+  },
+  {
+   "path": "src/shoppingassistantservice/shoppingassistantservice.py",
+   "function": "<module>",
+   "env": "REGION",
+   "line": 28
+  },
+  {
+   "path": "src/shoppingassistantservice/shoppingassistantservice.py",
+   "function": "<module>",
+   "env": "ALLOYDB_DATABASE_NAME",
+   "line": 29
+  },
+  {
+   "path": "src/shoppingassistantservice/shoppingassistantservice.py",
+   "function": "<module>",
+   "env": "ALLOYDB_TABLE_NAME",
+   "line": 30
+  },
+  {
+   "path": "src/shoppingassistantservice/shoppingassistantservice.py",
+   "function": "<module>",
+   "env": "ALLOYDB_CLUSTER_NAME",
+   "line": 31
+  },
+  {
+   "path": "src/shoppingassistantservice/shoppingassistantservice.py",
+   "function": "<module>",
+   "env": "ALLOYDB_INSTANCE_NAME",
+   "line": 32
+  },
+  {
+   "path": "src/shoppingassistantservice/shoppingassistantservice.py",
+   "function": "<module>",
+   "env": "ALLOYDB_SECRET_NAME",
+   "line": 33
+  }
+ ],
+ "writes": [
+  {
+   "path": "kubernetes-manifests/adservice.yaml",
+   "env": "PORT",
+   "line": 50
+  },
+  {
+   "path": "kubernetes-manifests/cartservice.yaml",
+   "env": "REDIS_ADDR",
+   "line": 50
+  },
+  {
+   "path": "kubernetes-manifests/checkoutservice.yaml",
+   "env": "PORT",
+   "line": 55
+  },
+  {
+   "path": "kubernetes-manifests/checkoutservice.yaml",
+   "env": "PRODUCT_CATALOG_SERVICE_ADDR",
+   "line": 57
+  },
+  {
+   "path": "kubernetes-manifests/checkoutservice.yaml",
+   "env": "SHIPPING_SERVICE_ADDR",
+   "line": 59
+  },
+  {
+   "path": "kubernetes-manifests/checkoutservice.yaml",
+   "env": "PAYMENT_SERVICE_ADDR",
+   "line": 61
+  },
+  {
+   "path": "kubernetes-manifests/checkoutservice.yaml",
+   "env": "EMAIL_SERVICE_ADDR",
+   "line": 63
+  },
+  {
+   "path": "kubernetes-manifests/checkoutservice.yaml",
+   "env": "CURRENCY_SERVICE_ADDR",
+   "line": 65
+  },
+  {
+   "path": "kubernetes-manifests/checkoutservice.yaml",
+   "env": "CART_SERVICE_ADDR",
+   "line": 67
+  },
+  {
+   "path": "kubernetes-manifests/currencyservice.yaml",
+   "env": "PORT",
+   "line": 51
+  },
+  {
+   "path": "kubernetes-manifests/currencyservice.yaml",
+   "env": "DISABLE_PROFILER",
+   "line": 53
+  },
+  {
+   "path": "kubernetes-manifests/emailservice.yaml",
+   "env": "PORT",
+   "line": 50
+  },
+  {
+   "path": "kubernetes-manifests/emailservice.yaml",
+   "env": "DISABLE_PROFILER",
+   "line": 52
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "PORT",
+   "line": 67
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "PRODUCT_CATALOG_SERVICE_ADDR",
+   "line": 69
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "CURRENCY_SERVICE_ADDR",
+   "line": 71
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "CART_SERVICE_ADDR",
+   "line": 73
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "RECOMMENDATION_SERVICE_ADDR",
+   "line": 75
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "SHIPPING_SERVICE_ADDR",
+   "line": 77
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "CHECKOUT_SERVICE_ADDR",
+   "line": 79
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "AD_SERVICE_ADDR",
+   "line": 81
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "SHOPPING_ASSISTANT_SERVICE_ADDR",
+   "line": 83
+  },
+  {
+   "path": "kubernetes-manifests/frontend.yaml",
+   "env": "ENABLE_PROFILER",
+   "line": 89
+  },
+  {
+   "path": "kubernetes-manifests/loadgenerator.yaml",
+   "env": "FRONTEND_ADDR",
+   "line": 69
+  },
+  {
+   "path": "kubernetes-manifests/loadgenerator.yaml",
+   "env": "FRONTEND_ADDR",
+   "line": 82
+  },
+  {
+   "path": "kubernetes-manifests/loadgenerator.yaml",
+   "env": "USERS",
+   "line": 84
+  },
+  {
+   "path": "kubernetes-manifests/loadgenerator.yaml",
+   "env": "RATE",
+   "line": 86
+  },
+  {
+   "path": "kubernetes-manifests/paymentservice.yaml",
+   "env": "PORT",
+   "line": 50
+  },
+  {
+   "path": "kubernetes-manifests/paymentservice.yaml",
+   "env": "DISABLE_PROFILER",
+   "line": 52
+  },
+  {
+   "path": "kubernetes-manifests/productcatalogservice.yaml",
+   "env": "PORT",
+   "line": 50
+  },
+  {
+   "path": "kubernetes-manifests/productcatalogservice.yaml",
+   "env": "DISABLE_PROFILER",
+   "line": 52
+  },
+  {
+   "path": "kubernetes-manifests/recommendationservice.yaml",
+   "env": "PORT",
+   "line": 58
+  },
+  {
+   "path": "kubernetes-manifests/recommendationservice.yaml",
+   "env": "PRODUCT_CATALOG_SERVICE_ADDR",
+   "line": 60
+  },
+  {
+   "path": "kubernetes-manifests/recommendationservice.yaml",
+   "env": "DISABLE_PROFILER",
+   "line": 62
+  },
+  {
+   "path": "kubernetes-manifests/shippingservice.yaml",
+   "env": "PORT",
+   "line": 49
+  },
+  {
+   "path": "kubernetes-manifests/shippingservice.yaml",
+   "env": "DISABLE_PROFILER",
+   "line": 51
+  }
+ ]
+}

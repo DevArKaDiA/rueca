@@ -1,0 +1,13 @@
+{
+  "main.go:f": [],
+  "main.go:g": [],
+  "main.go:h": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:f",
+    "main.go:g",
+    "main.go:h"
+  ]
+}

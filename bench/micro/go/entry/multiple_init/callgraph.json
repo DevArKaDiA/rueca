@@ -1,0 +1,14 @@
+{
+  "a.go:init": [
+    "a.go:loadA"
+  ],
+  "a.go:loadA": [],
+  "a.go:main": [
+    "b.go:start"
+  ],
+  "b.go:init": [
+    "b.go:loadB"
+  ],
+  "b.go:loadB": [],
+  "b.go:start": []
+}

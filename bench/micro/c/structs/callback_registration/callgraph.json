@@ -1,0 +1,8 @@
+{
+  "events.c:fire": [],
+  "events.c:on_event": [],
+  "events.c:register_handler": [],
+  "events.c:setup": [
+    "events.c:register_handler"
+  ]
+}

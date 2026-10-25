@@ -1,0 +1,9 @@
+{
+  "main.go:Counter.Value": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:Counter.Value"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "main.go:apply": [],
+  "main.go:double": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:apply"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "main.cpp:query": [
+    "repo.cpp:store::Repo::find"
+  ],
+  "repo.cpp:store::Repo::find": [
+    "repo.cpp:store::Repo::lookup",
+    "repo.h:store::Repo::count"
+  ],
+  "repo.cpp:store::Repo::lookup": [],
+  "repo.h:store::Repo::count": []
+}

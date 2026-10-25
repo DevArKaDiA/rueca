@@ -1,0 +1,11 @@
+{
+  "app/Main.java:Range.Range": [
+    "app/Main.java:Range.validate"
+  ],
+  "app/Main.java:Range.validate": [],
+  "app/Main.java:Range.width": [],
+  "app/Main.java:Ranges.span": [
+    "app/Main.java:Range.Range",
+    "app/Main.java:Range.width"
+  ]
+}

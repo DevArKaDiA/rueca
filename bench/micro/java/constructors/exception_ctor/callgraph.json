@@ -1,0 +1,6 @@
+{
+  "app/Errors.java:ValidationException.ValidationException": [],
+  "app/Errors.java:Validator.require": [
+    "app/Errors.java:ValidationException.ValidationException"
+  ]
+}

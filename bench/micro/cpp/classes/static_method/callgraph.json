@@ -1,0 +1,12 @@
+{
+  "main.cpp:Conn::close": [],
+  "main.cpp:Conn::open": [],
+  "main.cpp:cycle": [
+    "main.cpp:Conn::close",
+    "main.cpp:Conn::open"
+  ],
+  "main.cpp:cycle_chained": [
+    "main.cpp:Conn::close",
+    "main.cpp:Conn::open"
+  ]
+}

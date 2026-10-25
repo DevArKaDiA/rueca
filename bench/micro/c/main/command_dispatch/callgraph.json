@@ -1,0 +1,10 @@
+{
+  "main.c:cmd_add": [],
+  "main.c:cmd_remove": [],
+  "main.c:main": [
+    "main.c:cmd_add",
+    "main.c:cmd_remove",
+    "main.c:usage"
+  ],
+  "main.c:usage": []
+}

@@ -1,0 +1,11 @@
+{
+  "main.go:consume": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:produce": [],
+  "main.go:run": [
+    "main.go:consume",
+    "main.go:produce"
+  ]
+}

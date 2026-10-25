@@ -1,0 +1,9 @@
+{
+  "base/core.go:Core.Describe": [],
+  "main.go:Handler.Serve": [
+    "base/core.go:Core.Describe"
+  ],
+  "main.go:main": [
+    "main.go:Handler.Serve"
+  ]
+}

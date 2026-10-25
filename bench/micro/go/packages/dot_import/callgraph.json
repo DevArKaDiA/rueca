@@ -1,0 +1,10 @@
+{
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "util/strings.go:Reverse"
+  ],
+  "util/strings.go:Reverse": [],
+  "util/strings.go:Upper": []
+}

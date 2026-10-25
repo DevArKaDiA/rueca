@@ -1,0 +1,6 @@
+{
+  "app/Main.java:Account.deposit": [],
+  "app/Main.java:Bank.pay": [
+    "app/Main.java:Account.deposit"
+  ]
+}

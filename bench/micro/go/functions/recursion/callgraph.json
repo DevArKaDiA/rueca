@@ -1,0 +1,15 @@
+{
+  "main.go:fact": [
+    "main.go:fact"
+  ],
+  "main.go:isEven": [
+    "main.go:isOdd"
+  ],
+  "main.go:isOdd": [
+    "main.go:isEven"
+  ],
+  "main.go:main": [
+    "main.go:fact",
+    "main.go:isEven"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "main.cpp:A::root": [],
+  "main.cpp:C::leaf": [
+    "main.cpp:A::root"
+  ],
+  "main.cpp:walk": [
+    "main.cpp:A::root",
+    "main.cpp:C::leaf"
+  ]
+}

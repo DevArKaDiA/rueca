@@ -1,0 +1,7 @@
+{
+  "main.cpp:Vec::operator+": [],
+  "main.cpp:explicit_add": [
+    "main.cpp:Vec::operator+"
+  ],
+  "main.cpp:implicit_add": []
+}

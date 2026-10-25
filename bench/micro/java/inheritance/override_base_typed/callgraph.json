@@ -1,0 +1,7 @@
+{
+  "app/Main.java:Canvas.measure": [
+    "app/Main.java:Shape.area"
+  ],
+  "app/Main.java:Circle.area": [],
+  "app/Main.java:Shape.area": []
+}

@@ -1,0 +1,14 @@
+{
+  "main.go:List.Len": [],
+  "main.go:List.Push": [
+    "main.go:List.grow"
+  ],
+  "main.go:List.grow": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:List.Len",
+    "main.go:List.Push"
+  ]
+}

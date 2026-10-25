@@ -1,0 +1,11 @@
+{
+  "main.go:Close": [],
+  "main.go:Conn.Close": [],
+  "main.go:main": [
+    "main.go:shutdown"
+  ],
+  "main.go:shutdown": [
+    "main.go:Close",
+    "main.go:Conn.Close"
+  ]
+}

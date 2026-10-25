@@ -1,0 +1,7 @@
+{
+  "main.cpp:Handler::call": [],
+  "main.cpp:install": [
+    "main.cpp:Handler::call"
+  ],
+  "main.cpp:square": []
+}

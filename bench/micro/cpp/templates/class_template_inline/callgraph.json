@@ -1,0 +1,8 @@
+{
+  "main.cpp:Box::get": [],
+  "main.cpp:Box::set": [],
+  "main.cpp:roundtrip": [
+    "main.cpp:Box::get",
+    "main.cpp:Box::set"
+  ]
+}

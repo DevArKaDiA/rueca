@@ -1,0 +1,9 @@
+{
+  "main.go:helper": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:helper"
+  ]
+}

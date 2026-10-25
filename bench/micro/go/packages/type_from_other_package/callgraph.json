@@ -1,0 +1,13 @@
+{
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "stack/stack.go:New",
+    "stack/stack.go:Stack.Pop",
+    "stack/stack.go:Stack.Push"
+  ],
+  "stack/stack.go:New": [],
+  "stack/stack.go:Stack.Pop": [],
+  "stack/stack.go:Stack.Push": []
+}

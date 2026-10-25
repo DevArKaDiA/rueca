@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Button.draw": [
+    "app/Main.java:Button.label",
+    "app/Main.java:Widget.draw"
+  ],
+  "app/Main.java:Button.label": [],
+  "app/Main.java:Widget.draw": []
+}

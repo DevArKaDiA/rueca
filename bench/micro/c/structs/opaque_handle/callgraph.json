@@ -1,0 +1,13 @@
+{
+  "counter.c:bump": [],
+  "counter.c:counter_get": [],
+  "counter.c:counter_inc": [
+    "counter.c:bump"
+  ],
+  "counter.c:counter_new": [],
+  "main.c:main": [
+    "counter.c:counter_get",
+    "counter.c:counter_inc",
+    "counter.c:counter_new"
+  ]
+}

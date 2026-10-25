@@ -1,0 +1,15 @@
+{
+  "main.go:Tool.Reverse": [],
+  "main.go:main": [
+    "main.go:pkg",
+    "main.go:run"
+  ],
+  "main.go:pkg": [
+    "util/strings.go:Reverse"
+  ],
+  "main.go:run": [
+    "main.go:Tool.Reverse"
+  ],
+  "util/strings.go:Reverse": [],
+  "util/strings.go:Upper": []
+}

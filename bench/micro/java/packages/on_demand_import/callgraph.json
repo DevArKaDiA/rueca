@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Main.go": [
+    "lib/Item.java:Item.describe",
+    "lib/Store.java:Store.fetch"
+  ],
+  "lib/Item.java:Item.describe": [],
+  "lib/Store.java:Store.fetch": []
+}

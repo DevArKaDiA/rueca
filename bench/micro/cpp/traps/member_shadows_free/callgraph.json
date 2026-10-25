@@ -1,0 +1,13 @@
+{
+  "main.cpp:Logger::emit": [],
+  "main.cpp:Logger::run": [
+    "main.cpp:Logger::emit"
+  ],
+  "main.cpp:Logger::run_global": [
+    "main.cpp:emit"
+  ],
+  "main.cpp:emit": [],
+  "main.cpp:free_run": [
+    "main.cpp:emit"
+  ]
+}

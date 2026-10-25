@@ -1,0 +1,11 @@
+{
+  "parity.c:is_even": [
+    "parity.c:is_odd"
+  ],
+  "parity.c:is_odd": [
+    "parity.c:is_even"
+  ],
+  "parity.c:parity": [
+    "parity.c:is_even"
+  ]
+}

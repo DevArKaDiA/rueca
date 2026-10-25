@@ -1,0 +1,9 @@
+{
+  "app/Main.java:Base64Codec.encode": [],
+  "app/Main.java:Base64Codec.name": [],
+  "app/Main.java:Codec.encode": [],
+  "app/Main.java:Transport.wire": [
+    "app/Main.java:Base64Codec.encode",
+    "app/Main.java:Base64Codec.name"
+  ]
+}

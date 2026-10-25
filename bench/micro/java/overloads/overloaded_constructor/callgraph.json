@@ -1,0 +1,12 @@
+{
+  "app/Point.java:Point.Point@11": [],
+  "app/Point.java:Point.Point@7": [
+    "app/Point.java:Point.Point@11"
+  ],
+  "app/Point.java:Shapes.at": [
+    "app/Point.java:Point.Point@11"
+  ],
+  "app/Point.java:Shapes.origin": [
+    "app/Point.java:Point.Point@7"
+  ]
+}

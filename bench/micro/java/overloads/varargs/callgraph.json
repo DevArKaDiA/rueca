@@ -1,0 +1,10 @@
+{
+  "app/Sum.java:Sum.three": [
+    "app/Sum.java:Sum.total@4"
+  ],
+  "app/Sum.java:Sum.total@12": [],
+  "app/Sum.java:Sum.total@4": [],
+  "app/Sum.java:Sum.two": [
+    "app/Sum.java:Sum.total@12"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [],
+  "plugin/plugin.go:init": [
+    "plugin/plugin.go:register"
+  ],
+  "plugin/plugin.go:register": []
+}

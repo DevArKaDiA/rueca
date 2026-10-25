@@ -1,0 +1,11 @@
+{
+  "main.cpp:Client::connect": [],
+  "main.cpp:Client::open": [
+    "main.cpp:Client::connect",
+    "main.cpp:net::connect"
+  ],
+  "main.cpp:dial": [
+    "main.cpp:net::connect"
+  ],
+  "main.cpp:net::connect": []
+}

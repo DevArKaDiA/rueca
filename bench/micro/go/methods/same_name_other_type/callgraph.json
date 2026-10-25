@@ -1,0 +1,14 @@
+{
+  "main.go:Cat.Name": [],
+  "main.go:Dog.Name": [],
+  "main.go:catName": [
+    "main.go:Cat.Name"
+  ],
+  "main.go:dogName": [
+    "main.go:Dog.Name"
+  ],
+  "main.go:main": [
+    "main.go:catName",
+    "main.go:dogName"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "main.cpp:Outer::Inner::helper": [],
+  "main.cpp:Outer::Inner::value": [],
+  "main.cpp:Outer::run": [
+    "main.cpp:Outer::Inner::helper",
+    "main.cpp:Outer::Inner::value"
+  ]
+}

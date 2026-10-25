@@ -1,0 +1,6 @@
+{
+  "main.cpp:leaf": [
+    "node.cpp:Node::Node"
+  ],
+  "node.cpp:Node::Node": []
+}

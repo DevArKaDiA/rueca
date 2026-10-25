@@ -1,0 +1,10 @@
+{
+  "app/Main.java:Scheduler.start": [
+    "app/Main.java:Scheduler.task"
+  ],
+  "app/Main.java:Scheduler.task": [],
+  "app/Main.java:Scheduler.task.run": [
+    "app/Main.java:Scheduler.tick"
+  ],
+  "app/Main.java:Scheduler.tick": []
+}

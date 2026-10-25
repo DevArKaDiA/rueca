@@ -1,0 +1,10 @@
+{
+  "main.go:English.Greet": [],
+  "main.go:Spanish.Greet": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:Spanish.Greet"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "app/Main.java:Metrics.compute": [],
+  "app/Main.java:Metrics.lazy": [
+    "app/Main.java:Metrics.compute"
+  ]
+}

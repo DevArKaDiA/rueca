@@ -1,0 +1,10 @@
+{
+  "app/Query.java:Query.make": [
+    "app/Query.java:QueryBuilder.build",
+    "app/Query.java:QueryBuilder.select",
+    "app/Query.java:QueryBuilder.where"
+  ],
+  "app/Query.java:QueryBuilder.build": [],
+  "app/Query.java:QueryBuilder.select": [],
+  "app/Query.java:QueryBuilder.where": []
+}

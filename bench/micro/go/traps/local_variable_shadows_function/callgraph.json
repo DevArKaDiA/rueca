@@ -1,0 +1,11 @@
+{
+  "main.go:compute": [],
+  "main.go:main": [
+    "main.go:other",
+    "main.go:run"
+  ],
+  "main.go:other": [
+    "main.go:compute"
+  ],
+  "main.go:run": []
+}

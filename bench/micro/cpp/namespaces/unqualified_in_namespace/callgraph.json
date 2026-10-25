@@ -1,0 +1,11 @@
+{
+  "main.cpp:a::run": [],
+  "main.cpp:a::start": [
+    "main.cpp:a::run"
+  ],
+  "main.cpp:b::run": [],
+  "main.cpp:global_start": [
+    "main.cpp:run"
+  ],
+  "main.cpp:run": []
+}

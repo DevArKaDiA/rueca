@@ -1,0 +1,9 @@
+{
+  "a.c:level": [
+    "util.h:clamp"
+  ],
+  "b.c:percent": [
+    "util.h:clamp"
+  ],
+  "util.h:clamp": []
+}

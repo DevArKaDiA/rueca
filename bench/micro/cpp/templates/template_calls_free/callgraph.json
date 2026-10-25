@@ -1,0 +1,9 @@
+{
+  "main.cpp:checked": [
+    "main.cpp:validate"
+  ],
+  "main.cpp:use_checked": [
+    "main.cpp:checked"
+  ],
+  "main.cpp:validate": []
+}

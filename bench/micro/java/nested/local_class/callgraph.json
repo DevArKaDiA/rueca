@@ -1,0 +1,9 @@
+{
+  "app/Main.java:Solver.helper": [],
+  "app/Main.java:Solver.solve": [
+    "app/Main.java:Solver.solve.Local.go"
+  ],
+  "app/Main.java:Solver.solve.Local.go": [
+    "app/Main.java:Solver.helper"
+  ]
+}

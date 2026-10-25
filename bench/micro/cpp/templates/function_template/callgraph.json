@@ -1,0 +1,9 @@
+{
+  "main.cpp:doubles": [
+    "main.cpp:max_of"
+  ],
+  "main.cpp:ints": [
+    "main.cpp:max_of"
+  ],
+  "main.cpp:max_of": []
+}

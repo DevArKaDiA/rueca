@@ -1,0 +1,9 @@
+{
+  "main.go:Celsius.Fahrenheit": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:Celsius.Fahrenheit"
+  ]
+}

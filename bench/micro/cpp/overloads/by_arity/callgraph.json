@@ -1,0 +1,10 @@
+{
+  "main.cpp:one": [
+    "main.cpp:sum@1"
+  ],
+  "main.cpp:sum@1": [],
+  "main.cpp:sum@2": [],
+  "main.cpp:two": [
+    "main.cpp:sum@2"
+  ]
+}

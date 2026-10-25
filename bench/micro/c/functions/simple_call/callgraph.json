@@ -1,0 +1,9 @@
+{
+  "main.c:add": [],
+  "main.c:compute": [
+    "main.c:add"
+  ],
+  "main.c:main": [
+    "main.c:compute"
+  ]
+}

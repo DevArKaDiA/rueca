@@ -1,0 +1,11 @@
+{
+  "main.go:App.Config": [],
+  "main.go:Config.Port": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:App.Config",
+    "main.go:Config.Port"
+  ]
+}

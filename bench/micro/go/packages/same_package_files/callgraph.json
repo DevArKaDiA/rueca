@@ -1,0 +1,11 @@
+{
+  "a.go:Checkout": [
+    "b.go:tax",
+    "b.go:total"
+  ],
+  "b.go:rate": [],
+  "b.go:tax": [
+    "b.go:rate"
+  ],
+  "b.go:total": []
+}

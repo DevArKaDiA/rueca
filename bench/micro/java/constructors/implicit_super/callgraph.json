@@ -1,0 +1,10 @@
+{
+  "app/Main.java:Base.Base": [
+    "app/Main.java:Base.setup"
+  ],
+  "app/Main.java:Base.setup": [],
+  "app/Main.java:Child.work": [],
+  "app/Main.java:Factory.make": [
+    "app/Main.java:Child.work"
+  ]
+}

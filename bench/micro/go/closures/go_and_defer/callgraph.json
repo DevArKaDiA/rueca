@@ -1,0 +1,11 @@
+{
+  "main.go:cleanup": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:cleanup",
+    "main.go:work"
+  ],
+  "main.go:work": []
+}

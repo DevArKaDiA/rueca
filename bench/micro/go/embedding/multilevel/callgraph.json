@@ -1,0 +1,11 @@
+{
+  "main.go:B.Mid": [],
+  "main.go:C.Deep": [],
+  "main.go:main": [
+    "main.go:run"
+  ],
+  "main.go:run": [
+    "main.go:B.Mid",
+    "main.go:C.Deep"
+  ]
+}

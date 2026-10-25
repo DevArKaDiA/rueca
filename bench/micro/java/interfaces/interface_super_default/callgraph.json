@@ -1,0 +1,6 @@
+{
+  "app/Main.java:Robot.move": [
+    "app/Main.java:Walker.move"
+  ],
+  "app/Main.java:Walker.move": []
+}

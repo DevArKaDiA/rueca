@@ -1,0 +1,9 @@
+{
+  "app/Main.java:Animal.Animal": [],
+  "app/Main.java:Dog.Dog": [
+    "app/Main.java:Animal.Animal"
+  ],
+  "app/Main.java:Zoo.adopt": [
+    "app/Main.java:Dog.Dog"
+  ]
+}

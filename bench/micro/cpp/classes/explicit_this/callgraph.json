@@ -1,0 +1,6 @@
+{
+  "main.cpp:Pipe::flush": [],
+  "main.cpp:Pipe::write": [
+    "main.cpp:Pipe::flush"
+  ]
+}

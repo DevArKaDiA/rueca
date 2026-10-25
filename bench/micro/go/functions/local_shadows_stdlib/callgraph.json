@@ -1,0 +1,11 @@
+{
+  "main.go:Println": [],
+  "main.go:logLocal": [
+    "main.go:Println"
+  ],
+  "main.go:logStd": [],
+  "main.go:main": [
+    "main.go:logLocal",
+    "main.go:logStd"
+  ]
+}

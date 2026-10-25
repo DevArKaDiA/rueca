@@ -1,0 +1,8 @@
+{
+  "main.c:fact": [
+    "main.c:fact"
+  ],
+  "main.c:main": [
+    "main.c:fact"
+  ]
+}

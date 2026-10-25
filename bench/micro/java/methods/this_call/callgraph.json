@@ -1,0 +1,6 @@
+{
+  "app/Counter.java:Counter.inc": [],
+  "app/Counter.java:Counter.incTwice": [
+    "app/Counter.java:Counter.inc"
+  ]
+}

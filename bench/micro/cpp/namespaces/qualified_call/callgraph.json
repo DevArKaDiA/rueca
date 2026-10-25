@@ -1,0 +1,7 @@
+{
+  "main.cpp:a::run": [],
+  "main.cpp:b::run": [],
+  "main.cpp:pick": [
+    "main.cpp:a::run"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "fp.c:direct": [
+    "fp.c:twice"
+  ],
+  "fp.c:indirect": [],
+  "fp.c:twice": []
+}

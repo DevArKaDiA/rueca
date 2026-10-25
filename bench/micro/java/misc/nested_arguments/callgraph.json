@@ -1,0 +1,8 @@
+{
+  "app/Main.java:Fmt.both": [
+    "app/Main.java:Fmt.pad",
+    "app/Main.java:Fmt.wrap"
+  ],
+  "app/Main.java:Fmt.pad": [],
+  "app/Main.java:Fmt.wrap": []
+}
