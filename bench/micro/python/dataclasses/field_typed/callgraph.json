@@ -1,0 +1,10 @@
+{
+  "main.py:Customer.email": [],
+  "main.py:Order.notify": [
+    "main.py:Customer.email"
+  ],
+  "main.py:ship": [
+    "main.py:Customer.email",
+    "main.py:Order.notify"
+  ]
+}

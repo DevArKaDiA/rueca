@@ -1,0 +1,6 @@
+{
+  "visit.ts:each": ["visit.ts:prepare"],
+  "visit.ts:each.visit": ["visit.ts:record"],
+  "visit.ts:prepare": [],
+  "visit.ts:record": []
+}

@@ -1,0 +1,16 @@
+{
+  "main.py:clean": [],
+  "main.py:is_valid": [],
+  "main.py:key_of": [],
+  "main.py:notify": [],
+  "main.py:rank": [
+    "main.py:notify",
+    "main.py:score"
+  ],
+  "main.py:score": [],
+  "main.py:tabulate": [
+    "main.py:is_valid",
+    "main.py:key_of",
+    "main.py:score"
+  ]
+}

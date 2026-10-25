@@ -1,0 +1,6 @@
+{
+  "base.ts:Logger.log": ["base.ts:Logger.stamp"],
+  "base.ts:Logger.stamp": [],
+  "child.ts:AuditLogger.audit": ["base.ts:Logger.log"],
+  "child.ts:record": ["base.ts:Logger.log", "child.ts:AuditLogger.audit"]
+}

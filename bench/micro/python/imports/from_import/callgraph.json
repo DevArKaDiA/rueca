@@ -1,0 +1,14 @@
+{
+  "main.py:lazy": [
+    "textutil.py:slugify"
+  ],
+  "main.py:render": [
+    "textutil.py:normalize",
+    "textutil.py:slugify"
+  ],
+  "textutil.py:normalize": [],
+  "textutil.py:slugify": [
+    "textutil.py:normalize"
+  ],
+  "textutil.py:unused": []
+}

@@ -1,0 +1,11 @@
+{
+  "main.py:Repo.flush": [
+    "main.py:Repo.save",
+    "main.py:save"
+  ],
+  "main.py:Repo.save": [],
+  "main.py:flush": [
+    "main.py:Repo.flush"
+  ],
+  "main.py:save": []
+}

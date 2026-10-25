@@ -1,0 +1,6 @@
+{
+  "doc.ts:Doc.autosave": ["doc.ts:Doc.save"],
+  "doc.ts:Doc.constructor": [],
+  "doc.ts:Doc.save": ["doc.ts:save"],
+  "doc.ts:save": []
+}

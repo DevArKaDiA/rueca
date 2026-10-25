@@ -19,15 +19,16 @@ from __future__ import annotations
 import json
 import shutil
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .arms import make_arm
 from .arms.base import Arm, Handle
 from .common import BENCH_DIR, CACHE, GOLD_DIR, RUNS_DIR, SCIP_DIR, WORK_DIR, is_code_file, lang_family, load_manifest, log, read_json, safe_name, write_json
 from .common import run as sh
-from .corpus import add_worktree, remove_worktree, worktree
+from .corpus import add_worktree, prune_clone, remove_worktree, worktree
 from .phpstan import docker_available, edges_from_calls, phpstan_call_graph, run_phpstan, version_string
-from .scip import derive_call_graph, fid, in_scope, read_index, sample_functions
+from .scip import derive_call_graph, fid, in_scope, questions, read_index, sample_functions
 from .tools import fetch_tool, tool_available, tool_spec
 from .treesitter import extract_functions
 
@@ -140,7 +141,15 @@ def write_compdb(spec: dict, root: Path) -> Path:
     if sdk.rc == 0 and sdk.stdout.strip():
         flags += ["-isysroot", sdk.stdout.strip()]
     entries = []
+    files: list[str] = []
+    excl = tuple(spec.get("exclude", []))
     for f in cd.get("files", []):
+        if any(c in f for c in "*?["):
+            # glob, minus the set's `exclude` prefixes (Lua: every `*.c` but onelua.c / ltests.c)
+            files += sorted(str(p.relative_to(root)) for p in root.glob(f) if p.is_file() and not str(p.relative_to(root)).startswith(excl))
+        else:
+            files.append(f)
+    for f in files:
         entries.append({"directory": str(root), "file": str(root / f), "arguments": [cc, *flags, "-c", str(root / f)]})
     if cd.get("all_headers"):
         tu_dir = SCIP_DIR / f"{repo_name(spec)}-tu"
@@ -180,6 +189,7 @@ def build_phpstan_gold(spec: dict, force: bool = False) -> dict:
         "language": spec["language"],
         "commit": spec["commit"],
         "include": spec["include"],
+        "exclude": spec.get("exclude", []),
         "indexer": version_string(),
         "indexer_seconds": None,
         "stats": graph["stats"],
@@ -189,7 +199,8 @@ def build_phpstan_gold(spec: dict, force: bool = False) -> dict:
         "sample": sample,
     }
     write_json(gp, gold)
-    log(f"s3 gold {name}: {graph['stats'].get('edges')} edges, {len(graph['callables'])} callables, sample {len(sample)}")
+    qs = questions(graph, man["min_lines"])
+    log(f"s3 gold {name}: {graph['stats'].get('edges')} edges, {len(graph['callables'])} callables, questions callers {len(qs['callers'])} / callees {len(qs['callees'])}")
     return gold
 
 
@@ -217,7 +228,7 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
             if res.rc != 0 or not scip_out.exists():
                 raise RuntimeError(f"SCIP indexer failed for {name} rc={res.rc}: {res.stderr[-1500:]} {res.stdout[-500:]}")
         docs = read_index(scip_out)
-        graph = derive_call_graph(root, docs, spec["include"], spec["language"])
+        graph = derive_call_graph(root, docs, spec["include"], spec["language"], spec.get("exclude", []))
     sample = sample_functions(graph, man["sample_per_repo"], man["seed"], man["min_lines"])
     gold = {
         "suite": "scip",
@@ -226,6 +237,7 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
         "language": spec["language"],
         "commit": spec["commit"],
         "include": spec["include"],
+        "exclude": spec.get("exclude", []),
         "indexer": f"{tool_spec(spec['indexer']).get('npm') or tool_spec(spec['indexer'])['name']}@{tool_spec(spec['indexer'])['version']}",
         "indexer_seconds": indexer_seconds,
         "stats": graph["stats"],
@@ -235,7 +247,8 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
         "sample": sample,
     }
     write_json(gp, gold)
-    log(f"s3 gold {name}: {graph['stats'].get('edges')} edges, {len(graph['callables'])} callables, sample {len(sample)}")
+    qs = questions(graph, man["min_lines"])
+    log(f"s3 gold {name}: {graph['stats'].get('edges')} edges, {len(graph['callables'])} callables, questions callers {len(qs['callers'])} / callees {len(qs['callees'])}")
     return gold
 
 
@@ -456,10 +469,11 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     with the key is reported. Nothing is written into the snippet trees the
     arms index."""
     tool = spec["crosscheck"]
-    ok, why = tool_available(tool)
+    npm = "npm" in tool_spec(tool)
+    ok, why = (shutil.which("npx") is not None, "npx not on PATH") if npm else tool_available(tool)
     if not ok:
         return {"available": False, "reason": why}
-    binary = fetch_tool(tool)
+    binary = None if npm else fetch_tool(tool)
     scratch = CACHE / "scip" / "micro" / spec["name"]
     shutil.rmtree(scratch, ignore_errors=True)
     scratch.mkdir(parents=True)
@@ -471,7 +485,13 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
         root = scratch / sname
         shutil.copytree(dest / sname, root)
         out = scratch / f"{sname}.scip"
-        if tool == "scip_go":
+        if "npm" in tool_spec(tool):
+            ts = tool_spec(tool)
+            args = list(spec.get("crosscheck_args", ["index"]))
+            if tool == "scip_python":
+                args += ["--project-name", sname, "--project-version", "0"]
+            res = sh(["npx", "--yes", f"{ts['npm']}@{ts['version']}", *args, "--cwd", str(root), "--output", str(out)], cwd=scratch, timeout=600)
+        elif tool == "scip_go":
             env = {"GOMODCACHE": str(CACHE / "go" / "mod"), "GOCACHE": str(CACHE / "go" / "build"), "GOTOOLCHAIN": "local", "GOFLAGS": "-mod=mod"}
             res = sh([str(binary), "--output", str(out)], cwd=root, env=env, timeout=600)
         elif tool == "scip_java":
@@ -495,7 +515,7 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     ts = tool_spec(tool)
     return {
         "available": True,
-        "tool": f"{ts['name']}@{ts['version']}",
+        "tool": f"{ts.get('npm') or ts['name']}@{ts['version']}",
         "edges_key": tp + fn,
         "edges_scip": tp + fp,
         "agree": tp,
@@ -523,6 +543,8 @@ def build_rueca_micro_gold(spec: dict, force: bool = False) -> dict:
         sname = f"{snip.parent.name}__{snip.name}"
         shutil.copytree(snip, dest / sname)
         keys[sname] = json.loads(cg.read_text())
+    if not keys:
+        raise RuntimeError(f"{name}: no snippets under bench/{spec['local']}")
     gold: dict = {"suite": "micro", "name": name, "language": spec["language"], "source": spec["local"], "snippets": {}}
     for sname in sorted(keys):
         snip = dest / sname
@@ -563,49 +585,56 @@ def ensure_pycg_tree() -> None:
 
 
 def _brief(h: dict) -> dict:
-    return {k: h.get(k) for k in ("path", "name", "label", "start_line", "end_line")}
+    out = {k: h.get(k) for k in ("path", "name", "label", "start_line", "end_line")}
+    if h.get("confidence") is not None:
+        out["confidence"] = h["confidence"]
+    return out
 
 
-def _ask(arm: Arm, h: Handle, graph: dict, questions: list[str], do_lookup: bool) -> list[dict]:
+def _ask(arm: Arm, h: Handle, graph: dict, qs: list[str], lookup: set[str]) -> list[dict]:
+    """Per question: resolve the definition, then one depth-1 neighbours
+    answer (callers and callees), plus a symbol lookup by bare name for the
+    stratified lookup sample."""
     out = []
-    for q in questions:
+    for q in qs:
         func = graph["callables"][q]
         rec: dict = {"fid": q}
         r = arm.resolve(h, func)
         rec["resolve"] = {"ok": r.ok, "seconds": r.seconds, "error": r.error}
         if r.ok:
-            ref = r.extra.get("ref")
-            for direction in ("callers", "callees"):
-                n = arm.neighbors(h, ref, direction)
-                rec[direction] = {
-                    "ok": n.ok,
-                    "seconds": n.seconds,
-                    "error": n.error,
-                    "hits": [_brief(x) for x in n.hits],
-                }
-        if do_lookup:
+            n = arm.neighbors(h, r.extra.get("ref"))
+            rec["neighbors"] = {
+                "ok": n.ok,
+                "seconds": n.seconds,
+                "error": n.error,
+                "tokens": n.extra.get("tokens"),
+                "callers": [_brief(x) for x in n.extra.get("callers", [])],
+                "callees": [_brief(x) for x in n.extra.get("callees", [])],
+            }
+        if q in lookup:
             lk = arm.lookup(h, func["name"], 10)
-            rec["lookup"] = {"ok": lk.ok, "seconds": lk.seconds, "error": lk.error, "hits": [_brief(x) for x in lk.hits]}
+            rec["lookup"] = {"ok": lk.ok, "seconds": lk.seconds, "error": lk.error, "tokens": lk.extra.get("tokens"), "hits": [_brief(x) for x in lk.hits]}
         out.append(rec)
     return out
 
 
-def _run_scip_repo(arm: Arm, spec: dict) -> dict:
+def _run_scip_repo(arm: Arm, spec: dict, root: Path) -> dict:
     name = repo_name(spec)
     gold = read_json(gold_path(name))
-    rec: dict = {"arm": arm.name, "suite": "scip", "name": name, "repo": spec["repo"], "language": spec["language"]}
-    with worktree(spec["repo"], spec["commit"], f"s3-{name}") as root:
-        h = arm.index(root, f"s3-{name}", spec["language"])
-        rec["index_seconds"] = h.index_seconds
-        rec["index_info"] = h.info
-        if not h.ok:
-            rec.update(status="index_failed", error=h.error)
-            arm.cleanup(h)
-            return rec
-        try:
-            rec["answers"] = _ask(arm, h, gold, gold["sample"], do_lookup=True)
-        finally:
-            arm.cleanup(h)
+    man = load_manifest()["s3"]
+    rec: dict = {"arm": arm.name, "suite": gold.get("suite", "scip"), "name": name, "repo": spec["repo"], "language": spec["language"]}
+    h = arm.index(root, f"s3-{name}", spec["language"])
+    rec["index_seconds"] = h.index_seconds
+    rec["index_info"] = h.info
+    if not h.ok:
+        rec.update(status="index_failed", error=h.error)
+        arm.cleanup(h)
+        return rec
+    try:
+        qs = questions(gold, man["min_lines"])["all"]
+        rec["answers"] = _ask(arm, h, gold, qs, set(gold["sample"]))
+    finally:
+        arm.cleanup(h)
     rec["status"] = "ok"
     return rec
 
@@ -625,7 +654,7 @@ def _run_micro(arm: Arm, spec: dict) -> dict:
             srec.update(status="index_failed", error=h.error)
         else:
             try:
-                srec["answers"] = _ask(arm, h, g, g["sample"], do_lookup=False)
+                srec["answers"] = _ask(arm, h, g, g["sample"], set())
                 srec["status"] = "ok"
             except Exception as exc:
                 srec.update(status="error", error=str(exc))
@@ -646,28 +675,55 @@ def suites(languages: set[str] | None = None) -> list[tuple[str, dict, bool]]:
     return out
 
 
-def run(arm_names: list[str], only: list[str] | None = None, force: bool = False, languages: set[str] | None = None) -> None:
+def _run_set(name: str, spec: dict, micro: bool, arm_names: list[str], force: bool, prune: bool = False) -> None:
+    pending = []
+    for arm_name in arm_names:
+        arm = make_arm(arm_name)
+        if not arm.available()[0]:
+            continue
+        p = run_path(arm_name, name)
+        if p.exists() and not force and read_json(p).get("status") in ("ok", "index_failed"):
+            continue
+        pending.append(arm)
+    if not pending:
+        return
+
+    def one(arm: Arm, root: Path | None) -> None:
+        log(f"s3 {arm.name:5s} {name}")
+        try:
+            rec = _run_micro(arm, spec) if micro else _run_scip_repo(arm, spec, root)
+        except Exception as exc:
+            rec = {"arm": arm.name, "name": name, "status": "error", "error": f"{exc}\n{traceback.format_exc()[-1500:]}"}
+        rec["arm_version"] = arm.version()
+        write_json(run_path(arm.name, name), rec)
+        log(f"s3 {arm.name:5s} {name}: {rec.get('status')}")
+
+    if micro:
+        for arm in pending:
+            one(arm, None)
+        return
+    with worktree(spec["repo"], spec["commit"], f"s3-{name}") as root:
+        for arm in pending:
+            one(arm, root)
+    if prune:
+        prune_clone(spec["repo"])
+
+
+def run(arm_names: list[str], only: list[str] | None = None, force: bool = False, languages: set[str] | None = None, workers: int = 1, prune: bool = False) -> None:
+    """Sets run in parallel (`workers`), the arms of one set sequentially on
+    one worktree."""
+    jobs = []
     for name, spec, micro in suites(languages):
         if only and name not in only:
             continue
         if not gold_path(name).exists():
             log(f"s3 {name}: gold missing (run `rueca-bench setup`); skipped")
             continue
-        for arm_name in arm_names:
-            arm = make_arm(arm_name)
-            ok, _ = arm.available()
-            if not ok:
-                continue
-            p = run_path(arm_name, name)
-            if p.exists() and not force and read_json(p).get("status") in ("ok", "index_failed"):
-                continue
-            log(f"s3 {arm_name:5s} {name}")
-            try:
-                rec = _run_micro(arm, spec) if micro else _run_scip_repo(arm, spec)
-            except Exception as exc:
-                rec = {"arm": arm_name, "name": name, "status": "error", "error": f"{exc}\n{traceback.format_exc()[-1500:]}"}
-            rec["arm_version"] = arm.version()
-            write_json(p, rec)
+        jobs.append((name, spec, micro))
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        futs = [ex.submit(_run_set, name, spec, micro, arm_names, force, prune) for name, spec, micro in jobs]
+        for f in as_completed(futs):
+            f.result()
 
 
 def prediction_in_scope(path: str | None, gold: dict) -> bool:
@@ -675,4 +731,4 @@ def prediction_in_scope(path: str | None, gold: dict) -> bool:
         return False
     if gold.get("suite") in MICRO_SUITES:
         return is_code_file(path, gold["language"]) and not path.startswith("<")
-    return in_scope(path, gold["include"])
+    return in_scope(path, gold["include"], gold.get("exclude", []))

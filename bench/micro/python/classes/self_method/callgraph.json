@@ -1,0 +1,14 @@
+{
+  "main.py:Counter.__init__": [
+    "main.py:Counter.reset"
+  ],
+  "main.py:Counter._bump": [],
+  "main.py:Counter.increment": [
+    "main.py:Counter._bump"
+  ],
+  "main.py:Counter.reset": [],
+  "main.py:use": [
+    "main.py:Counter.__init__",
+    "main.py:Counter.increment"
+  ]
+}

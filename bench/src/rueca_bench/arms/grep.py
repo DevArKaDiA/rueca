@@ -93,29 +93,33 @@ class GrepArm(Arm):
                 return CallResult(True, time.perf_counter() - t0, hits=[f], extra={"ref": fid})
         return CallResult(False, time.perf_counter() - t0, error="not found")
 
-    def neighbors(self, h: Handle, ref, direction: str) -> CallResult:
-        """Textual heuristic: callees = defined function names followed by '(' in
-        the body; callers = functions whose body contains `name(`."""
+    def _called(self, h: Handle) -> dict[str, set[str]]:
+        """Per function: the identifiers followed by `(` in its body (after
+        the first line), computed once per index."""
+        st = h.state
+        if "called" not in st:
+            pat = re.compile(r"(?<![A-Za-z0-9_$])([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+            st["called"] = {}
+            for fid, body in st["bodies_text"].items():
+                rest = body.split("\n", 1)[1] if "\n" in body else ""
+                st["called"][fid] = set(pat.findall(rest))
+            by_name: dict[str, list[str]] = {}
+            for fid, f in st["funcs"].items():
+                by_name.setdefault(f["name"], []).append(fid)
+            st["by_name"] = by_name
+        return st["called"]
+
+    def neighbors(self, h: Handle, ref) -> CallResult:
+        """Textual heuristic: callees = defined functions whose name is
+        followed by `(` in the body; callers = functions whose body has
+        `name(`."""
         t0 = time.perf_counter()
         st = h.state
+        called = self._called(h)
         me = st["funcs"][ref]
-        out: dict[str, dict] = {}
-        if direction == "callees":
-            body = st["bodies_text"][ref]
-            body = body.split("\n", 1)[1] if "\n" in body else ""
-            called = set(re.findall(r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", body))
-            for fid, f in st["funcs"].items():
-                if f["name"] in called and fid != ref:
-                    out[fid] = f
-        else:
-            pat = re.compile(r"(?<![A-Za-z0-9_$])" + re.escape(me["name"]) + r"\s*\(")
-            for fid, body in st["bodies_text"].items():
-                if fid == ref:
-                    continue
-                rest = body.split("\n", 1)[1] if "\n" in body else ""
-                if pat.search(rest):
-                    out[fid] = st["funcs"][fid]
-        return CallResult(True, time.perf_counter() - t0, hits=list(out.values()))
+        callees = {fid: st["funcs"][fid] for name in called[ref] for fid in st["by_name"].get(name, []) if fid != ref}
+        callers = {fid: st["funcs"][fid] for fid, names in called.items() if fid != ref and me["name"] in names}
+        return CallResult(True, time.perf_counter() - t0, extra={"callers": list(callers.values()), "callees": list(callees.values()), "tokens": None})
 
     def lookup(self, h: Handle, name: str, limit: int = 10) -> CallResult:
         t0 = time.perf_counter()

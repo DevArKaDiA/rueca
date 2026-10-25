@@ -1,0 +1,8 @@
+{
+  "account.ts:Account.balance": ["account.ts:Account.toUnits"],
+  "account.ts:Account.deposit": ["account.ts:Account.toCents"],
+  "account.ts:Account.limit": ["account.ts:Account.toCents"],
+  "account.ts:Account.toCents": [],
+  "account.ts:Account.toUnits": [],
+  "account.ts:open": ["account.ts:Account.deposit"]
+}

@@ -1,0 +1,11 @@
+{
+  "main.py:Reader.run": [],
+  "main.py:Writer.run": [],
+  "main.py:both": [
+    "main.py:Reader.run",
+    "main.py:Writer.run"
+  ],
+  "main.py:read_only": [
+    "main.py:Reader.run"
+  ]
+}

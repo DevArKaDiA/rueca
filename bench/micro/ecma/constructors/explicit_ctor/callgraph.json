@@ -1,0 +1,5 @@
+{
+  "conn.ts:Conn.connect": [],
+  "conn.ts:Conn.constructor": ["conn.ts:Conn.connect"],
+  "conn.ts:dial": ["conn.ts:Conn.constructor"]
+}

@@ -1,0 +1,6 @@
+{
+  "a.ts:alpha": [],
+  "b.ts:beta": ["b.ts:suffix"],
+  "b.ts:suffix": [],
+  "main.ts:both": ["a.ts:alpha", "b.ts:beta"]
+}

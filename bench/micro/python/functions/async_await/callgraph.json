@@ -1,0 +1,13 @@
+{
+  "main.py:crawl": [
+    "main.py:fetch",
+    "main.py:parse",
+    "main.py:summarize"
+  ],
+  "main.py:fetch": [],
+  "main.py:main": [
+    "main.py:crawl"
+  ],
+  "main.py:parse": [],
+  "main.py:summarize": []
+}

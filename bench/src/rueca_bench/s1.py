@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .arms import make_arm
 from .arms.base import Arm
 from .common import GOLD_DIR, RUNS_DIR, candidate_path, lang_family, load_manifest, log, read_json, safe_name, write_json
-from .corpus import ensure_commit, worktree
+from .corpus import ensure_commit, prune_clone, worktree
 from .datasets import instance_row, rows_by_id
 from .gold import assembled_functions, compute_s1_gold, context_files, parse_list
 from .queries import derive_keywords, raw_query
@@ -135,7 +135,7 @@ def _run_arm(arm: Arm, inst: dict, root, qs: dict[str, str], limit: int) -> dict
     try:
         for variant, q in qs.items():
             res = arm.localize(h, q, limit)
-            entry: dict = {"ok": res.ok, "seconds": res.seconds, "error": res.error}
+            entry: dict = {"ok": res.ok, "seconds": res.seconds, "error": res.error, "tokens": res.extra.get("tokens")}
             if res.ok:
                 entry["files"] = _filtered_files(res.extra.get("files", []), lang)
                 entry["functions"] = _filtered_funcs(res.extra.get("functions", []), lang)
@@ -169,7 +169,7 @@ def run_instance(inst: dict, arm_names: list[str], limit: int, force: bool) -> N
             write_json(run_path(name, inst["id"]), rec)
 
 
-def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, force: bool = False, languages: set[str] | None = None) -> None:
+def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, force: bool = False, languages: set[str] | None = None, prune: bool = False) -> None:
     limit = load_manifest()["s1"].get("result_limit", 100)
     insts = [i for i in instances() if not only or i["id"] in only or i["repo"] in only]
     if languages:
@@ -186,6 +186,8 @@ def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, f
                 run_instance(inst, arm_names, limit, force)
             except Exception as exc:
                 log(f"s1 FAILED {inst['id']}: {exc}")
+        if prune:
+            prune_clone(items[0]["repo"])
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
         futs = [ex.submit(_repo_job, items) for items in by_repo.values()]

@@ -1,0 +1,6 @@
+{
+  "chain.ts:A.ping": [],
+  "chain.ts:B.pong": ["chain.ts:A.ping"],
+  "chain.ts:C.ping": ["chain.ts:A.ping", "chain.ts:B.pong"],
+  "chain.ts:run": ["chain.ts:A.ping", "chain.ts:B.pong"]
+}

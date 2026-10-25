@@ -1,0 +1,8 @@
+{
+  "loader.ts:fetchData": [],
+  "loader.ts:later": ["loader.ts:load", "loader.ts:report"],
+  "loader.ts:load": ["loader.ts:fetchData", "loader.ts:parse", "loader.ts:report", "loader.ts:valid"],
+  "loader.ts:parse": [],
+  "loader.ts:report": [],
+  "loader.ts:valid": []
+}

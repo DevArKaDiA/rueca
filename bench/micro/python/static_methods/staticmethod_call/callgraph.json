@@ -1,0 +1,15 @@
+{
+  "main.py:MathUtil.both": [
+    "main.py:MathUtil.cube",
+    "main.py:MathUtil.square"
+  ],
+  "main.py:MathUtil.cube": [
+    "main.py:MathUtil.square"
+  ],
+  "main.py:MathUtil.square": [],
+  "main.py:compute": [
+    "main.py:MathUtil.both",
+    "main.py:MathUtil.cube",
+    "main.py:MathUtil.square"
+  ]
+}

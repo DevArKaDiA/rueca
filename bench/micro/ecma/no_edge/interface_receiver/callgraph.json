@@ -1,0 +1,6 @@
+{
+  "sink.ts:FileSink.write": [],
+  "sink.ts:Job.start": [],
+  "sink.ts:PrintJob.execute": ["sink.ts:FileSink.write"],
+  "sink.ts:emit": []
+}

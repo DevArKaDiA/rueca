@@ -1,0 +1,5 @@
+{
+  "db.ts:Db.query": [],
+  "db.ts:Repository.all": ["db.ts:Db.query"],
+  "db.ts:Repository.mirror": ["db.ts:Db.query"]
+}

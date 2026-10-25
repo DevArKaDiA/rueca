@@ -1,0 +1,5 @@
+{
+  "notify.js:Mailer.send": [],
+  "notify.js:main": ["notify.js:notify"],
+  "notify.js:notify": []
+}

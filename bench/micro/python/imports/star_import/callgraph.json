@@ -1,0 +1,8 @@
+{
+  "main.py:total_area": [
+    "shapes.py:circle",
+    "shapes.py:square"
+  ],
+  "shapes.py:circle": [],
+  "shapes.py:square": []
+}

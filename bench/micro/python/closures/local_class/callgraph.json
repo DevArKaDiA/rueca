@@ -1,0 +1,9 @@
+{
+  "main.py:helper": [],
+  "main.py:make": [
+    "main.py:make.Local.go"
+  ],
+  "main.py:make.Local.go": [
+    "main.py:helper"
+  ]
+}

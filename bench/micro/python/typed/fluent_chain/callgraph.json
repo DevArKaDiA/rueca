@@ -1,0 +1,18 @@
+{
+  "main.py:Builder.__init__": [],
+  "main.py:Builder.build": [
+    "main.py:Product.__init__"
+  ],
+  "main.py:Builder.named": [],
+  "main.py:Product.__init__": [],
+  "main.py:Product.ship": [],
+  "main.py:make_builder": [
+    "main.py:Builder.__init__"
+  ],
+  "main.py:order": [
+    "main.py:Builder.build",
+    "main.py:Builder.named",
+    "main.py:Product.ship",
+    "main.py:make_builder"
+  ]
+}

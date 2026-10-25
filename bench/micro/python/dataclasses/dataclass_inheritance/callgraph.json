@@ -1,0 +1,8 @@
+{
+  "main.py:Click.position": [],
+  "main.py:Event.describe": [],
+  "main.py:handle": [
+    "main.py:Click.position",
+    "main.py:Event.describe"
+  ]
+}

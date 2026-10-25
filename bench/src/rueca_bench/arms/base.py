@@ -67,7 +67,12 @@ class Arm:
     def resolve(self, h: Handle, func: dict) -> CallResult:
         raise NotImplementedError
 
-    def neighbors(self, h: Handle, ref: Any, direction: str) -> CallResult:
+    def neighbors(self, h: Handle, ref: Any) -> CallResult:
+        """Depth-1 callers and callees in one answer (one tool call where the
+        tool allows it): extra = {"callers": hits, "callees": hits,
+        "tokens": cl100k tokens of the raw answer or None}. Hits may carry
+        `confidence` (Rueca: the best confidence of the edges linking the
+        neighbour to the root)."""
         raise NotImplementedError
 
     def lookup(self, h: Handle, name: str, limit: int = 10) -> CallResult:

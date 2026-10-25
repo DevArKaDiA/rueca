@@ -1,0 +1,12 @@
+{
+  "main.py:Temperature.__init__": [],
+  "main.py:Temperature._to_celsius": [],
+  "main.py:Temperature.describe": [],
+  "main.py:Temperature.fahrenheit@11": [
+    "main.py:to_fahrenheit"
+  ],
+  "main.py:Temperature.fahrenheit@16": [
+    "main.py:Temperature._to_celsius"
+  ],
+  "main.py:to_fahrenheit": []
+}

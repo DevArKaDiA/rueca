@@ -1,0 +1,5 @@
+{
+  "main.ts:route": ["util.ts:joinPath", "util.ts:slugify"],
+  "util.ts:joinPath": ["util.ts:slugify"],
+  "util.ts:slugify": []
+}

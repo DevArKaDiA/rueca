@@ -1,0 +1,15 @@
+{
+  "main.py:lazy": [
+    "textutil.py:slugify"
+  ],
+  "main.py:raw": [
+    "textutil.py:normalize"
+  ],
+  "main.py:render": [
+    "textutil.py:slugify"
+  ],
+  "textutil.py:normalize": [],
+  "textutil.py:slugify": [
+    "textutil.py:normalize"
+  ]
+}

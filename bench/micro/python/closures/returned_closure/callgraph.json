@@ -1,0 +1,10 @@
+{
+  "main.py:clamp": [],
+  "main.py:main": [
+    "main.py:make_adder"
+  ],
+  "main.py:make_adder": [],
+  "main.py:make_adder.add": [
+    "main.py:clamp"
+  ]
+}

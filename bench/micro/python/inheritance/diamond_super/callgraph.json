@@ -1,0 +1,15 @@
+{
+  "main.py:Base.setup": [],
+  "main.py:Bottom.setup": [
+    "main.py:Left.setup"
+  ],
+  "main.py:Left.setup": [
+    "main.py:Base.setup"
+  ],
+  "main.py:Right.setup": [
+    "main.py:Base.setup"
+  ],
+  "main.py:build": [
+    "main.py:Bottom.setup"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "main.py:create": [
+    "models/base.py:Model.__init__",
+    "models/base.py:Model.save",
+    "models/user.py:User.rename"
+  ],
+  "models/base.py:Model.__init__": [],
+  "models/base.py:Model.save": [],
+  "models/user.py:User.rename": [
+    "models/base.py:Model.save"
+  ]
+}

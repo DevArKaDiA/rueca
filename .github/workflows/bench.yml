@@ -1,0 +1,115 @@
+# Benchmark regression check (RFC 0004 §7.8).
+#
+# Builds the checked-out commit (`main` on schedule; any ref on dispatch, e.g.
+# a PR branch that touches a language pack or the resolver), runs the Rueca
+# arm of every suite over the pinned corpora and gold, regenerates the
+# scorecard and fails when a floor metric drops by more than the half-width
+# of its committed 95% interval (`rueca-bench check` against
+# bench/results/scorecard.json at HEAD). The baseline arms (grep, cbm) are
+# not run: their numbers are read from the committed bench/results/*.json.
+#
+# Gold labels, datasets and pinned tool binaries are cached by the hash of
+# the manifest, the hand-written labels and the harness sources; corpora are
+# cloned per run (shallow, one tree per pinned commit) and pruned as soon as
+# they are used. Runtime on ubuntu-latest: about 60–90 min with a cold cache
+# (datasets, every gold set, SCIP indexers), about 40–60 min warm
+# (bench/README.md, "Regression check in CI").
+
+name: Benchmark
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"  # weekly, Monday 04:17 UTC
+  workflow_dispatch:
+    inputs:
+      lang:
+        description: "Language families to run (space-separated manifest [languages] keys); empty = all"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  UV_NO_EDITABLE: "1"
+  GOTOOLCHAIN: local
+
+jobs:
+  regression:
+    name: Rueca arm vs committed scorecard
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+      # scip-python / scip-typescript run through npx; scip-go needs a Go toolchain
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+          cache: false
+
+      - name: Build rueca (release)
+        run: |
+          cargo build --release --locked -p rueca
+          echo "RUECA_BIN=$PWD/target/release/rueca" >> "$GITHUB_ENV"
+          echo "RUECA_BIN_LABEL=${GITHUB_REF_NAME}@${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Restore pinned inputs and gold
+        uses: actions/cache@v6
+        with:
+          path: |
+            bench/.cache/datasets
+            bench/.cache/gold
+            bench/.cache/bin
+            bench/.cache/dl
+            bench/.cache/scip
+            bench/.cache/go
+            bench/.cache/tiktoken
+          key: rueca-bench-${{ runner.os }}-${{ hashFiles('bench/manifest.toml', 'bench/micro/**', 'bench/labels/**', 'bench/phpstan/**', 'bench/src/**', 'bench/uv.lock') }}
+          restore-keys: |
+            rueca-bench-${{ runner.os }}-
+
+      - name: Pull the pinned images (PHPStan, javac)
+        run: |
+          docker pull "$(python3 -c "import tomllib;print(tomllib.load(open('bench/manifest.toml','rb'))['tools']['php_image']['image'])")"
+          docker pull "$(python3 -c "import tomllib;print(tomllib.load(open('bench/manifest.toml','rb'))['tools']['scip_java']['image'])")"
+
+      - name: Setup (datasets, clones, gold; no cbm)
+        env:
+          LANGS: ${{ inputs.lang }}
+        run: |
+          # shellcheck disable=SC2086 # LANGS is a space-separated list of family keys
+          uv run --project bench --locked rueca-bench setup --no-cbm --workers 4 ${LANGS:+--lang $LANGS data}
+
+      - name: Run the Rueca arm (health, S1, S3, data)
+        env:
+          LANGS: ${{ inputs.lang }}
+        run: |
+          # shellcheck disable=SC2086
+          uv run --project bench --locked rueca-bench run --arm rueca --suite health,s1,s3,data --workers 4 --prune ${LANGS:+--lang $LANGS data}
+
+      - name: Report
+        run: uv run --project bench --locked rueca-bench report
+
+      - name: Regression check
+        run: uv run --project bench --locked rueca-bench check
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-results
+          path: |
+            bench/results/
+            docs/bench/alpha-results.md
+          retention-days: 30

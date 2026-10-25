@@ -1,0 +1,7 @@
+{
+  "app.ts:setup": ["registry.ts:Registry.create", "registry.ts:Registry.describe", "registry.ts:Registry.reset"],
+  "registry.ts:Registry.bump": [],
+  "registry.ts:Registry.create": ["registry.ts:Registry.bump"],
+  "registry.ts:Registry.describe": ["registry.ts:Registry.bump"],
+  "registry.ts:Registry.reset": ["registry.ts:Registry.bump"]
+}

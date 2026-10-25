@@ -1,0 +1,11 @@
+{
+  "main.py:factorial": [
+    "main.py:factorial"
+  ],
+  "main.py:is_even": [
+    "main.py:is_odd"
+  ],
+  "main.py:is_odd": [
+    "main.py:is_even"
+  ]
+}

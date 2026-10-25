@@ -1,0 +1,6 @@
+{
+  "registry.ts:register": [],
+  "registry.ts:sealed": ["registry.ts:register"],
+  "service.ts:Service.run": ["service.ts:Service.step"],
+  "service.ts:Service.step": []
+}

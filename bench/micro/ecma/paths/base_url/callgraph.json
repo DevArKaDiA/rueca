@@ -1,0 +1,6 @@
+{
+  "src/app.ts:handle": ["src/services/users.ts:findUser", "src/util/text.ts:quote"],
+  "src/services/users.ts:findUser": ["src/services/users.ts:lookup", "src/util/text.ts:quote"],
+  "src/services/users.ts:lookup": [],
+  "src/util/text.ts:quote": []
+}

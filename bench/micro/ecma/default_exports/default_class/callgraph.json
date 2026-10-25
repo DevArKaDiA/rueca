@@ -1,0 +1,6 @@
+{
+  "main.ts:words": ["parser.ts:Parser.constructor", "parser.ts:Parser.parse"],
+  "parser.ts:Parser.constructor": ["parser.ts:Parser.rewind"],
+  "parser.ts:Parser.parse": [],
+  "parser.ts:Parser.rewind": []
+}

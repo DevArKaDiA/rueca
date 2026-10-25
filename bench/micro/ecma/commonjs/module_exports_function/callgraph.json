@@ -1,0 +1,5 @@
+{
+  "app.js:start": ["logger.js:exports"],
+  "logger.js:exports": ["logger.js:format"],
+  "logger.js:format": []
+}

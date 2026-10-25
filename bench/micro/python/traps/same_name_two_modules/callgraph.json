@@ -1,0 +1,13 @@
+{
+  "alpha.py:run": [],
+  "beta.py:run": [],
+  "main.py:first": [
+    "alpha.py:run"
+  ],
+  "main.py:second": [
+    "beta.py:run"
+  ],
+  "main.py:third": [
+    "beta.py:run"
+  ]
+}

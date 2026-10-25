@@ -1,0 +1,6 @@
+{
+  "refs.ts:pick": [],
+  "refs.ts:tick": [],
+  "refs.ts:transform": [],
+  "refs.ts:wire": ["refs.ts:pick"]
+}

@@ -174,37 +174,28 @@ Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
 
 ## Benchmark
 
-Rueca is benchmarked against [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
-v0.12.0 and a BM25 baseline, per language, on issue localization (SWE-bench
-Lite/Verified, SWE-PolyBench, SWE-bench Multilingual, Multi-SWE-bench; 270
-instances), structural questions (callers/callees against SCIP or PHPStan
-gold, plus hand-labeled micro-benchmarks) and, for configuration, key
-coverage and the code ↔ config bridge. Full results:
-[docs/bench/alpha-results.md](docs/bench/alpha-results.md); method:
-[bench/README.md](bench/README.md).
+Every language is measured against the absolute floors of
+[RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) — issue localization
+(SWE-bench family, ≥ 30 issues per language), callers / callees over every
+function of two or more SCIP / PHPStan gold repositories per language, own
+hand-labelled micro-benchmarks, parse-error rate, latency, and configuration
+key recall and env-var bridge — with 95% intervals;
+[codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
+v0.12.0 and a BM25 baseline are published alongside as reference. Current
+scorecard (`stable` = every floor met; full tables in
+[docs/bench/alpha-results.md](docs/bench/alpha-results.md), method in
+[bench/README.md](bench/README.md)):
 
-| Overall (Python, TS/JS, PHP), % | BM25 | cbm 0.12.0 | Rueca |
-|---|---:|---:|---:|
-| Localization (keywords): file Acc@5 | 60.3 | 52.9 | **66.9** |
-| Localization (keywords): function Acc@10 | 44.1 | 33.3 | **52.3** |
-| Callers F1 | 79.6 | 81.4 | **90.4** |
-| Callees F1 | 60.7 | 73.3 | **82.6** |
-| Definition found | 100 | 98.2 | 98.9 |
-| Median query latency | ~0 s | 0.43 s | **0.01 s** |
+- **Python** `stable`
+- **TS/JS** `preview` — micro-benchmark callee F1 89.9 (85.4–93.6) vs ≥ 90
+- **PHP** `stable`
+- **Go** `stable`
+- **Java** `stable`
+- **C** `preview` — callees recall 65.8 (63.3–68.3) vs ≥ 75; 12.0% of files with parse errors vs ≤ 2%
+- **C++** `preview` — function Acc@10 below BM25 (Δ −18.2, −33.3 to −6.1); callees precision 86.3 vs ≥ 90; callers / callees recall 73.9 / 71.1 vs ≥ 75; definition found 94.4 vs ≥ 95; 11.3% of files with parse errors vs ≤ 2%
+- **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
-Against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md),
-from the current numbers: Go meets every structural, micro and localization
-floor; PHP misses only the micro-benchmark floor by about one point; Python
-lacks a valid micro-benchmark and TS/JS misses callee recall (70 vs 75);
-Java misses precision (86–88 vs 90); C meets its structural, micro and
-parse-error floors and is not significantly below BM25 on localization;
-C++ misses callee precision / recall on fmt (88 / 70 vs 90 / 75), the
-parse-error floor on fmt (5.7% of files, vendored GoogleTest included) and
-function localization against BM25. Configuration meets its floors: key recall 100%
-(YAML, JSON) and 99.6% (HCL), env-var bridge precision / recall 100 / 98.6.
-codebase-memory-mcp is published alongside as reference. The per-language
-scorecard (RFC 0004 §9) replaces this paragraph once the rebuilt benchmark
-lands. Contributions that move these numbers are very welcome.
+Contributions that move these numbers are very welcome.
 
 ## Roadmap
 

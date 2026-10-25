@@ -1,0 +1,5 @@
+{
+  "build.ts:bundle": ["compile.ts:compile"],
+  "compile.ts:compile": ["compile.ts:minify"],
+  "compile.ts:minify": []
+}

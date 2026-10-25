@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..common import BIN_DIR, CACHE, load_manifest, pinned_asset, run, safe_name, sha256_file
+from ..common import BIN_DIR, CACHE, count_tokens, load_manifest, pinned_asset, run, safe_name, sha256_file
 from .base import Arm, CallResult, Handle, is_callable_label, same_def
 
 
@@ -101,6 +101,10 @@ class CbmArm(Arm):
     # -- plumbing ---------------------------------------------------------------
 
     def _call(self, tool: str, args: dict[str, Any], timeout: float | None = None) -> tuple[Any, float, str | None]:
+        data, secs, err, _ = self._call_raw(tool, args, timeout)
+        return data, secs, err
+
+    def _call_raw(self, tool: str, args: dict[str, Any], timeout: float | None = None) -> tuple[Any, float, str | None, str]:
         self._ensure_daemon()
         res = run(
             [str(self.bin), "cli", "--quiet", tool, json.dumps(args)],
@@ -108,15 +112,15 @@ class CbmArm(Arm):
             timeout=timeout or self.call_timeout,
         )
         if res.timed_out:
-            return None, res.seconds, f"timeout after {res.seconds:.0f}s"
+            return None, res.seconds, f"timeout after {res.seconds:.0f}s", ""
         try:
             data = json.loads(res.stdout) if res.stdout.strip() else None
         except json.JSONDecodeError:
-            return None, res.seconds, f"non-json output rc={res.rc}: {res.stdout[:300]} {res.stderr[-300:]}"
+            return None, res.seconds, f"non-json output rc={res.rc}: {res.stdout[:300]} {res.stderr[-300:]}", res.stdout
         if res.rc != 0 or data is None or (isinstance(data, dict) and "error" in data and not data.get("rows")):
             err = data.get("error") if isinstance(data, dict) else res.stderr[-500:]
-            return data, res.seconds, f"rc={res.rc}: {err}"
-        return data, res.seconds, None
+            return data, res.seconds, f"rc={res.rc}: {err}", res.stdout
+        return data, res.seconds, None, res.stdout
 
     @staticmethod
     def _lines(s: Any) -> tuple[int | None, int | None]:
@@ -160,6 +164,7 @@ class CbmArm(Arm):
                 "RETURN n.qualified_name, n.label, n.file_path, n.start_line, n.end_line"
             )
             nodes: dict[str, dict] = {}
+            every: list[dict] = []
             args: dict[str, Any] = {
                 "project": h.state["project"],
                 "query": q,
@@ -174,7 +179,7 @@ class CbmArm(Arm):
                     errors.append(err)
                     break
                 for qn, label, path, s, e in data.get("rows", []):
-                    nodes[qn] = {
+                    node = {
                         "path": path,
                         "name": qn.rsplit(".", 1)[-1],
                         "label": label,
@@ -182,12 +187,16 @@ class CbmArm(Arm):
                         "end_line": int(e) if str(e).isdigit() else None,
                         "qn": qn,
                     }
+                    every.append(node)
+                    nodes.setdefault(qn, node)
                 cur = data.get("next_cursor")
                 if not data.get("has_more") or not cur:
                     break
                 args = {k: v for k, v in args.items() if k != "offset"}
                 args["cursor"] = cur
             h.state["nodes"] = nodes
+            # every node, overloads included (one qualified name, several nodes)
+            h.state["every_node"] = every
             h.state["nodes_errors"] = errors
         return h.state["nodes"]
 
@@ -199,7 +208,7 @@ class CbmArm(Arm):
             "max_output_tokens": 1000000,
             **args,
         }
-        data, secs, err = self._call("search_graph", args)
+        data, secs, err, raw = self._call_raw("search_graph", args)
         if err:
             return CallResult(False, secs, error=err)
         hits = []
@@ -218,7 +227,7 @@ class CbmArm(Arm):
                     "qn": qn,
                 }
             )
-        return CallResult(True, secs, hits=hits, extra={"total": data.get("total")})
+        return CallResult(True, secs, hits=hits, extra={"total": data.get("total"), "tokens": count_tokens(raw)})
 
     # -- S1 ---------------------------------------------------------------------
 
@@ -241,46 +250,50 @@ class CbmArm(Arm):
 
     def resolve(self, h: Handle, func: dict) -> CallResult:
         t0 = time.perf_counter()
-        nodes = self._nodes(h)
-        for qn, n in nodes.items():
+        self._nodes(h)
+        for n in h.state["every_node"]:
             if same_def(n, func):
-                return CallResult(True, time.perf_counter() - t0, hits=[n], extra={"ref": qn})
+                return CallResult(True, time.perf_counter() - t0, hits=[n], extra={"ref": n["qn"]})
         return CallResult(False, time.perf_counter() - t0, error="definition not found in graph")
 
-    def neighbors(self, h: Handle, ref: Any, direction: str) -> CallResult:
+    def neighbors(self, h: Handle, ref: Any) -> CallResult:
+        """One `trace_path` (direction `both`, depth 1); neighbours are mapped
+        back to Function / Method nodes by qualified name."""
         nodes = self._nodes(h)
         args = {
             "project": h.state["project"],
             "function_name": ref,
-            "direction": "inbound" if direction == "callers" else "outbound",
+            "direction": "both",
             "depth": 1,
             "limit": 5000,
             "format": "json",
             "max_output_tokens": 1000000,
         }
-        data, secs, err = self._call("trace_path", args)
+        data, secs, err, raw = self._call_raw("trace_path", args)
         if err:
             return CallResult(False, secs, error=err)
         if isinstance(data, dict) and data.get("status") == "ambiguous":
             return CallResult(False, secs, error="ambiguous")
-        key = "callers" if direction == "callers" else "callees"
-        block = data.get(key) or {}
-        cols = block.get("cols", ["name", "hop"])
-        hits: list[dict] = []
-        unmapped = 0
-        for g in block.get("groups", []):
-            prefix = g.get("qn_prefix", "")
-            for row in g.get("rows", []):
-                r = dict(zip(cols, row))
-                if r.get("hop", 1) != 1:
-                    continue
-                qn = f"{prefix}.{r['name']}" if prefix else r["name"]
-                n = nodes.get(qn)
-                if n is None:
-                    unmapped += 1
-                    continue
-                hits.append(n)
-        return CallResult(True, secs, hits=hits, extra={"unmapped": unmapped, "total": data.get(f"{key}_total")})
+        out: dict[str, Any] = {"tokens": count_tokens(raw), "unmapped": 0}
+        for key in ("callers", "callees"):
+            block = data.get(key) or {}
+            cols = block.get("cols", ["name", "hop"])
+            hits: list[dict] = []
+            for g in block.get("groups", []):
+                prefix = g.get("qn_prefix", "")
+                for row in g.get("rows", []):
+                    r = dict(zip(cols, row))
+                    if r.get("hop", 1) != 1:
+                        continue
+                    qn = f"{prefix}.{r['name']}" if prefix else r["name"]
+                    n = nodes.get(qn)
+                    if n is None:
+                        out["unmapped"] += 1
+                        continue
+                    hits.append(n)
+            out[key] = hits
+            out[f"{key}_total"] = data.get(f"{key}_total")
+        return CallResult(True, secs, extra=out)
 
     def lookup(self, h: Handle, name: str, limit: int = 10) -> CallResult:
         return self._search(h, {"query": name}, limit)

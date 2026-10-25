@@ -1,0 +1,9 @@
+{
+  "counter.ts:bump": [],
+  "counter.ts:makeCounter": ["counter.ts:reset"],
+  "counter.ts:makeCounter.next": ["counter.ts:makeCounter.step"],
+  "counter.ts:makeCounter.peek": [],
+  "counter.ts:makeCounter.step": ["counter.ts:bump"],
+  "counter.ts:reset": [],
+  "counter.ts:useCounter": ["counter.ts:makeCounter", "counter.ts:makeCounter.next", "counter.ts:makeCounter.peek"]
+}

@@ -1,0 +1,14 @@
+{
+  "main.py:A.ping": [],
+  "main.py:B.middle": [
+    "main.py:A.ping"
+  ],
+  "main.py:C.top": [
+    "main.py:A.ping",
+    "main.py:B.middle"
+  ],
+  "main.py:run": [
+    "main.py:A.ping",
+    "main.py:C.top"
+  ]
+}

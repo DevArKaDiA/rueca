@@ -1,0 +1,12 @@
+{
+  "main.py:Swimmer.dive": [],
+  "main.py:Swimmer.move": [],
+  "main.py:Walker.move": [],
+  "main.py:Walker.rest": [],
+  "main.py:day": [
+    "main.py:Swimmer.dive",
+    "main.py:Swimmer.move",
+    "main.py:Walker.move",
+    "main.py:Walker.rest"
+  ]
+}

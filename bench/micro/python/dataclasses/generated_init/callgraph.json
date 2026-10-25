@@ -1,0 +1,10 @@
+{
+  "main.py:Point.__post_init__": [
+    "main.py:Point.check"
+  ],
+  "main.py:Point.check": [],
+  "main.py:Point.norm": [],
+  "main.py:length": [
+    "main.py:Point.norm"
+  ]
+}

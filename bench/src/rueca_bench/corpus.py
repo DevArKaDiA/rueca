@@ -140,3 +140,11 @@ def worktree(repo: str, commit: str, name: str, keep: bool = False) -> Iterator[
 def list_files(worktree_path: Path) -> list[str]:
     res = run(["git", "ls-files", "-z"], cwd=worktree_path, timeout=300, check=True)
     return sorted(p for p in res.stdout.split("\0") if p)
+
+
+def prune_clone(repo: str) -> None:
+    """Delete a repository's clone (and the blobs its checkouts fetched) once
+    a run no longer needs it; the next use re-creates it from the pinned
+    commits. Keeps the cache within a CI runner's disk."""
+    with named_lock(f"git:{repo}"):
+        shutil.rmtree(repo_dir(repo), ignore_errors=True)
