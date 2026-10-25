@@ -49,6 +49,15 @@
 //!   traversed edge between reported nodes, keeping the highest-confidence
 //!   one per (src, dst, kind). `limit` counts nodes over both directions; a
 //!   node reachable both ways appears once per direction.
+//! - `trace` neighbour filter: tests (`is_test` or label `Test`) are skipped
+//!   unless `include_tests` is true or `edge_types` contains `TESTS`; with
+//!   `labels`, only neighbours with those labels are kept. Skipped nodes are
+//!   neither reported nor expanded and their edges are dropped; the root is
+//!   never filtered. `tests_excluded` counts distinct skipped tests over all
+//!   levels. Other labels stay: a `File` caller is module-level code, a
+//!   `Class` / `Variable` / `Constant` / `Field` caller is code in a class
+//!   body or an initializer, a `Class` callee is a constructor call (its
+//!   `__init__` / `constructor` is listed too).
 //! - `get_snippet` also accepts `path` alone (from line 1, bounded by
 //!   `max_lines`) and unique path suffixes; `start_line` past the end of the
 //!   file is an error.
@@ -131,11 +140,12 @@ fn schema_for_tool(name: &str) -> &'static Value {
     &definitions().iter().find(|d| d.name == name).expect("known tool").input_schema
 }
 
-const DESC_SEARCH_SYMBOLS: &str = "Find functions, methods, classes and other definitions by name. \
-BM25 ranking over symbol names, qualified names, signatures, docstrings and file paths; identifiers are split on \
-camelCase, snake_case and path separators, so `invoice issue` finds `InvoiceService.issue_invoice`. Start here when \
-you know roughly what a symbol is called. Returns brief symbols (id, qualified_name, label, path, 1-based lines) with \
-signature and score; page with `offset` = `next_offset`. \
+const DESC_SEARCH_SYMBOLS: &str = "Find functions, methods, classes and other definitions by name or by what \
+their code does. BM25 ranking over symbol names, qualified names, signatures, docstrings, file paths and the \
+symbol's source code; identifiers are split on camelCase, snake_case and path separators, so `invoice issue` finds \
+`InvoiceService.issue_invoice`, and `Session.request` ranks that method first. Start here with a name, or with words \
+from an error message or issue to locate the code involved. Returns brief symbols (id, qualified_name, label, \
+path, 1-based lines) with signature and score; page with `offset` = `next_offset`. \
 Example: {\"query\": \"parse config\", \"labels\": [\"Function\", \"Method\"], \"path_glob\": \"src/**\"}";
 
 const DESC_SEARCH_CODE: &str = "Grep the indexed file contents: literal text (default) or a regular expression \
@@ -156,8 +166,11 @@ Example: {\"qualified_name\": \"billing.service.InvoiceService.issue\", \"contex
 
 const DESC_TRACE: &str = "Walk the call graph from a symbol: who calls it (`callers`), what it calls (`callees`) or \
 both, up to `depth` hops (default 2). Every edge carries a confidence (0–1), the resolution strategy and the call \
-site (path + 1-based line); raise `min_confidence` to drop guesses. Other relations can be followed with \
-`edge_types` (e.g. [\"CALLS\", \"INHERITS\", \"IMPORTS\"]). Use it for impact analysis before changing a function. \
+site (path + 1-based line); raise `min_confidence` to drop guesses. Tests are left out (counted in \
+`tests_excluded`) unless `include_tests` is true; `labels` keeps only some neighbour labels (e.g. [\"Function\", \
+\"Method\"]). A `File` caller is module-level code; a `Class` callee is a constructor call. Other relations can be \
+followed with `edge_types` (e.g. [\"CALLS\", \"INHERITS\", \"IMPORTS\", \"TESTS\"]). Use it for impact analysis \
+before changing a function. \
 Example: {\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\", \"depth\": 3}";
 
 const DESC_GET_FILE_OUTLINE: &str = "Outline of one file: its classes, functions, methods and other definitions, \

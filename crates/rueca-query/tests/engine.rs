@@ -296,7 +296,7 @@ fn get_snippet_symbol_and_range() {
 fn trace_both_directions() {
     let f = fixture();
     let e = engine(&f);
-    let r = call(&e, "trace", json!({"qualified_name": "InvoiceService.issue"}));
+    let r = call(&e, "trace", json!({"qualified_name": "InvoiceService.issue", "include_tests": true}));
     let node = |b: Value, d: u32, dir: &str| with(b, json!({"depth": d, "direction": dir}));
     let edge = |src: &Value, dst: &Value, conf: f64, strategy: &str, line: u32| {
         json!({
@@ -318,9 +318,25 @@ fn trace_both_directions() {
                 edge(&issue_brief(), &helper_brief(), 0.95, "same_module", 10),
                 edge(&test_issue_brief(), &issue_brief(), 0.5, "unique_name", 17),
             ],
-            "truncated": false
+            "truncated": false,
+            "tests_excluded": 0
         })
     );
+
+    // By default tests are left out (and counted); their edges too.
+    let r = call(&e, "trace", json!({"qualified_name": "InvoiceService.issue"}));
+    assert_eq!(r["nodes"], json!([node(run_brief(), 1, "callees"), node(helper_brief(), 1, "callees")]));
+    assert_eq!(r["edges"].as_array().unwrap().len(), 2);
+    assert_eq!(r["tests_excluded"], 1);
+    let r = call(&e, "trace", json!({"qualified_name": "InvoiceService.issue", "direction": "callees"}));
+    assert_eq!(r["tests_excluded"], 0);
+    // Following TESTS edges includes tests unless told otherwise.
+    let tests = json!({"qualified_name": "InvoiceService.issue", "direction": "callers", "edge_types": ["TESTS"]});
+    let r = call(&e, "trace", tests.clone());
+    assert_eq!(r["nodes"], json!([node(test_issue_brief(), 1, "callers")]));
+    let mut no_tests = tests;
+    no_tests["include_tests"] = json!(false);
+    assert_eq!(call(&e, "trace", no_tests)["tests_excluded"], 1);
 
     // Confidence filter drops the weak edges.
     let r = call(&e, "trace", json!({"id": ISSUE_ID, "min_confidence": 0.7}));
@@ -351,6 +367,15 @@ fn trace_both_directions() {
     let r = call(&e, "trace", json!({"name": "test_issue", "direction": "callees", "limit": 1}));
     assert_eq!(r["nodes"].as_array().unwrap().len(), 1);
     assert_eq!(r["truncated"], true);
+
+    // `labels` restricts reported and traversed neighbours; the root (a test)
+    // is never filtered. The constructor call to the class is dropped.
+    let r = call(&e, "trace", json!({"name": "test_issue", "direction": "callees", "depth": 2, "labels": ["Method"]}));
+    let got: Vec<&str> = r["nodes"].as_array().unwrap().iter().map(|n| n["qualified_name"].as_str().unwrap()).collect();
+    assert_eq!(got, ["pkg.service.InvoiceService.issue", "pkg.service.Base.run"]);
+    let r = call(&e, "trace", json!({"name": "test_issue", "direction": "callees", "labels": ["Class"]}));
+    assert_eq!(r["nodes"].as_array().unwrap().len(), 1);
+    assert!(err(&e, "trace", json!({"name": "issue", "labels": ["Fn"]})).contains("unknown label `Fn`"));
 
     // Other edge kinds.
     let r = call(&e, "trace", json!({"name": "InvoiceService", "direction": "callees", "edge_types": ["INHERITS"]}));

@@ -251,14 +251,17 @@ impl Engine {
         if sel.is_empty() {
             anyhow::bail!("one of `id`, `qualified_name` or `name` is required");
         }
+        let labels = parse_labels(a.labels.as_deref())?;
+        let include_tests = a.include_tests.unwrap_or(kinds.contains(&EdgeKind::Tests));
         let view = self.view(a.repo.as_deref(), id_repo(sel.id).as_deref())?;
         let root = view.lookup(&sel)?.node;
+        let filter = NeighbourFilter { labels: &labels, include_tests };
         let dirs: &[Dir] = match a.direction.unwrap_or(DirectionArg::Both) {
             DirectionArg::Callers => &[Dir::Callers],
             DirectionArg::Callees => &[Dir::Callees],
             DirectionArg::Both => &[Dir::Callers, Dir::Callees],
         };
-        let out = bfs(&view, root, dirs, &kinds, depth, min_conf, limit);
+        let out = bfs(&view, root, dirs, &kinds, depth, min_conf, limit, &filter);
 
         let mut nodes: Vec<(u32, Dir, String, NodeId)> =
             out.nodes.iter().map(|&(d, dir, n)| (d, dir, view.node(n).qualified_name.clone(), n)).collect();
@@ -294,6 +297,7 @@ impl Engine {
                 })
                 .collect(),
             truncated: out.truncated,
+            tests_excluded: out.tests_excluded.len() as u32,
         })
     }
 
@@ -338,11 +342,37 @@ pub(crate) struct BfsOut {
     /// (src, dst, kind) → strongest edge metadata.
     pub edges: BTreeMap<(NodeId, NodeId, EdgeKind), rueca_model::EdgeMeta>,
     pub truncated: bool,
+    /// Test neighbours skipped by the filter.
+    pub tests_excluded: HashSet<NodeId>,
+}
+
+/// Which neighbours `trace` reports and traverses (the root is never filtered).
+pub(crate) struct NeighbourFilter<'a> {
+    /// Allowed labels; empty = all.
+    pub labels: &'a [Label],
+    pub include_tests: bool,
+}
+
+impl NeighbourFilter<'_> {
+    /// `Err(true)` = skipped because it is a test.
+    fn check(&self, view: &View, n: NodeId) -> Result<(), bool> {
+        let node = view.node(n);
+        let is_test = node.is_test || node.label == Label::Test;
+        if is_test && !self.include_tests {
+            return Err(true);
+        }
+        if !self.labels.is_empty() && !self.labels.contains(&node.label) {
+            return Err(false);
+        }
+        Ok(())
+    }
 }
 
 /// Breadth-first traversal from `root`, level by level, callers before
 /// callees. Each node is visited once per direction; `limit` bounds the
-/// number of discovered nodes (all directions together).
+/// number of discovered nodes (all directions together). Neighbours rejected
+/// by `filter` are neither reported nor expanded, and their edges are dropped.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn bfs(
     view: &View,
     root: NodeId,
@@ -351,8 +381,10 @@ pub(crate) fn bfs(
     depth: u32,
     min_conf: f32,
     limit: usize,
+    filter: &NeighbourFilter<'_>,
 ) -> BfsOut {
-    let mut out = BfsOut { nodes: Vec::new(), edges: BTreeMap::new(), truncated: false };
+    let mut out =
+        BfsOut { nodes: Vec::new(), edges: BTreeMap::new(), truncated: false, tests_excluded: HashSet::new() };
     let mut visited: HashMap<Dir, HashSet<NodeId>> = dirs.iter().map(|&d| (d, HashSet::from([root]))).collect();
     let mut frontier: HashMap<Dir, Vec<NodeId>> = dirs.iter().map(|&d| (d, vec![root])).collect();
     for level in 1..=depth {
@@ -369,6 +401,14 @@ pub(crate) fn bfs(
                     edges.sort_by_cached_key(|e| (view.node(e.other).qualified_name.clone(), e.other));
                     for e in edges {
                         if e.meta.confidence < min_conf {
+                            continue;
+                        }
+                        if e.other != root
+                            && let Err(is_test) = filter.check(view, e.other)
+                        {
+                            if is_test {
+                                out.tests_excluded.insert(e.other);
+                            }
                             continue;
                         }
                         let seen = visited[&dir].contains(&e.other);

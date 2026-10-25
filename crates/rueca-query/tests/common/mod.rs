@@ -303,6 +303,7 @@ pub fn demo(repo: &str, root: &str) -> (Builder, Ids) {
     b.edge(issue, run, EdgeKind::Calls, 0.6, Strategy::Heuristic, Some((pf, line_span(PY, 10))));
     b.edge(test_issue, invoice_service, EdgeKind::Calls, 0.9, Strategy::SameModule, Some((pf, line_span(PY, 16))));
     b.edge(test_issue, issue, EdgeKind::Calls, 0.5, Strategy::UniqueName, Some((pf, line_span(PY, 16))));
+    b.edge(test_issue, issue, EdgeKind::Tests, 0.5, Strategy::UniqueName, Some((pf, line_span(PY, 16))));
     b.edge(request, format_amount, EdgeKind::Calls, 0.95, Strategy::SameModule, Some((tf, line_span(TS, 4))));
     let ids = Ids { base, run, invoice_service, issue, helper, test_issue, format_amount, session, request, ts_helper };
     (b, ids)
