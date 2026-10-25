@@ -85,6 +85,7 @@
 //! | `file_nodes.offsets` | `[u32; F+1]` | CSR offsets by file |
 //! | `file_nodes.ids` | `[u32; _]` | symbol nodes per file (no File/Folder/Repository), sorted by (span start, id); no span sorts last |
 //! | `tantivy/<file>` | tantivy 0.27 files | symbol index: `meta.json` plus the files of its single segment |
+//! | `symbols.bodiless` (optional) | roaring bitmap | node ids of C/C++ `Function` / `Method` nodes whose source has no `{` (prototypes, in-class method declarations, `= default` / `= delete`, function-like macros); absent in segments written before it, which then rank declarations like bodies |
 //! | `ngrams.keys` | `[u32; K]` | sorted trigram keys `a<<16 \| b<<8 \| c` over ASCII-lowercased bytes |
 //! | `ngrams.offsets` | `[u64; K+1]` | byte offsets into `ngrams.postings` |
 //! | `ngrams.postings` | roaring bitmaps | per key, the serialized bitmap of file ids containing it |
@@ -132,12 +133,32 @@
 //! name lookup: `body` only breaks ties (boost 0.25), so a definition is not
 //! outranked by its callers. BM25 is tantivy's (k1 = 1.2, b = 0.75).
 //!
-//! The text score is multiplied by a query-independent **prior**: 0.5 for
-//! `Field` / `Variable` / `Constant`, 0.5 for tests (`is_test`, the `Test`
-//! label, or a test path: a `test`, `tests`, `__tests__`, `spec`, `specs`,
-//! `testing` or `e2e` directory, `test_*.py`, `*_test.py`, `conftest.py`,
-//! `*.test.*`, `*.spec.*`), multiplied together, 1 otherwise. Priors are
-//! computed from the node table at open (a tantivy `tweak_score` collector).
+//! The text score is multiplied by a query-independent **prior**, the
+//! product of every factor that applies (1 otherwise):
+//!
+//! - 0.5 for `Field` / `Variable` / `Constant`;
+//! - 0.5 for tests (`is_test`, the `Test` label, or a test path: a `test`,
+//!   `tests`, `__tests__`, `spec`, `specs`, `testing` or `e2e` directory,
+//!   `test_*.py`, `*_test.py`, `conftest.py`, `*.test.*`, `*.spec.*`);
+//! - 0.5 for **bodiless** C/C++ callables (`symbols.bodiless`): a prototype
+//!   in a header and its body in a source file share the qualified name, and
+//!   the prototype's short text would otherwise outscore the body on BM25;
+//! - 0.5 for every definition of a **copy** file: an amalgamation such as
+//!   `single_include/nlohmann/json.hpp`, detected from the node table — at
+//!   least 50 callables / types with a body and ≥ 4 lines, ≥ 60% of them
+//!   with a fingerprint (family, label, name, signature, line count) also
+//!   found in another file, and no single other file holding more than 70%
+//!   of those (fingerprints shared by more than 8 files are idioms, not
+//!   copies). An amalgamation copies many files; a file and its one copy,
+//!   per-platform siblings and generated stubs explain each other and are
+//!   not demoted;
+//! - 0.5 for **vendored** paths: a `third_party`, `thirdparty`,
+//!   `third-party`, `3rdparty`, `vendored`, `deps` or `dependencies`
+//!   directory (`vendor` and `node_modules` are not indexed).
+//!
+//! Priors are computed at open from the node and file tables and
+//! `symbols.bodiless` (a tantivy `tweak_score` collector), so changing them
+//! needs no re-index.
 //!
 //! Labels and language are exact-term filters (an empty label list excludes
 //! `File`, `Folder`, `Module`, `Repository`, and `Key` / `Document` unless the
@@ -230,6 +251,7 @@ mod bundle;
 mod graph;
 mod ngram;
 mod packs;
+mod priors;
 mod segment;
 mod store;
 mod symbols;

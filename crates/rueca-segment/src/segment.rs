@@ -153,7 +153,17 @@ impl Inner {
             return Err(corrupt("ngrams.text_files out of range"));
         }
 
-        let symbols = SymbolIndex::open(&bundle, &nodes, &files)?;
+        // Optional (added without a format bump): absent in older segments,
+        // which then rank declarations like bodies.
+        let bodiless = match bundle.bytes(symbols::BODILESS_COMPONENT) {
+            Ok(b) => RoaringBitmap::deserialize_from(b)
+                .map_err(|e| corrupt(format!("{}: {e}", symbols::BODILESS_COMPONENT)))?,
+            Err(_) => RoaringBitmap::new(),
+        };
+        if bodiless.max().is_some_and(|m| m as usize >= n) {
+            return Err(corrupt(format!("{} out of range", symbols::BODILESS_COMPONENT)));
+        }
+        let symbols = SymbolIndex::open(&bundle, &nodes, &files, &bodiless)?;
         Ok(Inner {
             meta,
             nodes,

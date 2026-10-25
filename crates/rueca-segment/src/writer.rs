@@ -11,7 +11,7 @@ use rueca_model::{ResolvedGraph, SnapshotInfo, git_blob_sha};
 
 use crate::bundle::BundleWriter;
 use crate::packs::{BlobIndex, BlobLoc, PackReader, PackWriter, Sha, compress, parse_sha};
-use crate::{ContentSource, FORMAT_VERSION, Result, SegmentError, SegmentMeta, graph, ngram, store, symbols};
+use crate::{ContentSource, FORMAT_VERSION, Result, SegmentError, SegmentMeta, graph, ngram, priors, store, symbols};
 
 fn slug(s: &str, max: usize) -> String {
     let mut out = String::new();
@@ -224,6 +224,14 @@ pub(crate) fn write_segment(
         }
     }
 
+    // C/C++ callables without a body, for the declaration prior.
+    let bodiless: RoaringBitmap = bodies
+        .iter()
+        .enumerate()
+        .filter(|(i, b)| b.as_deref().is_some_and(|b| priors::is_bodiless(&graph.nodes[*i], b)))
+        .map(|(i, _)| i as u32)
+        .collect();
+
     // ---- bundle ------------------------------------------------------------
     let mut meta = SegmentMeta {
         id: id.clone(),
@@ -243,6 +251,9 @@ pub(crate) fn write_segment(
         let scratch = tempfile::Builder::new().prefix("tantivy-").tempdir_in(&tmp_dir)?;
         symbols::write_symbols(&mut w, &graph.nodes, &graph.files, &bodies, scratch.path())?;
         drop(scratch);
+        let mut bl = Vec::new();
+        bodiless.serialize_into(&mut bl)?;
+        w.add(symbols::BODILESS_COMPONENT, &bl)?;
         let (keys, offsets, post) = ngram::serialize_postings(postings)?;
         w.add_pod("ngrams.keys", &keys)?;
         w.add_pod("ngrams.offsets", &offsets)?;

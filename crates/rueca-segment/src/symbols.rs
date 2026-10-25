@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use globset::GlobMatcher;
+use roaring::RoaringBitmap;
 use rueca_model::{FileEntry, Label, LanguageFamily, Node};
 use tantivy::collector::TopDocs;
 use tantivy::directory::error::{DeleteError, LockError, OpenReadError, OpenWriteError};
@@ -27,10 +28,14 @@ use tantivy::schema::{Field, IndexRecordOption, NumericOptions, STRING, Schema, 
 use tantivy::{Directory, Index, IndexReader, ReloadPolicy, Searcher, TantivyDocument, Term};
 
 use crate::bundle::{Bundle, BundleWriter, SharedMmap};
+use crate::priors;
 use crate::tokenizer::{CODE_TOKENIZER, CodeTokenizer, tokens};
 use crate::{Result, SegmentError, SymbolHit, SymbolQuery};
 
 pub(crate) const TANTIVY_PREFIX: &str = "tantivy/";
+/// Optional component (added without a format bump): roaring bitmap of the
+/// node ids that are C/C++ callables without a body ([`priors::is_bodiless`]).
+pub(crate) const BODILESS_COMPONENT: &str = "symbols.bodiless";
 pub(crate) const DEFAULT_LIMIT: usize = 20;
 
 /// Field boosts. `body` (the symbol's source) carries the most weight for
@@ -50,10 +55,6 @@ const QNAME_SUFFIX_BOOST: f32 = 20.0;
 /// Two adjacent query words (`session request`) equal to a qualified-name
 /// suffix (`Session.request`).
 const QNAME_PAIR_BOOST: f32 = 10.0;
-/// Score multiplier of fields, variables and constants.
-const DATA_PRIOR: f32 = 0.5;
-/// Score multiplier of tests (`is_test`, `Test` label or a test file path).
-const TEST_PRIOR: f32 = 0.5;
 /// Most qualified-name segments considered for suffix terms.
 const MAX_SUFFIX_SEGMENTS: usize = 16;
 /// Bytes of a symbol's source kept for its `body` field.
@@ -398,40 +399,19 @@ impl Directory for BundleDirectory {
 pub(crate) struct SymbolIndex {
     reader: IndexReader,
     fields: Fields,
-    /// Score multiplier per node (doc id), see [`prior`].
+    /// Score multiplier per node (doc id), see [`crate::priors`].
     priors: Arc<[f32]>,
-}
-
-/// Query-independent score multiplier of a node (see the crate docs): data
-/// (fields, variables, constants) and tests rank below functions, methods and
-/// types with the same text score.
-pub(crate) fn prior(node: &Node, files: &[FileEntry]) -> f32 {
-    let label = match node.label {
-        Label::Field | Label::Variable | Label::Constant => DATA_PRIOR,
-        _ => 1.0,
-    };
-    let path = node.file.and_then(|f| files.get(f as usize)).map_or("", |f| f.path.as_str());
-    let test = node.is_test || node.label == Label::Test || is_test_path(path);
-    if test { label * TEST_PRIOR } else { label }
-}
-
-/// Test files by path: a `test`, `tests`, `__tests__`, `spec`, `specs`,
-/// `testing` or `e2e` directory, or a `test_*.py`, `*_test.py`, `conftest.py`,
-/// `*.test.*` or `*.spec.*` file name.
-fn is_test_path(path: &str) -> bool {
-    let mut segs: Vec<&str> = path.split('/').collect();
-    let name = segs.pop().unwrap_or("");
-    if segs.iter().any(|s| matches!(*s, "test" | "tests" | "__tests__" | "spec" | "specs" | "testing" | "e2e")) {
-        return true;
-    }
-    let stem = name.split('.').next().unwrap_or(name);
-    (name.ends_with(".py") && (stem.starts_with("test_") || stem.ends_with("_test") || stem == "conftest"))
-        || name.split('.').skip(1).any(|p| p == "test" || p == "spec")
 }
 
 impl SymbolIndex {
     /// Opens the embedded index and checks it against the node table.
-    pub fn open(bundle: &Bundle, node_table: &[Node], files: &[FileEntry]) -> Result<SymbolIndex> {
+    /// `bodiless` is the `symbols.bodiless` component (empty when absent).
+    pub fn open(
+        bundle: &Bundle,
+        node_table: &[Node],
+        files: &[FileEntry],
+        bodiless: &RoaringBitmap,
+    ) -> Result<SymbolIndex> {
         let nodes = node_table.len();
         let dir = BundleDirectory::new(bundle);
         if !dir.files.contains_key(Path::new("meta.json")) {
@@ -446,7 +426,7 @@ impl SymbolIndex {
             .try_into()
             .map_err(|e| SegmentError::Corrupt(format!("symbol index: {e}")))?;
         check_doc_ids(&reader.searcher(), nodes).map_err(|e| SegmentError::Corrupt(format!("symbol index: {e}")))?;
-        let priors: Arc<[f32]> = node_table.iter().map(|n| prior(n, files)).collect();
+        let priors: Arc<[f32]> = priors::priors(node_table, files, bodiless).into();
         Ok(SymbolIndex { reader, fields, priors })
     }
 
@@ -597,25 +577,6 @@ mod tests {
     }
 
     #[test]
-    fn test_paths() {
-        for p in [
-            "tests/x.py",
-            "pkg/test_x.py",
-            "pkg/x_test.py",
-            "conftest.py",
-            "src/__tests__/a.ts",
-            "a.spec.ts",
-            "b.test.jsx",
-            "e2e/run.js",
-        ] {
-            assert!(is_test_path(p), "{p}");
-        }
-        for p in ["src/testing_utils.py", "src/latest.ts", "pkg/contest.py", "spec.md"] {
-            assert!(!is_test_path(p), "{p}");
-        }
-    }
-
-    #[test]
     fn bodies_are_span_text() {
         let src = b"def f():\n    return g()\n";
         let mut nodes = vec![node(0), node(1)];
@@ -644,10 +605,10 @@ mod tests {
         // Only live files were embedded.
         let live = index.load_metas().unwrap().list_segment_files().len();
         assert!(bundle.components.len() <= live + 1);
-        let idx = SymbolIndex::open(&bundle, &nodes, &[]).unwrap();
+        let idx = SymbolIndex::open(&bundle, &nodes, &[], &RoaringBitmap::new()).unwrap();
         let mut more = nodes.clone();
         more.push(node(250));
-        assert!(matches!(SymbolIndex::open(&bundle, &more, &[]), Err(SegmentError::Corrupt(_))));
+        assert!(matches!(SymbolIndex::open(&bundle, &more, &[], &RoaringBitmap::new()), Err(SegmentError::Corrupt(_))));
         // All 84 `handler0` nodes tie on score: ties come back in node order,
         // and paging across the tie is exact.
         let q = SymbolQuery { text: "handler0".into(), limit: 10, ..Default::default() };

@@ -1,5 +1,49 @@
 # Decisions log
 
+## 2026-10-25 — Ranking: bodies over declarations, sources over copies
+
+C++ function localization failed its RFC 0004 floor (Function Acc@10 24.2
+vs BM25 42.4, Δ −18.2, CI −33.3 to −6.1) and C file localization was
+borderline (File Acc@5 Δ −16.7, CI −33.3 to 0.0). Prototypes in headers
+outscored the bodies they declare (a one-line text wins on BM25 length
+normalization), and amalgamated single headers (`single_include/`,
+simdjson's `singleheader/`, Catch2's `extras/catch_amalgamated.*`)
+doubled every hit. Three query-independent priors of 0.5, computed at open
+(`rueca-segment` `priors`), no segment format bump:
+
+- **Bodiless C/C++ callables** — `Function` / `Method` nodes whose source
+  has no `{` (prototypes, in-class method declarations, `= default` /
+  `= delete`, function-like macros), marked at write time in a new optional
+  component `symbols.bodiless`. Older segments lack it and rank as before
+  until re-indexed.
+- **Copy files** — detected from the node table: ≥ 50 callables / types
+  with a body and ≥ 4 lines, ≥ 60% of them fingerprinted (family, label,
+  name, signature, line count) in another file, no single other file
+  holding > 70% of those. On the benchmark corpora this flags exactly the
+  amalgamations (partner share 0.08–0.30, one early nlohmann header 0.65)
+  and `monaco.d.ts`; per-platform siblings, generated stubs and
+  test-file families (0.79–1.0) are not flagged. The qualified name is not
+  part of the fingerprint because amalgamation scripts rename namespaces.
+- **Vendored directories** — `third_party`, `thirdparty`, `third-party`,
+  `3rdparty`, `vendored`, `deps`, `dependencies` (no gold file of the 305 S1
+  instances lives under one).
+
+Result (S1 `kw`, gated, Rueca vs BM25 paired): C++ Function Acc@10 24.2 →
+36.4 (Δ −6.1, CI −21.2 to +9.1, floor ⚠ instead of ❌), File Acc@5 81.6
+unchanged; C File Acc@5 63.3 → 73.3 (Δ −6.7, CI −23.3 to +10.0), Function
+Acc@10 30.0 unchanged; every other language identical. S3 symbol lookup
+Acc@1: C 81 → 99, C++ 45 → 61. Calibration split: nng Func Acc@10 40 → 60,
+botan 60 → 80. The diagnosis read the gated C/C++ misses (as the task
+asked); the thresholds were set from the copy statistics of every corpus
+file and the 0.5 strength from a flat region (0.2–0.7 give the same
+calibration and gated Func Acc@10), not fitted per instance.
+
+Tried and dropped: collapsing hits that share a qualified name (keeps the
+best copy only; lost File Acc@5 on C++ and Func Acc@10 elsewhere), a 0.5
+prior on Markdown sections (no effect), body boost 12 or name / qualified
+name boosts 2 / 1.5 (Python / Go file accuracy up, C / C++ / PHP / Java
+function accuracy down).
+
 ## 2026-10-25 — Structure floors: members by kind, overloads by type, receiver types from assignments
 
 Work toward the structure floors of [RFC 0004](rfcs/0004-quality-and-benchmark.md)
