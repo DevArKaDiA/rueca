@@ -107,15 +107,18 @@ Repository local/shop
 
 Method request ─CALLS─▶ Method send     0.90  type_resolved   (self.send → member of the enclosing class)
 Function get   ─CALLS─▶ Class Session   0.95  import_resolved (Session bound by `from .http import Session`)
-Function get   ─CALLS─▶ Method request  0.50  heuristic       (receiver `Session()` is untyped; `request` is the only method with that name)
+Function get   ─CALLS─▶ Method request  0.85  type_resolved   (receiver `Session()` constructs a `Session`)
 ```
 
 The last edge is the interesting one. A human sees that `Session()` returns a
-`Session`, so `.request` is `Session.request`. The alpha has no receiver
-typing (see §7), so the resolver falls back to "the only method called
-`request` in the project" and marks the edge 0.5 / `heuristic`. An agent that
-needs certainty can ask `trace` with `min_confidence: 0.6` and that edge
-disappears. The sections below reference this example.
+`Session`, so `.request` is `Session.request`. The pack sees it too: calling
+a class-like name constructs an instance, so it reports the receiver as
+`$type:Session` (§4.2), and the resolver finds `request` in that class
+(strategy 5, 0.85). Without that evidence — `make().request()` with `make`
+defined in another file — the resolver would fall back to "the only method
+called `request` in the project" and mark the edge 0.5 / `heuristic`; an
+agent that needs certainty can ask `trace` with `min_confidence: 0.6` and
+such edges disappear. The sections below reference this example.
 
 ## 4. Building the graph
 
@@ -149,7 +152,7 @@ references:
 
 and `shop/api.py` yields the import `from .http import Session` (level 1),
 the function `get`, and two calls inside it: `Session` (no receiver) and
-`request` (receiver `Session()`).
+`request` (receiver `$type:Session`, see *receiver types* below).
 
 What packs deliberately do and don't do:
 
@@ -194,14 +197,44 @@ What packs deliberately do and don't do:
 - **Java receivers are typed from declarations.** Parameters, locals
   (`var x = new T()` included), pattern variables, `catch` parameters and
   fields of the enclosing classes are declared with a type, so `x.m()`
-  is reported with the receiver `$type:T` (§4.4, typed receiver); locals
-  come from a vendored `locals.scm` and are never references. Overloaded
-  methods and constructors get a parameter suffix in their qualified name
-  (`Parser.parse(String)`, `Parser.parse(String,int)`; a method that is
-  not overloaded stays bare), calls carry their argument count, and
-  constructors are members named like their class. Fully qualified type
-  names (`com.acme.Owner`) and static on-demand imports are recorded as
-  extra single imports so they resolve like explicit ones.
+  is reported with the receiver `$type:T` (§4.4, typed receiver), written
+  as in the source; a bounded type parameter (`F extends Figure`) stands
+  for its bound, and a call on the result of a method of the file's own
+  types (`getAsSingleElement().getAsBoolean()`) for its declared return
+  type. Locals come from a vendored `locals.scm` and are never references.
+  Overloaded methods and constructors get a parameter suffix in their
+  qualified name (`Parser.parse(String)`, `Parser.parse(String,int)`; a
+  method that is not overloaded stays bare), calls carry their argument
+  count and, in the name, the static types of the arguments the file
+  knows (`value$args:long`: literals, typed locals, parameters and fields,
+  `new T()`, casts), and constructors are members named like their class.
+  Anonymous classes (`new TypeAdapter<Foo>() {…}`) and enum constant
+  bodies are classes named after their base (`TypeAdapter$1`, children of
+  the enclosing definition), so their methods are definitions with their
+  own callers and `OVERRIDES`. Fully qualified type names
+  (`com.acme.Owner`) and static on-demand imports are recorded as extra
+  single imports so they resolve like explicit ones.
+- **Receiver types from declarations and assignments** (TS/JS, Python;
+  "strategy 5"). A per-file pre-pass records what every binding of a name
+  says about its type, per function (and for module-level names and class
+  fields): an annotation (`c: Context`, `let x: Foo = …`,
+  `opt?: Foo | undefined`, Python `req: Request`, `Optional[Foo]`,
+  `"Foo"`), or a value that constructs one (`new T()`, `v as T`, `<T>v`;
+  Python `x = Foo(…)`, or a call of a function or method of the same file
+  with a return annotation, `ctx = self.request_context(env)`). A name is
+  typed when its annotations agree, or, without one, when every binding
+  and assignment of it constructs the same type; anything else — a
+  reassignment to another or an unknown value, destructuring, `for` /
+  `catch` / `with` targets, a parameter without annotation — leaves it
+  untyped. Class fields work the same way (`#node: Node`,
+  `private cache = new Cache()`, TS parameter properties,
+  `this.x = new T()`; Python `self.x = Foo()`, class-body annotations), and
+  so do module-level bindings used in functions
+  (`const app = new Hono(); … app.get()`). The call is then reported with
+  the receiver `$type:T`. Types are file-local: a callback parameter typed
+  only by context (`app.use((c, next) => …)`) or a value returned by a
+  function of another file stays untyped. PHP does the same from its own
+  declarations (`(new Foo())->m()`, inline `/** @var Foo $x */` included).
 - **C and C++ names carry their namespace and class path**
   (`geo::Circle::area`), like PHP's: code never refers to files, so the
   module name is empty. Prototypes and in-class method declarations are
@@ -446,10 +479,21 @@ order; the first one that succeeds wins and stamps the edge:
 | 4 | same module (`same_module`) | no receiver; top-level definition of the same file | 0.90 |
 | 4 | same-module class (`same_module`) | receiver is a top-level class of the same file | 0.85 |
 | 6 | unique name (`unique_name`) | no receiver; exactly one compatible non-test definition with that name in the project | 0.60 |
+| 5 | typed receiver (`type_resolved`) | receiver `$type:T` (§4.2: declared, constructed or returned type known in the file): `T` resolves like a type reference, the member through its bases; a missing member of a type with a base outside the project is external | 0.85 |
 | 6 | unique method (`heuristic`) | call with an unknown receiver; exactly one method with that name (≥ 4 chars, not a common builtin method like `keys`, `then`) | 0.50 |
 
-(Strategy 5, receiver typing from assignments, is not implemented in the
-alpha for Python and ECMAScript.)
+**Members by kind.** A type's members are kept in separate slots by kind:
+callables, nested types and values (fields, properties, constants). A
+call looks for a callable first (then a nested type, then a value), a
+read or write for a value first (then a callable that is not a
+constructor, then a type), a type reference or a receiver path for a type
+first; each slot is searched through the whole base hierarchy before the
+next. So a Java field `code` and method `code()` do not hide each other,
+and a constructor — a Java or C++ method named like its class — is reached
+by calls only: a type named like an enclosing class or its superclass is
+that type, never its constructor. An ECMAScript function that owns
+methods (`View.prototype.render = function render() {}`) counts as a type
+for `this` and `$type:View` receivers.
 
 Rungs and rules that the RFC 0003 packs opt into (Python, ECMAScript, PHP
 and Markdown resolve exactly as above; Terraform uses directory scope; Go
@@ -462,11 +506,11 @@ overrides and includes):
 |---|---|---|---|
 | package scope | `module_scope` = `Package` / `Directory` | rung 4 and module lookups cover every file of the package; a top-level `T.m` (Go method) is a member of `T` | as rung 4 (0.90) |
 | implicit self (rung 1b) | `implicit_self` | a receiver-less name inside a method is first a member of the enclosing class, then of outer classes (C++, Java) | `type_resolved` 0.90 / 0.85 inherited |
-| typed receiver (strategy 5) | receiver text `$type:T` | `T` resolves like a type reference (or as an exact qualified name), the member through its bases | `type_resolved` 0.85 |
+| typed receiver (strategy 5) | receiver text `$type:T` | `T` resolves like a type reference (or as an exact qualified name), the member through its bases (also for Python, ECMAScript and PHP, whose packs type receivers from declarations and assignments) | `type_resolved` 0.85 |
 | normalized self | receiver `$self` in `self_receivers` | the enclosing type, or the type named by the method's qualified-name prefix (Go) | `type_resolved` 0.90 |
 | declarations | `Definition::is_declaration` | a C/C++ prototype or in-class declaration is replaced by its unique body | as the rung |
-| overloads | `overloads` | `parse(String)` / `parse(Reader)` chosen by the call's argument count, else all linked | as the rung, × 0.8 when several |
-| overrides | `overrides` | `OVERRIDES` from a method to the same-named (same-arity) method of each base | `type_resolved` 0.90 |
+| overloads | `overloads` | `parse(String)` / `parse(Reader)` chosen by the call's argument count, then by the static argument types the pack reports (`value$args:long`): overloads that cannot accept a known argument (a primitive that does not widen, a non-`String` for `String`) are dropped, and of the rest the one whose parameter types equal the arguments', else the one whose primitive parameters are the narrowest, wins; else all remaining linked | as the rung, × 0.8 when several |
+| overrides | `overrides` | `OVERRIDES` from a method to the same-named method of each base, paired by signature: same parameter count (overload suffix, else the signature's parameter list) and, among several, the same parameter types | `type_resolved` 0.90 |
 | includes | C/C++ family | `#include` is a transitive star import | as rung 3 |
 | implicit interfaces | Go family | a type whose method names (own and promoted through embedding) cover an interface's gets `IMPLEMENTS` to it and `OVERRIDES` from each covering method; ≤ 64 implementers per interface | `heuristic` 0.50 |
 
@@ -515,20 +559,21 @@ Java references go through the same ladder with the RFC 0003 rules on:
 | `m()` bound by `import static` (single, on demand) | imported binding (`import_resolved`) | 0.95 |
 | `Owner`, `new Owner(…)`: imported, or in the same package (any file) | imported binding / same module | 0.95 / 0.90 (constructor × 0.95) |
 | `Owner.find()`, `Color.RED` | imported / same-package class (`import_resolved` / `same_module`) | 0.85 |
-| `x.m()` with `x` declared as `T`, `new T().m()`, `((T) e).m()` | typed receiver (`type_resolved`) | 0.85 |
-| `this.m()`, `super.m()`, `this(…)`, `super(…)` | self / `super` (`type_resolved`) | 0.90 / 0.85 |
-| several overloads with the call's argument count | as the rule, × 0.8 each | |
+| `x.m()` with `x` declared as `T`, `new T().m()`, `((T) e).m()`, `own().m()` with `own` declared `T own()` in the file | typed receiver (`type_resolved`) | 0.85 |
+| `this.m()`, `super.m()`, `this(…)`, `super(…)`; inside an anonymous class, its own and inherited members first | self / `super` (`type_resolved`) | 0.90 / 0.85 |
+| several overloads with the call's argument count, not told apart by the argument types | as the rule, × 0.8 each | |
 | anything else (`a.b().c()`) | unique method (`heuristic`) | 0.50 |
 
 Overriding methods get `OVERRIDES` to the same-named method of each
-resolved superclass and interface (`type_resolved` 0.90), so `trace` on an
-interface method with `edge_types: ["CALLS", "OVERRIDES"]` reaches the
-implementations. JDK and dependency types are external; `java.lang`
+resolved superclass and interface, paired by signature when the base is
+overloaded (`type_resolved` 0.90), so `trace` on an interface method with
+`edge_types: ["CALLS", "OVERRIDES"]` reaches the implementations,
+anonymous classes included. JDK and dependency types are external; `java.lang`
 names are builtins.
 
 In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
-→ 0.95; `Session().request` has an unknown receiver, so only rung 6 applies
-→ 0.50.
+→ 0.95; `Session().request` has the receiver `$type:Session`, so rung 5
+applies → 0.85.
 
 **From reference kind to edge kind.**
 
@@ -809,15 +854,20 @@ use `min_confidence: 0.6` to drop pure name guesses, `0.85` for
 
 Known gaps behind low-confidence or missing edges, in rough order of impact:
 
-- **No receiver typing**: `x = Session(); x.request()` or
-  `const app = new Hono(); app.get()` resolve by name only (0.50) or not at
-  all. This is the largest source of misses (planned "strategy 5").
+- **Receiver typing is file-local** (strategy 5): `x = Session();
+  x.request()`, `const app = new Hono(); app.get()` and annotated
+  parameters resolve, but a receiver whose type only another file knows —
+  the result of a function or method declared elsewhere
+  (`assertThat(x).isEqualTo(y)`, builder chains), a callback parameter
+  typed by context (`app.use((c, next) => c.header())`), an element of a
+  collection — resolves by name only (0.50) or not at all. This is now the
+  largest source of misses.
 - No call-graph knowledge of third-party code; calls into dependencies stop
   at the import.
-- Java: receivers are typed from declarations only — not from the return
-  type of another call (`assertThat(x).isEqualTo(y)`, builder chains),
-  not from fields inherited from a class in another file; anonymous
-  classes are not definitions.
+- Java: receivers are not typed from fields inherited from a class in
+  another file; overloads that differ only by class parameters (subtyping
+  is not known) are linked together (× 0.8) unless an argument type matches
+  one exactly; method references (`Text::upper`) are calls without arity.
 - Python MRO is approximated depth-first (differs from C3 only for diamond
   inheritance).
 - Dynamic dispatch, decorators that replace functions, `getattr`,

@@ -73,15 +73,16 @@
 //! | 3 | Imported class | receiver is an imported class (static member) | `ImportResolved` | 0.85 |
 //! | 4 | Same module | no receiver; top-level definition of the same file | `SameModule` | 0.90 |
 //! | 4 | Same-module class | receiver is a top-level class of the same file | `SameModule` | 0.85 |
+//! | 5 | Typed receiver | receiver `$type:T`: `T` resolves as an exact global qualified type name, else like a `Type` reference through the ladder; the member through its bases (see *RFC 0003 hooks*) | `TypeResolved` | 0.85 |
 //! | 6 | Unique name | no receiver; exactly one compatible non-test definition with that name in the same language family, not a builtin | `UniqueName` | 0.60 |
 //! | 6 | Unique method | call with an unknown receiver; exactly one compatible method with that name, name ≥ 4 chars, not a builtin and not a common builtin-type method (`update`, `keys`, `then`, `forEach`, …) | `Heuristic` | 0.50 |
 //! | — | Constructor | a `Call`/`New` that hits a class also calls its `__init__` / `constructor` (own or inherited) | as the class edge | × 0.95 |
 //!
-//! (Strategy 5, constructor-based receiver typing, needs assignment facts and
-//! is not implemented in the alpha; packs of typed languages report declared
-//! receiver types as `$type:T`, see *RFC 0003 hooks*.) Self receivers that miss, and names bound
-//! to external modules or builtin objects, stop resolution without falling back
-//! to strategy 6.
+//! Strategy 5 needs no assignment facts: packs type receivers in the file
+//! (declarations, constructions, annotated returns; every pack's crate docs
+//! say which) and report them as `$type:T`. Self receivers that miss, and
+//! names bound to external modules or builtin objects, stop resolution
+//! without falling back to strategy 6.
 //!
 //! Label compatibility for strategy 6: without a receiver, `Call`/`Decorator`
 //! → Function, Class (a bare call never targets a method); `New` → Class,
@@ -95,6 +96,20 @@
 //! depth-first, left-to-right (cycle-safe, depth ≤ 10). This approximates the
 //! Python MRO (C3 linearization differs only for diamonds) and is exact for
 //! ECMAScript single inheritance.
+//!
+//! **Members by kind.** A type keeps one member per name *and kind*:
+//! callables, nested types and values (fields, properties, constants), so a
+//! field and a method with one name (Java `code` / `code()`) do not hide
+//! each other. The reference kind decides the order: `Call` / `New` /
+//! `Decorator` look for a callable, then a type, then a value; `Read` /
+//! `Write` for a value, then a callable that is not a constructor, then a
+//! type; `Type` references and receiver paths for a type, then a value,
+//! then a callable that is not a constructor. Each slot is searched through
+//! the whole hierarchy before the next. A constructor is a callable named
+//! like the type that declares it (Java, C/C++), so it is reached by calls
+//! only: a type name equal to an enclosing class or its superclass is the
+//! type. An ECMAScript `Function` that owns methods (prototype assignments)
+//! is a type for `this` and for `$type:` receivers.
 //!
 //! # PHP
 //!
@@ -130,7 +145,9 @@
 //! # RFC 0003 hooks
 //!
 //! Opt-in behaviour for the next languages (`rueca-extract` crate docs list
-//! the hooks); none of it applies to Python, ECMAScript, PHP or Markdown.
+//! the hooks); of it, only `$type:` receivers apply to Python, ECMAScript
+//! and PHP (their packs type receivers in the file too), nothing to
+//! Markdown.
 //!
 //! - **Package scope** (`ModuleScope::Package`: files of one family with the
 //!   same module name; `ModuleScope::Directory`: files of one language in a
@@ -163,12 +180,24 @@
 //!   candidates.
 //! - **Overloads** (`overloads`): definitions whose qualified name ends in a
 //!   parameter suffix (`parse(String)`) are grouped by (family, name without
-//!   suffix); a reference that hits one is linked to the overload whose
-//!   arity matches `Reference::arity`, else to all of them (× 0.8).
-//!   Constructors of Java and C/C++ are the members named like the class.
+//!   suffix); a reference that hits one is linked to the overloads whose
+//!   arity fits `Reference::arity`, narrowed by the static argument types a
+//!   pack writes into the name (`value$args:long,?`,
+//!   `rueca_extract::with_arg_types`): overloads that cannot accept a known
+//!   argument type are dropped (a primitive that does not widen, a
+//!   non-`String` class for `String`; class to class is always possible),
+//!   then the one whose parameter types equal the known argument types, else
+//!   the one whose parameters pass to every other's (the narrowest
+//!   primitives), wins. One candidate keeps the confidence; several are all
+//!   linked × 0.8; none fitting links the whole set × 0.8. Constructors of
+//!   Java and C/C++ are the members named like the class.
 //! - **`OVERRIDES`** (`overrides`): a method of a type → the method with the
-//!   same name (and arity) found in each resolved base (`TypeResolved`
-//!   0.90). For these families `IMPLEMENTS` targets also contribute members.
+//!   same name in each resolved base (`TypeResolved` 0.90), paired by
+//!   signature when the base has overloads: the parameter count must match
+//!   (overload suffix, else the parameter list of the definition's
+//!   signature), and among several, the overload with the same normalized
+//!   parameter types wins. Constructors override nothing. For these families
+//!   `IMPLEMENTS` targets also contribute members.
 //!
 //! # Go
 //!
@@ -245,6 +274,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use rueca_extract::{
     DATA_REF_ANY, DATA_REF_QN, LanguagePack, ModuleScope, ProjectFiles, Registry, SELF_RECEIVER, TYPE_RECEIVER_PREFIX,
+    split_arg_types,
 };
 use rueca_model::{
     Definition, Edge, EdgeKind, EdgeMeta, FileEntry, FileFacts, FileId, Import, Label, Language, LanguageFamily,
@@ -289,6 +319,56 @@ pub struct ResolveOutput {
 
 /// Maximum depth for transitive lookups (re-exports, base classes).
 const MAX_DEPTH: usize = 10;
+
+/// The members of a type that share one name, one slot per kind: a field
+/// and a method may share a name (Java `code` / `code()`), and a Java or
+/// C++ constructor is a method named like its class, which must not hide a
+/// nested type or stand for the class in a type lookup. First wins within a
+/// slot (overloads are found through their overload set).
+#[derive(Debug, Clone, Copy, Default)]
+struct MemberSlots {
+    /// Functions and methods (constructors included).
+    callable: Option<NodeId>,
+    /// Nested types.
+    ty: Option<NodeId>,
+    /// Fields, properties, constants and anything else.
+    value: Option<NodeId>,
+}
+
+/// One slot of [`MemberSlots`] as searched by [`Resolver::find_member`].
+#[derive(Debug, Clone, Copy)]
+enum Slot {
+    Callable,
+    /// A callable that is not a constructor of the type that declares it.
+    Method,
+    Type,
+    Value,
+}
+
+/// What a member lookup is for, which decides the order of the slots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Want {
+    /// A call or `new`: callable, then a nested type (Python `self.Inner()`,
+    /// Java `new Inner()`), then a value (a field holding a function).
+    Call,
+    /// A read or write: value, then a callable that is not a constructor
+    /// (a Python property, a method passed as a value), then a type.
+    Value,
+    /// A type, a receiver path segment or anything else: type, value, then a
+    /// callable that is not a constructor. Constructors are reached only by
+    /// calls.
+    Type,
+}
+
+impl Want {
+    pub(crate) fn of(kind: RefKind) -> Want {
+        match kind {
+            RefKind::Call | RefKind::New | RefKind::Decorator => Want::Call,
+            RefKind::Read | RefKind::Write => Want::Value,
+            _ => Want::Type,
+        }
+    }
+}
 
 /// Resolves a snapshot. `files` may be in any order; the resolver sorts by path.
 pub fn resolve(
@@ -369,6 +449,9 @@ struct RefItem<'a> {
     decorated: Option<LocalDefId>,
     /// Call arity, when the pack reports it (overload choice).
     arity: Option<u32>,
+    /// Static argument types, when the pack reports them (`?` = unknown;
+    /// `rueca_extract::with_arg_types`), for overload choice.
+    arg_types: Option<Vec<&'a str>>,
 }
 
 struct Resolver<'a> {
@@ -398,8 +481,9 @@ struct Resolver<'a> {
     child_by_name: Vec<HashMap<(LocalDefId, &'a str), LocalDefId>>,
     /// Per file: top-level definition by name (first exported one, else first).
     top_by_name: Vec<HashMap<&'a str, NodeId>>,
-    /// Members of each (canonical) definition node, by name; first wins.
-    members: HashMap<NodeId, BTreeMap<String, NodeId>>,
+    /// Members of each (canonical) definition node, by name, one slot per
+    /// kind of member (see [`MemberSlots`]); first wins within a slot.
+    members: HashMap<NodeId, BTreeMap<String, MemberSlots>>,
     /// Non-test definitions by simple name, for strategy 6.
     by_name: HashMap<String, Vec<NodeId>>,
     /// Per file, per import: resolved target file.
@@ -881,7 +965,7 @@ impl<'a> Resolver<'a> {
                     let owner = self.def_node[i][*p as usize];
                     let member = self.def_node[i][j];
                     if owner != member {
-                        self.members.entry(owner).or_default().entry(defs[j].name.clone()).or_insert(member);
+                        self.add_member(owner, &defs[j].name, member, defs[j].label);
                     }
                 }
             }
@@ -1475,8 +1559,8 @@ impl<'a> Resolver<'a> {
     }
 
     /// Member `name` of the class enclosing `scope` (`$this`, `self`, `static`).
-    fn self_member(&self, f: FileId, scope: Option<LocalDefId>, name: &str) -> Outcome {
-        match self.enclosing_type(f, scope).and_then(|c| self.find_member(c, name)) {
+    fn self_member(&self, f: FileId, scope: Option<LocalDefId>, name: &str, want: Want) -> Outcome {
+        match self.enclosing_type(f, scope).and_then(|c| self.find_member(c, name, want)) {
             Some((n, false)) => Outcome::Hit(n, Strategy::TypeResolved, 0.9),
             Some((n, true)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
             None => Outcome::Miss,
@@ -1484,10 +1568,10 @@ impl<'a> Resolver<'a> {
     }
 
     /// Member `name` of a base of the class enclosing `scope` (`super`, `parent`).
-    fn super_member(&self, f: FileId, scope: Option<LocalDefId>, name: &str) -> Outcome {
+    fn super_member(&self, f: FileId, scope: Option<LocalDefId>, name: &str, want: Want) -> Outcome {
         let found = self
             .enclosing_type(f, scope)
-            .and_then(|c| self.bases.get(&c)?.iter().find_map(|&b| self.find_member(b, name)));
+            .and_then(|c| self.bases.get(&c)?.iter().find_map(|&b| self.find_member(b, name, want)));
         match found {
             Some((n, _)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
             None => Outcome::Miss,
@@ -1529,8 +1613,12 @@ impl<'a> Resolver<'a> {
         };
         let selfs: &[&str] = pack.map_or(&[], |p| p.self_receivers());
         if selfs.contains(&receiver) || receiver == "parent" {
-            let outcome =
-                if receiver == "parent" { self.super_member(f, scope, name) } else { self.self_member(f, scope, name) };
+            let want = Want::of(item.kind);
+            let outcome = if receiver == "parent" {
+                self.super_member(f, scope, name, want)
+            } else {
+                self.self_member(f, scope, name, want)
+            };
             return match outcome {
                 Outcome::Miss => self.php_member_miss(self.enclosing_type(f, scope), || Outcome::Miss),
                 hit => hit,
@@ -1570,7 +1658,7 @@ impl<'a> Resolver<'a> {
                 None => (class, false),
             };
             return match self.php_class(f, class) {
-                Some((c, _)) => match self.find_member(c, name) {
+                Some((c, _)) => match self.find_member(c, name, Want::of(item.kind)) {
                     Some((n, _)) if instance => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
                     Some((n, _)) => Outcome::Hit(n, Strategy::ImportResolved, 0.85),
                     None => self.php_member_miss(Some(c), || self.unique_name(f, item.kind, name, true)),
@@ -1585,17 +1673,43 @@ impl<'a> Resolver<'a> {
 
     // -- members and bases ---------------------------------------------------
 
-    /// Member `name` of class `class`, searching resolved bases depth-first,
-    /// left-to-right. Returns the member and whether it was inherited.
-    fn find_member(&self, class: NodeId, name: &str) -> Option<(NodeId, bool)> {
-        let mut visited = Vec::new();
-        self.find_member_rec(class, name, 0, &mut visited).map(|(n, d)| (n, d > 0))
+    /// Records `member` (a definition with `label`) under `name` in the
+    /// slot of its kind (see [`MemberSlots`]); the first one wins.
+    pub(crate) fn add_member(&mut self, owner: NodeId, name: &str, member: NodeId, label: Label) {
+        let slots = self.members.entry(owner).or_default().entry(name.to_string()).or_default();
+        let slot = if label.is_callable() {
+            &mut slots.callable
+        } else if label.is_type() {
+            &mut slots.ty
+        } else {
+            &mut slots.value
+        };
+        slot.get_or_insert(member);
+    }
+
+    /// Member `name` of class `class` for a lookup of kind `want`, searching
+    /// resolved bases depth-first, left-to-right. Each slot is searched
+    /// through the whole hierarchy before the next one (see [`Want`]), so a
+    /// field never hides a method for a call, nor a method a field for a
+    /// read, and a constructor (a method named like its class) is reached
+    /// by calls only. Returns the member and whether it was inherited.
+    fn find_member(&self, class: NodeId, name: &str, want: Want) -> Option<(NodeId, bool)> {
+        let order: &[Slot] = match want {
+            Want::Call => &[Slot::Callable, Slot::Type, Slot::Value],
+            Want::Value => &[Slot::Value, Slot::Method, Slot::Type],
+            Want::Type => &[Slot::Type, Slot::Value, Slot::Method],
+        };
+        order.iter().find_map(|&slot| {
+            let mut visited = Vec::new();
+            self.find_member_rec(class, name, slot, 0, &mut visited).map(|(n, d)| (n, d > 0))
+        })
     }
 
     fn find_member_rec(
         &self,
         class: NodeId,
         name: &str,
+        slot: Slot,
         depth: usize,
         visited: &mut Vec<NodeId>,
     ) -> Option<(NodeId, usize)> {
@@ -1604,14 +1718,30 @@ impl<'a> Resolver<'a> {
         }
         visited.push(class);
         if let Some(m) = self.members.get(&class).and_then(|m| m.get(name)) {
-            return Some((*m, depth));
+            let found = match slot {
+                Slot::Callable => m.callable,
+                // A constructor is a callable named like its class.
+                Slot::Method => m.callable.filter(|_| name != self.nodes[class as usize].name),
+                Slot::Type => m.ty,
+                Slot::Value => m.value,
+            };
+            if let Some(n) = found {
+                return Some((n, depth));
+            }
         }
         for &b in self.bases.get(&class).map_or(&[][..], |v| v.as_slice()) {
-            if let Some(found) = self.find_member_rec(b, name, depth + 1, visited) {
+            if let Some(found) = self.find_member_rec(b, name, slot, depth + 1, visited) {
                 return Some(found);
             }
         }
         None
+    }
+
+    /// The constructor of `class` in families whose constructors are the
+    /// callables named like the class (Java, C/C++); own, not inherited.
+    fn named_constructor(&self, class: NodeId) -> Option<NodeId> {
+        let name = &self.nodes[class as usize].name;
+        self.members.get(&class).and_then(|m| m.get(name)).and_then(|s| s.callable)
     }
 
     fn resolve_bases(&mut self) {
@@ -1659,6 +1789,7 @@ impl<'a> Resolver<'a> {
                             span: d.name_span,
                             decorated: None,
                             arity: None,
+                            arg_types: None,
                         };
                         let outcome = self.resolve_item(fid, &item, scope);
                         if !matches!(outcome, Outcome::Hit(..)) {
@@ -1712,12 +1843,26 @@ impl<'a> Resolver<'a> {
         let defs = self.defs(f);
         let mut cur = scope;
         while let Some(a) = cur {
-            if defs[a as usize].label.is_type() {
-                return Some(self.node_of(f, a));
+            let node = self.node_of(f, a);
+            if defs[a as usize].label.is_type() || self.is_constructor_function(node) {
+                return Some(node);
             }
             cur = self.parents[f as usize][a as usize];
         }
         None
+    }
+
+    /// An ECMAScript function used as a class: it owns methods
+    /// (`View.prototype.render = function render() {}` makes `render` a
+    /// method of `View`), so `this` inside it and its methods, and a
+    /// receiver typed `View` (`new View()`), find those members.
+    pub(crate) fn is_constructor_function(&self, n: NodeId) -> bool {
+        let node = &self.nodes[n as usize];
+        node.label == Label::Function
+            && node.language.map(Language::family) == Some(LanguageFamily::EcmaScript)
+            && self.members.get(&n).is_some_and(|m| {
+                m.values().any(|s| s.callable.is_some_and(|c| self.nodes[c as usize].label == Label::Method))
+            })
     }
 
     /// Walks a dotted path from a starting binding.
@@ -1730,7 +1875,7 @@ impl<'a> Resolver<'a> {
                     if !self.nodes[n as usize].label.is_type() {
                         return None;
                     }
-                    Target::Symbol(self.find_member(n, seg)?.0)
+                    Target::Symbol(self.find_member(n, seg, Want::Type)?.0)
                 }
                 Target::Prefix(p) => {
                     let next = format!("{p}.{seg}");
@@ -1758,7 +1903,7 @@ impl<'a> Resolver<'a> {
                 return Outcome::Hit(n, Strategy::SameModule, 0.95);
             }
             // 1b. Implicit self (`implicit_self` packs): enclosing class member.
-            if let Some(hit) = self.implicit_member(f, scope, name) {
+            if let Some(hit) = self.implicit_member(f, scope, name, Want::of(item.kind)) {
                 return hit;
             }
             // 3. Imported binding.
@@ -1780,7 +1925,7 @@ impl<'a> Resolver<'a> {
             let class = self
                 .enclosing_type(f, scope)
                 .or_else(|| if receiver == SELF_RECEIVER { self.receiver_type_from_name(f, scope) } else { None });
-            return match class.and_then(|c| self.find_member(c, name)) {
+            return match class.and_then(|c| self.find_member(c, name, Want::of(item.kind))) {
                 Some((n, false)) => Outcome::Hit(n, Strategy::TypeResolved, 0.9),
                 Some((n, true)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
                 None => Outcome::Miss,
@@ -1791,13 +1936,7 @@ impl<'a> Resolver<'a> {
             return self.resolve_typed(f, item, scope, ty);
         }
         if receiver == "super()" || receiver == "super" {
-            let found = self
-                .enclosing_type(f, scope)
-                .and_then(|c| self.bases.get(&c)?.iter().find_map(|&b| self.find_member(b, name)));
-            return match found {
-                Some((n, _)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
-                None => Outcome::Miss,
-            };
+            return self.super_member(f, scope, name, Want::of(item.kind));
         }
 
         let segs: Vec<&str> = receiver.split('.').collect();
@@ -1812,7 +1951,7 @@ impl<'a> Resolver<'a> {
                         None => {}
                     },
                     Some(Target::Symbol(c)) if self.nodes[c as usize].label.is_type() => {
-                        if let Some((n, _)) = self.find_member(c, name) {
+                        if let Some((n, _)) = self.find_member(c, name, Want::of(item.kind)) {
                             return Outcome::Hit(n, Strategy::ImportResolved, 0.85);
                         }
                     }
@@ -1831,7 +1970,7 @@ impl<'a> Resolver<'a> {
                         && self.nodes[c as usize].label.is_type()
                         && let Some(Target::Symbol(c)) = self.walk(f, Target::Symbol(c), &segs[1..])
                         && self.nodes[c as usize].label.is_type()
-                        && let Some((n, _)) = self.find_member(c, name)
+                        && let Some((n, _)) = self.find_member(c, name, Want::of(item.kind))
                     {
                         return Outcome::Hit(n, Strategy::SameModule, 0.85);
                     }
@@ -1929,14 +2068,18 @@ impl<'a> Resolver<'a> {
             let mut items: Vec<RefItem<'a>> = facts
                 .references
                 .iter()
-                .map(|r: &'a Reference| RefItem {
-                    kind: r.kind,
-                    name: &r.name,
-                    receiver: r.receiver.as_deref(),
-                    enclosing: valid(r.enclosing),
-                    span: r.span,
-                    decorated: None,
-                    arity: r.arity,
+                .map(|r: &'a Reference| {
+                    let (name, arg_types) = split_arg_types(&r.name);
+                    RefItem {
+                        kind: r.kind,
+                        name,
+                        receiver: r.receiver.as_deref(),
+                        enclosing: valid(r.enclosing),
+                        span: r.span,
+                        decorated: None,
+                        arity: r.arity,
+                        arg_types,
+                    }
                 })
                 .collect();
             // Packs that do not report decorator references: synthesize them
@@ -1953,6 +2096,7 @@ impl<'a> Resolver<'a> {
                                 span: d.name_span,
                                 decorated: Some(j as LocalDefId),
                                 arity: None,
+                                arg_types: None,
                             });
                         }
                     }
@@ -2030,7 +2174,8 @@ impl<'a> Resolver<'a> {
         *self.stats.resolved_by_strategy.entry(strategy.as_str().to_string()).or_default() += 1;
         // Declarations → their body; overloads → by arity (RFC 0003 §10).
         let target = self.prefer_body(target);
-        for (target, strategy, confidence) in self.expand_overloads(target, item.arity, strategy, confidence) {
+        let args = item.arg_types.as_deref();
+        for (target, strategy, confidence) in self.expand_overloads(target, item.arity, args, strategy, confidence) {
             let meta = EdgeMeta { confidence, strategy, evidence: Some((f, item.span)) };
             match edge_kind {
                 EdgeKind::Decorates => {
@@ -2048,19 +2193,19 @@ impl<'a> Resolver<'a> {
                     self.add_edge(caller, target, EdgeKind::Calls, meta);
                     if self.nodes[target as usize].label.is_type() {
                         let ctor = match self.families[f as usize] {
-                            Some(LanguageFamily::Php) => self.find_member(target, "__construct"),
+                            Some(LanguageFamily::Php) => self.find_member(target, "__construct", Want::Call),
                             // Constructors are members named like the class.
                             Some(LanguageFamily::Java | LanguageFamily::C) => {
-                                let name = self.nodes[target as usize].name.clone();
-                                self.members.get(&target).and_then(|m| m.get(&name)).map(|&c| (c, false))
+                                self.named_constructor(target).map(|c| (c, false))
                             }
-                            _ => {
-                                self.find_member(target, "__init__").or_else(|| self.find_member(target, "constructor"))
-                            }
+                            _ => self
+                                .find_member(target, "__init__", Want::Call)
+                                .or_else(|| self.find_member(target, "constructor", Want::Call)),
                         };
                         if let Some((c, _)) = ctor {
                             let c = self.prefer_body(c);
-                            for (c, s, conf) in self.expand_overloads(c, item.arity, strategy, confidence * 0.95) {
+                            for (c, s, conf) in self.expand_overloads(c, item.arity, args, strategy, confidence * 0.95)
+                            {
                                 let m = EdgeMeta { confidence: conf, strategy: s, ..meta };
                                 self.add_edge(caller, c, EdgeKind::Calls, m);
                             }

@@ -60,6 +60,19 @@
 //!   (`console.log`, `Promise.all`, `JSON.parse`) are skipped unless the name
 //!   is shadowed locally. Capitalized JSX tags (`<Button/>`, `<Foo.Bar/>`)
 //!   are `Call`s too.
+//! - **Typed receivers** (`types.rs`): `x.m()` gets the receiver `$type:T`
+//!   when the file says `x` is a `T` — a parameter or variable annotation
+//!   (`c: Context`, `let x: Foo`, `x?: Foo | undefined`, generic arguments
+//!   dropped), or, without one, every binding and assignment of `x` in its
+//!   function being `new T(…)`, `v as T` or `<T>v` (module-level bindings
+//!   too: `const app = new Hono()`); `this.f.m()` / `this.#f.m()` when
+//!   field `f` of the enclosing class is annotated, initialized with
+//!   `new T()`, a TS parameter property, or only assigned `new T()`;
+//!   `(new T()).m()`, `new T().m()`, `(v as T).m()`. A name with
+//!   conflicting or unknown assignments, destructured, a `catch` / `for`
+//!   target, or typed by a type parameter, an array or a union of several
+//!   types stays untyped; `this` inside a non-arrow function is not the
+//!   class instance.
 //! - Builtins come in two lists (`builtins.rs`): ECMAScript / TypeScript /
 //!   Node / test globals that are never emitted, and web-platform and runtime
 //!   globals that projects may also define (`Request`, `Response`,
@@ -173,6 +186,7 @@ mod builtins;
 mod extract;
 mod locals;
 mod resolve;
+mod types;
 
 use std::time::Instant;
 
@@ -192,8 +206,9 @@ impl LanguagePack for TypeScriptPack {
     }
 
     fn extractor_version(&self) -> u32 {
-        // 3: env var / config key reads (RFC 0003 §7.2).
-        3
+        // 3: env var / config key reads (RFC 0003 §7.2); 4: `$type:`
+        // receivers from declarations and assignments.
+        4
     }
 
     fn extract(

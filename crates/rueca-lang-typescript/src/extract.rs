@@ -10,12 +10,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rueca_extract::{span_of, text_of};
+use rueca_extract::{span_of, text_of, type_receiver};
 use rueca_model::{Definition, FileFacts, Import, ImportedName, Label, RefKind, Reference, Span};
 use tree_sitter::Node;
 
 use crate::builtins::is_builtin;
 use crate::locals::Locals;
+use crate::types::{OWNERS, TypeTable};
 
 /// Maximum references kept per file.
 pub const MAX_REFS: usize = 20_000;
@@ -89,6 +90,9 @@ pub(crate) struct Extractor<'s> {
     read_seen: HashSet<(Option<u32>, Option<String>, String)>,
     /// Local bindings per owner, from the locals query.
     locals: &'s Locals,
+    /// Declared and constructed types of bindings and class fields
+    /// (`types.rs`), for `$type:` receivers.
+    types: TypeTable,
     /// Owners in scope: `scopes[0]` is the root node (module-level block
     /// bindings: loop variables, catch parameters); the rest are the
     /// function-like nodes being walked.
@@ -107,6 +111,21 @@ pub(crate) struct Extractor<'s> {
 
 /// Owner key that never has bindings (signature-only members).
 const NO_SCOPE: usize = usize::MAX;
+
+/// The class whose instance `this` is at `n`: the nearest class around it,
+/// unless a non-arrow function (which rebinds `this`) comes first.
+fn enclosing_class(n: Node<'_>) -> Option<usize> {
+    let mut cur = n.parent();
+    while let Some(p) = cur {
+        match p.kind() {
+            "class" | "class_declaration" | "abstract_class_declaration" => return Some(p.id()),
+            k if OWNERS.contains(&k) && !matches!(k, "arrow_function" | "method_definition") => return None,
+            _ => {}
+        }
+        cur = p.parent();
+    }
+    None
+}
 
 /// What [`Extractor::walk`] does after [`Extractor::visit`].
 enum Next<'t> {
@@ -127,6 +146,7 @@ pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], path: &str, max_depth: us
         imports: Vec::new(),
         read_seen: HashSet::new(),
         locals,
+        types: TypeTable::build(root, src, max_depth),
         scopes: vec![root.id()],
         type_params: Vec::new(),
         export_names: HashSet::new(),
@@ -2093,9 +2113,64 @@ impl<'s> Extractor<'s> {
             && !self.builtin_root(callee)
             && let Some((name, recv)) = self.callee_parts(callee)
         {
+            let typed = match callee.kind() {
+                "member_expression" => field(callee, "object").and_then(|o| self.receiver_type(o)),
+                _ => None,
+            };
+            let recv = typed.map(|t| type_receiver(&t)).or(recv);
             self.push_ref(RefKind::Call, name, recv, ctx.parent, span_of(n));
         }
         self.walk_children(n, ctx, depth)
+    }
+
+    /// The type of a call's receiver expression when the file says it
+    /// (`types.rs`): a local, parameter or module-level binding with a
+    /// declared or constructed type, `this.field` of the enclosing class,
+    /// or `new T()` / `v as T` itself.
+    fn receiver_type(&self, obj: Node<'_>) -> Option<String> {
+        match obj.kind() {
+            "identifier" => {
+                let name = self.text(obj);
+                match self.scopes.iter().rev().find(|&&s| s != NO_SCOPE && self.locals.contains(s, &name)) {
+                    Some(&owner) => self.types.var(owner, &name).map(str::to_string),
+                    // Not a local: a module-level binding.
+                    None => self.types.var(self.scopes[0], &name).map(str::to_string),
+                }
+            }
+            "member_expression" => {
+                let o = field(obj, "object")?;
+                let p = field(obj, "property")?;
+                if o.kind() != "this" {
+                    return None;
+                }
+                let class = enclosing_class(obj)?;
+                self.types.field(class, &self.text(p)).map(str::to_string)
+            }
+            "parenthesized_expression" | "non_null_expression" => {
+                let inner = obj.named_child(0)?;
+                match inner.kind() {
+                    "new_expression" | "as_expression" | "type_assertion" => self.constructed_type(inner),
+                    _ => self.receiver_type(inner),
+                }
+            }
+            "new_expression" => self.constructed_type(obj),
+            _ => None,
+        }
+    }
+
+    /// `new T(…)` → `T`; `v as T` / `<T>v` → `T` (simple and dotted names).
+    fn constructed_type(&self, v: Node<'_>) -> Option<String> {
+        let t = match v.kind() {
+            "new_expression" => field(v, "constructor")?,
+            "as_expression" => *named_children(v).last()?,
+            "type_assertion" => named_children(v).into_iter().find(|c| c.kind() == "type_arguments")?.named_child(0)?,
+            _ => return None,
+        };
+        let t = if t.kind() == "generic_type" { field(t, "name")? } else { t };
+        let text: String = self.text(t).split_whitespace().collect();
+        let simple =
+            text.split('.').all(|s| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$'));
+        (simple && !self.type_params.contains(&text) && !is_builtin(&text)).then_some(text)
     }
 
     /// `describe("x", fn)` / `it("y", fn)` / `it.each(t)("z", fn)` / `test.skip(...)`.

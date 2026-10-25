@@ -37,7 +37,8 @@ unless marked optional.
   `com.example.Owner.getPets` (package, dot, local name; nested types
   `Owner.Pet.getName`; constructors named like their class, `Owner.Owner`;
   overloads carry their parameter types, `Parser.parse(String)`,
-  `Parser.parse(String,int)`); C/C++ `geo::Circle::area` (namespace and
+  `Parser.parse(String,int)`; anonymous classes are named after their base
+  under the enclosing definition, `Gson.fromJson.TypeAdapter$1.read`); C/C++ `geo::Circle::area` (namespace and
   class path, no module; overloads in one file carry their parameter types,
   `geo::scale(double, double)`; macros `GEO_PI`; GoogleTest `Suite::Name`).
 - **Brief symbol** (used inside results):

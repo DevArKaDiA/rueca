@@ -847,12 +847,14 @@ with these choices (crate docs list them all):
   stated (a second overload renames the first).
 - **Constructors and implicit `this`.** With constructors as members named
   like the class, a bare type name that is an enclosing class or its
-  superclass reaches the constructor through the implicit-self rung. The
-  pack works around it (fully qualified `$type:` for types of the file,
-  `super` for the direct superclass, no self-references); a resolver rule
-  that skips constructors in type lookups would remove the workaround.
-  Likewise a field and a method with one name share one member slot, so
-  fields are emitted after methods.
+  superclass reached the constructor through the implicit-self rung. The
+  pack first worked around it; since 2026-10-25 the resolver keeps members
+  in slots by kind (callables, types, values) and reaches a constructor by
+  calls only, so types are written as in the source, fields and methods
+  with one name coexist, and the workarounds are gone (`docs/decisions.md`).
+  Anonymous classes are classes named after their base (`TypeAdapter$1`),
+  `OVERRIDES` pairs overloads by signature, and calls carry the static
+  types of their arguments to choose overloads (§10.1 item 4 refined).
 - **Bridge**: `System.getenv`, Spring `@Value` placeholders and
   `Environment.getProperty` with file-local evidence; relaxed binding off
   (open question 8).

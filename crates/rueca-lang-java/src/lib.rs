@@ -62,12 +62,11 @@
 //! | `static final` field (or interface field) with an `UPPER_CASE` name | `Constant` | |
 //! | enum constant | `Constant` | exported; arguments call the enum's constructor |
 //! | local class (in a method body) | its label | child of the method |
+//! | anonymous class `new T(…) {…}`, enum constant body | `Class` named `T$N` (the `N`-th anonymous `T` of its enclosing definition; an enum constant body's base is the enum), child of the enclosing method, field or constant | `bases` = `T`; signature `new T(…)`; test code when the enclosing definition is a test; its members are definitions (`Gson.fromJson.TypeAdapter$1.read`) |
 //!
-//! Not definitions: **anonymous classes** (`new T() {…}`) and enum constant
-//! bodies — their members' code is attributed to the enclosing definition
-//! and `this` inside them is the unknown receiver `class@anonymous`;
-//! lambdas; static and instance initializer blocks (their code belongs to
-//! the class); `package` and `module` declarations.
+//! Not definitions: lambdas (their code belongs to the enclosing
+//! definition); static and instance initializer blocks (their code belongs
+//! to the class); `package` and `module` declarations.
 //!
 //! - `span` covers the declaration with its annotations; `name_span` is the
 //!   identifier (for constructors, the class name).
@@ -92,10 +91,10 @@
 //!   `*TestCase`, `*ITCase`, annotated `@Nested` / `@Test`, or declaring a
 //!   test method are tests.
 //!
-//! Fields are emitted after the other members of their type: the resolver
-//! keeps one member per name, and a call `c.code()` must find the method
-//! `code()`, not the field `code`. For the same reason a field that shares
-//! its name with a method of its type is never reported as read or written.
+//! Members are emitted in source order (record components first). A field
+//! and a method may share a name (`code` and `code()`); the resolver keeps
+//! them in separate member slots, so calls find the method and reads and
+//! writes the field.
 //!
 //! # References
 //!
@@ -107,15 +106,30 @@
 //!   / `Outer.Inner.m()` → the type path as written; `x.m()` where `x` is
 //!   a parameter, local, `var x = new T()`, pattern variable, `catch`
 //!   parameter, resource, or a field of an enclosing type (also
-//!   `this.x.m()`) declared with class `T` → `$type:T`; `new T().m()`,
-//!   `((T) e).m()` → `$type:T`; `"s".m()` → `$type:String`; `X.super.m()`
-//!   → `$type:X`; anything else → the receiver text (≤ 200 chars, resolved
-//!   by the unique-method rung only). `this(…)` / `super(…)` → a call to
-//!   the constructor of this class / of the superclass (receiver `this` /
+//!   `this.x.m()`) declared with class `T` → `$type:T` (`T` as written; a
+//!   bounded type parameter `F extends Figure` → `$type:Figure`);
+//!   `new T().m()`, `((T) e).m()` → `$type:T`; `"s".m()` →
+//!   `$type:String`; `own().m()` / `this.own().m()` where `own` is a method
+//!   of an enclosing type of this file declaring class `T` as its return
+//!   type (every overload agreeing) → `$type:T`; `X.super.m()` →
+//!   `$type:X`; anything else → the receiver text (≤ 200 chars, resolved by
+//!   the unique-method rung only). `this(…)` / `super(…)` → a call to the
+//!   constructor of this class / of the superclass (receiver `this` /
 //!   `super`). Method references: `T::m`, `x::m`, `this::m` → `Call`
 //!   without arity; `T::new` → `New`.
+//! - **Argument types**: a `Call` or `New` with arguments carries their
+//!   static types in its name when the file knows at least one
+//!   (`value$args:long`, `fromJson$args:String,?`;
+//!   `rueca_extract::with_arg_types`): literals (`String`, `char`, `int` /
+//!   `long`, `float` / `double`, `boolean`, `Class` for `X.class`), locals,
+//!   parameters and fields with a declared type (primitives and arrays
+//!   included, in overload-suffix form), `this`, `new T(…)`, casts, string
+//!   concatenations, comparisons and calls of this file's methods with a
+//!   declared return type; `?` otherwise. The resolver uses them to choose
+//!   among overloads.
 //! - `New` with `arity`: `new T(…)` → `T` (receiver = qualifier); an
-//!   anonymous class body makes it a `Type` reference to its base.
+//!   anonymous class body makes it a `Type` reference to its base (which
+//!   the resolver turns into the anonymous class's `INHERITS`).
 //! - `Type`: field, local, parameter, return and pattern types, generic
 //!   arguments, bounds, casts, `instanceof`, `catch`, class literals, array
 //!   creation, annotations of parameters and types, generic arguments of
@@ -131,17 +145,10 @@
 //!   Other bare identifiers (locals, inherited fields, package names) are
 //!   not reported.
 //!
-//! **Receivers that would reach a constructor.** Constructors are members
-//! named like their class (wave R), and the resolver tries implicit `this`
-//! before imports, so a bare type name inside a class that *is* that class,
-//! an outer class, or its superclass would resolve to that class's
-//! constructor. The pack avoids it: types declared in the file are written
-//! fully qualified in `$type:` receivers (`$type:com.x.Outer.Node`), the
-//! direct superclass becomes `super`, and type references to the
-//! enclosing class itself or to an enclosing class's superclass are not
-//! reported (`DEFINES` / `INHERITS` already link them); a member type
-//! naming itself is qualified by its outer type. `new` keeps the bare name:
-//! reaching the constructor is right there.
+//! **Type names are written as in the source.** Constructors are members
+//! named like their class; the resolver looks a name up as a type (never as
+//! a constructor) in `Type` references and `$type:` receivers, so a type
+//! named like an enclosing class or its superclass needs no special form.
 //!
 //! ## Code ↔ config bridge (RFC 0003 §7.2)
 //!
@@ -209,7 +216,9 @@
 //! # Measured
 //!
 //! `tests/real_repo.rs` on pinned shallow clones (debug build for the
-//! counts, `rueca index` release build for the time, cold cache):
+//! counts, `rueca index` release build for the time, cold cache; extractor
+//! 1, before anonymous classes, argument types and the resolver's member
+//! slots — the S3 benchmark has the current numbers):
 //!
 //! | Repository (commit) | Files | Defs | Refs | Parse errors | Resolved | Builtin | External | Unresolved | `rueca index` |
 //! |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -224,14 +233,14 @@
 //!
 //! # Deviations and limitations
 //!
-//! - Receiver types are declared types only: return types of calls
-//!   (`a.b().c()`), fields inherited from a class in another file, and
-//!   generic type arguments (`List<Foo>` element types) are not followed.
-//! - Anonymous classes are not modelled: calls to their own methods or to
-//!   members inherited by them stay unresolved or resolve against the
-//!   enclosing class.
-//! - An override that is not overloaded in its own class (no suffix, so no
-//!   arity) gets `OVERRIDES` to every same-named overload of the base.
+//! - Receiver types are declared in the file: return types of methods of
+//!   other files (`a.b().c()`), fields inherited from a class in another
+//!   file, and generic type arguments (`List<Foo>` element types) are not
+//!   followed.
+//! - Argument types are file-local too; overloads that differ only by class
+//!   parameters (`fromJson(String, Class)` / `fromJson(String, Type)`) are
+//!   told apart only when an argument's type matches one exactly
+//!   (subtyping is not known).
 //! - Nested types imported on demand (`import a.b.Outer.*`) bind nothing;
 //!   the import still links the file.
 //! - Dependency injection, reflection, Lombok-generated members and other
@@ -285,7 +294,7 @@ impl LanguagePack for JavaPack {
         &[Language::Java]
     }
     fn extractor_version(&self) -> u32 {
-        1
+        2
     }
     fn extract(
         &self,

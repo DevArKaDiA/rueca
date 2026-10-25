@@ -25,8 +25,11 @@
 //!
 //! - Receivers: [`SELF_RECEIVER`] (`$self`, a pack-normalized self
 //!   receiver; list it in [`LanguagePack::self_receivers`]) and
-//!   [`type_receiver`] (`$type:T`, a receiver whose declared type `T` is
-//!   known in the file).
+//!   [`type_receiver`] (`$type:T`, a receiver whose type `T` the file
+//!   declares, constructs or returns; any pack may use it).
+//! - Call and `New` names: [`with_arg_types`] (`value$args:long,?`, the
+//!   static types of the arguments, for choosing overloads; the resolver
+//!   strips it before any lookup).
 //! - `DataRef` receivers: [`DATA_REF_QN`] and [`DATA_REF_ANY`] (see
 //!   `rueca_model::RefKind::DataRef`).
 //! - [`ExtractError::Skipped`] to keep a file listed but unextracted with a
@@ -95,9 +98,10 @@ pub enum ExtractError {
 /// method's local qualified-name prefix (`Server` for `Server.Handle`).
 pub const SELF_RECEIVER: &str = "$self";
 
-/// Prefix of a typed receiver: `$type:<T>` means "the receiver's declared
-/// type is `T`" (a local, parameter or field declared with a type in the
-/// same file). `T` is written as in source (`Server`, `http.Server`,
+/// Prefix of a typed receiver: `$type:<T>` means "the receiver's type is
+/// `T`" as the file says it: a local, parameter or field declared with a
+/// type, a value constructed from `T` (`x = new T()`, Python `x = T()`), or
+/// the declared return type of a function or method of the same file. `T` is written as in source (`Server`, `http.Server`,
 /// `ns::Foo`, `List<String>`); generic arguments, pointers and references
 /// are ignored. The resolver resolves `T` like a `Type` reference and looks
 /// the member up in it (`type_resolved`, 0.85).
@@ -106,6 +110,37 @@ pub const TYPE_RECEIVER_PREFIX: &str = "$type:";
 /// `$type:<ty>` receiver text.
 pub fn type_receiver(ty: &str) -> String {
     format!("{TYPE_RECEIVER_PREFIX}{ty}")
+}
+
+/// Separator between a call's name and the static types of its arguments:
+/// `value$args:long`, `fromJson$args:String,?` (see [`with_arg_types`]).
+/// `$args:` cannot occur in an identifier of any supported language. The
+/// resolver strips it before every lookup and uses the types only to choose
+/// among overloads (RFC 0003 §10.1): an overload whose parameter type
+/// cannot accept a known argument type is dropped, and of the rest the one
+/// whose parameter types equal the known argument types wins.
+pub const ARG_TYPES_SEPARATOR: &str = "$args:";
+
+/// A `Call` / `New` reference name carrying the static types of its
+/// arguments, in the pack's overload-suffix form (`int`, `String`,
+/// `byte[]`); `None` is an unknown type, written `?`. Returns the bare name
+/// when no type is known.
+pub fn with_arg_types(name: &str, types: &[Option<String>]) -> String {
+    if types.iter().all(Option::is_none) {
+        return name.to_string();
+    }
+    let list: Vec<&str> = types.iter().map(|t| t.as_deref().unwrap_or("?")).collect();
+    format!("{name}{ARG_TYPES_SEPARATOR}{}", list.join(","))
+}
+
+/// Splits a reference name written by [`with_arg_types`] into the name and
+/// the argument types (`?` = unknown).
+pub fn split_arg_types(name: &str) -> (&str, Option<Vec<&str>>) {
+    match name.split_once(ARG_TYPES_SEPARATOR) {
+        Some((n, list)) if !list.is_empty() => (n, Some(list.split(',').collect())),
+        Some((n, _)) => (n, None),
+        None => (name, None),
+    }
 }
 
 /// `DataRef` receiver: the reference name is a global qualified name
@@ -286,15 +321,18 @@ pub trait LanguagePack: Send + Sync {
     /// When true, definitions of this pack may be overloaded: overloads carry
     /// a parameter suffix in their local qualified name (`Parser.parse(String)`,
     /// `Parser.parse(Reader)`; non-overloaded names stay bare) and the
-    /// resolver chooses among them by `Reference::arity`, else links all of
-    /// them at × 0.8 confidence (RFC 0003 §10.1).
+    /// resolver chooses among them by `Reference::arity` and by the argument
+    /// types a reference name carries ([`with_arg_types`]), else links all
+    /// of the remaining ones at × 0.8 confidence (RFC 0003 §10.1).
     fn overloads(&self) -> bool {
         false
     }
 
     /// When true, the resolver adds `OVERRIDES` edges from a method to the
-    /// method of a resolved base type with the same name (and the same arity
-    /// when both are known), `type_resolved` 0.90 (RFC 0003 §10.1).
+    /// method of a resolved base type with the same name, paired by
+    /// signature when the base has overloads (same parameter count from the
+    /// overload suffix or the definition's signature, then the same
+    /// parameter types), `type_resolved` 0.90 (RFC 0003 §10.1).
     fn overrides(&self) -> bool {
         false
     }
@@ -448,6 +486,16 @@ pub fn first_line(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn argument_types_in_names() {
+        assert_eq!(with_arg_types("value", &[Some("long".into())]), "value$args:long");
+        assert_eq!(with_arg_types("f", &[Some("String".into()), None]), "f$args:String,?");
+        assert_eq!(with_arg_types("f", &[None, None]), "f");
+        assert_eq!(with_arg_types("f", &[]), "f");
+        assert_eq!(split_arg_types("f$args:String,?"), ("f", Some(vec!["String", "?"])));
+        assert_eq!(split_arg_types("f"), ("f", None));
+    }
 
     #[test]
     fn line_counting() {

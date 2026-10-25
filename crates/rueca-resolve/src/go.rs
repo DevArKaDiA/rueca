@@ -41,8 +41,10 @@ impl Resolver<'_> {
             }
             seen.push(c);
             if let Some(m) = self.members.get(&c) {
-                for (name, &n) in m {
-                    if self.nodes[n as usize].label == Label::Method {
+                for (name, slots) in m {
+                    if let Some(n) = slots.callable
+                        && self.nodes[n as usize].label == Label::Method
+                    {
                         out.entry(name.clone()).or_insert(n);
                     }
                 }

@@ -6,6 +6,8 @@
 //! - `java_like_implicit_self_overloads_overrides` — `implicit_self`,
 //!   `overloads` (arity), `overrides`, on-demand and static imports,
 //!   constructors named like the class.
+//! - `java_like_member_slots` — a field and a method with one name, type
+//!   lookups that skip constructors, `OVERRIDES` paired by signature.
 //! - `cpp_like_declarations_and_includes` — `Definition::is_declaration`,
 //!   includes as transitive star imports, out-of-line bodies,
 //!   `$type:ns::Foo`.
@@ -372,6 +374,86 @@ fn java_like_implicit_self_overloads_overrides() {
     assert!((both.confidence - 0.85 * 0.8).abs() < 1e-4);
     // import static com.acme.Util.max → the member.
     g.has("com.acme.app.App.main", "com.acme.Util.max", EdgeKind::Calls, Strategy::ImportResolved, 0.95);
+}
+
+#[test]
+fn java_like_member_slots() {
+    use Label::*;
+    let mut files = Vec::new();
+
+    // src/com/acme/Shape.java: class Shape { Shape(); int code; int code();
+    //   void draw(String); void draw(String, int); }
+    let mut f = F::default();
+    f.def(Package, "com.acme", "package", None);
+    let shape = f.def(Class, "Shape", "Shape", None);
+    f.def(Method, "Shape", "Shape.Shape", Some(shape));
+    f.def(Field, "code", "Shape.code", Some(shape));
+    f.def(Method, "code", "Shape.code", Some(shape));
+    f.def(Method, "draw", "Shape.draw(String)", Some(shape));
+    f.def(Method, "draw", "Shape.draw(String,int)", Some(shape));
+    files.push(f.file("src/com/acme/Shape.java", Language::Java));
+
+    // src/com/acme/Circle.java: class Circle extends Shape { Circle();
+    //   void draw(String s) {}  // overrides draw(String) only
+    //   void use(Shape other) { code(); code; other.code(); other.code;
+    //     Circle c; Shape s; new Circle(); c.use(); } }
+    let mut f = F::default();
+    f.def(Package, "com.acme", "package", None);
+    let circle = f.def(Class, "Circle", "Circle", None);
+    f.d(circle).bases = vec!["Shape".into()];
+    f.def(Method, "Circle", "Circle.Circle", Some(circle));
+    let draw = f.def(Method, "draw", "Circle.draw", Some(circle));
+    f.d(draw).signature = Some("void draw(final String s)".into());
+    let use_m = f.def(Method, "use", "Circle.use", Some(circle));
+    f.r(RefKind::Call, "code", None, Some(use_m), Some(0));
+    f.r(RefKind::Read, "code", None, Some(use_m), None);
+    f.r(RefKind::Call, "code", Some(&type_receiver("Shape")), Some(use_m), Some(0));
+    f.r(RefKind::Write, "code", Some(&type_receiver("Shape")), Some(use_m), None);
+    f.r(RefKind::Type, "Circle", None, Some(use_m), None);
+    f.r(RefKind::Type, "Shape", None, Some(use_m), None);
+    f.r(RefKind::New, "Circle", None, Some(use_m), Some(0));
+    f.r(RefKind::Call, "use", Some(&type_receiver("Circle")), Some(use_m), Some(1));
+    files.push(f.file("src/com/acme/Circle.java", Language::Java));
+
+    let mut registry = Registry::new();
+    registry.register(Box::new(FakeJava));
+    let out = run(registry, files);
+    let g = G(&out.graph);
+    let (field, method) = {
+        let v: Vec<NodeId> = (0..out.graph.nodes.len() as NodeId)
+            .filter(|&n| out.graph.nodes[n as usize].qualified_name == "com.acme.Shape.code")
+            .collect();
+        let field = *v.iter().find(|&&n| out.graph.nodes[n as usize].label == Field).unwrap();
+        let method = *v.iter().find(|&&n| out.graph.nodes[n as usize].label == Method).unwrap();
+        (field, method)
+    };
+    let use_id = g.id("com.acme.Circle.use");
+    let edge = |dst: NodeId, kind: EdgeKind| {
+        out.graph.edges.iter().find(|e| e.src == use_id && e.dst == dst && e.kind == kind)
+    };
+    // A field and a method with one name are separate members: calls find
+    // the method, reads and writes the field (implicit `this` and typed).
+    let call = edge(method, EdgeKind::Calls).expect("call to the method");
+    assert_eq!(call.meta.strategy, Strategy::TypeResolved);
+    assert!(edge(field, EdgeKind::Calls).is_none());
+    assert!(edge(field, EdgeKind::References).is_some(), "read of the field");
+    assert!(edge(field, EdgeKind::Writes).is_some(), "write of the field");
+    assert!(edge(method, EdgeKind::References).is_none());
+    // A type named like an enclosing class or its superclass is the type,
+    // not its constructor (constructors are members named like the class).
+    g.has("com.acme.Circle.use", "com.acme.Circle", EdgeKind::References, Strategy::SameModule, 0.9);
+    g.has("com.acme.Circle.use", "com.acme.Shape", EdgeKind::References, Strategy::SameModule, 0.9);
+    g.lacks("com.acme.Circle.use", "com.acme.Shape.Shape", EdgeKind::References);
+    // `$type:Circle` inside Circle: the class, then its member.
+    g.has("com.acme.Circle.use", "com.acme.Circle.use", EdgeKind::Calls, Strategy::TypeResolved, 0.85);
+    // `new Circle()` inside Circle still reaches the constructor.
+    let ctor = g.edge("com.acme.Circle.use", "com.acme.Circle.Circle", EdgeKind::Calls).expect("constructor");
+    assert_eq!(ctor.strategy, Strategy::TypeResolved);
+    // OVERRIDES paired by signature: draw(String s) → draw(String) only.
+    g.has("com.acme.Circle.draw", "com.acme.Shape.draw(String)", EdgeKind::Overrides, Strategy::TypeResolved, 0.9);
+    g.lacks("com.acme.Circle.draw", "com.acme.Shape.draw(String,int)", EdgeKind::Overrides);
+    // Constructors override nothing.
+    g.lacks("com.acme.Circle.Circle", "com.acme.Shape.Shape", EdgeKind::Overrides);
 }
 
 // ---------------------------------------------------------------------------

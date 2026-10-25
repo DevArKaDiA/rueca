@@ -36,7 +36,7 @@ use rueca_extract::tree_sitter::{
     Node, Query, QueryCursor, QueryCursorOptions, QueryCursorState, StreamingIterator, Tree,
 };
 
-use crate::types::class_of_type;
+use crate::types::{class_of_type, suffix_type};
 
 /// The vendored, adapted locals query.
 pub(crate) const LOCALS_SCM: &str = include_str!("../queries/locals.scm");
@@ -89,6 +89,10 @@ pub(crate) struct Binding {
     /// removed; `None` for primitives, arrays, `var` without a `new` / cast
     /// initializer, and untyped lambda parameters.
     pub(crate) class: Option<String>,
+    /// Declared type in overload-suffix form (`int`, `String`, `byte[]`,
+    /// `List`), primitives and arrays included; for `var`, the class of a
+    /// `new` / cast initializer. Used to choose overloads by argument type.
+    pub(crate) ty: Option<String>,
 }
 
 struct ScopeInfo {
@@ -220,6 +224,50 @@ fn binding_class(def: Node<'_>, source: &[u8]) -> Option<String> {
     }
 }
 
+/// Declared type of a binding identifier in overload-suffix form
+/// ([`Binding::ty`]).
+fn binding_type(def: Node<'_>, source: &[u8]) -> Option<String> {
+    let parent = def.parent()?;
+    let with_dims = |ty: Node<'_>, dims: Option<Node<'_>>| -> Option<String> {
+        let t = text(ty, source);
+        if t == "var" {
+            return None;
+        }
+        let mut s = suffix_type(t);
+        if let Some(d) = dims {
+            s.push_str(&text(d, source).split_whitespace().collect::<String>());
+        }
+        Some(s)
+    };
+    match parent.kind() {
+        "variable_declarator" => {
+            let decl = parent.parent()?;
+            match decl.kind() {
+                "local_variable_declaration" => {
+                    let ty = decl.child_by_field_name("type")?;
+                    if text(ty, source) == "var" {
+                        return binding_class(def, source).map(|c| suffix_type(&c));
+                    }
+                    with_dims(ty, parent.child_by_field_name("dimensions"))
+                }
+                // `String... args` is a `String[]` inside the method.
+                "spread_parameter" => {
+                    let ty = (0..decl.named_child_count()).filter_map(|i| decl.named_child(i as u32)).find(|c| {
+                        !matches!(c.kind(), "modifiers" | "variable_declarator" | "annotation" | "marker_annotation")
+                    })?;
+                    with_dims(ty, None).map(|t| format!("{t}[]"))
+                }
+                _ => None,
+            }
+        }
+        "formal_parameter" => with_dims(parent.child_by_field_name("type")?, parent.child_by_field_name("dimensions")),
+        "enhanced_for_statement" => {
+            with_dims(parent.child_by_field_name("type")?, parent.child_by_field_name("dimensions"))
+        }
+        _ => binding_class(def, source).map(|c| suffix_type(&c)),
+    }
+}
+
 /// Record components are fields (members), not locals.
 fn is_record_component(def: Node<'_>) -> bool {
     def.parent()
@@ -261,6 +309,7 @@ pub(crate) fn build(tree: &Tree, source: &[u8], max_time: Duration) -> Result<Lo
                             name: text(c.node, source).to_string(),
                             pos: c.node.start_byte() as u32,
                             class: binding_class(c.node, source),
+                            ty: binding_type(c.node, source),
                         });
                     }
                     Role::Ignore => {}

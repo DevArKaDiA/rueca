@@ -104,8 +104,10 @@
 //!   → receiver `\A\`; `$obj->m()` / `$obj?->m()` → `m` with the object as
 //!   receiver: `$this`, `\App\Services\UserService->` when the variable or
 //!   `$this->property` has a declared class (typed parameter or docblock
-//!   `@param`, `catch`, `new` assignment, typed, promoted or `@var`
-//!   property of the same class), else the source text (≤ 200 chars); `X::m()` → receiver `\App\X`; `self::m()`,
+//!   `@param`, `catch`, `new` assignment, an inline `/** @var Foo $x */`
+//!   before the assignment, typed, promoted or `@var` property of the same
+//!   class), `(new Foo())->m()` → `\App\Foo->`, else the source text
+//!   (≤ 200 chars); `X::m()` → receiver `\App\X`; `self::m()`,
 //!   `static::m()`, `parent::m()` → receivers `self`, `static`, `parent`.
 //!   Builtins are reported; the resolver filters them.
 //! - `New`: `new User` → `User` / `\App\Models\`; `new self` /
@@ -187,8 +189,9 @@
 //! - Receiver typing is syntactic: a variable is typed only when every
 //!   binding in its scope declares or constructs the same class; return
 //!   types of called methods are not followed (`$a->b()->c()`).
-//! - Docblock types are read only for `@param` of untyped parameters and
-//!   `@var` of untyped properties, and only when they name one class.
+//! - Docblock types are read only for `@param` of untyped parameters,
+//!   `@var` of untyped properties and an inline `@var` right before an
+//!   assignment, and only when they name one class.
 
 mod bridge;
 mod builtins;
@@ -237,8 +240,9 @@ impl LanguagePack for PhpPack {
         &[Language::Php]
     }
     fn extractor_version(&self) -> u32 {
-        // 2: env var / config key reads and Laravel config keys (RFC 0003 §7).
-        2
+        // 2: env var / config key reads and Laravel config keys (RFC 0003 §7);
+        // 3: `(new Foo())->m()` and inline `/** @var Foo $x */` receivers.
+        3
     }
     fn extract(
         &self,

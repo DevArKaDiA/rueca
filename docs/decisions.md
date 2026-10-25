@@ -1,5 +1,56 @@
 # Decisions log
 
+## 2026-10-25 — Structure floors: members by kind, overloads by type, receiver types from assignments
+
+Work toward the structure floors of [RFC 0004](rfcs/0004-quality-and-benchmark.md)
+§6 (Java precision and definition found, TS/JS callee recall, PHP micro
+callers). All of it is in the resolver's generic rules or in the packs;
+no model, facts-format or tool change (extractor versions: Java 2, TS/JS
+4, Python 3, PHP 3).
+
+- **Members by kind.** A type keeps one member per name and kind
+  (callable, nested type, value); calls look for callables first, reads
+  and writes for values, type lookups and receiver paths for types, each
+  through the whole hierarchy before the next kind. A constructor (a
+  callable named like its class, Java and C/C++) is reached by calls
+  only. This replaces the Java pack's workarounds (fully qualified
+  `$type:` receivers, `super` for the superclass, dropped self-references,
+  fields emitted last, unreported reads of fields sharing a method's name).
+  C, C++ and Go graphs of their fixtures and micro-benchmarks are
+  byte-identical before and after.
+- **Overloads by argument type.** Packs may write the static types of a
+  call's arguments into the reference name (`value$args:long,?`,
+  `rueca_extract::with_arg_types`), which keeps the facts format and every
+  other pack untouched; the resolver drops overloads that cannot accept a
+  known argument, then prefers an exact match, then the narrowest
+  primitives. Class-to-class compatibility is assumed (subtyping is not
+  known), so precision never depends on a guessed hierarchy.
+  `OVERRIDES` is paired by signature (parameter count, then types, from
+  the overload suffix or the definition's signature).
+- **Java anonymous classes are definitions** (`TypeAdapter$1`, child of
+  the enclosing definition, base = the instantiated type): their methods
+  get callers, `this` inside them finds their own and inherited members,
+  and they override their base's methods. Named after the base rather
+  than javac's `Outer$1` so a trace reads as what it is.
+- **Receiver types from declarations and assignments** ("strategy 5") for
+  TS/JS and Python, per file: annotations, `new T()` / `x as T` /
+  `x = Foo()`, return annotations of the same file's functions and
+  methods, class fields and `self.x` attributes. A name is typed only when
+  its annotations agree, or, without one, when every binding and
+  assignment of it constructs the same type; anything ambiguous stays
+  untyped. Contextual typing (callback parameters) and types that only
+  another file knows are out of reach of a per-file pass and stay gaps.
+- **Measured** (S3, scip / PHPStan gold, 50 questions per repository, the
+  alpha bench): Java callers / callees precision 88.4 / 86.4 → 97.3 /
+  96.3, definition found 88 → 100, java-micro callee F1 88.1 → 93.7;
+  TS/JS callee recall 69.8 → 74.6; Python callers / callees recall
+  82.6 / 77.5 → 88.3 / 80.8 at unchanged precision; PHP micro callers F1
+  89.0 → 91.2. TS/JS stays below its recall floor: the remaining misses on
+  the gold are contextually typed callback parameters (hono), recursion
+  (the bench's Rueca arm reads `trace` `nodes`, which never repeat the
+  root, so self-calls never count) and gold edges attributed by line to a
+  function expression passed as an argument (express `defineGetter`).
+
 ## 2026-10-25 — Quality bar: deterministic metrics, absolute floors, cbm as reference
 
 [RFC 0004](rfcs/0004-quality-and-benchmark.md) replaces the adoption gate
