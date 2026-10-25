@@ -795,11 +795,6 @@ def _render_data(L: list[str], data: dict, meta: dict) -> None:
     vers = sorted({(a, r.get("arm_version")) for d in data["repos"].values() for a, r in d.items() if r.get("arm_version")})
     for a, v in vers:
         L.append(f"- Arm `{a}` on this suite: {v}.")
-    if any(a == "rueca" for a, _ in vers):
-        L.append(
-            "- The Rueca data binary is the data branch alone: it has the data pack and the Python / TS / PHP bridge facts but not the Go and "
-            "Java packs, so Go and Java env reads (most of Online Boutique's services) count as misses until the packs are merged."
-        )
     L.append("")
     L.append("| Corpus | Commit | Data files (skipped) | Reference keys | Kinds | Bridge labels (reads / writes) |")
     L.append("|---|---|---:|---|---|---:|")
@@ -1205,10 +1200,12 @@ def report() -> None:
         spec = next((sp for n, sp, _ in suites() if n == name), None)
         if spec:
             carried_groups.add(lang_group(spec["language"]))
+    carried_arms = {k.split(":", 1)[0] for k in s1.get("carried", {})} | {k.split(":", 1)[0] for k in s3.get("carried", [])}
     arms = arm_status()
     pub_arms = published["meta"].get("arms", {})
     for a, st in arms.items():
-        if carried_groups and pub_arms.get(a):
+        # Only arms with carried results keep their published versions.
+        if a in carried_arms and pub_arms.get(a):
             vers = sorted(set(st["recorded_versions"]) | set(pub_arms[a].get("recorded_versions", [])))
             st.update(recorded_versions=vers, version="; ".join(vers) if vers else st["version"], available=st["available"] or bool(vers))
     meta = {

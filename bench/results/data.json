@@ -128,8 +128,8 @@
     }
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 10d08d738160, feat/lang-data@76dfa4b)",
-    "index_seconds": 0.33348558298894204,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
+    "index_seconds": 0.677514874987537,
     "keys": {
      "yaml": {
       "keys": 2582,
@@ -180,12 +180,12 @@
     },
     "bridge": {
      "reads": {
-      "tp": 27,
-      "pred": 27,
+      "tp": 60,
+      "pred": 60,
       "gold": 63,
       "precision": 1.0,
-      "recall": 0.42857142857142855,
-      "f1": 0.6
+      "recall": 0.9523809523809523,
+      "f1": 0.975609756097561
      },
      "writes": {
       "tp": 61,
@@ -196,50 +196,17 @@
       "f1": 1.0
      },
      "all": {
-      "tp": 88,
-      "pred": 88,
+      "tp": 121,
+      "pred": 121,
       "gold": 124,
       "precision": 1.0,
-      "recall": 0.7096774193548387,
-      "f1": 0.8301886792452831
+      "recall": 0.9758064516129032,
+      "f1": 0.9877551020408163
      },
      "reads_missed": [
-      "src/adservice/src/main/java/hipstershop/AdService.java|initStats|DISABLE_STATS",
-      "src/adservice/src/main/java/hipstershop/AdService.java|initTracing|DISABLE_TRACING",
       "src/adservice/src/main/java/hipstershop/AdService.java|start|PORT",
-      "src/checkoutservice/main.go|main|ENABLE_PROFILER",
-      "src/checkoutservice/main.go|main|ENABLE_TRACING",
-      "src/checkoutservice/main.go|main|PORT",
       "src/emailservice/email_server.py|<module>|DISABLE_PROFILER",
-      "src/frontend/handlers.go|<module>|CYMBAL_BRANDING",
-      "src/frontend/handlers.go|<module>|ENABLE_ASSISTANT",
-      "src/frontend/handlers.go|<module>|FRONTEND_MESSAGE",
-      "src/frontend/handlers.go|homeHandler|BANNER_COLOR",
-      "src/frontend/handlers.go|homeHandler|ENV_PLATFORM",
-      "src/frontend/main.go|main|BASE_URL",
-      "src/frontend/main.go|main|ENABLE_PROFILER",
-      "src/frontend/main.go|main|ENABLE_TRACING",
-      "src/frontend/main.go|main|LISTEN_ADDR",
-      "src/frontend/main.go|main|PORT",
-      "src/frontend/middleware.go|ensureSessionID|ENABLE_SINGLE_SHARED_SESSION",
-      "src/frontend/packaging_info.go|init|PACKAGING_SERVICE_URL",
-      "src/productcatalogservice/catalog_loader.go|loadCatalogFromAlloyDB|ALLOYDB_CLUSTER_NAME",
-      "src/productcatalogservice/catalog_loader.go|loadCatalogFromAlloyDB|ALLOYDB_DATABASE_NAME",
-      "src/productcatalogservice/catalog_loader.go|loadCatalogFromAlloyDB|ALLOYDB_INSTANCE_NAME",
-      "src/productcatalogservice/catalog_loader.go|loadCatalogFromAlloyDB|ALLOYDB_SECRET_NAME",
-      "src/productcatalogservice/catalog_loader.go|loadCatalogFromAlloyDB|ALLOYDB_TABLE_NAME",
-      "src/productcatalogservice/catalog_loader.go|loadCatalogFromAlloyDB|PROJECT_ID",
-      "src/productcatalogservice/catalog_loader.go|loadCatalogFromAlloyDB|REGION",
-      "src/productcatalogservice/catalog_loader.go|loadCatalog|ALLOYDB_CLUSTER_NAME",
-      "src/productcatalogservice/server.go|main|DISABLE_PROFILER",
-      "src/productcatalogservice/server.go|main|ENABLE_TRACING",
-      "src/productcatalogservice/server.go|main|EXTRA_LATENCY",
-      "src/productcatalogservice/server.go|main|PORT",
-      "src/recommendationservice/recommendation_server.py|<module>|DISABLE_PROFILER",
-      "src/shippingservice/main.go|main|DISABLE_PROFILER",
-      "src/shippingservice/main.go|main|DISABLE_STATS",
-      "src/shippingservice/main.go|main|DISABLE_TRACING",
-      "src/shippingservice/main.go|main|PORT"
+      "src/recommendationservice/recommendation_server.py|<module>|DISABLE_PROFILER"
      ],
      "reads_spurious": []
     }
@@ -341,8 +308,8 @@
     }
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 10d08d738160, feat/lang-data@76dfa4b)",
-    "index_seconds": 0.28740533301606774,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
+    "index_seconds": 0.6984215000120457,
     "keys": {
      "yaml": {
       "keys": 266,
@@ -451,8 +418,8 @@
     }
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 10d08d738160, feat/lang-data@76dfa4b)",
-    "index_seconds": 0.2713536249939352,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
+    "index_seconds": 0.40262291600811295,
     "keys": {
      "yaml": {
       "keys": 143,
@@ -601,11 +568,11 @@
   },
   "rueca": {
    "reads": {
-    "tp": 44,
-    "pred": 44,
+    "tp": 77,
+    "pred": 77,
     "gold": 80,
     "precision": 1.0,
-    "recall": 0.55
+    "recall": 0.9625
    },
    "writes": {
     "tp": 130,
@@ -615,12 +582,12 @@
     "recall": 1.0
    },
    "all": {
-    "tp": 174,
-    "pred": 174,
+    "tp": 207,
+    "pred": 207,
     "gold": 210,
     "precision": 1.0,
-    "recall": 0.8285714285714286,
-    "f1": 0.90625
+    "recall": 0.9857142857142858,
+    "f1": 0.9928057553956835
    }
   }
  },

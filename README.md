@@ -174,9 +174,10 @@ Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
 
 Rueca is benchmarked against [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
 v0.12.0 and a BM25 baseline, per language, on issue localization (SWE-bench
-Lite/Verified, SWE-PolyBench, SWE-bench Multilingual; 121 instances) and
-structural questions (callers/callees against SCIP or PHPStan gold, plus
-hand-labeled micro-benchmarks). Full results:
+Lite/Verified, SWE-PolyBench, SWE-bench Multilingual, Multi-SWE-bench; 270
+instances), structural questions (callers/callees against SCIP or PHPStan
+gold, plus hand-labeled micro-benchmarks) and, for configuration, key
+coverage and the code ↔ config bridge. Full results:
 [docs/bench/alpha-results.md](docs/bench/alpha-results.md); method:
 [bench/README.md](bench/README.md).
 
@@ -184,17 +185,17 @@ hand-labeled micro-benchmarks). Full results:
 |---|---:|---:|---:|
 | Localization (keywords): file Acc@5 | 60.3 | 52.9 | **66.9** |
 | Localization (keywords): function Acc@10 | 44.1 | 33.3 | **52.3** |
-| Localization (issue text): file Acc@5 | 69.4 | 59.5 | **70.2** |
-| Localization (issue text): function Acc@10 | **45.9** | 37.8 | 43.2 |
 | Callers F1 | 79.6 | 81.4 | **90.4** |
 | Callees F1 | 60.7 | 73.3 | **82.6** |
 | Definition found | 100 | 98.2 | 98.9 |
 | Median query latency | ~0 s | 0.43 s | **0.01 s** |
 
-Parity with cbm per language (every metric ≥ cbm): **PHP ✅ 13/13**,
-TS/JS ❌ 8/10 (behind on raw issue text by 2–3 points), Python ❌ 8/13
-(behind on structural questions by 1–2 points and on bare-name lookup).
-Contributions that move these numbers are very welcome.
+Parity with cbm per language (every metric ≥ cbm, strict): **PHP ✅ 13/13**,
+**Java ✅ 13/13**, Go 11/13, TS/JS 9/10, Python 8/13, C++ 8/13, C 3/13.
+Configuration: key recall 100% (YAML, JSON) and 99.6% (HCL) vs 1–25% for
+cbm; env-var bridge precision / recall 100 / 98.6 vs 99.5 / 86.7. C and C++
+are held back by parsing without a preprocessor. Contributions that move
+these numbers are very welcome.
 
 ## Roadmap
 

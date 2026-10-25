@@ -1,5 +1,5 @@
 {
- "date": "2026-10-25 05:38 UTC",
+ "date": "2026-10-25 06:39 UTC",
  "machine": {
   "platform": "macOS-26.4.1-arm64-arm-64bit",
   "machine": "arm64",
@@ -29,28 +29,13 @@
   "rueca": {
    "available": true,
    "reason": "RUECA_BIN not set",
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 10d08d738160, feat/lang-data@76dfa4b); rueca 0.1.0-alpha.1 (binary sha256 beef90bf2177, feat/lang-go@af4b3b6); rueca 0.1.0-alpha.1 (binary sha256 c3d709df4a55, feat/lang-java@831cf27); rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a); rueca 0.1.0-alpha.1 (binary sha256 d36cf9fb9512, feat/lang-cpp@c63f84a)",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
    "recorded_versions": [
-    "rueca 0.1.0-alpha.1 (binary sha256 10d08d738160, feat/lang-data@76dfa4b)",
-    "rueca 0.1.0-alpha.1 (binary sha256 beef90bf2177, feat/lang-go@af4b3b6)",
-    "rueca 0.1.0-alpha.1 (binary sha256 c3d709df4a55, feat/lang-java@831cf27)",
-    "rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a)",
-    "rueca 0.1.0-alpha.1 (binary sha256 d36cf9fb9512, feat/lang-cpp@c63f84a)"
+    "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)"
    ]
   }
  },
  "versions_by_group": {
-  "ts/js": {
-   "grep": [
-    "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
-   ],
-   "cbm": [
-    "codebase-memory-mcp 0.12.0"
-   ],
-   "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a)"
-   ]
-  },
   "php": {
    "grep": [
     "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
@@ -59,17 +44,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a)"
-   ]
-  },
-  "python": {
-   "grep": [
-    "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
-   ],
-   "cbm": [
-    "codebase-memory-mcp 0.12.0"
-   ],
-   "rueca": [
+    "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
     "rueca 0.1.0-alpha.1 (binary sha256 d0fb41d6d77a)"
    ]
   },
@@ -81,7 +56,18 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 c3d709df4a55, feat/lang-java@831cf27)"
+    "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)"
+   ]
+  },
+  "ts/js": {
+   "grep": [
+    "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
+   ],
+   "cbm": [
+    "codebase-memory-mcp 0.12.0"
+   ],
+   "rueca": [
+    "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)"
    ]
   },
   "go": {
@@ -92,7 +78,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 beef90bf2177, feat/lang-go@af4b3b6)"
+    "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)"
    ]
   },
   "cpp": {
@@ -103,7 +89,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 d36cf9fb9512, feat/lang-cpp@c63f84a)"
+    "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)"
    ]
   },
   "c": {
@@ -114,11 +100,22 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 d36cf9fb9512, feat/lang-cpp@c63f84a)"
+    "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)"
+   ]
+  },
+  "python": {
+   "grep": [
+    "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
+   ],
+   "cbm": [
+    "codebase-memory-mcp 0.12.0"
+   ],
+   "rueca": [
+    "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)"
    ]
   }
  },
- "manifest_sha256": "f457d9a6af17c067ec5099e517e5e04d07559cfd097dc45ac5b213023d4eb258",
+ "manifest_sha256": "7d170645488e19c778686d5dce613c16f1abd08a879d56b1956e9ab5a610eefe",
  "manifest_tools": {
   "cbm": {
    "name": "codebase-memory-mcp",
@@ -211,53 +208,14 @@
    "name": "rueca",
    "binary": "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)",
    "contract": "docs/tools.md (alpha)",
-   "results": "main @ 508436b + bench harness (binary sha256 d0fb41d6d77a31cc6b2c0a48157b75daae20444be6499f1603f9130fba7c292d)",
-   "branches": {
-    "go": {
-     "branch": "feat/lang-go",
-     "commit": "af4b3b6585eb841635d37738faa859c83564e749",
-     "binary_sha256": "beef90bf2177bb2330e2301de283c9528687df33c2782141ae428589d59a2cc6",
-     "suites": [
-      "s1 go",
-      "s3 gin, cli, go-micro"
-     ]
-    },
-    "java": {
-     "branch": "feat/lang-java",
-     "commit": "831cf27066b5f932299437858d22f159b93f3c86",
-     "binary_sha256": "c3d709df4a55688a7af5fab10c091d3f6b16b489d8603402c0dab876f653a792",
-     "suites": [
-      "s1 java",
-      "s3 gson, java-micro"
-     ]
-    },
-    "cpp": {
-     "branch": "feat/lang-cpp",
-     "commit": "c63f84a8d01f4869e7032b2bb9322f3940914753",
-     "binary_sha256": "d36cf9fb95124938ce0f3b41d6ea1dd30702df3cfb7a14bf7f3910497601e981",
-     "suites": [
-      "s1 c, cpp",
-      "s3 fmt, cJSON, c-micro, cpp-micro"
-     ]
-    },
-    "data": {
-     "branch": "feat/lang-data",
-     "commit": "76dfa4beeb375eba081c307daa61248bb494cf0a",
-     "binary_sha256": "10d08d738160b870d08e522c0fa999a6b13b3c6ed6fcd330d0c0b524c7588b81",
-     "suites": [
-      "data online-boutique, awesome-compose, terraform-aws-vpc"
-     ]
-    }
-   }
+   "results": "main @ 65ae154 (binary sha256 9db30d82e36b7e1a84dde8dc06296febe9dcdb90389c52d4c0054a17fe0e9eb9)"
   }
  },
  "carried_groups": [
-  "php",
-  "python",
-  "ts/js"
+  "php"
  ],
  "carried_from": {
-  "date": "2026-10-25 02:55 UTC",
+  "date": "2026-10-25 06:38 UTC",
   "machine": {
    "platform": "macOS-26.4.1-arm64-arm-64bit",
    "machine": "arm64",
