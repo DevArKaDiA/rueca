@@ -187,12 +187,12 @@ scorecard (`stable` = every floor met; full tables in
 [bench/README.md](bench/README.md)):
 
 - **Python** `stable`
-- **TS/JS** `preview` — micro-benchmark callee F1 87.0 (81.7–91.4) vs ≥ 90
+- **TS/JS** `preview` — micro-benchmark callee F1 89.9 (85.4–93.6) vs ≥ 90
 - **PHP** `stable`
 - **Go** `stable`
-- **Java** `preview` — callees precision 86.8 (85.2–88.4) vs ≥ 90; definition found 88.9 (86.9–90.6) vs ≥ 95
-- **C** `preview` — function Acc@10 below BM25 (Δ −20.0, −36.7 to −3.3); callers / callees recall 73.9 / 62.3 vs ≥ 75; 26.9% of files with parse errors vs ≤ 2%
-- **C++** `preview` — function Acc@10 below BM25 (Δ −15.2, −27.3 to −3.0); callers / callees precision 87.8 / 82.1 vs ≥ 90; recall 67.7 / 62.3 vs ≥ 75; definition found 91.3 vs ≥ 95; 23.9% of files with parse errors vs ≤ 2%
+- **Java** `stable`
+- **C** `preview` — callees recall 65.8 (63.3–68.3) vs ≥ 75; 12.0% of files with parse errors vs ≤ 2%
+- **C++** `preview` — function Acc@10 below BM25 (Δ −18.2, −33.3 to −6.1); callees precision 86.3 vs ≥ 90; callers / callees recall 73.9 / 71.1 vs ≥ 75; definition found 94.4 vs ≥ 95; 11.3% of files with parse errors vs ≤ 2%
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 Contributions that move these numbers are very welcome.
