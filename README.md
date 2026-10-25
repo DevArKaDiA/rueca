@@ -21,7 +21,8 @@ tree into the context window.
 agent can follow.
 
 > **Status: alpha (`0.1.0-alpha.1`).** Local mode only, Python,
-> TypeScript/JavaScript and PHP. Formats and tool shapes may change before 1.0. See
+> TypeScript/JavaScript and PHP, plus Markdown and structured configuration.
+> Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
 ## Features
@@ -46,6 +47,15 @@ PHP (incl. HTML templates, Composer PSR-4 / PSR-0 autoload, PHPUnit and Pest
 tests).
 Documents: Markdown headings become `Section` symbols and file links become
 `IMPORTS` edges, in the same graph as the code.
+Configuration: JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
+(Maven, MSBuild, Android manifests), HCL/Terraform and Dockerfile become
+keys addressed by key path (`k8s/web.yaml:Deployment/web.spec.replicas`),
+with file kinds — docker compose, Kubernetes, GitHub Actions, OpenAPI,
+JSON Schema, Terraform, Dockerfile, `package.json`, tsconfig,
+`pyproject.toml`, Spring — and the **code ↔ config bridge**: `trace` on
+`$env:DATABASE_URL` lists the code that reads it (`os.getenv`,
+`process.env`, `getenv`, Laravel `env()`) and the manifests that set it;
+`config('app.name')` reads its key in `config/app.php`.
 
 ## Install
 
@@ -123,9 +133,11 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
                                cached by blob)    cached)        scopes, MRO)  + trigrams + packs)
 ```
 
-1. **Extract** — each file is parsed with tree-sitter; a language pack emits
-   definitions, references, and imports. Local scopes come from adapted
-   `locals.scm` queries. Facts are cached by git blob SHA.
+1. **Extract** — each code file is parsed with tree-sitter (Markdown and
+   data files with pure-Rust parsers); a language pack emits definitions,
+   references (including env var and config key reads), and imports. Local
+   scopes come from adapted `locals.scm` queries. Facts are cached by git
+   blob SHA.
 2. **Resolve** — references are linked across files through imports
    (TS/JS module resolution by [`oxc_resolver`](https://github.com/oxc-project/oxc-resolver),
    including `tsconfig` paths and workspace packages; PHP names through
@@ -195,6 +207,7 @@ See [RFC 0001](docs/rfcs/0001-architecture.md) for the full plan.
 | [`rueca-lang-typescript`](crates/rueca-lang-typescript) | TS/TSX/JS extraction and module resolution |
 | [`rueca-lang-markdown`](crates/rueca-lang-markdown) | Markdown sections and file links |
 | [`rueca-lang-php`](crates/rueca-lang-php) | PHP extraction, name resolution and Composer autoload |
+| [`rueca-lang-data`](crates/rueca-lang-data) | structured data: keys, file kinds, data pointers, env var providers |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |
 | [`rueca-segment`](crates/rueca-segment) | segment format, search, content packs, catalog |
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |

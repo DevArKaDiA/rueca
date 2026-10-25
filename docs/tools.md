@@ -23,16 +23,20 @@ unless marked optional.
 - **Qualified names**: Python `pkg.mod.Class.method`; ECMAScript
   `src/util/index:Class.method` (module path, colon, local name); PHP
   `App\Models\User::save` (namespace, backslash, local name); Markdown
-  `docs/guide.md:Install > Linux` (path, colon, heading chain). Planned for
-  the RFC 0003 packs (the model and the tools already accept them):
-  structured data `config/app.yaml:database.host` (path, colon, key path;
-  quoted segments `paths."/v1/users".get`, list elements `steps[2]`,
-  identity-keyed elements `env["DATABASE_URL"]`), Go
+  `docs/guide.md:Install > Linux` (path, colon, heading chain); structured
+  data `config/app.yaml:database.host` (path, colon, key path; quoted
+  segments `paths."/v1/users.{format}".get`, list elements `steps[2]`,
+  identity-keyed elements `env["DATABASE_URL"]`, documents of a YAML stream
+  `{1}.spec`, Kubernetes objects `k8s/web.yaml:Deployment/web.spec.replicas`,
+  Terraform `infra/main.tf:aws_s3_bucket.logs`, `var.region`); Laravel
+  config keys of `config/<file>.php` are PHP definitions, so their name is
+  the key path alone (`name`, id `config/app.php#name`); canonical env vars
+  `$env:DATABASE_URL`. Planned for the RFC 0003 code packs (the model and
+  the tools already accept them): Go
   `github.com/gin-gonic/gin.Engine.ServeHTTP` (import path, dot, local
   name), Java `com.example.Owner.getPets` (package, dot, local name;
   overloads `Parser.parse(String)`), C/C++ `fmt::v11::format_to`
-  (namespace and class path, no module), canonical env vars
-  `$env:DATABASE_URL`.
+  (namespace and class path, no module).
 - **Brief symbol** (used inside results):
   `{ "id", "name", "qualified_name", "label", "path", "start_line", "end_line" }`
 - **Truncation**: list results include `"truncated": bool`; paginated ones
@@ -65,12 +69,13 @@ other definitions with the same text score. Ranking details:
 Result: `{ "results": [ brief + "signature" (opt) + "score" ], "truncated", "next_offset" }`
 
 **Language names** (`search_symbols`, `search_code`): `python`,
-`typescript`, `tsx`, `javascript`, `php`, `markdown`; and, for the packs
-RFC 0003 adds, the data languages `json`, `yaml`, `toml`, `dotenv`, `ini`,
-`properties`, `xml`, `hcl`, `dockerfile` and the code languages `go`,
-`cpp`, `c`, `java`. A language whose pack is not in this build is accepted
-and matches nothing (its files are content-searchable without a language
-filter).
+`typescript`, `tsx`, `javascript`, `php`, `markdown`, the data languages
+`json` (JSONC included), `yaml`, `toml`, `dotenv`, `ini`, `properties`,
+`xml` (`pom.xml`, `*.csproj`, `AndroidManifest.xml` only), `hcl`
+(Terraform / OpenTofu included) and `dockerfile`; and, for the code packs
+RFC 0003 adds, `go`, `cpp`, `c`, `java`. A language whose pack is not in
+this build is accepted and matches nothing (its files are
+content-searchable without a language filter).
 
 Structured-data keys (`Key`) and multi-document YAML documents
 (`Document`) are left out of the default label set so configuration does

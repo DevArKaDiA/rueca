@@ -1,5 +1,42 @@
 # Decisions log
 
+## 2026-10-25 — Structured data and the code ↔ config bridge
+
+Waves 1, 2a and 2b of [RFC 0003](rfcs/0003-structured-data-and-languages.md)
+landed: `rueca-lang-data` serves JSON/JSONC, YAML, TOML, `.env`, INI,
+`.properties`, XML kinds, HCL/Terraform and Dockerfile with the parsers the
+RFC chose (`jsonc-parser`, `saphyr-parser` events, `toml_edit`, `roxmltree`,
+`hcl-edit`; own line parsers), and the Python, TS/JS and PHP packs emit env
+var and config key reads. Decisions taken while building, all documented in
+the crate docs and the RFC's *Implemented* notes:
+
+- **One generic walk, kinds as a refinement.** Every mapping-shaped format
+  is converted to one spanned tree; the generic walk emits keys, previews,
+  docs, YAML anchors / merges and `$ref` pointers for every file, and a
+  kind only relabels, re-signs and adds facts. An unrecognized variant of a
+  kind degrades to plain keys, as §5 asks.
+- **Shape rules are for files of no kind.** Kubernetes bundles and OpenAPI
+  specs are capped (`partial`) instead of skipped; the "mostly array
+  elements" test needs at least 20 definitions. The 5,000-key cap counts
+  keys as the walk emits them (before kinds relabel some).
+- **Laravel config keys live in the PHP pack.** `config/<file>.php` is PHP,
+  so the PHP pack turns the returned array into `Key`s and makes `env()`
+  calls in an entry reads by that key; it sets `facts_depend_on_path`
+  (one cache key per path for PHP files). PHP has no module name, so these
+  keys' global names are bare key paths (`name`); ids carry the file.
+- **Evidence over names for code reads.** Python needs `import os`; TS/JS
+  needs `process` not to be local (and `config` imported from `config` for
+  node-config); PHP matches the global `getenv` / `env` / `config` helpers
+  and the `Config` facade by name (PHP falls back to globals), which a
+  project-defined namespaced `env()` would fool.
+- **Secrets.** Provider values and secret-looking keys never reach
+  signatures or docs. The segment's `body` field (search only, never
+  returned) still tokenizes each symbol's source, as it does for code; the
+  raw file is in the content packs either way.
+- **Golden.** The fixture golden now includes the data fixtures (a small
+  polyglot service) and changes only where JSON files gained a language
+  (`php/laravel/composer.json`); no existing code fixture reads env vars.
+
 ## 2026-10-24 — Wave R: shared model, contract and resolver for RFC 0003
 
 The groundwork every RFC 0003 pack needs landed before the packs, so the
