@@ -53,3 +53,11 @@ crates/rueca-lang-java/queries/locals.scm
   https://github.com/BloopAI/bloop (commit 431e9e82c5a293c40f22aadb3615c3aa387af82e).
   Copyright BloopAI. Licensed under the Apache License, Version 2.0.
   Modified for Rueca (see the file header for the list of changes).
+
+crates/rueca-lang-cpp/queries/c-locals.scm
+crates/rueca-lang-cpp/queries/cpp-locals.scm
+  Adapted from nvim-treesitter, runtime/queries/c/locals.scm and
+  runtime/queries/cpp/locals.scm,
+  https://github.com/nvim-treesitter/nvim-treesitter (commit 29212d826054bb2948fa9d3a99eca9bf6a050eb2).
+  Copyright nvim-treesitter contributors. Licensed under the Apache License, Version 2.0.
+  Modified for Rueca (see each file header for the list of changes).

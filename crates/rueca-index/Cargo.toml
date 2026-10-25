@@ -21,6 +21,7 @@ rueca-lang-php.workspace = true
 rueca-lang-data.workspace = true
 rueca-lang-go.workspace = true
 rueca-lang-java.workspace = true
+rueca-lang-cpp.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 tracing.workspace = true

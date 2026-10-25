@@ -21,8 +21,8 @@ tree into the context window.
 agent can follow.
 
 > **Status: alpha (`0.1.0-alpha.1`).** Local mode only, Python,
-> TypeScript/JavaScript, PHP, Go and Java, plus Markdown and structured
-> configuration. Formats and tool shapes may change before 1.0. See
+> TypeScript/JavaScript, PHP, Go, Java, C and C++, plus Markdown and
+> structured configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
 ## Features
@@ -48,7 +48,10 @@ tests), Go (preview: `go.mod` / `go.work` import paths, packages across
 files, methods with typed receivers, embedding, implicit interfaces as
 heuristic `IMPLEMENTS`, generics, `go test` functions), Java (preview: packages, Maven / Gradle multi-module
 source roots, overloads, `OVERRIDES`, JUnit and TestNG tests, Spring
-`@Value` and `System.getenv` reads).
+`@Value` and `System.getenv` reads), C and C++ (preview: namespaces,
+classes, out-of-line bodies linked to their declarations, overloads,
+templates, macros, `#include` through `compile_commands.json` include
+directories, GoogleTest and Catch2 tests).
 Documents: Markdown headings become `Section` symbols and file links become
 `IMPORTS` edges, in the same graph as the code.
 Configuration: JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
@@ -146,9 +149,11 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    (TS/JS module resolution by [`oxc_resolver`](https://github.com/oxc-project/oxc-resolver),
    including `tsconfig` paths and workspace packages; PHP names through
    `namespace` / `use` and Composer autoload; Go import paths through
-   `go.mod`; Java packages and imports through Maven / Gradle source roots),
+   `go.mod`; Java packages and imports through Maven / Gradle source roots; C/C++
+   `#include` through `compile_commands.json` include directories),
    re-export chains, `self`/`this` with base classes and traits,
-   declared receiver types (PHP, Go, Java), overloads by argument count, package and same-module scope (implicit `this` in Java), each
+   declared receiver types (PHP, Go, Java, C/C++), declarations to bodies (C/C++), overloads by
+   argument count, package and same-module scope (implicit `this` in Java), each
    with a confidence.
 3. **Store** — the graph is written as one immutable segment file: CSR
    adjacency, an embedded [tantivy](https://github.com/quickwit-oss/tantivy)
@@ -216,6 +221,7 @@ See [RFC 0001](docs/rfcs/0001-architecture.md) for the full plan.
 | [`rueca-lang-data`](crates/rueca-lang-data) | structured data: keys, file kinds, data pointers, env var providers |
 | [`rueca-lang-go`](crates/rueca-lang-go) | Go extraction, receivers and the `go.mod` module model |
 | [`rueca-lang-java`](crates/rueca-lang-java) | Java extraction, packages and Maven / Gradle source roots |
+| [`rueca-lang-cpp`](crates/rueca-lang-cpp) | C and C++ extraction, macro masking and include resolution |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |
 | [`rueca-segment`](crates/rueca-segment) | segment format, search, content packs, catalog |
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
