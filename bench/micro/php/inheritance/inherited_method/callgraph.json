@@ -1,0 +1,8 @@
+{
+  "main.php:Animal::breathe": [],
+  "main.php:Dog::bark": [],
+  "main.php:morning": [
+    "main.php:Animal::breathe",
+    "main.php:Dog::bark"
+  ]
+}

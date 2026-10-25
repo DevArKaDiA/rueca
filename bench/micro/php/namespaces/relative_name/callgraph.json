@@ -1,0 +1,6 @@
+{
+  "main.php:run": [
+    "sub.php:go"
+  ],
+  "sub.php:go": []
+}

@@ -1,0 +1,10 @@
+{
+  "main.php:QueryBuilder::build": [],
+  "main.php:QueryBuilder::select": [],
+  "main.php:QueryBuilder::where": [],
+  "main.php:query": [
+    "main.php:QueryBuilder::build",
+    "main.php:QueryBuilder::select",
+    "main.php:QueryBuilder::where"
+  ]
+}

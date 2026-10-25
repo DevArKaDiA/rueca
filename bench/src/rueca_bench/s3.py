@@ -1,11 +1,15 @@
 """S3 — structural questions (callers / callees at depth 1, symbol lookup).
 
-Gold sources:
-- SCIP (scip-python / scip-typescript) at pinned commits, call edges derived
-  per RFC 0002 §4.2 (see scip.py), ~50 functions per repo stratified by
-  fan-in / fan-out.
-- PyCG micro-benchmark (Apache-2.0): hand-written call graphs of small Python
-  programs; every function of every snippet is a question.
+Gold sources (manifest `[[s3.repos]]` / `[[s3.micro]]`):
+- `gold = "scip"`: SCIP (scip-python / scip-typescript) at pinned commits,
+  call edges derived per RFC 0002 §4.2 (see scip.py);
+- `gold = "phpstan"`: the bench's PHPStan collector (PHP has no viable SCIP
+  indexer; see phpstan.py), same edge derivation;
+  both with ~50 functions per repo stratified by fan-in / fan-out;
+- micro-benchmarks: hand-written call graphs of small programs, every
+  function of every snippet is a question — PyCG (Python, Apache-2.0,
+  `format = "pycg"`) and the bench's own snippets (`format = "rueca"`, e.g.
+  bench/micro/php).
 
 Raw arm outputs are cached in .cache/runs/s3/<arm>/<suite>.json.
 """
@@ -19,13 +23,15 @@ from pathlib import Path
 
 from .arms import make_arm
 from .arms.base import Arm, Handle
-from .common import GOLD_DIR, RUNS_DIR, SCIP_DIR, WORK_DIR, load_manifest, log, read_json, safe_name, write_json
+from .common import BENCH_DIR, GOLD_DIR, RUNS_DIR, SCIP_DIR, WORK_DIR, is_code_file, lang_family, load_manifest, log, read_json, safe_name, write_json
 from .common import run as sh
 from .corpus import add_worktree, remove_worktree, worktree
+from .phpstan import docker_available, edges_from_calls, phpstan_call_graph, run_phpstan, version_string
 from .scip import derive_call_graph, fid, in_scope, read_index, sample_functions
 from .treesitter import extract_functions
 
 PYCG_KEY = "pycg"
+MICRO_SUITES = ("pycg", "micro")
 
 
 def repo_name(spec: dict) -> str:
@@ -46,6 +52,45 @@ def run_path(arm: str, name: str) -> Path:
 def _scip_command(spec: dict, root: Path, out: Path) -> list[str]:
     tool = load_manifest()["tools"][spec["indexer"]]
     return ["npx", "--yes", f"{tool['npm']}@{tool['version']}", *spec["args"], "--cwd", str(root), "--output", str(out)]
+
+
+def build_repo_gold(spec: dict, force: bool = False) -> dict:
+    method = spec.get("gold", "scip")
+    if method == "scip":
+        return build_scip_gold(spec, force)
+    if method == "phpstan":
+        return build_phpstan_gold(spec, force)
+    raise ValueError(f"unknown S3 gold method {method!r} for {spec['repo']}")
+
+
+def build_phpstan_gold(spec: dict, force: bool = False) -> dict:
+    name = repo_name(spec)
+    gp = gold_path(name)
+    if gp.exists() and not force:
+        return read_json(gp)
+    man = load_manifest()["s3"]
+    with worktree(spec["repo"], spec["commit"], f"s3-{name}") as root:
+        log(f"phpstan {name}: {', '.join(spec['include'])}")
+        graph = phpstan_call_graph(root, spec["include"], name)
+    sample = sample_functions(graph, man["sample_per_repo"], man["seed"], man["min_lines"])
+    gold = {
+        "suite": "phpstan",
+        "name": name,
+        "repo": spec["repo"],
+        "language": spec["language"],
+        "commit": spec["commit"],
+        "include": spec["include"],
+        "indexer": version_string(),
+        "indexer_seconds": None,
+        "stats": graph["stats"],
+        "callables": graph["callables"],
+        "callers": graph["callers"],
+        "callees": graph["callees"],
+        "sample": sample,
+    }
+    write_json(gp, gold)
+    log(f"s3 gold {name}: {graph['stats'].get('edges')} edges, {len(graph['callables'])} callables, sample {len(sample)}")
+    return gold
 
 
 def build_scip_gold(spec: dict, force: bool = False) -> dict:
@@ -93,8 +138,20 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
 # --- gold: PyCG micro-benchmark ---------------------------------------------------
 
 
+def micro_specs() -> list[dict]:
+    return list(load_manifest()["s3"].get("micro", []))
+
+
+def micro_spec(name: str) -> dict:
+    return next(m for m in micro_specs() if m["name"] == name)
+
+
+def snippets_root(name: str) -> Path:
+    return WORK_DIR / f"{name}-snippets"
+
+
 def pycg_root() -> Path:
-    return WORK_DIR / "pycg-snippets"
+    return snippets_root(PYCG_KEY)
 
 
 def _module_name(rel: str) -> str:
@@ -181,7 +238,7 @@ def build_pycg_gold(force: bool = False) -> dict:
     gp = gold_path(PYCG_KEY)
     if gp.exists() and not force:
         return read_json(gp)
-    spec = load_manifest()["s3"]["pycg"]
+    spec = micro_spec(PYCG_KEY)
     dest = pycg_root()
     if dest.exists():
         shutil.rmtree(dest)
@@ -210,11 +267,129 @@ def build_pycg_gold(force: bool = False) -> dict:
     return gold
 
 
-def ensure_pycg_tree() -> None:
+# --- gold: rueca-format micro-benchmarks (bench/micro/<lang>) --------------------------
+#
+# bench/micro/<lang>/<category>/<snippet>/ holds a few source files and
+# callgraph.json: {"path:Qualified": ["path:Qualified", ...]} where Qualified
+# is the tree-sitter labeler's local qualified name (PHP `Class::method`,
+# `function`). Every key is a question (functions without calls have []).
+
+
+def rueca_micro_graph(snip: Path, answer: dict) -> dict:
+    files = sorted(str(p.relative_to(snip)) for p in snip.rglob("*") if p.is_file() and ".git" not in p.parts and p.name != "callgraph.json")
+    callables: dict[str, dict] = {}
+    by_label: dict[str, str] = {}
+    for rel in files:
+        for f in extract_functions(rel, (snip / rel).read_bytes()):
+            d = f.as_dict()
+            d["path"] = rel
+            k = fid(rel, d)
+            callables[k] = d
+            by_label.setdefault(f"{rel}:{d['qualname']}", k)
+    unmapped = sorted({lab for src, dsts in answer.items() for lab in [src, *dsts] if lab not in by_label})
+    if unmapped:
+        raise ValueError(f"{snip.name}: answer-key labels without a tree-sitter callable: {unmapped}")
+    callers: dict[str, set[str]] = {}
+    callees: dict[str, set[str]] = {}
+    for src, dsts in sorted(answer.items()):
+        s = by_label[src]
+        for dst in dsts:
+            d = by_label[dst]
+            callees.setdefault(s, set()).add(d)
+            callers.setdefault(d, set()).add(s)
+    return {
+        "callables": callables,
+        "callers": {k: sorted(v) for k, v in callers.items()},
+        "callees": {k: sorted(v) for k, v in callees.items()},
+        "sample": sorted(by_label[k] for k in answer),
+        "stats": {"labels": len(answer), "edges": sum(len(v) for v in answer.values())},
+    }
+
+
+def _phpstan_agreement(dest: Path, snippets: dict[str, dict], name: str) -> dict:
+    """Cross-check the hand-written answer keys against the PHPStan extractor
+    (when Docker is available): edge-level agreement per snippet."""
+    ok, why = docker_available()
+    if not ok:
+        return {"available": False, "reason": why}
+    raw = run_phpstan(dest, sorted(snippets), WORK_DIR.parent / "phpstan" / f"{name}-check")
+    per: dict[str, dict] = {}
+    tp = fp = fn = 0
+    for sname, g in sorted(snippets.items()):
+        by_file: dict[str, list[dict]] = {}
+        for d in g["callables"].values():
+            by_file.setdefault(d["path"], []).append(d)
+        _, callees, _ = edges_from_calls(raw[sname], f"/src/{sname}/", by_file, lambda rel: True)
+        got = {(a, b) for a, bs in callees.items() for b in bs}
+        want = {(a, b) for a, bs in g["callees"].items() for b in bs}
+        tp += len(got & want)
+        fp += len(got - want)
+        fn += len(want - got)
+        per[sname] = {
+            "phpstan_only": sorted(f"{a} -> {b}" for a, b in got - want),
+            "key_only": sorted(f"{a} -> {b}" for a, b in want - got),
+        }
+    return {
+        "available": True,
+        "tool": version_string(),
+        "edges_key": tp + fn,
+        "edges_phpstan": tp + fp,
+        "agree": tp,
+        "precision": tp / (tp + fp) if tp + fp else None,
+        "recall": tp / (tp + fn) if tp + fn else None,
+        "snippets_identical": sum(1 for v in per.values() if not v["phpstan_only"] and not v["key_only"]),
+        "per_snippet": {k: v for k, v in per.items() if v["phpstan_only"] or v["key_only"]},
+    }
+
+
+def build_rueca_micro_gold(spec: dict, force: bool = False) -> dict:
+    name = spec["name"]
+    gp = gold_path(name)
+    if gp.exists() and not force:
+        return read_json(gp)
+    src = BENCH_DIR / spec["local"]
+    dest = snippets_root(name)
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    keys: dict[str, dict] = {}
+    for cg in sorted(src.glob("*/*/callgraph.json")):
+        snip = cg.parent
+        sname = f"{snip.parent.name}__{snip.name}"
+        shutil.copytree(snip, dest / sname)
+        keys[sname] = json.loads(cg.read_text())
+    gold: dict = {"suite": "micro", "name": name, "language": spec["language"], "source": spec["local"], "snippets": {}}
+    for sname in sorted(keys):
+        snip = dest / sname
+        gold["snippets"][sname] = rueca_micro_graph(snip, keys[sname])
+        (snip / "callgraph.json").unlink()
+    if lang_family(spec["language"]) == "php":
+        gold["phpstan_agreement"] = _phpstan_agreement(dest, gold["snippets"], name)
+    for sname in sorted(keys):
+        _git_snapshot(dest / sname)
+    n_q = sum(len(g["sample"]) for g in gold["snippets"].values())
+    n_e = sum(len(v) for g in gold["snippets"].values() for v in g["callees"].values())
+    log(f"s3 gold {name}: {len(gold['snippets'])} snippets, {n_q} functions, {n_e} edges")
+    write_json(gp, gold)
+    return gold
+
+
+def build_micro_gold(spec: dict, force: bool = False) -> dict:
+    if spec.get("format") == "pycg":
+        return build_pycg_gold(force)
+    return build_rueca_micro_gold(spec, force)
+
+
+def ensure_snippet_tree(spec: dict) -> None:
     """Re-create the snippet repos if the work dir was cleaned after setup."""
-    if pycg_root().exists() and any(pycg_root().iterdir()):
+    root = snippets_root(spec["name"])
+    if root.exists() and any(root.iterdir()):
         return
-    build_pycg_gold(force=True)
+    build_micro_gold(spec, force=True)
+
+
+def ensure_pycg_tree() -> None:
+    ensure_snippet_tree(micro_spec(PYCG_KEY))
 
 
 # --- run ------------------------------------------------------------------------------
@@ -268,15 +443,16 @@ def _run_scip_repo(arm: Arm, spec: dict) -> dict:
     return rec
 
 
-def _run_pycg(arm: Arm) -> dict:
-    gold = read_json(gold_path(PYCG_KEY))
-    ensure_pycg_tree()
-    rec: dict = {"arm": arm.name, "suite": "pycg", "name": PYCG_KEY, "language": "python", "snippets": {}}
+def _run_micro(arm: Arm, spec: dict) -> dict:
+    name = spec["name"]
+    gold = read_json(gold_path(name))
+    ensure_snippet_tree(spec)
+    rec: dict = {"arm": arm.name, "suite": gold["suite"], "name": name, "language": spec["language"], "snippets": {}}
     for sname, g in sorted(gold["snippets"].items()):
         if not g["sample"]:
             continue
-        root = pycg_root() / sname
-        h = arm.index(root, f"pycg-{sname}", "python")
+        root = snippets_root(name) / sname
+        h = arm.index(root, f"{name}-{sname}", spec["language"])
         srec: dict = {"index_seconds": h.index_seconds}
         if not h.ok:
             srec.update(status="index_failed", error=h.error)
@@ -292,16 +468,19 @@ def _run_pycg(arm: Arm) -> dict:
     return rec
 
 
-def suites() -> list[tuple[str, dict | None]]:
+def suites(languages: set[str] | None = None) -> list[tuple[str, dict, bool]]:
+    """(name, spec, is_micro) for every S3 gold set, repos first then
+    micro-benchmarks, optionally restricted to language families."""
     man = load_manifest()["s3"]
-    out: list[tuple[str, dict | None]] = [(repo_name(s), s) for s in man["repos"]]
-    if "pycg" in man:
-        out.append((PYCG_KEY, None))
+    out: list[tuple[str, dict, bool]] = [(repo_name(s), s, False) for s in man["repos"]]
+    out += [(m["name"], m, True) for m in man.get("micro", [])]
+    if languages:
+        out = [x for x in out if lang_family(x[1]["language"]) in languages]
     return out
 
 
-def run(arm_names: list[str], only: list[str] | None = None, force: bool = False) -> None:
-    for name, spec in suites():
+def run(arm_names: list[str], only: list[str] | None = None, force: bool = False, languages: set[str] | None = None) -> None:
+    for name, spec, micro in suites(languages):
         if only and name not in only:
             continue
         if not gold_path(name).exists():
@@ -317,7 +496,7 @@ def run(arm_names: list[str], only: list[str] | None = None, force: bool = False
                 continue
             log(f"s3 {arm_name:5s} {name}")
             try:
-                rec = _run_pycg(arm) if spec is None else _run_scip_repo(arm, spec)
+                rec = _run_micro(arm, spec) if micro else _run_scip_repo(arm, spec)
             except Exception as exc:
                 rec = {"arm": arm_name, "name": name, "status": "error", "error": f"{exc}\n{traceback.format_exc()[-1500:]}"}
             rec["arm_version"] = arm.version()
@@ -327,6 +506,6 @@ def run(arm_names: list[str], only: list[str] | None = None, force: bool = False
 def prediction_in_scope(path: str | None, gold: dict) -> bool:
     if not path:
         return False
-    if gold.get("suite") == "pycg":
-        return path.endswith(".py") and not path.startswith("<")
+    if gold.get("suite") in MICRO_SUITES:
+        return is_code_file(path, gold["language"]) and not path.startswith("<")
     return in_scope(path, gold["include"])

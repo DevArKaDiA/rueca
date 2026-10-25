@@ -1,0 +1,6 @@
+{
+  "main.php:Point::__construct": [],
+  "main.php:origin": [
+    "main.php:Point::__construct"
+  ]
+}

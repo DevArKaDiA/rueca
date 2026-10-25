@@ -1,0 +1,8 @@
+{
+  "main.php:count_items": [],
+  "main.php:label": [],
+  "main.php:main": [
+    "main.php:count_items",
+    "main.php:label"
+  ]
+}

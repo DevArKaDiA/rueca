@@ -1,0 +1,6 @@
+{
+  "Str.php:Str::lower": [],
+  "main.php:normalize": [
+    "Str.php:Str::lower"
+  ]
+}

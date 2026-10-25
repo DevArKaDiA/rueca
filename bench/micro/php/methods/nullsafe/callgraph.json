@@ -1,0 +1,8 @@
+{
+  "main.php:Address::city": [],
+  "main.php:User::address": [],
+  "main.php:cityOf": [
+    "main.php:Address::city",
+    "main.php:User::address"
+  ]
+}

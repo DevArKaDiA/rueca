@@ -1,0 +1,12 @@
+{
+  "main.php:first": [
+    "main.php:second"
+  ],
+  "main.php:fourth": [],
+  "main.php:second": [
+    "main.php:third"
+  ],
+  "main.php:third": [
+    "main.php:fourth"
+  ]
+}

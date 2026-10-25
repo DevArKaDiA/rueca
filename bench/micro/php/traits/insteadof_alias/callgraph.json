@@ -1,0 +1,8 @@
+{
+  "main.php:Greeter::both": [
+    "main.php:Hello::hello",
+    "main.php:Hi::hello"
+  ],
+  "main.php:Hello::hello": [],
+  "main.php:Hi::hello": []
+}

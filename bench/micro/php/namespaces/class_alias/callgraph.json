@@ -1,0 +1,6 @@
+{
+  "Logger.php:Logger::log": [],
+  "main.php:report": [
+    "Logger.php:Logger::log"
+  ]
+}

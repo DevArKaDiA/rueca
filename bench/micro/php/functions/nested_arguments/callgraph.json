@@ -1,0 +1,10 @@
+{
+  "main.php:render": [
+    "main.php:shout",
+    "main.php:word",
+    "main.php:wrap"
+  ],
+  "main.php:shout": [],
+  "main.php:word": [],
+  "main.php:wrap": []
+}

@@ -1,0 +1,6 @@
+{
+  "main.php:Form::rules": [],
+  "main.php:Validates::validate": [
+    "main.php:Form::rules"
+  ]
+}

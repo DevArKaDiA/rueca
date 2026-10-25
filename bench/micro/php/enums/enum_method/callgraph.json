@@ -1,0 +1,9 @@
+{
+  "main.php:Suit::label": [
+    "main.php:Suit::prefix"
+  ],
+  "main.php:Suit::prefix": [],
+  "main.php:show": [
+    "main.php:Suit::label"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "main.php:Base::__construct": [],
+  "main.php:Child::__construct": [
+    "main.php:Base::__construct"
+  ],
+  "main.php:make": [
+    "main.php:Child::__construct"
+  ]
+}

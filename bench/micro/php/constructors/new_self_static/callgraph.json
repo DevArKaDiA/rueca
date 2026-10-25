@@ -1,0 +1,9 @@
+{
+  "main.php:Node::__construct": [],
+  "main.php:Node::child": [
+    "main.php:Node::__construct"
+  ],
+  "main.php:Node::sibling": [
+    "main.php:Node::__construct"
+  ]
+}

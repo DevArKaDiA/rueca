@@ -1,0 +1,8 @@
+{
+  "main.php:Cache::get": [],
+  "main.php:Container::service": [],
+  "main.php:lookup": [
+    "main.php:Cache::get",
+    "main.php:Container::service"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "main.php:Clock::now": [],
+  "main.php:Service::__construct": [],
+  "main.php:Service::stamp": [
+    "main.php:Clock::now"
+  ],
+  "main.php:make": [
+    "main.php:Service::__construct"
+  ]
+}

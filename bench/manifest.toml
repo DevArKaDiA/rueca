@@ -5,8 +5,78 @@
 # are fetched at runtime into bench/.cache and never committed.
 
 [bench]
-schema = 1
+schema = 2
 alpha_languages = ["python", "typescript", "javascript"]
+
+# ---------------------------------------------------------------- languages
+# Adding a language is data (bench/README.md, "Adding a language"). A family
+# is one Rueca language pack and one report column; `members` are the
+# instance languages it covers. `test_files` patterns (matched against the
+# file name) are pooled into one test-path heuristic used for gold and arms.
+
+[languages.python]
+label = "python"
+members = ["python"]
+extensions = [".py", ".pyi"]
+test_files = ['^test_.*\.py$', '.*_test\.py$', '^conftest\.py$']
+s1_sources = "SWE-bench Verified + Lite (LocAgent function labels, ContextBench context gold)"
+s3_gold = "scip-python 0.6.8 (requests, flask) and the PyCG micro-benchmark"
+
+[languages.ecma]
+label = "ts/js"
+members = ["typescript", "javascript"]
+extensions = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]
+exclude_suffixes = [".d.ts"]
+test_files = ['.*\.(test|spec)\.[cm]?[jt]sx?$', '.*-test\.[cm]?[jt]s$']
+s1_sources = "SWE-PolyBench (modified_nodes function labels) + SWE-bench Multilingual"
+s3_gold = "scip-typescript 0.5.2 (hono, express)"
+
+[languages.php]
+label = "php"
+members = ["php"]
+extensions = [".php"]
+test_files = ['.*Test\.php$']
+s1_sources = "SWE-bench Multilingual (all four PHP repositories) + SWE-rebench V2 (three small libraries, LLM screen code A); function gold from the tree-sitter labeler (no assembled PHP function labels exist)"
+s3_gold = "PHPStan 2.3.2 + rueca-bench collector (monolog 3.9.0, commonmark 2.8.3; no viable SCIP indexer for PHP) and the rueca-bench PHP micro-benchmark (60 hand-labelled snippets)"
+notes = "PHPStan gold follows declared and phpdoc types without vendor code; interface-typed receivers resolve to the interface method (no expansion to implementations)."
+
+# Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
+# callables). `binding` = Python package (pinned in pyproject.toml) and
+# function returning the language. `labeler = "nesting"` (default) is the
+# data-driven labeler (treesitter.py: _nesting_functions); `ecma` is the
+# code-backed labeler for JS/TS function shapes.
+
+[grammars.python]
+binding = "tree_sitter_python:language"
+extensions = [".py", ".pyi"]
+callables = { function_definition = "Function" }
+containers = ["class_definition"]
+separator = "."
+wrappers = ["decorated_definition"]
+
+[grammars.typescript]
+binding = "tree_sitter_typescript:language_typescript"
+extensions = [".ts", ".mts", ".cts"]
+labeler = "ecma"
+
+[grammars.tsx]
+binding = "tree_sitter_typescript:language_tsx"
+extensions = [".tsx"]
+labeler = "ecma"
+
+[grammars.javascript]
+binding = "tree_sitter_javascript:language"
+extensions = [".js", ".jsx", ".mjs", ".cjs"]
+labeler = "ecma"
+
+[grammars.php]
+binding = "tree_sitter_php:language_php"
+package = "tree-sitter-php 0.25.1 (MIT)"
+extensions = [".php"]
+callables = { function_definition = "Function", method_declaration = "Method" }
+containers = ["class_declaration", "interface_declaration", "trait_declaration", "enum_declaration"]
+separator = "::"
+flat_functions = ["function_definition"]
 
 # ---------------------------------------------------------------- tools
 
@@ -37,6 +107,22 @@ license = "MIT"
 npm = "@sourcegraph/scip-typescript"
 version = "0.5.2"
 license = "Apache-2.0"
+
+# PHP S3 gold (RFC 0002 §4.2: scip-php is not viable). PHPStan runs from its
+# release PHAR inside the official PHP CLI image (pinned by digest), with the
+# bench's own collector extension (bench/phpstan/). Nothing PHP is installed
+# on the host; no adopter dependencies are installed (no `composer install`).
+[tools.phpstan]
+name = "phpstan"
+version = "2.3.2"
+license = "MIT"
+url = "https://github.com/phpstan/phpstan/releases/download/2.3.2/phpstan.phar"
+sha256 = "0ded687c44b1f9d0346f7f00fa505212b018efe532b2b18e3a72f6e16feb32be"
+
+[tools.php_image]
+name = "php:8.3-cli (Docker official image)"
+image = "php@sha256:98d555ff97b3865140ad31032508c3ca089fa97a8944b14ca9dc03ea05d788cd"
+license = "PHP-3.01 (run as a separate process; nothing vendored)"
 
 [tools.rueca]
 name = "rueca"
@@ -78,6 +164,19 @@ file = "data/test-00000-of-00001.parquet"
 sha256 = "92abca7cb527b41a9f66d03a26ce441ff7319e3a49f985998fd56be4bb9b08b2"
 card_license = "MIT"
 citation = "SWE-bench Multilingual (SWE-bench team, 2025)"
+
+[datasets.swe_rebench_v2]
+hf = "nebius/SWE-rebench-V2"
+revision = "10483de0f50fe5da545942705a76c6150171af7f"
+file = "data/train-00000-of-00001.parquet"
+sha256 = "0e0bf9355f892ad74ae98d4e1c404f39fd6654a8e351ee3e6ab162e4a64cd3ad"
+columns = ["instance_id", "repo", "base_commit", "patch", "problem_statement", "license"]
+card_license = "CC-BY-4.0"
+citation = "Badertdinov et al., SWE-rebench (Nebius, 2025); SWE-rebench V2 (2026)"
+role = "S1 PHP issues and patches on small repositories (automatically mined, LLM-screened)"
+# keep only rows the dataset's own LLM screen rated well specified (code A)
+row_filter = { "meta.llm_metadata.code" = ["A"] }
+filter_repos = true  # 38k rows, 20 languages: read only the S1 repositories sourced from it
 
 # Assembled localization gold (RFC 0002 §8/§9). Used for gold labels only;
 # issue text / patches still come from the source dataset of each instance.
@@ -178,8 +277,56 @@ language = "javascript"
 quota = 6
 sources = ["swe_bench_multilingual"]
 
+# PHP: SWE-bench Multilingual (human-validated; all four PHP repositories) plus
+# SWE-rebench V2 on three small libraries for repository diversity.
+
+[[s1.repos]]
+repo = "briannesbitt/carbon"
+language = "php"
+quota = 8
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+quota = 8
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "laravel/framework"
+language = "php"
+quota = 6
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "phpoffice/phpspreadsheet"
+language = "php"
+quota = 6
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "twigphp/Twig"
+language = "php"
+quota = 4
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "Seldaek/monolog"
+language = "php"
+quota = 4
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "thephpleague/commonmark"
+language = "php"
+quota = 4
+sources = ["swe_rebench_v2"]
+
 # ---------------------------------------------------------------- S3 structural
-# Gold call edges from SCIP indexes at pinned commits (RFC 0002 §4.2).
+# Gold call edges from SCIP indexes (`gold = "scip"`, default) or, for PHP,
+# the bench's PHPStan collector (`gold = "phpstan"`) at pinned commits
+# (RFC 0002 §4.2). Micro-benchmarks (`[[s3.micro]]`) are hand-written call
+# graphs of small programs; every function is a question.
 
 [s3]
 sample_per_repo = 50
@@ -222,13 +369,44 @@ include = ["lib/", "index.js"]
 indexer = "scip_typescript"
 args = ["index", "--infer-tsconfig"]
 
+[[s3.repos]]
+repo = "Seldaek/monolog"
+language = "php"
+tag = "3.9.0"
+commit = "10d85740180ecba7896c87e06a166e0c95a0e3b6"
+include = ["src/Monolog/"]
+gold = "phpstan"
+
+[[s3.repos]]
+repo = "thephpleague/commonmark"
+language = "php"
+tag = "2.8.3"
+commit = "1902f60f984235023acbe03db6ad614a37b3c3e7"
+include = ["src/"]
+gold = "phpstan"
+
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
-[s3.pycg]
+[[s3.micro]]
+name = "pycg"
+title = "PyCG micro-benchmark"
+language = "python"
+format = "pycg"
 repo = "vitsalis/PyCG"
 commit = "8d5dc40837803beef1d8d379fbf2cdad6cd94641"
 path = "micro-benchmark/snippets"
 license = "Apache-2.0"
 citation = "Salis et al., PyCG: Practical Call Graph Generation in Python (ICSE 2021)"
+
+# PHP micro-benchmark: Rueca's own hand-labelled snippets (Apache-2.0), in
+# this repository (bench/micro/php/<category>/<snippet>/, answer key in
+# callgraph.json as "path:Qualified" -> ["path:Qualified", ...]).
+[[s3.micro]]
+name = "php-micro"
+title = "PHP micro-benchmark (rueca-bench)"
+language = "php"
+format = "rueca"
+local = "micro/php"
+license = "Apache-2.0"
 
 # --- generated by `rueca-bench select`; do not edit below this line ---
 [[s1.instances]]
@@ -877,4 +1055,324 @@ repo = "axios/axios"
 language = "javascript"
 base_commit = "9bb016f95e6de871a44f3276fd06562704a0abb0"
 dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "briannesbitt__carbon-3103"
+repo = "briannesbitt/carbon"
+language = "php"
+base_commit = "d481d8d69a94dc00e5c1b147ec1f7e7492626b12"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "briannesbitt__carbon-3098"
+repo = "briannesbitt/carbon"
+language = "php"
+base_commit = "cb0fd285ae34041ef2a0f62dc409bece61ff2bc4"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "briannesbitt__carbon-2813"
+repo = "briannesbitt/carbon"
+language = "php"
+base_commit = "8c019924327fe0251294adb61543981e3d27652c"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "briannesbitt__carbon-2981"
+repo = "briannesbitt/carbon"
+language = "php"
+base_commit = "1d762cbdb379838b10bde0a5a901c5b5c2a83437"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "briannesbitt__carbon-3005"
+repo = "briannesbitt/carbon"
+language = "php"
+base_commit = "640940f4a9303e458fc29341821395460f32b3b5"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "briannesbitt__carbon-2762"
+repo = "briannesbitt/carbon"
+language = "php"
+base_commit = "077657bce453df6992607e5aaa538d957068ae40"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "briannesbitt__carbon-2665"
+repo = "briannesbitt/carbon"
+language = "php"
+base_commit = "01bc4cdefe98ef58d1f9cb31bdbbddddf2a88f7a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "briannesbitt__carbon-2752"
+repo = "briannesbitt/carbon"
+language = "php"
+base_commit = "09acf64155c16dc6f580f36569ae89344e9734a3"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "php-cs-fixer__php-cs-fixer-7875"
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+base_commit = "18d9e42f276f65ba45da02597191ce555bf23cd0"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "php-cs-fixer__php-cs-fixer-7635"
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+base_commit = "826207ac6996fc1cf433e18476cf898e33c4aa06"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "php-cs-fixer__php-cs-fixer-7663"
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+base_commit = "c5cde0cf7542234dc061af8a25f77fcdad430e35"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "php-cs-fixer__php-cs-fixer-8064"
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+base_commit = "c3dbbcfd7f9a8a7cd38d2107790f29479a33ad78"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "php-cs-fixer__php-cs-fixer-8367"
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+base_commit = "50594cc3bca17298f81b5d4c3bd993275f7a6b55"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "php-cs-fixer__php-cs-fixer-8256"
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+base_commit = "27dde9afa3d4db851f8aaffc820f697a5dbe747f"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "php-cs-fixer__php-cs-fixer-7523"
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+base_commit = "10fb65e3e8b8645f74f6ab099dfa11ce5ac5cfcd"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "php-cs-fixer__php-cs-fixer-8075"
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+base_commit = "f0a95a77782538eafca6c4d2f2f2792be3dbbfcf"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "laravel__framework-52451"
+repo = "laravel/framework"
+language = "php"
+base_commit = "b8ca298a5475497d01b194ed5688441454d8ee34"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "laravel__framework-52866"
+repo = "laravel/framework"
+language = "php"
+base_commit = "4c7850844e218b4fa25e29c83bc80b7ef06836cb"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "laravel__framework-51890"
+repo = "laravel/framework"
+language = "php"
+base_commit = "5ed0ce8bbbc50843f4a63b47ed7004326e546697"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "laravel__framework-53914"
+repo = "laravel/framework"
+language = "php"
+base_commit = "37d48c45e0e2496c3acecee431416c1d1aab52bb"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "laravel__framework-48573"
+repo = "laravel/framework"
+language = "php"
+base_commit = "0bf186a30279212a44d6818f8db6ddf70baa4d1a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "laravel__framework-52684"
+repo = "laravel/framework"
+language = "php"
+base_commit = "455598c577fab3898e1d84ddbaa142780c8b192d"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "phpoffice__phpspreadsheet-4214"
+repo = "phpoffice/phpspreadsheet"
+language = "php"
+base_commit = "915bfc55cd6217e059b5859b341bab7bdd0874c8"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "phpoffice__phpspreadsheet-3903"
+repo = "phpoffice/phpspreadsheet"
+language = "php"
+base_commit = "0c8a80e83470bd4e042c500955684cad6f76b19f"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "phpoffice__phpspreadsheet-3570"
+repo = "phpoffice/phpspreadsheet"
+language = "php"
+base_commit = "40203ff6cb18c9fff9f605ba78f21ce95fd04d6c"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "phpoffice__phpspreadsheet-4313"
+repo = "phpoffice/phpspreadsheet"
+language = "php"
+base_commit = "eacaa25dca01b79b9b468184c452b97ad0b30dd7"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "phpoffice__phpspreadsheet-3469"
+repo = "phpoffice/phpspreadsheet"
+language = "php"
+base_commit = "e4a770eae9e1751314296ca4342b3c6271c9ba13"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "phpoffice__phpspreadsheet-3463"
+repo = "phpoffice/phpspreadsheet"
+language = "php"
+base_commit = "99a7de3812c9033b80eddbf759efd298cd50c3c5"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "twigphp__twig-4500"
+repo = "twigphp/Twig"
+language = "php"
+base_commit = "47f527ef8447640a5ff9d75ee4cf7cfff29fa3be"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "twigphp__twig-4212"
+repo = "twigphp/Twig"
+language = "php"
+base_commit = "b9b8d5257254ef258777467d59968fb5fd4501fa"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "twigphp__twig-4336"
+repo = "twigphp/Twig"
+language = "php"
+base_commit = "efc527ea65f0b12c6afda0a1e57e2f220e69afd2"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "twigphp__twig-4339"
+repo = "twigphp/Twig"
+language = "php"
+base_commit = "3ddab4f8b413c6b8395f51768336fcf605ae9e4b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "seldaek__monolog-1896"
+repo = "Seldaek/monolog"
+language = "php"
+base_commit = "a4471eb05bb32400bf408972d5162dccc49f46c5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "seldaek__monolog-1882"
+repo = "Seldaek/monolog"
+language = "php"
+base_commit = "b92508d0d7ef94534d3080ba831785cf7d3a0742"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "seldaek__monolog-1722"
+repo = "Seldaek/monolog"
+language = "php"
+base_commit = "5579edf28aee1190a798bfa5be8bc16c563bd524"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "seldaek__monolog-1928"
+repo = "Seldaek/monolog"
+language = "php"
+base_commit = "e94000419394ff1bec801dad310432228f9fc19c"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "thephpleague__commonmark-1038"
+repo = "thephpleague/commonmark"
+language = "php"
+base_commit = "200869c74b4711d4162d77aa701a613adceedd63"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "thephpleague__commonmark-883"
+repo = "thephpleague/commonmark"
+language = "php"
+base_commit = "9981c77d62ebe1d3038e3cb3d79cd83bc50cb465"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "thephpleague__commonmark-952"
+repo = "thephpleague/commonmark"
+language = "php"
+base_commit = "8e37e27b8d1eefd7f8ceed55295925a69f1e97c9"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "thephpleague__commonmark-1034"
+repo = "thephpleague/commonmark"
+language = "php"
+base_commit = "b7a7af3a23a818dcc5836e62e93e4b9ce4704481"
+dataset = "swe_rebench_v2"
 assets = []

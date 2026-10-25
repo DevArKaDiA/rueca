@@ -1,0 +1,5 @@
+{
+  "main.php:Invoice::save": [],
+  "main.php:Order::save": [],
+  "main.php:persist": []
+}

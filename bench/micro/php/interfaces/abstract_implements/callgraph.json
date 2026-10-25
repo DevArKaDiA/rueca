@@ -1,0 +1,6 @@
+{
+  "main.php:BaseHandler::process": [
+    "main.php:Handler::handle"
+  ],
+  "main.php:Handler::handle": []
+}

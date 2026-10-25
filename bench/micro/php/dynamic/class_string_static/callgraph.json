@@ -1,0 +1,6 @@
+{
+  "main.php:Util::slug": [],
+  "main.php:run": [
+    "main.php:Util::slug"
+  ]
+}

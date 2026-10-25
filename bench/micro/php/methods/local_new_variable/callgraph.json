@@ -1,0 +1,8 @@
+{
+  "main.php:Counter::inc": [],
+  "main.php:Counter::value": [],
+  "main.php:tally": [
+    "main.php:Counter::inc",
+    "main.php:Counter::value"
+  ]
+}

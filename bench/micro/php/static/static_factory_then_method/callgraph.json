@@ -1,0 +1,13 @@
+{
+  "main.php:Money::__construct": [],
+  "main.php:Money::add": [
+    "main.php:Money::__construct"
+  ],
+  "main.php:Money::of": [
+    "main.php:Money::__construct"
+  ],
+  "main.php:total": [
+    "main.php:Money::add",
+    "main.php:Money::of"
+  ]
+}

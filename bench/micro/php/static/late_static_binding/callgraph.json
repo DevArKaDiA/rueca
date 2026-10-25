@@ -1,0 +1,9 @@
+{
+  "main.php:Model::__construct": [],
+  "main.php:Model::create": [
+    "main.php:Model::__construct"
+  ],
+  "main.php:seed": [
+    "main.php:Model::create"
+  ]
+}

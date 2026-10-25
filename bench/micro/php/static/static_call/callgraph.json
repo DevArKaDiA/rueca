@@ -1,0 +1,6 @@
+{
+  "main.php:Str::slug": [],
+  "main.php:permalink": [
+    "main.php:Str::slug"
+  ]
+}
