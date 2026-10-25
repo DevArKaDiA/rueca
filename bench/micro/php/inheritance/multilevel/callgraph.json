@@ -1,0 +1,9 @@
+{
+  "main.php:A::fromA": [],
+  "main.php:C::own": [
+    "main.php:A::fromA"
+  ],
+  "main.php:use_c": [
+    "main.php:A::fromA"
+  ]
+}

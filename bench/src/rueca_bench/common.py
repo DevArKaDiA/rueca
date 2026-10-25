@@ -49,8 +49,27 @@ SCIP_DIR = CACHE / "scip"
 BIN_DIR = CACHE / "bin"
 GOLD_DIR = CACHE / "gold"
 
-PY_EXTS = (".py", ".pyi")
-ECMA_EXTS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
+# Pinned, sha256-verified assets (tool binaries, datasets, archives) may be
+# read from another bench cache instead of being downloaded again, e.g. when
+# several checkouts of the bench share one machine:
+#   RUECA_BENCH_SHARED_CACHE=/path/to/other/bench/.cache
+# Only files whose sha256 matches the manifest pin are used from there; nothing
+# is ever written to it.
+SHARED_CACHE = Path(os.environ["RUECA_BENCH_SHARED_CACHE"]).resolve() if os.environ.get("RUECA_BENCH_SHARED_CACHE") else None
+
+
+def pinned_asset(local: Path, sha256: str | None) -> Path:
+    """`local` if present, else the same relative path in the shared cache when
+    its sha256 matches the pin, else `local` (to be fetched)."""
+    if local.exists() or SHARED_CACHE is None or not sha256:
+        return local
+    try:
+        shared = SHARED_CACHE / local.relative_to(CACHE)
+    except ValueError:
+        return local
+    if shared.is_file() and sha256_file(shared) == sha256:
+        return shared
+    return local
 
 
 def load_manifest() -> dict[str, Any]:
@@ -58,35 +77,96 @@ def load_manifest() -> dict[str, Any]:
         return tomllib.load(fh)
 
 
+# --- languages (manifest `[languages.<family>]`) -----------------------------------
+#
+# A language family groups the instance languages that share one Rueca
+# language pack and one report column (python; typescript + javascript;
+# php; ...). Everything the harness needs per family is data in the manifest:
+# member languages, report label, source extensions, excluded suffixes,
+# test-file patterns. See bench/README.md, "Adding a language".
+
+
+@dataclass(frozen=True)
+class LanguageFamily:
+    key: str
+    label: str
+    members: tuple[str, ...]
+    extensions: tuple[str, ...]
+    exclude_suffixes: tuple[str, ...]
+    test_files: tuple[str, ...]
+
+
+_FAMILIES: dict[str, LanguageFamily] | None = None
+
+
+def families() -> dict[str, LanguageFamily]:
+    """Families in manifest order."""
+    global _FAMILIES
+    if _FAMILIES is None:
+        out: dict[str, LanguageFamily] = {}
+        for key, spec in load_manifest().get("languages", {}).items():
+            out[key] = LanguageFamily(
+                key=key,
+                label=spec.get("label", key),
+                members=tuple(spec.get("members", [key])),
+                extensions=tuple(spec["extensions"]),
+                exclude_suffixes=tuple(spec.get("exclude_suffixes", [])),
+                test_files=tuple(spec.get("test_files", [])),
+            )
+        _FAMILIES = out
+    return _FAMILIES
+
+
+def family_of(language: str) -> LanguageFamily:
+    for fam in families().values():
+        if language in fam.members:
+            return fam
+    raise KeyError(f"language {language!r} is not declared in manifest [languages]")
+
+
 def lang_family(language: str) -> str:
-    return "python" if language == "python" else "ecma"
+    return family_of(language).key
+
+
+def lang_group(language: str) -> str:
+    """Report column label of an instance language (python, ts/js, php, ...)."""
+    return family_of(language).label
 
 
 def code_exts(language: str) -> tuple[str, ...]:
-    return PY_EXTS if lang_family(language) == "python" else ECMA_EXTS
+    return family_of(language).extensions
 
 
 def is_code_file(path: str, language: str) -> bool:
-    if path.endswith(".d.ts"):
+    fam = family_of(language)
+    if fam.exclude_suffixes and path.endswith(fam.exclude_suffixes):
         return False
-    return path.endswith(code_exts(language))
+    return path.endswith(fam.extensions)
 
 
 _TEST_SEGMENTS = {"test", "tests", "__tests__", "__mocks__", "__fixtures__", "e2e", "spec", "specs"}
 _TOP_LEVEL_TEST_SEGMENTS = {"testing"}
-_TEST_FILE = re.compile(
-    r"(^test_.*\.py$|.*_test\.py$|^conftest\.py$|.*\.(test|spec)\.[cm]?[jt]sx?$|.*-test\.[cm]?[jt]s$)"
-)
+_TEST_FILE: re.Pattern | None = None
+
+
+def _test_file_re() -> re.Pattern:
+    global _TEST_FILE
+    if _TEST_FILE is None:
+        pats = [p for fam in families().values() for p in fam.test_files]
+        _TEST_FILE = re.compile("(" + "|".join(pats) + ")") if pats else re.compile(r"(?!)")
+    return _TEST_FILE
 
 
 def is_test_path(path: str) -> bool:
-    """Same heuristic for gold and every arm (documented in bench/README.md)."""
+    """Same heuristic for gold and every arm (documented in bench/README.md):
+    a test directory segment, or a file name matching any language's
+    `test_files` pattern."""
     parts = path.split("/")
     if parts and parts[0] in _TOP_LEVEL_TEST_SEGMENTS:
         return True
     if any(p in _TEST_SEGMENTS for p in parts[:-1]):
         return True
-    return bool(_TEST_FILE.match(parts[-1]))
+    return bool(_test_file_re().match(parts[-1]))
 
 
 def candidate_path(path: str, language: str) -> bool:

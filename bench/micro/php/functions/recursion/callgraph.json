@@ -1,0 +1,11 @@
+{
+  "main.php:factorial": [
+    "main.php:factorial"
+  ],
+  "main.php:isEven": [
+    "main.php:isOdd"
+  ],
+  "main.php:isOdd": [
+    "main.php:isEven"
+  ]
+}

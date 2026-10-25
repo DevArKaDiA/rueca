@@ -1,0 +1,8 @@
+{
+  "main.php:Registry::boot": [
+    "main.php:Registry::load",
+    "main.php:Registry::register"
+  ],
+  "main.php:Registry::load": [],
+  "main.php:Registry::register": []
+}

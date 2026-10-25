@@ -1,0 +1,7 @@
+{
+  "main.php:Shape::area": [],
+  "main.php:Square::area": [],
+  "main.php:describe": [
+    "main.php:Square::area"
+  ]
+}

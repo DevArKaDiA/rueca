@@ -1,0 +1,6 @@
+{
+  "Loggable.php:Loggable::log": [],
+  "main.php:work": [
+    "Loggable.php:Loggable::log"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "main.php:Text::clean": [
+    "main.php:Text::squash"
+  ],
+  "main.php:Text::squash": []
+}

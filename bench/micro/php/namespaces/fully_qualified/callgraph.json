@@ -1,0 +1,6 @@
+{
+  "lib.php:slug": [],
+  "main.php:run": [
+    "lib.php:slug"
+  ]
+}

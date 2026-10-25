@@ -1,0 +1,6 @@
+{
+  "main.php:Greets::greet": [],
+  "main.php:Robot::boot": [
+    "main.php:Greets::greet"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "global.php:legacy_helper": [],
+  "main.php:run": [
+    "global.php:legacy_helper"
+  ]
+}

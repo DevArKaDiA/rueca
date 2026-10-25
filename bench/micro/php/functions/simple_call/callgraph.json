@@ -1,0 +1,10 @@
+{
+  "main.php:a": [
+    "main.php:b"
+  ],
+  "main.php:b": [],
+  "main.php:c": [
+    "main.php:a",
+    "main.php:b"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "main.php:Task::run": [
+    "main.php:Task::step",
+    "main.php:helper"
+  ],
+  "main.php:Task::step": [],
+  "main.php:helper": []
+}

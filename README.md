@@ -150,26 +150,27 @@ Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
 ## Benchmark
 
 Rueca is benchmarked against [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
-v0.12.0 and a BM25 baseline, on issue localization (SWE-bench Lite/Verified,
-SWE-PolyBench, 81 instances) and structural questions (callers/callees against
-SCIP-derived gold and PyCG). Full results:
+v0.12.0 and a BM25 baseline, per language, on issue localization (SWE-bench
+Lite/Verified, SWE-PolyBench, SWE-bench Multilingual; 121 instances) and
+structural questions (callers/callees against SCIP or PHPStan gold, plus
+hand-labeled micro-benchmarks). Full results:
 [docs/bench/alpha-results.md](docs/bench/alpha-results.md); method:
 [bench/README.md](bench/README.md).
 
-| Overall, % | BM25 | cbm 0.12.0 | Rueca |
+| Overall (Python, TS/JS, PHP), % | BM25 | cbm 0.12.0 | Rueca |
 |---|---:|---:|---:|
-| Localization (keywords): file Acc@5 | 60.5 | 56.8 | **69.1** |
-| Localization (keywords): function Acc@10 | 47.9 | 35.6 | **54.8** |
-| Localization (issue text): file Acc@5 | 67.9 | 65.4 | **74.1** |
-| Localization (issue text): function Acc@10 | **52.1** | 39.7 | **52.1** |
-| Callers F1 | 82.8 | 82.2 | **86.4** |
-| Callees F1 | 62.7 | 69.9 | **74.8** |
-| Definition found | 100 | 97.1 | 98.3 |
+| Localization (keywords): file Acc@5 | 60.3 | 52.9 | **66.9** |
+| Localization (keywords): function Acc@10 | 44.1 | 33.3 | **52.3** |
+| Localization (issue text): file Acc@5 | 69.4 | 59.5 | **70.2** |
+| Localization (issue text): function Acc@10 | **45.9** | 37.8 | 43.2 |
+| Callers F1 | 79.6 | 81.4 | **90.4** |
+| Callees F1 | 60.7 | 73.3 | **82.6** |
+| Definition found | 100 | 98.2 | 98.9 |
 | Median query latency | ~0 s | 0.43 s | **0.01 s** |
 
-Rueca ranks definitions by their code as well as their names, leads on
-TS/JS call edges and on latency, and still trails cbm on Python structural
-questions (callers/callees F1, bare-name lookup) and BM25 on file Acc@1.
+Parity with cbm per language (every metric ≥ cbm): **PHP ✅ 13/13**,
+TS/JS ❌ 8/10 (behind on raw issue text by 2–3 points), Python ❌ 8/13
+(behind on structural questions by 1–2 points and on bare-name lookup).
 Contributions that move these numbers are very welcome.
 
 ## Roadmap

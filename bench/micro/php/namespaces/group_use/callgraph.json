@@ -1,0 +1,8 @@
+{
+  "lib.php:Bar::__construct": [],
+  "lib.php:Foo::make": [],
+  "main.php:build": [
+    "lib.php:Bar::__construct",
+    "lib.php:Foo::make"
+  ]
+}

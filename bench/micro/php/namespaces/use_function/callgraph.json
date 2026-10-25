@@ -1,0 +1,6 @@
+{
+  "lib.php:fmt": [],
+  "main.php:run": [
+    "lib.php:fmt"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "main.php:Mailer::send": [],
+  "main.php:Notifier::__construct": [],
+  "main.php:Notifier::notify": [
+    "main.php:Mailer::send"
+  ]
+}

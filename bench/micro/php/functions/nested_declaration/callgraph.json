@@ -1,0 +1,9 @@
+{
+  "main.php:inner": [
+    "main.php:leaf"
+  ],
+  "main.php:leaf": [],
+  "main.php:outer": [
+    "main.php:inner"
+  ]
+}

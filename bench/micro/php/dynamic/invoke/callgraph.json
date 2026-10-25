@@ -1,0 +1,6 @@
+{
+  "main.php:Handler::__invoke": [],
+  "main.php:dispatch": [
+    "main.php:Handler::__invoke"
+  ]
+}

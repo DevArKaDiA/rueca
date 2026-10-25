@@ -1,0 +1,8 @@
+{
+  "main.php:Car::drive": [
+    "main.php:Car::engine",
+    "main.php:Engine::start"
+  ],
+  "main.php:Car::engine": [],
+  "main.php:Engine::start": []
+}

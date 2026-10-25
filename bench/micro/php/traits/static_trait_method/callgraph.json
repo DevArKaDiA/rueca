@@ -1,0 +1,6 @@
+{
+  "main.php:Factory::make": [],
+  "main.php:widget": [
+    "main.php:Factory::make"
+  ]
+}

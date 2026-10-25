@@ -11,33 +11,49 @@ from dataclasses import asdict, dataclass
 from functools import lru_cache
 
 import tree_sitter_javascript
+import tree_sitter_php
 import tree_sitter_python
 import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
 
+from .common import load_manifest
+
+# Python grammar bindings the manifest may name in `[grammars.<name>] binding =
+# "<module>:<function>"`. Adding a grammar = a pinned dependency in
+# pyproject.toml, one import above, one entry here and the manifest data.
+_BINDINGS = {
+    "tree_sitter_javascript": tree_sitter_javascript,
+    "tree_sitter_php": tree_sitter_php,
+    "tree_sitter_python": tree_sitter_python,
+    "tree_sitter_typescript": tree_sitter_typescript,
+}
+
+
+@lru_cache(maxsize=None)
+def _grammars() -> dict[str, dict]:
+    return dict(load_manifest().get("grammars", {}))
+
+
+@lru_cache(maxsize=None)
+def _ext_map() -> list[tuple[str, str]]:
+    """(extension, grammar), longest extension first."""
+    pairs = [(ext, name) for name, g in _grammars().items() for ext in g.get("extensions", [])]
+    return sorted(pairs, key=lambda p: (-len(p[0]), p[0]))
+
 
 @lru_cache(maxsize=None)
 def _language(kind: str) -> Language:
-    if kind == "python":
-        return Language(tree_sitter_python.language())
-    if kind == "typescript":
-        return Language(tree_sitter_typescript.language_typescript())
-    if kind == "tsx":
-        return Language(tree_sitter_typescript.language_tsx())
-    if kind == "javascript":
-        return Language(tree_sitter_javascript.language())
-    raise ValueError(kind)
+    spec = _grammars().get(kind)
+    if spec is None:
+        raise ValueError(kind)
+    mod, _, fn = spec["binding"].partition(":")
+    return Language(getattr(_BINDINGS[mod], fn)())
 
 
 def grammar_for(path: str) -> str | None:
-    if path.endswith((".py", ".pyi")):
-        return "python"
-    if path.endswith(".tsx"):
-        return "tsx"
-    if path.endswith((".ts", ".mts", ".cts")):
-        return "typescript"
-    if path.endswith((".js", ".jsx", ".mjs", ".cjs")):
-        return "javascript"
+    for ext, name in _ext_map():
+        if path.endswith(ext):
+            return name
     return None
 
 
@@ -64,7 +80,6 @@ class Func:
         return asdict(self)
 
 
-_PY_CONTAINERS = {"class_definition", "function_definition"}
 _ECMA_CLASS = {"class_declaration", "class", "abstract_class_declaration"}
 _ECMA_FUNC_VALUES = {"arrow_function", "function_expression", "function", "generator_function"}
 
@@ -76,12 +91,14 @@ def _text(node: Node | None) -> str:
 
 
 def extract_functions(path: str, source: bytes) -> list[Func]:
-    tree = parse(path, source)
-    if tree is None:
+    kind = grammar_for(path)
+    if kind is None:
         return []
-    if grammar_for(path) == "python":
-        return _py_functions(tree.root_node)
-    return _ecma_functions(tree.root_node)
+    tree = parse(path, source)
+    spec = _grammars()[kind]
+    if spec.get("labeler", "nesting") == "ecma":
+        return _ecma_functions(tree.root_node)
+    return _nesting_functions(tree.root_node, spec)
 
 
 def _walk(node: Node):
@@ -92,31 +109,52 @@ def _walk(node: Node):
         stack.extend(reversed(n.children))
 
 
-def _py_functions(root: Node) -> list[Func]:
+def _nesting_functions(root: Node, spec: dict) -> list[Func]:
+    """Data-driven labeler for grammars whose callables are named declaration
+    nodes nested in named containers (manifest `[grammars.<name>]`):
+
+    - `callables`: node type -> label (`Function` / `Method`); a `Function`
+      whose nearest named ancestor (container or callable) is a container is
+      a `Method` (Python `def` in a class body);
+    - `containers`: class-like node types contributing to the qualified name;
+    - `separator`: qualified-name separator (`.` Python, `::` PHP); the
+      qualified name joins every enclosing container and callable name
+      (`Class.method`, `outer.inner`, `Class::method`), unless `flat_functions`
+      lists callable types whose name is global (PHP nested `function`);
+    - `wrappers`: node types that wrap a declaration and carry its outer start
+      (Python `decorated_definition`).
+    """
+    callables: dict[str, str] = spec["callables"]
+    containers = set(spec.get("containers", []))
+    named = containers | set(callables)
+    sep = spec.get("separator", ".")
+    flat = set(spec.get("flat_functions", []))
+    wrappers = set(spec.get("wrappers", []))
     out: list[Func] = []
     for node in _walk(root):
-        if node.type != "function_definition":
+        label = callables.get(node.type)
+        if label is None:
             continue
         name_node = node.child_by_field_name("name")
         name = _text(name_node)
         if not name:
             continue
         parts = [name]
-        label = "Function"
         anc = node.parent
         first = True
         while anc is not None:
-            if anc.type in _PY_CONTAINERS:
-                parts.append(_text(anc.child_by_field_name("name")))
-                if first and anc.type == "class_definition":
+            if anc.type in named:
+                if node.type not in flat:
+                    parts.append(_text(anc.child_by_field_name("name")) or "class@anonymous")
+                if first and anc.type in containers and label == "Function":
                     label = "Method"
                 first = False
             anc = anc.parent
-        outer = node.parent if node.parent is not None and node.parent.type == "decorated_definition" else node
+        outer = node.parent if node.parent is not None and node.parent.type in wrappers else node
         out.append(
             Func(
                 name=name,
-                qualname=".".join(reversed(parts)),
+                qualname=sep.join(reversed(parts)),
                 label=label,
                 start=node.start_point[0] + 1,
                 end=node.end_point[0] + 1,

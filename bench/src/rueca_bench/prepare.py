@@ -14,11 +14,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .arms.cbm import cbm_binary, cbm_platform_key
-from .common import BIN_DIR, CACHE, load_manifest, log, sha256_file
+from .common import BIN_DIR, CACHE, lang_family, load_manifest, log, sha256_file
 from .corpus import ensure_commit
 from .datasets import fetch_dataset, select_instances, write_instances
+from .phpstan import docker_available, fetch_phpstan
 from .s1 import instances, s1_gold
-from .s3 import build_pycg_gold, build_scip_gold
+from .s3 import build_micro_gold, build_repo_gold, suites
 
 
 def fetch_cbm() -> Path:
@@ -55,13 +56,25 @@ def fetch_cbm() -> Path:
     return dest
 
 
-def setup(select: bool = False, workers: int = 4, skip_s3: bool = False) -> None:
+def _datasets_for(languages: set[str] | None) -> list[str]:
+    man = load_manifest()
+    if not languages:
+        return list(man["datasets"])
+    keys = {src for r in man["s1"]["repos"] if lang_family(r["language"]) in languages for src in r["sources"]}
+    keys |= set(man["s1"].get("gold_assets", [])) | {"locagent_lite", "contextbench"}
+    return [k for k in man["datasets"] if k in keys]
+
+
+def setup(select: bool = False, workers: int = 4, skip_s3: bool = False, languages: set[str] | None = None) -> None:
+    """`languages`: restrict to these language families (manifest
+    `[languages]` keys); selection (`--select`) always covers every repo so the
+    generated instance list stays deterministic."""
     fetch_cbm()
-    for key in load_manifest()["datasets"]:
+    for key in (load_manifest()["datasets"] if select else _datasets_for(languages)):
         fetch_dataset(key)
     if select or not instances():
         write_instances(select_instances())
-    insts = instances()
+    insts = [i for i in instances() if not languages or lang_family(i["language"]) in languages]
     by_repo: dict[str, list[dict]] = {}
     for i in insts:
         by_repo.setdefault(i["repo"], []).append(i)
@@ -76,10 +89,15 @@ def setup(select: bool = False, workers: int = 4, skip_s3: bool = False) -> None
     log(f"s1 gold ready for {len(insts)} instances")
     if skip_s3:
         return
-    for spec in load_manifest()["s3"]["repos"]:
+    sets = suites(languages)
+    if any(not micro and spec.get("gold") == "phpstan" for _, spec, micro in sets):
+        ok, why = docker_available()
+        if ok:
+            fetch_phpstan()
+        else:
+            log(f"phpstan gold needs docker ({why}); PHP repository gold will be missing")
+    for name, spec, micro in sets:
         try:
-            build_scip_gold(spec)
-        except Exception as exc:  # recorded; the report shows the repo as missing
-            log(f"s3 gold FAILED for {spec['repo']}: {exc}")
-    if "pycg" in load_manifest()["s3"]:
-        build_pycg_gold()
+            build_micro_gold(spec) if micro else build_repo_gold(spec)
+        except Exception as exc:  # recorded; the report shows the set as missing
+            log(f"s3 gold FAILED for {name}: {exc}")

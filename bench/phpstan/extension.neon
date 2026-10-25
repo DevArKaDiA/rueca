@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# rueca-bench PHPStan extension: call-edge collector (see RuecaCallCollector.php).
+parameters:
+    level: 0
+    reportUnmatchedIgnoredErrors: false
+    treatPhpDocTypesAsCertain: true
+services:
+    -
+        class: RuecaBench\CallCollector
+        tags: [phpstan.collector]
+    -
+        class: RuecaBench\DumpRule
+        tags: [phpstan.rules.rule]

@@ -1,0 +1,8 @@
+{
+  "main.php:Readable::read": [],
+  "main.php:Stream::close": [],
+  "main.php:drain": [
+    "main.php:Readable::read",
+    "main.php:Stream::close"
+  ]
+}

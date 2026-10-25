@@ -1,0 +1,6 @@
+{
+  "main.php:Status::color": [],
+  "main.php:badge": [
+    "main.php:Status::color"
+  ]
+}

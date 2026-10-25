@@ -1,9 +1,11 @@
 """rueca-bench command line.
 
-  rueca-bench setup  [--select] [--skip-s3]
-  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,all} [--only ID ...] [--workers N] [--force]
+  rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
+  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
   rueca-bench report
   rueca-bench clean  [--work] [--runs ARM]
+
+Language families are the manifest `[languages]` keys (python, ecma, php, ...).
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import sys
 from . import report as report_mod
 from . import s1, s3
 from .arms import ARM_NAMES, make_arm
-from .common import RUNS_DIR, WORK_DIR, log
+from .common import RUNS_DIR, WORK_DIR, families, log
 from .prepare import setup
 
 
@@ -42,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--select", action="store_true", help="regenerate [[s1.instances]] in manifest.toml")
     sp.add_argument("--skip-s3", action="store_true")
     sp.add_argument("--workers", type=int, default=4)
+    sp.add_argument("--lang", nargs="*", help="language families to prepare (default: all)")
 
     rp = sub.add_parser("run", help="run arms on suites (resumable)")
     rp.add_argument("--arm", default="all")
@@ -49,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--only", nargs="*", help="instance ids / repos (s1) or suite names (s3)")
     rp.add_argument("--workers", type=int, default=2, help="S1 repos processed in parallel")
     rp.add_argument("--force", action="store_true", help="ignore cached arm outputs")
+    rp.add_argument("--lang", nargs="*", help="language families to run (default: all)")
 
     sub.add_parser("report", help="score cached outputs; write bench/results/*.json and docs/bench/alpha-results.md")
 
@@ -57,17 +61,21 @@ def main(argv: list[str] | None = None) -> int:
     cp.add_argument("--runs", nargs="*", help="arm names whose cached outputs to delete")
 
     a = p.parse_args(argv)
+    langs = set(getattr(a, "lang", None) or []) or None
+    for lang in langs or ():
+        if lang not in families():
+            raise SystemExit(f"unknown language family {lang!r}; choose from {list(families())}")
     if a.cmd == "setup":
-        setup(select=a.select, workers=a.workers, skip_s3=a.skip_s3)
+        setup(select=a.select, workers=a.workers, skip_s3=a.skip_s3, languages=langs)
     elif a.cmd == "run":
         arms = _arms(a.arm)
         if not arms:
             log("no available arms")
             return 1
         if a.suite in ("s1", "all"):
-            s1.run(arms, workers=a.workers, only=a.only, force=a.force)
+            s1.run(arms, workers=a.workers, only=a.only, force=a.force, languages=langs)
         if a.suite in ("s3", "all"):
-            s3.run(arms, only=a.only, force=a.force)
+            s3.run(arms, only=a.only, force=a.force, languages=langs)
     elif a.cmd == "report":
         report_mod.report()
     elif a.cmd == "clean":

@@ -1,7 +1,7 @@
 [project]
 name = "rueca-bench"
 version = "0.1.0"
-description = "Benchmark harness for Rueca (localization + structural questions) against grep/BM25 and codebase-memory-mcp."
+description = "Benchmark harness for Rueca (localization + structural questions, per language) against grep/BM25 and codebase-memory-mcp."
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
@@ -10,6 +10,7 @@ dependencies = [
     "tree-sitter-python>=0.25,<0.26",
     "tree-sitter-typescript>=0.23,<0.24",
     "tree-sitter-javascript>=0.25,<0.26",
+    "tree-sitter-php>=0.25.1,<0.26",
     "tomli-w>=1.0",
 ]
 

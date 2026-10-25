@@ -8,6 +8,7 @@ different version.
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import os
 import threading
@@ -17,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..common import BIN_DIR, CACHE, load_manifest, run, safe_name, sha256_file
+from ..common import BIN_DIR, CACHE, load_manifest, pinned_asset, run, safe_name, sha256_file
 from .base import Arm, CallResult, Handle, is_callable_label, same_def
 
 
@@ -29,7 +30,20 @@ def cbm_platform_key() -> str:
 
 
 def cbm_binary() -> Path:
-    return BIN_DIR / "codebase-memory-mcp"
+    """The pinned binary in this cache, or in $RUECA_BENCH_SHARED_CACHE when
+    its sha256 matches the pin (common.pinned_asset)."""
+    spec = load_manifest()["tools"]["cbm"]["binaries"].get(cbm_platform_key(), {})
+    return pinned_asset(BIN_DIR / "codebase-memory-mcp", spec.get("binary_sha256"))
+
+
+def cbm_runtime_dir() -> Path:
+    """CBM_RUNTIME_DIR holds the daemon's unix socket; sun_path is limited to
+    104 bytes on macOS, so a deep cache path falls back to a short,
+    cache-specific directory under /tmp."""
+    d = CACHE / "cbm-run"
+    if len(str(d)) <= 52:
+        return d
+    return Path("/tmp") / f"rueca-bench-cbm-{hashlib.sha256(str(CACHE).encode()).hexdigest()[:10]}"
 
 
 _DAEMON_LOCK = threading.Lock()
@@ -50,7 +64,7 @@ class CbmArm(Arm):
         self.index_mode = load_manifest()["tools"]["cbm"].get("index_mode", "full")
         self.env = {
             "CBM_CACHE_DIR": str(CACHE / "cbm"),
-            "CBM_RUNTIME_DIR": str(CACHE / "cbm-run"),
+            "CBM_RUNTIME_DIR": str(cbm_runtime_dir()),
         }
         for d in self.env.values():
             Path(d).mkdir(parents=True, exist_ok=True)

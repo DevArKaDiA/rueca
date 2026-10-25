@@ -1,0 +1,7 @@
+{
+  "a.php:run": [],
+  "b.php:run": [],
+  "main.php:start": [
+    "b.php:run"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "main.php:Job::run": [
+    "main.php:Job::step"
+  ],
+  "main.php:Job::step": [],
+  "main.php:SpecialJob::extra": [],
+  "main.php:SpecialJob::step": [
+    "main.php:SpecialJob::extra"
+  ]
+}

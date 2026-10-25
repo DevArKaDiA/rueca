@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .arms import make_arm
 from .arms.base import Arm
-from .common import GOLD_DIR, RUNS_DIR, candidate_path, load_manifest, log, read_json, safe_name, write_json
+from .common import GOLD_DIR, RUNS_DIR, candidate_path, lang_family, load_manifest, log, read_json, safe_name, write_json
 from .corpus import ensure_commit, worktree
 from .datasets import instance_row, rows_by_id
 from .gold import assembled_functions, compute_s1_gold, context_files, parse_list
@@ -169,9 +169,11 @@ def run_instance(inst: dict, arm_names: list[str], limit: int, force: bool) -> N
             write_json(run_path(name, inst["id"]), rec)
 
 
-def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, force: bool = False) -> None:
+def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, force: bool = False, languages: set[str] | None = None) -> None:
     limit = load_manifest()["s1"].get("result_limit", 100)
     insts = [i for i in instances() if not only or i["id"] in only or i["repo"] in only]
+    if languages:
+        insts = [i for i in insts if lang_family(i["language"]) in languages]
     log(f"s1: {len(insts)} instances x {arm_names}")
     # instances of one repo run sequentially (shared clone, git lock); repos in parallel
     by_repo: dict[str, list[dict]] = {}
