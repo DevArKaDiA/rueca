@@ -1,0 +1,2434 @@
+{
+ "generated": "2026-10-25 20:52 UTC",
+ "languages": {
+  "python": {
+   "label": "python",
+   "status": "stable",
+   "failing": [],
+   "metrics": {
+    "file_acc@5": {
+     "value": 0.725,
+     "ci": [
+      0.5716504419378943,
+      0.8389198375233267
+     ],
+     "n": 40,
+     "bm25": 0.725,
+     "cbm": 0.65,
+     "paired": {
+      "diff": 0.0,
+      "ci": [
+       -0.125,
+       0.125
+      ],
+      "n": 40
+     },
+     "label": "File Acc@5",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.8,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "func_acc@10": {
+     "value": 0.625,
+     "ci": [
+      0.47032439137301096,
+      0.7577702083276673
+     ],
+     "n": 40,
+     "bm25": 0.525,
+     "cbm": 0.3,
+     "paired": {
+      "diff": 0.1,
+      "ci": [
+       0.025,
+       0.2
+      ],
+      "n": 40
+     },
+     "label": "Function Acc@10",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.65,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 30
+    },
+    "callers_precision": {
+     "value": 0.9862571960351469,
+     "ci": [
+      0.9761394624074795,
+      0.9947193005237416
+     ],
+     "n": 508,
+     "cbm": 0.9903189066059226,
+     "label": "Callers precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision": {
+     "value": 0.9368245392412211,
+     "ci": [
+      0.9217786228354432,
+      0.9507506596894003
+     ],
+     "n": 565,
+     "cbm": 0.9432587782587782,
+     "label": "Callees precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall": {
+     "value": 0.8635924986700809,
+     "ci": [
+      0.8352108089147229,
+      0.8916198209598801
+     ],
+     "n": 508,
+     "cbm": 0.8171374945367534,
+     "label": "Callers recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall": {
+     "value": 0.8273515775483637,
+     "ci": [
+      0.8003661271968212,
+      0.8536991860607952
+     ],
+     "n": 565,
+     "cbm": 0.8186416535904193,
+     "label": "Callees recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_precision@conf": {
+     "value": 0.9912151067323481,
+     "ci": [
+      0.9815270935960592,
+      0.9987684729064039
+     ],
+     "n": 508,
+     "cbm": 0.9903189066059226,
+     "label": "Callers precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision@conf": {
+     "value": 0.9225898568382577,
+     "ci": [
+      0.903655034775104,
+      0.940734052949538
+     ],
+     "n": 565,
+     "cbm": 0.9432587782587782,
+     "label": "Callees precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall@conf": {
+     "value": 0.7538019540543857,
+     "ci": [
+      0.7180234984413714,
+      0.7890041150469879
+     ],
+     "n": 508,
+     "cbm": 0.8171374945367534,
+     "label": "Callers recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall@conf": {
+     "value": 0.7041803807639858,
+     "ci": [
+      0.6718971020052762,
+      0.7363670251822907
+     ],
+     "n": 565,
+     "cbm": 0.8186416535904193,
+     "label": "Callees recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "definition_found": {
+     "value": 0.9838709677419355,
+     "ci": [
+      0.9726012396972576,
+      0.990550240761461
+     ],
+     "n": 806,
+     "cbm": 0.9404466501240695,
+     "label": "Definition found",
+     "family": "Structure",
+     "floor": 0.95,
+     "target": 1.0,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "micro_callee_f1": {
+     "value": 0.9149560117302052,
+     "ci": [
+      0.8790560471976402,
+      0.9456869009584664
+     ],
+     "n": null,
+     "cbm": 0.8708708708708709,
+     "detail": {
+      "precision": 0.968944099378882,
+      "recall": 0.8666666666666667,
+      "edges": 180
+     },
+     "n_callables": 273,
+     "label": "Micro-benchmark callee F1",
+     "family": "Micro",
+     "floor": 0.9,
+     "target": 0.98,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": null
+    },
+    "parse_error_rate": {
+     "value": 0.0019880715705765406,
+     "ci": [
+      0.0009114596474634434,
+      0.0043308599899395134
+     ],
+     "n": 3018,
+     "repos": 8,
+     "partial": 6,
+     "label": "Files with parse errors",
+     "family": "Health",
+     "floor": 0.02,
+     "target": 0.005,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": null
+    },
+    "latency_p95_ms": {
+     "value": 18.447167007252574,
+     "ci": [
+      15.4,
+      20.817959011765197
+     ],
+     "n": 1829,
+     "cbm": 450.6,
+     "label": "Query latency p95 (ms)",
+     "family": "Health",
+     "floor": 100,
+     "target": 20,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": null
+    },
+    "tokens_per_answer": {
+     "value": 532,
+     "ci": [
+      526,
+      539
+     ],
+     "n": 745,
+     "cbm": 173,
+     "label": "Tokens per answer (trace, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_search": {
+     "value": 1118,
+     "ci": [
+      1110,
+      1136
+     ],
+     "n": 150,
+     "cbm": 123.0,
+     "label": "Tokens per answer (search, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    }
+   }
+  },
+  "ecma": {
+   "label": "ts/js",
+   "status": "preview",
+   "failing": [
+    "micro_callee_f1"
+   ],
+   "metrics": {
+    "file_acc@5": {
+     "value": 0.6585365853658537,
+     "ci": [
+      0.5054983651982969,
+      0.7844119174261515
+     ],
+     "n": 41,
+     "bm25": 0.4878048780487805,
+     "cbm": 0.4878048780487805,
+     "paired": {
+      "diff": 0.17073170731707318,
+      "ci": [
+       0.024390243902439025,
+       0.3170731707317073
+      ],
+      "n": 41
+     },
+     "label": "File Acc@5",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.8,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 30
+    },
+    "func_acc@10": {
+     "value": 0.48484848484848486,
+     "ci": [
+      0.32504042108133696,
+      0.6478162455108585
+     ],
+     "n": 33,
+     "bm25": 0.42424242424242425,
+     "cbm": 0.42424242424242425,
+     "paired": {
+      "diff": 0.06060606060606061,
+      "ci": [
+       -0.06060606060606061,
+       0.18181818181818182
+      ],
+      "n": 33
+     },
+     "label": "Function Acc@10",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.65,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "callers_precision": {
+     "value": 0.9854563163020874,
+     "ci": [
+      0.9756566045434204,
+      0.9936889625944352
+     ],
+     "n": 438,
+     "cbm": 0.9482209737827715,
+     "label": "Callers precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision": {
+     "value": 0.9152723311546841,
+     "ci": [
+      0.896437908496732,
+      0.9329414488017429
+     ],
+     "n": 556,
+     "cbm": 0.9518579398286511,
+     "label": "Callees precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall": {
+     "value": 0.8940413088784874,
+     "ci": [
+      0.8648778644512093,
+      0.9214908442147987
+     ],
+     "n": 438,
+     "cbm": 0.7503438401716531,
+     "label": "Callers recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall": {
+     "value": 0.8055655475619504,
+     "ci": [
+      0.7782904926059152,
+      0.8322922554813292
+     ],
+     "n": 556,
+     "cbm": 0.791079279433596,
+     "label": "Callees recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_precision@conf": {
+     "value": 0.9858271786292352,
+     "ci": [
+      0.9748423919696414,
+      0.9944913698127067
+     ],
+     "n": 438,
+     "cbm": 0.9482209737827715,
+     "label": "Callers precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision@conf": {
+     "value": 0.915093509350935,
+     "ci": [
+      0.8964301430143014,
+      0.9324147414741474
+     ],
+     "n": 556,
+     "cbm": 0.9518579398286511,
+     "label": "Callees precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall@conf": {
+     "value": 0.8612407000504814,
+     "ci": [
+      0.8295977092337643,
+      0.8918423782534723
+     ],
+     "n": 438,
+     "cbm": 0.7503438401716531,
+     "label": "Callers recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall@conf": {
+     "value": 0.7901364622587644,
+     "ci": [
+      0.7610529255167294,
+      0.8180396932454037
+     ],
+     "n": 556,
+     "cbm": 0.791079279433596,
+     "label": "Callees recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "definition_found": {
+     "value": 0.98046875,
+     "ci": [
+      0.9680262434299824,
+      0.9881286658017647
+     ],
+     "n": 768,
+     "cbm": 0.94921875,
+     "label": "Definition found",
+     "family": "Structure",
+     "floor": 0.95,
+     "target": 1.0,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "micro_callee_f1": {
+     "value": 0.8695652173913042,
+     "ci": [
+      0.8167892707150215,
+      0.9135802469135803
+     ],
+     "n": null,
+     "cbm": 0.8513513513513514,
+     "detail": {
+      "precision": 0.9701492537313433,
+      "recall": 0.7878787878787878,
+      "edges": 165
+     },
+     "n_callables": 242,
+     "label": "Micro-benchmark callee F1",
+     "family": "Micro",
+     "floor": 0.9,
+     "target": 0.98,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": null
+    },
+    "parse_error_rate": {
+     "value": 0.016646848989298454,
+     "ci": [
+      0.011542271616943014,
+      0.02395422095511376
+     ],
+     "n": 1682,
+     "repos": 7,
+     "partial": 28,
+     "label": "Files with parse errors",
+     "family": "Health",
+     "floor": 0.02,
+     "target": 0.005,
+     "better": "lower",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": null
+    },
+    "latency_p95_ms": {
+     "value": 29.166041989810765,
+     "ci": [
+      26.5,
+      34.2
+     ],
+     "n": 1703,
+     "cbm": 458.6,
+     "label": "Query latency p95 (ms)",
+     "family": "Health",
+     "floor": 100,
+     "target": 20,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_answer": {
+     "value": 546,
+     "ci": [
+      536,
+      560
+     ],
+     "n": 722,
+     "cbm": 166.0,
+     "label": "Tokens per answer (trace, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_search": {
+     "value": 1133,
+     "ci": [
+      1118,
+      1159
+     ],
+     "n": 100,
+     "cbm": 128.0,
+     "label": "Tokens per answer (search, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    }
+   }
+  },
+  "php": {
+   "label": "php",
+   "status": "stable",
+   "failing": [],
+   "metrics": {
+    "file_acc@5": {
+     "value": 0.625,
+     "ci": [
+      0.47032439137301096,
+      0.7577702083276673
+     ],
+     "n": 40,
+     "bm25": 0.6,
+     "cbm": 0.45,
+     "paired": {
+      "diff": 0.025,
+      "ci": [
+       -0.075,
+       0.125
+      ],
+      "n": 40
+     },
+     "label": "File Acc@5",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.8,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "func_acc@10": {
+     "value": 0.4473684210526316,
+     "ci": [
+      0.3014640099805125,
+      0.6029370287800753
+     ],
+     "n": 38,
+     "bm25": 0.3684210526315789,
+     "cbm": 0.2894736842105263,
+     "paired": {
+      "diff": 0.07894736842105263,
+      "ci": [
+       0.0,
+       0.18421052631578946
+      ],
+      "n": 38
+     },
+     "label": "Function Acc@10",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.65,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 30
+    },
+    "callers_precision": {
+     "value": 0.9928942719002066,
+     "ci": [
+      0.9871117001198604,
+      0.9973988208873223
+     ],
+     "n": 709,
+     "cbm": 0.9577692026283575,
+     "label": "Callers precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision": {
+     "value": 0.9953511854275212,
+     "ci": [
+      0.991494002181025,
+      0.9983622117209903
+     ],
+     "n": 810,
+     "cbm": 0.90108143845908,
+     "label": "Callees precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_recall": {
+     "value": 0.9325438900544684,
+     "ci": [
+      0.9146459041663555,
+      0.9496626713084754
+     ],
+     "n": 709,
+     "cbm": 0.7768972564811776,
+     "label": "Callers recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_recall": {
+     "value": 0.9049572442505449,
+     "ci": [
+      0.8894513272662442,
+      0.9200150760187524
+     ],
+     "n": 810,
+     "cbm": 0.6651740764581179,
+     "label": "Callees recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_precision@conf": {
+     "value": 0.9948003222651111,
+     "ci": [
+      0.9893348240179224,
+      0.9989548792365694
+     ],
+     "n": 709,
+     "cbm": 0.9577692026283575,
+     "label": "Callers precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision@conf": {
+     "value": 0.9991014120667522,
+     "ci": [
+      0.9975609756097561,
+      1.0
+     ],
+     "n": 810,
+     "cbm": 0.90108143845908,
+     "label": "Callees precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_recall@conf": {
+     "value": 0.8631837706952769,
+     "ci": [
+      0.8395164471866275,
+      0.886318880063243
+     ],
+     "n": 709,
+     "cbm": 0.7768972564811776,
+     "label": "Callers recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall@conf": {
+     "value": 0.859905261314575,
+     "ci": [
+      0.8414593281476451,
+      0.8776097449147218
+     ],
+     "n": 810,
+     "cbm": 0.6651740764581179,
+     "label": "Callees recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "definition_found": {
+     "value": 0.9991645781119465,
+     "ci": [
+      0.9952830163951575,
+      0.9998525122978382
+     ],
+     "n": 1197,
+     "cbm": 0.9991645781119465,
+     "label": "Definition found",
+     "family": "Structure",
+     "floor": 0.95,
+     "target": 1.0,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "micro_callee_f1": {
+     "value": 0.9497206703910615,
+     "ci": [
+      0.909931064196467,
+      0.9811320754716981
+     ],
+     "n": null,
+     "cbm": 0.8823529411764706,
+     "detail": {
+      "precision": 1.0,
+      "recall": 0.9042553191489362,
+      "edges": 94
+     },
+     "n_callables": 162,
+     "label": "Micro-benchmark callee F1",
+     "family": "Micro",
+     "floor": 0.9,
+     "target": 0.98,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": null
+    },
+    "parse_error_rate": {
+     "value": 0.000521702838063439,
+     "ci": [
+      0.00022286020574324586,
+      0.0012207868216030562
+     ],
+     "n": 9584,
+     "repos": 9,
+     "partial": 5,
+     "label": "Files with parse errors",
+     "family": "Health",
+     "floor": 0.02,
+     "target": 0.005,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": null
+    },
+    "latency_p95_ms": {
+     "value": 21.1,
+     "ci": [
+      18.599999999999998,
+      24.400000000000002
+     ],
+     "n": 2573,
+     "cbm": 489.20000000000005,
+     "label": "Query latency p95 (ms)",
+     "family": "Health",
+     "floor": 100,
+     "target": 20,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_answer": {
+     "value": 688,
+     "ci": [
+      678,
+      710
+     ],
+     "n": 1196,
+     "cbm": 173.0,
+     "label": "Tokens per answer (trace, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_search": {
+     "value": 1285,
+     "ci": [
+      1271,
+      1291
+     ],
+     "n": 100,
+     "cbm": 206.5,
+     "label": "Tokens per answer (search, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    }
+   }
+  },
+  "go": {
+   "label": "go",
+   "status": "stable",
+   "failing": [],
+   "metrics": {
+    "file_acc@5": {
+     "value": 0.5365853658536586,
+     "ci": [
+      0.38746471267669474,
+      0.6794376602366394
+     ],
+     "n": 41,
+     "bm25": 0.5609756097560976,
+     "cbm": 0.4878048780487805,
+     "paired": {
+      "diff": -0.024390243902439025,
+      "ci": [
+       -0.17073170731707318,
+       0.12195121951219512
+      ],
+      "n": 41
+     },
+     "label": "File Acc@5",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.8,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "func_acc@10": {
+     "value": 0.3783783783783784,
+     "ci": [
+      0.24063999175798265,
+      0.5389956956078235
+     ],
+     "n": 37,
+     "bm25": 0.3783783783783784,
+     "cbm": 0.16216216216216217,
+     "paired": {
+      "diff": 0.0,
+      "ci": [
+       -0.08108108108108109,
+       0.08108108108108109
+      ],
+      "n": 37
+     },
+     "label": "Function Acc@10",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.65,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "callers_precision": {
+     "value": 1.0,
+     "ci": [
+      1.0,
+      1.0
+     ],
+     "n": 348,
+     "cbm": 0.9020771932693641,
+     "label": "Callers precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision": {
+     "value": 1.0,
+     "ci": [
+      1.0,
+      1.0
+     ],
+     "n": 516,
+     "cbm": 0.9141168419394226,
+     "label": "Callees precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_recall": {
+     "value": 0.9741379310344828,
+     "ci": [
+      0.9578544061302683,
+      0.9880268199233716
+     ],
+     "n": 348,
+     "cbm": 0.7235282688484659,
+     "label": "Callers recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_recall": {
+     "value": 0.9824427833148763,
+     "ci": [
+      0.9730432124400147,
+      0.9906330749354005
+     ],
+     "n": 516,
+     "cbm": 0.6695607235142119,
+     "label": "Callees recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_precision@conf": {
+     "value": 1.0,
+     "ci": [
+      1.0,
+      1.0
+     ],
+     "n": 348,
+     "cbm": 0.9020771932693641,
+     "label": "Callers precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision@conf": {
+     "value": 1.0,
+     "ci": [
+      1.0,
+      1.0
+     ],
+     "n": 516,
+     "cbm": 0.9141168419394226,
+     "label": "Callees precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_recall@conf": {
+     "value": 0.9489144316730523,
+     "ci": [
+      0.9264846743295018,
+      0.9691091954022989
+     ],
+     "n": 348,
+     "cbm": 0.7235282688484659,
+     "label": "Callers recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_recall@conf": {
+     "value": 0.9733330257167467,
+     "ci": [
+      0.9621228389934785,
+      0.983475829026701
+     ],
+     "n": 516,
+     "cbm": 0.6695607235142119,
+     "label": "Callees recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "definition_found": {
+     "value": 1.0,
+     "ci": [
+      0.9941693729663428,
+      1.0
+     ],
+     "n": 655,
+     "cbm": 0.8213740458015267,
+     "label": "Definition found",
+     "family": "Structure",
+     "floor": 0.95,
+     "target": 1.0,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "micro_callee_f1": {
+     "value": 0.9902912621359222,
+     "ci": [
+      0.9779179810725551,
+      1.0
+     ],
+     "n": null,
+     "cbm": 0.9456869009584665,
+     "detail": {
+      "precision": 0.9935064935064936,
+      "recall": 0.9870967741935484,
+      "edges": 155
+     },
+     "n_callables": 240,
+     "label": "Micro-benchmark callee F1",
+     "family": "Micro",
+     "floor": 0.9,
+     "target": 0.98,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": null
+    },
+    "parse_error_rate": {
+     "value": 0.0,
+     "ci": [
+      0.0,
+      0.001172305364470282
+     ],
+     "n": 3273,
+     "repos": 7,
+     "partial": 0,
+     "label": "Files with parse errors",
+     "family": "Health",
+     "floor": 0.02,
+     "target": 0.005,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": null
+    },
+    "latency_p95_ms": {
+     "value": 23.690583009738475,
+     "ci": [
+      16.297250025672838,
+      30.69766701082699
+     ],
+     "n": 1492,
+     "cbm": 493.9,
+     "label": "Query latency p95 (ms)",
+     "family": "Health",
+     "floor": 100,
+     "target": 20,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_answer": {
+     "value": 532,
+     "ci": [
+      515,
+      544
+     ],
+     "n": 538,
+     "cbm": 151.0,
+     "label": "Tokens per answer (trace, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_search": {
+     "value": 1059,
+     "ci": [
+      1035,
+      1075
+     ],
+     "n": 100,
+     "cbm": 102.0,
+     "label": "Tokens per answer (search, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    }
+   }
+  },
+  "java": {
+   "label": "java",
+   "status": "preview",
+   "failing": [
+    "callees_precision",
+    "definition_found"
+   ],
+   "metrics": {
+    "file_acc@5": {
+     "value": 0.7,
+     "ci": [
+      0.5456998118185507,
+      0.8192515477025347
+     ],
+     "n": 40,
+     "bm25": 0.75,
+     "cbm": 0.525,
+     "paired": {
+      "diff": -0.05,
+      "ci": [
+       -0.175,
+       0.075
+      ],
+      "n": 40
+     },
+     "label": "File Acc@5",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.8,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "func_acc@10": {
+     "value": 0.5,
+     "ci": [
+      0.34849928364395105,
+      0.6515007163560489
+     ],
+     "n": 38,
+     "bm25": 0.47368421052631576,
+     "cbm": 0.3684210526315789,
+     "paired": {
+      "diff": 0.02631578947368421,
+      "ci": [
+       -0.10526315789473684,
+       0.15789473684210525
+      ],
+      "n": 38
+     },
+     "label": "Function Acc@10",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.65,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "callers_precision": {
+     "value": 0.9050717851474891,
+     "ci": [
+      0.8871422112510403,
+      0.9225790818813246
+     ],
+     "n": 665,
+     "cbm": 0.789526383889167,
+     "label": "Callers precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_precision": {
+     "value": 0.8681117115484294,
+     "ci": [
+      0.8515109917558192,
+      0.8844853223908098
+     ],
+     "n": 878,
+     "cbm": 0.6220663427029863,
+     "label": "Callees precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall": {
+     "value": 0.8821446019596704,
+     "ci": [
+      0.8605343522479374,
+      0.9027629373618196
+     ],
+     "n": 665,
+     "cbm": 0.5725577046722846,
+     "label": "Callers recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall": {
+     "value": 0.8304992653512016,
+     "ci": [
+      0.806594255687365,
+      0.8536829448076602
+     ],
+     "n": 878,
+     "cbm": 0.46829673938326627,
+     "label": "Callees recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_precision@conf": {
+     "value": 0.9047795480986157,
+     "ci": [
+      0.8863005122805476,
+      0.9221795590445426
+     ],
+     "n": 665,
+     "cbm": 0.789526383889167,
+     "label": "Callers precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_precision@conf": {
+     "value": 0.8742429805453898,
+     "ci": [
+      0.8576825244302267,
+      0.8906979981085699
+     ],
+     "n": 878,
+     "cbm": 0.6220663427029863,
+     "label": "Callees precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall@conf": {
+     "value": 0.8799725050507313,
+     "ci": [
+      0.8578685170207259,
+      0.9010809649783114
+     ],
+     "n": 665,
+     "cbm": 0.5725577046722846,
+     "label": "Callers recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall@conf": {
+     "value": 0.8278417103018471,
+     "ci": [
+      0.803240214132868,
+      0.8506980396217299
+     ],
+     "n": 878,
+     "cbm": 0.46829673938326627,
+     "label": "Callees recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "definition_found": {
+     "value": 0.8890892696122633,
+     "ci": [
+      0.8692475663594985,
+      0.9062447494233288
+     ],
+     "n": 1109,
+     "cbm": 0.7195671776375113,
+     "label": "Definition found",
+     "family": "Structure",
+     "floor": 0.95,
+     "target": 1.0,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "micro_callee_f1": {
+     "value": 0.9259259259259259,
+     "ci": [
+      0.8842105263157894,
+      0.9612424514968521
+     ],
+     "n": null,
+     "cbm": 0.8878048780487804,
+     "detail": {
+      "precision": 0.9259259259259259,
+      "recall": 0.9259259259259259,
+      "edges": 108
+     },
+     "n_callables": 195,
+     "label": "Micro-benchmark callee F1",
+     "family": "Micro",
+     "floor": 0.9,
+     "target": 0.98,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": null
+    },
+    "parse_error_rate": {
+     "value": 0.01162340178225494,
+     "ci": [
+      0.009466533936812781,
+      0.01426461633880941
+     ],
+     "n": 7743,
+     "repos": 7,
+     "partial": 90,
+     "label": "Files with parse errors",
+     "family": "Health",
+     "floor": 0.02,
+     "target": 0.005,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": null
+    },
+    "latency_p95_ms": {
+     "value": 24.282375001348555,
+     "ci": [
+      21.895375015446916,
+      28.5
+     ],
+     "n": 2275,
+     "cbm": 452.7,
+     "label": "Query latency p95 (ms)",
+     "family": "Health",
+     "floor": 100,
+     "target": 20,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_answer": {
+     "value": 914,
+     "ci": [
+      888,
+      972
+     ],
+     "n": 796,
+     "cbm": 215.0,
+     "label": "Tokens per answer (trace, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_search": {
+     "value": 1222,
+     "ci": [
+      1201,
+      1235
+     ],
+     "n": 100,
+     "cbm": 279.5,
+     "label": "Tokens per answer (search, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    }
+   }
+  },
+  "c": {
+   "label": "c",
+   "status": "preview",
+   "failing": [
+    "func_acc@10",
+    "callers_recall",
+    "callees_recall",
+    "parse_error_rate"
+   ],
+   "metrics": {
+    "file_acc@5": {
+     "value": 0.6333333333333333,
+     "ci": [
+      0.4551356365479487,
+      0.7812607919389929
+     ],
+     "n": 30,
+     "bm25": 0.8,
+     "cbm": 0.7333333333333333,
+     "paired": {
+      "diff": -0.16666666666666666,
+      "ci": [
+       -0.3333333333333333,
+       0.0
+      ],
+      "n": 30
+     },
+     "label": "File Acc@5",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.8,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "func_acc@10": {
+     "value": 0.2,
+     "ci": [
+      0.0950510717728987,
+      0.3730569641314825
+     ],
+     "n": 30,
+     "bm25": 0.4,
+     "cbm": 0.23333333333333334,
+     "paired": {
+      "diff": -0.2,
+      "ci": [
+       -0.36666666666666664,
+       -0.03333333333333333
+      ],
+      "n": 30
+     },
+     "label": "Function Acc@10",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.65,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 30
+    },
+    "callers_precision": {
+     "value": 0.9795652173913043,
+     "ci": [
+      0.9706211382574685,
+      0.9874663638682616
+     ],
+     "n": 976,
+     "cbm": 0.9969011808993471,
+     "label": "Callers precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision": {
+     "value": 0.9949925595238095,
+     "ci": [
+      0.9908,
+      0.9983750744047619
+     ],
+     "n": 1034,
+     "cbm": 0.9915708290627651,
+     "label": "Callees precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_recall": {
+     "value": 0.7394784705850438,
+     "ci": [
+      0.7135466533781579,
+      0.7654851744868486
+     ],
+     "n": 976,
+     "cbm": 0.9274659726687704,
+     "label": "Callers recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall": {
+     "value": 0.6225051656411356,
+     "ci": [
+      0.5969985361228061,
+      0.6482612438416577
+     ],
+     "n": 1034,
+     "cbm": 0.8689503950503795,
+     "label": "Callees recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_precision@conf": {
+     "value": 0.9795652173913043,
+     "ci": [
+      0.9707646958789183,
+      0.9873487188934867
+     ],
+     "n": 976,
+     "cbm": 0.9969011808993471,
+     "label": "Callers precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision@conf": {
+     "value": 0.9949925595238095,
+     "ci": [
+      0.9906576636904761,
+      0.9984895833333333
+     ],
+     "n": 1034,
+     "cbm": 0.9915708290627651,
+     "label": "Callees precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_recall@conf": {
+     "value": 0.7394784705850438,
+     "ci": [
+      0.713503730002778,
+      0.7656051341100283
+     ],
+     "n": 976,
+     "cbm": 0.9274659726687704,
+     "label": "Callers recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall@conf": {
+     "value": 0.6225051656411356,
+     "ci": [
+      0.597537632052429,
+      0.6477822110089557
+     ],
+     "n": 1034,
+     "cbm": 0.8689503950503795,
+     "label": "Callees recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "definition_found": {
+     "value": 0.976897689768977,
+     "ci": [
+      0.9668132863724583,
+      0.9839685705986492
+     ],
+     "n": 1212,
+     "cbm": 0.995049504950495,
+     "label": "Definition found",
+     "family": "Structure",
+     "floor": 0.95,
+     "target": 1.0,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "micro_callee_f1": {
+     "value": 0.9462365591397849,
+     "ci": [
+      0.8852301387137452,
+      0.9885057471264368
+     ],
+     "n": null,
+     "cbm": 0.98,
+     "detail": {
+      "precision": 1.0,
+      "recall": 0.8979591836734694,
+      "edges": 49
+     },
+     "n_callables": 82,
+     "label": "Micro-benchmark callee F1",
+     "family": "Micro",
+     "floor": 0.9,
+     "target": 0.98,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": null
+    },
+    "parse_error_rate": {
+     "value": 0.2690156599552573,
+     "ci": [
+      0.25473497640149706,
+      0.28379207318906846
+     ],
+     "n": 3576,
+     "repos": 6,
+     "partial": 962,
+     "label": "Files with parse errors",
+     "family": "Health",
+     "floor": 0.02,
+     "target": 0.005,
+     "better": "lower",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": null
+    },
+    "latency_p95_ms": {
+     "value": 12.8,
+     "ci": [
+      12.0,
+      14.7
+     ],
+     "n": 2556,
+     "cbm": 497.0,
+     "label": "Query latency p95 (ms)",
+     "family": "Health",
+     "floor": 100,
+     "target": 20,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": null
+    },
+    "tokens_per_answer": {
+     "value": 1140,
+     "ci": [
+      1122,
+      1174
+     ],
+     "n": 1181,
+     "cbm": 180,
+     "label": "Tokens per answer (trace, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_search": {
+     "value": 1035,
+     "ci": [
+      1016,
+      1055
+     ],
+     "n": 100,
+     "cbm": 82.0,
+     "label": "Tokens per answer (search, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    }
+   }
+  },
+  "cpp": {
+   "label": "cpp",
+   "status": "preview",
+   "failing": [
+    "func_acc@10",
+    "callers_precision",
+    "callees_precision",
+    "callers_recall",
+    "callees_recall",
+    "definition_found",
+    "parse_error_rate"
+   ],
+   "metrics": {
+    "file_acc@5": {
+     "value": 0.8157894736842105,
+     "ci": [
+      0.665811419288686,
+      0.9077823481477872
+     ],
+     "n": 38,
+     "bm25": 0.8421052631578947,
+     "cbm": 0.7631578947368421,
+     "paired": {
+      "diff": -0.02631578947368421,
+      "ci": [
+       -0.15789473684210525,
+       0.10526315789473684
+      ],
+      "n": 38
+     },
+     "label": "File Acc@5",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.8,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": true,
+     "min_n": 30
+    },
+    "func_acc@10": {
+     "value": 0.2727272727272727,
+     "ci": [
+      0.1506744088542064,
+      0.44217559002872625
+     ],
+     "n": 33,
+     "bm25": 0.42424242424242425,
+     "cbm": 0.3333333333333333,
+     "paired": {
+      "diff": -0.15151515151515152,
+      "ci": [
+       -0.2727272727272727,
+       -0.030303030303030304
+      ],
+      "n": 33
+     },
+     "label": "Function Acc@10",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.65,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 30
+    },
+    "callers_precision": {
+     "value": 0.8776118402879266,
+     "ci": [
+      0.8568712695801721,
+      0.8970850613725517
+     ],
+     "n": 863,
+     "cbm": 0.7978647331288999,
+     "label": "Callers precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_precision": {
+     "value": 0.8210437553692825,
+     "ci": [
+      0.8000487035772118,
+      0.8412424344781253
+     ],
+     "n": 1073,
+     "cbm": 0.7351806723660271,
+     "label": "Callees precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall": {
+     "value": 0.6772419166216165,
+     "ci": [
+      0.6494832347848147,
+      0.705266972578101
+     ],
+     "n": 863,
+     "cbm": 0.4074518877090536,
+     "label": "Callers recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall": {
+     "value": 0.6232603385216626,
+     "ci": [
+      0.5987070150920971,
+      0.6477247191359502
+     ],
+     "n": 1073,
+     "cbm": 0.37698469595021317,
+     "label": "Callees recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_precision@conf": {
+     "value": 0.8804033214316275,
+     "ci": [
+      0.8599241240335335,
+      0.8998231259726726
+     ],
+     "n": 863,
+     "cbm": 0.7978647331288999,
+     "label": "Callers precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_precision@conf": {
+     "value": 0.821880061446972,
+     "ci": [
+      0.8010893054370511,
+      0.8421838984834902
+     ],
+     "n": 1073,
+     "cbm": 0.7351806723660271,
+     "label": "Callees precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall@conf": {
+     "value": 0.6420000968346055,
+     "ci": [
+      0.6137047915117204,
+      0.669919926410153
+     ],
+     "n": 863,
+     "cbm": 0.4074518877090536,
+     "label": "Callers recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall@conf": {
+     "value": 0.5886628929364968,
+     "ci": [
+      0.5639681363719183,
+      0.6133156638600283
+     ],
+     "n": 1073,
+     "cbm": 0.37698469595021317,
+     "label": "Callees recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "definition_found": {
+     "value": 0.9127773527161438,
+     "ci": [
+      0.8962452651555958,
+      0.9268901283272503
+     ],
+     "n": 1307,
+     "cbm": 0.6748278500382555,
+     "label": "Definition found",
+     "family": "Structure",
+     "floor": 0.95,
+     "target": 1.0,
+     "better": "higher",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "micro_callee_f1": {
+     "value": 0.910736250219645,
+     "ci": [
+      0.8505467411034741,
+      0.9605276125596514
+     ],
+     "n": null,
+     "cbm": 0.9628085924975953,
+     "detail": {
+      "precision": 0.9605263157894737,
+      "recall": 0.8658536585365854,
+      "edges": 82
+     },
+     "n_callables": 148,
+     "label": "Micro-benchmark callee F1",
+     "family": "Micro",
+     "floor": 0.9,
+     "target": 0.98,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": null
+    },
+    "parse_error_rate": {
+     "value": 0.2387202625102543,
+     "ci": [
+      0.2156334571566422,
+      0.26344864673741325
+     ],
+     "n": 1219,
+     "repos": 6,
+     "partial": 291,
+     "label": "Files with parse errors",
+     "family": "Health",
+     "floor": 0.02,
+     "target": 0.005,
+     "better": "lower",
+     "gated": true,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": null
+    },
+    "latency_p95_ms": {
+     "value": 21.2,
+     "ci": [
+      20.6,
+      22.1
+     ],
+     "n": 2676,
+     "cbm": 456.5,
+     "label": "Query latency p95 (ms)",
+     "family": "Health",
+     "floor": 100,
+     "target": 20,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_answer": {
+     "value": 949,
+     "ci": [
+      846,
+      996
+     ],
+     "n": 819,
+     "cbm": 188,
+     "label": "Tokens per answer (trace, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    },
+    "tokens_per_search": {
+     "value": 1134,
+     "ci": [
+      1121,
+      1157
+     ],
+     "n": 100,
+     "cbm": 164.5,
+     "label": "Tokens per answer (search, median)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    }
+   }
+  }
+ },
+ "config": {
+  "status": "stable",
+  "failing": [],
+  "metrics": {
+   "key_recall:hcl": {
+    "label": "Key recall \u2014 hcl",
+    "value": 0.9955739972337483,
+    "ci": [
+     0.9937586550605253,
+     0.9968630002236154
+    ],
+    "n": 7230,
+    "cbm": 0.2484094052558783,
+    "grep": null,
+    "floor": 0.95,
+    "target": 1.0,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "key_recall:json": {
+    "label": "Key recall \u2014 json",
+    "value": 1.0,
+    "ci": [
+     0.9882106505581045,
+     1.0
+    ],
+    "n": 322,
+    "cbm": 0.2422360248447205,
+    "grep": null,
+    "floor": 0.95,
+    "target": 1.0,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "key_recall:yaml": {
+    "label": "Key recall \u2014 yaml",
+    "value": 1.0,
+    "ci": [
+     0.998717308120141,
+     1.0
+    ],
+    "n": 2991,
+    "cbm": 0.013707790036776997,
+    "grep": null,
+    "floor": 0.95,
+    "target": 1.0,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "span_accuracy:hcl": {
+    "label": "Span line accuracy \u2014 hcl",
+    "value": 1.0,
+    "ci": [
+     0.999466600473968,
+     1.0
+    ],
+    "n": 7198,
+    "cbm": 1.0,
+    "grep": null,
+    "floor": 0.95,
+    "target": 1.0,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "span_accuracy:json": {
+    "label": "Span line accuracy \u2014 json",
+    "value": 1.0,
+    "ci": [
+     0.9882106505581045,
+     1.0
+    ],
+    "n": 322,
+    "cbm": 1.0,
+    "grep": null,
+    "floor": 0.95,
+    "target": 1.0,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "span_accuracy:yaml": {
+    "label": "Span line accuracy \u2014 yaml",
+    "value": 1.0,
+    "ci": [
+     0.998717308120141,
+     1.0
+    ],
+    "n": 2991,
+    "cbm": 1.0,
+    "grep": null,
+    "floor": 0.95,
+    "target": 1.0,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "bridge_precision": {
+    "label": "Env bridge precision",
+    "value": 1.0,
+    "ci": [
+     0.9817803441401861,
+     0.9999999999999999
+    ],
+    "n": 207,
+    "cbm": 0.994535519125683,
+    "grep": 0.8186528497409327,
+    "floor": 0.95,
+    "target": 0.99,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "bridge_recall": {
+    "label": "Env bridge recall",
+    "value": 0.9857142857142858,
+    "ci": [
+     0.9588478946044763,
+     0.9951298846579344
+    ],
+    "n": 210,
+    "cbm": 0.8666666666666667,
+    "grep": 0.7523809523809524,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   }
+  }
+ },
+ "settings": {
+  "resamples": 10000,
+  "seed": 20261025,
+  "cut": 0.6,
+  "min_s3": 300,
+  "min_s1": 30,
+  "variant": "kw"
+ },
+ "rueca": "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)"
+}

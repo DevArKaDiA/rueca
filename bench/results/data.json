@@ -39,7 +39,7 @@
    },
    "cbm": {
     "arm_version": "codebase-memory-mcp 0.12.0",
-    "index_seconds": 0.9316982080054004,
+    "index_seconds": 1.1816435829969123,
     "keys": {
      "yaml": {
       "keys": 2582,
@@ -128,8 +128,8 @@
     }
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
-    "index_seconds": 0.677514874987537,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)",
+    "index_seconds": 0.4951211670122575,
     "keys": {
      "yaml": {
       "keys": 2582,
@@ -247,7 +247,7 @@
    },
    "cbm": {
     "arm_version": "codebase-memory-mcp 0.12.0",
-    "index_seconds": 0.9543685000098776,
+    "index_seconds": 1.1859665419906378,
     "keys": {
      "yaml": {
       "keys": 266,
@@ -308,8 +308,8 @@
     }
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
-    "index_seconds": 0.6984215000120457,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)",
+    "index_seconds": 0.34251308301463723,
     "keys": {
      "yaml": {
       "keys": 266,
@@ -377,7 +377,7 @@
    },
    "cbm": {
     "arm_version": "codebase-memory-mcp 0.12.0",
-    "index_seconds": 2.4603863340162206,
+    "index_seconds": 0.92930037502083,
     "keys": {
      "yaml": {
       "keys": 143,
@@ -418,8 +418,8 @@
     }
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 9db30d82e36b)",
-    "index_seconds": 0.40262291600811295,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)",
+    "index_seconds": 0.34434483299264684,
     "keys": {
      "yaml": {
       "keys": 143,
