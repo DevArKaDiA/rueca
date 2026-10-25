@@ -1,5 +1,22 @@
 # Decisions log
 
+## 2026-10-24 — Language order for the first release
+
+Before the first public release, languages land in this order: PHP,
+Markdown, JSON, YAML, the other structured config formats (TOML, `.env`,
+INI, `.properties`, XML kinds, HCL/Terraform, Dockerfile), Go, C++, C, Java.
+Structured data is indexed as `Key` nodes with qualified names
+`path:key.path`, file kinds (compose, Kubernetes, GitHub Actions, OpenAPI,
+Terraform, Dockerfile) add `Resource` / `Image` / `Route` / `EnvVar` nodes,
+and code that reads env vars or config keys is linked to them with `READS`
+(providers with `WRITES`). A language is "supported" only when it meets the
+release gate (extraction, import resolution, tests, bench entry, published
+parity row vs cbm v0.12.0, docs). The design, parsers, phasing and the
+release point are in
+[RFC 0003](rfcs/0003-structured-data-and-languages.md). **The first public
+release ships after Java**, with every language above `supported` (none as
+`preview`).
+
 ## 2026-10-22 — Project renamed from Telar to Rueca
 
 `telar` is taken on crates.io by an unrelated Rust UI framework with its own
