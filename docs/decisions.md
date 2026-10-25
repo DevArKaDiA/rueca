@@ -1,5 +1,18 @@
 # Decisions log
 
+## 2026-10-25 — Quality bar: deterministic metrics, absolute floors, cbm as reference
+
+[RFC 0004](rfcs/0004-quality-and-benchmark.md) replaces the adoption gate
+"match or beat codebase-memory-mcp on every metric" with absolute floors and
+aspirational targets per metric family (localization, structure,
+micro-benchmarks, configuration, health), checked with confidence
+intervals. A language is `stable` when it meets every floor; the first
+public release requires every language at `stable`. cbm and BM25 are
+published as reference; localization must not be significantly below BM25.
+Agent runs, a vector retrieval arm and hybrid retrieval stay on the roadmap:
+deterministic metrics are the north star until a representative agent run
+is affordable.
+
 ## 2026-10-25 — Structured data and the code ↔ config bridge
 
 Waves 1, 2a and 2b of [RFC 0003](rfcs/0003-structured-data-and-languages.md)
