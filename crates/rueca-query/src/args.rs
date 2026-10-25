@@ -10,7 +10,9 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-/// Language filter accepted by `search_symbols` and `search_code`.
+/// Language filter accepted by `search_symbols` and `search_code`. Every
+/// `rueca_model::Language`, under its serialized name; a language whose
+/// pack is not in this build simply matches nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum LanguageArg {
@@ -20,17 +22,44 @@ pub enum LanguageArg {
     Javascript,
     Php,
     Markdown,
+    Json,
+    Yaml,
+    Toml,
+    Dotenv,
+    Ini,
+    Properties,
+    Xml,
+    Hcl,
+    Dockerfile,
+    Go,
+    Cpp,
+    C,
+    Java,
 }
 
 impl LanguageArg {
     pub fn to_language(self) -> rueca_model::Language {
+        use rueca_model::Language as L;
         match self {
-            LanguageArg::Python => rueca_model::Language::Python,
-            LanguageArg::Typescript => rueca_model::Language::TypeScript,
-            LanguageArg::Tsx => rueca_model::Language::Tsx,
-            LanguageArg::Javascript => rueca_model::Language::JavaScript,
-            LanguageArg::Php => rueca_model::Language::Php,
-            LanguageArg::Markdown => rueca_model::Language::Markdown,
+            LanguageArg::Python => L::Python,
+            LanguageArg::Typescript => L::TypeScript,
+            LanguageArg::Tsx => L::Tsx,
+            LanguageArg::Javascript => L::JavaScript,
+            LanguageArg::Php => L::Php,
+            LanguageArg::Markdown => L::Markdown,
+            LanguageArg::Json => L::Json,
+            LanguageArg::Yaml => L::Yaml,
+            LanguageArg::Toml => L::Toml,
+            LanguageArg::Dotenv => L::DotEnv,
+            LanguageArg::Ini => L::Ini,
+            LanguageArg::Properties => L::Properties,
+            LanguageArg::Xml => L::Xml,
+            LanguageArg::Hcl => L::Hcl,
+            LanguageArg::Dockerfile => L::Dockerfile,
+            LanguageArg::Go => L::Go,
+            LanguageArg::Cpp => L::Cpp,
+            LanguageArg::C => L::C,
+            LanguageArg::Java => L::Java,
         }
     }
 }
@@ -53,7 +82,9 @@ pub struct SearchSymbolsArgs {
     /// Free text: identifiers, fragments of names (`invoice issue`), camelCase or
     /// snake_case words, path fragments.
     pub query: String,
-    /// Restrict to these labels, e.g. `["Function", "Method", "Class"]`. Default: all symbol labels.
+    /// Restrict to these labels, e.g. `["Function", "Method", "Class"]`. Default: all symbol
+    /// labels except `Key` and `Document` (structured-data keys; included when `language` is a
+    /// data language such as `yaml`).
     pub labels: Option<Vec<String>>,
     /// Glob on the repository-relative file path, e.g. `src/**/*.py`.
     pub path_glob: Option<String>,
@@ -298,6 +329,21 @@ mod tests {
         assert!(e.to_string().contains("must be a JSON object"), "{e}");
         let a = parse_args::<SearchSymbolsArgs>("search_symbols", &s, json!({"query": "x", "limit": null})).unwrap();
         assert_eq!(a.limit, None);
+    }
+
+    #[test]
+    fn every_language_is_accepted() {
+        let s = input_schema::<SearchSymbolsArgs>();
+        for l in rueca_model::Language::ALL {
+            let a =
+                parse_args::<SearchSymbolsArgs>("search_symbols", &s, json!({"query": "x", "language": l.as_str()}))
+                    .unwrap_or_else(|e| panic!("{l}: {e}"));
+            assert_eq!(a.language.map(LanguageArg::to_language), Some(*l));
+        }
+        let schema = s["properties"]["language"].to_string();
+        for l in rueca_model::Language::ALL {
+            assert!(schema.contains(&format!("\"{}\"", l.as_str())), "{l} missing from {schema}");
+        }
     }
 
     #[test]

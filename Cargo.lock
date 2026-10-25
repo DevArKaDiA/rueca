@@ -2348,7 +2348,9 @@ dependencies = [
 name = "rueca-model"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "postcard",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

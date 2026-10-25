@@ -155,6 +155,9 @@ impl Engine {
         };
         let bases = related(false);
         let subtypes = related(true);
+        // The code ↔ config bridge (RFC 0003 §7.4): who reads / sets it.
+        let bridge = matches!(node.label, Label::EnvVar | Label::Key);
+        let count_in = |kind| bridge.then(|| distinct_others(&seg.in_edges(n, Some(kind))));
 
         Ok(GetSymbolResult {
             symbol: SymbolDetail {
@@ -171,6 +174,8 @@ impl Engine {
             subtypes: view.briefs(subtypes),
             callers_count: distinct_others(&seg.in_edges(n, Some(EdgeKind::Calls))),
             callees_count: distinct_others(&seg.out_edges(n, Some(EdgeKind::Calls))),
+            readers_count: count_in(EdgeKind::Reads),
+            writers_count: count_in(EdgeKind::Writes),
             candidates: view.briefs(found.candidates),
         })
     }

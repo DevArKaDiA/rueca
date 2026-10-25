@@ -237,7 +237,7 @@ impl<'s> Extractor<'s> {
         {
             return;
         }
-        self.refs.push(Reference { kind, name, receiver, enclosing, span });
+        self.refs.push(Reference { kind, name, receiver, enclosing, span, arity: None });
     }
 
     /// Receiver text of an object expression: dotted for chains, otherwise
@@ -716,6 +716,7 @@ impl<'s> Extractor<'s> {
             bases: Vec::new(),
             implements: Vec::new(),
             is_test,
+            is_declaration: false,
         });
         self.visit_decorators(decorators, idx, depth);
 
@@ -776,6 +777,7 @@ impl<'s> Extractor<'s> {
             qualified_name: self.qualify(parent, &name),
             exported: parent.is_none() && scope_kind == ScopeKind::Module && self.is_exported(&name),
             is_test: name.starts_with("Test"),
+            is_declaration: false,
             name,
             parent,
             span: span_of(outer),
@@ -839,6 +841,7 @@ impl<'s> Extractor<'s> {
                 bases: Vec::new(),
                 implements: Vec::new(),
                 is_test: false,
+                is_declaration: false,
             });
             enc = Some(idx);
         }
@@ -892,6 +895,7 @@ impl<'s> Extractor<'s> {
             bases: Vec::new(),
             implements: Vec::new(),
             is_test: false,
+            is_declaration: false,
         }))
     }
 

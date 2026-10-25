@@ -9,7 +9,10 @@ live in the crate docs (`rueca-segment`). The planned extension to
 structured data (config keys, env vars, the code ↔ config bridge) and to Go,
 C/C++ and Java is designed in
 [RFC 0003](rfcs/0003-structured-data-and-languages.md); this document
-changes as each part lands.
+changes as each part lands. Its shared groundwork — the model, the
+language-pack hooks and the generic resolver rules those packs use — is
+implemented (§4.3–§4.4, §5, marked *packs pending* where no shipped pack
+produces the facts yet).
 
 Contents:
 
@@ -58,8 +61,10 @@ Two ideas carry the whole design:
 | **Definition** | A named thing declared in a file (class, function, method, field, variable, constant, interface, type alias, enum, test…), with its span, signature, docstring and parent. |
 | **Reference** | A use of a name: a call, `new`, type annotation, decorator, `raise`/`throw`, read or write. Has a name, an optional receiver (`self`, `app`, `a.b`) and the definition that encloses it. |
 | **Import** | A module specifier plus imported names (`from .http import Session`). |
-| **Module name** | How other files refer to a file: Python `shop.http`; ECMAScript `src/util/index` (path without extension); Markdown `docs/guide.md` (path with extension). PHP files have none: code refers to classes and functions by namespace, never to files. |
-| **Qualified name** | Global name of a definition: module name + separator + local name. Python `shop.http.Session.send`; ECMAScript `src/util/index:formatAmount`; Markdown `docs/guide.md:Install > Linux`; PHP the fully qualified name, members after `::` (`App\Models\User::save`). |
+| **Module name** | How other files refer to a file: Python `shop.http`; ECMAScript `src/util/index` (path without extension); Markdown and data files `docs/guide.md` (path with extension); Go the package import path; Java the package. PHP and C/C++ files have none: code refers to classes and functions by namespace, never to files. |
+| **Qualified name** | Global name of a definition: module name + separator + local name. Python `shop.http.Session.send`; ECMAScript `src/util/index:formatAmount`; Markdown `docs/guide.md:Install > Linux`; PHP the fully qualified name, members after `::` (`App\Models\User::save`); data `config/app.yaml:database.host` (the local name is a **key path**); Go `github.com/gin-gonic/gin.Engine.ServeHTTP`; Java `com.example.Owner.getPets`; C/C++ `fmt::v11::format_to`. |
+| **Package** | Files that share one module namespace without imports: Go and Java packages (same module name), Terraform modules (same directory). Declared by the pack (`module_scope`). |
+| **Canonical env var** | One file-less `EnvVar` node per environment variable name (`$env:DATABASE_URL`): code that reads it has a `READS` edge to it, manifests that set it a `WRITES` edge. |
 | **Node / edge** | The resolved graph. Nodes are definitions plus `Repository` / `Folder` / `File`; edges are typed relations between them. |
 | **Strategy / confidence** | How a reference edge was resolved, and how much to trust it (0–1). |
 | **Segment** | The immutable file that stores one snapshot's graph and indexes. |
@@ -208,15 +213,28 @@ of tree-sitter, and become structure in the same graph:
   `search_code`). Headings inside block quotes and lists, front matter and
   MDX are not extracted.
 
-Facts are cached at `<store>/facts/<sha>-<lang>-v<extractor version>.bin`.
+Facts are cached at
+`<store>/facts/<sha>-<lang>-v<extractor version>-f<facts format>.bin`.
 Re-indexing an unchanged file is a cache hit; bumping a pack's
-`extractor_version` invalidates its entries.
+`extractor_version` invalidates its entries, and changing the facts structs
+(`rueca_model::FACTS_FORMAT`) invalidates every entry once. Packs whose
+facts depend on the path as well as the bytes (data file kinds are chosen by
+name) add a hash of the path to the key. A pack may also decline a file with
+a reason (`skipped:data-shape`): the file stays listed and searchable.
+
+**Detection** is by extension, then by file name (`Dockerfile`,
+`Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`); a C header
+(`.h`) is C++ when the snapshot has C++ sources. A file gets a language in
+the graph only when a pack for it is registered; otherwise it is plain text
+(listed, content-searchable).
 
 ### 4.3 Module names and import targets
 
 Two per-language hooks, still without guessing symbols:
 
-- `module_name(path)`: Python walks up `__init__.py` packages and source
+- `module_name(path)` (the resolver calls `module_name_for(path, facts)`,
+  which defaults to it, so a pack can read the module from the file itself —
+  a Java `package` clause, a Go `package x_test`): Python walks up `__init__.py` packages and source
   roots (`src/`, `pyproject` package dirs) → `shop.http`. ECMAScript strips
   the extension → `src/util/index`. PHP returns nothing (definitions already
   carry their declared namespace, which may differ from the path).
@@ -242,6 +260,10 @@ Two per-language hooks, still without guessing symbols:
 
 Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0);
 for documents that means "links to" (docs → docs, code files, images).
+`resolve_import` may also return a **directory** (a Go package, a Java
+on-demand import, a Terraform module source, a compose build context): the
+edge is then `IMPORTS` File→Folder, and for package-scoped languages the
+import binds the package in that directory.
 An import that resolves to nothing marks its names **external**: later
 references through them are never fuzzy-matched to a project symbol.
 
@@ -284,7 +306,22 @@ order; the first one that succeeds wins and stamps the edge:
 | 6 | unique method (`heuristic`) | call with an unknown receiver; exactly one method with that name (≥ 4 chars, not a common builtin method like `keys`, `then`) | 0.50 |
 
 (Strategy 5, receiver typing from assignments, is not implemented in the
-alpha for Python and ECMAScript.) A reference to a builtin, a name bound to an external module, or a
+alpha for Python and ECMAScript.)
+
+Rungs and rules that the RFC 0003 packs opt into (*packs pending*: no
+shipped pack enables them yet, so Python, ECMAScript, PHP and Markdown
+resolve exactly as above):
+
+| Rule | Hook | Effect | Confidence |
+|---|---|---|---|
+| package scope | `module_scope` = `Package` / `Directory` | rung 4 and module lookups cover every file of the package; a top-level `T.m` (Go method) is a member of `T` | as rung 4 (0.90) |
+| implicit self (rung 1b) | `implicit_self` | a receiver-less name inside a method is first a member of the enclosing class, then of outer classes (C++, Java) | `type_resolved` 0.90 / 0.85 inherited |
+| typed receiver (strategy 5) | receiver text `$type:T` | `T` resolves like a type reference (or as an exact qualified name), the member through its bases | `type_resolved` 0.85 |
+| normalized self | receiver `$self` in `self_receivers` | the enclosing type, or the type named by the method's qualified-name prefix (Go) | `type_resolved` 0.90 |
+| declarations | `Definition::is_declaration` | a C/C++ prototype or in-class declaration is replaced by its unique body | as the rung |
+| overloads | `overloads` | `parse(String)` / `parse(Reader)` chosen by the call's argument count, else all linked | as the rung, × 0.8 when several |
+| overrides | `overrides` | `OVERRIDES` from a method to the same-named (same-arity) method of each base | `type_resolved` 0.90 |
+| includes | C/C++ family | `#include` is a transitive star import | as rung 3 | A reference to a builtin, a name bound to an external module, or a
 `self` member that does not exist **stops** resolution: it is counted as an
 expected miss, never fuzzy-matched. For JS/TS, "builtin" includes web and
 runtime globals that a project could also define (`Request`, `Response`,
@@ -324,6 +361,37 @@ In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
 | `Throw` | `THROWS` |
 | `Read` | `REFERENCES` |
 | `Write` | `WRITES` |
+| `EnvVar`, `ConfigKey` | `READS` (the bridge, below) |
+| `DataRef` | `REFERENCES` (data pointers, below) |
+
+**The code ↔ config bridge and data pointers** (RFC 0003 §6–§7; resolver
+implemented, *packs pending*). These references never go through the
+ladder: they match exact names only, so an env var or a key path can never
+be fuzzy-matched to a code symbol.
+
+- An `EnvVar` read (`os.getenv("DATABASE_URL")`, `process.env.X`) gets a
+  `READS` edge to the **canonical env var** `$env:DATABASE_URL`, a
+  file-less `EnvVar` node created when anything reads or sets the name
+  (`contract`, 0.95). Every `EnvVar` *definition* — a `.env` line, a
+  compose / Kubernetes / GitHub Actions `env` entry, a Dockerfile `ENV` —
+  is a provider with a `WRITES` edge to it (1.0). Config that reads env
+  (Spring `${DB_URL}`) reads from its `Key`, so chains compose: function
+  → `READS` → key → `READS` → env var ← `WRITES` ← manifest.
+- A `ConfigKey` read (`config('app.name')`, `@Value("${server.port}")`)
+  carries a namespace; it gets `READS` to every `Key` with that key path in
+  the namespace's config files (`spring`: `application*` / `bootstrap*`,
+  every profile; `laravel`: `config/<file>.php`; `dotnet`:
+  `appsettings*.json`; `node-config`: `config/*`; `viper`: `config.*` or
+  the files `SetConfigName` names) at 0.90; without a scope match, to the
+  only `Key` in the snapshot with that path (`unique_name`, 0.60);
+  several candidates → nothing.
+- A `DataRef` (`$ref`, a YAML alias, `COPY --from`) points at a key path:
+  in the same file (1.0), in its package (Terraform directory, 0.95), in an
+  imported file (`./user.yaml#/User`, 0.95), at a global qualified name
+  (`pyproject` scripts → a Python function, 0.95) or in any data file
+  (unique, 0.60). Bases of data definitions (YAML merge keys, compose
+  `extends`, Dockerfile `FROM <stage>`) resolve the same way into
+  `INHERITS`.
 
 Duplicate edges `(src, dst, kind)` are merged keeping the best strategy, the
 highest confidence and the first evidence. **Evidence** is the file and span
@@ -361,18 +429,27 @@ then points the indexed root at it. Query time never reads the working tree.
 | `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, PHP properties (`$email`, also promoted constructor parameters), module-level assignments (`UPPER_CASE` → `Constant`), PHP `const` / `define()` / enum cases |
 | `Test` | JS/TS `describe` / `it` / `test` blocks and Pest tests (Python and PHPUnit tests are `Function` / `Method` / `Class` with `is_test: true`) |
 | `Section` | Markdown headings, nested by `DEFINES` |
+| `EnvVar` | canonical env vars `$env:NAME` (file-less) and env var providers (*packs pending*) |
+| `Key`, `Document` | structured-data keys at any depth (key path = local name) and documents of multi-document YAML streams (*packs pending*) |
+| `Resource`, `Image` | deployable / infrastructure objects (Kubernetes objects, compose services, Terraform resources) and container images / Dockerfile stages (*packs pending*) |
 
 Every symbol node carries: name, qualified name, file, span, language,
-signature, docstring, `exported`, `is_test`.
+signature, docstring, `exported`, `is_test`. Canonical env vars have no
+file, span or language.
 
-**Edge kinds** produced by the alpha: `CONTAINS`, `DEFINES`, `IMPORTS`
-(structural, 1.0); `CALLS`, `REFERENCES`, `INHERITS`, `IMPLEMENTS`,
-`DECORATES`, `THROWS`, `WRITES`, `TESTS` (resolved, with strategy and
-confidence). `OVERRIDES` and `READS` exist in the model but are not produced
-yet (reads become `REFERENCES`).
+**Edge kinds**: `CONTAINS`, `DEFINES`, `IMPORTS` (structural, 1.0; `IMPORTS`
+also File → Folder for directory imports); `CALLS`, `REFERENCES`,
+`INHERITS`, `IMPLEMENTS`, `DECORATES`, `THROWS`, `WRITES`, `TESTS`
+(resolved, with strategy and confidence). `READS` (env var and config key
+reads), `WRITES` from env var providers and `OVERRIDES` are produced by the
+resolver as soon as a pack emits the facts (*packs pending*); Python,
+ECMAScript and PHP reads of ordinary names stay `REFERENCES`.
 
 **Edge metadata**: `confidence` (0–1), `strategy`, and `evidence` (file +
 span of the reference that produced it; absent for structural edges).
+Strategies: `syntactic`, `scip`, `type_resolved`, `import_resolved`,
+`same_module`, `unique_name`, `heuristic`, and `contract` (the code ↔
+config bridge).
 
 ## 6. How each tool uses the graph
 
@@ -384,7 +461,11 @@ All six tools first pick the segment (the `repo` argument, the server's
    that file (the commit is ignored, so ids survive re-indexing);
 2. else `qualified_name` → exact match in the qualified-name index, then
    suffix match on a `.` / `:` / `/` / `\` boundary (`Session.send` finds
-   `shop.http.Session.send`, `User::save` finds `App\Models\User::save`);
+   `shop.http.Session.send`, `User::save` finds `App\Models\User::save`,
+   `server.port` finds `config/app.yaml:server.port`), or after a key-path
+   accessor (`["DATABASE_URL"]`); for Java and C/C++, an overload's
+   parameter suffix is optional (`Parser.parse` finds every
+   `Parser.parse(…)`);
 3. else `name` → name index, optionally narrowed by `path`.
 
 When several nodes match, the pick is deterministic (non-test, exported,
@@ -428,7 +509,10 @@ On top of that:
 Filters (`labels`, `language`) are exact terms; `path_glob` filters after
 ranking. Default labels exclude `File`, `Folder`, `Module` and `Repository`, so
 document sections are found alongside code (`install linux` →
-`README.md:Install > Linux`). Ties break by node id so pages are stable.
+`README.md:Install > Linux`); they also exclude structured-data `Key` and
+`Document` nodes unless `language` is a data language, because a repository
+has far more config keys than functions. Ties break by node id so pages are
+stable.
 
 ### `search_code` — "where does this text appear?"
 
@@ -452,7 +536,10 @@ One hop around the node:
 - `bases`: outgoing `INHERITS` + `IMPLEMENTS`;
 - `subtypes`: incoming `INHERITS` + `IMPLEMENTS`;
 - `callers_count` / `callees_count`: distinct nodes across incoming /
-  outgoing `CALLS`, so the agent can decide whether a `trace` is worth it.
+  outgoing `CALLS`, so the agent can decide whether a `trace` is worth it;
+- `readers_count` / `writers_count` (env vars and config keys only):
+  distinct nodes across incoming `READS` / `WRITES` — "who reads it, does
+  anything set it?".
 
 ### `get_snippet` — "show me the code"
 
@@ -521,6 +608,7 @@ graph instead of reading whole files.
 | Confidence | Strategies | Meaning |
 |---|---|---|
 | 1.0 | `syntactic`, `import_resolved` (IMPORTS) | Structure or a resolved import. Certain. |
+| 0.90–0.95 | `contract` | An env var or config key read resolved through a known namespace (the code ↔ config bridge). |
 | 0.85–0.95 | `type_resolved`, `import_resolved`, `same_module` | Resolved through scope, `self`, or an import. Wrong only with dynamic tricks (monkey-patching, `getattr`, re-assigned names). |
 | 0.60 | `unique_name` | A bare name that matched the only compatible definition in the project. Usually right in small/medium code bases; can be wrong when a third-party symbol shadows it. |
 | 0.50 | `heuristic` | Method call on an untyped receiver matched by name alone. Useful for exploration; verify before relying on it. |
@@ -575,13 +663,13 @@ gaps show up on real repositories.
 | Step | Crate | Start reading at |
 |---|---|---|
 | Data model (labels, edge kinds, facts, ids) | `rueca-model` | `src/lib.rs` |
-| Language-pack contract, budgeted parsing | `rueca-extract` | `LanguagePack` |
+| Language-pack contract, budgeted parsing | `rueca-extract` | `LanguagePack` (crate docs list the RFC 0003 hooks) |
 | Python extraction, module names, imports | `rueca-lang-python` | crate docs, `queries/locals.scm` |
 | TS/TSX/JS extraction, `oxc_resolver` | `rueca-lang-typescript` | crate docs, `src/resolve.rs` |
 | Markdown sections and links (`pulldown-cmark`) | `rueca-lang-markdown` | crate docs, `src/links.rs` |
 | PHP extraction, name resolution, Composer autoload | `rueca-lang-php` | crate docs, `src/names.rs`, `src/composer.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
-| Resolution | `rueca-resolve` | crate docs (strategy table) |
+| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
 | Tools | `rueca-query` | `src/tools.rs` |
 | MCP / CLI | `rueca-mcp`, `rueca` | `serve_stdio`, `src/main.rs` |

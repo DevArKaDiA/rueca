@@ -133,6 +133,7 @@ fn synth(files_n: usize, syms_per_file: usize, edges_n: usize) -> (ResolvedGraph
         nodes,
         edges,
         files,
+        modules: vec![],
     };
     (graph, Mem(contents))
 }

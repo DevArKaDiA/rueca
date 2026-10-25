@@ -8,8 +8,9 @@ use rueca_model::{EdgeKind, EdgeMeta, FileEntry, Label, Node, ResolvedGraph, Spa
 use crate::bundle::BundleWriter;
 use crate::{Result, SegmentError};
 
-/// `Strategy` ↔ `u8` (declaration order).
-pub(crate) const STRATEGIES: [Strategy; 7] = [
+/// `Strategy` ↔ `u8` (declaration order; new strategies are appended, so
+/// older segments keep their codes).
+pub(crate) const STRATEGIES: [Strategy; 8] = [
     Strategy::Syntactic,
     Strategy::Scip,
     Strategy::TypeResolved,
@@ -17,6 +18,7 @@ pub(crate) const STRATEGIES: [Strategy; 7] = [
     Strategy::SameModule,
     Strategy::UniqueName,
     Strategy::Heuristic,
+    Strategy::Contract,
 ];
 
 pub(crate) fn strategy_code(s: Strategy) -> u8 {
@@ -28,6 +30,7 @@ pub(crate) fn strategy_code(s: Strategy) -> u8 {
         Strategy::SameModule => 4,
         Strategy::UniqueName => 5,
         Strategy::Heuristic => 6,
+        Strategy::Contract => 7,
     }
 }
 
@@ -96,6 +99,13 @@ pub(crate) fn write_graph(w: &mut BundleWriter, graph: &ResolvedGraph) -> Result
     }
     w.add("nodes", &postcard::to_stdvec(&graph.nodes).map_err(|e| SegmentError::Other(e.to_string()))?)?;
     w.add("files", &postcard::to_stdvec(&graph.files).map_err(|e| SegmentError::Other(e.to_string()))?)?;
+    if !graph.modules.is_empty() {
+        if graph.modules.len() != graph.files.len() {
+            return Err(SegmentError::Other("modules and files disagree in length".into()));
+        }
+        let modules = postcard::to_stdvec(&graph.modules).map_err(|e| SegmentError::Other(e.to_string()))?;
+        w.add("files.modules", &modules)?;
+    }
 
     let metas: Vec<EdgeMetaRec> = graph.edges.iter().map(|e| EdgeMetaRec::encode(&e.meta)).collect();
     w.add_pod("edge_meta", &metas)?;

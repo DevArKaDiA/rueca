@@ -109,7 +109,13 @@ A language is a crate implementing `rueca_extract::LanguagePack`: extraction
 (definitions, references, imports), module naming and import resolution. Use
 `rueca-lang-python` and `rueca-lang-typescript` as templates, vendor locals
 queries rather than hand-writing scope rules, and add the language to the
-benchmark before declaring support. What "supported" requires (the release
+benchmark before declaring support. Package scope, directory imports, typed
+receivers, implicit `this`, overloads, declarations and the env / config
+bridge are defaulted hooks of the contract (the `rueca-extract` crate docs
+list them); `crates/rueca-resolve/tests/hooks.rs` has a small fake-pack
+example for each. A new pack should only need its crate, a line in
+`rueca_index::default_registry` and, if its language needs it,
+family-specific resolver code. What "supported" requires (the release
 gate and the parity row) is defined in
 [RFC 0003 §3](docs/rfcs/0003-structured-data-and-languages.md#3-what-supported-means).
 

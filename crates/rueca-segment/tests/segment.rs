@@ -154,6 +154,7 @@ fn fixture() -> (ResolvedGraph, Mem) {
         nodes,
         edges,
         files,
+        modules: vec![],
     };
     graph.validate().unwrap();
     let mem = Mem {
@@ -761,7 +762,7 @@ fn symbol_field_boost_order() {
     }
     nodes[2].doc = Some("Run the parse step on the input".into());
     nodes[4].signature = Some("def u(parse)".into());
-    let graph = ResolvedGraph { snapshot: fixture().0.snapshot, nodes, edges: vec![], files };
+    let graph = ResolvedGraph { snapshot: fixture().0.snapshot, nodes, edges: vec![], files, modules: vec![] };
     let mem = Mem {
         by_path: files_src.iter().map(|(p, c)| (p.to_string(), c.to_vec())).collect(),
         calls: AtomicUsize::new(0),

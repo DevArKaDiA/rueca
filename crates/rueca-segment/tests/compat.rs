@@ -196,7 +196,7 @@ fn graph() -> (ResolvedGraph, Mem) {
         indexed_at: 0,
         rueca_version: "0.1.0-alpha.1".into(),
     };
-    (ResolvedGraph { snapshot, nodes, edges, files }, Mem(contents))
+    (ResolvedGraph { snapshot, nodes, edges, files, modules: vec![] }, Mem(contents))
 }
 
 fn fixture_dir() -> PathBuf {
@@ -243,6 +243,7 @@ fn segment_written_before_wave_r_opens_unchanged() {
     let (graph, mem) = graph();
     assert_eq!(seg.nodes(), graph.nodes.as_slice(), "node table (labels, languages) decodes identically");
     assert_eq!(seg.files(), graph.files.as_slice());
+    assert_eq!(seg.module_of(0), None, "no files.modules component before wave R");
     assert_eq!(seg.meta().edge_count as usize, graph.edges.len());
     for e in &graph.edges {
         let out = seg.out_edges(e.src, Some(e.kind));
@@ -276,4 +277,33 @@ fn segment_written_before_wave_r_opens_unchanged() {
             .unwrap();
         assert!(!hits.is_empty() && hits.iter().all(|h| seg.node(h.node).language == Some(lang)), "{lang}");
     }
+}
+
+/// What wave R adds to a segment without a format bump: the `Contract`
+/// strategy (code 7), the appended labels and languages, and the optional
+/// `files.modules` component.
+#[test]
+fn wave_r_additions_round_trip() {
+    let (mut graph, mem) = graph();
+    let first = first_symbol_node(&graph);
+    graph.nodes[first].label = Label::Key;
+    graph.nodes[first + 1].label = Label::Image;
+    graph.files[0].language = Some(Language::Java);
+    graph.nodes[graph.files[0].node as usize].language = Some(Language::Java);
+    graph.edges[1].meta.strategy = Strategy::Contract;
+    graph.modules = (0..graph.files.len()).map(|i| format!("module{i}")).collect();
+    let store = tempfile::tempdir().unwrap();
+    let meta = write_segment(&graph, &mem, store.path()).unwrap();
+    let seg = Segment::open(&store.path().join("segments").join(format!("{}.rcseg", meta.id)), store.path()).unwrap();
+    assert_eq!(seg.nodes(), graph.nodes.as_slice());
+    assert_eq!(seg.files(), graph.files.as_slice());
+    assert_eq!(seg.module_of(2), Some("module2"));
+    assert_eq!(seg.module_of(99), None);
+    let e = &graph.edges[1];
+    let hit = seg.out_edges(e.src, Some(e.kind)).into_iter().find(|r| r.other == e.dst).unwrap();
+    assert_eq!(hit.meta.strategy, Strategy::Contract);
+}
+
+fn first_symbol_node(graph: &ResolvedGraph) -> usize {
+    graph.nodes.iter().position(|n| n.span.is_some()).unwrap()
 }

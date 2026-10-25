@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use globset::GlobMatcher;
-use rueca_model::{FileEntry, Label, Node};
+use rueca_model::{FileEntry, Label, LanguageFamily, Node};
 use tantivy::collector::TopDocs;
 use tantivy::directory::error::{DeleteError, LockError, OpenReadError, OpenWriteError};
 use tantivy::directory::{DirectoryLock, FileHandle, Lock, OwnedBytes, WatchCallback, WatchHandle, WritePtr};
@@ -61,6 +61,10 @@ pub(crate) const MAX_BODY_BYTES: usize = 32 * 1024;
 
 /// Labels excluded when `SymbolQuery::labels` is empty.
 pub(crate) const DEFAULT_EXCLUDED: [Label; 4] = [Label::File, Label::Folder, Label::Module, Label::Repository];
+/// Also excluded by default unless `SymbolQuery::language` is a data
+/// language: structured-data keys and documents (RFC 0003 §11), which would
+/// otherwise crowd code out of localization queries.
+pub(crate) const DATA_DETAIL: [Label; 2] = [Label::Key, Label::Document];
 
 fn terr(e: tantivy::TantivyError) -> SegmentError {
     SegmentError::Other(format!("tantivy: {e}"))
@@ -496,7 +500,11 @@ impl SymbolIndex {
             Box::new(BooleanQuery::new(should))
         };
         if q.labels.is_empty() {
-            clauses.push((Occur::MustNot, label_terms(&DEFAULT_EXCLUDED)));
+            let mut excluded = DEFAULT_EXCLUDED.to_vec();
+            if q.language.is_none_or(|l| l.family() != LanguageFamily::Data) {
+                excluded.extend(DATA_DETAIL);
+            }
+            clauses.push((Occur::MustNot, label_terms(&excluded)));
         } else {
             clauses.push((Occur::Must, Box::new(ConstScoreQuery::new(label_terms(&q.labels), 0.0))));
         }

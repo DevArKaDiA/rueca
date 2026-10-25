@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use rueca_model::{EdgeKind, FileId, Label, LanguageFamily, Node, NodeId, Span};
+use rueca_model::{ENV_PATH, EdgeKind, FileId, Label, LanguageFamily, Node, NodeId, Span, env_var_qualified_name};
 use rueca_segment::{CatalogEntry, Segment};
 
 use crate::types::Brief;
@@ -67,10 +67,27 @@ impl View {
         if is_container(node.label) {
             return None;
         }
+        // Canonical env vars (no file): `$env:NAME` → `NAME`.
+        if node.file.is_none()
+            && let Some(name) = env_var_name(node)
+        {
+            return Some(name.to_string());
+        }
+        let family = node.language.map(|l| l.family());
         // PHP names carry their namespace and use `::` for members: the
         // global qualified name is the local one (`App\Models\User::save`).
-        if node.language.map(|l| l.family()) == Some(LanguageFamily::Php) {
+        if family == Some(LanguageFamily::Php) {
             return Some(node.qualified_name.clone());
+        }
+        // RFC 0003 families: the global name is module + separator + local
+        // name, with the module recorded per file (Go import paths and Java
+        // packages contain dots, data key paths and overload suffixes do not
+        // follow `DEFINES` names).
+        if let Some(family @ (LanguageFamily::Data | LanguageFamily::Go | LanguageFamily::C | LanguageFamily::Java)) =
+            family
+            && let Some(local) = self.module_local_name(node, family)
+        {
+            return Some(local);
         }
         let mut parts = vec![node.name.as_str()];
         let mut cur = id;
@@ -101,10 +118,34 @@ impl View {
         Some(chain)
     }
 
-    /// Stable symbol id of a node.
+    /// `qualified_name` minus `<module><separator>`, with the module from
+    /// the segment's `files.modules` (data files: the path; C/C++: none).
+    fn module_local_name(&self, node: &Node, family: LanguageFamily) -> Option<String> {
+        let file = node.file?;
+        let module = match self.seg.module_of(file) {
+            Some(m) => m.to_string(),
+            None => match family {
+                LanguageFamily::Data => self.seg.file(file).path.clone(),
+                LanguageFamily::C => String::new(),
+                _ => return None,
+            },
+        };
+        if module.is_empty() {
+            return Some(node.qualified_name.clone());
+        }
+        let rest = node.qualified_name.strip_prefix(module.as_str())?;
+        rest.strip_prefix(family.module_separator()).map(str::to_string)
+    }
+
+    /// Stable symbol id of a node. Canonical env vars use the pseudo-path
+    /// `$env` (`repo@commit:$env#DATABASE_URL`).
     pub fn symbol_id(&self, id: NodeId) -> String {
         let node = self.node(id);
-        let path = self.node_path(id).unwrap_or(node.qualified_name.as_str());
+        let path = match self.node_path(id) {
+            Some(p) => p,
+            None if env_var_name(node).is_some() => ENV_PATH,
+            None => node.qualified_name.as_str(),
+        };
         let local = self.local_qualified_name(id);
         rueca_model::symbol_id(self.repo(), self.commit(), path, local.as_deref())
     }
@@ -260,6 +301,17 @@ impl View {
             );
         }
         let Some(file) = self.seg.file_by_path(&parts.path) else {
+            if parts.path == ENV_PATH
+                && let Some(name) = parts.qualified_name.as_deref()
+            {
+                let qn = env_var_qualified_name(name);
+                return Ok(self
+                    .seg
+                    .nodes_by_qualified_name(&qn)
+                    .into_iter()
+                    .filter(|&n| self.node(n).file.is_none())
+                    .collect());
+            }
             anyhow::bail!("file `{}` of symbol id `{id}` is not indexed", parts.path);
         };
         match parts.qualified_name.as_deref() {
@@ -279,16 +331,25 @@ impl View {
             return exact;
         }
         let nodes = self.seg.nodes();
+        let suffix: Vec<NodeId> = (0..nodes.len() as NodeId)
+            .filter(|&i| {
+                let n = &nodes[i as usize];
+                !is_container(n.label) && is_qualified_suffix(&n.qualified_name, q)
+            })
+            .collect();
+        if !suffix.is_empty() {
+            return suffix;
+        }
+        // Overloads (Java, C/C++): the parameter suffix is optional, so
+        // `Parser.parse` finds `com.x.Parser.parse(String)` and its siblings.
         (0..nodes.len() as NodeId)
             .filter(|&i| {
                 let n = &nodes[i as usize];
-                if is_container(n.label) || n.qualified_name.len() <= q.len() || !n.qualified_name.ends_with(q) {
-                    return false;
-                }
-                let b = n.qualified_name.as_bytes()[n.qualified_name.len() - q.len() - 1];
-                // `/` lets ECMAScript names drop leading module directories
-                // (`util:formatAmount` for `src/util:formatAmount`).
-                b == b'.' || b == b':' || b == b'/' || b == b'\\'
+                let overloadable =
+                    matches!(n.language.map(|l| l.family()), Some(LanguageFamily::Java | LanguageFamily::C));
+                overloadable
+                    && !is_container(n.label)
+                    && overload_base(&n.qualified_name).is_some_and(|b| b == q || is_qualified_suffix(b, q))
             })
             .collect()
     }
@@ -307,6 +368,32 @@ impl View {
             })
             .collect()
     }
+}
+
+/// Name of a canonical env var node (`$env:NAME`, no file).
+fn env_var_name(node: &Node) -> Option<&str> {
+    if node.label != Label::EnvVar || node.file.is_some() {
+        return None;
+    }
+    node.qualified_name.strip_prefix(ENV_PATH)?.strip_prefix(':')
+}
+
+/// Whether `q` is a suffix of `qn` on a separator boundary: `.`, `:`, `/`
+/// (ECMAScript names drop leading module directories: `util:formatAmount`
+/// for `src/util:formatAmount`), `\`; and any boundary when `q` starts with
+/// a key-path accessor (`["DATABASE_URL"]`, `[0].run`).
+fn is_qualified_suffix(qn: &str, q: &str) -> bool {
+    if q.is_empty() || qn.len() <= q.len() || !qn.ends_with(q) {
+        return false;
+    }
+    let b = qn.as_bytes()[qn.len() - q.len() - 1];
+    b == b'.' || b == b':' || b == b'/' || b == b'\\' || q.starts_with('[')
+}
+
+/// `a.B.m` for an overloaded `a.B.m(int, String)`.
+fn overload_base(qn: &str) -> Option<&str> {
+    let open = qn.strip_suffix(')')?.rfind('(')?;
+    (open > 0).then(|| &qn[..open])
 }
 
 /// Innermost symbol among `symbols` whose span covers 0-based `line`.

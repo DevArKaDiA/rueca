@@ -385,6 +385,7 @@ impl<'s> Extractor<'s> {
             implements: nd.implements,
             exported: nd.exported,
             is_test: nd.is_test,
+            is_declaration: false,
         });
         id
     }
@@ -393,7 +394,7 @@ impl<'s> Extractor<'s> {
         if self.refs.len() >= MAX_REFS || name.is_empty() {
             return;
         }
-        self.refs.push(Reference { kind, name, receiver, enclosing, span });
+        self.refs.push(Reference { kind, name, receiver, enclosing, span, arity: None });
     }
 
     fn is_local(&self, name: &str) -> bool {

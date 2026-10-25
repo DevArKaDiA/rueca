@@ -54,6 +54,7 @@ pub(crate) fn render_graph(root: &Path) -> String {
         budget: &budget,
         facts_dir: &cache.path().join("facts"),
         kept_bytes: &kept,
+        cpp_headers: has_cpp(&paths),
     };
     let loaded: Vec<Loaded> = paths.par_iter().map(|p| ctx.load(p).unwrap()).collect();
     let mut configs = std::collections::BTreeMap::new();

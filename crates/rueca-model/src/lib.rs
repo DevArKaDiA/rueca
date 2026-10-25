@@ -19,9 +19,12 @@ use std::fmt;
 // Languages
 // ---------------------------------------------------------------------------
 
-/// Languages with an extractor. `JavaScript` covers `.js/.jsx/.mjs/.cjs`;
-/// `Tsx` is TypeScript with JSX. New variants are appended (segments store
-/// the variant index).
+/// Languages and structured-data formats Rueca knows how to detect.
+/// `JavaScript` covers `.js/.jsx/.mjs/.cjs`; `Tsx` is TypeScript with JSX.
+/// New variants are appended (segments and facts store the variant index), so
+/// the declaration order is part of the on-disk format. Detection does not
+/// imply extraction: a file gets a language in the graph only when a pack for
+/// it is registered (RFC 0003 §3.1, status `text` otherwise).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -31,9 +34,52 @@ pub enum Language {
     Tsx,
     Php,
     Markdown,
+    // RFC 0003 §4.1: structured data, one variant per format.
+    /// JSON and JSONC.
+    Json,
+    Yaml,
+    Toml,
+    /// `.env` files (`NAME=value` lines).
+    DotEnv,
+    Ini,
+    /// Java `.properties`.
+    Properties,
+    /// XML of known kinds only (`pom.xml`, `*.csproj`, …); other XML is text.
+    Xml,
+    /// HCL and Terraform / OpenTofu.
+    Hcl,
+    Dockerfile,
+    // RFC 0003 §10: code languages.
+    Go,
+    Cpp,
+    C,
+    Java,
 }
 
 impl Language {
+    /// Every variant, in declaration (on-disk) order.
+    pub const ALL: &'static [Language] = &[
+        Language::Python,
+        Language::JavaScript,
+        Language::TypeScript,
+        Language::Tsx,
+        Language::Php,
+        Language::Markdown,
+        Language::Json,
+        Language::Yaml,
+        Language::Toml,
+        Language::DotEnv,
+        Language::Ini,
+        Language::Properties,
+        Language::Xml,
+        Language::Hcl,
+        Language::Dockerfile,
+        Language::Go,
+        Language::Cpp,
+        Language::C,
+        Language::Java,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Language::Python => "python",
@@ -42,30 +88,112 @@ impl Language {
             Language::Tsx => "tsx",
             Language::Php => "php",
             Language::Markdown => "markdown",
+            Language::Json => "json",
+            Language::Yaml => "yaml",
+            Language::Toml => "toml",
+            Language::DotEnv => "dotenv",
+            Language::Ini => "ini",
+            Language::Properties => "properties",
+            Language::Xml => "xml",
+            Language::Hcl => "hcl",
+            Language::Dockerfile => "dockerfile",
+            Language::Go => "go",
+            Language::Cpp => "cpp",
+            Language::C => "c",
+            Language::Java => "java",
         }
     }
 
-    /// Detects the language from a repository-relative path's extension.
+    /// Parses the serialized name (`python`, `dotenv`, `cpp`, …).
+    pub fn parse(s: &str) -> Option<Language> {
+        Language::ALL.iter().copied().find(|l| l.as_str() == s)
+    }
+
+    /// Detects the language of a repository-relative path (RFC 0003 §4.1):
+    /// by extension first, then by file name — `Dockerfile`, `Dockerfile.*`,
+    /// `*.Dockerfile`, `Containerfile`, `Containerfile.*`; `.env`, `.env.*`;
+    /// `pom.xml`, `AndroidManifest.xml` (other XML stays undetected). A C
+    /// header (`.h`) is [`Language::C`] here; the indexer reads it as C++ when
+    /// the snapshot has C++ sources (see [`Language::header_language`]).
     pub fn from_path(path: &str) -> Option<Language> {
-        let ext = path.rsplit_once('.').map(|(_, e)| e)?;
-        match ext {
-            "py" | "pyi" => Some(Language::Python),
-            "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
-            "ts" | "mts" | "cts" => Some(Language::TypeScript),
-            "tsx" => Some(Language::Tsx),
-            "php" => Some(Language::Php),
-            "md" | "markdown" => Some(Language::Markdown),
-            _ => None,
+        let name = path.rsplit('/').next().unwrap_or(path);
+        if let Some((_, ext)) = name.rsplit_once('.')
+            && let Some(lang) = Language::from_extension(ext)
+        {
+            return Some(lang);
+        }
+        Language::from_file_name(name)
+    }
+
+    fn from_extension(ext: &str) -> Option<Language> {
+        Some(match ext {
+            "py" | "pyi" => Language::Python,
+            "js" | "jsx" | "mjs" | "cjs" => Language::JavaScript,
+            "ts" | "mts" | "cts" => Language::TypeScript,
+            "tsx" => Language::Tsx,
+            "php" => Language::Php,
+            "md" | "markdown" => Language::Markdown,
+            "json" | "jsonc" => Language::Json,
+            "yml" | "yaml" => Language::Yaml,
+            "toml" => Language::Toml,
+            "ini" | "cfg" => Language::Ini,
+            "properties" => Language::Properties,
+            "csproj" | "fsproj" | "vbproj" => Language::Xml,
+            "tf" | "tfvars" | "tofu" | "hcl" => Language::Hcl,
+            "dockerfile" | "Dockerfile" | "containerfile" | "Containerfile" => Language::Dockerfile,
+            "go" => Language::Go,
+            "cc" | "cpp" | "cxx" | "c++" | "hh" | "hpp" | "hxx" | "h++" | "ipp" | "tpp" | "inl" | "ixx" | "cppm" => {
+                Language::Cpp
+            }
+            "c" | "h" => Language::C,
+            "java" => Language::Java,
+            _ => return None,
+        })
+    }
+
+    fn from_file_name(name: &str) -> Option<Language> {
+        let base_is = |base: &str| name == base || name.strip_prefix(base).is_some_and(|r| r.starts_with('.'));
+        if base_is("Dockerfile") || base_is("Containerfile") {
+            return Some(Language::Dockerfile);
+        }
+        if base_is(".env") {
+            return Some(Language::DotEnv);
+        }
+        if name == "pom.xml" || name == "AndroidManifest.xml" {
+            return Some(Language::Xml);
+        }
+        None
+    }
+
+    /// Language of a C/C++ header (`.h`) in a snapshot: C++ when the snapshot
+    /// has C++ sources or headers, else C (RFC 0003 §9.2, an indexer
+    /// decision). Every other path keeps [`Language::from_path`].
+    pub fn header_language(path: &str, snapshot_has_cpp: bool) -> Option<Language> {
+        match Language::from_path(path) {
+            Some(Language::C) if snapshot_has_cpp && path.ends_with(".h") => Some(Language::Cpp),
+            other => other,
         }
     }
 
-    /// TypeScript, TSX and JavaScript share module semantics.
+    /// Module semantics shared by a group of languages.
     pub fn family(self) -> LanguageFamily {
         match self {
             Language::Python => LanguageFamily::Python,
             Language::JavaScript | Language::TypeScript | Language::Tsx => LanguageFamily::EcmaScript,
             Language::Php => LanguageFamily::Php,
             Language::Markdown => LanguageFamily::Markdown,
+            Language::Json
+            | Language::Yaml
+            | Language::Toml
+            | Language::DotEnv
+            | Language::Ini
+            | Language::Properties
+            | Language::Xml
+            | Language::Hcl
+            | Language::Dockerfile => LanguageFamily::Data,
+            Language::Go => LanguageFamily::Go,
+            Language::Cpp | Language::C => LanguageFamily::C,
+            Language::Java => LanguageFamily::Java,
         }
     }
 }
@@ -76,6 +204,9 @@ impl fmt::Display for Language {
     }
 }
 
+/// Languages that share module and name-resolution semantics. Not stored in
+/// segments or facts (derived from [`Language`]), so variants can be added
+/// anywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LanguageFamily {
@@ -83,18 +214,34 @@ pub enum LanguageFamily {
     EcmaScript,
     Php,
     Markdown,
+    /// Structured data (JSON, YAML, TOML, `.env`, INI, `.properties`, XML,
+    /// HCL, Dockerfile): module name = path with extension, local names are
+    /// key paths (RFC 0003 §4.3).
+    Data,
+    /// Go: module name = package import path.
+    Go,
+    /// C and C++: no modules; names carry their namespace / class path.
+    C,
+    /// Java: module name = package.
+    Java,
 }
 
 impl LanguageFamily {
     /// Separator between a module name and a definition's local qualified
     /// name in global qualified names: Python `pkg.mod.Class.method`,
     /// ECMAScript `src/util/index:formatAmount`, PHP `App\Models\User::save`
-    /// (module = namespace), Markdown `docs/guide.md:Install > Linux`.
+    /// (module = namespace), Markdown `docs/guide.md:Install > Linux`, data
+    /// `config/app.yaml:database.host`, Go
+    /// `github.com/gin-gonic/gin.Engine.ServeHTTP`, Java
+    /// `com.example.Owner.getPets`. C and C++ have no module names (the
+    /// local name `fmt::v11::format_to` is global); `::` is the separator
+    /// their local names use.
     pub fn module_separator(self) -> &'static str {
         match self {
-            LanguageFamily::Python => ".",
-            LanguageFamily::EcmaScript | LanguageFamily::Markdown => ":",
+            LanguageFamily::Python | LanguageFamily::Go | LanguageFamily::Java => ".",
+            LanguageFamily::EcmaScript | LanguageFamily::Markdown | LanguageFamily::Data => ":",
             LanguageFamily::Php => "\\",
+            LanguageFamily::C => "::",
         }
     }
 }
@@ -129,7 +276,8 @@ impl Span {
 // Labels and edge kinds
 // ---------------------------------------------------------------------------
 
-/// Node labels (RFC 0001 §6.2). The alpha only produces the code subset.
+/// Node labels (RFC 0001 §6.2, RFC 0003 §4.2). New variants are appended
+/// (segments store the variant index).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Label {
     Repository,
@@ -155,6 +303,15 @@ pub enum Label {
     Test,
     /// A heading section of a document (Markdown); nested by `DEFINES`.
     Section,
+    /// A key in structured data, at any depth (`config/app.yaml:database.host`).
+    Key,
+    /// One document of a multi-document YAML stream that has no kind identity.
+    Document,
+    /// A declared deployable or infrastructure object: Kubernetes object,
+    /// compose service, Terraform `resource` / `data` / `module`, Helm chart.
+    Resource,
+    /// A container image or build stage (Dockerfile stage, compose `build`).
+    Image,
 }
 
 impl Label {
@@ -181,6 +338,10 @@ impl Label {
         Label::EnvVar,
         Label::Test,
         Label::Section,
+        Label::Key,
+        Label::Document,
+        Label::Resource,
+        Label::Image,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -207,6 +368,10 @@ impl Label {
             Label::EnvVar => "EnvVar",
             Label::Test => "Test",
             Label::Section => "Section",
+            Label::Key => "Key",
+            Label::Document => "Document",
+            Label::Resource => "Resource",
+            Label::Image => "Image",
         }
     }
 
@@ -217,6 +382,12 @@ impl Label {
     /// Labels that can be the source of a `CALLS` edge.
     pub fn is_callable(self) -> bool {
         matches!(self, Label::Function | Label::Method | Label::Test)
+    }
+
+    /// Structured-data labels left out of `search_symbols` by default (they
+    /// would flood code results; RFC 0003 §11): `Key`, `Document`.
+    pub fn is_data_detail(self) -> bool {
+        matches!(self, Label::Key | Label::Document)
     }
 
     /// Labels that own members (methods, fields).
@@ -302,6 +473,9 @@ impl fmt::Display for EdgeKind {
 
 /// How an edge was established (RFC 0001 §6.3). Ordered from strongest to
 /// weakest; when two strategies produce the same edge the earlier one wins.
+/// New variants are appended (segments store the variant index); `Contract`
+/// edges (the code ↔ config bridge) never compete with ladder edges for the
+/// same `(src, dst, kind)`, so its place in the order does not matter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Strategy {
     /// Structural fact from the syntax tree (containment, definition).
@@ -312,9 +486,24 @@ pub enum Strategy {
     SameModule,
     UniqueName,
     Heuristic,
+    /// A contract between code and configuration (RFC 0003 §7.3): an env var
+    /// or config key read resolved through a known namespace.
+    Contract,
 }
 
 impl Strategy {
+    /// Every variant, in declaration (on-disk) order.
+    pub const ALL: &'static [Strategy] = &[
+        Strategy::Syntactic,
+        Strategy::Scip,
+        Strategy::TypeResolved,
+        Strategy::ImportResolved,
+        Strategy::SameModule,
+        Strategy::UniqueName,
+        Strategy::Heuristic,
+        Strategy::Contract,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Strategy::Syntactic => "syntactic",
@@ -324,6 +513,7 @@ impl Strategy {
             Strategy::SameModule => "same_module",
             Strategy::UniqueName => "unique_name",
             Strategy::Heuristic => "heuristic",
+            Strategy::Contract => "contract",
         }
     }
 }
@@ -331,6 +521,15 @@ impl Strategy {
 // ---------------------------------------------------------------------------
 // Facts (extractor output for one file)
 // ---------------------------------------------------------------------------
+
+/// Version of the [`FileFacts`] encoding. Facts are cached as postcard,
+/// which is positional: appending enum variants keeps old facts decodable,
+/// but adding a struct field does not. The facts cache key includes this
+/// number, so a change re-extracts once instead of failing to decode.
+///
+/// - 1: alpha 1 – alpha 2.
+/// - 2: RFC 0003 wave R — `Definition::is_declaration`, `Reference::arity`.
+pub const FACTS_FORMAT: u32 = 2;
 
 /// Index of a [`Definition`] within its file's `definitions` vector.
 pub type LocalDefId = u32;
@@ -367,6 +566,11 @@ pub struct Definition {
     pub exported: bool,
     /// True if this is a test (pytest `test_*`, `Test*` classes, `it`/`test` blocks).
     pub is_test: bool,
+    /// True for a declaration without a body (C/C++ prototypes and in-class
+    /// method declarations). References that resolve to a declaration are
+    /// moved to the unique body with the same global qualified name, if any
+    /// (RFC 0003 §10.3). `false` for every other language.
+    pub is_declaration: bool,
 }
 
 /// Kind of an unresolved reference.
@@ -386,6 +590,23 @@ pub enum RefKind {
     Decorator,
     /// `raise X` / `throw new X`.
     Throw,
+    /// Read of an environment variable by literal name (`os.getenv("X")`,
+    /// `process.env.X`); `name` is the variable. Resolved to the canonical
+    /// `$env:NAME` node with a `READS` edge, never by name matching (RFC 0003
+    /// §7.2).
+    EnvVar,
+    /// Read of a configuration key by literal key path (`config('app.name')`,
+    /// `@Value("${server.port}")`); `name` is the key path and `receiver` the
+    /// config namespace (`spring`, `laravel`, `dotnet`, `node-config`,
+    /// `viper`, `viper:<config name>`), if known. Resolved to `Key` nodes
+    /// with `READS` edges.
+    ConfigKey,
+    /// A pointer inside structured data to a key path (`$ref`, YAML alias,
+    /// `COPY --from`). `receiver`: `None` = same file; an import specifier of
+    /// the same file = that file; `$qn` = `name` is a global qualified name
+    /// (any language); `$any` = any data file. Exact matches only (RFC 0003
+    /// §6); resolved to `REFERENCES`.
+    DataRef,
 }
 
 /// A use of a name that the resolver must link to a definition.
@@ -399,6 +620,9 @@ pub struct Reference {
     /// Innermost enclosing definition (the caller), if any. `None` = module level.
     pub enclosing: Option<LocalDefId>,
     pub span: Span,
+    /// Number of call arguments, when the pack reports it. Used to choose
+    /// among overloads (Java, C++; RFC 0003 §10.1); `None` everywhere else.
+    pub arity: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -491,6 +715,10 @@ pub struct Node {
     ///   separates them because paths may contain dots.
     /// - PHP symbols: the fully qualified PHP name, members after `::`
     ///   (`App\Models\User::save`, `App\Models\User::$email`).
+    /// - Structured data: `<path>:<key path>` (`config/app.yaml:database.host`).
+    /// - Go: `<import path>.<local>`; Java: `<package>.<local>`; C/C++: the
+    ///   namespace / class path (`fmt::v11::format_to`).
+    /// - Canonical env vars (file-less `EnvVar` nodes): `$env:<NAME>`.
     /// - Files and folders: the repository-relative path. Repository: the repo id.
     pub qualified_name: String,
     pub file: Option<FileId>,
@@ -528,10 +756,21 @@ pub struct ResolvedGraph {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub files: Vec<FileEntry>,
+    /// Module name of each file (index = [`FileId`]) as the file's pack
+    /// computed it; empty for files without a pack and for languages without
+    /// file modules (PHP, C/C++). Either empty (unknown) or one entry per
+    /// file. Lets readers split a global qualified name into module and
+    /// local name where the split is not derivable (Go import paths with
+    /// dots, Java packages).
+    #[serde(default)]
+    pub modules: Vec<String>,
 }
 
 impl ResolvedGraph {
     pub fn validate(&self) -> Result<(), String> {
+        if !self.modules.is_empty() && self.modules.len() != self.files.len() {
+            return Err("modules and files disagree in length".into());
+        }
         let n = self.nodes.len() as u32;
         for (i, e) in self.edges.iter().enumerate() {
             if e.src >= n || e.dst >= n {
@@ -564,8 +803,19 @@ impl ResolvedGraph {
 // Stable symbol identifiers (RFC 0001 §6.1)
 // ---------------------------------------------------------------------------
 
+/// Pseudo-path of file-less canonical env var nodes in symbol ids, and the
+/// prefix (with `:`) of their qualified names (`$env:DATABASE_URL`).
+pub const ENV_PATH: &str = "$env";
+
+/// Qualified name of the canonical env var node for `name`.
+pub fn env_var_qualified_name(name: &str) -> String {
+    format!("{ENV_PATH}:{name}")
+}
+
 /// Formats `<repo>@<commit>:<path>#<qualified-name>`. `qualified_name` is the
-/// node's module-relative name; pass `None` for file nodes.
+/// node's module-relative name; pass `None` for file nodes. File-less
+/// canonical env vars use the pseudo-path [`ENV_PATH`]:
+/// `<repo>@<commit>:$env#DATABASE_URL`.
 pub fn symbol_id(repo: &str, commit: &str, path: &str, qualified_name: Option<&str>) -> String {
     match qualified_name {
         Some(q) if !q.is_empty() => format!("{repo}@{commit}:{path}#{q}"),
@@ -688,5 +938,111 @@ mod tests {
         assert_eq!(Language::from_path("a/b.tsx"), Some(Language::Tsx));
         assert_eq!(Language::from_path("a/b.mjs"), Some(Language::JavaScript));
         assert_eq!(Language::from_path("Makefile"), None);
+        // Extension-less names and paths with dots in directories.
+        assert_eq!(Language::from_path("a.py/README"), None);
+        assert_eq!(Language::from_path("v1.2/x.ts"), Some(Language::TypeScript));
+    }
+
+    #[test]
+    fn language_detection_rfc_0003() {
+        use Language::*;
+        let cases: &[(&str, Option<Language>)] = &[
+            ("package.json", Some(Json)),
+            ("tsconfig.base.jsonc", Some(Json)),
+            (".github/workflows/ci.yml", Some(Yaml)),
+            ("k8s/web.yaml", Some(Yaml)),
+            ("pyproject.toml", Some(Toml)),
+            (".env", Some(DotEnv)),
+            ("deploy/.env.example", Some(DotEnv)),
+            (".env.local", Some(DotEnv)),
+            (".environment", None),
+            ("app.env", None),
+            ("setup.cfg", Some(Ini)),
+            ("conf/php.ini", Some(Ini)),
+            ("src/main/resources/application.properties", Some(Properties)),
+            ("pom.xml", Some(Xml)),
+            ("app/src/main/AndroidManifest.xml", Some(Xml)),
+            ("src/App/App.csproj", Some(Xml)),
+            ("docs/site.xml", None),
+            ("infra/main.tf", Some(Hcl)),
+            ("infra/prod.tfvars", Some(Hcl)),
+            ("infra/main.tofu", Some(Hcl)),
+            ("Dockerfile", Some(Dockerfile)),
+            ("docker/Dockerfile.dev", Some(Dockerfile)),
+            ("build/api.Dockerfile", Some(Dockerfile)),
+            ("Containerfile", Some(Dockerfile)),
+            ("Dockerfile.py", Some(Python)),
+            ("DockerfileX", None),
+            ("cmd/server/main.go", Some(Go)),
+            ("src/fmt.cc", Some(Cpp)),
+            ("include/fmt/core.hpp", Some(Cpp)),
+            ("src/redis.c", Some(C)),
+            ("src/redis.h", Some(C)),
+            ("src/main/java/com/x/Owner.java", Some(Java)),
+        ];
+        for (path, want) in cases {
+            assert_eq!(Language::from_path(path), *want, "{path}");
+        }
+        assert_eq!(Language::header_language("a/b.h", true), Some(Cpp));
+        assert_eq!(Language::header_language("a/b.h", false), Some(C));
+        assert_eq!(Language::header_language("a/b.c", true), Some(C));
+        for l in Language::ALL {
+            assert_eq!(Language::parse(l.as_str()), Some(*l));
+            assert_eq!(serde_json::to_string(l).unwrap(), format!("\"{}\"", l.as_str()));
+        }
+        assert_eq!(Json.family(), LanguageFamily::Data);
+        assert_eq!(Dockerfile.family().module_separator(), ":");
+        assert_eq!(Go.family().module_separator(), ".");
+        assert_eq!(Cpp.family(), C.family());
+        assert_eq!(Java.family().module_separator(), ".");
+    }
+
+    /// Segments and facts store enum variants by index (postcard). These
+    /// indexes are the on-disk format: existing variants never move, new
+    /// ones are appended (RFC 0003 §9.3).
+    #[test]
+    fn variant_indexes_are_stable() {
+        fn idx<T: Serialize>(v: &T) -> u8 {
+            let b = postcard::to_stdvec(v).unwrap();
+            assert_eq!(b.len(), 1);
+            b[0]
+        }
+        let langs: Vec<u8> = Language::ALL.iter().map(idx).collect();
+        assert_eq!(langs, (0..19).collect::<Vec<u8>>());
+        assert_eq!(idx(&Language::Markdown), 5);
+        assert_eq!(idx(&Language::Json), 6);
+        assert_eq!(idx(&Language::Java), 18);
+        let labels: Vec<u8> = Label::ALL.iter().map(idx).collect();
+        assert_eq!(labels, (0..26).collect::<Vec<u8>>());
+        assert_eq!(idx(&Label::Section), 21);
+        assert_eq!(idx(&Label::Key), 22);
+        assert_eq!(idx(&Label::Image), 25);
+        let kinds: Vec<u8> = EdgeKind::ALL.iter().map(idx).collect();
+        assert_eq!(kinds, (0..13).collect::<Vec<u8>>());
+        let strategies: Vec<u8> = Strategy::ALL.iter().map(idx).collect();
+        assert_eq!(strategies, (0..8).collect::<Vec<u8>>());
+        assert_eq!(idx(&Strategy::Heuristic), 6);
+        assert_eq!(idx(&Strategy::Contract), 7);
+        assert_eq!(idx(&RefKind::Throw), 6);
+        assert_eq!(idx(&RefKind::EnvVar), 7);
+        assert_eq!(idx(&RefKind::ConfigKey), 8);
+        assert_eq!(idx(&RefKind::DataRef), 9);
+        // Old ordering of strategies is preserved: earlier wins.
+        assert!(Strategy::Syntactic < Strategy::Heuristic && Strategy::Heuristic < Strategy::Contract);
+    }
+
+    #[test]
+    fn labels_and_env_ids() {
+        for l in Label::ALL {
+            assert_eq!(Label::parse(l.as_str()), Some(*l));
+        }
+        assert!(Label::Key.is_data_detail() && Label::Document.is_data_detail());
+        assert!(!Label::EnvVar.is_data_detail() && !Label::Resource.is_data_detail());
+        assert_eq!(env_var_qualified_name("DB_URL"), "$env:DB_URL");
+        let id = symbol_id("local/x", "abc", ENV_PATH, Some("DB_URL"));
+        assert_eq!(id, "local/x@abc:$env#DB_URL");
+        let p = parse_symbol_id(&id).unwrap();
+        assert_eq!(p.path, "$env");
+        assert_eq!(p.qualified_name.as_deref(), Some("DB_URL"));
     }
 }

@@ -142,7 +142,7 @@ impl<'s> Extractor<'s> {
         {
             return;
         }
-        self.refs.push(Reference { kind, name, receiver, enclosing, span });
+        self.refs.push(Reference { kind, name, receiver, enclosing, span, arity: None });
     }
 
     fn push_resolved(&mut self, kind: RefKind, resolved: &Resolved, span: Span) {
@@ -707,6 +707,7 @@ impl<'s> Extractor<'s> {
             implements,
             exported: true,
             is_test,
+            is_declaration: false,
         });
         self.visit_attribute_nodes(&attrs, Some(idx), depth);
 
@@ -828,6 +829,7 @@ impl<'s> Extractor<'s> {
             implements: Vec::new(),
             exported: self.member_exported(node),
             is_test,
+            is_declaration: false,
         });
         self.visit_attribute_nodes(&attrs, Some(idx), depth);
         self.visit_callable(node, idx, depth);
@@ -895,6 +897,7 @@ impl<'s> Extractor<'s> {
             implements: Vec::new(),
             exported: class.exported && visibility(param, self.source) == "public",
             is_test: false,
+            is_declaration: false,
         });
         self.visit_attribute_nodes(&attrs, Some(idx), depth);
         self.with_enclosing(Some(idx), |this| {
@@ -934,6 +937,7 @@ impl<'s> Extractor<'s> {
                 implements: Vec::new(),
                 exported,
                 is_test: false,
+                is_declaration: false,
             });
             first = first.or(Some(idx));
             self.with_enclosing(Some(idx), |this| {
@@ -978,6 +982,7 @@ impl<'s> Extractor<'s> {
                 implements: Vec::new(),
                 exported,
                 is_test: false,
+                is_declaration: false,
             });
             first = first.or(Some(idx));
             self.with_enclosing(Some(idx), |this| {
@@ -1012,6 +1017,7 @@ impl<'s> Extractor<'s> {
             implements: Vec::new(),
             exported: self.class.as_ref().is_none_or(|c| c.exported),
             is_test: false,
+            is_declaration: false,
         });
         self.visit_attribute_nodes(&attrs, Some(idx), depth);
         self.with_enclosing(Some(idx), |this| this.visit_field(node, "value", depth));
@@ -1038,6 +1044,7 @@ impl<'s> Extractor<'s> {
             implements: Vec::new(),
             exported: true,
             is_test: false,
+            is_declaration: false,
         });
         self.visit_attribute_nodes(&attrs, Some(idx), depth);
         // A function declared inside a method is not a member of the class.
@@ -1126,6 +1133,7 @@ impl<'s> Extractor<'s> {
             implements: Vec::new(),
             exported: true,
             is_test: false,
+            is_declaration: false,
         });
     }
 
@@ -1173,6 +1181,7 @@ impl<'s> Extractor<'s> {
             implements: Vec::new(),
             exported: false,
             is_test: true,
+            is_declaration: false,
         });
         self.with_enclosing(Some(idx), |this| {
             for arg in args.iter().skip(1) {

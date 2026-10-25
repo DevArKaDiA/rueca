@@ -17,11 +17,20 @@
 //!    `skipped:binary`) are listed but not extracted. Files with a language
 //!    pack are extracted under `catch_unwind` (`skipped:panic`); extractor
 //!    errors become `skipped:<reason>` (`size`, `timeout`, `parser`, `query`,
-//!    `unsupported`), parse errors `partial`. Files without a pack are
-//!    `skipped:unsupported` (still listed and content-searchable).
-//! 3. **Facts cache**: `<store>/facts/<sha[0..2]>/<sha>-<lang>-v<version>.bin`
+//!    `unsupported`, or the pack's own reason such as `data-shape`), parse
+//!    errors `partial`. Files without a pack are `skipped:unsupported` (still
+//!    listed and content-searchable) and have no language in the graph, even
+//!    when `Language::from_path` recognizes them. Detection is by extension
+//!    and file name (`Dockerfile`, `.env.*`); a C header (`.h`) is C++ when
+//!    the snapshot has any C++ source or header.
+//! 3. **Facts cache**:
+//!    `<store>/facts/<sha[0..2]>/<sha>-<lang>-v<version>-f<FACTS_FORMAT>.bin`
 //!    holds `zstd(postcard(FileFacts))`, checked before extracting and written
-//!    atomically (temp file + rename) after a successful extraction.
+//!    atomically (temp file + rename) after a successful extraction. The
+//!    facts format ([`rueca_model::FACTS_FORMAT`]) is part of the key, so a
+//!    change to the facts structs re-extracts once; entries of older formats
+//!    are left in place and never read. Packs whose facts depend on the path
+//!    (`LanguagePack::facts_depend_on_path`) add `-p<hash of the path>`.
 //! 4. **Snapshot identity** from git, read with `gix` (see the `git` module):
 //!    repository id from `remote.origin.url` (normalized by
 //!    [`normalize_remote`]) else `local/<dirname>`; commit = `HEAD` id, else
@@ -46,7 +55,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use rayon::prelude::*;
 use rueca_extract::{Budget, ExtractError, LanguagePack, ProjectFiles, Registry};
-use rueca_model::{FileEntry, FileFacts, Language, SnapshotInfo, git_blob_sha};
+use rueca_model::{FACTS_FORMAT, FileEntry, FileFacts, Language, SnapshotInfo, git_blob_sha};
 use rueca_resolve::FileInput;
 use rueca_segment::{ContentSource, SegmentMeta, Store};
 use tracing::{debug, info, warn};
@@ -151,6 +160,15 @@ pub const LOCKFILES: &[&str] = &[
     "composer.lock",
     "Gemfile.lock",
     "go.sum",
+    // RFC 0003 §4.5: lockfiles of the structured-data ecosystems.
+    ".terraform.lock.hcl",
+    "packages.lock.json",
+    "gradle.lockfile",
+    "flake.lock",
+    "Podfile.lock",
+    "Package.resolved",
+    "pubspec.lock",
+    "mix.lock",
 ];
 
 /// True for directory names excluded by the hard-coded list.
@@ -170,8 +188,6 @@ const BINARY_SNIFF: usize = 8 * 1024;
 /// Total file bytes kept in memory for the segment writer; beyond this the
 /// writer's content source re-reads (and verifies) files from disk.
 const CONTENT_MEMORY_CAP: u64 = 512 * 1024 * 1024;
-/// Largest config file loaded into `ProjectFiles::configs`.
-const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
 /// Indexes the working tree at `opts.root` (including uncommitted changes and
 /// untracked, non-ignored files) and registers the new segment in the store.
@@ -205,6 +221,7 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
         budget: &opts.budget,
         facts_dir: &facts_dir,
         kept_bytes: &kept_bytes,
+        cpp_headers: has_cpp(&paths),
     };
     let loaded: Vec<anyhow::Result<Loaded>> = pool.install(|| paths.par_iter().map(|p| ctx.load(p)).collect());
     let mut files = Vec::with_capacity(loaded.len());
@@ -369,6 +386,13 @@ struct ExtractCtx<'a> {
     budget: &'a Budget,
     facts_dir: &'a Path,
     kept_bytes: &'a AtomicU64,
+    /// The snapshot has C++ sources: `.h` headers are C++ (RFC 0003 §9.2).
+    cpp_headers: bool,
+}
+
+/// Whether any path is a C++ source or header (decides `.h`).
+fn has_cpp(paths: &[String]) -> bool {
+    paths.iter().any(|p| Language::from_path(p) == Some(Language::Cpp))
 }
 
 struct Loaded {
@@ -386,15 +410,18 @@ impl ExtractCtx<'_> {
         let bytes = fs::read(&abs).with_context(|| format!("reading {}", abs.display()))?;
         let blob_sha = git_blob_sha(&bytes);
         let size = bytes.len() as u64;
-        let pack = self.registry.for_path(rel);
-        let language = Language::from_path(rel);
+        let detected = Language::header_language(rel, self.cpp_headers);
+        let pack = detected.and_then(|l| self.registry.for_language(l).map(|p| (l, p)));
+        // A language without a registered pack is not recorded (status `text`).
+        let language = pack.map(|(l, _)| l);
         let mut cache_hit = false;
         let (facts, status) = if bytes.len() > self.budget.max_bytes {
             (None, "skipped:size".to_string())
         } else if bytes[..bytes.len().min(BINARY_SNIFF)].contains(&0) {
             (None, "skipped:binary".to_string())
         } else if let Some((lang, pack)) = pack {
-            let cache = self.cache_path(&blob_sha, lang, pack.extractor_version());
+            let path_key = pack.facts_depend_on_path().then_some(rel);
+            let cache = self.cache_path(&blob_sha, lang, pack.extractor_version(), path_key);
             match read_cached(&cache) {
                 Some(f) => {
                     cache_hit = true;
@@ -417,7 +444,7 @@ impl ExtractCtx<'_> {
         };
         let keep = bytes.len() <= self.budget.max_bytes
             && self.kept_bytes.fetch_add(size, Ordering::Relaxed) + size <= CONTENT_MEMORY_CAP;
-        let config = (ProjectFiles::is_config_file(rel) && size <= MAX_CONFIG_BYTES)
+        let config = (ProjectFiles::is_config_file(rel) && size <= ProjectFiles::max_config_bytes(rel))
             .then(|| String::from_utf8(bytes.clone()).ok())
             .flatten();
         let input = FileInput { path: rel.to_string(), blob_sha, language, size, facts, status };
@@ -435,6 +462,7 @@ impl ExtractCtx<'_> {
                     ExtractError::Parser(_) => "parser".into(),
                     ExtractError::Unsupported(_) => "unsupported".into(),
                     ExtractError::Query(_) => "query".into(),
+                    ExtractError::Skipped(reason) => reason,
                 })
             }
             Err(_) => {
@@ -444,9 +472,12 @@ impl ExtractCtx<'_> {
         }
     }
 
-    fn cache_path(&self, sha: &str, lang: Language, version: u32) -> PathBuf {
+    /// `<sha>-<lang>-v<version>-f<FACTS_FORMAT>[-p<path hash>].bin`; the
+    /// path hash only for packs whose facts depend on the path.
+    fn cache_path(&self, sha: &str, lang: Language, version: u32, path: Option<&str>) -> PathBuf {
         let prefix = sha.get(..2).unwrap_or("00");
-        self.facts_dir.join(prefix).join(format!("{sha}-{}-v{version}.bin", lang.as_str()))
+        let path_part = path.map(|p| format!("-p{}", &git_blob_sha(p.as_bytes())[..16])).unwrap_or_default();
+        self.facts_dir.join(prefix).join(format!("{sha}-{}-v{version}-f{FACTS_FORMAT}{path_part}.bin", lang.as_str()))
     }
 }
 
@@ -609,6 +640,97 @@ mod tests {
         let paths = walk(root).unwrap();
         let expected = [".github/ci.yml", ".gitignore", "README.md", "src/a.py"];
         assert_eq!(paths, expected.map(String::from).to_vec());
+    }
+
+    /// A C/C++-like pack that skips files named `skip*` with its own reason.
+    struct FakeC;
+
+    impl LanguagePack for FakeC {
+        fn languages(&self) -> &'static [Language] {
+            &[Language::C, Language::Cpp]
+        }
+        fn extractor_version(&self) -> u32 {
+            3
+        }
+        fn extract(&self, path: &str, _: Language, _: &[u8], _: &Budget) -> Result<FileFacts, ExtractError> {
+            if path.contains("skip") {
+                return Err(ExtractError::Skipped("data-shape".into()));
+            }
+            Ok(FileFacts { line_count: 1, ..Default::default() })
+        }
+        fn module_name(&self, _: &str, _: &ProjectFiles) -> String {
+            String::new()
+        }
+        fn resolve_import(&self, _: &str, _: &rueca_model::Import, _: &ProjectFiles) -> Option<String> {
+            None
+        }
+        fn is_builtin(&self, _: &str) -> bool {
+            false
+        }
+        fn self_receivers(&self) -> &'static [&'static str] {
+            &[]
+        }
+        fn facts_depend_on_path(&self) -> bool {
+            true
+        }
+    }
+
+    fn load_all(root: &Path, registry: &Registry, store: &Path) -> Vec<Loaded> {
+        let paths = walk(root).unwrap();
+        let kept = AtomicU64::new(0);
+        let budget = Budget::default();
+        let facts_dir = store.join("facts");
+        let ctx = ExtractCtx {
+            root,
+            registry,
+            budget: &budget,
+            facts_dir: &facts_dir,
+            kept_bytes: &kept,
+            cpp_headers: has_cpp(&paths),
+        };
+        paths.iter().map(|p| ctx.load(p).unwrap()).collect()
+    }
+
+    #[test]
+    fn languages_headers_skips_and_cache_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let write = |p: &str| {
+            let path = dir.path().join(p);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"x\n").unwrap();
+        };
+        for p in ["c/a.c", "c/a.h", "cpp/b.cc", "cpp/b.h", "cpp/skip.cc", "go/main.go", "config.yaml"] {
+            write(p);
+        }
+        let mut registry = Registry::new();
+        registry.register(Box::new(FakeC));
+        // Two roots: one C-only, one with C++ sources.
+        let c_only = load_all(&dir.path().join("c"), &registry, store.path());
+        let lang = |v: &[Loaded], p: &str| v.iter().find(|l| l.input.path == p).unwrap().input.language;
+        assert_eq!(lang(&c_only, "a.h"), Some(Language::C));
+        let mixed = load_all(dir.path(), &registry, store.path());
+        assert_eq!(lang(&mixed, "cpp/b.h"), Some(Language::Cpp), "`.h` is C++ when the snapshot has C++");
+        assert_eq!(lang(&mixed, "c/a.h"), Some(Language::Cpp));
+        // Detected but no pack registered: no language, status unsupported.
+        let go = mixed.iter().find(|l| l.input.path == "go/main.go").unwrap();
+        assert_eq!((go.input.language, go.input.status.as_str()), (None, "skipped:unsupported"));
+        assert_eq!(lang(&mixed, "config.yaml"), None);
+        // A pack's own skip reason.
+        let skipped = mixed.iter().find(|l| l.input.path == "cpp/skip.cc").unwrap();
+        assert_eq!(skipped.input.status, "skipped:data-shape");
+        assert!(skipped.input.facts.is_none());
+        // The facts cache key carries the facts format: entries written by
+        // an older format are never read.
+        let sha = git_blob_sha(b"x\n");
+        let path_hash = &git_blob_sha(b"cpp/b.cc")[..16];
+        let key =
+            store.path().join("facts").join(&sha[..2]).join(format!("{sha}-cpp-v3-f{FACTS_FORMAT}-p{path_hash}.bin"));
+        assert!(key.exists(), "{}", key.display());
+        let old = store.path().join("facts").join(&sha[..2]).join(format!("{sha}-c-v3.bin"));
+        fs::write(&old, b"not postcard").unwrap();
+        let again = load_all(&dir.path().join("c"), &registry, store.path());
+        assert!(again.iter().filter(|l| l.input.facts.is_some()).all(|l| l.cache_hit));
     }
 
     #[test]
