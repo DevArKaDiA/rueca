@@ -1,0 +1,1 @@
+<footer><?= date('Y') ?></footer>

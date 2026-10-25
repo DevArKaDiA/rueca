@@ -342,7 +342,9 @@ pub struct Definition {
     /// Simple name, e.g. `issue`.
     pub name: String,
     /// Name qualified within the file's module, e.g. `InvoiceService.issue`.
-    /// Never includes the module path itself.
+    /// Never includes the module path itself. PHP has no file modules (its
+    /// module name is empty): the name carries the declared namespace,
+    /// `App\Models\User::save`.
     pub qualified_name: String,
     /// Innermost containing definition in the same file, if any.
     pub parent: Option<LocalDefId>,
@@ -487,6 +489,8 @@ pub struct Node {
     /// - ECMAScript symbols: `<module>:<local qualified name>` where the module
     ///   is the path without extension (`src/util/index:Class.method`); a colon
     ///   separates them because paths may contain dots.
+    /// - PHP symbols: the fully qualified PHP name, members after `::`
+    ///   (`App\Models\User::save`, `App\Models\User::$email`).
     /// - Files and folders: the repository-relative path. Repository: the repo id.
     pub qualified_name: String,
     pub file: Option<FileId>,

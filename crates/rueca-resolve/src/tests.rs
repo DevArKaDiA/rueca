@@ -88,10 +88,41 @@ impl LanguagePack for FakeEs {
     }
 }
 
+/// PHP-like pack: names arrive fully qualified (see `rueca-lang-php`),
+/// `App\` autoloads from `app/` (PSR-4).
+struct FakePhp;
+
+impl LanguagePack for FakePhp {
+    fn languages(&self) -> &'static [Language] {
+        &[Language::Php]
+    }
+    fn extractor_version(&self) -> u32 {
+        1
+    }
+    fn extract(&self, _: &str, l: Language, _: &[u8], _: &Budget) -> Result<FileFacts, ExtractError> {
+        Err(ExtractError::Unsupported(l))
+    }
+    fn module_name(&self, _: &str, _: &ProjectFiles) -> String {
+        String::new()
+    }
+    fn resolve_import(&self, _: &str, imp: &Import, project: &ProjectFiles) -> Option<String> {
+        let rest = imp.module.trim_start_matches('\\').strip_prefix("App\\")?;
+        let p = format!("app/{}.php", rest.replace('\\', "/"));
+        project.contains(&p).then_some(p)
+    }
+    fn is_builtin(&self, name: &str) -> bool {
+        matches!(name, "strlen" | "Exception" | "DateTime" | "count")
+    }
+    fn self_receivers(&self) -> &'static [&'static str] {
+        &["$this", "self", "static"]
+    }
+}
+
 fn registry() -> Registry {
     let mut r = Registry::new();
     r.register(Box::new(FakePy));
     r.register(Box::new(FakeEs));
+    r.register(Box::new(FakePhp));
     r
 }
 
@@ -931,4 +962,226 @@ fn ecmascript_export_of_imported_name() {
     g.has("src/main:main", "src/hono:Hono", EdgeKind::Calls, Strategy::ImportResolved, 0.95);
     g.has("src/main:main", "src/b:Other", EdgeKind::Calls, Strategy::ImportResolved, 0.95);
     assert_eq!(g.out_count("src/main:main", EdgeKind::Calls), 2);
+}
+
+// ---------------------------------------------------------------------------
+// PHP
+// ---------------------------------------------------------------------------
+
+/// A PHP definition with an explicit (fully qualified) qualified name.
+fn php_def(f: &mut F, label: Label, name: &str, qn: &str, parent: Option<u32>, a: u32, b: u32) -> u32 {
+    let id = f.def(label, name, parent, a, b);
+    f.d(id).qualified_name = qn.into();
+    f.d(id).exported = true;
+    id
+}
+
+fn php_project() -> Vec<FileInput> {
+    use Label::*;
+    let mut files = Vec::new();
+
+    // app/Models/Model.php: base class with a static `find`.
+    let mut f = F::es();
+    let model = php_def(&mut f, Class, "Model", "App\\Models\\Model", None, 0, 100);
+    php_def(&mut f, Method, "find", "App\\Models\\Model::find", Some(model), 10, 20);
+    php_def(&mut f, Method, "boot", "App\\Models\\Model::boot", Some(model), 20, 30);
+    php_def(&mut f, Method, "__construct", "App\\Models\\Model::__construct", Some(model), 30, 40);
+    files.push(f.file("app/Models/Model.php"));
+
+    // app/Models/Concerns/HasUuid.php: a trait.
+    let mut f = F::es();
+    let t = php_def(&mut f, Trait, "HasUuid", "App\\Models\\Concerns\\HasUuid", None, 0, 100);
+    php_def(&mut f, Method, "ensureUuid", "App\\Models\\Concerns\\HasUuid::ensureUuid", Some(t), 10, 20);
+    files.push(f.file("app/Models/Concerns/HasUuid.php"));
+
+    // app/Contracts/Labelled.php: an interface with a constant.
+    let mut f = F::es();
+    let i = php_def(&mut f, Interface, "Labelled", "App\\Contracts\\Labelled", None, 0, 100);
+    php_def(&mut f, Constant, "PREFIX", "App\\Contracts\\Labelled::PREFIX", Some(i), 10, 20);
+    php_def(&mut f, Method, "label", "App\\Contracts\\Labelled::label", Some(i), 20, 30);
+    files.push(f.file("app/Contracts/Labelled.php"));
+
+    // app/Models/User.php
+    let mut f = F::es();
+    let user = php_def(&mut f, Class, "User", "App\\Models\\User", None, 0, 500);
+    f.d(user).bases = vec!["\\App\\Models\\Model".into(), "\\App\\Models\\Concerns\\HasUuid".into()];
+    f.d(user).implements = vec!["\\App\\Contracts\\Labelled".into(), "\\Vendor\\Arrayable".into()];
+    f.d(user).decorators = vec!["Entity".into()];
+    f.r(RefKind::Decorator, "Entity", Some("\\App\\Attributes\\"), Some(user), 0);
+    php_def(&mut f, Field, "$email", "App\\Models\\User::$email", Some(user), 10, 20);
+    let save = php_def(&mut f, Method, "save", "App\\Models\\User::save", Some(user), 20, 100);
+    php_def(&mut f, Method, "email", "App\\Models\\User::email", Some(user), 100, 120);
+    let boot = php_def(&mut f, Method, "boot", "App\\Models\\User::boot", Some(user), 120, 200);
+    f.call("ensureUuid", Some("$this"), Some(save), 30);
+    f.r(RefKind::Read, "$email", Some("$this"), Some(save), 40);
+    f.r(RefKind::Write, "$email", Some("$this"), Some(save), 45);
+    f.call("email", Some("$this"), Some(save), 50);
+    f.r(RefKind::Read, "PREFIX", Some("self"), Some(save), 55);
+    f.call("boot", Some("parent"), Some(boot), 130);
+    f.call("find", Some("static"), Some(boot), 140);
+    files.push(f.file("app/Models/User.php"));
+
+    // app/Support/helpers.php: namespaced and global functions, a constant.
+    let mut f = F::es();
+    php_def(&mut f, Function, "format", "App\\Support\\format", None, 0, 10);
+    php_def(&mut f, Function, "helper", "helper", None, 10, 20);
+    php_def(&mut f, Constant, "VERSION", "App\\Support\\VERSION", None, 20, 30);
+    php_def(&mut f, Function, "unique_global", "unique_global", None, 30, 40);
+    files.push(f.file("app/Support/helpers.php"));
+
+    // app/Attributes/Entity.php: an attribute class.
+    let mut f = F::es();
+    php_def(&mut f, Class, "Entity", "App\\Attributes\\Entity", None, 0, 10);
+    files.push(f.file("app/Attributes/Entity.php"));
+
+    // app/Legacy/Old.php declares `Old` in the global namespace; PSR-4
+    // still maps `App\Legacy\Old` to this file.
+    let mut f = F::es();
+    php_def(&mut f, Class, "Old", "Old", None, 0, 10);
+    files.push(f.file("app/Legacy/Old.php"));
+
+    // app/Repo.php: a method only reachable by name.
+    let mut f = F::es();
+    let repo = php_def(&mut f, Class, "Repo", "App\\Repo", None, 0, 100);
+    php_def(&mut f, Method, "persist", "App\\Repo::persist", Some(repo), 10, 20);
+    files.push(f.file("app/Repo.php"));
+
+    // app/Http/Controller.php
+    let mut f = F::es();
+    f.imp("App\\Models\\User", 0, &[], Some("User"));
+    f.imp("Vendor\\Lib\\Thing", 0, &[], Some("Thing"));
+    let c = php_def(&mut f, Class, "Controller", "App\\Http\\Controller", None, 0, 1000);
+    let show = php_def(&mut f, Method, "show", "App\\Http\\Controller::show", Some(c), 10, 900);
+    f.r(RefKind::New, "User", Some("\\App\\Models\\"), Some(show), 20);
+    f.call("find", Some("\\App\\Models\\User"), Some(show), 30);
+    f.call("save", Some("\\App\\Models\\User->"), Some(show), 40);
+    f.call("ensureUuid", Some("\\app\\models\\user->"), Some(show), 45);
+    f.r(RefKind::Read, "PREFIX", Some("\\App\\Models\\User"), Some(show), 50);
+    f.call("format", Some("\\App\\Support\\"), Some(show), 60);
+    f.call("helper", Some("App\\Http\\"), Some(show), 70);
+    f.r(RefKind::Read, "VERSION", Some("\\App\\Support\\"), Some(show), 80);
+    f.call("strlen", Some("App\\Http\\"), Some(show), 90);
+    f.r(RefKind::New, "Exception", Some("\\"), Some(show), 100);
+    f.r(RefKind::Type, "Thing", Some("\\Vendor\\Lib\\"), Some(show), 110);
+    f.call("make", Some("\\Vendor\\Lib\\Thing"), Some(show), 120);
+    f.r(RefKind::Type, "Missing", Some("\\App\\Models\\"), Some(show), 130);
+    f.r(RefKind::Type, "Old", Some("\\App\\Legacy\\"), Some(show), 140);
+    f.call("persist", Some("$repo"), Some(show), 150);
+    f.call("where", Some("\\App\\Models\\User"), Some(show), 160);
+    f.r(RefKind::Throw, "User", Some("\\App\\Models\\"), Some(show), 170);
+    f.r(RefKind::Read, "User", Some("\\App\\Models\\"), Some(show), 180);
+    f.call("unique_global", None, Some(show), 190);
+    f.call("label", Some("\\App\\Repo"), Some(show), 200);
+    files.push(f.file("app/Http/Controller.php"));
+    files
+}
+
+#[test]
+fn php_fully_qualified_names_members_and_traits() {
+    let out = run(php_project());
+    let g = G(&out.graph);
+    let show = "App\\Http\\Controller::show";
+    // PHP qualified names are global as-is (module name is empty).
+    assert!(g.0.nodes.iter().any(|n| n.qualified_name == "App\\Models\\User::save"));
+    // Bases: parent class and trait are INHERITS, interfaces IMPLEMENTS.
+    g.has("App\\Models\\User", "App\\Models\\Model", EdgeKind::Inherits, Strategy::ImportResolved, 0.95);
+    g.has("App\\Models\\User", "App\\Models\\Concerns\\HasUuid", EdgeKind::Inherits, Strategy::ImportResolved, 0.95);
+    g.has("App\\Models\\User", "App\\Contracts\\Labelled", EdgeKind::Implements, Strategy::ImportResolved, 0.95);
+    // Class by name; `new` also calls the (inherited) constructor.
+    g.has(show, "App\\Models\\User", EdgeKind::Calls, Strategy::ImportResolved, 0.95);
+    g.has(show, "App\\Models\\Model::__construct", EdgeKind::Calls, Strategy::ImportResolved, 0.95 * 0.95);
+    // Static member through the parent class; typed instance member.
+    g.has(show, "App\\Models\\Model::find", EdgeKind::Calls, Strategy::ImportResolved, 0.85);
+    g.has(show, "App\\Models\\User::save", EdgeKind::Calls, Strategy::TypeResolved, 0.85);
+    // Case-insensitive class names; trait members are members.
+    g.has(show, "App\\Models\\Concerns\\HasUuid::ensureUuid", EdgeKind::Calls, Strategy::TypeResolved, 0.85);
+    // Interface constants are members of implementing classes.
+    g.has(show, "App\\Contracts\\Labelled::PREFIX", EdgeKind::References, Strategy::ImportResolved, 0.85);
+    // Namespaced function, global fallback, namespaced constant.
+    g.has(show, "App\\Support\\format", EdgeKind::Calls, Strategy::ImportResolved, 0.95);
+    g.has(show, "helper", EdgeKind::Calls, Strategy::ImportResolved, 0.9);
+    g.has(show, "App\\Support\\VERSION", EdgeKind::References, Strategy::ImportResolved, 0.95);
+    // PSR-4 file fallback when the declared namespace differs.
+    g.has(show, "Old", EdgeKind::References, Strategy::ImportResolved, 0.8);
+    // Unknown receiver: unique method name.
+    g.has(show, "App\\Repo::persist", EdgeKind::Calls, Strategy::Heuristic, 0.5);
+    // `throw new`, `X::class`.
+    g.has(show, "App\\Models\\User", EdgeKind::Throws, Strategy::ImportResolved, 0.95);
+    g.has(show, "App\\Models\\User", EdgeKind::References, Strategy::ImportResolved, 0.95);
+    // Attributes decorate.
+    g.has("App\\Attributes\\Entity", "App\\Models\\User", EdgeKind::Decorates, Strategy::ImportResolved, 0.95);
+    // A receiver-less call (not produced by the PHP pack) falls back to the
+    // generic ladder: a unique function name.
+    g.has(show, "unique_global", EdgeKind::Calls, Strategy::UniqueName, 0.6);
+}
+
+#[test]
+fn php_self_parent_static_and_fields() {
+    let out = run(php_project());
+    let g = G(&out.graph);
+    let save = "App\\Models\\User::save";
+    g.has(save, "App\\Models\\Concerns\\HasUuid::ensureUuid", EdgeKind::Calls, Strategy::TypeResolved, 0.85);
+    // `$email` (property) and `email()` (method) are distinct members.
+    g.has(save, "App\\Models\\User::$email", EdgeKind::References, Strategy::TypeResolved, 0.9);
+    g.has(save, "App\\Models\\User::$email", EdgeKind::Writes, Strategy::TypeResolved, 0.9);
+    g.has(save, "App\\Models\\User::email", EdgeKind::Calls, Strategy::TypeResolved, 0.9);
+    g.has(save, "App\\Contracts\\Labelled::PREFIX", EdgeKind::References, Strategy::TypeResolved, 0.85);
+    // `parent::boot()` skips the class's own `boot`.
+    g.has("App\\Models\\User::boot", "App\\Models\\Model::boot", EdgeKind::Calls, Strategy::TypeResolved, 0.85);
+    g.lacks("App\\Models\\User::boot", "App\\Models\\User::boot", EdgeKind::Calls);
+    g.has("App\\Models\\User::boot", "App\\Models\\Model::find", EdgeKind::Calls, Strategy::TypeResolved, 0.85);
+}
+
+#[test]
+fn php_misses_externals_and_builtins() {
+    let out = run(php_project());
+    let g = G(&out.graph);
+    let show = "App\\Http\\Controller::show";
+    // `strlen` (namespace fallback) and `\Exception` are builtins;
+    // `\Vendor\…` is third-party (twice); `User::where` is external because
+    // `User` implements a vendor interface (open class); `App\Models\Missing`
+    // is a miss.
+    let s = &out.stats;
+    assert_eq!(s.references_builtin, 2, "{s:?}");
+    assert_eq!(s.references_external, 3, "{s:?}");
+    // A missing member of a closed project class (magic `__callStatic`)
+    // falls back to the unique method name.
+    g.has(show, "App\\Contracts\\Labelled::label", EdgeKind::Calls, Strategy::Heuristic, 0.5);
+    let calls_from_show = g.out_count(show, EdgeKind::Calls);
+    // User, Model::__construct, Model::find, User::save, HasUuid::ensureUuid,
+    // format, helper, Repo::persist, unique_global, Labelled::label.
+    assert_eq!(calls_from_show, 10, "{:#?}", out.graph.edges);
+    // Nothing is fuzzy-matched across families either.
+    assert!(out.graph.edges.iter().all(|e| {
+        let (s, d) = (&out.graph.nodes[e.src as usize], &out.graph.nodes[e.dst as usize]);
+        s.language.is_none() || d.language.is_none() || s.language.map(|l| l.family()) == d.language.map(|l| l.family())
+    }));
+}
+
+#[test]
+fn php_imports_and_mixed_languages() {
+    let mut files = php_project();
+    // A Python file with a `helper` must not capture PHP calls, and vice versa.
+    let mut f = F::py();
+    let h = f.def(Label::Function, "helper", None, 0, 10);
+    f.call("persist", Some("obj"), Some(h), 5);
+    files.push(f.file("tools/helper.py"));
+    let out = run(files);
+    let g = G(&out.graph);
+    // `use App\Models\User` → IMPORTS through the pack's resolve_import.
+    let ctrl = g.0.files.iter().find(|f| f.path == "app/Http/Controller.php").unwrap().node;
+    let user = g.0.files.iter().find(|f| f.path == "app/Models/User.php").unwrap().node;
+    assert!(g.0.edges.iter().any(|e| e.src == ctrl && e.dst == user && e.kind == EdgeKind::Imports));
+    assert_eq!(g.0.edges.iter().filter(|e| e.src == ctrl && e.kind == EdgeKind::Imports).count(), 1);
+    g.has("App\\Http\\Controller::show", "helper", EdgeKind::Calls, Strategy::ImportResolved, 0.9);
+    g.lacks("helper", "App\\Repo::persist", EdgeKind::Calls);
+}
+
+#[test]
+fn php_deterministic_across_input_order() {
+    let a = run(php_project());
+    let mut files = php_project();
+    files.reverse();
+    let b = run(files);
+    assert_eq!(serde_json::to_string(&a.graph).unwrap(), serde_json::to_string(&b.graph).unwrap());
 }

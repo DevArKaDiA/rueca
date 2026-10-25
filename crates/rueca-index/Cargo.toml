@@ -17,6 +17,7 @@ rueca-segment.workspace = true
 rueca-lang-python.workspace = true
 rueca-lang-typescript.workspace = true
 rueca-lang-markdown.workspace = true
+rueca-lang-php.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 tracing.workspace = true

@@ -11,9 +11,10 @@ unless marked optional.
   repository id (`local/<dir>`, `github.com/o/r`). Default: the server's
   `--root`, else the only indexed root, else an error listing indexed roots.
 - **Symbol IDs**: `<repo>@<commit>:<path>#<local-qualified-name>`
-  (`rueca_model::symbol_id`). Tools accept an `id`, a global
-  `qualified_name`, or a suffix of it (`Session.request`), in that order of
-  precedence.
+  (`rueca_model::symbol_id`). For PHP the local qualified name is the fully
+  qualified name (`app/Models/User.php#App\Models\User::save`). Tools
+  accept an `id`, a global `qualified_name`, or a suffix of it
+  (`Session.request`, `User::save`), in that order of precedence.
 - **Qualified names**: Python `pkg.mod.Class.method`; ECMAScript
   `src/util/index:Class.method` (module path, colon, local name); PHP
   `App\Models\User::save` (namespace, backslash, local name); Markdown

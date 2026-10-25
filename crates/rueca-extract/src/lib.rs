@@ -65,7 +65,8 @@ pub struct ProjectFiles {
     pub paths: BTreeSet<String>,
     /// Contents of small configuration files that affect module resolution,
     /// keyed by repository-relative path: `tsconfig*.json`, `jsconfig.json`,
-    /// `package.json`, `pyproject.toml`, `setup.cfg`, `setup.py`.
+    /// `package.json`, `pyproject.toml`, `setup.cfg`, `setup.py`,
+    /// `composer.json`.
     pub configs: BTreeMap<String, String>,
 }
 
@@ -82,6 +83,7 @@ impl ProjectFiles {
             || name == "pyproject.toml"
             || name == "setup.cfg"
             || name == "setup.py"
+            || name == "composer.json"
             || (name.starts_with("tsconfig") && name.ends_with(".json"))
     }
 }
@@ -111,7 +113,9 @@ pub trait LanguagePack: Send + Sync {
     /// The module name other files use to refer to `path`.
     /// Python: dotted path relative to its source root (`pkg.sub.mod`,
     /// `pkg` for `pkg/__init__.py`). ECMAScript: the path without extension
-    /// (`src/util/index`).
+    /// (`src/util/index`). An empty module name means the local qualified
+    /// names are already global (PHP: definitions carry their namespace,
+    /// `App\Models\User::save`).
     fn module_name(&self, path: &str, project: &ProjectFiles) -> String;
 
     /// Resolves an import written in `from_path` to the repository-relative
@@ -278,6 +282,7 @@ mod tests {
     fn config_detection() {
         assert!(ProjectFiles::is_config_file("web/tsconfig.base.json"));
         assert!(ProjectFiles::is_config_file("pyproject.toml"));
+        assert!(ProjectFiles::is_config_file("packages/core/composer.json"));
         assert!(!ProjectFiles::is_config_file("src/config.json"));
     }
 }

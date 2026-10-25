@@ -27,15 +27,17 @@
 //!
 //! # Symbol lookup
 //!
-//! `id` → `qualified_name` (exact, then suffix on a `.`, `:` or `/` boundary, so
-//! `util:formatAmount` finds `src/util:formatAmount`) →
+//! `id` → `qualified_name` (exact, then suffix on a `.`, `:`, `/` or `\`
+//! boundary, so `util:formatAmount` finds `src/util:formatAmount` and
+//! `User::save` finds `App\Models\User::save`) →
 //! `name` (narrowed by `path`, a file, directory or path suffix). The commit
 //! in an `id` is not checked, so ids survive a re-index of the same
 //! repository. Among several matches the pick is deterministic: non-test,
 //! exported, symbols before containers (files, folders), shorter qualified
 //! name, lower node id; up to 20 others are returned as `candidates`.
 //! Symbol ids use the module-local name computed by walking `DEFINES` parents
-//! up to the `File` node.
+//! up to the `File` node; PHP names are already file-independent, so a PHP
+//! id carries the fully qualified name (`…/User.php#App\Models\User::save`).
 //!
 //! # Interpretations of `docs/tools.md`
 //!
