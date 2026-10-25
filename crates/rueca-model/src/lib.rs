@@ -20,7 +20,8 @@ use std::fmt;
 // ---------------------------------------------------------------------------
 
 /// Languages with an extractor. `JavaScript` covers `.js/.jsx/.mjs/.cjs`;
-/// `Tsx` is TypeScript with JSX.
+/// `Tsx` is TypeScript with JSX. New variants are appended (segments store
+/// the variant index).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -28,6 +29,8 @@ pub enum Language {
     JavaScript,
     TypeScript,
     Tsx,
+    Php,
+    Markdown,
 }
 
 impl Language {
@@ -37,6 +40,8 @@ impl Language {
             Language::JavaScript => "javascript",
             Language::TypeScript => "typescript",
             Language::Tsx => "tsx",
+            Language::Php => "php",
+            Language::Markdown => "markdown",
         }
     }
 
@@ -48,6 +53,8 @@ impl Language {
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "ts" | "mts" | "cts" => Some(Language::TypeScript),
             "tsx" => Some(Language::Tsx),
+            "php" => Some(Language::Php),
+            "md" | "markdown" => Some(Language::Markdown),
             _ => None,
         }
     }
@@ -57,6 +64,8 @@ impl Language {
         match self {
             Language::Python => LanguageFamily::Python,
             Language::JavaScript | Language::TypeScript | Language::Tsx => LanguageFamily::EcmaScript,
+            Language::Php => LanguageFamily::Php,
+            Language::Markdown => LanguageFamily::Markdown,
         }
     }
 }
@@ -72,6 +81,22 @@ impl fmt::Display for Language {
 pub enum LanguageFamily {
     Python,
     EcmaScript,
+    Php,
+    Markdown,
+}
+
+impl LanguageFamily {
+    /// Separator between a module name and a definition's local qualified
+    /// name in global qualified names: Python `pkg.mod.Class.method`,
+    /// ECMAScript `src/util/index:formatAmount`, PHP `App\Models\User::save`
+    /// (module = namespace), Markdown `docs/guide.md:Install > Linux`.
+    pub fn module_separator(self) -> &'static str {
+        match self {
+            LanguageFamily::Python => ".",
+            LanguageFamily::EcmaScript | LanguageFamily::Markdown => ":",
+            LanguageFamily::Php => "\\",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +153,8 @@ pub enum Label {
     Topic,
     EnvVar,
     Test,
+    /// A heading section of a document (Markdown); nested by `DEFINES`.
+    Section,
 }
 
 impl Label {
@@ -153,6 +180,7 @@ impl Label {
         Label::Topic,
         Label::EnvVar,
         Label::Test,
+        Label::Section,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -178,6 +206,7 @@ impl Label {
             Label::Topic => "Topic",
             Label::EnvVar => "EnvVar",
             Label::Test => "Test",
+            Label::Section => "Section",
         }
     }
 

@@ -18,6 +18,8 @@ pub enum LanguageArg {
     Typescript,
     Tsx,
     Javascript,
+    Php,
+    Markdown,
 }
 
 impl LanguageArg {
@@ -27,6 +29,8 @@ impl LanguageArg {
             LanguageArg::Typescript => rueca_model::Language::TypeScript,
             LanguageArg::Tsx => rueca_model::Language::Tsx,
             LanguageArg::Javascript => rueca_model::Language::JavaScript,
+            LanguageArg::Php => rueca_model::Language::Php,
+            LanguageArg::Markdown => rueca_model::Language::Markdown,
         }
     }
 }

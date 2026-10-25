@@ -50,7 +50,7 @@ pub(crate) fn grammar(language: Language) -> Option<tree_sitter::Language> {
         Language::JavaScript => Some(tree_sitter_javascript::LANGUAGE.into()),
         Language::TypeScript => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
         Language::Tsx => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
-        Language::Python => None,
+        _ => None,
     }
 }
 
@@ -105,7 +105,7 @@ pub(crate) fn locals_query(language: Language) -> Result<&'static LocalsQuery, E
         Language::JavaScript => &JS,
         Language::TypeScript => &TS,
         Language::Tsx => &TSX,
-        Language::Python => return Err(ExtractError::Unsupported(language)),
+        _ => return Err(ExtractError::Unsupported(language)),
     };
     cell.get_or_init(|| LocalsQuery::compile(language)).as_ref().map_err(|e| ExtractError::Query(e.clone()))
 }

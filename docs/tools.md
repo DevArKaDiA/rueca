@@ -15,7 +15,9 @@ unless marked optional.
   `qualified_name`, or a suffix of it (`Session.request`), in that order of
   precedence.
 - **Qualified names**: Python `pkg.mod.Class.method`; ECMAScript
-  `src/util/index:Class.method` (module path, colon, local name).
+  `src/util/index:Class.method` (module path, colon, local name); PHP
+  `App\Models\User::save` (namespace, backslash, local name); Markdown
+  `docs/guide.md:Install > Linux` (path, colon, heading chain).
 - **Brief symbol** (used inside results):
   `{ "id", "name", "qualified_name", "label", "path", "start_line", "end_line" }`
 - **Truncation**: list results include `"truncated": bool`; paginated ones
@@ -35,7 +37,7 @@ paths, with camelCase / snake_case / path splitting.
 | `query` | string, required | — |
 | `labels` | array of label names (`Function`, `Method`, `Class`, …) | all symbol labels |
 | `path_glob` | string | — |
-| `language` | `python` / `typescript` / `tsx` / `javascript` | — |
+| `language` | `python` / `typescript` / `tsx` / `javascript` / `php` / `markdown` | — |
 | `limit` | int, 1–200 | 20 |
 | `offset` | int | 0 |
 
