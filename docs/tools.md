@@ -33,9 +33,12 @@ unless marked optional.
   the key path alone (`name`, id `config/app.php#name`); canonical env vars
   `$env:DATABASE_URL`; Go `github.com/gin-gonic/gin.Engine.ServeHTTP`
   (package import path, dot, local name; methods are `Type.Method`, the
-  symbol id is `gin.go#Engine.ServeHTTP`). Planned for the remaining
-  RFC 0003 code packs (the model and the tools already accept them): Java `com.example.Owner.getPets` (package, dot, local name;
-  overloads `Parser.parse(String)`), C/C++ `fmt::v11::format_to`
+  symbol id is `gin.go#Engine.ServeHTTP`); Java
+  `com.example.Owner.getPets` (package, dot, local name; nested types
+  `Owner.Pet.getName`; constructors named like their class, `Owner.Owner`;
+  overloads carry their parameter types, `Parser.parse(String)`,
+  `Parser.parse(String,int)`). Planned for the remaining RFC 0003 code pack
+  (the model and the tools already accept it): C/C++ `fmt::v11::format_to`
   (namespace and class path, no module).
 - **Brief symbol** (used inside results):
   `{ "id", "name", "qualified_name", "label", "path", "start_line", "end_line" }`
@@ -69,11 +72,11 @@ other definitions with the same text score. Ranking details:
 Result: `{ "results": [ brief + "signature" (opt) + "score" ], "truncated", "next_offset" }`
 
 **Language names** (`search_symbols`, `search_code`): `python`,
-`typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`, the data languages
+`typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`, `java`, the data languages
 `json` (JSONC included), `yaml`, `toml`, `dotenv`, `ini`, `properties`,
 `xml` (`pom.xml`, `*.csproj`, `AndroidManifest.xml` only), `hcl`
 (Terraform / OpenTofu included) and `dockerfile`; and, for the code packs
-RFC 0003 adds, `cpp`, `c`, `java`. A language whose pack is not in
+RFC 0003 adds, `cpp`, `c`. A language whose pack is not in
 this build is accepted and matches nothing (its files are
 content-searchable without a language filter).
 
