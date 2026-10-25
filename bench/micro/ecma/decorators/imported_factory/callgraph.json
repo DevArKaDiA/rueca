@@ -1,0 +1,8 @@
+{
+  "controller.ts:Controller.health": [],
+  "controller.ts:Controller.list": ["controller.ts:render"],
+  "controller.ts:render": [],
+  "routes.ts:remember": [],
+  "routes.ts:route": ["routes.ts:remember", "routes.ts:validate"],
+  "routes.ts:validate": []
+}

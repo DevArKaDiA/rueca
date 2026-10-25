@@ -1,0 +1,6 @@
+{
+  "app.ts:warm": ["loader.ts:cache", "loader.ts:load"],
+  "loader.ts:cache": [],
+  "loader.ts:fetchRemote": [],
+  "loader.ts:load": ["loader.ts:cache", "loader.ts:fetchRemote"]
+}

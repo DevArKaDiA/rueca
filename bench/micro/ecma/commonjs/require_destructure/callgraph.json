@@ -1,0 +1,6 @@
+{
+  "app.cjs:login": ["lib.cjs:verify"],
+  "app.cjs:register": ["lib.cjs:hash"],
+  "lib.cjs:hash": [],
+  "lib.cjs:verify": ["lib.cjs:hash"]
+}

@@ -1,0 +1,6 @@
+{
+  "format.ts:pad": [],
+  "format.ts:render": [],
+  "view.ts:render": ["format.ts:pad", "format.ts:render"],
+  "view.ts:show": ["view.ts:render"]
+}

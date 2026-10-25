@@ -1,0 +1,6 @@
+{
+  "base.ts:Resource.constructor": ["base.ts:track"],
+  "base.ts:track": [],
+  "file.ts:FileResource.size": [],
+  "file.ts:openTemp": ["base.ts:Resource.constructor", "file.ts:FileResource.size"]
+}

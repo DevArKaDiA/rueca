@@ -1,0 +1,10 @@
+{
+  "main.py:parse": [],
+  "main.py:report": [],
+  "main.py:run": [
+    "main.py:parse",
+    "main.py:report",
+    "main.py:validate"
+  ],
+  "main.py:validate": []
+}

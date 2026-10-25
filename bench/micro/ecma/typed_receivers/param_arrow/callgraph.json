@@ -1,0 +1,5 @@
+{
+  "mailer.ts:Mailer.send": [],
+  "notify.ts:notify": ["mailer.ts:Mailer.send"],
+  "notify.ts:notifyAll": ["notify.ts:notify"]
+}

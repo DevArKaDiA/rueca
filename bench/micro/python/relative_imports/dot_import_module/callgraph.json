@@ -1,0 +1,9 @@
+{
+  "app/repo.py:save": [],
+  "app/service.py:register": [
+    "app/repo.py:save"
+  ],
+  "app/service.py:register_twice": [
+    "app/repo.py:save"
+  ]
+}

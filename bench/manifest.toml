@@ -5,12 +5,183 @@
 # are fetched at runtime into bench/.cache and never committed.
 
 [bench]
-schema = 2
+schema = 3
 alpha_languages = ["python", "typescript", "javascript"]
-# Families pooled in the report's `overall` column (the alpha headline).
-# Languages added later are reported in their own columns and parity rows,
-# so the published overall numbers stay comparable across releases.
+# Families pooled in the report's `overall` column of the detailed tables
+# (the alpha headline). The scorecard is per language.
 overall = ["python", "ecma", "php"]
+
+# ---------------------------------------------------------------- scorecard
+# RFC 0004 §6 (floors and targets), §7.2 (minimum populations), §7.6
+# (intervals). Values are fractions (latency in milliseconds). Every metric
+# has a `floor` (the `stable` bar; `bm25` = the paired bootstrap of
+# Rueca − BM25 must not lie entirely below zero, §6.1; absent = reported
+# only) and a `target` (`cbm_ratio` = at most that fraction of cbm's value).
+# `better = "lower"` for rates and costs. `gated = false` rows are shown in
+# the scorecard but never decide a status (confidence-filtered rows, §5).
+# The report renders one scorecard per language from this table; nothing
+# about floors lives in code.
+[scorecard]
+min_structural_questions = 300  # per direction and language (§7.2)
+min_localization_instances = 30  # per language (§7.2; ≥ 40 where datasets allow)
+bootstrap_resamples = 10000
+bootstrap_seed = 20261025
+min_confidence = 0.6  # second structural row: edges at confidence >= 0.6 (§5)
+localization_variant = "kw"  # S1 query variant the scorecard uses (keywords from the issue)
+
+[[scorecard.metrics]]
+key = "file_acc@5"
+family = "Localization"
+label = "File Acc@5"
+floor = "bm25"
+target = 0.80
+
+[[scorecard.metrics]]
+key = "func_acc@10"
+family = "Localization"
+label = "Function Acc@10"
+floor = "bm25"
+target = 0.65
+
+[[scorecard.metrics]]
+key = "callers_precision"
+family = "Structure"
+label = "Callers precision"
+floor = 0.90
+target = 0.97
+
+[[scorecard.metrics]]
+key = "callees_precision"
+family = "Structure"
+label = "Callees precision"
+floor = 0.90
+target = 0.97
+
+[[scorecard.metrics]]
+key = "callers_recall"
+family = "Structure"
+label = "Callers recall"
+floor = 0.75
+target = 0.90
+
+[[scorecard.metrics]]
+key = "callees_recall"
+family = "Structure"
+label = "Callees recall"
+floor = 0.75
+target = 0.90
+
+[[scorecard.metrics]]
+key = "callers_precision@conf"
+family = "Structure"
+label = "Callers precision, confidence ≥ 0.6"
+floor = 0.90
+target = 0.97
+gated = false
+
+[[scorecard.metrics]]
+key = "callees_precision@conf"
+family = "Structure"
+label = "Callees precision, confidence ≥ 0.6"
+floor = 0.90
+target = 0.97
+gated = false
+
+[[scorecard.metrics]]
+key = "callers_recall@conf"
+family = "Structure"
+label = "Callers recall, confidence ≥ 0.6"
+floor = 0.75
+target = 0.90
+gated = false
+
+[[scorecard.metrics]]
+key = "callees_recall@conf"
+family = "Structure"
+label = "Callees recall, confidence ≥ 0.6"
+floor = 0.75
+target = 0.90
+gated = false
+
+[[scorecard.metrics]]
+key = "definition_found"
+family = "Structure"
+label = "Definition found"
+floor = 0.95
+target = 1.0
+
+[[scorecard.metrics]]
+key = "micro_callee_f1"
+family = "Micro"
+label = "Micro-benchmark callee F1"
+floor = 0.90
+target = 0.98
+
+[[scorecard.metrics]]
+key = "parse_error_rate"
+family = "Health"
+label = "Files with parse errors"
+floor = 0.02
+target = 0.005
+better = "lower"
+
+[[scorecard.metrics]]
+key = "latency_p95_ms"
+family = "Health"
+label = "Query latency p95 (ms)"
+floor = 100
+target = 20
+better = "lower"
+unit = "ms"
+
+[[scorecard.metrics]]
+key = "tokens_per_answer"
+family = "Efficiency"
+label = "Tokens per answer (trace, median)"
+target = { cbm_ratio = 0.5 }
+better = "lower"
+unit = "tokens"
+
+[[scorecard.metrics]]
+key = "tokens_per_search"
+family = "Efficiency"
+label = "Tokens per answer (search, median)"
+target = { cbm_ratio = 0.5 }
+better = "lower"
+unit = "tokens"
+
+# Configuration (RFC 0003 §3.3): one scorecard for the data formats.
+[[scorecard.config_metrics]]
+key = "key_recall"
+label = "Key recall"
+floor = 0.95
+target = 1.0
+
+[[scorecard.config_metrics]]
+key = "span_accuracy"
+label = "Span line accuracy"
+floor = 0.95
+target = 1.0
+
+[[scorecard.config_metrics]]
+key = "bridge_precision"
+label = "Env bridge precision"
+floor = 0.95
+target = 0.99
+
+[[scorecard.config_metrics]]
+key = "bridge_recall"
+label = "Env bridge recall"
+floor = 0.75
+target = 0.90
+
+# ---------------------------------------------------------------- calibration
+# RFC 0004 §7.7: ranking weights and heuristics are tuned only on the
+# calibration split — instances and repositories disjoint from the gated
+# ones — and the gated set is only evaluated. Entries with
+# `split = "calibration"` (`[[s1.repos]]`, `[[s3.repos]]`) are scored in a
+# separate section of the report and never enter the scorecard; entries
+# with `split = "diagnostic"` are reported and never gated (express, PyCG).
 
 # Clone mode (corpus.py): `shallow` = true makes every new clone an empty
 # promisor repository that fetches each pinned commit with
@@ -26,26 +197,23 @@ shallow = true
 # file name) are pooled into one test-path heuristic used for gold and arms.
 
 [languages.python]
-status = "supported"  # RFC 0003 §3.1 release-gate status
 label = "python"
 members = ["python"]
 extensions = [".py", ".pyi"]
 test_files = ['^test_.*\.py$', '.*_test\.py$', '^conftest\.py$']
 s1_sources = "SWE-bench Verified + Lite (LocAgent function labels, ContextBench context gold)"
-s3_gold = "scip-python 0.6.8 (requests, flask) and the PyCG micro-benchmark"
+s3_gold = "scip-python 0.6.8 (requests, flask, jinja; click = calibration) and the rueca-bench Python micro-benchmark (PyCG = diagnostic)"
 
 [languages.ecma]
-status = "supported"  # RFC 0003 §3.1 release-gate status
 label = "ts/js"
 members = ["typescript", "javascript"]
 extensions = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]
 exclude_suffixes = [".d.ts"]
 test_files = ['.*\.(test|spec)\.[cm]?[jt]sx?$', '.*-test\.[cm]?[jt]s$']
 s1_sources = "SWE-PolyBench (modified_nodes function labels) + SWE-bench Multilingual"
-s3_gold = "scip-typescript 0.5.2 (hono, express)"
+s3_gold = "scip-typescript 0.5.2 (hono, zod; express = diagnostic) and the rueca-bench TS/JS micro-benchmark"
 
 [languages.php]
-status = "supported"  # RFC 0003 §3.1 release-gate status
 label = "php"
 members = ["php"]
 extensions = [".php"]
@@ -55,43 +223,39 @@ s3_gold = "PHPStan 2.3.2 + rueca-bench collector (monolog 3.9.0, commonmark 2.8.
 notes = "PHPStan gold follows declared and phpdoc types without vendor code; interface-typed receivers resolve to the interface method (no expansion to implementations)."
 
 [languages.go]
-status = "text"  # RFC 0003 §3.1 release-gate status
 label = "go"
 members = ["go"]
 extensions = [".go"]
 test_files = ['.*_test\.go$']
 test_dirs = ["testdata"]
 s1_sources = "SWE-bench Multilingual (all 42 Go instances: caddy, gin, prometheus, hugo, terraform); function gold from the tree-sitter labeler"
-s3_gold = "scip-go 0.2.9 (gin v1.11.0, urfave/cli v3.9.1) and the rueca-bench Go micro-benchmark"
+s3_gold = "scip-go 0.2.9 (gin v1.11.0, urfave/cli v3.9.1; goawk = calibration) and the rueca-bench Go micro-benchmark"
 notes = "Go methods are named `Type.method` (receiver type, pointer stripped). scip-go resolves interface calls to the interface method only."
 
 [languages.java]
-status = "text"  # RFC 0003 §3.1 release-gate status
 label = "java"
 members = ["java"]
 extensions = [".java"]
 test_files = ['.*Tests?\.java$', '.*TestCase\.java$', '^Test[A-Z].*\.java$']
 s1_sources = "SWE-PolyBench Java (modified_nodes function labels; gson, dubbo, rocketmq, apollo) + SWE-bench Multilingual (gson, lombok)"
-s3_gold = "the rueca-bench Java micro-benchmark (scip-java needs a JDK and a full Maven/Gradle build; see bench/README.md)"
-notes = "No repository-level Java gold yet: the micro-benchmark is the only S3 set."
+s3_gold = "scip-java 0.13.2 via javac in Docker (gson 2.15.0, javapoet 1.13.0) and the rueca-bench Java micro-benchmark"
+notes = "scip-java resolves interface calls to the interface method only (no expansion to implementations)."
 
 [languages.c]
-status = "text"  # RFC 0003 §3.1 release-gate status
 label = "c"
 members = ["c"]
 extensions = [".c", ".h"]
 test_files = ['^test_.*\.c$', '.*_test\.c$']
 s1_sources = "SWE-bench Multilingual (all 30 C instances: redis, jq, micropython, valkey); function gold from the tree-sitter labeler"
-s3_gold = "scip-clang 0.4.1 (cJSON v1.7.19, bench-synthesized compile_commands.json) and the rueca-bench C/C++ micro-benchmark (C snippets)"
+s3_gold = "scip-clang 0.4.1 (cJSON v1.7.19, Lua 5.4.7; bench-synthesized compile_commands.json) and the rueca-bench C micro-benchmark"
 
 [languages.cpp]
-status = "text"  # RFC 0003 §3.1 release-gate status
 label = "cpp"
 members = ["cpp"]
 extensions = [".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx", ".h"]
 test_files = ['.*[_-]test\.(cc|cpp|cxx)$', '^test[_-].*\.(cc|cpp|cxx)$']
 s1_sources = "SWE-bench Multilingual (all 12 C++ instances: fmt, nlohmann/json) + Multi-SWE-bench C++ (fmt, nlohmann/json, Catch2, simdjson); function gold from the tree-sitter labeler"
-s3_gold = "scip-clang 0.4.1 (fmt 12.1.0, bench-synthesized compile_commands.json) and the rueca-bench C/C++ micro-benchmark (C++ snippets)"
+s3_gold = "scip-clang 0.4.1 (fmt 12.1.0, yaml-cpp 0.8.0; bench-synthesized compile_commands.json) and the rueca-bench C++ micro-benchmark"
 notes = "`.h` headers belong to the instance language (C or C++); the bench parses them with that grammar."
 
 # Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
@@ -255,6 +419,11 @@ release = "https://github.com/sourcegraph/scip-clang/releases/tag/v0.4.1"
 url = "https://github.com/sourcegraph/scip-clang/releases/download/v0.4.1/scip-clang-arm64-darwin"
 binary_sha256 = "34a2eb7a5ef9bbe9849cded59f4eb22a2331bd5b64a5cec2b17ee09b8aa515de"
 
+# Linux (the CI regression check, .github/workflows/bench.yml)
+[tools.scip_clang.binaries.linux-amd64]
+url = "https://github.com/sourcegraph/scip-clang/releases/download/v0.4.1/scip-clang-x86_64-linux"
+binary_sha256 = "a434d26a079fd80e1996ba79276cb1ef86b2b2ad28b13e24386285db32c59046"
+
 # Java S3 gold: scip-java's javac plugin (embedded in the pinned launcher)
 # run by javac in the official Eclipse Temurin JDK image (pinned by digest,
 # `--network=none`, read-only sources), then `scip-java aggregate`. No build
@@ -282,9 +451,9 @@ name = "rueca"
 binary = "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)"
 contract = "docs/tools.md (alpha)"
 # Binary behind the published Rueca numbers (every language and suite):
-# main after the Go, Java, C/C++ and data packs, `cargo build --release -p
-# rueca` (macOS arm64).
-results = "main @ 65ae154 (binary sha256 9db30d82e36b7e1a84dde8dc06296febe9dcdb90389c52d4c0054a17fe0e9eb9)"
+# `cargo build --release -p rueca` of main (macOS arm64). The crates are
+# unchanged since 65ae154 (the alpha results' binary).
+results = "main @ 6df4324 (binary sha256 80e72f05793aeabc40e1affa5e718fbbae0955779d82c81cbcbdc012852e397a)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -422,6 +591,16 @@ language = "python"
 quota = 10
 sources = ["swe_bench_verified", "swe_bench_lite"]
 
+# Calibration split (RFC 0004 §7.7): SWE-rebench V2 rows (LLM screen code A)
+# on repositories disjoint from the gated ones, here and for every language below.
+
+[[s1.repos]]
+repo = "pallets/click"
+language = "python"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
 [[s1.repos]]
 repo = "tailwindlabs/tailwindcss"
 language = "typescript"
@@ -451,6 +630,13 @@ repo = "axios/axios"
 language = "javascript"
 quota = 6
 sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "yargs/yargs"
+language = "javascript"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
 
 # PHP: SWE-bench Multilingual (human-validated; all four PHP repositories) plus
 # SWE-rebench V2 on three small libraries for repository diversity.
@@ -497,6 +683,13 @@ language = "php"
 quota = 4
 sources = ["swe_rebench_v2"]
 
+[[s1.repos]]
+repo = "JsonMapper/JsonMapper"
+language = "php"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
 # Go: every SWE-bench Multilingual Go instance.
 
 [[s1.repos]]
@@ -528,6 +721,13 @@ repo = "hashicorp/terraform"
 language = "go"
 quota = 5
 sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "benhoyt/goawk"
+language = "go"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
 
 # Java: SWE-PolyBench (assembled modified_nodes gold) on small/medium
 # repositories + SWE-bench Multilingual. Left out for size: lucene, druid,
@@ -563,6 +763,13 @@ language = "java"
 quota = 6
 sources = ["swe_polybench"]
 
+[[s1.repos]]
+repo = "decorators-squad/eo-yaml"
+language = "java"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
 # C: every SWE-bench Multilingual C instance.
 
 [[s1.repos]]
@@ -588,6 +795,13 @@ repo = "valkey-io/valkey"
 language = "c"
 quota = 4
 sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "nanomsg/nng"
+language = "c"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
 
 # C++: every SWE-bench Multilingual C++ instance (12), supplemented by
 # Multi-SWE-bench C++ (SWE-bench Multilingual first: `source_priority`).
@@ -618,12 +832,23 @@ language = "cpp"
 quota = 6
 sources = ["multi_swe_bench_cpp"]
 
+[[s1.repos]]
+repo = "randombit/botan"
+language = "cpp"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
 # ---------------------------------------------------------------- S3 structural
 # Gold call edges from SCIP indexes (`gold = "scip"`, default) or, for PHP,
 # the bench's PHPStan collector (`gold = "phpstan"`) at pinned commits
 # (RFC 0002 §4.2). Micro-benchmarks (`[[s3.micro]]`) are hand-written call
 # graphs of small programs; every function is a question.
 
+# RFC 0004 §7.1: questions are every in-scope callable with at least one gold
+# edge in that direction, minus dunders and one-line bodies (extent shorter
+# than `min_lines`); the symbol lookup (one search per question) keeps a
+# stratified sample of `sample_per_repo` per set (fan-in / fan-out buckets).
 [s3]
 sample_per_repo = 50
 seed = 20261022
@@ -648,11 +873,43 @@ indexer = "scip_python"
 args = ["index", ".", "--project-name", "flask", "--project-version", "3.1.3"]
 
 [[s3.repos]]
+repo = "pallets/jinja"
+language = "python"
+tag = "3.1.6"
+commit = "15206881c006c79667fe5154fe80c01c65410679"
+license = "BSD-3-Clause"
+include = ["src/jinja2/"]
+indexer = "scip_python"
+args = ["index", ".", "--project-name", "jinja", "--project-version", "3.1.6"]
+
+[[s3.repos]]
+repo = "pallets/click"
+language = "python"
+tag = "8.1.8"
+commit = "934813e4d421071a1b3db3973c02fe2721359a6e"
+license = "BSD-3-Clause"
+include = ["src/click/"]
+indexer = "scip_python"
+args = ["index", ".", "--project-name", "click", "--project-version", "8.1.8"]
+split = "calibration"
+
+[[s3.repos]]
 repo = "honojs/hono"
 language = "typescript"
 tag = "v4.13.13"
 commit = "08a023cbfde55b434fb0fb30fae35d42e4bf20aa"
 include = ["src/"]
+indexer = "scip_typescript"
+args = ["index"]
+
+[[s3.repos]]
+repo = "colinhacks/zod"
+language = "typescript"
+tag = "v3.23.8"
+commit = "ca42965df46b2f7e2747db29c40a26bcb32a51d5"
+license = "MIT"
+include = ["src/"]
+exclude = ["src/__tests__/", "src/benchmarks/"]
 indexer = "scip_typescript"
 args = ["index"]
 
@@ -664,6 +921,7 @@ commit = "cf6722bf89a86905281d9160b6482e08166b5ef0"
 include = ["lib/", "index.js"]
 indexer = "scip_typescript"
 args = ["index", "--infer-tsconfig"]
+split = "diagnostic"  # 19 gold edges: untyped JavaScript (RFC 0004 §7.5)
 
 [[s3.repos]]
 repo = "Seldaek/monolog"
@@ -700,6 +958,17 @@ include = [""]
 indexer = "scip_go"
 args = ["--output", "{out}"]
 
+[[s3.repos]]
+repo = "benhoyt/goawk"
+language = "go"
+tag = "v1.29.1"
+commit = "4b6c79a6da06fc8e53eeb25c96f3b0e89d53c818"
+license = "MIT"
+include = [""]
+indexer = "scip_go"
+args = ["--output", "{out}"]
+split = "calibration"
+
 # Java: scip-java gold (javac + scip-java plugin, no build tool).
 [[s3.repos]]
 repo = "google/gson"
@@ -709,6 +978,16 @@ commit = "fcd416909db2bea96eb916bcfb2d0a83cb9b86c3"
 include = ["gson/src/main/java/"]
 indexer = "scip_java"
 javac = { sources = ["gson/src/main/java", "gson/src/main/java-templates"], classpath = ["error_prone_annotations"] }
+
+[[s3.repos]]
+repo = "square/javapoet"
+language = "java"
+tag = "javapoet-1.13.0"
+commit = "714e05ca60179285746604452324262b126dcb2d"
+license = "Apache-2.0"
+include = ["src/main/java/"]
+indexer = "scip_java"
+javac = { sources = ["src/main/java"], classpath = [] }
 
 # C / C++: scip-clang gold over a bench-synthesized compile_commands.json
 # (translation units listed below plus one TU including every public header).
@@ -723,6 +1002,17 @@ args = ["--compdb-path={compdb}", "--index-output-path={out}"]
 compdb = { std = "c++17", includes = ["include"], files = ["src/format.cc", "src/os.cc"], all_headers = ["include/fmt"] }
 
 [[s3.repos]]
+repo = "jbeder/yaml-cpp"
+language = "cpp"
+tag = "0.8.0"
+commit = "f7320141120f720aecc4c32be25586e7da9eb978"
+license = "MIT"
+include = ["include/", "src/"]
+indexer = "scip_clang"
+args = ["--compdb-path={compdb}", "--index-output-path={out}"]
+compdb = { std = "c++11", includes = ["include", "src"], files = ["src/*.cpp", "src/contrib/*.cpp"], all_headers = ["include/yaml-cpp"] }
+
+[[s3.repos]]
 repo = "DaveGamble/cJSON"
 language = "c"
 tag = "v1.7.19"
@@ -731,6 +1021,21 @@ include = ["cJSON.c", "cJSON.h", "cJSON_Utils.c", "cJSON_Utils.h"]
 indexer = "scip_clang"
 args = ["--compdb-path={compdb}", "--index-output-path={out}"]
 compdb = { std = "c99", includes = ["."], files = ["cJSON.c", "cJSON_Utils.c"] }
+
+# Lua (MIT, license text in lua.h): the library and the stand-alone
+# interpreter; the amalgamation (onelua.c) and the internal test library
+# (ltests.c) are out of scope.
+[[s3.repos]]
+repo = "lua/lua"
+language = "c"
+tag = "v5.4.7"
+commit = "1ab3208a1fceb12fca8f24ba57d6e13c5bff15e3"
+license = "MIT"
+include = [""]
+exclude = ["onelua.c", "ltests.c", "ltests.h", "testes/", "manual/", "all"]
+indexer = "scip_clang"
+args = ["--compdb-path={compdb}", "--index-output-path={out}"]
+compdb = { std = "c99", includes = ["."], files = ["*.c"] }
 
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
 [[s3.micro]]
@@ -743,6 +1048,7 @@ commit = "8d5dc40837803beef1d8d379fbf2cdad6cd94641"
 path = "micro-benchmark/snippets"
 license = "Apache-2.0"
 citation = "Salis et al., PyCG: Practical Call Graph Generation in Python (ICSE 2021)"
+split = "diagnostic"  # function -> function edges only; mostly module-level calls (RFC 0004 §7.3)
 
 # PHP micro-benchmark: Rueca's own hand-labelled snippets (Apache-2.0), in
 # this repository (bench/micro/php/<category>/<snippet>/, answer key in
@@ -754,6 +1060,28 @@ language = "php"
 format = "rueca"
 local = "micro/php"
 license = "Apache-2.0"
+
+# Python and TS/JS micro-benchmarks (RFC 0004 §7.3, §7.4): Rueca's own
+# snippets, cross-checked against scip-python / scip-typescript.
+[[s3.micro]]
+name = "python-micro"
+title = "Python micro-benchmark (rueca-bench)"
+language = "python"
+format = "rueca"
+local = "micro/python"
+license = "Apache-2.0"
+crosscheck = "scip_python"
+crosscheck_args = ["index"]
+
+[[s3.micro]]
+name = "ecma-micro"
+title = "TS/JS micro-benchmark (rueca-bench)"
+language = "typescript"
+format = "rueca"
+local = "micro/ecma"
+license = "Apache-2.0"
+crosscheck = "scip_typescript"
+crosscheck_args = ["index", "--infer-tsconfig"]
 
 # Go / Java / C / C++ micro-benchmarks: Rueca's own hand-labelled snippets
 # (Apache-2.0), same format; answer-key conventions in bench/README.md.
@@ -803,8 +1131,6 @@ crosscheck = "scip_clang"
 # are scored.
 
 [data]
-# RFC 0003 §3.1 status per data format (no data pack on main yet)
-status = { json = "text", yaml = "text", toml = "text", hcl = "text" }
 
 [[data.repos]]
 name = "online-boutique"
@@ -1155,6 +1481,46 @@ dataset = "swe_bench_verified"
 assets = ["contextbench"]
 
 [[s1.instances]]
+id = "pallets__click-1964"
+repo = "pallets/click"
+language = "python"
+base_commit = "08ecfd0e7c238a2444886d239de6d0e9d83530ec"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "pallets__click-2788"
+repo = "pallets/click"
+language = "python"
+base_commit = "380008389b32ca2b7de7c73f670a9eee1562004e"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "pallets__click-1709"
+repo = "pallets/click"
+language = "python"
+base_commit = "f0cc87d491e98b8770af0f3be13fba4b688298b3"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "pallets__click-2217"
+repo = "pallets/click"
+language = "python"
+base_commit = "bf9da4838986af3bc09a1b16974d154c61dcbe3f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "pallets__click-1604"
+repo = "pallets/click"
+language = "python"
+base_commit = "6271cee2e8b2cf9a392377271bc9ed8345ce77c8"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
 id = "tailwindlabs__tailwindcss-553"
 repo = "tailwindlabs/tailwindcss"
 language = "typescript"
@@ -1483,6 +1849,46 @@ dataset = "swe_bench_multilingual"
 assets = []
 
 [[s1.instances]]
+id = "yargs__yargs-1600"
+repo = "yargs/yargs"
+language = "javascript"
+base_commit = "c67c257cdf2b79af117cfd1b3938881c8f3e0677"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "yargs__yargs-988"
+repo = "yargs/yargs"
+language = "javascript"
+base_commit = "8515e4f5683fb783e6f6f994973207b553e527d5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "yargs__yargs-972"
+repo = "yargs/yargs"
+language = "javascript"
+base_commit = "db77c5387e4716897aab472805163ef5bdc9a15f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "yargs__yargs-847"
+repo = "yargs/yargs"
+language = "javascript"
+base_commit = "360e3019de266ee04f85e2baf21ce18f8b48cdc1"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "yargs__yargs-549"
+repo = "yargs/yargs"
+language = "javascript"
+base_commit = "00ea3941e08fc3630ed3865691f3c05ff0c95a7c"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
 id = "briannesbitt__carbon-3103"
 repo = "briannesbitt/carbon"
 language = "php"
@@ -1799,6 +2205,46 @@ id = "thephpleague__commonmark-1034"
 repo = "thephpleague/commonmark"
 language = "php"
 base_commit = "b7a7af3a23a818dcc5836e62e93e4b9ce4704481"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "jsonmapper__jsonmapper-135"
+repo = "JsonMapper/JsonMapper"
+language = "php"
+base_commit = "fd0389f56d0f4fab756b2e074eef2ae1d9987324"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "jsonmapper__jsonmapper-164"
+repo = "JsonMapper/JsonMapper"
+language = "php"
+base_commit = "71664cea86bc459eca09ea9209e1bbbc23c7b96c"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "jsonmapper__jsonmapper-84"
+repo = "JsonMapper/JsonMapper"
+language = "php"
+base_commit = "c6a1e88b9451aa807d2a37caf113244da7800e82"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "jsonmapper__jsonmapper-161"
+repo = "JsonMapper/JsonMapper"
+language = "php"
+base_commit = "4bbee99f84d710b473effb476508c091a0ae0a8b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "jsonmapper__jsonmapper-61"
+repo = "JsonMapper/JsonMapper"
+language = "php"
+base_commit = "fce54a361adf03f9c5d6ca8fbe1567f41cb4d9c3"
 dataset = "swe_rebench_v2"
 assets = []
 
@@ -2131,6 +2577,46 @@ dataset = "swe_bench_multilingual"
 assets = []
 
 [[s1.instances]]
+id = "benhoyt__goawk-173"
+repo = "benhoyt/goawk"
+language = "go"
+base_commit = "59441bef1fca2e9eee1d4b207ca3ef5768b8fc1a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "benhoyt__goawk-133"
+repo = "benhoyt/goawk"
+language = "go"
+base_commit = "b28a6a58dd5007ce402c7f16bf010e0743f54cc5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "benhoyt__goawk-201"
+repo = "benhoyt/goawk"
+language = "go"
+base_commit = "62d545bbfef56faa4e70458204a18e1d18d51ed1"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "benhoyt__goawk-240"
+repo = "benhoyt/goawk"
+language = "go"
+base_commit = "f39db9b8a29cde9ee966d36b8e313055ce667cfb"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "benhoyt__goawk-147"
+repo = "benhoyt/goawk"
+language = "go"
+base_commit = "41beaa4b7e2a1e3c238532c58a886bd6a68fb326"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
 id = "google__gson-1703"
 repo = "google/gson"
 language = "java"
@@ -2451,6 +2937,46 @@ dataset = "swe_polybench"
 assets = ["swe_polybench:modified_nodes"]
 
 [[s1.instances]]
+id = "decorators-squad__eo-yaml-226"
+repo = "decorators-squad/eo-yaml"
+language = "java"
+base_commit = "e75f2e84f8b39422f9fb69f40042ee1a09884e2d"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "decorators-squad__eo-yaml-274"
+repo = "decorators-squad/eo-yaml"
+language = "java"
+base_commit = "1987c13254c510116b646bc7909ed52f875ab874"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "decorators-squad__eo-yaml-466"
+repo = "decorators-squad/eo-yaml"
+language = "java"
+base_commit = "0434a512e6bed42083c69c56bf151b095091a3ea"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "decorators-squad__eo-yaml-404"
+repo = "decorators-squad/eo-yaml"
+language = "java"
+base_commit = "87cf55ca375cc5205d5a2ba53eaf46925002a9a9"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "decorators-squad__eo-yaml-184"
+repo = "decorators-squad/eo-yaml"
+language = "java"
+base_commit = "6d3ae10985133573f827a1f1c57a7c59c9c4d2b5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
 id = "redis__redis-10068"
 repo = "redis/redis"
 language = "c"
@@ -2688,6 +3214,46 @@ repo = "valkey-io/valkey"
 language = "c"
 base_commit = "93b701d8d48eaf87077e707dd77eaaed0e66900f"
 dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "nanomsg__nng-1305"
+repo = "nanomsg/nng"
+language = "c"
+base_commit = "206de0ad6f338c7e375885443836fbb44853550b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "nanomsg__nng-1256"
+repo = "nanomsg/nng"
+language = "c"
+base_commit = "2f288bddf5b501f029d080835f439ecd9c0eae47"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "nanomsg__nng-1233"
+repo = "nanomsg/nng"
+language = "c"
+base_commit = "0e9e2f1b33ec115368aee5ab9939a9d2dc27b213"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "nanomsg__nng-1125"
+repo = "nanomsg/nng"
+language = "c"
+base_commit = "136eabff656f77e3eed58abb2fc4cf2b3f7268ae"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "nanomsg__nng-1257"
+repo = "nanomsg/nng"
+language = "c"
+base_commit = "59301ab3f80991086519124d020edbe94a74615c"
+dataset = "swe_rebench_v2"
 assets = []
 
 [[s1.instances]]
@@ -2993,3 +3559,43 @@ language = "cpp"
 base_commit = "35158257c6e79d908723f1a7023362a718579c4f"
 dataset = "multi_swe_bench_cpp"
 assets = ["contextbench"]
+
+[[s1.instances]]
+id = "randombit__botan-4122"
+repo = "randombit/botan"
+language = "cpp"
+base_commit = "f02c6027b19f3e992796c157a474720ed3bcf82a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "randombit__botan-2083"
+repo = "randombit/botan"
+language = "cpp"
+base_commit = "14ba8584069e927210bc5a1707f865746f6f93c6"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "randombit__botan-2425"
+repo = "randombit/botan"
+language = "cpp"
+base_commit = "f33f00e5d0add6b17c3a51407720710a58bacd0b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "randombit__botan-4536"
+repo = "randombit/botan"
+language = "cpp"
+base_commit = "9c74c630310400beaf4999878f458a2916a26843"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "randombit__botan-2201"
+repo = "randombit/botan"
+language = "cpp"
+base_commit = "865184972cbda7a3b6bd46c2ec0b399cbdde7b6e"
+dataset = "swe_rebench_v2"
+assets = []

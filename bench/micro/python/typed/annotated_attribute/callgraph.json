@@ -1,0 +1,7 @@
+{
+  "main.py:Mailer.send": [],
+  "main.py:Notifier.__init__": [],
+  "main.py:Notifier.alert": [
+    "main.py:Mailer.send"
+  ]
+}

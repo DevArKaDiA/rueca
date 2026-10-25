@@ -1,0 +1,6 @@
+{
+  "jobs.ts:EmailJob.run": [],
+  "jobs.ts:SmsJob.run": [],
+  "jobs.ts:dispatch": ["jobs.ts:EmailJob.run", "jobs.ts:SmsJob.run"],
+  "jobs.ts:onlySms": ["jobs.ts:SmsJob.run"]
+}

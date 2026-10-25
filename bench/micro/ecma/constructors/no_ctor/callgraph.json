@@ -1,0 +1,6 @@
+{
+  "plain.ts:Named.constructor": ["plain.ts:Named.init"],
+  "plain.ts:Named.init": [],
+  "plain.ts:Point.norm": [],
+  "plain.ts:demo": ["plain.ts:Named.constructor", "plain.ts:Point.norm"]
+}

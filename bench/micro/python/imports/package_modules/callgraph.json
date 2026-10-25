@@ -1,0 +1,13 @@
+{
+  "main.py:save": [
+    "storage/backends/memory.py:put",
+    "storage/disk.py:write"
+  ],
+  "main.py:save_and_notify": [
+    "storage/backends/memory.py:put",
+    "storage/mailer.py:send"
+  ],
+  "storage/backends/memory.py:put": [],
+  "storage/disk.py:write": [],
+  "storage/mailer.py:send": []
+}

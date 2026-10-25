@@ -1,0 +1,16 @@
+{
+  "main.py:Cache.save": [],
+  "main.py:Logger.info": [],
+  "main.py:Repo.save": [],
+  "main.py:log": [
+    "main.py:Logger.info"
+  ],
+  "main.py:lookup": [],
+  "main.py:persist": [
+    "main.py:Repo.save"
+  ],
+  "main.py:persist_from": [
+    "main.py:Cache.save",
+    "main.py:lookup"
+  ]
+}

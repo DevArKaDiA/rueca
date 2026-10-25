@@ -1,0 +1,13 @@
+{
+  "app/core/engine.py:run": [],
+  "app/handlers/job.py:handle": [
+    "app/core/engine.py:run",
+    "app/util.py:fmt"
+  ],
+  "app/handlers/job.py:signup": [
+    "app/models/user.py:create",
+    "app/util.py:fmt"
+  ],
+  "app/models/user.py:create": [],
+  "app/util.py:fmt": []
+}

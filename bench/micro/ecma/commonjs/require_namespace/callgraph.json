@@ -1,0 +1,6 @@
+{
+  "main.js:greet": ["strings.js:shout"],
+  "main.js:greetWith": [],
+  "strings.js:shout": ["strings.js:upper"],
+  "strings.js:upper": []
+}

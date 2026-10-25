@@ -1,0 +1,7 @@
+{
+  "main.ts:welcome": ["user.ts:User.greet", "user.ts:first", "user.ts:identity"],
+  "user.ts:User.constructor": [],
+  "user.ts:User.greet": [],
+  "user.ts:first": [],
+  "user.ts:identity": []
+}

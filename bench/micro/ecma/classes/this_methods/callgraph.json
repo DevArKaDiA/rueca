@@ -1,0 +1,5 @@
+{
+  "cart.ts:Cart.add": ["cart.ts:Cart.recalc"],
+  "cart.ts:Cart.recalc": ["cart.ts:Cart.round"],
+  "cart.ts:Cart.round": []
+}

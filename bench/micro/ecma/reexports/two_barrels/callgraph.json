@@ -1,0 +1,5 @@
+{
+  "app.ts:run": ["core/impl.ts:compute"],
+  "core/impl.ts:compute": ["core/impl.ts:square"],
+  "core/impl.ts:square": []
+}

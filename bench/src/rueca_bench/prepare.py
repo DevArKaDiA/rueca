@@ -67,11 +67,13 @@ def _datasets_for(languages: set[str] | None) -> list[str]:
     return [k for k in man["datasets"] if k in keys]
 
 
-def setup(select: bool = False, workers: int = 4, skip_s3: bool = False, languages: set[str] | None = None) -> None:
+def setup(select: bool = False, workers: int = 4, skip_s3: bool = False, languages: set[str] | None = None, cbm: bool = True) -> None:
     """`languages`: restrict to these language families (manifest
     `[languages]` keys); selection (`--select`) always covers every repo so the
-    generated instance list stays deterministic."""
-    fetch_cbm()
+    generated instance list stays deterministic. `cbm = False` skips the cbm
+    binary (Rueca-only runs: baseline arms are read from committed results)."""
+    if cbm:
+        fetch_cbm()
     for key in (load_manifest()["datasets"] if select and not languages else _datasets_for(languages)):
         fetch_dataset(key)
     if select or not instances():

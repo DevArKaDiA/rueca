@@ -1,0 +1,12 @@
+{
+  "main.py:fmt": [],
+  "main.py:plain": [
+    "main.py:fmt"
+  ],
+  "main.py:print": [],
+  "main.py:render": [
+    "main.py:print",
+    "main.py:render.fmt"
+  ],
+  "main.py:render.fmt": []
+}

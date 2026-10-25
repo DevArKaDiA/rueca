@@ -1,0 +1,7 @@
+{
+  "animals.ts:Animal.speak": [],
+  "animals.ts:Dog.fetch": [],
+  "animals.ts:Dog.speak": [],
+  "animals.ts:chorus": ["animals.ts:Animal.speak"],
+  "animals.ts:walk": ["animals.ts:Dog.fetch", "animals.ts:Dog.speak"]
+}

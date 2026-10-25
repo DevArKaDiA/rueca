@@ -1,0 +1,5 @@
+{
+  "host.ts:boot": ["plugins.ts:register"],
+  "plugins.ts:announce": [],
+  "plugins.ts:register": ["plugins.ts:announce"]
+}

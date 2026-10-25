@@ -1,0 +1,6 @@
+{
+  "math.ts:add": [],
+  "math.ts:clamp": [],
+  "math.ts:scale": ["math.ts:clamp"],
+  "report.ts:total": ["math.ts:add", "math.ts:scale"]
+}

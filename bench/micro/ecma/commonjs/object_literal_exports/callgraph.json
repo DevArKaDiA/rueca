@@ -1,0 +1,6 @@
+{
+  "server.js:restart": ["service.js:start", "service.js:stop"],
+  "service.js:helper": [],
+  "service.js:start": ["service.js:helper"],
+  "service.js:stop": ["service.js:helper"]
+}

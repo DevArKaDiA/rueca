@@ -1,0 +1,10 @@
+{
+  "main.py:Base.__init__": [],
+  "main.py:Base.describe": [],
+  "main.py:Child.tag": [],
+  "main.py:make": [
+    "main.py:Base.__init__",
+    "main.py:Base.describe",
+    "main.py:Child.tag"
+  ]
+}

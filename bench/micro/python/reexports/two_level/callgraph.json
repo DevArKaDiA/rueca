@@ -1,0 +1,9 @@
+{
+  "main.py:run": [
+    "pkg/sub/core.py:helper"
+  ],
+  "main.py:run_attr": [
+    "pkg/sub/core.py:helper"
+  ],
+  "pkg/sub/core.py:helper": []
+}

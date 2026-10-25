@@ -1,0 +1,8 @@
+{
+  "client.ts:Client.query": [],
+  "client.ts:Query.build": [],
+  "client.ts:Query.limit": [],
+  "client.ts:Query.where": [],
+  "client.ts:makeClient": [],
+  "main.ts:recent": ["client.ts:Client.query", "client.ts:Query.build", "client.ts:Query.limit", "client.ts:Query.where", "client.ts:makeClient"]
+}

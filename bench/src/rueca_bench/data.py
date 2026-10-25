@@ -651,8 +651,30 @@ def score_bridge(gold: dict, spec: dict, pred: dict) -> dict:
     }
 
 
-def score() -> dict:
-    """{repos: {name: {arm: {...}}}, formats: {fmt: {arm: {...}}}, bridge: {arm: pooled}, gold: {...}}"""
+def _pool(out: dict, pooled_keys: dict, pooled_bridge: dict, arm: str, res: dict) -> None:
+    for fmt, o in (res.get("keys") or {}).items():
+        a = pooled_keys.setdefault(fmt, {}).setdefault(arm, {"keys": 0, "covered": 0, "exact": 0, "files": 0})
+        for k in a:
+            a[k] += o[k]
+    for kind, o in (res.get("kinds") or {}).items():
+        a = out["kinds"].setdefault(kind, {}).setdefault(arm, {"format": o["format"], "files": 0, "with_kind_nodes": 0})
+        a["files"] += o["files"]
+        a["with_kind_nodes"] += o["with_kind_nodes"]
+    if res.get("bridge"):
+        pb = pooled_bridge.setdefault(arm, {"reads": [0, 0, 0], "writes": [0, 0, 0]})
+        for d in ("reads", "writes"):
+            pb[d][0] += res["bridge"][d]["tp"]
+            pb[d][1] += res["bridge"][d]["pred"]
+            pb[d][2] += res["bridge"][d]["gold"]
+
+
+def score(published: dict | None = None) -> dict:
+    """{repos: {name: {arm: {...}}}, formats: {fmt: {arm: {...}}}, bridge: {arm: pooled}, gold: {...}}.
+    An (arm, repository) without a local run keeps its entry from the
+    published `bench/results/data.json` (`published`), so a Rueca-only run
+    (the CI regression check) still has the baseline arms."""
+    published = published or {}
+    pub_repos = published.get("repos", {})
     out: dict = {"repos": {}, "formats": {}, "bridge": {}, "kinds": {}, "gold": {}, "failures": []}
     pooled_keys: dict = {}
     pooled_bridge: dict = {}
@@ -660,7 +682,11 @@ def score() -> dict:
         name = spec["name"]
         gp = gold_path(name)
         if not gp.exists():
-            out["gold"][name] = {"missing": True}
+            out["gold"][name] = published.get("gold", {}).get(name) or {"missing": True}
+            carried = pub_repos.get(name, {})
+            for arm, res in carried.items():
+                _pool(out, pooled_keys, pooled_bridge, arm, dict(res, carried=True))
+                out["repos"].setdefault(name, {})[arm] = dict(res, carried=True)
             continue
         gold = read_json(gp)
         refs = [f for f in gold["files"] if not f["skipped"]]
@@ -677,6 +703,10 @@ def score() -> dict:
         for arm in ("grep", "cbm", "rueca"):
             rp = run_path(arm, name)
             if not rp.exists():
+                res = pub_repos.get(name, {}).get(arm)
+                if res is not None:
+                    _pool(out, pooled_keys, pooled_bridge, arm, dict(res, carried=True))
+                    out["repos"].setdefault(name, {})[arm] = dict(res, carried=True)
                 continue
             rec = read_json(rp)
             if rec.get("status") != "ok":
@@ -685,21 +715,9 @@ def score() -> dict:
             if arm != "grep":
                 res["keys"] = score_keys(gold, rec.get("nodes", []))
                 res["kinds"] = kinds_covered(gold, rec.get("nodes", []))
-                for fmt, o in res["keys"].items():
-                    a = pooled_keys.setdefault(fmt, {}).setdefault(arm, {"keys": 0, "covered": 0, "exact": 0, "files": 0})
-                    for k in a:
-                        a[k] += o[k]
-                for kind, o in res["kinds"].items():
-                    a = out["kinds"].setdefault(kind, {}).setdefault(arm, {"format": o["format"], "files": 0, "with_kind_nodes": 0})
-                    a["files"] += o["files"]
-                    a["with_kind_nodes"] += o["with_kind_nodes"]
             if gold.get("bridge") and rec.get("bridge") is not None:
                 res["bridge"] = score_bridge(gold, spec, rec["bridge"])
-                pb = pooled_bridge.setdefault(arm, {"reads": [0, 0, 0], "writes": [0, 0, 0]})
-                for d in ("reads", "writes"):
-                    pb[d][0] += res["bridge"][d]["tp"]
-                    pb[d][1] += res["bridge"][d]["pred"]
-                    pb[d][2] += res["bridge"][d]["gold"]
+            _pool(out, pooled_keys, pooled_bridge, arm, res)
             out["repos"].setdefault(name, {})[arm] = res
     for fmt, arms in pooled_keys.items():
         for arm, a in arms.items():

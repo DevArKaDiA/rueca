@@ -1,0 +1,6 @@
+{
+  "io.js:decode": [],
+  "io.js:read": ["io.js:decode"],
+  "io.js:write": [],
+  "sync.js:copy": ["io.js:read", "io.js:write"]
+}

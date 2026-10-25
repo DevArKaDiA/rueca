@@ -1,0 +1,6 @@
+{
+  "queue.js:Queue.constructor": ["queue.js:Queue.reset"],
+  "queue.js:Queue.push": [],
+  "queue.js:Queue.reset": [],
+  "worker.js:enqueueAll": ["queue.js:Queue.constructor", "queue.js:Queue.push"]
+}

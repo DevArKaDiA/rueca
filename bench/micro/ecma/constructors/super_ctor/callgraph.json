@@ -1,0 +1,6 @@
+{
+  "model.ts:Model.constructor": ["model.ts:validate"],
+  "model.ts:User.constructor": ["model.ts:Model.constructor"],
+  "model.ts:makeUser": ["model.ts:User.constructor"],
+  "model.ts:validate": []
+}

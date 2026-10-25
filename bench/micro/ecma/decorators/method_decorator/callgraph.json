@@ -1,0 +1,7 @@
+{
+  "api.ts:Api.fetch": ["api.ts:Api.parse"],
+  "api.ts:Api.parse": [],
+  "trace.ts:logged": [],
+  "trace.ts:logged.value": ["trace.ts:trace"],
+  "trace.ts:trace": []
+}

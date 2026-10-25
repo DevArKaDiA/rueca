@@ -1,0 +1,10 @@
+{
+  "main.py:Plain.render": [],
+  "main.py:Widget.__init__": [],
+  "main.py:Widget.render": [],
+  "main.py:page": [
+    "main.py:Plain.render",
+    "main.py:Widget.__init__",
+    "main.py:Widget.render"
+  ]
+}

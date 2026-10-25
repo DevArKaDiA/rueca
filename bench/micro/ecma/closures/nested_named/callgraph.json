@@ -1,0 +1,6 @@
+{
+  "outer.ts:leaf": [],
+  "outer.ts:outer": ["outer.ts:outer.twice"],
+  "outer.ts:outer.inner": ["outer.ts:leaf"],
+  "outer.ts:outer.twice": ["outer.ts:outer.inner"]
+}

@@ -1,0 +1,7 @@
+{
+  "box.ts:Box.constructor": [],
+  "box.ts:Box.get": [],
+  "box.ts:Box.map": ["box.ts:Box.constructor"],
+  "box.ts:double": [],
+  "box.ts:pipeline": ["box.ts:Box.constructor", "box.ts:Box.get", "box.ts:Box.map"]
+}

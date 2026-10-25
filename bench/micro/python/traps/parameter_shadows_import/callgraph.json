@@ -1,0 +1,9 @@
+{
+  "main.py:normal": [
+    "util.py:parse"
+  ],
+  "main.py:with_local": [],
+  "main.py:with_module_param": [],
+  "main.py:with_param": [],
+  "util.py:parse": []
+}

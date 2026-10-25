@@ -1,0 +1,6 @@
+{
+  "io.ts:FileHandle.close": ["io.ts:FileHandle.flush"],
+  "io.ts:FileHandle.flush": [],
+  "io.ts:closeAll": [],
+  "io.ts:closeFile": ["io.ts:FileHandle.close"]
+}

@@ -1,0 +1,18 @@
+{
+  "main.py:Base.__init__": [],
+  "main.py:Base.label": [],
+  "main.py:Base.save": [],
+  "main.py:Child.__init__": [
+    "main.py:Base.__init__"
+  ],
+  "main.py:Child.label": [
+    "main.py:Base.label"
+  ],
+  "main.py:Child.save": [
+    "main.py:Base.save"
+  ],
+  "main.py:store": [
+    "main.py:Child.__init__",
+    "main.py:Child.save"
+  ]
+}

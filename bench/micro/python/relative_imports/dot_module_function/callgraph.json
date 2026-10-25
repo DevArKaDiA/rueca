@@ -1,0 +1,8 @@
+{
+  "app/repo.py:load": [],
+  "app/repo.py:save": [],
+  "app/service.py:rename": [
+    "app/repo.py:load",
+    "app/repo.py:save"
+  ]
+}

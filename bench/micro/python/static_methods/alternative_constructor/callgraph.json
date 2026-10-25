@@ -1,0 +1,13 @@
+{
+  "main.py:Point.__init__": [],
+  "main.py:Point.from_dict": [
+    "main.py:Point.__init__",
+    "main.py:Point.validate"
+  ],
+  "main.py:Point.norm": [],
+  "main.py:Point.validate": [],
+  "main.py:load": [
+    "main.py:Point.from_dict",
+    "main.py:Point.norm"
+  ]
+}

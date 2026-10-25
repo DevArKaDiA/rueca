@@ -1,0 +1,5 @@
+{
+  "pets.ts:Bird.sing": [],
+  "pets.ts:Cat.meow": [],
+  "pets.ts:voice": ["pets.ts:Bird.sing", "pets.ts:Cat.meow"]
+}

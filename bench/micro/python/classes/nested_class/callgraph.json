@@ -1,0 +1,10 @@
+{
+  "main.py:Outer.Inner.ping": [],
+  "main.py:Outer.make": [
+    "main.py:Outer.Inner.ping"
+  ],
+  "main.py:build": [
+    "main.py:Outer.Inner.ping",
+    "main.py:Outer.make"
+  ]
+}

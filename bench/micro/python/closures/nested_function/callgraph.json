@@ -1,0 +1,11 @@
+{
+  "main.py:helper": [],
+  "main.py:outer": [
+    "main.py:outer.inner"
+  ],
+  "main.py:outer.inner": [
+    "main.py:helper",
+    "main.py:outer.sibling"
+  ],
+  "main.py:outer.sibling": []
+}

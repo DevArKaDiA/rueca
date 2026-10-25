@@ -246,11 +246,16 @@ def read_json(path: Path) -> Any:
         return json.load(fh)
 
 
-def write_json(path: Path, data: Any) -> None:
+def write_json(path: Path, data: Any, compact: bool = False) -> None:
+    """`compact` writes one line without spaces (large committed results:
+    bench/results/s3.json holds one row per structural question)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with tmp.open("w") as fh:
-        json.dump(data, fh, indent=1, sort_keys=False)
+        if compact:
+            json.dump(data, fh, separators=(",", ":"), sort_keys=False, ensure_ascii=False)
+        else:
+            json.dump(data, fh, indent=1, sort_keys=False)
         fh.write("\n")
     tmp.replace(path)
 
@@ -272,3 +277,38 @@ def named_lock(name: str) -> threading.Lock:
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+# --- efficiency: tokens per tool answer (RFC 0004 §5) -------------------------------
+
+_ENCODER = None
+_ENCODER_LOCK = threading.Lock()
+
+
+def count_tokens(text: str | None) -> int | None:
+    """cl100k_base tokens of a tool answer (the JSON text the tool printed).
+    tiktoken fetches the encoding file once (its own sha256 check) into
+    bench/.cache/tiktoken."""
+    global _ENCODER
+    if text is None:
+        return None
+    with _ENCODER_LOCK:
+        if _ENCODER is None:
+            os.environ.setdefault("TIKTOKEN_CACHE_DIR", str(CACHE / "tiktoken"))
+            import tiktoken
+
+            _ENCODER = tiktoken.get_encoding("cl100k_base")
+    return len(_ENCODER.encode(text, disallowed_special=()))
+
+
+def scorecard_spec() -> dict:
+    """Manifest `[scorecard]`: floors, targets, minimum populations and
+    bootstrap settings (RFC 0004 §6, §7.2, §7.6)."""
+    return load_manifest().get("scorecard", {})
+
+
+def split_of(spec: dict) -> str:
+    """`gated` (scored in the scorecard), `calibration` (RFC 0004 §7.7: where
+    ranking weights and heuristics may be tuned; reported separately) or
+    `diagnostic` (reported, never gated)."""
+    return spec.get("split", "gated")

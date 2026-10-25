@@ -1,0 +1,5 @@
+{
+  "client.ts:get": ["http.ts:fetch"],
+  "client.ts:remote": [],
+  "http.ts:fetch": []
+}

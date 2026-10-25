@@ -1,0 +1,12 @@
+{
+  "main.py:show": [
+    "pkg/__init__.py:banner",
+    "pkg/__init__.py:version"
+  ],
+  "pkg/__init__.py:banner": [
+    "pkg/__init__.py:version",
+    "pkg/impl.py:build"
+  ],
+  "pkg/__init__.py:version": [],
+  "pkg/impl.py:build": []
+}

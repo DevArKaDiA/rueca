@@ -1,0 +1,8 @@
+{
+  "handlers.ts:Router.about": [],
+  "handlers.ts:Router.home": [],
+  "handlers.ts:dispatch": [],
+  "handlers.ts:fire": [],
+  "handlers.ts:onClose": [],
+  "handlers.ts:onOpen": []
+}

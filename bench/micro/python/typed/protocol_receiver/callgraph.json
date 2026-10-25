@@ -1,0 +1,12 @@
+{
+  "main.py:Closer.close": [],
+  "main.py:File.close": [],
+  "main.py:Socket.close": [],
+  "main.py:main": [
+    "main.py:File.close",
+    "main.py:shutdown"
+  ],
+  "main.py:shutdown": [
+    "main.py:Closer.close"
+  ]
+}

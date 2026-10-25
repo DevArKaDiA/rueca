@@ -1,0 +1,13 @@
+{
+  "main.py:Base.create": [
+    "main.py:Base.name"
+  ],
+  "main.py:Base.name": [],
+  "main.py:Base.version": [],
+  "main.py:Derived.name": [],
+  "main.py:main": [
+    "main.py:Base.create",
+    "main.py:Base.version",
+    "main.py:Derived.name"
+  ]
+}

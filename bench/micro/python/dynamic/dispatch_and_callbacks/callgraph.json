@@ -1,0 +1,10 @@
+{
+  "main.py:apply": [],
+  "main.py:dispatch": [],
+  "main.py:dispatch_inline": [],
+  "main.py:handle_create": [],
+  "main.py:handle_delete": [],
+  "main.py:main": [
+    "main.py:apply"
+  ]
+}

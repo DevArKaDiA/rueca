@@ -1,0 +1,14 @@
+{
+  "decos.py:emit": [],
+  "decos.py:timed": [],
+  "decos.py:timed.wrapper": [
+    "decos.py:emit"
+  ],
+  "main.py:crunch": [],
+  "main.py:main": [
+    "main.py:work"
+  ],
+  "main.py:work": [
+    "main.py:crunch"
+  ]
+}

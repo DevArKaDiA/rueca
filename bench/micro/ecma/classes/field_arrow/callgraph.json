@@ -1,0 +1,5 @@
+{
+  "button.ts:Button.onClick": ["button.ts:Button.render"],
+  "button.ts:Button.render": [],
+  "button.ts:press": ["button.ts:Button.onClick", "button.ts:Button.render"]
+}

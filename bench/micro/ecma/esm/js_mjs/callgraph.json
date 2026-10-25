@@ -1,0 +1,5 @@
+{
+  "cli.mjs:main": ["lib.mjs:count"],
+  "lib.mjs:count": ["lib.mjs:tokenize"],
+  "lib.mjs:tokenize": []
+}

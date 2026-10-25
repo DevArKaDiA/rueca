@@ -1,0 +1,6 @@
+{
+  "helpers/a.ts:normalize": [],
+  "helpers/b.ts:normalize": [],
+  "helpers/index.ts:version": [],
+  "user.ts:clean": ["helpers/a.ts:normalize", "helpers/index.ts:version"]
+}

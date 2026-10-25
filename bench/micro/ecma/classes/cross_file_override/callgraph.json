@@ -1,0 +1,7 @@
+{
+  "circle.ts:Circle.area": [],
+  "circle.ts:Circle.constructor": [],
+  "circle.ts:report": ["circle.ts:Circle.area", "shape.ts:Shape.describe"],
+  "shape.ts:Shape.area": [],
+  "shape.ts:Shape.describe": ["shape.ts:Shape.area"]
+}

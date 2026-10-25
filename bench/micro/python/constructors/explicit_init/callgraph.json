@@ -1,0 +1,11 @@
+{
+  "main.py:User.__init__": [
+    "main.py:default_name"
+  ],
+  "main.py:User.greet": [],
+  "main.py:default_name": [],
+  "main.py:welcome": [
+    "main.py:User.__init__",
+    "main.py:User.greet"
+  ]
+}

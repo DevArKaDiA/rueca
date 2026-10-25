@@ -1,0 +1,7 @@
+{
+  "csv.ts:parse": ["csv.ts:splitLine"],
+  "csv.ts:splitLine": [],
+  "json.ts:parse": [],
+  "loader.ts:loadConfig": ["json.ts:parse"],
+  "loader.ts:loadTable": ["csv.ts:parse"]
+}

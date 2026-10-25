@@ -190,11 +190,17 @@ def fid(path: str, f: Func | dict) -> str:
     return f"{path}#{f.qualname}@{f.def_line}"
 
 
-def in_scope(path: str, include: list[str]) -> bool:
-    return any(path == p or path.startswith(p) for p in include) and not is_test_path(path) and grammar_for(path) is not None
+def in_scope(path: str, include: list[str], exclude: list[str] | tuple[str, ...] = ()) -> bool:
+    """`include` / `exclude` are path prefixes (manifest `[[s3.repos]]`)."""
+    return (
+        any(path == p or path.startswith(p) for p in include)
+        and not any(path == p or path.startswith(p) for p in exclude)
+        and not is_test_path(path)
+        and grammar_for(path) is not None
+    )
 
 
-def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language: str | None = None) -> dict:
+def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language: str | None = None, exclude: list[str] | tuple[str, ...] = ()) -> dict:
     callables: dict[str, dict] = {}  # fid -> func dict (+ path)
     by_file: dict[str, list[dict]] = {}
     sym_to_fid: dict[str, str] = {}
@@ -203,7 +209,7 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
     stats = defaultdict(int)
     overload_alias: dict[tuple[str, int, str], dict] = {}
 
-    scoped = [d for d in docs if in_scope(d.path, include)]
+    scoped = [d for d in docs if in_scope(d.path, include, exclude)]
     stats["documents_total"] = len(docs)
     stats["documents_in_scope"] = len(scoped)
 
@@ -351,3 +357,31 @@ def sample_functions(graph: dict, n: int, seed: int, min_lines: int) -> list[str
             if buckets[k] and len(out) < n:
                 out.append(buckets[k].pop())
     return sorted(out)
+
+
+def eligible(f: dict, min_lines: int) -> bool:
+    """A structural question (RFC 0004 §7.1): not a dunder, body longer than
+    one line (`min_lines` lines of extent)."""
+    if f["end"] - f["start"] + 1 < min_lines:
+        return False
+    return not (f["name"].startswith("__") and f["name"].endswith("__"))
+
+
+def gold_neighbours(graph: dict, fid_: str, direction: str) -> list[str]:
+    """Gold depth-1 neighbours of a callable, without the callable itself
+    (trace tools never list their root, so recursion is not a question)."""
+    return [x for x in graph[direction].get(fid_, []) if x != fid_ and x in graph["callables"]]
+
+
+def questions(graph: dict, min_lines: int) -> dict[str, list[str]]:
+    """Every in-scope callable with at least one gold edge in a direction
+    (minus dunders and one-line bodies), per direction, plus their union."""
+    out: dict[str, list[str]] = {"callers": [], "callees": []}
+    for k, f in sorted(graph["callables"].items()):
+        if not eligible(f, min_lines):
+            continue
+        for d in out:
+            if gold_neighbours(graph, k, d):
+                out[d].append(k)
+    out["all"] = sorted(set(out["callers"]) | set(out["callees"]))
+    return out

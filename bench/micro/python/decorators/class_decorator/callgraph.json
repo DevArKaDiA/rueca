@@ -1,0 +1,10 @@
+{
+  "main.py:Plugin.run": [],
+  "main.py:add_to_registry": [],
+  "main.py:main": [
+    "main.py:Plugin.run"
+  ],
+  "main.py:register": [
+    "main.py:add_to_registry"
+  ]
+}

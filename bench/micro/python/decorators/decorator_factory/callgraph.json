@@ -1,0 +1,15 @@
+{
+  "main.py:backoff": [],
+  "main.py:download": [],
+  "main.py:fetch": [
+    "main.py:download"
+  ],
+  "main.py:main": [
+    "main.py:fetch"
+  ],
+  "main.py:retry": [],
+  "main.py:retry.deco": [],
+  "main.py:retry.deco.wrapper": [
+    "main.py:backoff"
+  ]
+}

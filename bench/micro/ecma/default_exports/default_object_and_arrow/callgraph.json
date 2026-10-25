@@ -1,0 +1,6 @@
+{
+  "app.ts:start": ["greet.ts:greet"],
+  "app.ts:stop": [],
+  "greet.ts:greet": [],
+  "main.ts:session": ["app.ts:start", "app.ts:stop"]
+}

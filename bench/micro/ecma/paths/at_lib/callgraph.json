@@ -1,0 +1,6 @@
+{
+  "app/clock.ts:now": [],
+  "app/main.ts:log": ["lib/stamp.ts:stamp"],
+  "lib/clock.ts:now": [],
+  "lib/stamp.ts:stamp": ["lib/clock.ts:now"]
+}

@@ -1,0 +1,15 @@
+{
+  "main.py:push": [
+    "pkg/models.py:Client.__init__",
+    "pkg/models.py:Client.send"
+  ],
+  "main.py:start": [
+    "pkg/impl.py:connect"
+  ],
+  "main.py:start_again": [
+    "pkg/impl.py:connect"
+  ],
+  "pkg/impl.py:connect": [],
+  "pkg/models.py:Client.__init__": [],
+  "pkg/models.py:Client.send": []
+}

@@ -1,0 +1,5 @@
+{
+  "format.ts:fixed": [],
+  "format.ts:money": ["format.ts:fixed"],
+  "main.ts:price": ["format.ts:money"]
+}

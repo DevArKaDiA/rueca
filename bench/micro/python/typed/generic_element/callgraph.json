@@ -1,0 +1,10 @@
+{
+  "main.py:Task.run": [],
+  "main.py:Worker.stop": [],
+  "main.py:run_all": [
+    "main.py:Task.run"
+  ],
+  "main.py:stop_all": [
+    "main.py:Worker.stop"
+  ]
+}

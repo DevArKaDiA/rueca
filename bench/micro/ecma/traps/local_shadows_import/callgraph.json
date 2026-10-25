@@ -1,0 +1,6 @@
+{
+  "fmt.ts:format": [],
+  "view.ts:loud": ["view.ts:loud.format"],
+  "view.ts:loud.format": [],
+  "view.ts:quiet": ["fmt.ts:format"]
+}

@@ -1,0 +1,5 @@
+{
+  "lib/numbers.ts:round2": [],
+  "lib/strings.ts:capitalize": [],
+  "main.ts:label": ["lib/numbers.ts:round2", "lib/strings.ts:capitalize"]
+}

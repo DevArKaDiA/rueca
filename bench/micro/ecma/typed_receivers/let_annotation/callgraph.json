@@ -1,0 +1,6 @@
+{
+  "store.ts:Cache.evict": [],
+  "store.ts:Store.save": [],
+  "store.ts:persist": ["store.ts:Store.save"],
+  "store.ts:purge": ["store.ts:Cache.evict", "store.ts:Store.save"]
+}
