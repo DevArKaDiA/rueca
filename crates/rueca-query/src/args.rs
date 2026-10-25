@@ -150,6 +150,12 @@ pub struct TraceArgs {
     pub min_confidence: Option<f64>,
     /// Maximum nodes returned, 1–2000 (default 200); hitting it sets `truncated`.
     pub limit: Option<i64>,
+    /// Only report and traverse neighbours with these labels, e.g. `["Function", "Method"]`.
+    /// Default: every label (a `File` caller is module-level code, a `Class` callee a constructor call).
+    pub labels: Option<Vec<String>>,
+    /// Include tests (test functions, `describe`/`it` blocks) as neighbours. Default false,
+    /// unless `edge_types` contains `TESTS`.
+    pub include_tests: Option<bool>,
     /// Indexed working-tree root path or repository id. Default: the server's root.
     pub repo: Option<String>,
 }

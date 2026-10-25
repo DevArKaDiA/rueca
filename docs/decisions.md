@@ -17,6 +17,43 @@ release point are in
 release ships after Java**, with every language above `supported` (none as
 `preview`).
 
+## 2026-10-24 — Alpha 2 quality pass: ranking over code, segment format 2
+
+The alpha's symbol index looked only at names, signatures, docstrings and
+paths; a BM25 baseline over function bodies beat it on localization. Changes,
+each kept only because the benchmark moved (`docs/bench/alpha-results.md`):
+
+- **Segment format 2.** The tantivy symbol index gains a `body` field (the
+  source text of each symbol's span, nested definitions included, ≤ 32 KiB,
+  read from the content packs at write time) and a `qname_suffix` field
+  (qualified-name suffixes for dotted queries such as `Session.request`).
+  Version-1 segments are rejected with `SegmentError::Version` and must be
+  re-indexed; `rueca mcp` detects an old segment from its header and
+  re-indexes on start. Segments grow ~20–25 %; index time is unchanged.
+- **Ranking.** Boosts body 8, name 4 (was 8), qualified name 3;
+  query term frequency `1 + ln n`; score × 0.5 for fields / variables /
+  constants and × 0.5 for tests (flag, `Test` label or test path); one-chunk
+  queries are name lookups (body × 0.25). The region around these values is
+  flat on the benchmark (±3 points); they were not tuned further to avoid
+  fitting 81 instances.
+- **`trace` leaves tests out by default** (`include_tests`, `labels`,
+  `tests_excluded` are additive). Module-level and initializer callers stay
+  and are identified by their label.
+- **TypeScript extractor 2**: named function expressions are definitions;
+  type parameters of call / construct signatures and function types, and
+  inside parse-error fragments, are not type references (hono: 11.9k → 5.6k
+  `Type` references); web/runtime globals (`Request`, `Response`, …) are
+  builtins for the resolver only; `export default x`, `module.exports = x`
+  and `export { a as b }` are recorded as self re-exports, and the resolver
+  now prefers an explicit `default` re-export over the default-export
+  heuristic.
+
+Tried and dropped: excluding nested definitions from a symbol's body (worse
+function ranking), a `.d.ts` penalty and body caps of 8 / 128 KiB (no
+measurable effect), an in-degree "popularity" prior to break same-name ties
+(no gain on Python lookups, worse on raw issue text). BM25 `k1` / `b` were
+not tuned: tantivy 0.27 fixes them unless a custom scorer is written.
+
 ## 2026-10-22 — Project renamed from Telar to Rueca
 
 `telar` is taken on crates.io by an unrelated Rust UI framework with its own

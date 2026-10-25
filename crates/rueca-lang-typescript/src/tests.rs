@@ -646,13 +646,152 @@ fn parse_errors_are_counted() {
 }
 
 // ---------------------------------------------------------------------------
+// Extractor version 2
+// ---------------------------------------------------------------------------
+
+#[test]
+fn named_function_expressions_are_definitions() {
+    let src = r#"
+/**
+ * Parse the query string.
+ */
+defineGetter(req, 'query', function query() {
+  return parse(this).query;
+});
+
+app.use(function handler(req, res) { next(); });
+
+module.exports.x = function x() { return 1 };
+
+export default isSupported && function httpAdapter(config) {
+  return new Promise(function dispatchHttpRequest(resolve, reject) {
+    function handleResponse(res) { resolve(res); }
+    stream.on('data', function onData(chunk) { handleResponse(chunk); });
+  });
+}
+
+const timing = (config) => {
+  return async function timing(c, next) { await next(); };
+};
+const anon = run(function () {});
+"#;
+    let f = facts("lib/request.js", src);
+    let q = def(&f, "query");
+    assert_eq!((q.label, q.parent), (Label::Function, None));
+    assert_eq!(q.signature.as_deref(), Some("function query()"));
+    assert_eq!(q.doc.as_deref(), Some("Parse the query string."));
+    assert_eq!(q.span.start_line, 4, "span starts at `function`, not at the call");
+    assert!(refs(&f, RefKind::Call, "parse").iter().all(|r| r.enclosing == Some(id(&f, "query"))));
+    assert!(has_def(&f, "handler") && has_def(&f, "x") && has_def(&f, "httpAdapter"));
+    let d = def(&f, "httpAdapter.dispatchHttpRequest");
+    assert_eq!(d.parent, Some(id(&f, "httpAdapter")));
+    assert!(has_def(&f, "httpAdapter.dispatchHttpRequest.handleResponse"));
+    assert!(has_def(&f, "httpAdapter.dispatchHttpRequest.onData"));
+    let call = refs(&f, RefKind::Call, "handleResponse");
+    assert_eq!(call[0].enclosing, Some(id(&f, "httpAdapter.dispatchHttpRequest.onData")));
+    assert_eq!(def(&f, "timing.timing").parent, Some(id(&f, "timing")));
+    // Anonymous function expressions stay anonymous.
+    assert_eq!(f.definitions.iter().filter(|d| d.label == Label::Function).count(), 9);
+}
+
+#[test]
+fn type_parameters_of_signatures_and_function_types_are_not_references() {
+    let src = r#"
+interface Handler<E extends Env> {
+  <P extends string, E2 extends Env = E>(path: P, h: H<E2, P>): Hono<E2>
+  new <T>(value: T): Box<T>
+}
+type Mapper = <In, Out>(x: In) => Out
+type Ctor = new <C>(c: C) => Wrapped<C>
+type Keys<T> = { [K in keyof T]: T[K] }
+"#;
+    let f = facts("src/types.ts", src);
+    for tp in ["E", "P", "E2", "T", "In", "Out", "C", "K"] {
+        assert!(refs(&f, RefKind::Type, tp).is_empty(), "type parameter {tp} reported as a type reference");
+    }
+    for real in ["Env", "H", "Hono", "Box", "Wrapped"] {
+        assert!(!refs(&f, RefKind::Type, real).is_empty(), "missing type reference {real}");
+    }
+}
+
+/// tree-sitter-typescript 0.23 splits an interface whose generic call
+/// signatures start on new lines into `ERROR` fragments; the type parameters
+/// of the interface and of each fragment stay in scope there.
+#[test]
+fn type_parameters_survive_signature_parse_errors() {
+    let src = r#"
+export interface HandlerInterface<E extends Env = Env, BasePath extends string = '/'> {
+  <P extends string = BasePath, E2 extends Env = E>(
+    handler: H<E2, P>
+  ): HonoBase<E, BasePath>
+
+  // two handlers
+  <
+    P extends string = BasePath,
+    E2 extends Env = E,
+    E3 extends Env = Merge<E, E2>,
+  >(
+    ...handlers: [H<E2, P>, H<E3, P>]
+  ): HonoBase<E3, BasePath>
+}
+"#;
+    let f = facts("src/types.ts", src);
+    assert!(f.parse_errors > 0, "the grammar gap this test covers is gone; simplify error_region");
+    for tp in ["E", "BasePath", "P", "E2", "E3"] {
+        assert!(refs(&f, RefKind::Type, tp).is_empty(), "type parameter {tp} reported as a type reference");
+    }
+    let h = refs(&f, RefKind::Type, "H");
+    assert!(h.len() >= 3);
+    assert!(h.iter().all(|r| r.enclosing == Some(id(&f, "HandlerInterface"))), "{h:?}");
+    assert!(!refs(&f, RefKind::Type, "Merge").is_empty());
+}
+
+#[test]
+fn runtime_globals_are_builtins_for_the_resolver_only() {
+    let p = TypeScriptPack;
+    for g in ["Request", "Response", "Headers", "FormData", "Blob", "ReadableStream", "WebSocket", "Event", "crypto"] {
+        assert!(p.is_builtin(g), "{g}");
+    }
+    for g in ["URL", "URLSearchParams", "fetch", "AbortController", "TextEncoder", "structuredClone", "Buffer"] {
+        assert!(p.is_builtin(g), "{g}");
+    }
+    // References are still emitted, so an imported or local `Request` resolves.
+    let f = facts(
+        "src/a.ts",
+        "import { Request } from './request'\nexport function f(r: Request) { return new Response(r) }\n",
+    );
+    assert!(has_ref(&f, RefKind::Type, "Request", None));
+    assert!(has_ref(&f, RefKind::New, "Response", None));
+    // Hard builtins are dropped at the source as before.
+    let f = facts("src/b.ts", "export function g() { return fetch(new URL('x')) }\n");
+    assert!(refs(&f, RefKind::Call, "fetch").is_empty() && refs(&f, RefKind::New, "URL").is_empty());
+}
+
+#[test]
+fn local_exports_are_self_reexports() {
+    let src = "function main() {}\nconst helper = 1;\nexport { helper as util, main };\nexport default main;\n";
+    let f = facts("src/app.ts", src);
+    let own: Vec<_> = f.imports.iter().filter(|i| i.reexport).collect();
+    assert_eq!(own.len(), 2, "{:?}", f.imports);
+    assert!(own.iter().all(|i| i.module == "./app.ts" && !i.type_only));
+    assert_eq!(names(own[0]), vec![n("helper", Some("util"))]);
+    assert_eq!(names(own[1]), vec![n("main", Some("default"))]);
+    assert!(def(&f, "main").exported && def(&f, "helper").exported);
+    // CommonJS `module.exports = x` is the ESM-interop default.
+    let f = facts("lib/express.js", "function createApp() {}\nmodule.exports = createApp;\n");
+    let own: Vec<_> = f.imports.iter().filter(|i| i.reexport).collect();
+    assert_eq!(own.len(), 1);
+    assert_eq!((own[0].module.as_str(), names(own[0])), ("./express.js", vec![n("createApp", Some("default"))]));
+}
+
+// ---------------------------------------------------------------------------
 // Pack metadata
 // ---------------------------------------------------------------------------
 
 #[test]
 fn pack_metadata() {
     let p = TypeScriptPack;
-    assert_eq!(p.extractor_version(), 1);
+    assert_eq!(p.extractor_version(), 2);
     assert_eq!(p.self_receivers(), &["this"]);
     assert!(p.is_builtin("console") && p.is_builtin("Promise") && p.is_builtin("Record"));
     assert!(!p.is_builtin("UserService"));

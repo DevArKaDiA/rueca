@@ -163,6 +163,14 @@ What packs deliberately do and don't do:
 - **Tests are definitions too**: `test_*` functions and `Test*` classes in
   Python; `describe` / `it` / `test` blocks in JS/TS become `Test` nodes
   whose qualified name is the describe chain.
+- **Named function expressions are definitions** in JS/TS wherever they
+  appear (`app.use(function handler() {})`, `defineGetter(req, "query",
+  function query() {})`, `return function timing() {}`): a `Function` child
+  of the enclosing definition. Anonymous callbacks are not.
+- **Exports the resolver needs exactly are recorded as facts**: in JS/TS,
+  `export default x`, `module.exports = x` and `export { a as b }` become
+  re-exports of the file's own names, so `import x from "./m"` binds the
+  right definition instead of a guess.
 
 Facts are cached at `<store>/facts/<sha>-<lang>-v<extractor version>.bin`.
 Re-indexing an unchanged file is a cache hit; bumping a pack's
@@ -201,7 +209,10 @@ its imports bind: `from .http import Session` binds `Session` to the node
 module; star imports bind every exported name. Looking up a name in a module
 checks its own definitions, then its re-exports (`export { x } from`,
 `export *`), then the names its own imports bind (barrel files, package
-`__init__.py`), transitively and cycle-safe up to depth 10.
+`__init__.py`), transitively and cycle-safe up to depth 10. An ECMAScript
+`default` import binds a definition named `default`, else the module's
+explicit `default` re-export (`export default x`), else a heuristic (the
+exported class or function named after the file, else the only export).
 
 **The strategy ladder.** Each reference is resolved by trying strategies in
 order; the first one that succeeds wins and stamps the edge:
@@ -222,7 +233,11 @@ order; the first one that succeeds wins and stamps the edge:
 (Strategy 5, receiver typing from assignments, is not implemented in the
 alpha.) A reference to a builtin, a name bound to an external module, or a
 `self` member that does not exist **stops** resolution: it is counted as an
-expected miss, never fuzzy-matched. Calls to a class also call its
+expected miss, never fuzzy-matched. For JS/TS, "builtin" includes web and
+runtime globals that a project could also define (`Request`, `Response`,
+`Headers`, `Event`, `crypto`, …): an imported or same-module `Request` still
+resolves through rungs 1–4, but an unbound one is never matched to a project
+type by unique name. Calls to a class also call its
 `__init__` / `constructor` (confidence × 0.95).
 
 In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
@@ -256,7 +271,7 @@ component exists because a tool needs it:
 | edge metadata | confidence, strategy, evidence span per edge | `trace` |
 | name indexes | node ids sorted by qualified name and by name | symbol lookup (`get_symbol`, `get_snippet`, `trace`) |
 | file → symbols | symbol nodes per file, sorted by position | `get_file_outline`, `search_code` (enclosing symbol) |
-| tantivy symbol index | BM25 over name, qualified name, signature, path, docstring | `search_symbols` |
+| tantivy symbol index | BM25 over name, qualified name, signature, path, docstring and the symbol's source (`body`, from the content packs) | `search_symbols` |
 | trigram index | which files contain each 3-byte sequence | `search_code` |
 | content packs | zstd-compressed file contents by blob SHA | `search_code`, `get_snippet` |
 
@@ -314,16 +329,34 @@ are returned as `candidates`.
 | `trace` | lookup → adjacency + edge metadata | breadth-first, N hops |
 | `get_file_outline` | file → symbols → `DEFINES` | containment tree |
 
-### `search_symbols` — "where is the thing called…?"
+### `search_symbols` — "where is the thing called…?" / "where is the code that…?"
 
 Ranks definitions, not lines. The query is split with the same code-aware
 tokenizer used at index time (`user by id` → `user`, `by`, `id`, and
 `getUserById` → `get`, `user`, `by`, `id`, plus the whole identifier), then
-BM25 runs over five fields with boosts: name ×8, qualified name ×3,
-signature ×1.5, path ×1, docstring ×0.5, plus a bonus for an exact name or
-qualified-name match. Filters (`labels`, `language`) are exact terms;
-`path_glob` filters after ranking. Default labels exclude `File`, `Folder`,
-`Module` and `Repository`. Ties break by node id so pages are stable.
+BM25 runs over six fields with boosts: the symbol's **source text** (`body`)
+×8, name ×4, qualified name ×3, signature ×1.5, path ×1, docstring ×0.5.
+On top of that:
+
+- **Exact and qualified matches**: the whole query equal to a name (×20) or
+  qualified name (×10); a dotted part of the query (`Session.request`,
+  `util:formatAmount`) equal to a qualified-name suffix (×20); two adjacent
+  words (`session request`) equal to one (×10). So `Session.request` ranks
+  that method above `session` and `Session`.
+- **Name lookups vs descriptions**: a one-chunk query (`getUserById`) is a
+  name lookup and the body only breaks ties (×0.25), so a definition is not
+  outranked by its callers. A multi-word query (keywords, an error message,
+  an issue) is matched against the code itself: a function whose body uses
+  `redirect`, `location` and `header` is found even if its name says none of
+  that. Words repeated in the query weigh more (`1 + ln count`).
+- **Priors**: the score is multiplied by 0.5 for fields, variables and
+  constants, and by 0.5 for tests (test functions, `describe`/`it` blocks,
+  files under `test`/`tests`/`__tests__`/`spec` or named `test_*.py`,
+  `*.spec.ts`, …), so code an agent navigates to comes first.
+
+Filters (`labels`, `language`) are exact terms; `path_glob` filters after
+ranking. Default labels exclude `File`, `Folder`, `Module` and `Repository`.
+Ties break by node id so pages are stable.
 
 ### `search_code` — "where does this text appear?"
 
@@ -364,7 +397,27 @@ only `edge_types` (default `CALLS`) and skipping edges below
 `min_confidence`. Each direction keeps its own visited set, so a node
 reachable both ways appears once per direction. Every traversed edge is
 returned with its confidence, strategy and `call_site` (the evidence span).
-`limit` caps nodes and sets `truncated`. Other edge kinds make `trace` a
+`limit` caps nodes and sets `truncated`.
+
+Which neighbours count:
+
+- **Tests are left out by default.** In a well-tested project most callers
+  of a function are tests (over half of them in a sample of `vuejs/core`
+  functions), which would
+  bury the code callers and eat the `limit`. They are counted in
+  `tests_excluded`; `include_tests: true` brings them back, and following
+  `TESTS` edges includes them automatically.
+- **Code outside functions is reported where it lives.** A call at module
+  level comes from the `File` node; one in a class body or a variable / field
+  initializer comes from that `Class`, `Variable`, `Constant` or `Field`.
+  These are real call sites (the code runs on import or construction), so
+  they are kept and the label says what they are.
+- **Calling a class is a constructor call**: the callee is the `Class`, and
+  its `__init__` / `constructor` is listed as a callee too (confidence
+  × 0.95).
+- `labels` restricts reported *and traversed* neighbours, e.g.
+  `["Function", "Method"]` for a callables-only call graph. The root is never
+  filtered. Other edge kinds make `trace` a
 general traversal: `["INHERITS"]` walks a class hierarchy, `["IMPORTS"]`
 from a `File` node walks module dependencies, `["TESTS"]` finds the tests
 that exercise a function.
@@ -412,7 +465,12 @@ Known gaps behind low-confidence or missing edges, in rough order of impact:
   inheritance).
 - Dynamic dispatch, decorators that replace functions, `getattr`,
   dependency injection containers.
-- JS named function expressions passed as arguments are not definitions yet.
+- Same-name definitions: a bare-name `search_symbols` lookup of `get` or
+  `add_url_rule` ranks them by text only (shorter, denser matches first);
+  nothing structural (base class, call count) breaks the tie yet.
+- `search_symbols` ranks symbols, not files: a file is found through its
+  best-matching definition. Module-level code that is not inside a
+  definition is only reachable through `search_code`.
 
 The benchmark ([alpha results](bench/alpha-results.md)) measures how these
 gaps show up on real repositories.

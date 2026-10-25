@@ -49,6 +49,8 @@ struct WorkerOut {
     postings: HashMap<u32, RoaringBitmap>,
     text_files: RoaringBitmap,
     new_blobs: Vec<(Sha, u64, u64, u64)>,
+    /// `(node, body text)` for the symbol index.
+    bodies: Vec<(u32, String)>,
 }
 
 pub(crate) fn write_segment(
@@ -76,6 +78,16 @@ pub(crate) fn write_segment(
                 by_sha.insert(sha, jobs.len());
                 jobs.push(Job { sha, rep: i, files: vec![i as u32], known: index.map.contains_key(&sha) });
             }
+        }
+    }
+    // Symbol nodes per file, for the symbol index `body` field.
+    let mut file_nodes: Vec<Vec<u32>> = vec![Vec::new(); graph.files.len()];
+    for (i, n) in graph.nodes.iter().enumerate() {
+        if let Some(f) = n.file
+            && n.span.is_some()
+            && let Some(v) = file_nodes.get_mut(f as usize)
+        {
+            v.push(i as u32);
         }
     }
     let reader = PackReader::with_index(store_dir, index);
@@ -121,6 +133,9 @@ pub(crate) fn write_segment(
                 }
             };
             if ngram::is_text(&content) {
+                for &f in &job.files {
+                    out.bodies.extend(symbols::body_texts(&file_nodes[f as usize], &graph.nodes, &content));
+                }
                 let tris = ngram::trigrams(&content);
                 for &f in &job.files {
                     out.text_files.insert(f);
@@ -193,7 +208,11 @@ pub(crate) fn write_segment(
     // Merge per-worker trigram postings.
     let mut postings: HashMap<u32, RoaringBitmap> = HashMap::new();
     let mut text_files = RoaringBitmap::new();
+    let mut bodies: Vec<Option<String>> = vec![None; graph.nodes.len()];
     for o in outs {
+        for (n, b) in o.bodies {
+            bodies[n as usize] = Some(b);
+        }
         text_files |= o.text_files;
         for (k, bm) in o.postings {
             match postings.get_mut(&k) {
@@ -222,7 +241,7 @@ pub(crate) fn write_segment(
         w.add("meta", &serde_json::to_vec(&meta).map_err(|e| SegmentError::Other(e.to_string()))?)?;
         graph::write_graph(&mut w, graph)?;
         let scratch = tempfile::Builder::new().prefix("tantivy-").tempdir_in(&tmp_dir)?;
-        symbols::write_symbols(&mut w, &graph.nodes, &graph.files, scratch.path())?;
+        symbols::write_symbols(&mut w, &graph.nodes, &graph.files, &bodies, scratch.path())?;
         drop(scratch);
         let (keys, offsets, post) = ngram::serialize_postings(postings)?;
         w.add_pod("ngrams.keys", &keys)?;

@@ -1,5 +1,5 @@
 {
- "date": "2026-10-23 02:52 UTC",
+ "date": "2026-10-25 02:17 UTC",
  "machine": {
   "platform": "macOS-26.4.1-arm64-arm-64bit",
   "machine": "arm64",
@@ -27,10 +27,10 @@
   },
   "rueca": {
    "available": true,
-   "reason": "RUECA_BIN not set",
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 8d6bc2783fd3)",
+   "reason": "",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 45bac6854a67)",
    "recorded_versions": [
-    "rueca 0.1.0-alpha.1 (binary sha256 8d6bc2783fd3)"
+    "rueca 0.1.0-alpha.1 (binary sha256 45bac6854a67)"
    ]
   }
  },

@@ -35,7 +35,7 @@
 //! blob index heals itself (it is rebuilt whenever the set of packs it lists
 //! differs from the packs on disk).
 //!
-//! # Bundle format (`.rcseg`, [`FORMAT_VERSION`] 1)
+//! # Bundle format (`.rcseg`, [`FORMAT_VERSION`] 2)
 //!
 //! All integers little-endian. Modeled on Quickwit splits: concatenated
 //! components, a footer directory, a fixed-size trailer.
@@ -59,6 +59,10 @@
 //! [`SegmentError::Corrupt`]; malformed input never panics in Rueca code.
 //! Readers ignore components they do not know, so components can be added
 //! without a version bump; any other change bumps [`FORMAT_VERSION`].
+//! Version 2 changed the symbol index schema (`body`, `qname_suffix`);
+//! version-1 segments are rejected with [`SegmentError::Version`] and must be
+//! re-indexed ([`Store::segment_format_version`] reads the header alone, so
+//! callers can detect that cheaply).
 //!
 //! Components (`N` nodes, `E` edges, `F` files; ids are `u32` indexes into
 //! the `nodes` / `files` / edge order of the written [`ResolvedGraph`]):
@@ -93,17 +97,43 @@
 //!
 //! One tantivy document per node, **doc id = node id** (one tantivy segment,
 //! built by one indexing thread and merged in node order; checked at write
-//! and open). Text fields `name`, `qualified_name`, `signature`, `path`,
-//! `doc` use the [`tokenizer`] (camelCase / PascalCase / snake_case / digit /
-//! path / dot splitting, lowercased, plus the whole identifier as one token)
-//! at index and query time. Query = OR over every (query token × text field)
-//! with boosts name 8 ≫ qualified_name 3 > signature 1.5 > path 1 > doc 0.5,
-//! plus whole-query exact matches on the lowercased name (20) and qualified
-//! name (10), so `user by id` finds `getUserById` and `getUserById` ranks the
-//! exact name first. Labels and language are exact-term filters; `path_glob`
-//! is a post-filter with over-fetching. Results are ordered by score
-//! descending, then node id ascending (tantivy breaks ties by doc address,
-//! which equals node id, so pagination is exact). The index is served through
+//! and open). Fields:
+//!
+//! | Field | Content | Boost |
+//! |---|---|---|
+//! | `name` | node name | 4 |
+//! | `qualified_name` | global qualified name | 3 |
+//! | `signature` | one-line signature | 1.5 |
+//! | `path` | file path | 1 |
+//! | `doc` | docstring | 0.5 |
+//! | `body` | the source text of the node's span (nested definitions included), from the content packs at write time, at most 32 KiB; none for files, folders and modules | 8 (0.25 for one-chunk queries) |
+//! | `name_exact` / `qname_exact` | lowercased name / qualified name, one term | 20 / 10 |
+//! | `qname_suffix` | every suffix of ≥ 2 segments of the lowercased qualified name, separators (`.` `:` `::` `/` `\` `#`) normalized to `.` (`pkg.http.Session.send` → `http.session.send`, `session.send`) | 20 (dotted query part), 10 (two adjacent query words) |
+//! | `label`, `language` | exact-term filters | — |
+//!
+//! Text fields use the [`tokenizer`] (camelCase / PascalCase / snake_case /
+//! digit / path / dot splitting, lowercased, plus the whole identifier as one
+//! token) at index and query time. Query = OR over every distinct (query token
+//! × text field), each boosted by the field boost × `1 + ln(count)` of the
+//! token in the query (issue text that keeps naming a term is about it); plus
+//! whole-query exact matches on name and qualified name; plus `qname_suffix`
+//! matches for dotted query parts (`Session.request`, `util:formatAmount`,
+//! trailing punctuation ignored) and for pairs of adjacent query words
+//! (`session request`). A query that is a single whitespace-free chunk is a
+//! name lookup: `body` only breaks ties (boost 0.25), so a definition is not
+//! outranked by its callers. BM25 is tantivy's (k1 = 1.2, b = 0.75).
+//!
+//! The text score is multiplied by a query-independent **prior**: 0.5 for
+//! `Field` / `Variable` / `Constant`, 0.5 for tests (`is_test`, the `Test`
+//! label, or a test path: a `test`, `tests`, `__tests__`, `spec`, `specs`,
+//! `testing` or `e2e` directory, `test_*.py`, `*_test.py`, `conftest.py`,
+//! `*.test.*`, `*.spec.*`), multiplied together, 1 otherwise. Priors are
+//! computed from the node table at open (a tantivy `tweak_score` collector).
+//!
+//! Labels and language are exact-term filters; `path_glob` is a post-filter
+//! with over-fetching. Results are ordered by score descending, then node id
+//! ascending (tantivy breaks ties by doc address, which equals node id, also
+//! under `tweak_score`, so pagination is exact). The index is served through
 //! a read-only tantivy `Directory` over slices of the bundle map (the Quickwit
 //! bundle-directory pattern); nothing is copied at open.
 //!
@@ -183,7 +213,7 @@
 //! - The trigram prefilter folds ASCII case only; non-ASCII case variants
 //!   rely on case-folded classes of at most 8 code points, else a scan.
 #[cfg(target_endian = "big")]
-compile_error!("rueca-segment format v1 reads little-endian arrays zero-copy; big-endian hosts are unsupported");
+compile_error!("rueca-segment format v2 reads little-endian arrays zero-copy; big-endian hosts are unsupported");
 
 mod bundle;
 mod graph;
@@ -200,7 +230,10 @@ use std::path::{Path, PathBuf};
 use rueca_model::{EdgeKind, EdgeMeta, FileEntry, FileId, Label, Language, Node, NodeId, ResolvedGraph, SnapshotInfo};
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 1;
+/// Bundle format version. 2 (alpha.2): the symbol index gained the `body`
+/// and `qname_suffix` fields; version-1 segments are rejected with
+/// [`SegmentError::Version`] and must be re-indexed.
+pub const FORMAT_VERSION: u32 = 2;
 
 pub type Result<T> = std::result::Result<T, SegmentError>;
 
@@ -210,7 +243,9 @@ pub enum SegmentError {
     Io(#[from] std::io::Error),
     #[error("corrupt segment: {0}")]
     Corrupt(String),
-    #[error("unsupported format version {0}")]
+    #[error(
+        "unsupported format version {0} (this build reads segment format {FORMAT_VERSION}); re-index with `rueca index`"
+    )]
     Version(u32),
     #[error("invalid query: {0}")]
     InvalidQuery(String),
@@ -303,6 +338,12 @@ impl Store {
     }
     pub fn segment_path(&self, segment_id: &str) -> PathBuf {
         self.dir.join("segments").join(format!("{segment_id}.rcseg"))
+    }
+    /// Format version recorded in the header of a stored segment (cheap: reads
+    /// 16 bytes). A value other than [`FORMAT_VERSION`] means the segment was
+    /// written by another build and must be re-indexed.
+    pub fn segment_format_version(&self, segment_id: &str) -> Result<u32> {
+        bundle::Bundle::peek_version(&self.segment_path(segment_id))
     }
     pub fn open_segment(&self, segment_id: &str) -> Result<Segment> {
         Segment::open(&self.segment_path(segment_id), &self.dir)

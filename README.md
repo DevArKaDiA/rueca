@@ -153,21 +153,24 @@ SCIP-derived gold and PyCG). Full results:
 
 | Overall, % | BM25 | cbm 0.12.0 | Rueca |
 |---|---:|---:|---:|
-| Localization: file Acc@5 | **60.5** | 56.8 | 59.3 |
-| Localization: function Acc@10 | **47.9** | 35.6 | 30.1 |
-| Callers F1 | 82.8 | 82.2 | **83.7** |
-| Callees F1 | 62.7 | 69.9 | **73.5** |
-| Definition found | 100 | 97.1 | 90.9 |
+| Localization (keywords): file Acc@5 | 60.5 | 56.8 | **69.1** |
+| Localization (keywords): function Acc@10 | 47.9 | 35.6 | **54.8** |
+| Localization (issue text): file Acc@5 | 67.9 | 65.4 | **74.1** |
+| Localization (issue text): function Acc@10 | **52.1** | 39.7 | **52.1** |
+| Callers F1 | 82.8 | 82.2 | **86.4** |
+| Callees F1 | 62.7 | 69.9 | **74.8** |
+| Definition found | 100 | 97.1 | 98.3 |
 | Median query latency | ~0 s | 0.43 s | **0.01 s** |
 
-Rueca leads on TS/JS call edges and latency, and trails on localization
-ranking and on Python structural questions. Contributions that move these
-numbers are very welcome.
+Rueca ranks definitions by their code as well as their names, leads on
+TS/JS call edges and on latency, and still trails cbm on Python structural
+questions (callers/callees F1, bare-name lookup) and BM25 on file Acc@1.
+Contributions that move these numbers are very welcome.
 
 ## Roadmap
 
-- Ranking for localization; receiver typing from assignments; more JS
-  definition shapes.
+- Receiver typing from assignments; structural tie-breaks for same-name
+  definitions; Python call-edge recall.
 - More languages (Go, Java, PHP, Kotlin, Swift, Rust, …).
 - Optional compiler-grade precision from SCIP indexes.
 - Service mode (object storage, MCP over HTTP) and an org-wide mode over

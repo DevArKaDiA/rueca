@@ -132,6 +132,8 @@ pub struct TraceResult {
     pub nodes: Vec<TraceNode>,
     pub edges: Vec<TraceEdge>,
     pub truncated: bool,
+    /// Distinct test neighbours left out because `include_tests` was false.
+    pub tests_excluded: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]

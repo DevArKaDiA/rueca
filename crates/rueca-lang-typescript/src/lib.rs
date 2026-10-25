@@ -34,6 +34,7 @@
 //! | other module-level `const` | `Constant` if `UPPER_CASE`, else `Variable` | `let` / `var` → `Variable`; destructuring gives one per name |
 //! | methods / function-valued pairs of a module-level object literal (`export const api = { get() {} }`) | `Method` children of the variable | |
 //! | CommonJS `module.exports = function f`, `exports.x = function`, `X.prototype.y = function`, `X.y = function` | `Function`, or `Method` of a module-level `X` | |
+//! | named function expression anywhere else: call arguments (`defineGetter(req, "query", function query() {})`, `app.use(function handler() {})`), `return function timing() {}`, operands | `Function` child of the enclosing definition | span = the function expression; doc = JSDoc before it or before the statement holding it. Anonymous ones are not definitions |
 //! | `describe` / `it` / `test` (also `context`, `suite`, `specify`, `fit`, `xit`, `.each`, `.only`, `.skip`, `.todo`) with a string first argument and a function argument | `Test` | `is_test`; qualified name = describe chain joined by ` > ` (dots in titles become `_`); references inside get the test as `enclosing` |
 //!
 //! - `exported`: `export` declarations, `export { a, b as c }`,
@@ -59,10 +60,25 @@
 //!   (`console.log`, `Promise.all`, `JSON.parse`) are skipped unless the name
 //!   is shadowed locally. Capitalized JSX tags (`<Button/>`, `<Foo.Bar/>`)
 //!   are `Call`s too.
+//! - Builtins come in two lists (`builtins.rs`): ECMAScript / TypeScript /
+//!   Node / test globals that are never emitted, and web-platform and runtime
+//!   globals that projects may also define (`Request`, `Response`,
+//!   `Headers`, `FormData`, `Blob`, `ReadableStream`, `WebSocket`, `Event*`,
+//!   `crypto`, `Element`, …). References to the latter are emitted (an
+//!   imported or same-module `Request` still resolves), but
+//!   [`LanguagePack::is_builtin`] reports both lists, so the resolver never
+//!   matches an unbound `Request` to a project symbol by unique name.
 //! - `New`: `new Foo()`; `Throw`: `throw new X()` (also a `New`).
 //! - `Type`: type identifiers in annotations, generics, `implements`,
 //!   `extends` (classes and interfaces), `satisfies`, `as`, skipping builtin
-//!   types and type parameters in scope.
+//!   types and type parameters in scope. Type parameters are scoped by the
+//!   declaration that introduces them: functions, methods, classes,
+//!   interfaces, type aliases, call / construct signatures, function and
+//!   constructor types, mapped types (`[K in …]`) and `infer`. Parse-error
+//!   regions (tree-sitter-typescript 0.23 splits interfaces whose generic call
+//!   signatures start on new lines into `ERROR` fragments) keep the type
+//!   parameters of the declaration they continue and of earlier fragments,
+//!   and their references are attributed to that declaration.
 //! - `Decorator`: `@Injectable()` → `Injectable`; `@a.b()` → `b` / `a`.
 //! - `Read`: identifiers and plain member chains (`a.b`, `this.x`) in value
 //!   position (arguments, return values, initialisers, assignment right-hand
@@ -88,12 +104,17 @@
 //! | `export { a as b } from "m"` | `a` as `b` | | `reexport` |
 //! | `export * from "m"` | `*` | | `reexport` |
 //! | `export * as ns from "m"` | | `ns` | `reexport` |
+//! | `export default x` / `module.exports = x` (`x` an identifier) | `x` as `default` | | `reexport`, module = `./<own file name>` |
+//! | `export { a as b }` (no `from`, `a` ≠ `b`) | `a` as `b` | | `reexport`, module = `./<own file name>` |
 //! | `const x = require("m")` / `await import("m")` | | `x` | |
 //! | `const { a, b: c } = require("m")` | `a`, `b` as `c` | | |
 //! | `const y = require("m").y` | `y` | | |
 //! | `require("m")` / `import("m")` elsewhere | | | |
 //!
 //! Mixed value/type imports are split so `type_only` stays exact per name.
+//! Self re-exports (module `./<own file name>`) resolve to the file itself, so the
+//! resolver binds `import x from "./m"` and `import { b } from "./m"` to the
+//! exact local definition instead of guessing the default export.
 //!
 //! # Locals
 //!
@@ -162,12 +183,12 @@ impl LanguagePack for TypeScriptPack {
     }
 
     fn extractor_version(&self) -> u32 {
-        1
+        2
     }
 
     fn extract(
         &self,
-        _path: &str,
+        path: &str,
         language: Language,
         source: &[u8],
         budget: &Budget,
@@ -177,7 +198,7 @@ impl LanguagePack for TypeScriptPack {
         let tree = rueca_extract::parse(&grammar, source, budget)?;
         let root = tree.root_node();
         let locals = locals::Locals::compute(query, root, source, Instant::now() + budget.max_parse_time);
-        let mut facts = extract::extract_tree(root, source, budget.max_depth, &locals);
+        let mut facts = extract::extract_tree(root, source, path, budget.max_depth, &locals);
         facts.parse_errors = count_errors(&tree);
         facts.line_count = line_count(source);
         Ok(facts)
@@ -192,7 +213,7 @@ impl LanguagePack for TypeScriptPack {
     }
 
     fn is_builtin(&self, name: &str) -> bool {
-        builtins::is_builtin(name)
+        builtins::is_global(name)
     }
 
     fn self_receivers(&self) -> &'static [&'static str] {

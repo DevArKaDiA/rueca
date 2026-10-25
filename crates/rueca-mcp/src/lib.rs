@@ -215,14 +215,31 @@ impl IndexGate {
 }
 
 /// The root to auto-index: `opts.root` when `auto_index` is set and the store
-/// has no entry covering it.
+/// has no entry covering it, or that entry's segment is in an older format.
 pub fn root_to_index(opts: &ServerOptions) -> Option<PathBuf> {
     let root = opts.root.as_ref().filter(|_| opts.auto_index)?;
     let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
-    match rueca_segment::Store::open(&opts.store_dir).and_then(|s| s.entry_for_path(&canon)) {
+    let store = match rueca_segment::Store::open(&opts.store_dir) {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::warn!(error = %err, "cannot read the store catalog; indexing anyway");
+            return Some(canon);
+        }
+    };
+    match store.entry_for_path(&canon) {
         Ok(Some(entry)) => {
-            tracing::info!(root = %canon.display(), segment = %entry.segment_id, "serving existing index");
-            None
+            // A segment written in an older format is re-indexed instead of
+            // failing every tool call.
+            match store.segment_format_version(&entry.segment_id) {
+                Ok(v) if v != rueca_segment::FORMAT_VERSION => {
+                    tracing::info!(root = %canon.display(), version = v, "index has an old segment format; re-indexing");
+                    Some(canon)
+                }
+                _ => {
+                    tracing::info!(root = %canon.display(), segment = %entry.segment_id, "serving existing index");
+                    None
+                }
+            }
         }
         Ok(None) => Some(canon),
         Err(err) => {
@@ -346,6 +363,26 @@ mod tests {
         let failed = IndexGate::new(PathBuf::from("/repo"));
         failed.finish(Err("disk full".into()));
         assert_eq!(failed.wait(Duration::ZERO), Ok(Some("disk full".to_string())));
+    }
+
+    #[test]
+    fn old_segment_format_is_reindexed() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("app.py"), "def main():\n    pass\n").unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let opts = ServerOptions { store_dir: store.path().into(), root: Some(root.path().into()), auto_index: true };
+        assert!(root_to_index(&opts).is_some(), "not indexed yet");
+        index_root(root.path(), store.path()).unwrap();
+        assert_eq!(root_to_index(&opts), None, "current format is served");
+        // Rewrite the header's format version as an older build would have.
+        let st = rueca_segment::Store::open(store.path()).unwrap();
+        let entry = st.entries().unwrap().pop().unwrap();
+        let path = st.segment_path(&entry.segment_id);
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(st.segment_format_version(&entry.segment_id).unwrap(), 1);
+        assert!(root_to_index(&opts).is_some(), "old format is re-indexed");
     }
 
     #[test]

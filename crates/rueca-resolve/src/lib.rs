@@ -32,7 +32,9 @@
 //!   the submodule `m.x`; `from m import *` binds every exported top-level
 //!   definition of `m`. Explicit imports override star imports.
 //! - ECMAScript named imports bind the exported symbol of that name, `default`
-//!   binds the target's default export (a definition named `default`, else the
+//!   binds the target's default export (a definition named `default`, else an
+//!   explicit re-export of `default` — packs record `export default x` and
+//!   `export { a as b }` as re-exports of the file's own names — else the
 //!   single exported class/function named after the file, else the only
 //!   exported top-level definition), namespace imports bind the module.
 //! - Imports of non-project modules bind the name as *external*: references
@@ -914,13 +916,9 @@ impl<'a> Resolver<'a> {
         if let Some(n) = self.top_level_def(f, name) {
             return Some(Target::Symbol(n));
         }
-        if !python
-            && name == "default"
-            && let Some(n) = self.default_export(f)
-        {
-            return Some(Target::Symbol(n));
-        }
-        // Re-exports, in order. Explicit names first, then star re-exports.
+        // Re-exports, in order. Explicit names first (including a module's
+        // re-export of its own names, `export default x` / `export { a as b }`,
+        // which beats the default-export heuristic), then star re-exports.
         let imports = self.imports(f);
         let mut stars = Vec::new();
         for (k, imp) in imports.iter().enumerate() {
@@ -951,6 +949,12 @@ impl<'a> Resolver<'a> {
                     };
                 }
             }
+        }
+        if !python
+            && name == "default"
+            && let Some(n) = self.default_export(f)
+        {
+            return Some(Target::Symbol(n));
         }
         if name != "default" {
             for t in stars.into_iter().flatten() {
