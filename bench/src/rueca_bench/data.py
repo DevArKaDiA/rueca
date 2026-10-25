@@ -14,10 +14,11 @@ subset, a Terraform module, a Kubernetes microservices repository).
    since python-hcl2 reports lines for blocks only. Files cut by the
    RFC §4.5 rules (lockfiles, fixtures / testdata, > 256 KiB, templated YAML
    with `{{ }}`) are not in the reference.
-   An arm *covers* a reference key when it has a node in the same file with
-   the same name (the last key segment) whose start line lies inside the
-   key's span (key line .. end of its value); arms are free to qualify the
-   key differently (Rueca key paths, cbm's flattened names). **Span line
+   An arm *covers* a reference key when it has a node in the same file named
+   like the key (its last segment, or a qualified name ending in it) whose
+   start line lies inside the key's span (key line .. end of its value);
+   arms are free to qualify the key differently (Rueca key paths, cbm's
+   flattened names). **Span line
    accuracy** = covered keys whose node starts exactly on the key's line.
 2. **Env bridge precision / recall** against hand-labelled
    `(reader, env var)` and `(provider, env var)` pairs
@@ -481,12 +482,16 @@ def grep_env_edges(root: Path, readers: list[str], providers: list[str]) -> dict
 
 def candidate_env_names(root: Path, spec: dict, gold: dict) -> list[str]:
     """Names to ask a tool without an enumeration API about (Rueca's
-    `trace` on `$env:NAME`): every gold name plus every UPPER_CASE string
-    literal / env-looking token in scope, so spurious edges can be seen."""
+    `trace` on `$env:NAME`): every gold name plus every UPPER_CASE token and
+    env-looking assignment in scope (code, data files, Dockerfiles, `.env`),
+    so spurious edges can be seen."""
     names = {r["env"] for r in (gold.get("bridge") or {}).get("reads", [])} | {w["env"] for w in (gold.get("bridge") or {}).get("writes", [])}
     br = spec.get("bridge_scope", {})
     scope = br.get("readers", []) + br.get("providers", [])
-    tok = re.compile(r"""["'`]([A-Z][A-Z0-9_]{2,})["'`]|process\.env\.([A-Za-z_][A-Za-z0-9_]*)|name:\s*([A-Z][A-Z0-9_]{2,})|^\s*-?\s*([A-Z][A-Z0-9_]{2,})[=:]""", re.M)
+    tok = re.compile(
+        r"""\b([A-Z][A-Z0-9_]{1,})\b|process\.env\.([A-Za-z_][A-Za-z0-9_]*)|^\s*ENV\s+([A-Za-z_][A-Za-z0-9_]*)|^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=""",
+        re.M,
+    )
     for rel in list_files(root):
         if not in_prefixes(rel, scope) or not (rel.endswith(CODE_EXTS) or data_format(rel) or rel.rsplit("/", 1)[-1].startswith((".env", "Dockerfile"))):
             continue
@@ -554,6 +559,13 @@ def run(arm_names: list[str], only: list[str] | None = None, force: bool = False
 # --- scoring -------------------------------------------------------------------------------------
 
 
+def _same_key_name(node_name: str, key: str) -> bool:
+    """A node names a key when its name is the key, or ends with it after a
+    `.` / `/` / `:` separator (tools that use a qualified path as the name,
+    e.g. cbm's `resource.aws_s3_bucket.logs` for block `logs`)."""
+    return node_name == key or any(node_name.endswith(sep + key) for sep in (".", "/", ":"))
+
+
 def score_keys(gold: dict, nodes: list[dict]) -> dict:
     """Per format: reference keys, covered (same file, same name, node start
     inside the key's span), exact (node starts on the key line)."""
@@ -573,7 +585,7 @@ def score_keys(gold: dict, nodes: list[dict]) -> dict:
             o["keys"] += 1
             best = None
             for i, n in enumerate(cands):
-                if i in used or str(n.get("name")) != str(k["name"]):
+                if i in used or not _same_key_name(str(n.get("name")), str(k["name"])):
                     continue
                 ln = n["start_line"]
                 if k["line"] <= ln <= k["end_line"] and (best is None or abs(ln - k["line"]) < abs(cands[best]["start_line"] - k["line"])):

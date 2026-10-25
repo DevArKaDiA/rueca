@@ -1,5 +1,5 @@
 {
- "description": "Hand-checked env bridge labels (rueca-bench, Apache-2.0). reads: (path, function, env) \u2014 the innermost named function (or <module>) that reads the variable with a string-literal name through a standard env API (os.Getenv/LookupEnv, os.environ[...]/.get/in, os.getenv, process.env.X/['X'], System.getenv(...)/System.getenv().get*(...)); line is informative. writes: (path, env, line) \u2014 manifest entries that set the variable (Kubernetes container env / initContainers, compose `environment` list or mapping), line = the entry's line. Not labelled: names built at run time (wrappers such as mustMapEnv(&x, \"NAME\")), C# code, Helm templates.",
+ "description": "Hand-checked env bridge labels (rueca-bench, Apache-2.0). reads: (path, function, env): the innermost named function (or <module>) that reads the variable with a string-literal name through a standard env API (os.Getenv/LookupEnv, os.environ[...]/.get/in, os.getenv, process.env.X/['X'], System.getenv(...)/System.getenv().get*(...)); line is informative. writes: (path, env, line): entries that set the variable: Kubernetes container env / initContainers, compose environment (list or mapping), Dockerfile ENV (every pair; line = the instruction's first line) and .env files. Not labelled: names built at run time (wrappers such as mustMapEnv(&x, \"NAME\")), C# code, Helm templates, config keys.",
  "repo": "docker/awesome-compose",
  "commit": "30f4b7f6a6c3b0c0ecf4d4efb0de203c48d11562",
  "reads": [
@@ -187,6 +187,26 @@
    "line": 22
   },
   {
+   "path": "nginx-flask-mysql/backend/Dockerfile",
+   "env": "FLASK_APP",
+   "line": 11
+  },
+  {
+   "path": "nginx-flask-mysql/backend/Dockerfile",
+   "env": "FLASK_ENV",
+   "line": 12
+  },
+  {
+   "path": "nginx-flask-mysql/backend/Dockerfile",
+   "env": "FLASK_RUN_PORT",
+   "line": 13
+  },
+  {
+   "path": "nginx-flask-mysql/backend/Dockerfile",
+   "env": "FLASK_RUN_HOST",
+   "line": 14
+  },
+  {
    "path": "nginx-flask-mysql/compose.yaml",
    "env": "MYSQL_DATABASE",
    "line": 21
@@ -197,6 +217,21 @@
    "line": 22
   },
   {
+   "path": "nginx-golang-mysql/backend/Dockerfile",
+   "env": "CGO_ENABLED",
+   "line": 6
+  },
+  {
+   "path": "nginx-golang-mysql/backend/Dockerfile",
+   "env": "GOPATH",
+   "line": 7
+  },
+  {
+   "path": "nginx-golang-mysql/backend/Dockerfile",
+   "env": "GOCACHE",
+   "line": 8
+  },
+  {
    "path": "nginx-golang-mysql/compose.yaml",
    "env": "MYSQL_DATABASE",
    "line": 29
@@ -205,6 +240,21 @@
    "path": "nginx-golang-mysql/compose.yaml",
    "env": "MYSQL_ROOT_PASSWORD_FILE",
    "line": 30
+  },
+  {
+   "path": "nginx-golang-postgres/backend/Dockerfile",
+   "env": "CGO_ENABLED",
+   "line": 6
+  },
+  {
+   "path": "nginx-golang-postgres/backend/Dockerfile",
+   "env": "GOPATH",
+   "line": 7
+  },
+  {
+   "path": "nginx-golang-postgres/backend/Dockerfile",
+   "env": "GOCACHE",
+   "line": 8
   },
   {
    "path": "nginx-golang-postgres/compose.yaml",
@@ -220,6 +270,41 @@
    "path": "nginx-wsgi-flask/compose.yaml",
    "env": "FLASK_SERVER_ADDR",
    "line": 8
+  },
+  {
+   "path": "nginx-wsgi-flask/flask/Dockerfile",
+   "env": "VIRTUAL_ENV",
+   "line": 21
+  },
+  {
+   "path": "nginx-wsgi-flask/flask/Dockerfile",
+   "env": "PATH",
+   "line": 25
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "POSTGRES_USER",
+   "line": 1
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "POSTGRES_PW",
+   "line": 2
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "POSTGRES_DB",
+   "line": 3
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "PGADMIN_MAIL",
+   "line": 4
+  },
+  {
+   "path": "postgresql-pgadmin/.env",
+   "env": "PGADMIN_PW",
+   "line": 5
   },
   {
    "path": "postgresql-pgadmin/compose.yaml",
@@ -245,6 +330,16 @@
    "path": "postgresql-pgadmin/compose.yaml",
    "env": "PGADMIN_DEFAULT_PASSWORD",
    "line": 18
+  },
+  {
+   "path": "react-express-mysql/backend/Dockerfile",
+   "env": "NODE_ENV",
+   "line": 9
+  },
+  {
+   "path": "react-express-mysql/backend/Dockerfile",
+   "env": "PORT",
+   "line": 15
   },
   {
    "path": "react-express-mysql/compose.yaml",
@@ -282,6 +377,16 @@
    "line": 46
   },
   {
+   "path": "react-express-mysql/frontend/Dockerfile",
+   "env": "CI",
+   "line": 5
+  },
+  {
+   "path": "react-express-mysql/frontend/Dockerfile",
+   "env": "PORT",
+   "line": 6
+  },
+  {
    "path": "react-java-mysql/compose.yaml",
    "env": "MYSQL_HOST",
    "line": 8
@@ -295,6 +400,16 @@
    "path": "react-java-mysql/compose.yaml",
    "env": "MYSQL_ROOT_PASSWORD_FILE",
    "line": 22
+  },
+  {
+   "path": "react-java-mysql/frontend/Dockerfile",
+   "env": "CI",
+   "line": 14
+  },
+  {
+   "path": "react-java-mysql/frontend/Dockerfile",
+   "env": "PORT",
+   "line": 15
   },
   {
    "path": "sparkjava-mysql/compose.yaml",

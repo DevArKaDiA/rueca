@@ -296,6 +296,26 @@ commit = "af4b3b6585eb841635d37738faa859c83564e749"
 binary_sha256 = "beef90bf2177bb2330e2301de283c9528687df33c2782141ae428589d59a2cc6"
 suites = ["s1 go", "s3 gin, cli, go-micro"]
 
+[tools.rueca.branches.java]
+branch = "feat/lang-java"
+commit = "831cf27066b5f932299437858d22f159b93f3c86"
+binary_sha256 = "c3d709df4a55688a7af5fab10c091d3f6b16b489d8603402c0dab876f653a792"
+suites = ["s1 java", "s3 gson, java-micro"]
+
+[tools.rueca.branches.cpp]
+branch = "feat/lang-cpp"
+commit = "c63f84a8d01f4869e7032b2bb9322f3940914753"
+binary_sha256 = "d36cf9fb95124938ce0f3b41d6ea1dd30702df3cfb7a14bf7f3910497601e981"
+suites = ["s1 c, cpp", "s3 fmt, cJSON, c-micro, cpp-micro"]
+
+# The data branch has the data pack and the Python / TS / PHP bridge facts,
+# not the Go and Java packs: Go and Java env reads are missed by this binary.
+[tools.rueca.branches.data]
+branch = "feat/lang-data"
+commit = "76dfa4beeb375eba081c307daa61248bb494cf0a"
+binary_sha256 = "10d08d738160b870d08e522c0fa999a6b13b3c6ed6fcd330d0c0b524c7588b81"
+suites = ["data online-boutique, awesome-compose, terraform-aws-vpc"]
+
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
 
@@ -824,7 +844,7 @@ commit = "5b608cb1dfe317d05e4f1bb8c99b7618452fde87"
 license = "Apache-2.0"
 include = [""]
 bridge = "labels/bridge/online-boutique.json"
-bridge_scope = { readers = ["src/"], providers = ["kubernetes-manifests/"] }
+bridge_scope = { readers = ["src/"], providers = ["kubernetes-manifests/", "src/"] }
 
 [[data.repos]]
 name = "awesome-compose"

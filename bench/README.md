@@ -10,14 +10,18 @@ same inputs and with the same scoring:
 | `rueca` | Rueca at HEAD | `$RUECA_BIN index <root> --store <dir> --json`, `$RUECA_BIN query <tool> '<json>' --root <root> --store <dir>` (alpha contract, `docs/tools.md`) |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
-the PHP micro-benchmark in `micro/php/`). Datasets, repositories and tool
-binaries are fetched at runtime at pinned revisions into `bench/.cache`
-(git-ignored), so nothing with an unclear licence is vendored.
+the micro-benchmarks in `micro/{php,go,java,c,cpp}/` and the env-bridge
+labels in `labels/bridge/`). Datasets, repositories and tool binaries are
+fetched at runtime at pinned revisions into `bench/.cache` (git-ignored), so
+nothing with an unclear licence is vendored.
 
-Results are reported **per language family** (python, ts/js, php, …; the
-manifest `[languages]` table) plus an `overall` column, and a per-language
-parity table against cbm. A language counts as supported only with a bench
-entry and a published parity row (RFC 0001 §12, §15).
+Results are reported **per language family** (python, ts/js, php, go, java,
+c, cpp; the manifest `[languages]` table) plus an `overall` column (the
+alpha languages, `[bench] overall`), a per-language parity table against cbm,
+parity rows in the RFC 0003 §3.2 format, and a data-format section (key
+recall, span accuracy, kinds, env bridge; RFC 0003 §3.3). A language counts
+as supported only with a bench entry and a published parity row (RFC 0001
+§12, §15; RFC 0003 §3).
 
 ## Running
 
@@ -30,13 +34,16 @@ uv run --project bench rueca-bench report                # bench/results/*.json 
 
 - `setup [--lang FAMILY ...]` and `run ... [--lang FAMILY ...]` restrict work
   to language families (manifest `[languages]` keys: `python`, `ecma`,
-  `php`); `report` always scores everything cached.
-- `run --arm {grep,cbm,rueca,all|a,b} --suite {s1,s3,all} [--only ID|REPO ...] [--workers N] [--force]`.
+  `php`, `go`, `java`, `c`, `cpp`) and/or `data` (the data-format suite);
+  `report` always scores everything cached.
+- `run --arm {grep,cbm,rueca,all|a,b} --suite {s1,s3,data,all} [--only ID|REPO ...] [--workers N] [--force]`.
   Outputs are cached per (arm, instance) in `.cache/runs/`; re-running only
   computes what is missing (`--force` recomputes). Arm failures are recorded
   (and scored as misses), never dropped.
 - `setup --select` regenerates the `[[s1.instances]]` list at the end of
-  `manifest.toml` from the selection rules (deterministic).
+  `manifest.toml` from the selection rules (deterministic). With `--lang`,
+  only those families are re-selected; every other instance keeps its entry
+  and position.
 - `clean --work` removes worktrees; `clean --runs rueca` drops cached Rueca outputs.
 - Per-call timeouts: 120 s per query, 1800 s per index (`arms/__init__.py`).
 - S1 runs repositories in parallel (`--workers`, default 2), instances of one
@@ -54,9 +61,10 @@ uv run --project bench rueca-bench report
 
 A language pack still on a branch is benchmarked the same way: build that
 branch (e.g. in a temporary worktree with its own `CARGO_TARGET_DIR`) and run
-`--arm rueca --lang <family>` with `RUECA_BIN` pointing at it. The report
-lists the Rueca binary per language, and `manifest.toml` (`[tools.rueca]`)
-records which binary produced the published numbers.
+`--arm rueca --lang <family>` with `RUECA_BIN` pointing at it and
+`RUECA_BIN_LABEL=<branch>@<sha>` (recorded in every output's arm version).
+The report lists the Rueca binary per language, and `manifest.toml`
+(`[tools.rueca]`) records which binary produced the published numbers.
 
 Without `RUECA_BIN` the Rueca column is reported as *pending*; a language
 whose Rueca outputs are missing shows *pending* in its own column and is left
@@ -84,12 +92,15 @@ deep for a unix socket (macOS `sun_path` limit) it falls back to
 
 ### Requirements
 
-`uv`, `git` ≥ 2.40 (partial clone), `node`/`npx` (SCIP indexers, S3 setup
-only), Docker (PHP S3 gold only: PHPStan runs in the pinned `php:8.3-cli`
-image; nothing PHP is installed on the host — without Docker the PHP
-repository gold is reported as missing and the micro-benchmark is still
-built), network for `setup`. `git-lfs` is not needed: worktrees are created
-with the LFS filter disabled (pointers stay pointers).
+`uv`, `git` ≥ 2.40 (partial clone), `node`/`npx` (scip-python /
+scip-typescript, S3 setup only), `go` (scip-go runs the Go toolchain; module
+downloads go to `bench/.cache/go`, `GOTOOLCHAIN=local`), Docker (PHP S3 gold:
+PHPStan in the pinned `php:8.3-cli` image; Java S3 gold: javac in the pinned
+`eclipse-temurin:21-jdk` image — nothing PHP or Java is installed on the
+host; without Docker those repository golds are reported as missing),
+Xcode command-line tools on macOS (scip-clang reads the SDK from
+`xcrun --show-sdk-path`), network for `setup`. `git-lfs` is not needed:
+worktrees are created with the LFS filter disabled (pointers stay pointers).
 
 **macOS note.** If `uv run` fails with `ModuleNotFoundError: rueca_bench`,
 macOS has marked files in `bench/.venv` hidden and Python ≥ 3.12 skips hidden
@@ -101,40 +112,67 @@ Disk: about 1 GB for the alpha corpus (partial clones ≈ 100 MB, one worktree
 at a time per repository, datasets ≈ 120 MB, cbm binary 335 MB). PHP adds
 ≈ 0.6 GB: partial clones ≈ 100 MB, SWE-rebench V2 parquet 429 MB (read with a
 repository filter), PHPStan PHAR 31 MB, plus the `php:8.3-cli` image
-(≈ 530 MB, in Docker's storage).
+(≈ 530 MB, in Docker's storage). Go, Java, C, C++ and the data corpus add
+≈ 1.3 GB: shallow per-commit clones of 26 repositories ≈ 0.8 GB (hugo,
+terraform, prometheus, redis are the large ones; `[corpus] shallow` keeps one
+tree per pinned commit instead of whole histories), Multi-SWE-bench JSONL
+7 MB, scip-go 13 MB, scip-clang 71 MB, scip-java 90 MB, Go module downloads
+for scip-go ≈ 0.5 GB (deletable after `setup`), plus the
+`eclipse-temurin:21-jdk` image (≈ 500 MB, in Docker's storage).
 
 ## Adding a language
 
 Adding a language is data plus, at most, one labeler entry:
 
 1. **Language family** — `[languages.<family>]` in `manifest.toml`: report
-   `label`, member instance languages, source `extensions`,
-   `exclude_suffixes`, `test_files` patterns (pooled into the shared
-   test-path heuristic), and `s1_sources` / `s3_gold` / `notes` shown in the
-   report. Report columns, the per-language summary and the parity row
-   appear automatically.
+   `label`, release-gate `status` (RFC 0003 §3.1: `supported` / `preview` /
+   `text`), member instance languages, source `extensions`,
+   `exclude_suffixes`, `test_files` patterns and `test_dirs` (both pooled
+   into the shared test-path heuristic, e.g. Go `testdata`), and
+   `s1_sources` / `s3_gold` / `notes` shown in the report. Report columns,
+   the per-language summary and both parity rows appear automatically.
 2. **Grammar** — `[grammars.<name>]`: the Python binding
    (`"<package>:<function>"`, pinned in `pyproject.toml`, one import in
-   `treesitter.py: _BINDINGS`), its extensions, and for the data-driven
-   labeler the callable node types (→ `Function` / `Method`), container node
-   types and the qualified-name separator. Grammars whose function shapes
-   need code (JS/TS) name a code-backed `labeler`. The labeler gives S1
-   function gold, the grep arm's function documents and S3 callables.
+   `treesitter.py: _BINDINGS`), its extensions (grammars sharing one, like
+   C and C++ `.h`, are told apart by `languages` = the instance languages
+   they parse), and for the data-driven labeler the callable node types
+   (→ `Function` / `Method`), container node types and the qualified-name
+   separator. Grammars whose function shapes need code name a code-backed
+   `labeler` (`ecma` for JS/TS, `go` for receiver methods, `c` for C/C++
+   declarators). `calls` / `members` describe call sites for SCIP edge
+   derivation (`treesitter.py: _is_callee`). The labeler gives S1 function
+   gold, the grep arm's function documents and S3 callables.
 3. **S1** — `[[s1.repos]]` entries (repository, `language`, `quota`,
-   `sources` = dataset keys) and, if needed, a `[datasets.<key>]` pin
-   (HF revision, file, sha256, licence, optional `row_filter` /
-   `filter_repos`). `rueca-bench setup --select` appends the instances
-   deterministically; existing instances do not move.
-4. **S3** — `[[s3.repos]]` with `gold = "scip"` (an `indexer` from `[tools]`)
-   or another gold method (`phpstan` for PHP); and/or a `[[s3.micro]]`
-   micro-benchmark (`format = "pycg"`, or `format = "rueca"` with snippets
-   under `bench/micro/<lang>/`).
+   `sources` = dataset keys, optional `source_priority` to prefer earlier
+   sources) and, if needed, a `[datasets.<key>]` pin (HF revision, `file` +
+   `sha256` or `files = { path = sha256 }`, `format` for non-SWE-bench
+   layouts such as `multi_swe_bench`, licence, optional `row_filter` /
+   `filter_repos`). `rueca-bench setup --select --lang <family>` selects that
+   family's instances deterministically; other instances do not move.
+4. **S3** — `[[s3.repos]]` with `gold = "scip"` (an `indexer` from `[tools]`:
+   npm indexers run through `npx`, binary indexers from pinned release
+   archives with `{out}` / `{root}` / `{compdb}` in `args`; scip-clang gets a
+   synthesized `compdb`, scip-java a `javac` source list) or another gold
+   method (`phpstan` for PHP); and/or a `[[s3.micro]]` micro-benchmark
+   (`format = "pycg"`, or `format = "rueca"` with snippets under
+   `bench/micro/<lang>/`, optionally `crosscheck = "<SCIP indexer>"`).
 5. `setup --lang <family>`, `run --arm grep,cbm --lang <family>`, `report`;
    document sources, licences and biases here.
 
 A new S3 gold method (another external tool) is the only part that needs new
 harness code; it must return the same graph shape as `scip.derive_call_graph`
 (callables, callers, callees, stats).
+
+### Additive results
+
+`report` scores what is in the local cache and **carries forward** the
+published entries of `bench/results/*.json` for everything else: S1
+per-instance rows (and gold summaries), S3 per-question rows, or — for sets
+published before rows were stored — the set's aggregates (including the
+pooled language and `overall` rows that depend on them). So a checkout that
+only adds a language reproduces every other number byte for byte without
+re-running it, and the report lists which languages were carried, from which
+run (date, machine). Local outputs always win over carried ones.
 
 ## Suites
 
@@ -160,6 +198,24 @@ existing, non-test source file of the language. Inside each repository quota,
 instances with more assembled gold (below) come first, then
 `sha256(instance_id)` ascending.
 
+Go (41): every SWE-bench Multilingual Go instance with an eligible patch
+(caddy 14, gin 8, prometheus 8, hugo 6, terraform 5; one hugo instance only
+touches non-Go files). Java (40): SWE-PolyBench Java (assembled
+`modified_nodes` gold) on gson 10 (with SWE-bench Multilingual), dubbo 8,
+rocketmq 8, apollo 6, plus SWE-bench Multilingual lombok 8; lucene, druid
+and trino are left out for size. C (30): every SWE-bench Multilingual C
+instance (redis 12, jq 9, micropython 5, valkey 4). C++ (38): SWE-bench
+Multilingual has only 12 (fmt 11, nlohmann/json 1), so Multi-SWE-bench C++
+(CC0) supplements it on the same two repositories plus Catch2 and simdjson
+(fmt 14, nlohmann/json 10, Catch2 8, simdjson 6; SWE-bench Multilingual
+first via `source_priority`, after instances with ContextBench gold).
+Multi-SWE-bench rows give the issue text as title + body of each resolved
+issue (as SWE-bench does) and `fix_patch` as the gold patch. Function gold
+for these languages comes from the tree-sitter labeler, except SWE-PolyBench
+Java (`modified_nodes`; its `ReturnType_name` node names are mapped back to
+the method name). ContextBench gold context exists for 32 of the new
+instances (mostly C++ and Java).
+
 **Queries.** Same strings for every arm (`queries.py`):
 
 - `kw` — up to 12 tokens: identifiers from inline/fenced code first, then
@@ -182,7 +238,8 @@ as a secondary number).
 | Files | gold patch | modified/deleted files existing at the base commit, source extension of the instance language, not a test path. New files are excluded (cannot be localized). |
 | Functions (27 Python instances) | **LocAgent** `edit_functions` (`czlll/SWE-bench_Lite`) | `path:Class.func` labels, mapped to the tree-sitter definition at the base commit to obtain def lines |
 | Functions (20 TS instances, 13 non-empty) | **SWE-PolyBench** `modified_nodes` | CST node paths (`path->program->kind:name…`); class/interface-only nodes skipped |
-| Functions (34 other Python/TS instances, all 40 PHP) | Rueca tree-sitter labeler (`gold.py`) | every removed/modified old-side line → innermost enclosing function/method; a pure insertion after old line k → innermost function containing k and k+1 (Python: also the function containing k when the inserted line is indented deeper than its `def`). PHP methods are qualified `Class::method` (classes, interfaces, traits, enums); PHP functions by bare name |
+| Functions (32 Java instances) | **SWE-PolyBench** `modified_nodes` | as above; `method_declaration:String_buildKey` style names (return type prefix) are mapped to `buildKey` |
+| Functions (34 other Python/TS instances, all 40 PHP, Go, C, C++ and 8 Java) | Rueca tree-sitter labeler (`gold.py`) | every removed/modified old-side line → innermost enclosing function/method; a pure insertion after old line k → innermost function containing k and k+1 (Python: also the function containing k when the inserted line is indented deeper than its `def`). PHP methods are qualified `Class::method` (classes, interfaces, traits, enums); PHP functions by bare name. Go methods `Type.Method` (receiver type); Java `Outer.Inner.method`, constructors `Class.Class`; C/C++ every `function_definition` with a body, `ns::Class::method` (out-of-line definitions keep their declarator scope) |
 | Context files (22 instances) | **ContextBench** `gold_context` | human-annotated context spans; scored as context-file recall@5/@10 of the ranked files |
 
 Where both an assembled label and the tree-sitter labeler exist, their
@@ -201,8 +258,19 @@ a test path (`common.py: is_test_path`).
 
 **Gold from SCIP** (RFC 0002 §4.2) at pinned tags: requests v2.34.2, flask
 3.1.3 (`scip-python` 0.6.8); hono v4.13.13 (`scip-typescript` 0.5.2); express
-v5.3.0 (`scip-typescript --infer-tsconfig`). SCIP gives references, not
-calls, so (`scip.py`):
+v5.3.0 (`scip-typescript --infer-tsconfig`); gin v1.11.0 and urfave/cli
+v3.9.1 (`scip-go` 0.2.9, release binary; every package of the module);
+gson 2.15.0 (`scip-java` 0.13.2: the javac plugin embedded in the pinned
+launcher, run by `javac` in the pinned `eclipse-temurin:21-jdk` image with
+`--network=none` over `gson/src/main/java` + `java-templates` and the
+sha256-pinned `error_prone_annotations` jar, then `scip-java aggregate` — no
+Maven run); fmt 12.1.0 and cJSON v1.7.19 (`scip-clang` 0.4.1 release binary
+over a `compile_commands.json` the bench writes: the listed translation
+units — fmt `src/format.cc`, `src/os.cc`; cJSON `cJSON.c`, `cJSON_Utils.c` —
+plus, for fmt, one bench-owned TU outside the worktree that includes every
+public header so that headers no source file includes are indexed too; the
+host SDK from `xcrun`; nothing is compiled or linked). SCIP gives
+references, not calls, so (`scip.py`):
 
 1. callables = tree-sitter functions/methods in scope (`include` prefixes, no
    tests); a SCIP definition whose (line, name) equals a callable's name
@@ -210,7 +278,12 @@ calls, so (`scip.py`):
    replaces the tree-sitter extent);
 2. each non-definition occurrence of a bound symbol is kept only if
    tree-sitter says it is a call site (callee of a call / `new`, directly or as
-   the property of a member access);
+   the property of a member access; for Go, Java and C/C++ the manifest's
+   `calls` / `members` per grammar: Go `call_expression.function` through
+   selectors and generic instantiations, Java `method_invocation.name`,
+   `object_creation_expression.type` and `this(...)` / `super(...)`, C/C++
+   `call_expression.function` through `.`/`->`, `::` and template
+   arguments, C++ `new T`);
 3. the caller is the innermost callable containing the occurrence
    (module-level calls produce no edge).
 
@@ -262,6 +335,54 @@ keys against the PHPStan extractor and the report prints the agreement
 `call_user_func` callables, a conditionally declared function and a trait
 `as` alias, which PHPStan does not resolve and the key does).
 
+**Go, Java, C and C++ micro-benchmarks** (`micro/{go,java,c,cpp}/`, Rueca's
+own labels, Apache-2.0), same format and spirit as the PHP one; every
+snippet compiles (`go vet`, `javac` 21 in Docker, `clang -fsyntax-only` /
+`clang++ -std=c++17 -fsyntax-only`). Answer keys name callables by the bench
+labeler's qualified names; overloads (Java, C++) are told apart as
+`path:Qualified@<name line>`.
+
+| Set | Snippets | Functions | Edges | Covers |
+|---|---:|---:|---:|---|
+| Go | 60 | 240 | 156 | functions, packages (same package across files, sub-packages, aliases, dot / blank imports, package name ≠ directory), methods (value / pointer receivers, `&T{}` / `T{}` / `var x T` / constructor functions, typed params, fields, range and map / slice elements, chained returns, method values vs method expressions), embedding (promotion, pointer embedding, shadowing, multilevel), interfaces, type assertions and switches, closures, `go` / `defer`, generics, `init` / `main`, name traps |
+| Java | 65 | 195 | 109 | packages (same package, single-type / on-demand / static imports, fully qualified calls), methods (`this`, implicit this, typed receivers, `var`, chains, builders), overloads (arity, type, varargs, widening, constructors), constructors (`new`, `this(...)`, `super(...)`), inheritance and overrides, interfaces (default, static, abstract, `I.super.m()`), nested / inner / anonymous / local classes, lambdas and method references, statics, enums and records, generics |
+| C | 26 | 82 | 50 | prototypes in headers vs definitions, `static` same-name functions in two files, `static inline` in headers, includes from sub-directories, function pointers and dispatch tables, function-like macros, opaque handles and callbacks |
+| C++ | 46 | 148 | 82 | namespaces (nested, `using`, aliases, anonymous), classes (inline and out-of-line methods across `.h` / `.cpp`, implicit `this`, static methods, nested classes), overloads, constructors, inheritance and virtuals, templates, operators, lambdas, name traps |
+
+Answer-key conventions (beyond the PHP ones): an edge exists for every
+explicit call whose target is statically determinable from types declared
+or inferred in the snippet, pointing to the declaring definition. **Go**:
+calls through interface values, function-typed values (including method
+values `f := s.M; f()`) and on type parameters give no edge (interface
+method elements are not callables); method expressions `T.M(x)` and type
+assertions `x.(T).M()` do; promoted methods point to the embedded type that
+declares them; calls in function literals, `go` and `defer` belong to the
+enclosing function; package-level `var` initializers give none. **Java**:
+interface- / abstract-typed receivers point to the interface or abstract
+declaration; overloads follow Java's static resolution; `new C(...)`,
+`this(...)`, `super(...)` point to the explicit constructor (none when the
+class has no explicit constructor; implicit `super()` gives none); method
+references `C::m` are references, not calls; lambdas belong to the enclosing
+method, anonymous- and local-class methods are their own callables
+(`Outer.method.m`); field and static initializers give none. **C / C++**:
+callables are function definitions with a body (prototypes, in-class
+declarations, pure virtuals and macros are not); edges point to the body
+wherever it lives; virtual calls point to the static type's definition;
+calls through function pointers, implicit calls (destructors, conversions,
+operators used as operators) and calls written inside a macro body give no
+edge, while calls written in a macro's arguments and explicit
+`a.operator+(b)` do; `new T(...)` points to `T::T` when it has a body.
+
+Setup cross-checks every answer key against a SCIP indexer, deriving edges
+exactly like the repository gold (`crosscheck` in the manifest; scratch
+copies, nothing is written into the trees the arms index) and the report
+prints the agreement: Go vs scip-go 156 / 156 edges (60 snippets identical),
+Java vs scip-java 109 / 109 (65 identical), C vs scip-clang 49 / 50 key
+edges with 2 extra SCIP edges (two `static helper` functions in different
+files share one SCIP symbol; a call written in a macro body, which the key
+excludes by convention), C++ 79 / 82 with no extra edges (scip-clang misses a
+`using`-declared function and two explicit `operator` calls).
+
 **Gold from PyCG** (Apache-2.0): the hand-written `callgraph.json` of every
 snippet of the PyCG micro-benchmark, restricted to function → function edges
 (module nodes, builtins and external names dropped). Each snippet becomes a
@@ -281,6 +402,54 @@ only on the first stub, which is aliased to the implementation. Metrics: definit
 macro-averaged over questions with non-empty gold for that direction; micro
 precision / recall pooled over all edges; lookup Acc@1/@10; query latency.
 
+### Data formats (RFC 0003 §3.3)
+
+`data.py`, manifest `[[data.repos]]`, pinned: GoogleCloudPlatform/
+microservices-demo v0.10.7 (Online Boutique: Kubernetes manifests, Helm,
+kustomize, GitHub Actions, Terraform, eleven services in five languages),
+a 16-stack subset of docker/awesome-compose (compose files and small apps),
+and terraform-aws-modules/terraform-aws-vpc v6.7.3 (HCL).
+
+- **Key recall vs a reference parser.** Every data file in scope (JSON /
+  JSONC, YAML, TOML, Terraform `.tf`) is flattened by a reference parser
+  into leaf keys — keys whose value is not a mapping; arrays of mappings are
+  entered (≤ 64 elements, depth ≤ 32). JSON uses a small position-keeping
+  scanner of the JSON grammar (plus JSONC comments and trailing commas),
+  YAML PyYAML's composer (aliases are leaves, never expanded; merge keys
+  skipped; multi-document streams), TOML `tomllib` (lines from a header /
+  key scan), HCL python-hcl2's syntax tree (attributes and labelled blocks).
+  Files cut by RFC 0003 §4.5 are not in the reference: lockfiles, fixtures /
+  testdata, > 256 KiB, generated markers, and YAML that is a Go / Helm
+  template (`{{ }}` other than GitHub Actions `${{ }}`). An arm **covers** a
+  reference key when it has a node in the same file named like the key (last
+  key segment, or a qualified name ending in it after `.` / `/` / `:`) whose
+  start line lies inside the key's span — the arms
+  qualify keys differently (Rueca key paths, cbm flattened names), so paths
+  are not compared. **Span line accuracy** = covered keys whose node starts
+  exactly on the key's line. Rueca's nodes come from `get_file_outline`,
+  cbm's from `query_graph` over every node of the file.
+- **Kinds covered**: files of each detected kind (compose, Kubernetes,
+  GitHub Actions, Terraform, `package.json`, …) on which the arm emitted a
+  kind node (`Resource`, `Image`, `EnvVar`, `Route`).
+- **Env bridge precision / recall** against hand-checked labels
+  (`labels/bridge/*.json`, Rueca's own, Apache-2.0): reads are
+  `(file, function, variable)` — the innermost named function (or
+  `<module>`) that reads the variable with a string-literal name through a
+  standard env API (`os.Getenv` / `LookupEnv`, `os.environ[...]` / `.get` /
+  `in`, `os.getenv`, `process.env.X` / `['X']`, `System.getenv(...)` and
+  `System.getenv().get*(...)`); writes are `(manifest, variable, line ±1)` —
+  Kubernetes container `env` entries and compose `environment` items. Names
+  built at run time (Online Boutique's `mustMapEnv(&x, "NAME")` wrapper),
+  C# code and Helm templates are not labelled. Online Boutique: 66 reads, 36
+  writes; awesome-compose: 21 reads, 46 writes. cbm's `CONFIGURES` edges are
+  mapped by direction (`env_access` → reads, `env_set` → writes at the
+  entry's line); Rueca's `READS` / `WRITES` come from `trace` callers of
+  `$env:NAME` for every candidate name (gold names plus every UPPER_CASE
+  literal / env-looking token in scope, so spurious edges are seen). The
+  `grep` arm is a regex baseline: the env APIs above in code (reader = the
+  innermost tree-sitter function) and `- name: X` / `- X=…` / `X: …` lines
+  inside `env:` / `environment:` blocks of YAML manifests.
+
 ## Datasets, tools and licences
 
 | Asset | Pinned | Licence | Use |
@@ -292,21 +461,31 @@ precision / recall pooled over all edges; lookup Acc@1/@10; query latency.
 | LocAgent / Loc-Bench labels (`czlll/SWE-bench_Lite`) | HF revision + sha256 | none stated on the card (LocAgent code: Apache-2.0) | S1 function gold |
 | ContextBench (`Contextbench/ContextBench`) | HF revision + sha256 | none stated on the card (ContextBench code: Apache-2.0) | S1 context-file gold |
 | SWE-rebench V2 (`nebius/SWE-rebench-V2`) | HF revision + sha256 | CC-BY-4.0 (attribution: Nebius, SWE-rebench V2) | S1 PHP issues, patches (Twig, monolog, commonmark) |
+| Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`), four C++ JSONL files | HF revision + per-file sha256 | CC0 (dataset README; upstream repository licences apply) | S1 C++ issues, patches (fmt, nlohmann/json, Catch2, simdjson) |
 | PyCG micro-benchmark (`vitsalis/PyCG`) | commit | Apache-2.0 | S3 Python call-graph gold |
 | PHP micro-benchmark (`bench/micro/php`) | in repository | Apache-2.0 (Rueca's own labels) | S3 PHP call-graph gold |
+| Go / Java / C / C++ micro-benchmarks (`bench/micro/{go,java,c,cpp}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
+| Env bridge labels (`bench/labels/bridge`) | in repository | Apache-2.0 (Rueca's own labels) | data-format suite gold |
 | PHPStan (`phpstan/phpstan`) release PHAR | version + sha256 | MIT | S3 PHP gold (run in Docker, never vendored) |
 | `php:8.3-cli` Docker official image | digest | PHP-3.01 (separate process) | runtime for PHPStan |
-| tree-sitter-php (PyPI) | `uv.lock` | MIT | bench labeler for PHP |
+| tree-sitter-php, -go, -java, -c, -cpp (PyPI) | `uv.lock` | MIT | bench labeler for PHP, Go, Java, C, C++ |
+| PyYAML, python-hcl2 (+ lark, regex) (PyPI) | `uv.lock` | MIT / MIT (+ MIT, Apache-2.0) | data-format reference parsers |
 | scip-python / scip-typescript | npm version | MIT / Apache-2.0 | S3 gold |
+| scip-go 0.2.9 | release archive + binary sha256 (darwin-arm64, linux-amd64) | Apache-2.0 | S3 Go gold, Go micro cross-check |
+| scip-clang 0.4.1 | release binary sha256 (darwin-arm64) | Apache-2.0 | S3 C / C++ gold, micro cross-checks |
+| scip-java 0.13.2 | release launcher sha256 (JVM, any platform) | Apache-2.0 | S3 Java gold, Java micro cross-check |
+| `eclipse-temurin:21-jdk` Docker official image | digest | GPL-2.0 with Classpath Exception (separate process) | runtime for javac + scip-java |
+| `error_prone_annotations` 2.50.0 (Maven Central) | sha256 | Apache-2.0 | compile-only classpath for the gson gold |
 | codebase-memory-mcp v0.12.0 | release URL + archive and binary sha256 (darwin-arm64, linux-amd64) | MIT | `cbm` arm |
-| Corpus repositories | commit SHAs | their own (requests Apache-2.0, flask BSD-3, pytest MIT, pylint GPL-2.0, sphinx BSD-2, tailwindcss MIT, code-server MIT, vue MIT, preact MIT, axios MIT, hono MIT, express MIT, carbon MIT, php-cs-fixer MIT, laravel/framework MIT, phpspreadsheet MIT, Twig BSD-3, monolog MIT, commonmark BSD-3) | cloned at runtime; nothing vendored |
+| Corpus repositories | commit SHAs | their own (requests Apache-2.0, flask BSD-3, pytest MIT, pylint GPL-2.0, sphinx BSD-2, tailwindcss MIT, code-server MIT, vue MIT, preact MIT, axios MIT, hono MIT, express MIT, carbon MIT, php-cs-fixer MIT, laravel/framework MIT, phpspreadsheet MIT, Twig BSD-3, monolog MIT, commonmark BSD-3; caddy Apache-2.0, gin MIT, prometheus Apache-2.0, hugo Apache-2.0, terraform BUSL-1.1 (source-available), urfave/cli MIT; gson Apache-2.0, lombok MIT, dubbo Apache-2.0, rocketmq Apache-2.0, apollo Apache-2.0; redis BSD-3 before 7.4, RSALv2 / SSPLv1 (and AGPLv3 from 8.0) after (source-available at most pinned commits), jq MIT, micropython MIT, valkey BSD-3, cJSON MIT; fmt MIT, nlohmann/json MIT, Catch2 BSL-1.0, simdjson Apache-2.0; microservices-demo Apache-2.0, awesome-compose CC0-1.0, terraform-aws-vpc Apache-2.0) | cloned at runtime as benchmark input only; nothing vendored or copied (RFC 0002 §2 governs what enters the repository) |
 
 Citations: Jimenez et al., *SWE-bench* (ICLR 2024); OpenAI, *SWE-bench
 Verified* (2024); Rashid et al., *SWE-PolyBench* (2025); Chen et al.,
 *LocAgent* (ACL 2025); EuniAI, *ContextBench* (2026); Salis et al., *PyCG*
 (ICSE 2021); Badertdinov et al., *SWE-rebench* (Nebius, 2025) and SWE-rebench
 V2 (CC-BY-4.0); SWE-bench team, *SWE-bench Multilingual* (2025); Ondřej
-Mirtes et al., *PHPStan*.
+Mirtes et al., *PHPStan*; Zan et al., *Multi-SWE-bench* (2025); Sourcegraph /
+SCIP steering committee, *scip-go*, *scip-java*, *scip-clang*.
 
 Only identifiers (instance ids, commits, revisions) and Rueca's own code live
 in this repository. Gold labels and arm outputs stay in `bench/.cache`;
@@ -367,7 +546,47 @@ file paths and function names of the public corpus repositories.
   `tests/` directories were already excluded.
 - **ContextBench TS/JS rows** carry PR descriptions instead of issue text, so
   they are not used as S1 sources; only their Python (SWE-bench Verified) gold
-  contexts are used, joined by instance id and base commit.
+  contexts are used, joined by instance id and base commit. The same join
+  gives context-file gold to 32 C++ / Java / C instances.
+- **Go, C, C++ S1 function gold** has no assembled labels; it comes from the
+  tree-sitter labeler, validated on Python / TS / Java (mean Jaccard in the
+  report). C/C++ callables are definitions with a body: a patch that only
+  edits a prototype or a macro has no function gold. `.h` files follow the
+  instance language (C grammar for C repositories, C++ for C++).
+- **Small and skewed samples.** C++ S1 leans on fmt and nlohmann/json
+  (24 of 38); nlohmann/json and simdjson ship amalgamated single headers
+  (`single_include/`) that duplicate the sources, so file rankings there can
+  hit either copy (only the patched one is gold). Java S1 has no lucene /
+  druid / trino (size). Repository S3 gold exists for one repository per
+  language except Go (two); the micro-benchmarks carry the rest.
+- **SCIP gold for Go, Java, C/C++** has the usual SCIP blind spots: interface
+  dispatch (scip-go, scip-java resolve to the interface method only, so
+  implementations get no caller edges), function pointers, macros
+  (scip-clang attributes a call written in a macro body to the expansion
+  site, which tree-sitter tools cannot see), `static` functions with the same
+  name in different C files (one SCIP symbol). The fmt gold indexes the two
+  library translation units plus one TU including every public header, so
+  header-only templates are covered without a CMake configure; cJSON's gold
+  covers its two sources. gson's gold compiles only `gson/src/main/java`
+  (tests and other modules are out of scope anyway).
+- **Micro-benchmarks** are written by the bench authors; their conventions
+  are choices (above). The SCIP cross-checks guard against labelling
+  mistakes, not against convention bias.
+- **Data formats.** The reference flattens leaf keys only and matches arms
+  by file + name + line span, not by key path, because Rueca and cbm qualify
+  keys differently; a tool that emits a node per leaf at the right line
+  scores 100 % regardless of its naming. The bridge labels cover literal env
+  reads through standard APIs and Kubernetes / compose providers only: no
+  config keys (Spring, viper, Laravel), no Dockerfile `ENV`, no `.env`
+  files, no wrapper functions — those are later extensions. Rueca's bridge
+  edges are found by asking `trace` about candidate names (it has no
+  enumeration tool); a spurious edge to a name that never appears as a
+  literal in scope would be missed.
+- **Source-available corpus repositories.** terraform (BUSL-1.1) and redis
+  (RSALv2 / SSPLv1 / AGPLv3 at recent commits) come with SWE-bench
+  Multilingual (RFC 0003 §10.2, §10.3 list them). They are cloned at runtime
+  as benchmark input; no code is vendored or copied, and results only name
+  their files and functions.
 
 ## Deviations from the RFCs
 
@@ -386,3 +605,13 @@ file paths and function names of the public corpus repositories.
 - S1 uses SWE-bench Multilingual for vuejs/core, preact and axios next to
   SWE-PolyBench, because PolyBench's TS/JS repositories of small/medium size
   are few.
+- RFC 0003 §10.2 names gin and cli/cli for Go S3 gold; the bench uses gin and
+  urfave/cli (smaller, no generated code). §10.3 names fmt and jq for C/C++;
+  jq needs an autotools configure for `config.h`, so cJSON stands in for C.
+  §10.4 names gson and spring-petclinic for Java; petclinic needs Spring on
+  the classpath (a Maven resolution), so only gson has repository gold.
+- RFC 0003 §3.3 puts bridge precision / recall in suite 2 (contracts) on
+  OpenTelemetry demo, Online Boutique, spring-petclinic, laravel/laravel and
+  two compose services; this first cut labels Online Boutique and an
+  awesome-compose subset, env vars only. The key-recall measurement is a
+  bench metric here (the RFC also wants it as a CI test in the data pack).

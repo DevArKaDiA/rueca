@@ -1,5 +1,5 @@
 {
- "description": "Hand-checked env bridge labels (rueca-bench, Apache-2.0). reads: (path, function, env) \u2014 the innermost named function (or <module>) that reads the variable with a string-literal name through a standard env API (os.Getenv/LookupEnv, os.environ[...]/.get/in, os.getenv, process.env.X/['X'], System.getenv(...)/System.getenv().get*(...)); line is informative. writes: (path, env, line) \u2014 manifest entries that set the variable (Kubernetes container env / initContainers, compose `environment` list or mapping), line = the entry's line. Not labelled: names built at run time (wrappers such as mustMapEnv(&x, \"NAME\")), C# code, Helm templates.",
+ "description": "Hand-checked env bridge labels (rueca-bench, Apache-2.0). reads: (path, function, env): the innermost named function (or <module>) that reads the variable with a string-literal name through a standard env API (os.Getenv/LookupEnv, os.environ[...]/.get/in, os.getenv, process.env.X/['X'], System.getenv(...)/System.getenv().get*(...)); line is informative. writes: (path, env, line): entries that set the variable: Kubernetes container env / initContainers, compose environment (list or mapping), Dockerfile ENV (every pair; line = the instruction's first line) and .env files. Not labelled: names built at run time (wrappers such as mustMapEnv(&x, \"NAME\")), C# code, Helm templates, config keys.",
  "repo": "GoogleCloudPlatform/microservices-demo",
  "commit": "5b608cb1dfe317d05e4f1bb8c99b7618452fde87",
  "reads": [
@@ -580,6 +580,131 @@
    "path": "kubernetes-manifests/shippingservice.yaml",
    "env": "DISABLE_PROFILER",
    "line": 51
+  },
+  {
+   "path": "src/cartservice/src/Dockerfile",
+   "env": "ASPNETCORE_HTTP_PORTS",
+   "line": 41
+  },
+  {
+   "path": "src/cartservice/src/Dockerfile",
+   "env": "DOTNET_EnableDiagnostics",
+   "line": 41
+  },
+  {
+   "path": "src/cartservice/src/Dockerfile.debug",
+   "env": "ASPNETCORE_HTTP_PORTS",
+   "line": 31
+  },
+  {
+   "path": "src/checkoutservice/Dockerfile",
+   "env": "GOTRACEBACK",
+   "line": 41
+  },
+  {
+   "path": "src/emailservice/Dockerfile",
+   "env": "PYTHONDONTWRITEBYTECODE",
+   "line": 22
+  },
+  {
+   "path": "src/emailservice/Dockerfile",
+   "env": "PYTHONUNBUFFERED",
+   "line": 23
+  },
+  {
+   "path": "src/emailservice/Dockerfile",
+   "env": "PYTHONDONTWRITEBYTECODE",
+   "line": 35
+  },
+  {
+   "path": "src/emailservice/Dockerfile",
+   "env": "PYTHONUNBUFFERED",
+   "line": 36
+  },
+  {
+   "path": "src/emailservice/Dockerfile",
+   "env": "ENABLE_PROFILER",
+   "line": 39
+  },
+  {
+   "path": "src/frontend/Dockerfile",
+   "env": "GOTRACEBACK",
+   "line": 41
+  },
+  {
+   "path": "src/loadgenerator/Dockerfile",
+   "env": "PYTHONDONTWRITEBYTECODE",
+   "line": 22
+  },
+  {
+   "path": "src/loadgenerator/Dockerfile",
+   "env": "PYTHONUNBUFFERED",
+   "line": 23
+  },
+  {
+   "path": "src/loadgenerator/Dockerfile",
+   "env": "PYTHONDONTWRITEBYTECODE",
+   "line": 35
+  },
+  {
+   "path": "src/loadgenerator/Dockerfile",
+   "env": "PYTHONUNBUFFERED",
+   "line": 36
+  },
+  {
+   "path": "src/loadgenerator/Dockerfile",
+   "env": "GEVENT_SUPPORT",
+   "line": 50
+  },
+  {
+   "path": "src/productcatalogservice/Dockerfile",
+   "env": "GOTRACEBACK",
+   "line": 41
+  },
+  {
+   "path": "src/recommendationservice/Dockerfile",
+   "env": "PYTHONDONTWRITEBYTECODE",
+   "line": 22
+  },
+  {
+   "path": "src/recommendationservice/Dockerfile",
+   "env": "PYTHONUNBUFFERED",
+   "line": 23
+  },
+  {
+   "path": "src/recommendationservice/Dockerfile",
+   "env": "PYTHONDONTWRITEBYTECODE",
+   "line": 35
+  },
+  {
+   "path": "src/recommendationservice/Dockerfile",
+   "env": "PYTHONUNBUFFERED",
+   "line": 36
+  },
+  {
+   "path": "src/recommendationservice/Dockerfile",
+   "env": "PORT",
+   "line": 52
+  },
+  {
+   "path": "src/shippingservice/Dockerfile",
+   "env": "APP_PORT",
+   "line": 36
+  },
+  {
+   "path": "src/shippingservice/Dockerfile",
+   "env": "GOTRACEBACK",
+   "line": 41
+  },
+  {
+   "path": "src/shoppingassistantservice/Dockerfile",
+   "env": "PYTHONUNBUFFERED",
+   "line": 32
+  },
+  {
+   "path": "src/shoppingassistantservice/Dockerfile",
+   "env": "PORT",
+   "line": 44
   }
  ]
 }

@@ -110,7 +110,7 @@ def machine_info() -> dict:
 
 def _recorded_versions(name: str) -> list[str]:
     vers: set[str] = set()
-    for suite in ("s1", "s3"):
+    for suite in ("s1", "s3", "data"):
         for p in sorted((RUNS_DIR / suite / name).glob("*.json")):
             v = read_json(p).get("arm_version")
             if v:
@@ -791,6 +791,15 @@ def _render_data(L: list[str], data: dict, meta: dict) -> None:
         "and labelled blocks). A key is covered when the arm has a node in that file with the same name starting inside the key's span; span "
         "accuracy = covered keys whose node starts on the key's line. Bridge labels: `bench/labels/bridge/` (hand-checked). Percentages."
     )
+    L.append("")
+    vers = sorted({(a, r.get("arm_version")) for d in data["repos"].values() for a, r in d.items() if r.get("arm_version")})
+    for a, v in vers:
+        L.append(f"- Arm `{a}` on this suite: {v}.")
+    if any(a == "rueca" for a, _ in vers):
+        L.append(
+            "- The Rueca data binary is the data branch alone: it has the data pack and the Python / TS / PHP bridge facts but not the Go and "
+            "Java packs, so Go and Java env reads (most of Online Boutique's services) count as misses until the packs are merged."
+        )
     L.append("")
     L.append("| Corpus | Commit | Data files (skipped) | Reference keys | Kinds | Bridge labels (reads / writes) |")
     L.append("|---|---|---:|---|---|---:|")
