@@ -10,7 +10,7 @@
    "ok": true,
    "files_extracted": 37,
    "files_partial": 0,
-   "duration_ms": 331
+   "duration_ms": 283
   },
   {
    "name": "s3-flask",
@@ -22,7 +22,7 @@
    "ok": true,
    "files_extracted": 83,
    "files_partial": 0,
-   "duration_ms": 310
+   "duration_ms": 292
   },
   {
    "name": "s3-jinja",
@@ -34,7 +34,7 @@
    "ok": true,
    "files_extracted": 60,
    "files_partial": 0,
-   "duration_ms": 279
+   "duration_ms": 323
   },
   {
    "name": "s3-click",
@@ -46,7 +46,7 @@
    "ok": true,
    "files_extracted": 70,
    "files_partial": 0,
-   "duration_ms": 265
+   "duration_ms": 321
   },
   {
    "name": "s3-hono",
@@ -58,7 +58,7 @@
    "ok": true,
    "files_extracted": 450,
    "files_partial": 8,
-   "duration_ms": 1045
+   "duration_ms": 1140
   },
   {
    "name": "s3-zod",
@@ -70,7 +70,7 @@
    "ok": true,
    "files_extracted": 169,
    "files_partial": 0,
-   "duration_ms": 400
+   "duration_ms": 402
   },
   {
    "name": "s3-express",
@@ -82,7 +82,7 @@
    "ok": true,
    "files_extracted": 141,
    "files_partial": 0,
-   "duration_ms": 313
+   "duration_ms": 382
   },
   {
    "name": "s3-monolog",
@@ -94,7 +94,7 @@
    "ok": true,
    "files_extracted": 217,
    "files_partial": 0,
-   "duration_ms": 393
+   "duration_ms": 567
   },
   {
    "name": "s3-commonmark",
@@ -106,7 +106,7 @@
    "ok": true,
    "files_extracted": 486,
    "files_partial": 0,
-   "duration_ms": 899
+   "duration_ms": 1234
   },
   {
    "name": "s3-gin",
@@ -118,7 +118,7 @@
    "ok": true,
    "files_extracted": 95,
    "files_partial": 0,
-   "duration_ms": 285
+   "duration_ms": 300
   },
   {
    "name": "s3-cli",
@@ -130,7 +130,7 @@
    "ok": true,
    "files_extracted": 66,
    "files_partial": 0,
-   "duration_ms": 296
+   "duration_ms": 287
   },
   {
    "name": "s3-goawk",
@@ -142,7 +142,7 @@
    "ok": true,
    "files_extracted": 39,
    "files_partial": 0,
-   "duration_ms": 235
+   "duration_ms": 231
   },
   {
    "name": "s3-gson",
@@ -154,7 +154,7 @@
    "ok": true,
    "files_extracted": 264,
    "files_partial": 0,
-   "duration_ms": 564
+   "duration_ms": 779
   },
   {
    "name": "s3-javapoet",
@@ -166,7 +166,7 @@
    "ok": true,
    "files_extracted": 39,
    "files_partial": 0,
-   "duration_ms": 240
+   "duration_ms": 267
   },
   {
    "name": "s3-fmt",
@@ -177,8 +177,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 70,
-   "files_partial": 26,
-   "duration_ms": 459
+   "files_partial": 4,
+   "duration_ms": 635
   },
   {
    "name": "s3-yaml-cpp",
@@ -189,8 +189,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 259,
-   "files_partial": 45,
-   "duration_ms": 756
+   "files_partial": 30,
+   "duration_ms": 909
   },
   {
    "name": "s3-cJSON",
@@ -201,8 +201,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 99,
-   "files_partial": 31,
-   "duration_ms": 288
+   "files_partial": 0,
+   "duration_ms": 320
   },
   {
    "name": "s3-lua",
@@ -213,8 +213,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 68,
-   "files_partial": 31,
-   "duration_ms": 303
+   "files_partial": 10,
+   "duration_ms": 300
   },
   {
    "name": "s1-psf__requests",
@@ -226,7 +226,7 @@
    "ok": true,
    "files_extracted": 83,
    "files_partial": 0,
-   "duration_ms": 280
+   "duration_ms": 338
   },
   {
    "name": "s1-pallets__flask",
@@ -238,7 +238,7 @@
    "ok": true,
    "files_extracted": 80,
    "files_partial": 0,
-   "duration_ms": 269
+   "duration_ms": 302
   },
   {
    "name": "s1-pylint-dev__pylint",
@@ -250,7 +250,7 @@
    "ok": true,
    "files_extracted": 1923,
    "files_partial": 6,
-   "duration_ms": 1175
+   "duration_ms": 1613
   },
   {
    "name": "s1-pytest-dev__pytest",
@@ -262,7 +262,7 @@
    "ok": true,
    "files_extracted": 222,
    "files_partial": 0,
-   "duration_ms": 582
+   "duration_ms": 640
   },
   {
    "name": "s1-sphinx-doc__sphinx",
@@ -274,7 +274,7 @@
    "ok": true,
    "files_extracted": 530,
    "files_partial": 0,
-   "duration_ms": 1280
+   "duration_ms": 1372
   },
   {
    "name": "s1-pallets__click",
@@ -286,7 +286,7 @@
    "ok": true,
    "files_extracted": 63,
    "files_partial": 0,
-   "duration_ms": 268
+   "duration_ms": 270
   },
   {
    "name": "s1-tailwindlabs__tailwindcss",
@@ -298,7 +298,7 @@
    "ok": true,
    "files_extracted": 102,
    "files_partial": 0,
-   "duration_ms": 224
+   "duration_ms": 265
   },
   {
    "name": "s1-coder__code-server",
@@ -310,7 +310,7 @@
    "ok": true,
    "files_extracted": 71,
    "files_partial": 0,
-   "duration_ms": 225
+   "duration_ms": 254
   },
   {
    "name": "s1-vuejs__core",
@@ -322,7 +322,7 @@
    "ok": true,
    "files_extracted": 510,
    "files_partial": 2,
-   "duration_ms": 1384
+   "duration_ms": 1091
   },
   {
    "name": "s1-preactjs__preact",
@@ -334,7 +334,7 @@
    "ok": true,
    "files_extracted": 241,
    "files_partial": 18,
-   "duration_ms": 514
+   "duration_ms": 570
   },
   {
    "name": "s1-axios__axios",
@@ -346,7 +346,7 @@
    "ok": true,
    "files_extracted": 139,
    "files_partial": 0,
-   "duration_ms": 500
+   "duration_ms": 393
   },
   {
    "name": "s1-yargs__yargs",
@@ -358,7 +358,7 @@
    "ok": true,
    "files_extracted": 86,
    "files_partial": 0,
-   "duration_ms": 296
+   "duration_ms": 334
   },
   {
    "name": "s1-briannesbitt__carbon",
@@ -370,7 +370,7 @@
    "ok": true,
    "files_extracted": 1992,
    "files_partial": 0,
-   "duration_ms": 2023
+   "duration_ms": 2128
   },
   {
    "name": "s1-php-cs-fixer__php-cs-fixer",
@@ -382,7 +382,7 @@
    "ok": true,
    "files_extracted": 1212,
    "files_partial": 2,
-   "duration_ms": 1885
+   "duration_ms": 1967
   },
   {
    "name": "s1-laravel__framework",
@@ -394,7 +394,7 @@
    "ok": true,
    "files_extracted": 2363,
    "files_partial": 1,
-   "duration_ms": 2572
+   "duration_ms": 2651
   },
   {
    "name": "s1-phpoffice__phpspreadsheet",
@@ -406,7 +406,7 @@
    "ok": true,
    "files_extracted": 2269,
    "files_partial": 2,
-   "duration_ms": 2155
+   "duration_ms": 2076
   },
   {
    "name": "s1-twigphp__Twig",
@@ -418,7 +418,7 @@
    "ok": true,
    "files_extracted": 360,
    "files_partial": 0,
-   "duration_ms": 557
+   "duration_ms": 605
   },
   {
    "name": "s1-Seldaek__monolog",
@@ -430,7 +430,7 @@
    "ok": true,
    "files_extracted": 214,
    "files_partial": 0,
-   "duration_ms": 402
+   "duration_ms": 424
   },
   {
    "name": "s1-thephpleague__commonmark",
@@ -442,7 +442,7 @@
    "ok": true,
    "files_extracted": 471,
    "files_partial": 0,
-   "duration_ms": 938
+   "duration_ms": 850
   },
   {
    "name": "s1-JsonMapper__JsonMapper",
@@ -454,7 +454,7 @@
    "ok": true,
    "files_extracted": 150,
    "files_partial": 1,
-   "duration_ms": 315
+   "duration_ms": 344
   },
   {
    "name": "s1-caddyserver__caddy",
@@ -466,7 +466,7 @@
    "ok": true,
    "files_extracted": 240,
    "files_partial": 0,
-   "duration_ms": 726
+   "duration_ms": 499
   },
   {
    "name": "s1-gin-gonic__gin",
@@ -478,7 +478,7 @@
    "ok": true,
    "files_extracted": 84,
    "files_partial": 0,
-   "duration_ms": 318
+   "duration_ms": 312
   },
   {
    "name": "s1-prometheus__prometheus",
@@ -490,7 +490,7 @@
    "ok": true,
    "files_extracted": 394,
    "files_partial": 0,
-   "duration_ms": 1133
+   "duration_ms": 1111
   },
   {
    "name": "s1-gohugoio__hugo",
@@ -502,7 +502,7 @@
    "ok": true,
    "files_extracted": 793,
    "files_partial": 0,
-   "duration_ms": 1663
+   "duration_ms": 1783
   },
   {
    "name": "s1-hashicorp__terraform",
@@ -514,7 +514,7 @@
    "ok": true,
    "files_extracted": 1601,
    "files_partial": 0,
-   "duration_ms": 2318
+   "duration_ms": 2511
   },
   {
    "name": "s1-benhoyt__goawk",
@@ -526,7 +526,7 @@
    "ok": true,
    "files_extracted": 37,
    "files_partial": 0,
-   "duration_ms": 192
+   "duration_ms": 223
   },
   {
    "name": "s1-google__gson",
@@ -538,7 +538,7 @@
    "ok": true,
    "files_extracted": 218,
    "files_partial": 0,
-   "duration_ms": 484
+   "duration_ms": 550
   },
   {
    "name": "s1-projectlombok__lombok",
@@ -550,7 +550,7 @@
    "ok": true,
    "files_extracted": 1680,
    "files_partial": 90,
-   "duration_ms": 1262
+   "duration_ms": 1963
   },
   {
    "name": "s1-apache__dubbo",
@@ -562,7 +562,7 @@
    "ok": true,
    "files_extracted": 3118,
    "files_partial": 0,
-   "duration_ms": 3249
+   "duration_ms": 3270
   },
   {
    "name": "s1-apache__rocketmq",
@@ -574,7 +574,7 @@
    "ok": true,
    "files_extracted": 1615,
    "files_partial": 0,
-   "duration_ms": 2288
+   "duration_ms": 2501
   },
   {
    "name": "s1-apolloconfig__apollo",
@@ -586,7 +586,7 @@
    "ok": true,
    "files_extracted": 809,
    "files_partial": 0,
-   "duration_ms": 1213
+   "duration_ms": 1786
   },
   {
    "name": "s1-decorators-squad__eo-yaml",
@@ -598,7 +598,7 @@
    "ok": true,
    "files_extracted": 81,
    "files_partial": 0,
-   "duration_ms": 273
+   "duration_ms": 263
   },
   {
    "name": "s1-redis__redis",
@@ -609,8 +609,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 552,
-   "files_partial": 127,
-   "duration_ms": 1431
+   "files_partial": 35,
+   "duration_ms": 1384
   },
   {
    "name": "s1-jqlang__jq",
@@ -621,8 +621,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 73,
-   "files_partial": 19,
-   "duration_ms": 400
+   "files_partial": 1,
+   "duration_ms": 354
   },
   {
    "name": "s1-micropython__micropython",
@@ -633,8 +633,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 2062,
-   "files_partial": 610,
-   "duration_ms": 2897
+   "files_partial": 344,
+   "duration_ms": 3289
   },
   {
    "name": "s1-valkey-io__valkey",
@@ -645,8 +645,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 722,
-   "files_partial": 144,
-   "duration_ms": 1564
+   "files_partial": 40,
+   "duration_ms": 2102
   },
   {
    "name": "s1-nanomsg__nng",
@@ -657,8 +657,8 @@
    "split": "calibration",
    "ok": true,
    "files_extracted": 287,
-   "files_partial": 92,
-   "duration_ms": 714
+   "files_partial": 64,
+   "duration_ms": 895
   },
   {
    "name": "s1-fmtlib__fmt",
@@ -669,8 +669,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 60,
-   "files_partial": 24,
-   "duration_ms": 444
+   "files_partial": 15,
+   "duration_ms": 543
   },
   {
    "name": "s1-nlohmann__json",
@@ -681,8 +681,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 465,
-   "files_partial": 95,
-   "duration_ms": 1020
+   "files_partial": 54,
+   "duration_ms": 1163
   },
   {
    "name": "s1-catchorg__Catch2",
@@ -693,8 +693,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 245,
-   "files_partial": 47,
-   "duration_ms": 759
+   "files_partial": 21,
+   "duration_ms": 762
   },
   {
    "name": "s1-simdjson__simdjson",
@@ -705,8 +705,8 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 120,
-   "files_partial": 54,
-   "duration_ms": 464
+   "files_partial": 14,
+   "duration_ms": 454
   },
   {
    "name": "s1-randombit__botan",
@@ -717,8 +717,8 @@
    "split": "calibration",
    "ok": true,
    "files_extracted": 1185,
-   "files_partial": 149,
-   "duration_ms": 2368
+   "files_partial": 59,
+   "duration_ms": 2288
   }
  ]
 }

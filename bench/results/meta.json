@@ -1,5 +1,5 @@
 {
- "date": "2026-10-25 20:52 UTC",
+ "date": "2026-10-25 21:58 UTC",
  "machine": {
   "platform": "macOS-26.4.1-arm64-arm-64bit",
   "machine": "arm64",
@@ -28,10 +28,10 @@
   },
   "rueca": {
    "available": true,
-   "reason": "",
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)",
+   "reason": "RUECA_BIN not set",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)",
    "recorded_versions": [
-    "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)"
+    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
    ]
   }
  },
@@ -44,7 +44,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)"
+    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
    ]
   },
   "java": {
@@ -55,7 +55,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)"
+    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
    ]
   },
   "ts/js": {
@@ -66,7 +66,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)"
+    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
    ]
   },
   "go": {
@@ -77,7 +77,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)"
+    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
    ]
   },
   "cpp": {
@@ -88,7 +88,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)"
+    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
    ]
   },
   "c": {
@@ -99,7 +99,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)"
+    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
    ]
   },
   "python": {
@@ -110,7 +110,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 80e72f05793a, main@6df4324)"
+    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
    ]
   }
  },
@@ -225,7 +225,7 @@
  ],
  "carried": "cbm:c (30 instances), cbm:cpp (38 instances), cbm:go (41 instances), cbm:java (40 instances), cbm:php (40 instances), cbm:python (40 instances), cbm:ts/js (41 instances), grep:c (30 instances), grep:cpp (38 instances), grep:go (41 instances), grep:java (40 instances), grep:php (40 instances), grep:python (40 instances), grep:ts/js (41 instances)",
  "carried_from": {
-  "date": "2026-10-25 06:39 UTC",
+  "date": "2026-10-25 20:52 UTC",
   "machine": {
    "platform": "macOS-26.4.1-arm64-arm-64bit",
    "machine": "arm64",
