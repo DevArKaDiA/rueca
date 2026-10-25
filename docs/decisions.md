@@ -94,6 +94,37 @@ package scope, implicit `this`, `$type:` receivers, overloads by arity and
   heads, and `Object` / collection / stream / string method names, so an
   untyped `list.stream()` never links to the only project `stream()`.
 
+## 2026-10-25 — C and C++: one pack, macro masking, all overloads suffixed
+
+C and C++ land as one pack, `rueca-lang-cpp` (`CppPack` for
+`Language::C` and `Language::Cpp`; RFC 0003 §10.3 called it
+`rueca-lang-c`), status `preview` until the bench entry and the parity row
+exist. Choices beyond the RFC, all documented in the crate docs:
+
+- **No preprocessor, but a masking pass.** Macro tokens that expand to
+  declaration syntax (`FMT_API`, `FMT_BEGIN_NAMESPACE`, `FMT_ENABLE_IF(…)`
+  in a template head, `extern "C" {` split by `#ifdef __cplusplus`, a
+  function header written once per `#if` branch) are replaced by spaces
+  before parsing when their position allows no other reading; `#if`
+  conditions become `1`. Offsets are preserved and text is read from the
+  original source. On hiredis, jq and fmt it cut the files with parse
+  errors from 34 / 45 / 53% to 17 / 35 / 40% (and fmt gained 20% more
+  definitions); the remaining rate is a grammar limit without a
+  preprocessor and is reported, not hidden.
+- **Overloads: every overload is suffixed** (RFC 0003 open question 4),
+  per file, so a declaration and its body share the suffix; lookups treat
+  the suffix as optional.
+- **Declaration ↔ body: references prefer the body** (open question 3); no
+  new edge.
+- **Namespaces are not nodes**: they qualify names; a namespace-qualified
+  call has no receiver and resolves through includes. Out-of-line method
+  bodies are top-level, unexported `Method`s (the class declaration
+  carries the visibility).
+- Includes are read lexically (they survive parse errors) and resolved
+  through `compile_commands.json` / `compile_flags.txt` include
+  directories; the unique path-suffix fallback produces a 1.0 `IMPORTS`
+  edge because the generic resolver fixes that confidence.
+
 ## 2026-10-24 — Wave R: shared model, contract and resolver for RFC 0003
 
 The groundwork every RFC 0003 pack needs landed before the packs, so the

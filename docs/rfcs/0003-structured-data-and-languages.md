@@ -4,8 +4,8 @@
   resolver, wave R of §12) is **implemented**, and so are the data formats,
   file kinds and the code ↔ config bridge (waves 1, 2a and 2b:
   `rueca-lang-data` plus the Python, TS/JS and PHP packs) — see the
-  *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. Go (§10.2) and
-  Java (§10.4) have landed; the C/C++ pack is pending.
+  *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. Go (§10.2), Java
+  (§10.4) and C/C++ (§10.3) have landed as `preview`.
 - Created: 2026-10-24
 - Depends on: RFC 0001 (architecture), RFC 0002 (building blocks)
 - Research date: 2026-10-24. Crate versions, licenses and dependency
@@ -757,6 +757,52 @@ One pack crate (`rueca-lang-c`) for both languages, family `C`.
 | Precision | scip-clang 0.4.1 (Apache-2.0), needs `compile_commands.json` |
 | Bench | S1: SWE-bench Multilingual C 30 (redis 12, jq 9, micropython 5, valkey 4) and C++ 12 (fmt 11, nlohmann/json 1) — small, so Multi-SWE-bench C/C++ (CC0, upstream licenses apply) supplements. S3: scip-clang gold on fmt (CMake) and jq |
 
+*Implemented* (wave 4, status `preview`): crate **`rueca-lang-cpp`** (named
+after the C++ grammar; one `CppPack` serves `Language::C` and
+`Language::Cpp`), `tree-sitter-c` 0.24.2 and `tree-sitter-cpp` 0.23.4,
+local scopes from vendored nvim-treesitter `c` / `cpp` `locals.scm`
+(Apache-2.0, `NOTICE`). Everything in the table above ships, with these
+choices and deviations (details in the crate docs and
+[how-it-works](../how-it-works.md)):
+
+- **Qualified names, declarations, overloads, templates, macros** as
+  designed. Out-of-line bodies are top-level `Method`s (a `Function` when
+  the qualifier is a namespace the file declares) and are not exported, so
+  an include never binds a method body by its bare name. Overload suffixes
+  are computed per file (open question 4 below). Anonymous namespaces add
+  nothing to qualified names and make their names file-local. Tests:
+  GoogleTest `TEST` / `TEST_F` / `TEST_P` / `TYPED_TEST(_P)` (`Suite::Name`)
+  and Catch2 / doctest `TEST_CASE` / `TEST_CASE_METHOD` / `SCENARIO`.
+- **Receivers**: `$type:T` from parameters, locals (`T x(…)`, `auto x =
+  new T`, `std::make_unique<T>()`), fields of classes in the same file and
+  globals; `Q::f()` gives `$type:Q` when `Q` is a type and no receiver when
+  it is a namespace (namespaces are not nodes, so the name resolves through
+  includes, the same file and unique names).
+- **Includes** follow the module model above; the unique path-suffix match
+  produces an ordinary `IMPORTS` edge at 1.0 (the generic resolver fixes
+  `IMPORTS` confidence; a 0.6 edge would need a resolver change).
+- **Macros**: no preprocessor, as designed, plus a lexical masking pass
+  before parsing (`mask.rs`): macro tokens that expand to declaration
+  syntax (`FMT_API`, `FMT_BEGIN_NAMESPACE`, `FMT_ENABLE_IF(…)` in a
+  template head, `extern "C" {` split by `#ifdef __cplusplus`, a function
+  header written once per `#if` branch) are blanked when their position
+  allows no other reading, and `#if` conditions are replaced by `1`.
+  Offsets are preserved and all text is read from the original source.
+  Masking cut the files with parse errors from 34 / 45 / 53% to
+  17 / 35 / 40% on hiredis / jq / fmt.
+- **`OVERRIDES`** joins the in-class declarations (where the override is
+  written); the resolver does not move them to bodies.
+- **Gate (§3.1)**: items 1 (extraction; but see the parse-error rate), 2,
+  3 and 6 ship; items 4 and 5 (bench entry, parity row vs cbm) are
+  pending, so the status is `preview`. The parse-error rate is far above
+  the 1% target and is reported honestly: files with at least one parse
+  error after masking were 9 / 53 on hiredis (17.0%), 18 / 51 on jq
+  (35.3%) and 30 / 74 on fmt (40.5%, a third of them vendored GoogleTest
+  and test files), mostly one to a few local errors per file. The residue
+  is grammar limits without a preprocessor (`va_arg(ap, char*)`,
+  `unsigned(x)` casts, statement macros with statement arguments, `if` /
+  `else` split across `#if` branches, C++26 annotations).
+
 ### 10.4 Java
 
 | Aspect | Design |
@@ -853,7 +899,7 @@ including tests and docs, excluding review.
 | 2b | **Bridge and infra kinds**: `EnvVar` / `ConfigKey` facts in Python, TS/JS and PHP packs; canonical env vars, `READS` / `WRITES`, `Strategy::Contract`; compose, k8s, GitHub Actions, OpenAPI, JSON Schema, Spring/.NET config scopes — *done*; S2 bridge labels pending | 1 | 3 |
 | R | **Shared resolver work** (§10.1) — *done*, with the §9.2 contract and §9.3 model | 0 | 1–2 |
 | 3 | **Go** (+ `go.mod` kind, Terraform references) | R | 2–3 |
-| 4 | **C++ then C** (one pack; C++ tested first, per the maintainer's order) | R (implicit self, overloads), `is_declaration` | 3–4 |
+| 4 | **C++ then C** (one pack; C++ tested first, per the maintainer's order) — *implemented as `preview`* (§10.3) | R (implicit self, overloads), `is_declaration` | 3–4 |
 | 5 | **Java** (+ `pom.xml` / Gradle roots) | R | 2–3 |
 
 Parallelism: 2a and 2b run in parallel after wave 1; R runs in parallel
@@ -915,10 +961,22 @@ one complete release instead.)
    unchanged; Java reads its `package` clause, Go its `package x_test`.
 3. Declaration ↔ body link for C/C++: is "references prefer the body"
    enough, or is a dedicated edge (`IMPLEMENTS` reuse vs a new `DECLARES`)
-   worth adding for `get_symbol`?
+   worth adding for `get_symbol`? — *Implemented as "references prefer the
+   body"* (C/C++ pack, wave 4): every reference to a declaration with a
+   unique body lands on the body, and the declaration and the body share
+   one qualified name, so `get_symbol` returns one and lists the other as a
+   candidate. No new edge was needed for the fixtures or the smoke
+   repositories; a `DECLARES` edge stays open until an agent workflow
+   needs the declaration from the body.
 4. Overload suffixes change a method's qualified name when a second
    overload is added. Acceptable (the symbol changed meaning), or should the
-   first overload keep its bare name?
+   first overload keep its bare name? — *Decided in the C/C++ pack: all
+   overloads get the suffix*, the first one included (§10.1 as written).
+   Lookups by `qualified_name` treat the suffix as optional, so
+   `geo::scale` keeps working after an overload is added; only symbol
+   ids change, which is right because the symbol did. Suffixes are
+   computed per file (a declaration and its body in one file share the
+   suffix; overloads split across files are not suffixed there).
 5. Dockerfile `COPY` and compose/CI build contexts: worth resolving
    statically (cbm does, for image-scoped env reads), and in which wave?
 6. i18n catalogs and `t('key')` reads: same bridge with a `i18n` namespace?
@@ -928,7 +986,11 @@ one complete release instead.)
 8. Spring relaxed binding and identifier-to-key matching: ship the
    heuristic rung at 0.5 by default or behind an option?
 9. Should `.h` language detection be per file (try C, fall back to C++ on
-   errors) rather than per snapshot?
+   errors) rather than per snapshot? — Decided per snapshot (wave R). In
+   the smoke repositories a single C++ file (hiredis's Qt example, jq's
+   fuzzers) makes every header C++; C headers parse as C++ without extra
+   errors once `extern "C" {` blocks are masked, so this has not been a
+   problem.
 
 ## 16. Sources
 

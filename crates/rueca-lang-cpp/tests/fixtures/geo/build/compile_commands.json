@@ -1,0 +1,6 @@
+[
+  {"directory": "/work/geo/build", "file": "/work/geo/src/shape.cpp",
+   "arguments": ["c++", "-std=c++17", "-I/work/geo/lib/inc", "-isystem", "/usr/include", "-c", "../src/shape.cpp"]},
+  {"directory": "/work/geo/build", "file": "/work/geo/src/main.cpp",
+   "command": "c++ -std=c++17 -I../lib/inc -c ../src/main.cpp"}
+]

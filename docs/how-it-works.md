@@ -9,9 +9,8 @@ live in the crate docs (`rueca-segment`). Structured data (config keys,
 env vars, the code ↔ config bridge) and the extension to Go, C/C++ and Java
 are designed in [RFC 0003](rfcs/0003-structured-data-and-languages.md); this
 document changes as each part lands. Structured data and the bridge are
-implemented (§4.2–§4.4, §5); Go and Java are built on the shared resolver
-rules; the rules for C/C++ are implemented and marked *packs pending*
-where no shipped pack uses them yet.
+implemented (§4.2–§4.4, §5); Go, Java and C/C++ are built on the shared
+resolver rules.
 
 Contents:
 
@@ -133,7 +132,7 @@ disappears. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-markdown`, `rueca-lang-data`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-markdown`, `rueca-lang-data`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -203,6 +202,25 @@ What packs deliberately do and don't do:
   constructors are members named like their class. Fully qualified type
   names (`com.acme.Owner`) and static on-demand imports are recorded as
   extra single imports so they resolve like explicit ones.
+- **C and C++ names carry their namespace and class path**
+  (`geo::Circle::area`), like PHP's: code never refers to files, so the
+  module name is empty. Prototypes and in-class method declarations are
+  definitions marked `is_declaration`; an out-of-line body
+  (`double Circle::area() const {…}` inside `namespace geo`) is a top-level
+  `Method` with the same qualified name, which is how the resolver pairs
+  the two. When a file declares several callables with one name and
+  different parameters, all of them get the parameter types as a suffix
+  (`geo::scale(double)`, `geo::scale(double, double)`). Macros are
+  definitions (`#define GEO_PI 3.14` → `Constant`, `#define GEO_SQ(x) …` →
+  `Function`), and their invocations are calls or reads. There is no
+  preprocessor: both branches of `#if` are parsed, and macro tokens that
+  would derail the parser (`FMT_API`, `FMT_BEGIN_NAMESPACE`,
+  `FMT_ENABLE_IF(…)` in a template head) are blanked first when their
+  position allows no other reading (`rueca-lang-cpp` crate docs). Receivers
+  are typed from declarations in the file: `obj.m()` / `p->m()` is reported
+  with the receiver `$type:Foo` when `obj` is a parameter, local, field of
+  the enclosing class or global declared `Foo`, `Foo*`, `const Foo&`, or
+  `auto obj = new Foo`.
 - **Tests are definitions too**: `test_*` functions and `Test*` classes in
   Python; `describe` / `it` / `test` blocks in JS/TS and Pest become `Test`
   nodes whose qualified name is the describe chain; PHPUnit `test*`,
@@ -212,7 +230,9 @@ What packs deliberately do and don't do:
   in Java, JUnit 4 / 5 and TestNG `@Test` (and parameterized,
   repeated, factory) methods, their fixture methods, JUnit 3 `test*`
   methods, and classes named `*Test` / `*Tests` / `*IT` or declaring tests
-  (`Method` / `Class` with `is_test: true`).
+  (`Method` / `Class` with `is_test: true`);
+  GoogleTest `TEST(Suite, Name)` / `TEST_F` / `TEST_P`
+  (`Suite::Name`) and Catch2 / doctest `TEST_CASE("title")` blocks.
 - **Named function expressions are definitions** in JS/TS wherever they
   appear (`app.use(function handler() {})`, `defineGetter(req, "query",
   function query() {})`, `return function timing() {}`): a `Function` child
@@ -372,6 +392,14 @@ Two per-language hooks, still without guessing symbols:
   `srcDirs` of a `build.gradle` — else under any directory whose path ends
   with the package path; `import com.acme.*` resolves to the package
   directory. JDK and dependency classes are not in the snapshot: external.
+  C and C++ files return nothing as module name (definitions carry their
+  namespace). An `#include "x.h"` resolves relative to the including file,
+  then through the `-iquote` / `-I` directories of every
+  `compile_commands.json` and `compile_flags.txt` in the snapshot
+  (`-isystem` and directories outside the repository ignored), then
+  `include/`, `src/` and the repository root, then the only project file
+  whose path ends with `/x.h`; `#include <x.h>` is a system header unless a
+  project include directory (or `include/`) has it.
 
 Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0);
 for documents that means "links to" (docs → docs, code files, images).
@@ -427,7 +455,8 @@ Rungs and rules that the RFC 0003 packs opt into (Python, ECMAScript, PHP
 and Markdown resolve exactly as above; Terraform uses directory scope; Go
 uses package scope, directory imports, `$self` and `$type:`; Java uses
 package scope, implicit self, typed receivers, overloads and overrides;
-the rest are *packs pending* until the C/C++ pack lands):
+C and C++ use implicit self, typed receivers, declarations, overloads,
+overrides and includes):
 
 | Rule | Hook | Effect | Confidence |
 |---|---|---|---|
@@ -440,6 +469,17 @@ the rest are *packs pending* until the C/C++ pack lands):
 | overrides | `overrides` | `OVERRIDES` from a method to the same-named (same-arity) method of each base | `type_resolved` 0.90 |
 | includes | C/C++ family | `#include` is a transitive star import | as rung 3 |
 | implicit interfaces | Go family | a type whose method names (own and promoted through embedding) cover an interface's gets `IMPLEMENTS` to it and `OVERRIDES` from each covering method; ≤ 64 implementers per interface | `heuristic` 0.50 |
+
+A C++ example: in `double Circle::area() const { return GEO_PI * GEO_SQ(r_); }`
+(in `src/shape.cpp`, which includes `geo/shape.h`), `r_` is a member of
+`geo::Circle` found through the body's qualified name (implicit self,
+0.90), and `GEO_SQ` / `GEO_PI` are the header's macros bound by the include
+(0.95). In `geo::Circle c(2.0); c.area();`, the receiver `$type:geo::Circle`
+finds the in-class declaration of `area`, which is replaced by its unique
+body in `shape.cpp` (0.85); the construction calls the class and its
+constructor (× 0.95). `geo::scale(a, 2.0)` has no receiver (namespaces are
+not nodes), binds `scale` through the include, and its two arguments pick
+`geo::scale(double, double)`.
 
 A reference to a builtin, a name bound to an external module, or a
 `self` member that does not exist **stops** resolution: it is counted as an
@@ -505,7 +545,8 @@ In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
 
 **The code ↔ config bridge and data pointers** (RFC 0003 §6–§7; Go emits
 env var reads — `os.Getenv("X")`, `os.LookupEnv` — and viper config key
-reads; Java emits env var and Spring config key reads). These
+reads; Java emits env var and Spring config key reads; C and C++ emit `getenv("X")`
+reads). These
 references never go through the
 ladder: they match exact names only, so an env var or a key path can never
 be fuzzy-matched to a code symbol.
@@ -565,11 +606,11 @@ then points the indexed root at it. Query time never reads the working tree.
 |---|---|
 | `Repository`, `Folder`, `File` | the walk (every listed file, any language) |
 | `Module` | TS `namespace` / `declare module` |
-| `Class`, `Interface`, `Trait`, `Struct`, `Enum`, `TypeAlias` | class / interface / PHP trait / Go struct / enum / type declarations |
-| `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters; Go methods (`Server.Start`, attached to their type through the package) and interface methods |
+| `Class`, `Interface`, `Trait`, `Struct`, `Enum`, `TypeAlias` | class / interface / PHP trait / Go struct / C and C++ `struct` and `union` / enum / type declarations (`typedef`, `using`) |
+| `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters; Go methods (`Server.Start`, attached to their type through the package) and interface methods; C/C++ prototypes and out-of-line bodies, function-like macros |
 | `Package` | Go external test packages (`package x_test`), marking the module |
 | `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, PHP properties (`$email`, also promoted constructor parameters), module-level assignments (`UPPER_CASE` → `Constant`), PHP `const` / `define()` / enum cases |
-| `Test` | JS/TS `describe` / `it` / `test` blocks and Pest tests (Python and PHPUnit tests are `Function` / `Method` / `Class` with `is_test: true`) |
+| `Test` | JS/TS `describe` / `it` / `test` blocks, Pest tests, GoogleTest `TEST*` and Catch2 `TEST_CASE` blocks (Python and PHPUnit tests are `Function` / `Method` / `Class` with `is_test: true`) |
 | `Section` | Markdown headings, nested by `DEFINES` |
 | `EnvVar` | canonical env vars `$env:NAME` (file-less) and env var providers (`.env` lines, compose / Kubernetes / GitHub Actions `env` entries, Dockerfile `ENV`) |
 | `Key`, `Document` | structured-data keys at any depth (key path = local name), Laravel `config/*.php` keys, and documents of multi-document YAML streams |
@@ -588,8 +629,8 @@ reads by code and by config that reads env) and `WRITES` from env var
 providers form the code ↔ config bridge; `REFERENCES` also carries data
 pointers (`$ref`, aliases, `depends_on`, Terraform traversals), and
 `INHERITS` YAML merges, compose `extends` and Dockerfile `FROM <stage>`.
-`OVERRIDES` come from Java overrides and Go's implicit interfaces
-(heuristic), and C++ once its pack lands. Go embedding (struct fields and
+`OVERRIDES` come from Java and C++ overrides and Go's implicit interfaces
+(heuristic). Go embedding (struct fields and
 interfaces) and type aliases are `INHERITS`; Go `IMPLEMENTS` edges are
 inferred (heuristic 0.5).
 Python, ECMAScript, PHP and Java reads of ordinary names stay `REFERENCES`.
@@ -790,6 +831,12 @@ Known gaps behind low-confidence or missing edges, in rough order of impact:
 - `search_symbols` ranks symbols, not files: a file is found through its
   best-matching definition. Module-level code that is not inside a
   definition is only reachable through `search_code`.
+- C and C++ without a preprocessor: code generated by macros is invisible,
+  both `#if` branches are parsed, and files the grammars cannot fully parse
+  (17–40% of the files of the smoke repositories have at least one error,
+  mostly local) lose the definitions and references inside the broken
+  region. Overloads are chosen by argument count only; ADL, calls through
+  function pointers and virtual dispatch are not followed.
 
 The benchmark ([alpha results](bench/alpha-results.md)) measures how these
 gaps show up on real repositories.
@@ -824,6 +871,7 @@ gaps show up on real repositories.
 | PHP extraction, name resolution, Composer autoload | `rueca-lang-php` | crate docs, `src/names.rs`, `src/composer.rs` |
 | Go extraction, receivers, `go.mod` module model | `rueca-lang-go` | crate docs, `src/locals.rs`, `src/modules.rs` |
 | Java extraction, packages, Maven / Gradle source roots | `rueca-lang-java` | crate docs, `src/extract.rs`, `src/project.rs`, `queries/locals.scm` |
+| C/C++ extraction, macro masking, include directories | `rueca-lang-cpp` | crate docs, `src/extract.rs`, `src/mask.rs`, `src/includes.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
 | Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
