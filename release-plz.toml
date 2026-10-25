@@ -51,6 +51,18 @@ name = "rueca-lang-java"
 version_group = "rueca"
 
 [[package]]
+name = "rueca-lang-cpp"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-lang-markdown"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-lang-data"
+version_group = "rueca"
+
+[[package]]
 name = "rueca-resolve"
 version_group = "rueca"
 
