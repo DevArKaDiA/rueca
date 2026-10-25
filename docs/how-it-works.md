@@ -5,7 +5,11 @@ it turns that into a graph, what the graph contains, and exactly which parts
 of it each tool reads. It describes the alpha as implemented. The *why* lives
 in the [RFCs](rfcs/) and the [decisions log](decisions.md); the exact tool
 arguments and result shapes live in [tools.md](tools.md); byte-level formats
-live in the crate docs (`rueca-segment`).
+live in the crate docs (`rueca-segment`). The planned extension to
+structured data (config keys, env vars, the code ↔ config bridge) and to Go,
+C/C++ and Java is designed in
+[RFC 0003](rfcs/0003-structured-data-and-languages.md); this document
+changes as each part lands.
 
 Contents:
 

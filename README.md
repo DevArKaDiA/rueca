@@ -139,6 +139,7 @@ schema, and exactly what each tool reads — is in
 
 Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
 [building blocks (RFC 0002)](docs/rfcs/0002-building-blocks.md),
+[structured data and the next languages (RFC 0003)](docs/rfcs/0003-structured-data-and-languages.md),
 [decisions log](docs/decisions.md).
 
 ## Benchmark

@@ -109,7 +109,9 @@ A language is a crate implementing `rueca_extract::LanguagePack`: extraction
 (definitions, references, imports), module naming and import resolution. Use
 `rueca-lang-python` and `rueca-lang-typescript` as templates, vendor locals
 queries rather than hand-writing scope rules, and add the language to the
-benchmark before declaring support.
+benchmark before declaring support. What "supported" requires (the release
+gate and the parity row) is defined in
+[RFC 0003 §3](docs/rfcs/0003-structured-data-and-languages.md#3-what-supported-means).
 
 ## Maintainers and decisions
 

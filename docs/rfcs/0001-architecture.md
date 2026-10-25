@@ -471,7 +471,8 @@ return explicit truncation markers and cursors.
 
 ### 11.4 MCP surface
 
-Tools (names provisional, final list in RFC 0003):
+Tools (names provisional, final list in a later RFC; RFC 0003 covers
+structured data and the next languages):
 
 - `search_symbols`, `search_code`, `get_symbol`, `get_snippet`, `get_file_outline`
 - `trace` (calls / data flow / cross-service), `impact`
