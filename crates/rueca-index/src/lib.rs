@@ -52,6 +52,8 @@ use rueca_segment::{ContentSource, SegmentMeta, Store};
 use tracing::{debug, info, warn};
 
 mod git;
+#[cfg(test)]
+mod golden;
 
 #[derive(Debug, Clone)]
 pub struct IndexOptions {

@@ -2278,6 +2278,7 @@ dependencies = [
  "rueca-resolve",
  "rueca-segment",
  "serde",
+ "serde_json",
  "tempfile",
  "tracing",
  "zstd",

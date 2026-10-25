@@ -1,0 +1,549 @@
+# files 29
+{"path":"markdown/README.md","blob_sha":"bdca5c9d5bd8f137cc403d88b14626a9fbd39ab5","language":"markdown","size":1039,"line_count":60,"node":27,"status":"ok"}
+{"path":"markdown/docs/guide.md","blob_sha":"cb4b8feb7b6ef4eb59d7a6efd8962eaabead2c95","language":"markdown","size":190,"line_count":13,"node":28,"status":"ok"}
+{"path":"php/laravel/app/Contracts/Notifier.php","blob_sha":"962bc602f4d2e353d73ea2f48c62c8ca7b443067","language":"php","size":177,"line_count":12,"node":29,"status":"ok"}
+{"path":"php/laravel/app/Enums/Status.php","blob_sha":"1c00f36fc08ed975c840b2c45d2d72ddb57552bd","language":"php","size":314,"line_count":19,"node":30,"status":"ok"}
+{"path":"php/laravel/app/Http/Controllers/Controller.php","blob_sha":"77f7ed0998c3fd2a1f83869f6e48bb2ebbde906e","language":"php","size":144,"line_count":10,"node":31,"status":"ok"}
+{"path":"php/laravel/app/Http/Controllers/UserController.php","blob_sha":"548d1d2e1a830456f882b2a9fddb78793bba816c","language":"php","size":1355,"line_count":55,"node":32,"status":"ok"}
+{"path":"php/laravel/app/Models/Concerns/HasUuid.php","blob_sha":"a6466c5aba1be84f7b5cceb1e3fa589dc6101fb4","language":"php","size":192,"line_count":13,"node":33,"status":"ok"}
+{"path":"php/laravel/app/Models/Order.php","blob_sha":"c75be06cd075c3c54887bf84990a4f49fce9fd10","language":"php","size":186,"line_count":13,"node":34,"status":"ok"}
+{"path":"php/laravel/app/Models/User.php","blob_sha":"d59cbb3f02db73eec68cce17d555275c4f5f9a50","language":"php","size":989,"line_count":48,"node":35,"status":"ok"}
+{"path":"php/laravel/app/Repositories/UserRepository.php","blob_sha":"5e6409ce0848109773a927eee53a2b6b9357ec20","language":"php","size":285,"line_count":18,"node":36,"status":"ok"}
+{"path":"php/laravel/app/Services/UserService.php","blob_sha":"cd98f59d21c7ace4393e001003369b7f2c39523a","language":"php","size":763,"line_count":35,"node":37,"status":"ok"}
+{"path":"php/laravel/app/Support/helpers.php","blob_sha":"562f4b76fe730fdcbb94079a7be93eabd29108d9","language":"php","size":280,"line_count":15,"node":38,"status":"ok"}
+{"path":"php/laravel/composer.json","blob_sha":"b48a20c2cfe469d491cf180492c0282a1aeafa34","language":null,"size":389,"line_count":0,"node":39,"status":"skipped:unsupported"}
+{"path":"php/laravel/resources/views/partials/footer.php","blob_sha":"8c62ff231b45b538fe2d8797b5d338f53126f553","language":"php","size":34,"line_count":1,"node":40,"status":"ok"}
+{"path":"php/laravel/resources/views/users.php","blob_sha":"33417c30b505e79f04195e8e7025db550704af4a","language":"php","size":309,"line_count":12,"node":41,"status":"ok"}
+{"path":"php/laravel/routes/web.php","blob_sha":"af21954b60b7f0b6d91aae3864079d0b3aa354a9","language":"php","size":271,"line_count":9,"node":42,"status":"ok"}
+{"path":"php/laravel/src/Controller/BlogController.php","blob_sha":"4d229b1c6d9b744d1ef55cce9165723148df5c66","language":"php","size":604,"line_count":20,"node":43,"status":"ok"}
+{"path":"php/laravel/src/Entity/Post.php","blob_sha":"97bf3e799422b539be26b6fbc8fe13187da1c8a4","language":"php","size":344,"line_count":19,"node":44,"status":"ok"}
+{"path":"php/laravel/src/legacy.php","blob_sha":"461442291bb6d74b2e31f7313180650a2bcfbc7d","language":"php","size":314,"line_count":19,"node":45,"status":"ok"}
+{"path":"php/laravel/tests/Feature/UserPestTest.php","blob_sha":"c34ec541d2a539d35edf0f6141838cf1057a50e6","language":"php","size":446,"line_count":19,"node":46,"status":"ok"}
+{"path":"php/laravel/tests/TestCase.php","blob_sha":"539c7dde15df232a7efb0580d4712b4881136fe9","language":"php","size":135,"line_count":9,"node":47,"status":"ok"}
+{"path":"php/laravel/tests/Unit/UserServiceTest.php","blob_sha":"762787be02af39271a6aec4ef6bd9e90520f62bf","language":"php","size":865,"line_count":38,"node":48,"status":"ok"}
+{"path":"python/service.py","blob_sha":"7e6cc670c3bc0a7dd6c6f7b13eb21bfd45c775a7","language":"python","size":1803,"line_count":88,"node":49,"status":"ok"}
+{"path":"typescript/Button.tsx","blob_sha":"a23cb6d07093d59e5421415a330e52f5a0961c7d","language":"tsx","size":728,"line_count":30,"node":50,"status":"ok"}
+{"path":"typescript/index.ts","blob_sha":"6bbd6a3c955b3fd5cf6f376599db921813fc14fe","language":"typescript","size":240,"line_count":5,"node":51,"status":"ok"}
+{"path":"typescript/legacy.js","blob_sha":"e7aa507d7381caf0537469a7aa54757042383ed0","language":"javascript","size":712,"line_count":34,"node":52,"status":"ok"}
+{"path":"typescript/user.spec.ts","blob_sha":"c5bbbb87e835add1c62c9af0df1787c93a322616","language":"typescript","size":472,"line_count":21,"node":53,"status":"ok"}
+{"path":"typescript/users.controller.ts","blob_sha":"7ded1dd89bdc09193254d203121e37f6d06eefce","language":"typescript","size":445,"line_count":18,"node":54,"status":"ok"}
+{"path":"typescript/users.service.ts","blob_sha":"5bc23a6c35171ac25aced8b4519d7f5ec487cb6e","language":"typescript","size":2103,"line_count":84,"node":55,"status":"ok"}
+# nodes 195
+0 {"label":"Repository","name":"golden","qualified_name":"local/golden","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+1 {"label":"Folder","name":"markdown","qualified_name":"markdown","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+2 {"label":"Folder","name":"docs","qualified_name":"markdown/docs","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+3 {"label":"Folder","name":"php","qualified_name":"php","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+4 {"label":"Folder","name":"laravel","qualified_name":"php/laravel","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+5 {"label":"Folder","name":"app","qualified_name":"php/laravel/app","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+6 {"label":"Folder","name":"Contracts","qualified_name":"php/laravel/app/Contracts","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+7 {"label":"Folder","name":"Enums","qualified_name":"php/laravel/app/Enums","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+8 {"label":"Folder","name":"Http","qualified_name":"php/laravel/app/Http","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+9 {"label":"Folder","name":"Controllers","qualified_name":"php/laravel/app/Http/Controllers","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+10 {"label":"Folder","name":"Models","qualified_name":"php/laravel/app/Models","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+11 {"label":"Folder","name":"Concerns","qualified_name":"php/laravel/app/Models/Concerns","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+12 {"label":"Folder","name":"Repositories","qualified_name":"php/laravel/app/Repositories","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+13 {"label":"Folder","name":"Services","qualified_name":"php/laravel/app/Services","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+14 {"label":"Folder","name":"Support","qualified_name":"php/laravel/app/Support","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+15 {"label":"Folder","name":"resources","qualified_name":"php/laravel/resources","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+16 {"label":"Folder","name":"views","qualified_name":"php/laravel/resources/views","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+17 {"label":"Folder","name":"partials","qualified_name":"php/laravel/resources/views/partials","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+18 {"label":"Folder","name":"routes","qualified_name":"php/laravel/routes","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+19 {"label":"Folder","name":"src","qualified_name":"php/laravel/src","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+20 {"label":"Folder","name":"Controller","qualified_name":"php/laravel/src/Controller","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+21 {"label":"Folder","name":"Entity","qualified_name":"php/laravel/src/Entity","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+22 {"label":"Folder","name":"tests","qualified_name":"php/laravel/tests","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+23 {"label":"Folder","name":"Feature","qualified_name":"php/laravel/tests/Feature","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+24 {"label":"Folder","name":"Unit","qualified_name":"php/laravel/tests/Unit","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+25 {"label":"Folder","name":"python","qualified_name":"python","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+26 {"label":"Folder","name":"typescript","qualified_name":"typescript","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+27 {"label":"File","name":"README.md","qualified_name":"markdown/README.md","file":0,"span":null,"language":"markdown","signature":null,"doc":null,"exported":false,"is_test":false}
+28 {"label":"File","name":"guide.md","qualified_name":"markdown/docs/guide.md","file":1,"span":null,"language":"markdown","signature":null,"doc":null,"exported":false,"is_test":false}
+29 {"label":"File","name":"Notifier.php","qualified_name":"php/laravel/app/Contracts/Notifier.php","file":2,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+30 {"label":"File","name":"Status.php","qualified_name":"php/laravel/app/Enums/Status.php","file":3,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+31 {"label":"File","name":"Controller.php","qualified_name":"php/laravel/app/Http/Controllers/Controller.php","file":4,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+32 {"label":"File","name":"UserController.php","qualified_name":"php/laravel/app/Http/Controllers/UserController.php","file":5,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+33 {"label":"File","name":"HasUuid.php","qualified_name":"php/laravel/app/Models/Concerns/HasUuid.php","file":6,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+34 {"label":"File","name":"Order.php","qualified_name":"php/laravel/app/Models/Order.php","file":7,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+35 {"label":"File","name":"User.php","qualified_name":"php/laravel/app/Models/User.php","file":8,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+36 {"label":"File","name":"UserRepository.php","qualified_name":"php/laravel/app/Repositories/UserRepository.php","file":9,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+37 {"label":"File","name":"UserService.php","qualified_name":"php/laravel/app/Services/UserService.php","file":10,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+38 {"label":"File","name":"helpers.php","qualified_name":"php/laravel/app/Support/helpers.php","file":11,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+39 {"label":"File","name":"composer.json","qualified_name":"php/laravel/composer.json","file":12,"span":null,"language":null,"signature":null,"doc":null,"exported":false,"is_test":false}
+40 {"label":"File","name":"footer.php","qualified_name":"php/laravel/resources/views/partials/footer.php","file":13,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+41 {"label":"File","name":"users.php","qualified_name":"php/laravel/resources/views/users.php","file":14,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+42 {"label":"File","name":"web.php","qualified_name":"php/laravel/routes/web.php","file":15,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+43 {"label":"File","name":"BlogController.php","qualified_name":"php/laravel/src/Controller/BlogController.php","file":16,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+44 {"label":"File","name":"Post.php","qualified_name":"php/laravel/src/Entity/Post.php","file":17,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+45 {"label":"File","name":"legacy.php","qualified_name":"php/laravel/src/legacy.php","file":18,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+46 {"label":"File","name":"UserPestTest.php","qualified_name":"php/laravel/tests/Feature/UserPestTest.php","file":19,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+47 {"label":"File","name":"TestCase.php","qualified_name":"php/laravel/tests/TestCase.php","file":20,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+48 {"label":"File","name":"UserServiceTest.php","qualified_name":"php/laravel/tests/Unit/UserServiceTest.php","file":21,"span":null,"language":"php","signature":null,"doc":null,"exported":false,"is_test":false}
+49 {"label":"File","name":"service.py","qualified_name":"python/service.py","file":22,"span":null,"language":"python","signature":null,"doc":null,"exported":false,"is_test":false}
+50 {"label":"File","name":"Button.tsx","qualified_name":"typescript/Button.tsx","file":23,"span":null,"language":"tsx","signature":null,"doc":null,"exported":false,"is_test":false}
+51 {"label":"File","name":"index.ts","qualified_name":"typescript/index.ts","file":24,"span":null,"language":"typescript","signature":null,"doc":null,"exported":false,"is_test":false}
+52 {"label":"File","name":"legacy.js","qualified_name":"typescript/legacy.js","file":25,"span":null,"language":"javascript","signature":null,"doc":null,"exported":false,"is_test":false}
+53 {"label":"File","name":"user.spec.ts","qualified_name":"typescript/user.spec.ts","file":26,"span":null,"language":"typescript","signature":null,"doc":null,"exported":false,"is_test":false}
+54 {"label":"File","name":"users.controller.ts","qualified_name":"typescript/users.controller.ts","file":27,"span":null,"language":"typescript","signature":null,"doc":null,"exported":false,"is_test":false}
+55 {"label":"File","name":"users.service.ts","qualified_name":"typescript/users.service.ts","file":28,"span":null,"language":"typescript","signature":null,"doc":null,"exported":false,"is_test":false}
+56 {"label":"Section","name":"Demo","qualified_name":"markdown/README.md:Demo","file":0,"span":{"start_byte":120,"end_byte":1038,"start_line":9,"start_col":0,"end_line":59,"end_col":24},"language":"markdown","signature":"# Demo","doc":"Demo is a small tool for parsing things. It has a second line.","exported":true,"is_test":false}
+57 {"label":"Section","name":"Install","qualified_name":"markdown/README.md:Demo > Install","file":0,"span":{"start_byte":371,"end_byte":573,"start_line":17,"start_col":0,"end_line":30,"end_col":62},"language":"markdown","signature":"## Install","doc":"See the guide and the API.","exported":true,"is_test":false}
+58 {"label":"Section","name":"Linux","qualified_name":"markdown/README.md:Demo > Install > Linux","file":0,"span":{"start_byte":443,"end_byte":498,"start_line":21,"start_col":0,"end_line":26,"end_col":3},"language":"markdown","signature":"### Linux","doc":null,"exported":true,"is_test":false}
+59 {"label":"Section","name":"macOS","qualified_name":"markdown/README.md:Demo > Install > macOS","file":0,"span":{"start_byte":500,"end_byte":573,"start_line":28,"start_col":0,"end_line":30,"end_col":62},"language":"markdown","signature":"### macOS","doc":"Use Homebrew or read https://example.com.","exported":true,"is_test":false}
+60 {"label":"Section","name":"Usage","qualified_name":"markdown/README.md:Demo > Usage","file":0,"span":{"start_byte":575,"end_byte":709,"start_line":32,"start_col":0,"end_line":37,"end_col":36},"language":"markdown","signature":"## Usage","doc":"Run demo --help. Contact us. Jump to install.","exported":true,"is_test":false}
+61 {"label":"Section","name":"Usage notes","qualified_name":"markdown/README.md:Demo > Usage notes","file":0,"span":{"start_byte":711,"end_byte":771,"start_line":39,"start_col":0,"end_line":42,"end_col":35},"language":"markdown","signature":"## Usage notes","doc":"Setext headings nest like ATX ones.","exported":true,"is_test":false}
+62 {"label":"Section","name":"Usage","qualified_name":"markdown/README.md:Demo > Usage (2)","file":0,"span":{"start_byte":773,"end_byte":1038,"start_line":44,"start_col":0,"end_line":59,"end_col":24},"language":"markdown","signature":"## Usage","doc":"Second section with the same name. Source in main and the docs folder.","exported":true,"is_test":false}
+63 {"label":"Section","name":"Guide","qualified_name":"markdown/docs/guide.md:Guide","file":1,"span":{"start_byte":0,"end_byte":139,"start_line":0,"start_col":0,"end_line":8,"end_col":53},"language":"markdown","signature":"# Guide","doc":null,"exported":true,"is_test":false}
+64 {"label":"Section","name":"Install","qualified_name":"markdown/docs/guide.md:Guide > Install","file":1,"span":{"start_byte":9,"end_byte":139,"start_line":2,"start_col":0,"end_line":8,"end_col":53},"language":"markdown","signature":"## Install","doc":"Back to the readme or the root.","exported":true,"is_test":false}
+65 {"label":"Section","name":"Linux","qualified_name":"markdown/docs/guide.md:Guide > Install > Linux","file":1,"span":{"start_byte":75,"end_byte":139,"start_line":6,"start_col":0,"end_line":8,"end_col":53},"language":"markdown","signature":"### Linux","doc":"Read the API and spaces.","exported":true,"is_test":false}
+66 {"label":"Section","name":"Appendix","qualified_name":"markdown/docs/guide.md:Appendix","file":1,"span":{"start_byte":141,"end_byte":189,"start_line":10,"start_col":0,"end_line":12,"end_col":36},"language":"markdown","signature":"# Appendix","doc":"Escape: outside.","exported":true,"is_test":false}
+67 {"label":"Interface","name":"Notifier","qualified_name":"App\\Contracts\\Notifier","file":2,"span":{"start_byte":55,"end_byte":176,"start_line":6,"start_col":0,"end_line":11,"end_col":1},"language":"php","signature":"interface Notifier","doc":null,"exported":true,"is_test":false}
+68 {"label":"Constant","name":"CHANNEL","qualified_name":"App\\Contracts\\Notifier::CHANNEL","file":2,"span":{"start_byte":80,"end_byte":110,"start_line":8,"start_col":4,"end_line":8,"end_col":34},"language":"php","signature":"public const CHANNEL = 'mail'","doc":null,"exported":true,"is_test":false}
+69 {"label":"Method","name":"notify","qualified_name":"App\\Contracts\\Notifier::notify","file":2,"span":{"start_byte":116,"end_byte":174,"start_line":10,"start_col":4,"end_line":10,"end_col":62},"language":"php","signature":"public function notify(User $user, string $message): bool","doc":null,"exported":true,"is_test":false}
+70 {"label":"Enum","name":"Status","qualified_name":"App\\Enums\\Status","file":3,"span":{"start_byte":29,"end_byte":313,"start_line":4,"start_col":0,"end_line":18,"end_col":1},"language":"php","signature":"enum Status: string","doc":null,"exported":true,"is_test":false}
+71 {"label":"Constant","name":"Active","qualified_name":"App\\Enums\\Status::Active","file":3,"span":{"start_byte":55,"end_byte":78,"start_line":6,"start_col":4,"end_line":6,"end_col":27},"language":"php","signature":"case Active = 'active'","doc":null,"exported":true,"is_test":false}
+72 {"label":"Constant","name":"Banned","qualified_name":"App\\Enums\\Status::Banned","file":3,"span":{"start_byte":83,"end_byte":106,"start_line":7,"start_col":4,"end_line":7,"end_col":27},"language":"php","signature":"case Banned = 'banned'","doc":null,"exported":true,"is_test":false}
+73 {"label":"Method","name":"label","qualified_name":"App\\Enums\\Status::label","file":3,"span":{"start_byte":112,"end_byte":193,"start_line":9,"start_col":4,"end_line":12,"end_col":5},"language":"php","signature":"public function label(): string","doc":null,"exported":true,"is_test":false}
+74 {"label":"Method","name":"fromLabel","qualified_name":"App\\Enums\\Status::fromLabel","file":3,"span":{"start_byte":199,"end_byte":311,"start_line":14,"start_col":4,"end_line":17,"end_col":5},"language":"php","signature":"public static function fromLabel(string $label): self","doc":null,"exported":true,"is_test":false}
+75 {"label":"Class","name":"Controller","qualified_name":"App\\Http\\Controllers\\Controller","file":4,"span":{"start_byte":40,"end_byte":143,"start_line":4,"start_col":0,"end_line":9,"end_col":1},"language":"php","signature":"abstract class Controller","doc":null,"exported":true,"is_test":false}
+76 {"label":"Method","name":"authorizeAccess","qualified_name":"App\\Http\\Controllers\\Controller::authorizeAccess","file":4,"span":{"start_byte":72,"end_byte":141,"start_line":6,"start_col":4,"end_line":8,"end_col":5},"language":"php","signature":"protected function authorizeAccess(string $ability): void","doc":null,"exported":false,"is_test":false}
+77 {"label":"Class","name":"UserController","qualified_name":"App\\Http\\Controllers\\UserController","file":5,"span":{"start_byte":355,"end_byte":1354,"start_line":19,"start_col":0,"end_line":54,"end_col":1},"language":"php","signature":"class UserController extends Controller","doc":"CRUD for users.","exported":true,"is_test":false}
+78 {"label":"Constant","name":"PER_PAGE","qualified_name":"App\\Http\\Controllers\\UserController::PER_PAGE","file":5,"span":{"start_byte":401,"end_byte":428,"start_line":21,"start_col":4,"end_line":21,"end_col":31},"language":"php","signature":"public const PER_PAGE = 20","doc":null,"exported":true,"is_test":false}
+79 {"label":"Method","name":"__construct","qualified_name":"App\\Http\\Controllers\\UserController::__construct","file":5,"span":{"start_byte":434,"end_byte":510,"start_line":23,"start_col":4,"end_line":25,"end_col":5},"language":"php","signature":"public function __construct(private readonly UserService $users)","doc":null,"exported":true,"is_test":false}
+80 {"label":"Field","name":"$users","qualified_name":"App\\Http\\Controllers\\UserController::$users","file":5,"span":{"start_byte":462,"end_byte":497,"start_line":23,"start_col":32,"end_line":23,"end_col":67},"language":"php","signature":"private readonly UserService $users","doc":null,"exported":false,"is_test":false}
+81 {"label":"Method","name":"index","qualified_name":"App\\Http\\Controllers\\UserController::index","file":5,"span":{"start_byte":546,"end_byte":846,"start_line":28,"start_col":4,"end_line":35,"end_col":5},"language":"php","signature":"public function index(Request $request): JsonResponse","doc":"List active users.","exported":true,"is_test":false}
+82 {"label":"Method","name":"store","qualified_name":"App\\Http\\Controllers\\UserController::store","file":5,"span":{"start_byte":852,"end_byte":1129,"start_line":37,"start_col":4,"end_line":43,"end_col":5},"language":"php","signature":"public function store(StoreUserRequest $request): JsonResponse","doc":null,"exported":true,"is_test":false}
+83 {"label":"Method","name":"show","qualified_name":"App\\Http\\Controllers\\UserController::show","file":5,"span":{"start_byte":1135,"end_byte":1352,"start_line":45,"start_col":4,"end_line":53,"end_col":5},"language":"php","signature":"public function show(int $id): User","doc":null,"exported":true,"is_test":false}
+84 {"label":"Trait","name":"HasUuid","qualified_name":"App\\Models\\Concerns\\HasUuid","file":6,"span":{"start_byte":68,"end_byte":191,"start_line":6,"start_col":0,"end_line":12,"end_col":1},"language":"php","signature":"trait HasUuid","doc":null,"exported":true,"is_test":false}
+85 {"label":"Method","name":"ensureUuid","qualified_name":"App\\Models\\Concerns\\HasUuid::ensureUuid","file":6,"span":{"start_byte":88,"end_byte":189,"start_line":8,"start_col":4,"end_line":11,"end_col":5},"language":"php","signature":"public function ensureUuid(): string","doc":null,"exported":true,"is_test":false}
+86 {"label":"Class","name":"Order","qualified_name":"App\\Models\\Order","file":7,"span":{"start_byte":71,"end_byte":185,"start_line":6,"start_col":0,"end_line":12,"end_col":1},"language":"php","signature":"class Order extends Model","doc":null,"exported":true,"is_test":false}
+87 {"label":"Method","name":"user","qualified_name":"App\\Models\\Order::user","file":7,"span":{"start_byte":103,"end_byte":183,"start_line":8,"start_col":4,"end_line":11,"end_col":5},"language":"php","signature":"public function user()","doc":null,"exported":true,"is_test":false}
+88 {"label":"Class","name":"User","qualified_name":"App\\Models\\User","file":8,"span":{"start_byte":287,"end_byte":988,"start_line":15,"start_col":0,"end_line":47,"end_col":1},"language":"php","signature":"class User extends Model","doc":"An account holder.\n\n@property int $id","exported":true,"is_test":false}
+89 {"label":"Constant","name":"TABLE","qualified_name":"App\\Models\\User::TABLE","file":8,"span":{"start_byte":348,"end_byte":377,"start_line":19,"start_col":4,"end_line":19,"end_col":33},"language":"php","signature":"public const TABLE = 'users'","doc":null,"exported":true,"is_test":false}
+90 {"label":"Field","name":"$fillable","qualified_name":"App\\Models\\User::$fillable","file":8,"span":{"start_byte":383,"end_byte":423,"start_line":21,"start_col":4,"end_line":21,"end_col":44},"language":"php","signature":"protected $fillable = ['name', 'email']","doc":null,"exported":false,"is_test":false}
+91 {"label":"Field","name":"$casts","qualified_name":"App\\Models\\User::$casts","file":8,"span":{"start_byte":429,"end_byte":476,"start_line":23,"start_col":4,"end_line":23,"end_col":51},"language":"php","signature":"protected $casts = ['status' => Status::class]","doc":null,"exported":false,"is_test":false}
+92 {"label":"Method","name":"orders","qualified_name":"App\\Models\\User::orders","file":8,"span":{"start_byte":482,"end_byte":572,"start_line":25,"start_col":4,"end_line":28,"end_col":5},"language":"php","signature":"public function orders(): HasMany","doc":null,"exported":true,"is_test":false}
+93 {"label":"Method","name":"balance","qualified_name":"App\\Models\\User::balance","file":8,"span":{"start_byte":578,"end_byte":683,"start_line":30,"start_col":4,"end_line":33,"end_col":5},"language":"php","signature":"public function balance(): int","doc":null,"exported":true,"is_test":false}
+94 {"label":"Method","name":"active","qualified_name":"App\\Models\\User::active","file":8,"span":{"start_byte":689,"end_byte":843,"start_line":35,"start_col":4,"end_line":38,"end_col":5},"language":"php","signature":"public static function active(int $limit): array","doc":null,"exported":true,"is_test":false}
+95 {"label":"Method","name":"promote","qualified_name":"App\\Models\\User::promote","file":8,"span":{"start_byte":849,"end_byte":986,"start_line":40,"start_col":4,"end_line":46,"end_col":5},"language":"php","signature":"public function promote(): static","doc":null,"exported":true,"is_test":false}
+96 {"label":"Class","name":"UserRepository","qualified_name":"App\\Repositories\\UserRepository","file":9,"span":{"start_byte":58,"end_byte":284,"start_line":6,"start_col":0,"end_line":17,"end_col":1},"language":"php","signature":"class UserRepository","doc":null,"exported":true,"is_test":false}
+97 {"label":"Method","name":"create","qualified_name":"App\\Repositories\\UserRepository::create","file":9,"span":{"start_byte":85,"end_byte":186,"start_line":8,"start_col":4,"end_line":11,"end_col":5},"language":"php","signature":"public function create(array $attributes): User","doc":null,"exported":true,"is_test":false}
+98 {"label":"Method","name":"active","qualified_name":"App\\Repositories\\UserRepository::active","file":9,"span":{"start_byte":192,"end_byte":282,"start_line":13,"start_col":4,"end_line":16,"end_col":5},"language":"php","signature":"public function active(int $limit): array","doc":null,"exported":true,"is_test":false}
+99 {"label":"Class","name":"UserService","qualified_name":"App\\Services\\UserService","file":10,"span":{"start_byte":149,"end_byte":762,"start_line":9,"start_col":0,"end_line":34,"end_col":1},"language":"php","signature":"final class UserService","doc":null,"exported":true,"is_test":false}
+100 {"label":"Method","name":"__construct","qualified_name":"App\\Services\\UserService::__construct","file":10,"span":{"start_byte":179,"end_byte":301,"start_line":11,"start_col":4,"end_line":15,"end_col":5},"language":"php","signature":"public function __construct(private UserRepository $repository, private Notifier $notifier)","doc":null,"exported":true,"is_test":false}
+101 {"label":"Field","name":"$repository","qualified_name":"App\\Services\\UserService::$repository","file":10,"span":{"start_byte":216,"end_byte":250,"start_line":12,"start_col":8,"end_line":12,"end_col":42},"language":"php","signature":"private UserRepository $repository","doc":null,"exported":false,"is_test":false}
+102 {"label":"Field","name":"$notifier","qualified_name":"App\\Services\\UserService::$notifier","file":10,"span":{"start_byte":260,"end_byte":286,"start_line":13,"start_col":8,"end_line":13,"end_col":34},"language":"php","signature":"private Notifier $notifier","doc":null,"exported":false,"is_test":false}
+103 {"label":"Method","name":"register","qualified_name":"App\\Services\\UserService::register","file":10,"span":{"start_byte":307,"end_byte":625,"start_line":17,"start_col":4,"end_line":27,"end_col":5},"language":"php","signature":"public function register(array $data): User","doc":null,"exported":true,"is_test":false}
+104 {"label":"Method","name":"active","qualified_name":"App\\Services\\UserService::active","file":10,"span":{"start_byte":657,"end_byte":760,"start_line":30,"start_col":4,"end_line":33,"end_col":5},"language":"php","signature":"public function active(int $limit): array","doc":"@return User[]","exported":true,"is_test":false}
+105 {"label":"Constant","name":"CURRENCY","qualified_name":"App\\Support\\CURRENCY","file":11,"span":{"start_byte":31,"end_byte":54,"start_line":4,"start_col":0,"end_line":4,"end_col":23},"language":"php","signature":"const CURRENCY = 'USD'","doc":null,"exported":true,"is_test":false}
+106 {"label":"Function","name":"format_money","qualified_name":"App\\Support\\format_money","file":11,"span":{"start_byte":160,"end_byte":277,"start_line":10,"start_col":4,"end_line":13,"end_col":5},"language":"php","signature":"function format_money(int $cents): string","doc":"Formats cents as money.","exported":true,"is_test":false}
+107 {"label":"Class","name":"BlogController","qualified_name":"Acme\\Blog\\Controller\\BlogController","file":16,"span":{"start_byte":285,"end_byte":603,"start_line":10,"start_col":0,"end_line":19,"end_col":1},"language":"php","signature":"final class BlogController extends AbstractController","doc":null,"exported":true,"is_test":false}
+108 {"label":"Method","name":"show","qualified_name":"Acme\\Blog\\Controller\\BlogController::show","file":16,"span":{"start_byte":378,"end_byte":601,"start_line":13,"start_col":4,"end_line":18,"end_col":5},"language":"php","signature":"public function show(Post $post): Response","doc":null,"exported":true,"is_test":false}
+109 {"label":"Class","name":"Post","qualified_name":"Acme\\Blog\\Entity\\Post","file":17,"span":{"start_byte":36,"end_byte":343,"start_line":4,"start_col":0,"end_line":18,"end_col":1},"language":"php","signature":"class Post","doc":null,"exported":true,"is_test":false}
+110 {"label":"Method","name":"__construct","qualified_name":"Acme\\Blog\\Entity\\Post::__construct","file":17,"span":{"start_byte":53,"end_byte":212,"start_line":6,"start_col":4,"end_line":10,"end_col":5},"language":"php","signature":"public function __construct(public string $title = '', protected ?\\DateTimeImmutable $publishedAt = null)","doc":null,"exported":true,"is_test":false}
+111 {"label":"Field","name":"$title","qualified_name":"Acme\\Blog\\Entity\\Post::$title","file":17,"span":{"start_byte":90,"end_byte":138,"start_line":7,"start_col":8,"end_line":7,"end_col":56},"language":"php","signature":"public string $title = ''","doc":null,"exported":true,"is_test":false}
+112 {"label":"Field","name":"$publishedAt","qualified_name":"Acme\\Blog\\Entity\\Post::$publishedAt","file":17,"span":{"start_byte":148,"end_byte":197,"start_line":8,"start_col":8,"end_line":8,"end_col":57},"language":"php","signature":"protected ?\\DateTimeImmutable $publishedAt = null","doc":null,"exported":false,"is_test":false}
+113 {"label":"Method","name":"publish","qualified_name":"Acme\\Blog\\Entity\\Post::publish","file":17,"span":{"start_byte":218,"end_byte":341,"start_line":12,"start_col":4,"end_line":17,"end_col":5},"language":"php","signature":"public function publish(): static","doc":null,"exported":true,"is_test":false}
+114 {"label":"Function","name":"make","qualified_name":"Acme\\Legacy\\make","file":18,"span":{"start_byte":103,"end_byte":166,"start_line":4,"start_col":4,"end_line":7,"end_col":5},"language":"php","signature":"function make(): Post","doc":null,"exported":true,"is_test":false}
+115 {"label":"Function","name":"legacy_boot","qualified_name":"legacy_boot","file":18,"span":{"start_byte":208,"end_byte":311,"start_line":13,"start_col":4,"end_line":17,"end_col":5},"language":"php","signature":"function legacy_boot(): void","doc":null,"exported":true,"is_test":false}
+116 {"label":"Test","name":"users","qualified_name":"users","file":19,"span":{"start_byte":29,"end_byte":356,"start_line":4,"start_col":0,"end_line":14,"end_col":2},"language":"php","signature":"describe('users', function ()","doc":null,"exported":false,"is_test":true}
+117 {"label":"Test","name":"promotes a user","qualified_name":"users > promotes a user","file":19,"span":{"start_byte":152,"end_byte":263,"start_line":9,"start_col":4,"end_line":11,"end_col":6},"language":"php","signature":"it('promotes a user', function ()","doc":null,"exported":false,"is_test":true}
+118 {"label":"Test","name":"balance starts at zero","qualified_name":"users > balance starts at zero","file":19,"span":{"start_byte":270,"end_byte":352,"start_line":13,"start_col":4,"end_line":13,"end_col":86},"language":"php","signature":"test('balance starts at zero', fn () =>","doc":null,"exported":false,"is_test":true}
+119 {"label":"Test","name":"lists users","qualified_name":"lists users","file":19,"span":{"start_byte":359,"end_byte":431,"start_line":16,"start_col":0,"end_line":18,"end_col":2},"language":"php","signature":"it('lists users', function ()","doc":null,"exported":false,"is_test":true}
+120 {"label":"Class","name":"TestCase","qualified_name":"Tests\\TestCase","file":20,"span":{"start_byte":86,"end_byte":134,"start_line":6,"start_col":0,"end_line":8,"end_col":1},"language":"php","signature":"abstract class TestCase extends BaseTestCase","doc":null,"exported":true,"is_test":true}
+121 {"label":"Class","name":"UserServiceTest","qualified_name":"Tests\\Unit\\UserServiceTest","file":21,"span":{"start_byte":185,"end_byte":864,"start_line":10,"start_col":0,"end_line":37,"end_col":1},"language":"php","signature":"class UserServiceTest extends TestCase","doc":null,"exported":true,"is_test":true}
+122 {"label":"Field","name":"$service","qualified_name":"Tests\\Unit\\UserServiceTest::$service","file":21,"span":{"start_byte":230,"end_byte":259,"start_line":12,"start_col":4,"end_line":12,"end_col":33},"language":"php","signature":"private UserService $service","doc":null,"exported":false,"is_test":false}
+123 {"label":"Method","name":"setUp","qualified_name":"Tests\\Unit\\UserServiceTest::setUp","file":21,"span":{"start_byte":265,"end_byte":434,"start_line":14,"start_col":4,"end_line":18,"end_col":5},"language":"php","signature":"protected function setUp(): void","doc":null,"exported":false,"is_test":false}
+124 {"label":"Method","name":"testRegisterRequiresEmail","qualified_name":"Tests\\Unit\\UserServiceTest::testRegisterRequiresEmail","file":21,"span":{"start_byte":440,"end_byte":605,"start_line":20,"start_col":4,"end_line":24,"end_col":5},"language":"php","signature":"public function testRegisterRequiresEmail(): void","doc":null,"exported":true,"is_test":true}
+125 {"label":"Method","name":"it_lists_active_users","qualified_name":"Tests\\Unit\\UserServiceTest::it_lists_active_users","file":21,"span":{"start_byte":628,"end_byte":743,"start_line":27,"start_col":4,"end_line":30,"end_col":5},"language":"php","signature":"public function it_lists_active_users(): void","doc":"@test","exported":true,"is_test":true}
+126 {"label":"Method","name":"registers","qualified_name":"Tests\\Unit\\UserServiceTest::registers","file":21,"span":{"start_byte":749,"end_byte":862,"start_line":32,"start_col":4,"end_line":36,"end_col":5},"language":"php","signature":"public function registers(): void","doc":null,"exported":true,"is_test":true}
+127 {"label":"Variable","name":"__all__","qualified_name":"python.service.__all__","file":22,"span":{"start_byte":287,"end_byte":343,"start_line":13,"start_col":0,"end_line":13,"end_col":56},"language":"python","signature":"__all__ = [\"InvoiceService\", \"issue_all\", \"MAX_RETRIES\"]","doc":null,"exported":false,"is_test":false}
+128 {"label":"Constant","name":"MAX_RETRIES","qualified_name":"python.service.MAX_RETRIES","file":22,"span":{"start_byte":345,"end_byte":360,"start_line":15,"start_col":0,"end_line":15,"end_col":15},"language":"python","signature":"MAX_RETRIES = 3","doc":null,"exported":true,"is_test":false}
+129 {"label":"Variable","name":"default_timeout","qualified_name":"python.service.default_timeout","file":22,"span":{"start_byte":361,"end_byte":389,"start_line":16,"start_col":0,"end_line":16,"end_col":28},"language":"python","signature":"default_timeout: float = 2.5","doc":null,"exported":false,"is_test":false}
+130 {"label":"Variable","name":"_cache","qualified_name":"python.service._cache","file":22,"span":{"start_byte":390,"end_byte":424,"start_line":17,"start_col":0,"end_line":17,"end_col":34},"language":"python","signature":"_cache, (left, right) = {}, (1, 2)","doc":null,"exported":false,"is_test":false}
+131 {"label":"Variable","name":"left","qualified_name":"python.service.left","file":22,"span":{"start_byte":390,"end_byte":424,"start_line":17,"start_col":0,"end_line":17,"end_col":34},"language":"python","signature":"_cache, (left, right) = {}, (1, 2)","doc":null,"exported":false,"is_test":false}
+132 {"label":"Variable","name":"right","qualified_name":"python.service.right","file":22,"span":{"start_byte":390,"end_byte":424,"start_line":17,"start_col":0,"end_line":17,"end_col":34},"language":"python","signature":"_cache, (left, right) = {}, (1, 2)","doc":null,"exported":false,"is_test":false}
+133 {"label":"Class","name":"InvoiceError","qualified_name":"python.service.InvoiceError","file":22,"span":{"start_byte":427,"end_byte":466,"start_line":20,"start_col":0,"end_line":21,"end_col":8},"language":"python","signature":"class InvoiceError(Exception)","doc":null,"exported":false,"is_test":false}
+134 {"label":"Class","name":"InvoiceService","qualified_name":"python.service.InvoiceService","file":22,"span":{"start_byte":469,"end_byte":1421,"start_line":24,"start_col":0,"end_line":60,"end_col":16},"language":"python","signature":"class InvoiceService(BaseService, models.Mixin, metaclass=Meta)","doc":"Issues invoices.\n\nSecond paragraph.","exported":true,"is_test":false}
+135 {"label":"Field","name":"currency","qualified_name":"python.service.InvoiceService.currency","file":22,"span":{"start_byte":618,"end_byte":639,"start_line":31,"start_col":4,"end_line":31,"end_col":25},"language":"python","signature":"currency: str = \"MXN\"","doc":null,"exported":false,"is_test":false}
+136 {"label":"Field","name":"rate","qualified_name":"python.service.InvoiceService.rate","file":22,"span":{"start_byte":644,"end_byte":663,"start_line":32,"start_col":4,"end_line":32,"end_col":23},"language":"python","signature":"rate = DEFAULT_RATE","doc":null,"exported":false,"is_test":false}
+137 {"label":"Method","name":"__init__","qualified_name":"python.service.InvoiceService.__init__","file":22,"span":{"start_byte":669,"end_byte":817,"start_line":34,"start_col":4,"end_line":37,"end_col":24},"language":"python","signature":"def __init__(self, repo: Repository, timeout=default_timeout)","doc":null,"exported":false,"is_test":false}
+138 {"label":"Field","name":"repo","qualified_name":"python.service.InvoiceService.repo","file":22,"span":{"start_byte":740,"end_byte":756,"start_line":35,"start_col":8,"end_line":35,"end_col":24},"language":"python","signature":"self.repo = repo","doc":null,"exported":false,"is_test":false}
+139 {"label":"Field","name":"timeout","qualified_name":"python.service.InvoiceService.timeout","file":22,"span":{"start_byte":765,"end_byte":792,"start_line":36,"start_col":8,"end_line":36,"end_col":35},"language":"python","signature":"self.timeout: int = timeout","doc":null,"exported":false,"is_test":false}
+140 {"label":"Method","name":"issue","qualified_name":"python.service.InvoiceService.issue","file":22,"span":{"start_byte":823,"end_byte":1364,"start_line":39,"start_col":4,"end_line":56,"end_col":52},"language":"python","signature":"async def issue(self, invoice: Optional[models.Invoice], *args: list[Item]) -> Receipt","doc":null,"exported":false,"is_test":false}
+141 {"label":"Function","name":"inner","qualified_name":"python.service.InvoiceService.issue.inner","file":22,"span":{"start_byte":1004,"end_byte":1046,"start_line":46,"start_col":8,"end_line":47,"end_col":28},"language":"python","signature":"def inner(x)","doc":null,"exported":false,"is_test":false}
+142 {"label":"Class","name":"Nested","qualified_name":"python.service.InvoiceService.Nested","file":22,"span":{"start_byte":1370,"end_byte":1421,"start_line":58,"start_col":4,"end_line":60,"end_col":16},"language":"python","signature":"class Nested","doc":null,"exported":false,"is_test":false}
+143 {"label":"Method","name":"m","qualified_name":"python.service.InvoiceService.Nested.m","file":22,"span":{"start_byte":1392,"end_byte":1421,"start_line":59,"start_col":8,"end_line":60,"end_col":16},"language":"python","signature":"def m(self)","doc":null,"exported":false,"is_test":false}
+144 {"label":"Function","name":"issue_all","qualified_name":"python.service.issue_all","file":22,"span":{"start_byte":1424,"end_byte":1591,"start_line":63,"start_col":0,"end_line":68,"end_col":20},"language":"python","signature":"def issue_all(items)","doc":null,"exported":true,"is_test":false}
+145 {"label":"Function","name":"_private","qualified_name":"python.service._private","file":22,"span":{"start_byte":1594,"end_byte":1618,"start_line":71,"start_col":0,"end_line":72,"end_col":8},"language":"python","signature":"def _private()","doc":null,"exported":false,"is_test":false}
+146 {"label":"Function","name":"test_issue","qualified_name":"python.service.test_issue","file":22,"span":{"start_byte":1621,"end_byte":1671,"start_line":75,"start_col":0,"end_line":76,"end_col":32},"language":"python","signature":"def test_issue()","doc":null,"exported":false,"is_test":true}
+147 {"label":"Class","name":"TestService","qualified_name":"python.service.TestService","file":22,"span":{"start_byte":1674,"end_byte":1802,"start_line":79,"start_col":0,"end_line":87,"end_col":12},"language":"python","signature":"class TestService","doc":null,"exported":false,"is_test":true}
+148 {"label":"Method","name":"test_one","qualified_name":"python.service.TestService.test_one","file":22,"span":{"start_byte":1697,"end_byte":1729,"start_line":80,"start_col":4,"end_line":81,"end_col":12},"language":"python","signature":"def test_one(self)","doc":null,"exported":false,"is_test":true}
+149 {"label":"Method","name":"testTwo","qualified_name":"python.service.TestService.testTwo","file":22,"span":{"start_byte":1735,"end_byte":1766,"start_line":83,"start_col":4,"end_line":84,"end_col":12},"language":"python","signature":"def testTwo(self)","doc":null,"exported":false,"is_test":true}
+150 {"label":"Method","name":"helper","qualified_name":"python.service.TestService.helper","file":22,"span":{"start_byte":1772,"end_byte":1802,"start_line":86,"start_col":4,"end_line":87,"end_col":12},"language":"python","signature":"def helper(self)","doc":null,"exported":false,"is_test":false}
+151 {"label":"Interface","name":"ButtonProps","qualified_name":"typescript/Button:ButtonProps","file":23,"span":{"start_byte":138,"end_byte":211,"start_line":4,"start_col":0,"end_line":7,"end_col":1},"language":"tsx","signature":"interface ButtonProps","doc":null,"exported":true,"is_test":false}
+152 {"label":"Field","name":"label","qualified_name":"typescript/Button:ButtonProps.label","file":23,"span":{"start_byte":171,"end_byte":184,"start_line":5,"start_col":2,"end_line":5,"end_col":15},"language":"tsx","signature":"label: string","doc":null,"exported":true,"is_test":false}
+153 {"label":"Field","name":"onClick","qualified_name":"typescript/Button:ButtonProps.onClick","file":23,"span":{"start_byte":188,"end_byte":208,"start_line":6,"start_col":2,"end_line":6,"end_col":22},"language":"tsx","signature":"onClick?: () => void","doc":null,"exported":true,"is_test":false}
+154 {"label":"Function","name":"Button","qualified_name":"typescript/Button:Button","file":23,"span":{"start_byte":230,"end_byte":579,"start_line":10,"start_col":0,"end_line":23,"end_col":1},"language":"tsx","signature":"function Button({ label, onClick }: ButtonProps)","doc":"A button.","exported":true,"is_test":false}
+155 {"label":"Function","name":"handle","qualified_name":"typescript/Button:Button.handle","file":23,"span":{"start_byte":331,"end_byte":400,"start_line":12,"start_col":2,"end_line":15,"end_col":4},"language":"tsx","signature":"const handle = ()","doc":null,"exported":false,"is_test":false}
+156 {"label":"Function","name":"IconButton","qualified_name":"typescript/Button:IconButton","file":23,"span":{"start_byte":581,"end_byte":703,"start_line":25,"start_col":0,"end_line":27,"end_col":3},"language":"tsx","signature":"const IconButton = forwardRef<HTMLButtonElement, ButtonProps>((props, ref) => { return…","doc":null,"exported":true,"is_test":false}
+157 {"label":"Variable","name":"debug","qualified_name":"typescript/legacy:debug","file":25,"span":{"start_byte":108,"end_byte":146,"start_line":4,"start_col":0,"end_line":4,"end_col":38},"language":"javascript","signature":"const debug = require('debug')('app')","doc":null,"exported":false,"is_test":false}
+158 {"label":"Function","name":"Router","qualified_name":"typescript/legacy:Router","file":25,"span":{"start_byte":217,"end_byte":296,"start_line":8,"start_col":0,"end_line":11,"end_col":1},"language":"javascript","signature":"function Router(options)","doc":null,"exported":true,"is_test":false}
+159 {"label":"Method","name":"route","qualified_name":"typescript/legacy:Router.route","file":25,"span":{"start_byte":319,"end_byte":452,"start_line":14,"start_col":0,"end_line":18,"end_col":2},"language":"javascript","signature":"Router.prototype.route = function route(p)","doc":"Adds a route.","exported":true,"is_test":false}
+160 {"label":"Method","name":"create","qualified_name":"typescript/legacy:Router.create","file":25,"span":{"start_byte":454,"end_byte":517,"start_line":20,"start_col":0,"end_line":22,"end_col":2},"language":"javascript","signature":"Router.create = function (opts)","doc":null,"exported":true,"is_test":false}
+161 {"label":"Function","name":"helper","qualified_name":"typescript/legacy:helper","file":25,"span":{"start_byte":519,"end_byte":595,"start_line":24,"start_col":0,"end_line":26,"end_col":2},"language":"javascript","signature":"exports.helper = function helper(x)","doc":null,"exported":true,"is_test":false}
+162 {"label":"Function","name":"lazy","qualified_name":"typescript/legacy:lazy","file":25,"span":{"start_byte":597,"end_byte":685,"start_line":28,"start_col":0,"end_line":31,"end_col":1},"language":"javascript","signature":"async function lazy()","doc":null,"exported":false,"is_test":false}
+163 {"label":"Test","name":"UserService","qualified_name":"typescript/user.spec:UserService","file":26,"span":{"start_byte":99,"end_byte":470,"start_line":3,"start_col":0,"end_line":20,"end_col":2},"language":"typescript","signature":"describe('UserService')","doc":null,"exported":false,"is_test":true}
+164 {"label":"Test","name":"findById","qualified_name":"typescript/user.spec:UserService > findById","file":26,"span":{"start_byte":161,"end_byte":417,"start_line":6,"start_col":2,"end_line":15,"end_col":4},"language":"typescript","signature":"describe('findById')","doc":null,"exported":false,"is_test":true}
+165 {"label":"Test","name":"returns the cached user","qualified_name":"typescript/user.spec:UserService > findById > returns the cached user","file":26,"span":{"start_byte":194,"end_byte":342,"start_line":7,"start_col":4,"end_line":10,"end_col":6},"language":"typescript","signature":"it('returns the cached user')","doc":null,"exported":false,"is_test":true}
+166 {"label":"Test","name":"handles %s","qualified_name":"typescript/user.spec:UserService > findById > handles %s","file":26,"span":{"start_byte":349,"end_byte":411,"start_line":12,"start_col":4,"end_line":14,"end_col":6},"language":"typescript","signature":"it.each([1, 2])('handles %s')","doc":null,"exported":false,"is_test":true}
+167 {"label":"Test","name":"v1.2 works","qualified_name":"typescript/user.spec:UserService > v1_2 works","file":26,"span":{"start_byte":422,"end_byte":466,"start_line":17,"start_col":2,"end_line":19,"end_col":4},"language":"typescript","signature":"test('v1.2 works')","doc":null,"exported":false,"is_test":true}
+168 {"label":"Class","name":"UsersController","qualified_name":"typescript/users.controller:UsersController","file":27,"span":{"start_byte":156,"end_byte":444,"start_line":4,"start_col":0,"end_line":17,"end_col":1},"language":"typescript","signature":"class UsersController","doc":null,"exported":true,"is_test":false}
+169 {"label":"Method","name":"constructor","qualified_name":"typescript/users.controller:UsersController.constructor","file":27,"span":{"start_byte":210,"end_byte":261,"start_line":6,"start_col":2,"end_line":6,"end_col":53},"language":"typescript","signature":"constructor(private readonly users: UserService)","doc":null,"exported":true,"is_test":false}
+170 {"label":"Field","name":"users","qualified_name":"typescript/users.controller:UsersController.users","file":27,"span":{"start_byte":222,"end_byte":257,"start_line":6,"start_col":14,"end_line":6,"end_col":49},"language":"typescript","signature":"private readonly users: UserService","doc":null,"exported":true,"is_test":false}
+171 {"label":"Method","name":"findOne","qualified_name":"typescript/users.controller:UsersController.findOne","file":27,"span":{"start_byte":265,"end_byte":353,"start_line":8,"start_col":2,"end_line":11,"end_col":3},"language":"typescript","signature":"findOne(id: string)","doc":null,"exported":true,"is_test":false}
+172 {"label":"Method","name":"create","qualified_name":"typescript/users.controller:UsersController.create","file":27,"span":{"start_byte":357,"end_byte":442,"start_line":13,"start_col":2,"end_line":16,"end_col":3},"language":"typescript","signature":"create(dto: CreateUserDto)","doc":null,"exported":true,"is_test":false}
+173 {"label":"Constant","name":"DEFAULT_PAGE_SIZE","qualified_name":"typescript/users.service:DEFAULT_PAGE_SIZE","file":28,"span":{"start_byte":291,"end_byte":327,"start_line":7,"start_col":0,"end_line":7,"end_col":36},"language":"typescript","signature":"const DEFAULT_PAGE_SIZE = 20","doc":null,"exported":true,"is_test":false}
+174 {"label":"Interface","name":"Page","qualified_name":"typescript/users.service:Page","file":28,"span":{"start_byte":354,"end_byte":455,"start_line":10,"start_col":0,"end_line":14,"end_col":1},"language":"typescript","signature":"interface Page<T>","doc":"Paginated result.","exported":true,"is_test":false}
+175 {"label":"Field","name":"items","qualified_name":"typescript/users.service:Page.items","file":28,"span":{"start_byte":383,"end_byte":393,"start_line":11,"start_col":2,"end_line":11,"end_col":12},"language":"typescript","signature":"items: T[]","doc":null,"exported":true,"is_test":false}
+176 {"label":"Field","name":"total","qualified_name":"typescript/users.service:Page.total","file":28,"span":{"start_byte":397,"end_byte":410,"start_line":12,"start_col":2,"end_line":12,"end_col":15},"language":"typescript","signature":"total: number","doc":null,"exported":true,"is_test":false}
+177 {"label":"Method","name":"next","qualified_name":"typescript/users.service:Page.next","file":28,"span":{"start_byte":414,"end_byte":452,"start_line":13,"start_col":2,"end_line":13,"end_col":40},"language":"typescript","signature":"next(cursor: string): Promise<Page<T>>","doc":null,"exported":true,"is_test":false}
+178 {"label":"TypeAlias","name":"UserId","qualified_name":"typescript/users.service:UserId","file":28,"span":{"start_byte":457,"end_byte":485,"start_line":16,"start_col":0,"end_line":16,"end_col":28},"language":"typescript","signature":"type UserId = string","doc":null,"exported":true,"is_test":false}
+179 {"label":"Enum","name":"Role","qualified_name":"typescript/users.service:Role","file":28,"span":{"start_byte":487,"end_byte":547,"start_line":18,"start_col":0,"end_line":21,"end_col":1},"language":"typescript","signature":"enum Role","doc":null,"exported":true,"is_test":false}
+180 {"label":"Constant","name":"Admin","qualified_name":"typescript/users.service:Role.Admin","file":28,"span":{"start_byte":508,"end_byte":523,"start_line":19,"start_col":2,"end_line":19,"end_col":17},"language":"typescript","signature":"Admin = 'admin'","doc":null,"exported":true,"is_test":false}
+181 {"label":"Constant","name":"Member","qualified_name":"typescript/users.service:Role.Member","file":28,"span":{"start_byte":527,"end_byte":544,"start_line":20,"start_col":2,"end_line":20,"end_col":19},"language":"typescript","signature":"Member = 'member'","doc":null,"exported":true,"is_test":false}
+182 {"label":"Class","name":"BaseService","qualified_name":"typescript/users.service:BaseService","file":28,"span":{"start_byte":549,"end_byte":685,"start_line":23,"start_col":0,"end_line":26,"end_col":1},"language":"typescript","signature":"abstract class BaseService<T>","doc":null,"exported":true,"is_test":false}
+183 {"label":"Field","name":"name","qualified_name":"typescript/users.service:BaseService.name","file":28,"span":{"start_byte":590,"end_byte":630,"start_line":24,"start_col":2,"end_line":24,"end_col":42},"language":"typescript","signature":"protected abstract readonly name: string","doc":null,"exported":true,"is_test":false}
+184 {"label":"Method","name":"findById","qualified_name":"typescript/users.service:BaseService.findById","file":28,"span":{"start_byte":634,"end_byte":682,"start_line":25,"start_col":2,"end_line":25,"end_col":50},"language":"typescript","signature":"abstract findById(id: string): Promise<T | null>","doc":null,"exported":true,"is_test":false}
+185 {"label":"Class","name":"UserService","qualified_name":"typescript/users.service:UserService","file":28,"span":{"start_byte":744,"end_byte":2102,"start_line":32,"start_col":0,"end_line":83,"end_col":1},"language":"typescript","signature":"class UserService extends BaseService<User> implements Searchable<User>, Auditable","doc":"Users domain service.\nHandles persistence.","exported":true,"is_test":false}
+186 {"label":"Field","name":"name","qualified_name":"typescript/users.service:UserService.name","file":28,"span":{"start_byte":852,"end_byte":885,"start_line":34,"start_col":2,"end_line":34,"end_col":35},"language":"typescript","signature":"protected readonly name","doc":null,"exported":true,"is_test":false}
+187 {"label":"Field","name":"cache","qualified_name":"typescript/users.service:UserService.cache","file":28,"span":{"start_byte":889,"end_byte":928,"start_line":35,"start_col":2,"end_line":35,"end_col":41},"language":"typescript","signature":"private cache","doc":null,"exported":true,"is_test":false}
+188 {"label":"Method","name":"constructor","qualified_name":"typescript/users.service:UserService.constructor","file":28,"span":{"start_byte":933,"end_byte":1075,"start_line":37,"start_col":2,"end_line":42,"end_col":3},"language":"typescript","signature":"constructor(private readonly repo: Repository<User>, private readonly audit: AuditLog)","doc":null,"exported":true,"is_test":false}
+189 {"label":"Field","name":"repo","qualified_name":"typescript/users.service:UserService.repo","file":28,"span":{"start_byte":950,"end_byte":1013,"start_line":38,"start_col":4,"end_line":38,"end_col":67},"language":"typescript","signature":"private readonly repo: Repository<User>","doc":null,"exported":true,"is_test":false}
+190 {"label":"Field","name":"audit","qualified_name":"typescript/users.service:UserService.audit","file":28,"span":{"start_byte":1019,"end_byte":1051,"start_line":39,"start_col":4,"end_line":39,"end_col":36},"language":"typescript","signature":"private readonly audit: AuditLog","doc":null,"exported":true,"is_test":false}
+191 {"label":"Method","name":"findById","qualified_name":"typescript/users.service:UserService.findById","file":28,"span":{"start_byte":1112,"end_byte":1441,"start_line":45,"start_col":2,"end_line":56,"end_col":3},"language":"typescript","signature":"async findById(id: UserId): Promise<User | null>","doc":"Finds a user or throws.","exported":true,"is_test":false}
+192 {"label":"Method","name":"create","qualified_name":"typescript/users.service:UserService.create","file":28,"span":{"start_byte":1445,"end_byte":1862,"start_line":58,"start_col":2,"end_line":71,"end_col":3},"language":"typescript","signature":"async create(dto: CreateUserDto): Promise<User>","doc":null,"exported":true,"is_test":false}
+193 {"label":"Method","name":"update","qualified_name":"typescript/users.service:UserService.update","file":28,"span":{"start_byte":1866,"end_byte":1992,"start_line":73,"start_col":2,"end_line":75,"end_col":3},"language":"typescript","signature":"update(id: UserId, dto: UpdateUserDto)","doc":null,"exported":true,"is_test":false}
+194 {"label":"Method","name":"size","qualified_name":"typescript/users.service:UserService.size","file":28,"span":{"start_byte":1996,"end_byte":2048,"start_line":77,"start_col":2,"end_line":79,"end_col":3},"language":"typescript","signature":"get size(): number","doc":null,"exported":true,"is_test":false}
+# edges 321
+{"src":0,"dst":1,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":0,"dst":3,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":0,"dst":25,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":0,"dst":26,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":1,"dst":2,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":1,"dst":27,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":2,"dst":28,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":3,"dst":4,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":4,"dst":5,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":4,"dst":15,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":4,"dst":18,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":4,"dst":19,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":4,"dst":22,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":4,"dst":39,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":5,"dst":6,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":5,"dst":7,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":5,"dst":8,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":5,"dst":10,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":5,"dst":12,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":5,"dst":13,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":5,"dst":14,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":6,"dst":29,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":7,"dst":30,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":8,"dst":9,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":9,"dst":31,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":9,"dst":32,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":10,"dst":11,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":10,"dst":34,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":10,"dst":35,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":11,"dst":33,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":12,"dst":36,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":13,"dst":37,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":14,"dst":38,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":15,"dst":16,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":16,"dst":17,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":16,"dst":41,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":17,"dst":40,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":18,"dst":42,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":19,"dst":20,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":19,"dst":21,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":19,"dst":45,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":20,"dst":43,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":21,"dst":44,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":22,"dst":23,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":22,"dst":24,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":22,"dst":47,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":23,"dst":46,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":24,"dst":48,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":25,"dst":49,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":26,"dst":50,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":26,"dst":51,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":26,"dst":52,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":26,"dst":53,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":26,"dst":54,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":26,"dst":55,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":27,"dst":56,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":27,"dst":28,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[0,{"start_byte":391,"end_byte":421,"start_line":19,"start_col":8,"end_line":19,"end_col":38}]}}
+{"src":28,"dst":63,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":28,"dst":66,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":28,"dst":27,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[1,{"start_byte":33,"end_byte":55,"start_line":4,"start_col":12,"end_line":4,"end_col":34}]}}
+{"src":29,"dst":67,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":29,"dst":35,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[2,{"start_byte":33,"end_byte":53,"start_line":4,"start_col":0,"end_line":4,"end_col":20}]}}
+{"src":30,"dst":70,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":31,"dst":75,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":32,"dst":77,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":32,"dst":30,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[5,{"start_byte":66,"end_byte":87,"start_line":6,"start_col":0,"end_line":6,"end_col":21}]}}
+{"src":32,"dst":35,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[5,{"start_byte":128,"end_byte":148,"start_line":8,"start_col":0,"end_line":8,"end_col":20}]}}
+{"src":32,"dst":37,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[5,{"start_byte":149,"end_byte":178,"start_line":9,"start_col":0,"end_line":9,"end_col":29}]}}
+{"src":33,"dst":84,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":34,"dst":86,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":35,"dst":88,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":35,"dst":30,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[8,{"start_byte":30,"end_byte":51,"start_line":4,"start_col":0,"end_line":4,"end_col":21}]}}
+{"src":35,"dst":33,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[8,{"start_byte":52,"end_byte":84,"start_line":5,"start_col":0,"end_line":5,"end_col":32}]}}
+{"src":36,"dst":96,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":36,"dst":35,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[9,{"start_byte":36,"end_byte":56,"start_line":4,"start_col":0,"end_line":4,"end_col":20}]}}
+{"src":37,"dst":99,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":37,"dst":29,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[10,{"start_byte":32,"end_byte":59,"start_line":4,"start_col":0,"end_line":4,"end_col":27}]}}
+{"src":37,"dst":35,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[10,{"start_byte":60,"end_byte":80,"start_line":5,"start_col":0,"end_line":5,"end_col":20}]}}
+{"src":37,"dst":36,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[10,{"start_byte":81,"end_byte":117,"start_line":6,"start_col":0,"end_line":6,"end_col":36}]}}
+{"src":38,"dst":105,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":38,"dst":106,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":41,"dst":40,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[14,{"start_byte":248,"end_byte":288,"start_line":9,"start_col":6,"end_line":9,"end_col":46}]}}
+{"src":41,"dst":73,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[14,{"start_byte":168,"end_byte":173,"start_line":6,"start_col":34,"end_line":6,"end_col":39}]}}
+{"src":41,"dst":94,"kind":"Calls","meta":{"confidence":0.85,"strategy":"ImportResolved","evidence":[14,{"start_byte":109,"end_byte":115,"start_line":5,"start_col":33,"end_line":5,"end_col":39}]}}
+{"src":42,"dst":32,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[15,{"start_byte":7,"end_byte":47,"start_line":2,"start_col":0,"end_line":2,"end_col":40}]}}
+{"src":42,"dst":38,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[15,{"start_byte":87,"end_byte":134,"start_line":5,"start_col":0,"end_line":5,"end_col":47}]}}
+{"src":42,"dst":77,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[15,{"start_byte":159,"end_byte":180,"start_line":7,"start_col":22,"end_line":7,"end_col":43}]}}
+{"src":43,"dst":107,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":43,"dst":44,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[16,{"start_byte":40,"end_byte":66,"start_line":4,"start_col":0,"end_line":4,"end_col":26}]}}
+{"src":44,"dst":109,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":45,"dst":114,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":45,"dst":115,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":45,"dst":43,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[18,{"start_byte":34,"end_byte":97,"start_line":2,"start_col":4,"end_line":2,"end_col":67}]}}
+{"src":45,"dst":44,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[18,{"start_byte":34,"end_byte":97,"start_line":2,"start_col":4,"end_line":2,"end_col":67}]}}
+{"src":46,"dst":116,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":46,"dst":119,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":46,"dst":35,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[19,{"start_byte":7,"end_byte":27,"start_line":2,"start_col":0,"end_line":2,"end_col":20}]}}
+{"src":47,"dst":120,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":48,"dst":121,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":48,"dst":29,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[21,{"start_byte":30,"end_byte":57,"start_line":4,"start_col":0,"end_line":4,"end_col":27}]}}
+{"src":48,"dst":36,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[21,{"start_byte":58,"end_byte":94,"start_line":5,"start_col":0,"end_line":5,"end_col":36}]}}
+{"src":48,"dst":37,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[21,{"start_byte":95,"end_byte":124,"start_line":6,"start_col":0,"end_line":6,"end_col":29}]}}
+{"src":48,"dst":47,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[21,{"start_byte":164,"end_byte":183,"start_line":8,"start_col":0,"end_line":8,"end_col":19}]}}
+{"src":49,"dst":127,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":128,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":129,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":130,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":131,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":132,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":133,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":134,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":144,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":145,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":146,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":49,"dst":147,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":50,"dst":151,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":50,"dst":154,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":50,"dst":156,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":51,"dst":50,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[24,{"start_byte":176,"end_byte":239,"start_line":4,"start_col":0,"end_line":4,"end_col":63}]}}
+{"src":51,"dst":54,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[24,{"start_byte":33,"end_byte":100,"start_line":1,"start_col":0,"end_line":1,"end_col":67}]}}
+{"src":51,"dst":55,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[24,{"start_byte":0,"end_byte":32,"start_line":0,"start_col":0,"end_line":0,"end_col":32}]}}
+{"src":52,"dst":157,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":52,"dst":158,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":52,"dst":161,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":52,"dst":162,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":52,"dst":158,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[25,{"start_byte":704,"end_byte":710,"start_line":33,"start_col":17,"end_line":33,"end_col":23}]}}
+{"src":53,"dst":163,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":53,"dst":55,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[26,{"start_byte":51,"end_byte":97,"start_line":1,"start_col":0,"end_line":1,"end_col":46}]}}
+{"src":54,"dst":168,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":54,"dst":55,"kind":"Imports","meta":{"confidence":1.0,"strategy":"ImportResolved","evidence":[27,{"start_byte":69,"end_byte":115,"start_line":1,"start_col":0,"end_line":1,"end_col":46}]}}
+{"src":55,"dst":173,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":55,"dst":174,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":55,"dst":178,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":55,"dst":179,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":55,"dst":182,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":55,"dst":185,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":56,"dst":57,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":56,"dst":60,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":56,"dst":61,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":56,"dst":62,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":57,"dst":58,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":57,"dst":59,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":63,"dst":64,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":64,"dst":65,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":67,"dst":68,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":67,"dst":69,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":69,"dst":88,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[2,{"start_byte":139,"end_byte":143,"start_line":10,"start_col":27,"end_line":10,"end_col":31}]}}
+{"src":70,"dst":71,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":70,"dst":72,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":70,"dst":73,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":70,"dst":74,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":75,"dst":76,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":77,"dst":78,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":77,"dst":79,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":77,"dst":80,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":77,"dst":81,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":77,"dst":82,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":77,"dst":83,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":77,"dst":75,"kind":"Inherits","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[5,{"start_byte":361,"end_byte":375,"start_line":19,"start_col":6,"end_line":19,"end_col":20}]}}
+{"src":80,"dst":99,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[5,{"start_byte":479,"end_byte":490,"start_line":23,"start_col":49,"end_line":23,"end_col":60}]}}
+{"src":81,"dst":76,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[5,{"start_byte":621,"end_byte":636,"start_line":30,"start_col":15,"end_line":30,"end_col":30}]}}
+{"src":81,"dst":104,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[5,{"start_byte":774,"end_byte":780,"start_line":32,"start_col":75,"end_line":32,"end_col":81}]}}
+{"src":81,"dst":78,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[5,{"start_byte":781,"end_byte":795,"start_line":32,"start_col":82,"end_line":32,"end_col":96}]}}
+{"src":81,"dst":80,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[5,{"start_byte":760,"end_byte":772,"start_line":32,"start_col":61,"end_line":32,"end_col":73}]}}
+{"src":82,"dst":93,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[5,{"start_byte":1105,"end_byte":1112,"start_line":42,"start_col":66,"end_line":42,"end_col":73}]}}
+{"src":82,"dst":103,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[5,{"start_byte":951,"end_byte":959,"start_line":39,"start_col":30,"end_line":39,"end_col":38}]}}
+{"src":82,"dst":106,"kind":"Calls","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[5,{"start_byte":1085,"end_byte":1097,"start_line":42,"start_col":46,"end_line":42,"end_col":58}]}}
+{"src":82,"dst":80,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[5,{"start_byte":937,"end_byte":949,"start_line":39,"start_col":16,"end_line":39,"end_col":28}]}}
+{"src":83,"dst":72,"kind":"References","meta":{"confidence":0.85,"strategy":"ImportResolved","evidence":[5,{"start_byte":1246,"end_byte":1260,"start_line":48,"start_col":30,"end_line":48,"end_col":44}]}}
+{"src":83,"dst":88,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[5,{"start_byte":1166,"end_byte":1170,"start_line":45,"start_col":35,"end_line":45,"end_col":39}]}}
+{"src":84,"dst":85,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":86,"dst":87,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":87,"dst":88,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[7,{"start_byte":164,"end_byte":175,"start_line":10,"start_col":32,"end_line":10,"end_col":43}]}}
+{"src":88,"dst":89,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":88,"dst":90,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":88,"dst":91,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":88,"dst":92,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":88,"dst":93,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":88,"dst":94,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":88,"dst":95,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":88,"dst":84,"kind":"Inherits","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[8,{"start_byte":293,"end_byte":297,"start_line":15,"start_col":6,"end_line":15,"end_col":10}]}}
+{"src":91,"dst":70,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[8,{"start_byte":461,"end_byte":474,"start_line":23,"start_col":36,"end_line":23,"end_col":49}]}}
+{"src":92,"dst":86,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[8,{"start_byte":552,"end_byte":564,"start_line":27,"start_col":30,"end_line":27,"end_col":42}]}}
+{"src":93,"dst":92,"kind":"Calls","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[8,{"start_byte":637,"end_byte":643,"start_line":32,"start_col":22,"end_line":32,"end_col":28}]}}
+{"src":94,"dst":71,"kind":"References","meta":{"confidence":0.85,"strategy":"ImportResolved","evidence":[8,{"start_byte":792,"end_byte":806,"start_line":37,"start_col":48,"end_line":37,"end_col":62}]}}
+{"src":95,"dst":85,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[8,{"start_byte":944,"end_byte":954,"start_line":43,"start_col":15,"end_line":43,"end_col":25}]}}
+{"src":95,"dst":71,"kind":"References","meta":{"confidence":0.85,"strategy":"ImportResolved","evidence":[8,{"start_byte":913,"end_byte":927,"start_line":42,"start_col":24,"end_line":42,"end_col":38}]}}
+{"src":96,"dst":97,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":96,"dst":98,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":97,"dst":88,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[9,{"start_byte":128,"end_byte":132,"start_line":8,"start_col":47,"end_line":8,"end_col":51}]}}
+{"src":98,"dst":94,"kind":"Calls","meta":{"confidence":0.85,"strategy":"ImportResolved","evidence":[9,{"start_byte":261,"end_byte":267,"start_line":15,"start_col":21,"end_line":15,"end_col":27}]}}
+{"src":99,"dst":100,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":99,"dst":101,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":99,"dst":102,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":99,"dst":103,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":99,"dst":104,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":101,"dst":96,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[10,{"start_byte":224,"end_byte":238,"start_line":12,"start_col":16,"end_line":12,"end_col":30}]}}
+{"src":102,"dst":67,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[10,{"start_byte":268,"end_byte":276,"start_line":13,"start_col":16,"end_line":13,"end_col":24}]}}
+{"src":103,"dst":69,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[10,{"start_byte":545,"end_byte":551,"start_line":23,"start_col":25,"end_line":23,"end_col":31}]}}
+{"src":103,"dst":95,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[10,{"start_byte":586,"end_byte":593,"start_line":24,"start_col":15,"end_line":24,"end_col":22}]}}
+{"src":103,"dst":97,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[10,{"start_byte":505,"end_byte":511,"start_line":22,"start_col":35,"end_line":22,"end_col":41}]}}
+{"src":103,"dst":88,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[10,{"start_byte":346,"end_byte":350,"start_line":17,"start_col":43,"end_line":17,"end_col":47}]}}
+{"src":103,"dst":101,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[10,{"start_byte":486,"end_byte":503,"start_line":22,"start_col":16,"end_line":22,"end_col":33}]}}
+{"src":103,"dst":102,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[10,{"start_byte":528,"end_byte":543,"start_line":23,"start_col":8,"end_line":23,"end_col":23}]}}
+{"src":104,"dst":98,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[10,{"start_byte":739,"end_byte":745,"start_line":32,"start_col":34,"end_line":32,"end_col":40}]}}
+{"src":104,"dst":101,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[10,{"start_byte":720,"end_byte":737,"start_line":32,"start_col":15,"end_line":32,"end_col":32}]}}
+{"src":106,"dst":105,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[11,{"start_byte":262,"end_byte":270,"start_line":12,"start_col":54,"end_line":12,"end_col":62}]}}
+{"src":107,"dst":108,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":108,"dst":113,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[16,{"start_byte":583,"end_byte":590,"start_line":17,"start_col":70,"end_line":17,"end_col":77}]}}
+{"src":108,"dst":109,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[16,{"start_byte":485,"end_byte":489,"start_line":15,"start_col":25,"end_line":15,"end_col":29}]}}
+{"src":109,"dst":110,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":109,"dst":111,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":109,"dst":112,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":109,"dst":113,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":113,"dst":112,"kind":"Writes","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[17,{"start_byte":266,"end_byte":284,"start_line":14,"start_col":8,"end_line":14,"end_col":26}]}}
+{"src":114,"dst":109,"kind":"Calls","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[18,{"start_byte":150,"end_byte":154,"start_line":6,"start_col":19,"end_line":6,"end_col":23}]}}
+{"src":114,"dst":110,"kind":"Calls","meta":{"confidence":0.9025,"strategy":"ImportResolved","evidence":[18,{"start_byte":150,"end_byte":154,"start_line":6,"start_col":19,"end_line":6,"end_col":23}]}}
+{"src":114,"dst":109,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[18,{"start_byte":120,"end_byte":124,"start_line":4,"start_col":21,"end_line":4,"end_col":25}]}}
+{"src":115,"dst":113,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[18,{"start_byte":266,"end_byte":273,"start_line":15,"start_col":23,"end_line":15,"end_col":30}]}}
+{"src":115,"dst":114,"kind":"Calls","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[18,{"start_byte":251,"end_byte":262,"start_line":15,"start_col":8,"end_line":15,"end_col":19}]}}
+{"src":116,"dst":117,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":116,"dst":118,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":116,"dst":97,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[19,{"start_byte":129,"end_byte":135,"start_line":6,"start_col":39,"end_line":6,"end_col":45}]}}
+{"src":116,"dst":97,"kind":"Tests","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[19,{"start_byte":129,"end_byte":135,"start_line":6,"start_col":39,"end_line":6,"end_col":45}]}}
+{"src":117,"dst":95,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[19,{"start_byte":216,"end_byte":223,"start_line":10,"start_col":28,"end_line":10,"end_col":35}]}}
+{"src":117,"dst":88,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[19,{"start_byte":243,"end_byte":254,"start_line":10,"start_col":55,"end_line":10,"end_col":66}]}}
+{"src":117,"dst":95,"kind":"Tests","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[19,{"start_byte":216,"end_byte":223,"start_line":10,"start_col":28,"end_line":10,"end_col":35}]}}
+{"src":118,"dst":93,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[19,{"start_byte":332,"end_byte":339,"start_line":13,"start_col":66,"end_line":13,"end_col":73}]}}
+{"src":118,"dst":93,"kind":"Tests","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[19,{"start_byte":332,"end_byte":339,"start_line":13,"start_col":66,"end_line":13,"end_col":73}]}}
+{"src":121,"dst":122,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":121,"dst":123,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":121,"dst":124,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":121,"dst":125,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":121,"dst":126,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":121,"dst":120,"kind":"Inherits","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[21,{"start_byte":191,"end_byte":206,"start_line":10,"start_col":6,"end_line":10,"end_col":21}]}}
+{"src":122,"dst":99,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[21,{"start_byte":238,"end_byte":249,"start_line":12,"start_col":12,"end_line":12,"end_col":23}]}}
+{"src":123,"dst":96,"kind":"Calls","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[21,{"start_byte":374,"end_byte":388,"start_line":17,"start_col":45,"end_line":17,"end_col":59}]}}
+{"src":123,"dst":99,"kind":"Calls","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[21,{"start_byte":358,"end_byte":369,"start_line":17,"start_col":29,"end_line":17,"end_col":40}]}}
+{"src":123,"dst":100,"kind":"Calls","meta":{"confidence":0.9025,"strategy":"ImportResolved","evidence":[21,{"start_byte":358,"end_byte":369,"start_line":17,"start_col":29,"end_line":17,"end_col":40}]}}
+{"src":123,"dst":67,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[21,{"start_byte":410,"end_byte":425,"start_line":17,"start_col":81,"end_line":17,"end_col":96}]}}
+{"src":123,"dst":122,"kind":"Writes","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[21,{"start_byte":337,"end_byte":351,"start_line":17,"start_col":8,"end_line":17,"end_col":22}]}}
+{"src":124,"dst":103,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[21,{"start_byte":586,"end_byte":594,"start_line":23,"start_col":24,"end_line":23,"end_col":32}]}}
+{"src":124,"dst":122,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[21,{"start_byte":570,"end_byte":584,"start_line":23,"start_col":8,"end_line":23,"end_col":22}]}}
+{"src":124,"dst":103,"kind":"Tests","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[21,{"start_byte":586,"end_byte":594,"start_line":23,"start_col":24,"end_line":23,"end_col":32}]}}
+{"src":125,"dst":104,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[21,{"start_byte":726,"end_byte":732,"start_line":29,"start_col":46,"end_line":29,"end_col":52}]}}
+{"src":125,"dst":122,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[21,{"start_byte":710,"end_byte":724,"start_line":29,"start_col":30,"end_line":29,"end_col":44}]}}
+{"src":125,"dst":104,"kind":"Tests","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[21,{"start_byte":726,"end_byte":732,"start_line":29,"start_col":46,"end_line":29,"end_col":52}]}}
+{"src":126,"dst":103,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[21,{"start_byte":825,"end_byte":833,"start_line":35,"start_col":24,"end_line":35,"end_col":32}]}}
+{"src":126,"dst":122,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[21,{"start_byte":809,"end_byte":823,"start_line":35,"start_col":8,"end_line":35,"end_col":22}]}}
+{"src":126,"dst":103,"kind":"Tests","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[21,{"start_byte":825,"end_byte":833,"start_line":35,"start_col":24,"end_line":35,"end_col":32}]}}
+{"src":134,"dst":135,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":134,"dst":136,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":134,"dst":137,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":134,"dst":138,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":134,"dst":139,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":134,"dst":140,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":134,"dst":142,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":137,"dst":129,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[22,{"start_byte":714,"end_byte":729,"start_line":34,"start_col":49,"end_line":34,"end_col":64}]}}
+{"src":137,"dst":138,"kind":"Writes","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[22,{"start_byte":740,"end_byte":749,"start_line":35,"start_col":8,"end_line":35,"end_col":17}]}}
+{"src":137,"dst":139,"kind":"Writes","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[22,{"start_byte":765,"end_byte":777,"start_line":36,"start_col":8,"end_line":36,"end_col":20}]}}
+{"src":140,"dst":141,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":140,"dst":141,"kind":"Calls","meta":{"confidence":0.95,"strategy":"SameModule","evidence":[22,{"start_byte":1339,"end_byte":1344,"start_line":56,"start_col":27,"end_line":56,"end_col":32}]}}
+{"src":140,"dst":138,"kind":"References","meta":{"confidence":0.9,"strategy":"TypeResolved","evidence":[22,{"start_byte":1168,"end_byte":1177,"start_line":52,"start_col":8,"end_line":52,"end_col":17}]}}
+{"src":140,"dst":133,"kind":"Throws","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[22,{"start_byte":1136,"end_byte":1148,"start_line":51,"start_col":18,"end_line":51,"end_col":30}]}}
+{"src":142,"dst":143,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":144,"dst":134,"kind":"Calls","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[22,{"start_byte":1460,"end_byte":1474,"start_line":64,"start_col":14,"end_line":64,"end_col":28}]}}
+{"src":144,"dst":137,"kind":"Calls","meta":{"confidence":0.85499996,"strategy":"SameModule","evidence":[22,{"start_byte":1460,"end_byte":1474,"start_line":64,"start_col":14,"end_line":64,"end_col":28}]}}
+{"src":144,"dst":140,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[22,{"start_byte":1518,"end_byte":1531,"start_line":66,"start_col":8,"end_line":66,"end_col":21}]}}
+{"src":146,"dst":144,"kind":"Calls","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[22,{"start_byte":1650,"end_byte":1659,"start_line":76,"start_col":11,"end_line":76,"end_col":20}]}}
+{"src":146,"dst":144,"kind":"Tests","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[22,{"start_byte":1650,"end_byte":1659,"start_line":76,"start_col":11,"end_line":76,"end_col":20}]}}
+{"src":147,"dst":148,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":147,"dst":149,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":147,"dst":150,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":151,"dst":152,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":151,"dst":153,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":154,"dst":155,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":154,"dst":151,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[23,{"start_byte":273,"end_byte":284,"start_line":10,"start_col":43,"end_line":10,"end_col":54}]}}
+{"src":156,"dst":154,"kind":"Calls","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[23,{"start_byte":677,"end_byte":698,"start_line":26,"start_col":9,"end_line":26,"end_col":30}]}}
+{"src":156,"dst":151,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[23,{"start_byte":637,"end_byte":648,"start_line":25,"start_col":56,"end_line":25,"end_col":67}]}}
+{"src":158,"dst":159,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":158,"dst":160,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":160,"dst":158,"kind":"Calls","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[25,{"start_byte":497,"end_byte":513,"start_line":21,"start_col":9,"end_line":21,"end_col":25}]}}
+{"src":163,"dst":164,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":163,"dst":167,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":164,"dst":165,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":164,"dst":166,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":165,"dst":185,"kind":"Calls","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[26,{"start_byte":256,"end_byte":284,"start_line":8,"start_col":18,"end_line":8,"end_col":46}]}}
+{"src":165,"dst":188,"kind":"Calls","meta":{"confidence":0.9025,"strategy":"ImportResolved","evidence":[26,{"start_byte":256,"end_byte":284,"start_line":8,"start_col":18,"end_line":8,"end_col":46}]}}
+{"src":165,"dst":190,"kind":"References","meta":{"confidence":0.6,"strategy":"UniqueName","evidence":[26,{"start_byte":278,"end_byte":283,"start_line":8,"start_col":40,"end_line":8,"end_col":45}]}}
+{"src":165,"dst":185,"kind":"Tests","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[26,{"start_byte":256,"end_byte":284,"start_line":8,"start_col":18,"end_line":8,"end_col":46}]}}
+{"src":165,"dst":188,"kind":"Tests","meta":{"confidence":0.9025,"strategy":"ImportResolved","evidence":[26,{"start_byte":256,"end_byte":284,"start_line":8,"start_col":18,"end_line":8,"end_col":46}]}}
+{"src":166,"dst":161,"kind":"Calls","meta":{"confidence":0.6,"strategy":"UniqueName","evidence":[26,{"start_byte":394,"end_byte":403,"start_line":13,"start_col":6,"end_line":13,"end_col":15}]}}
+{"src":166,"dst":161,"kind":"Tests","meta":{"confidence":0.6,"strategy":"UniqueName","evidence":[26,{"start_byte":394,"end_byte":403,"start_line":13,"start_col":6,"end_line":13,"end_col":15}]}}
+{"src":168,"dst":169,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":168,"dst":170,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":168,"dst":171,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":168,"dst":172,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":169,"dst":185,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[27,{"start_byte":246,"end_byte":257,"start_line":6,"start_col":38,"end_line":6,"end_col":49}]}}
+{"src":174,"dst":175,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":174,"dst":176,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":174,"dst":177,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":177,"dst":174,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[28,{"start_byte":444,"end_byte":448,"start_line":13,"start_col":32,"end_line":13,"end_col":36}]}}
+{"src":179,"dst":180,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":179,"dst":181,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":182,"dst":183,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":182,"dst":184,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":186,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":187,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":188,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":189,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":190,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":191,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":192,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":193,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":194,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
+{"src":185,"dst":182,"kind":"Inherits","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[28,{"start_byte":771,"end_byte":782,"start_line":33,"start_col":13,"end_line":33,"end_col":24}]}}
+{"src":187,"dst":178,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[28,{"start_byte":913,"end_byte":919,"start_line":35,"start_col":26,"end_line":35,"end_col":32}]}}
+{"src":191,"dst":171,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[28,{"start_byte":1270,"end_byte":1306,"start_line":50,"start_col":23,"end_line":50,"end_col":59}]}}
+{"src":191,"dst":178,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[28,{"start_byte":1131,"end_byte":1137,"start_line":45,"start_col":21,"end_line":45,"end_col":27}]}}
+{"src":192,"dst":173,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[28,{"start_byte":1816,"end_byte":1833,"start_line":68,"start_col":20,"end_line":68,"end_col":37}]}}
+{"src":193,"dst":178,"kind":"References","meta":{"confidence":0.9,"strategy":"SameModule","evidence":[28,{"start_byte":1877,"end_byte":1883,"start_line":73,"start_col":13,"end_line":73,"end_col":19}]}}
+# stats total=232 resolved=83 builtin=18 external=76 by_strategy={"heuristic": 9, "import_resolved": 30, "same_module": 16, "type_resolved": 26, "unique_name": 2}
