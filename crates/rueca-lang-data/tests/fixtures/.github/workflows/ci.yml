@@ -1,0 +1,24 @@
+name: CI
+on: [push]
+env:
+  PYTHON_VERSION: "3.12"
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+  test:
+    # Unit tests against a real database.
+    runs-on: ubuntu-latest
+    needs: lint
+    env:
+      DATABASE_URL: postgres://localhost/test
+    steps:
+      - uses: actions/checkout@v4
+      - id: tests
+        name: Run tests
+        run: pytest --db "${{ env.DATABASE_URL }}"
+  release:
+    needs: [lint, test]
+    uses: ./.github/workflows/release.yml

@@ -44,6 +44,7 @@ pub(crate) fn extract(source: &[u8], budget: &Budget) -> Result<FileFacts, Extra
         type_checking: 0,
         enc_override: None,
         locals,
+        env: crate::bridge::EnvApi::scan(root, source),
     };
     ex.scopes.push(Scope { kind: ScopeKind::Module, def: None, self_name: None, init_class: None });
     ex.visit_children(root, 0);
@@ -98,6 +99,8 @@ struct Extractor<'s> {
     enc_override: Option<Option<LocalDefId>>,
     /// Which identifiers are local bindings (from `queries/locals.scm`).
     locals: Locals,
+    /// Env var APIs bound by the file's imports (the bridge, `bridge.rs`).
+    env: crate::bridge::EnvApi,
 }
 
 /// Identifier nodes of a pure attribute chain `a.b.c` (root first) and the
@@ -317,6 +320,12 @@ impl<'s> Extractor<'s> {
             "assignment" => self.visit_assignment(node, depth),
             "augmented_assignment" => self.visit_augmented(node, depth),
             "call" => self.visit_call(node, depth),
+            "subscript" => {
+                if let Some(var) = self.env.subscript(node, self.source) {
+                    self.push_ref(RefKind::EnvVar, var, None, span_of(node));
+                }
+                self.visit_children(node, depth)
+            }
             "attribute" => self.visit_attribute(node, depth),
             "identifier" => self.read_identifier(node),
             "keyword_argument" => self.visit_field(node, "value", depth),
@@ -401,6 +410,9 @@ impl<'s> Extractor<'s> {
     }
 
     fn visit_call(&mut self, node: Node<'_>, depth: usize) {
+        if let Some(var) = self.env.call(node, self.source) {
+            self.push_ref(RefKind::EnvVar, var, None, span_of(node));
+        }
         if let Some(func) = node.child_by_field_name("function") {
             match func.kind() {
                 "identifier" => {

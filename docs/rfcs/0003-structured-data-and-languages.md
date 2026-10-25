@@ -1,8 +1,11 @@
 # RFC 0003 — Structured data and the next languages
 
 - Status: Draft; the shared groundwork (§9.2 contract, §9.3 model, §10.1
-  resolver, wave R of §12) is **implemented** — see the *Implemented*
-  notes in those sections. Language and format packs are pending.
+  resolver, wave R of §12) is **implemented**, and so are the data formats,
+  file kinds and the code ↔ config bridge (waves 1, 2a and 2b:
+  `rueca-lang-data` plus the Python, TS/JS and PHP packs) — see the
+  *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. The Go, C/C++ and
+  Java packs are pending.
 - Created: 2026-10-24
 - Depends on: RFC 0001 (architecture), RFC 0002 (building blocks)
 - Research date: 2026-10-24. Crate versions, licenses and dependency
@@ -91,6 +94,16 @@ Statuses used in the README and `docs/tools.md`:
 | `supported` | Gate met. |
 | `preview` | Extraction ships and is documented; one or more of items 3–5 is missing. Results are flagged in tool output docs. |
 | `text` | No pack: `File` node and content search only (any text file). |
+
+*Implemented* (data formats, 2026-10-25): items 1, 2 and 6 of the gate
+for every data format, and the parts of item 3 that run in CI — fixtures per
+format and kind, the key-recall test against `serde_json`, `saphyr`'s
+loader and `toml` (≥ 99%, on the fixture corpus), determinism, adversarial
+inputs (billion-laughs YAML, 100,000-deep brackets, random and mutated
+bytes) and an `#[ignore]` smoke test (`rueca-lang-data/tests/real_repo.rs`).
+Still missing, so every data format is `preview`: `cargo fuzz` targets
+(the randomized tests stand in for now), pinned smoke baselines, the bridge
+precision/recall labels of §3.3 (item 4) and the parity row (item 5).
 
 ### 3.2 Parity table format
 
@@ -248,6 +261,16 @@ Within an indexed file: array elements that are mappings are indexed up to
 ancestor's preview); a file emits at most 5,000 `Key`s (status `partial`
 beyond).
 
+*Implemented* with these refinements: rule 5 applies to files of no known
+kind (a Kubernetes bundle or an OpenAPI spec is capped and `partial`, never
+skipped), and its "mostly array elements" test needs at least 20
+definitions (a three-element config list is not a dump); the 5,000-key cap
+counts keys as the generic walk emits them, before kinds relabel some as
+`Route` / `Resource` / `EnvVar`; Helm templates (YAML under `templates/`
+containing `{{`) are `skipped:template`; HCL deeper than 128 brackets is
+`skipped:data-shape`; unrecoverable JSON / TOML / HCL / XML syntax errors
+are `skipped:parser`, while YAML keeps what it read (`partial`).
+
 ### 4.6 Spans, signatures, docs, secrets
 
 - **Spans**: definition span = from the key's first byte to the end of its
@@ -315,6 +338,22 @@ a kind degrades to plain keys.
 | Android manifest | `AndroidManifest.xml` | activities / services → `Resource` with class REFERENCES | later |
 | i18n catalogs | `locales/**`, `*.po` | translation keys + `t('home.title')` bridge | later (open question) |
 
+*Implemented* (waves 1–2): every kind of the table except the Helm row
+(chart `Resource`, `values*.yaml` scoping and `.Values` references stay for
+wave 3), `go.mod` / `go.work` (with Go) and Android components (later).
+Maven and MSBuild projects get keys (`dependencies.dependency["g:a"]`,
+`ItemGroup.PackageReference["Serilog"]`) and imports (`modules/module`,
+`parent/relativePath`, `ProjectReference`); Java source roots come with
+Java. Additions: `pyproject.toml` entry points include
+`[project.gui-scripts]`, `[project.entry-points.*]` and
+`[tool.poetry.scripts]`; Kubernetes `secretKeyRef` points at `data` and
+`stringData`; compose `build` also imports `<context>/Dockerfile`;
+GitHub Actions `${{ env.X }}` and Kubernetes `$(X)` are env var reads by
+the key that holds them. Terraform references (wave 3 in the table) are
+implemented too, since directory scope landed in wave R:
+`var.x` / `local.x` / `module.m` / `data.t.n` / `t.n` traversals resolve
+within the module directory.
+
 ## 6. References inside data
 
 Data pointers use the same facts as code: `Import` for file targets,
@@ -338,6 +377,11 @@ for inheritance-like merges.
 
 The resolver handles `DataRef` outside the strategy ladder: exact matches
 only, no name fallback, so a data pointer never fuzzy-matches.
+
+*Implemented*: every row except Dockerfile `COPY src/` build contexts
+(open question 5). A `$ref` JSON Pointer into an array becomes `[N]` (or the
+element's identity) by walking the document; a pointer into another file
+keeps its tokens as keys.
 
 ## 7. The code ↔ config bridge
 
@@ -392,6 +436,19 @@ builtin `getenv`), never by function name alone.
 | Go | `os.Getenv("X")`, `os.LookupEnv("X")` | viper `viper.GetString("a.b")` (namespace `viper`) |
 | Java | `System.getenv("X")` | Spring `@Value("${a.b}")`, `env.getProperty("a.b")`; `@ConfigurationProperties(prefix)` fields (later) (namespace `spring`) |
 | C / C++ | `getenv("X")`, `std::getenv("X")`, `secure_getenv` | — |
+
+*Implemented* for Python, TS / JS and PHP as listed, except Django
+`settings.X` and pydantic `BaseSettings` (later). Evidence: Python needs the
+file's `import os` / `from os import …` (aliases followed); TS / JS needs
+`process` / `Deno` not to be a local binding and, for node-config, an
+import or `require` of `config`; PHP matches the unqualified builtin /
+helper names (`getenv`, `env`, `config`) and the `Config` facade, so a
+project-defined namespaced `env()` would be misread. Assignment and
+`del` / `delete` targets are writes, not reads. Laravel config files are
+handled in the PHP pack as §7.3 says: `config/<file>.php` arrays become
+`Key`s (PHP has no module name, so their global name is the key path,
+`name`; symbol id `config/app.php#name`), and `env()` inside an entry is
+read by that key. The PHP pack therefore sets `facts_depend_on_path`.
 
 Why new kinds instead of `Read` with a marker receiver: `Read` goes through
 the strategy ladder, whose last rung matches any symbol by name; an env var
@@ -469,6 +526,13 @@ work for a framework/infra RFC.
 | `.env`, INI, `.properties` | — | — | — | — | — | **Build**: ~100 lines each; `dotenvy` 0.15.7, `rust-ini` 0.21.3 and `java-properties` 2.0.0 are MIT but expose no positions |
 | Dockerfile | — | — | — | — | — | **Build**: line-oriented (continuations, parser directives, JSON-form arguments, heredocs), ~400 lines, against the BuildKit reference |
 | Reference parsers (tests only) | `serde_json` 1.0.154, `saphyr` 0.2.2, `toml` 1.1.8 | | MIT OR Apache-2.0 | | | Dev-dependencies for the key-recall test |
+
+*Implemented* with the crates and versions of the table (versions and
+licenses re-checked on crates.io on 2026-10-25; `cargo deny` passes; no
+new license). Two facts found while building: `saphyr-parser` markers count
+**characters**, not bytes, so offsets are mapped back to bytes for
+non-ASCII sources; and its block-collection end events sit at the next
+token, so block collections end where their last child ends.
 
 Not chosen:
 
@@ -702,9 +766,9 @@ including tests and docs, excluding review.
 | Wave | Content | Depends on | Estimate |
 |---|---|---|---|
 | 0 | PHP, Markdown (in flight) | — | — |
-| 1 | **JSON, YAML**: model additions (§9.3 except `is_declaration`), `rueca-lang-data` core (tree, key paths, emit, budgets), JSON/JSONC + YAML front ends, kinds `package.json`, tsconfig, `composer.json`, `search_symbols` default-label rule, key-recall test | 0 (model) | 2–3 |
-| 2a | **Other config formats**: TOML, `.env`, INI, `.properties`, HCL (definitions), Dockerfile, XML kinds; `pyproject` | 1 | 2 |
-| 2b | **Bridge and infra kinds**: `EnvVar` / `ConfigKey` facts in Python, TS/JS and PHP packs; canonical env vars, `READS` / `WRITES`, `Strategy::Contract`; compose, k8s, GitHub Actions, OpenAPI, JSON Schema, Spring/.NET config scopes; S2 bridge labels | 1 | 3 |
+| 1 | **JSON, YAML**: model additions (§9.3 except `is_declaration`), `rueca-lang-data` core (tree, key paths, emit, budgets), JSON/JSONC + YAML front ends, kinds `package.json`, tsconfig, `composer.json`, `search_symbols` default-label rule, key-recall test — *done* | 0 (model) | 2–3 |
+| 2a | **Other config formats**: TOML, `.env`, INI, `.properties`, HCL (definitions), Dockerfile, XML kinds; `pyproject` — *done* | 1 | 2 |
+| 2b | **Bridge and infra kinds**: `EnvVar` / `ConfigKey` facts in Python, TS/JS and PHP packs; canonical env vars, `READS` / `WRITES`, `Strategy::Contract`; compose, k8s, GitHub Actions, OpenAPI, JSON Schema, Spring/.NET config scopes — *done*; S2 bridge labels pending | 1 | 3 |
 | R | **Shared resolver work** (§10.1) — *done*, with the §9.2 contract and §9.3 model | 0 | 1–2 |
 | 3 | **Go** (+ `go.mod` kind, Terraform references) | R | 2–3 |
 | 4 | **C++ then C** (one pack; C++ tested first, per the maintainer's order) | R (implicit self, overloads), `is_declaration` | 3–4 |

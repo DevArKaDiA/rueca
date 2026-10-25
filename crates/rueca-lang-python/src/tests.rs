@@ -756,7 +756,7 @@ fn builtins() {
     }
     assert!(builtins::BUILTINS.windows(2).all(|w| w[0] < w[1]), "builtins must be sorted");
     assert_eq!(p.self_receivers(), &["self", "cls"]);
-    assert_eq!(p.extractor_version(), 1);
+    assert_eq!(p.extractor_version(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -885,4 +885,57 @@ fn deeply_nested_scopes_stay_fast() {
     assert!(start.elapsed() < std::time::Duration::from_secs(10), "{:?}", start.elapsed());
     assert_eq!(f.definitions.len(), 1);
     assert!(has_ref(&f, RefKind::Read, "free", ""));
+}
+
+// ---------------------------------------------------------------------------
+// Env var reads (the code ↔ config bridge, RFC 0003 §7.2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn env_var_reads() {
+    let f = facts(
+        "import os
+import os as o
+from os import environ as env, getenv
+
+URL = os.getenv(\"DATABASE_URL\")
+
+
+def main(name):
+    a = os.environ[\"LOG_LEVEL\"]
+    b = os.environ.get(\"API_TOKEN\", \"x\")
+    c = o.getenv('QUEUE')
+    d = env[\"SENTRY_DSN\"]
+    e = env.get(\"REGION\")
+    g = getenv(\"HOME\")
+    os.environ[\"SET_ONLY\"] = \"1\"
+    del os.environ[\"GONE\"]
+    dynamic = os.getenv(name)
+    fstr = os.getenv(f\"X_{name}\")
+    other = config.get(\"NOT_ENV\")
+    return a, b, c, d, e, g, dynamic, fstr, other
+",
+    );
+    let mut env: Vec<(String, String)> =
+        f.references.iter().filter(|r| r.kind == RefKind::EnvVar).map(|r| (r.name.clone(), enc_name(&f, r))).collect();
+    env.sort();
+    let expect: Vec<(String, String)> = [
+        ("API_TOKEN", "main"),
+        ("DATABASE_URL", ""),
+        ("HOME", "main"),
+        ("LOG_LEVEL", "main"),
+        ("QUEUE", "main"),
+        ("REGION", "main"),
+        ("SENTRY_DSN", "main"),
+    ]
+    .iter()
+    .map(|(a, b)| (a.to_string(), b.to_string()))
+    .collect();
+    assert_eq!(env, expect);
+    // The ordinary call facts are unchanged.
+    assert!(has_ref(&f, RefKind::Call, "os.getenv", ""));
+
+    // Without `import os` there is no evidence: nothing is emitted.
+    let f = facts("def f():\n    return os.getenv(\"X\"), environ[\"Y\"], getenv(\"Z\")\n");
+    assert!(f.references.iter().all(|r| r.kind != RefKind::EnvVar));
 }

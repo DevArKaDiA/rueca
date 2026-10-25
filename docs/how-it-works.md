@@ -5,14 +5,12 @@ it turns that into a graph, what the graph contains, and exactly which parts
 of it each tool reads. It describes the alpha as implemented. The *why* lives
 in the [RFCs](rfcs/) and the [decisions log](decisions.md); the exact tool
 arguments and result shapes live in [tools.md](tools.md); byte-level formats
-live in the crate docs (`rueca-segment`). The planned extension to
-structured data (config keys, env vars, the code ↔ config bridge) and to Go,
-C/C++ and Java is designed in
-[RFC 0003](rfcs/0003-structured-data-and-languages.md); this document
-changes as each part lands. Its shared groundwork — the model, the
-language-pack hooks and the generic resolver rules those packs use — is
-implemented (§4.3–§4.4, §5, marked *packs pending* where no shipped pack
-produces the facts yet).
+live in the crate docs (`rueca-segment`). Structured data (config keys,
+env vars, the code ↔ config bridge) and the extension to Go, C/C++ and Java
+are designed in [RFC 0003](rfcs/0003-structured-data-and-languages.md); this
+document changes as each part lands. Structured data and the bridge are
+implemented (§4.2–§4.4, §5); the resolver rules for Go, C/C++ and Java are
+implemented and marked *packs pending* where no shipped pack uses them yet.
 
 Contents:
 
@@ -134,7 +132,7 @@ disappears. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-markdown`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-markdown`, `rueca-lang-data`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -213,6 +211,69 @@ of tree-sitter, and become structure in the same graph:
   `search_code`). Headings inside block quotes and lists, front matter and
   MDX are not extracted.
 
+**Structured data** (`rueca-lang-data`) is parsed with pure-Rust,
+span-preserving parsers — `jsonc-parser` (JSON, JSONC), `saphyr-parser`
+(YAML, at the event level), `toml_edit` (TOML), `roxmltree` (XML),
+`hcl-edit` (HCL / Terraform) — and small parsers built here for `.env`,
+INI, `.properties` and Dockerfile:
+
+- **Keys.** Every mapping entry is a `Key` whose local name is a **key
+  path**: `database.host`; keys that need it are quoted
+  (`paths."/v1/a.{b}".get`); mapping elements of arrays are `[N]`
+  (`jobs.test.steps[2]`) or keyed by an identity field where the file kind
+  has one (`containers["web"].env["DATABASE_URL"]`); documents of a
+  multi-document YAML stream are `{N}`. The module name is the path with
+  extension, so the global name is `k8s/web.yaml:Deployment/web.spec.replicas`.
+  TOML tables and arrays of tables, INI sections, `.properties` keys
+  (`server.port` split into a key path) and XML elements of known kinds
+  (`pom.xml`, `*.csproj`, `AndroidManifest.xml`) map to the same shape, so
+  `database.host` looks the same in YAML, TOML, INI and `.properties`.
+- **Signatures and docs.** `key: <preview>` — scalars as written (≤ 80
+  chars), maps `{a, b, c, … 2 more}`, arrays `[3 items]` — and the comment
+  above a key (plus a trailing one) as its doc. Values of env var providers
+  and of secret-looking keys (`password`, `token`, `api_key`, …) are never
+  copied into signatures: `DATABASE_URL=•••`.
+- **File kinds** add meaning chosen by path and shape: `package.json`
+  entry points and tsconfig `extends` → imports; `pyproject.toml` scripts →
+  references to the Python function; compose services → `Resource`,
+  `environment` → `EnvVar` providers, `build` → `Image` plus imports of the
+  context and Dockerfile, `depends_on` / `extends` → references / bases;
+  Kubernetes documents → `Resource` `Kind/name`, container `env` →
+  providers, `configMapKeyRef` / `secretKeyRef` / `envFrom` → references to
+  the ConfigMap or Secret in any manifest; GitHub Actions jobs (with their
+  `runs-on`), steps keyed by `id`, `needs` → references, local `uses: ./…`
+  → imports from the repository root, `env` → providers; OpenAPI operations
+  → `Route` `GET /users/{id}`; Terraform `resource` / `data` / `module` →
+  `Resource` (`aws_s3_bucket.logs`), `variable` / `locals` → `Variable`
+  (`var.x`, `local.x`), module `source` → an import of the folder, and
+  `var.x` / `aws_s3_bucket.logs.arn` traversals → references within the
+  module directory; Dockerfile stages → `Image`, `FROM <stage>` → base,
+  `COPY --from` → reference, `ENV` → providers.
+- **Pointers** are exact: `$ref` (JSON Pointer), YAML aliases and merge
+  keys (never expanded: an alias is one reference, so a "billion laughs"
+  file costs nothing), and the kind pointers above.
+- **Not indexed** (the file stays listed and searchable, status
+  `skipped:<reason>`): lockfiles (by the walk), minified / notebook / HAR /
+  GeoJSON files and data under `fixtures/`, `testdata/`, `__snapshots__/`
+  (`data`), generated files (`generated`), Helm templates (`template`),
+  data files over 256 KiB that are not a known kind (`data-size`), and
+  data dumps — long root arrays, more than 5,000 keys, mostly array
+  elements (`data-shape`). Inside a file, keys stop at depth 32, arrays at
+  64 mapping elements and files at 5,000 keys (`partial`).
+
+**Env var and config reads in code** (the code side of the bridge) are
+facts of the code packs, recognized only with file-local evidence and
+literal names: Python `os.environ["X"]`, `os.environ.get("X")`,
+`os.getenv("X")` (with `import os` / `from os import …`); TS/JS
+`process.env.X`, `process.env["X"]`, `const { X } = process.env`,
+`import.meta.env.X`, `Deno.env.get("X")`, and `config.get("a.b")` with
+`config` imported from the `config` package (node-config); PHP
+`getenv('X')`, `$_ENV['X']`, `$_SERVER['X']`, Laravel `env('X')`,
+`config('app.name')` and `Config::get(…)`. Laravel config files are PHP:
+the array a `config/<file>.php` returns becomes `Key`s (`name`,
+`providers.cache.driver`), and `env()` calls inside an entry are reads by
+that key.
+
 Facts are cached at
 `<store>/facts/<sha>-<lang>-v<extractor version>-f<facts format>.bin`.
 Re-indexing an unchanged file is a cache hit; bumping a pack's
@@ -223,7 +284,8 @@ name) add a hash of the path to the key. A pack may also decline a file with
 a reason (`skipped:data-shape`): the file stays listed and searchable.
 
 **Detection** is by extension, then by file name (`Dockerfile`,
-`Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`); a C header
+`Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`,
+`AndroidManifest.xml`; other XML stays text); a C header
 (`.h`) is C++ when the snapshot has C++ sources. A file gets a language in
 the graph only when a pack for it is registered; otherwise it is plain text
 (listed, content-searchable).
@@ -308,9 +370,9 @@ order; the first one that succeeds wins and stamps the edge:
 (Strategy 5, receiver typing from assignments, is not implemented in the
 alpha for Python and ECMAScript.)
 
-Rungs and rules that the RFC 0003 packs opt into (*packs pending*: no
-shipped pack enables them yet, so Python, ECMAScript, PHP and Markdown
-resolve exactly as above):
+Rungs and rules that the RFC 0003 packs opt into (Python, ECMAScript, PHP
+and Markdown resolve exactly as above; Terraform uses directory scope; the
+rest are *packs pending* until the Go, C/C++ and Java packs land):
 
 | Rule | Hook | Effect | Confidence |
 |---|---|---|---|
@@ -364,8 +426,8 @@ In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
 | `EnvVar`, `ConfigKey` | `READS` (the bridge, below) |
 | `DataRef` | `REFERENCES` (data pointers, below) |
 
-**The code ↔ config bridge and data pointers** (RFC 0003 §6–§7; resolver
-implemented, *packs pending*). These references never go through the
+**The code ↔ config bridge and data pointers** (RFC 0003 §6–§7). These
+references never go through the
 ladder: they match exact names only, so an env var or a key path can never
 be fuzzy-matched to a code symbol.
 
@@ -429,9 +491,10 @@ then points the indexed root at it. Query time never reads the working tree.
 | `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, PHP properties (`$email`, also promoted constructor parameters), module-level assignments (`UPPER_CASE` → `Constant`), PHP `const` / `define()` / enum cases |
 | `Test` | JS/TS `describe` / `it` / `test` blocks and Pest tests (Python and PHPUnit tests are `Function` / `Method` / `Class` with `is_test: true`) |
 | `Section` | Markdown headings, nested by `DEFINES` |
-| `EnvVar` | canonical env vars `$env:NAME` (file-less) and env var providers (*packs pending*) |
-| `Key`, `Document` | structured-data keys at any depth (key path = local name) and documents of multi-document YAML streams (*packs pending*) |
-| `Resource`, `Image` | deployable / infrastructure objects (Kubernetes objects, compose services, Terraform resources) and container images / Dockerfile stages (*packs pending*) |
+| `EnvVar` | canonical env vars `$env:NAME` (file-less) and env var providers (`.env` lines, compose / Kubernetes / GitHub Actions `env` entries, Dockerfile `ENV`) |
+| `Key`, `Document` | structured-data keys at any depth (key path = local name), Laravel `config/*.php` keys, and documents of multi-document YAML streams |
+| `Resource`, `Image` | deployable / infrastructure objects (Kubernetes objects, compose services, Terraform resources, data sources and modules) and container images (Dockerfile stages, compose `build`) |
+| `Route`, `Variable` (data) | OpenAPI operations (`GET /users/{id}`); Terraform `var.x` / `local.x` and Dockerfile `ARG` |
 
 Every symbol node carries: name, qualified name, file, span, language,
 signature, docstring, `exported`, `is_test`. Canonical env vars have no
@@ -441,9 +504,12 @@ file, span or language.
 also File → Folder for directory imports); `CALLS`, `REFERENCES`,
 `INHERITS`, `IMPLEMENTS`, `DECORATES`, `THROWS`, `WRITES`, `TESTS`
 (resolved, with strategy and confidence). `READS` (env var and config key
-reads), `WRITES` from env var providers and `OVERRIDES` are produced by the
-resolver as soon as a pack emits the facts (*packs pending*); Python,
-ECMAScript and PHP reads of ordinary names stay `REFERENCES`.
+reads by code and by config that reads env) and `WRITES` from env var
+providers form the code ↔ config bridge; `REFERENCES` also carries data
+pointers (`$ref`, aliases, `depends_on`, Terraform traversals), and
+`INHERITS` YAML merges, compose `extends` and Dockerfile `FROM <stage>`.
+`OVERRIDES` is produced once a pack opts in (*packs pending*: Java, C++).
+Python, ECMAScript and PHP reads of ordinary names stay `REFERENCES`.
 
 **Edge metadata**: `confidence` (0–1), `strategy`, and `evidence` (file +
 span of the reference that produced it; absent for structural edges).
@@ -594,8 +660,8 @@ Markdown file the outline is its heading tree.
 
 The recommended agent loop, and why it is cheap:
 
-1. `search_symbols` (or `search_code` for literals, config keys, error
-   messages) to find candidates. Milliseconds, a few hundred tokens.
+1. `search_symbols` (with a data `language` for config keys; `search_code`
+   for literals and error messages) to find candidates. Milliseconds, a few hundred tokens.
 2. `get_symbol` to confirm the right one and see its neighbourhood size.
 3. `get_snippet` to read only that code.
 4. `trace` to follow callers / callees, filtering by `min_confidence`.
@@ -667,6 +733,7 @@ gaps show up on real repositories.
 | Python extraction, module names, imports | `rueca-lang-python` | crate docs, `queries/locals.scm` |
 | TS/TSX/JS extraction, `oxc_resolver` | `rueca-lang-typescript` | crate docs, `src/resolve.rs` |
 | Markdown sections and links (`pulldown-cmark`) | `rueca-lang-markdown` | crate docs, `src/links.rs` |
+| Structured data, file kinds, data pointers | `rueca-lang-data` | crate docs (mapping tables), `src/emit.rs`, `src/kinds/` |
 | PHP extraction, name resolution, Composer autoload | `rueca-lang-php` | crate docs, `src/names.rs`, `src/composer.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
 | Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers) |

@@ -312,6 +312,12 @@ impl<'s> Extractor<'s> {
                     self.visit_target(child, depth);
                 }
             }
+            "subscript_expression" => {
+                if let Some(var) = crate::bridge::subscript(node, self.source) {
+                    self.push_ref(RefKind::EnvVar, var, None, span_of(node));
+                }
+                self.visit_children(node, depth)
+            }
             "binary_expression" => self.visit_binary(node, depth),
             "throw_expression" => self.visit_throw(node, depth),
             "catch_clause" => {
@@ -1087,6 +1093,9 @@ impl<'s> Extractor<'s> {
         };
         if is_name_node(func) {
             let written = self.name_text(func);
+            if let Some((kind, name, receiver)) = crate::bridge::call(&written, node, self.source) {
+                self.push_ref(kind, name, receiver, span_of(node));
+            }
             let bare = written.trim_start_matches('\\');
             if func.kind() == "name" && PEST_FNS.contains(&bare) && self.pest_test(node, depth) {
                 return;
@@ -1207,6 +1216,9 @@ impl<'s> Extractor<'s> {
     }
 
     fn visit_scoped_call(&mut self, node: Node<'_>, depth: usize) {
+        if let Some((kind, name, receiver)) = crate::bridge::scoped_call(node, self.source) {
+            self.push_ref(kind, name, receiver, span_of(node));
+        }
         let receiver = match node.child_by_field_name("scope") {
             Some(scope) => match self.class_receiver(scope) {
                 Some(r) => r,

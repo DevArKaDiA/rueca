@@ -99,6 +99,8 @@ pub(crate) struct Extractor<'s> {
     export_names: HashSet<String>,
     /// Top-level definition index by name (last wins).
     top_level: HashMap<String, u32>,
+    /// Env / config APIs for the code ↔ config bridge (`bridge.rs`).
+    env: crate::bridge::EnvApi,
     /// `(parent, name)` of accessors already emitted, so a get/set pair yields one Method.
     accessors: HashSet<(Option<u32>, String)>,
 }
@@ -130,6 +132,7 @@ pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], path: &str, max_depth: us
         export_names: HashSet::new(),
         top_level: HashMap::new(),
         accessors: HashSet::new(),
+        env: crate::bridge::EnvApi::scan(root, src),
     };
     let ctx = Ctx { parent: None, top: true, ambient: false };
     if root.kind() == "ERROR" {
@@ -491,6 +494,9 @@ impl<'s> Extractor<'s> {
         if depth >= self.max_depth {
             return;
         }
+        if matches!(n.kind(), "member_expression" | "subscript_expression" | "call_expression") {
+            self.bridge(n, ctx);
+        }
         match n.kind() {
             "export_statement" => self.export_statement(n, ctx, depth),
             "function_declaration"
@@ -534,6 +540,14 @@ impl<'s> Extractor<'s> {
                 Next::Children => self.walk_children(n, ctx, depth),
                 Next::Child(c) => self.walk(c, ctx, depth + 1),
             },
+        }
+    }
+
+    /// Env var / config key reads at `n` (RFC 0003 §7.2, `bridge.rs`).
+    #[inline(never)]
+    fn bridge(&mut self, n: Node<'_>, ctx: Ctx) {
+        for (kind, name, receiver) in self.env.facts(n, self.src, |r| self.is_local(r)) {
+            self.push_ref(kind, name, receiver, ctx.parent, span_of(n));
         }
     }
 

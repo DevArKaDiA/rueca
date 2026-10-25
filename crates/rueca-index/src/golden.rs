@@ -24,6 +24,7 @@ const FIXTURES: &[(&str, &str)] = &[
     ("typescript", "../rueca-lang-typescript/tests/fixtures"),
     ("php", "../rueca-lang-php/tests/fixtures"),
     ("markdown", "../rueca-lang-markdown/tests/fixtures"),
+    ("data", "../rueca-lang-data/tests/fixtures"),
 ];
 
 fn copy_dir(from: &Path, to: &Path) {

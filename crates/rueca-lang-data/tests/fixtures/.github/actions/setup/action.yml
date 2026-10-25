@@ -1,0 +1,7 @@
+name: Setup
+description: Install the toolchain
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: pip install -e .

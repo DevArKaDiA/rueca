@@ -1,0 +1,25 @@
+# Local development stack.
+services:
+  web:
+    build: ./docker
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      LOG_LEVEL: debug
+    env_file: .env.example
+    depends_on:
+      - db
+      - cache
+    ports:
+      - "8000:8000"
+  worker:
+    extends:
+      service: web
+    environment:
+      - QUEUE=default
+      - SENTRY_DSN
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+  cache:
+    image: redis:7

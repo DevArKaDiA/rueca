@@ -1,0 +1,11 @@
+defaults: &defaults
+  adapter: postgres
+  pool: 5
+development:
+  <<: *defaults
+  database: shop_dev
+test:
+  <<: *defaults
+  database: shop_test
+mirror: *defaults
+hosts: [a, b, c]
