@@ -17,7 +17,9 @@ permissions:
 jobs:
   release:
     name: Release-plz release
-    if: github.repository_owner == 'DevArKaDiA'
+    # Publishing is off until the repository variable RELEASE_ENABLED is set
+    # to "true" (Settings → Secrets and variables → Actions → Variables).
+    if: github.repository_owner == 'DevArKaDiA' && vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: crates-io
     permissions:

@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0-alpha.1] - 2026-10-23
-
 First public alpha: local mode.
 
 ### Added
@@ -29,5 +27,4 @@ First public alpha: local mode.
 - Automated releases: release-plz (versions, changelog, crates.io, tag) and
   cargo-dist (binaries, installer, GitHub release).
 
-[Unreleased]: https://github.com/DevArKaDiA/rueca/compare/v0.1.0-alpha.1...HEAD
-[0.1.0-alpha.1]: https://github.com/DevArKaDiA/rueca/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/DevArKaDiA/rueca/commits/main

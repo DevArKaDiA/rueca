@@ -28,6 +28,20 @@ release PR merged ──▶ release-plz publishes every crate to crates.io
   crates.io is released. Versions only change through the release PR, so in
   practice merging the release PR is the release decision.
 
+## Status
+
+Publishing is **disabled** until the first public release: the release job
+only runs when the repository variable `RELEASE_ENABLED` is `true`. While it
+is unset, merging PRs publishes nothing and creates no tag (the release PR
+job still runs). To enable releases:
+
+```sh
+gh variable set RELEASE_ENABLED --body true --repo DevArKaDiA/rueca
+```
+
+The next push to `main` then publishes the current version
+(`0.1.0-alpha.1`) if it is not on crates.io yet.
+
 ## Cutting a release
 
 1. Merge PRs to `main` as usual (squash; Conventional Commit titles —
