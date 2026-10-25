@@ -29,8 +29,14 @@ unless marked optional.
 
 ### `search_symbols`
 
-BM25 search over symbol names, qualified names, signatures, docstrings and
-paths, with camelCase / snake_case / path splitting.
+BM25 search over symbol names, qualified names, signatures, docstrings,
+paths and each symbol's source code, with camelCase / snake_case / path
+splitting. A one-word query is a name lookup (exact names first); dotted
+parts (`Session.request`, `util:formatAmount`) and adjacent word pairs
+(`session request`) match qualified-name suffixes; multi-word queries also
+match the code itself. Fields, variables, constants and tests rank below
+other definitions with the same text score. Ranking details:
+[how-it-works §6](how-it-works.md#6-how-each-tool-uses-the-graph).
 
 | Arg | Type | Default |
 |---|---|---|
@@ -104,6 +110,8 @@ Call graph traversal.
 | `edge_types` | array of edge kinds | `["CALLS"]` |
 | `min_confidence` | float 0–1 | 0.0 |
 | `limit` | int (nodes), 1–2000 | 200 |
+| `labels` | array of label names: only neighbours with these labels are reported and traversed | all labels |
+| `include_tests` | bool: report and traverse tests (`is_test` or label `Test`) | false, or true when `edge_types` contains `TESTS` |
 
 Result:
 
@@ -113,12 +121,17 @@ Result:
   "nodes": [ brief + { "depth": int, "direction": "callers" | "callees" } ],
   "edges": [ { "src": id, "dst": id, "kind", "confidence", "strategy",
                "call_site": { "path", "line" } | null } ],
-  "truncated": bool
+  "truncated": bool,
+  "tests_excluded": int      // distinct tests left out because include_tests is false
 }
 ```
 
 `nodes` is ordered by (depth, direction, qualified_name); the root is not
-repeated in `nodes`.
+repeated in `nodes` and is never filtered. Neighbour labels other than
+functions and methods are real call sites: a `File` caller is module-level
+code, a `Class` / `Variable` / `Constant` / `Field` caller is code in a class
+body or initializer, and a `Class` callee is a constructor call (its
+`__init__` / `constructor` is listed as well).
 
 ### `get_file_outline`
 
