@@ -1,11 +1,12 @@
 """rueca-bench command line.
 
   rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
-  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
+  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,data,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
   rueca-bench report
   rueca-bench clean  [--work] [--runs ARM]
 
-Language families are the manifest `[languages]` keys (python, ecma, php, ...).
+Language families are the manifest `[languages]` keys (python, ecma, php, ...);
+`data` selects the data-format suite (manifest `[[data.repos]]`).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import argparse
 import shutil
 import sys
 
+from . import data as data_mod
 from . import report as report_mod
 from . import s1, s3
 from .arms import ARM_NAMES, make_arm
@@ -48,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rp = sub.add_parser("run", help="run arms on suites (resumable)")
     rp.add_argument("--arm", default="all")
-    rp.add_argument("--suite", default="all", choices=["s1", "s3", "all"])
+    rp.add_argument("--suite", default="all", choices=["s1", "s3", "data", "all"])
     rp.add_argument("--only", nargs="*", help="instance ids / repos (s1) or suite names (s3)")
     rp.add_argument("--workers", type=int, default=2, help="S1 repos processed in parallel")
     rp.add_argument("--force", action="store_true", help="ignore cached arm outputs")
@@ -63,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     langs = set(getattr(a, "lang", None) or []) or None
     for lang in langs or ():
-        if lang not in families():
+        if lang != "data" and lang not in families():
             raise SystemExit(f"unknown language family {lang!r}; choose from {list(families())}")
     if a.cmd == "setup":
         setup(select=a.select, workers=a.workers, skip_s3=a.skip_s3, languages=langs)
@@ -72,17 +74,21 @@ def main(argv: list[str] | None = None) -> int:
         if not arms:
             log("no available arms")
             return 1
-        if a.suite in ("s1", "all"):
-            s1.run(arms, workers=a.workers, only=a.only, force=a.force, languages=langs)
-        if a.suite in ("s3", "all"):
-            s3.run(arms, only=a.only, force=a.force, languages=langs)
+        code_langs = {x for x in langs if x != "data"} if langs else None
+        run_code = not langs or bool(code_langs)
+        if a.suite in ("s1", "all") and run_code:
+            s1.run(arms, workers=a.workers, only=a.only, force=a.force, languages=code_langs)
+        if a.suite in ("s3", "all") and run_code:
+            s3.run(arms, only=a.only, force=a.force, languages=code_langs)
+        if a.suite in ("data", "all") and (not langs or "data" in langs):
+            data_mod.run(arms, only=a.only, force=a.force)
     elif a.cmd == "report":
         report_mod.report()
     elif a.cmd == "clean":
         if a.work:
             shutil.rmtree(WORK_DIR, ignore_errors=True)
         for arm in a.runs or []:
-            for suite in ("s1", "s3"):
+            for suite in ("s1", "s3", "data"):
                 shutil.rmtree(RUNS_DIR / suite / arm, ignore_errors=True)
     return 0
 

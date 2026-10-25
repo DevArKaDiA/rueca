@@ -52,7 +52,11 @@ class RuecaArm(Arm):
             return "pending (RUECA_BIN not set)"
         res = run([self.bin, "--version"], timeout=30)
         ver = (res.stdout.strip() or res.stderr.strip() or "unknown").splitlines()[0]
-        return f"{ver} (binary sha256 {sha256_file(Path(self.bin))[:12]})"
+        # RUECA_BIN_LABEL names the source of a branch build (e.g.
+        # `feat/lang-go@af4b3b6`), so the report can say which binary
+        # produced each language's numbers.
+        label = os.environ.get("RUECA_BIN_LABEL")
+        return f"{ver} (binary sha256 {sha256_file(Path(self.bin))[:12]}{', ' + label if label else ''})"
 
     def _store(self, key: str) -> Path:
         return CACHE / "rueca-store" / safe_name(key)
@@ -133,6 +137,53 @@ class RuecaArm(Arm):
 
     def lookup(self, h: Handle, name: str, limit: int = 10) -> CallResult:
         return self._search(h, name, limit)
+
+    # -- data suite ----------------------------------------------------------------
+
+    def data_nodes(self, h: Handle, files: list[str]) -> CallResult:
+        """`get_file_outline` of every data file, flattened."""
+        t0 = time.perf_counter()
+        hits: list[dict] = []
+        errors = 0
+
+        def walk(path: str, syms: list[dict]) -> None:
+            for s in syms:
+                hits.append({"path": s.get("path") or path, "name": s.get("name"), "label": s.get("label"), "start_line": s.get("start_line")})
+                walk(path, s.get("children") or [])
+
+        for f in files:
+            data, _, err = self._query(h, "get_file_outline", {"path": f})
+            if err or not isinstance(data, dict):
+                errors += 1
+                continue
+            walk(f, data.get("symbols") or [])
+        return CallResult(True, time.perf_counter() - t0, hits=hits, extra={"outline_errors": errors})
+
+    def env_edges(self, h: Handle, names: list[str]) -> CallResult:
+        """`trace` callers over READS / WRITES from `$env:NAME` for every
+        candidate name (Rueca has no enumeration tool)."""
+        t0 = time.perf_counter()
+        reads, writes = [], []
+        for name in names:
+            data, _, err = self._query(
+                h,
+                "trace",
+                {"qualified_name": f"$env:{name}", "direction": "callers", "edge_types": ["READS", "WRITES"], "depth": 1, "limit": 2000, "include_tests": True},
+            )
+            if err or not isinstance(data, dict):
+                continue
+            root = (data.get("root") or {}).get("id")
+            nodes = {n.get("id"): n for n in data.get("nodes", [])}
+            for e in data.get("edges", []):
+                if e.get("dst") != root:
+                    continue
+                src = nodes.get(e.get("src")) or {}
+                if e.get("kind") == "READS":
+                    func = src.get("name") if src.get("label") in ("Function", "Method", "Test") else "<module>"
+                    reads.append({"path": src.get("path") or (e.get("call_site") or {}).get("path"), "function": func, "env": name, "line": (e.get("call_site") or {}).get("line")})
+                elif e.get("kind") == "WRITES":
+                    writes.append({"path": src.get("path"), "env": name, "line": src.get("start_line")})
+        return CallResult(True, time.perf_counter() - t0, extra={"reads": [r for r in reads if r["path"]], "writes": [w for w in writes if w["path"] and w["line"]]})
 
     def cleanup(self, h: Handle) -> None:
         shutil.rmtree(h.state["store"], ignore_errors=True)

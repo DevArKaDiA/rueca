@@ -94,6 +94,7 @@ class LanguageFamily:
     extensions: tuple[str, ...]
     exclude_suffixes: tuple[str, ...]
     test_files: tuple[str, ...]
+    test_dirs: tuple[str, ...] = ()
 
 
 _FAMILIES: dict[str, LanguageFamily] | None = None
@@ -112,6 +113,7 @@ def families() -> dict[str, LanguageFamily]:
                 extensions=tuple(spec["extensions"]),
                 exclude_suffixes=tuple(spec.get("exclude_suffixes", [])),
                 test_files=tuple(spec.get("test_files", [])),
+                test_dirs=tuple(spec.get("test_dirs", [])),
             )
         _FAMILIES = out
     return _FAMILIES
@@ -157,14 +159,26 @@ def _test_file_re() -> re.Pattern:
     return _TEST_FILE
 
 
+_EXTRA_TEST_DIRS: frozenset[str] | None = None
+
+
+def _extra_test_dirs() -> frozenset[str]:
+    global _EXTRA_TEST_DIRS
+    if _EXTRA_TEST_DIRS is None:
+        _EXTRA_TEST_DIRS = frozenset(d for fam in families().values() for d in fam.test_dirs)
+    return _EXTRA_TEST_DIRS
+
+
 def is_test_path(path: str) -> bool:
     """Same heuristic for gold and every arm (documented in bench/README.md):
-    a test directory segment, or a file name matching any language's
-    `test_files` pattern."""
+    a test directory segment (built in, plus every language's `test_dirs`,
+    e.g. Go `testdata`), or a file name matching any language's `test_files`
+    pattern."""
     parts = path.split("/")
     if parts and parts[0] in _TOP_LEVEL_TEST_SEGMENTS:
         return True
-    if any(p in _TEST_SEGMENTS for p in parts[:-1]):
+    extra = _extra_test_dirs()
+    if any(p in _TEST_SEGMENTS or p in extra for p in parts[:-1]):
         return True
     return bool(_test_file_re().match(parts[-1]))
 

@@ -44,7 +44,7 @@ class GrepArm(Arm):
             text = data.decode("utf-8", errors="replace")
             file_docs.append((rel, tokenize(text) + tokenize(rel)))
             lines = text.splitlines()
-            for f in extract_functions(rel, data):
+            for f in extract_functions(rel, data, language):
                 fid = f"{rel}#{f.qualname}@{f.start}"
                 funcs[fid] = {
                     "path": rel,

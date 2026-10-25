@@ -23,11 +23,12 @@ from pathlib import Path
 
 from .arms import make_arm
 from .arms.base import Arm, Handle
-from .common import BENCH_DIR, GOLD_DIR, RUNS_DIR, SCIP_DIR, WORK_DIR, is_code_file, lang_family, load_manifest, log, read_json, safe_name, write_json
+from .common import BENCH_DIR, CACHE, GOLD_DIR, RUNS_DIR, SCIP_DIR, WORK_DIR, is_code_file, lang_family, load_manifest, log, read_json, safe_name, write_json
 from .common import run as sh
 from .corpus import add_worktree, remove_worktree, worktree
 from .phpstan import docker_available, edges_from_calls, phpstan_call_graph, run_phpstan, version_string
 from .scip import derive_call_graph, fid, in_scope, read_index, sample_functions
+from .tools import fetch_tool, tool_available, tool_spec
 from .treesitter import extract_functions
 
 PYCG_KEY = "pycg"
@@ -49,9 +50,108 @@ def run_path(arm: str, name: str) -> Path:
 # --- gold: SCIP -----------------------------------------------------------------
 
 
-def _scip_command(spec: dict, root: Path, out: Path) -> list[str]:
+def _scip_command(spec: dict, root: Path, out: Path) -> tuple[list[str], Path, dict]:
+    """(argv, cwd, env) of the pinned SCIP indexer. npm indexers run through
+    npx outside the worktree (so the repository's .npmrc does not govern the
+    pinned indexer); binary indexers (scip-go, scip-clang) run in the
+    worktree with `{out}` / `{root}` / `{compdb}` substituted in `args`."""
     tool = load_manifest()["tools"][spec["indexer"]]
-    return ["npx", "--yes", f"{tool['npm']}@{tool['version']}", *spec["args"], "--cwd", str(root), "--output", str(out)]
+    if "npm" in tool:
+        return ["npx", "--yes", f"{tool['npm']}@{tool['version']}", *spec["args"], "--cwd", str(root), "--output", str(out)], SCIP_DIR, {}
+    binary = fetch_tool(spec["indexer"])
+    compdb = SCIP_DIR / f"{repo_name(spec)}-compile_commands.json"
+    args = [a.format(out=out, root=root, compdb=compdb) for a in spec.get("args", [])]
+    env = {}
+    if spec["indexer"] == "scip_go":
+        # module downloads stay inside the bench cache; never fetch a toolchain
+        env = {"GOMODCACHE": str(CACHE / "go" / "mod"), "GOCACHE": str(CACHE / "go" / "build"), "GOTOOLCHAIN": "local", "GOFLAGS": "-mod=mod"}
+    return [str(binary), *args], root, env
+
+
+_JAVAC_JVM = [
+    f"-J--add-exports=jdk.compiler/com.sun.tools.javac.{m}=ALL-UNNAMED" for m in ("api", "code", "model", "tree", "util")
+]
+
+
+def _scip_java_plugin() -> Path:
+    """The javac plugin embedded in the pinned scip-java launcher (a shell
+    stub + jar): extracted once, never downloaded separately."""
+    import zipfile
+
+    dest = SCIP_DIR / f"scip-java-{tool_spec('scip_java')['version']}-plugin.jar"
+    if dest.exists():
+        return dest
+    launcher = fetch_tool("scip_java")
+    SCIP_DIR.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(launcher) as outer:
+        inner_name = next(n for n in outer.namelist() if n.endswith(f"/scip-java-{tool_spec('scip_java')['version']}.jar"))
+        with outer.open(inner_name) as fh, zipfile.ZipFile(fh) as inner:
+            dest.write_bytes(inner.read("scip-plugin.jar"))
+    return dest
+
+
+def run_scip_java(root: Path, out: Path, sources: list[str], classpath: list[str], name: str):
+    """scip-java without a build tool: javac (pinned JDK image, no network,
+    read-only sources) with scip-java's own javac plugin over the listed
+    source directories (`module-info.java` excluded, annotation processing
+    off), then `scip-java aggregate` of the per-file shards."""
+    from .tools import fetch_artifact
+
+    spec = tool_spec("scip_java")
+    launcher = fetch_tool("scip_java")
+    plugin = _scip_java_plugin()
+    jars = [fetch_artifact(k) for k in classpath]
+    work = SCIP_DIR / f"{name}-java"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    mounts = ["-v", f"{root}:/src:ro", "-v", f"{work}:/out", "-v", f"{launcher}:/tools/scip-java:ro", "-v", f"{plugin}:/tools/scip-plugin.jar:ro"]
+    cp = ["/tools/scip-plugin.jar"]
+    for j in jars:
+        mounts += ["-v", f"{j}:/tools/{j.name}:ro"]
+        cp.append(f"/tools/{j.name}")
+    find = " ".join(f"'{s}'" for s in sources)
+    script = (
+        f"cd /src && find {find} -name '*.java' ! -name module-info.java | sort > /out/srcs && "
+        f"javac {' '.join(_JAVAC_JVM)} -encoding UTF-8 -proc:none -nowarn -cp {':'.join(cp)} "
+        f"'-Xplugin:scip -sourceroot:/src -targetroot:/out/t' -d /out/classes @/out/srcs && "
+        "sh /tools/scip-java aggregate --output /out/index.scip --targetroot /out/t"
+    )
+    res = sh(["docker", "run", "--rm", "--network=none", *mounts, spec["image"], "sh", "-c", script], timeout=3600)
+    if (work / "index.scip").exists():
+        shutil.move(str(work / "index.scip"), out)
+    shutil.rmtree(work, ignore_errors=True)
+    return res
+
+
+def write_compdb(spec: dict, root: Path) -> Path:
+    """compile_commands.json for scip-clang, synthesized from the manifest
+    (`compdb = { std, includes, files, defines, all_headers }`): one entry
+    per listed translation unit, plus — with `all_headers` — one bench-owned
+    TU outside the worktree that includes every header under those
+    directories, so headers no source file includes are indexed too. Uses
+    the host SDK (`xcrun --show-sdk-path`) on macOS. No build is run."""
+    cd = spec["compdb"]
+    lang = spec["language"]
+    cc = "clang++" if lang == "cpp" else "clang"
+    flags = [f"-std={cd.get('std', 'c++17' if lang == 'cpp' else 'c11')}"]
+    flags += [f"-I{root / inc}" for inc in cd.get("includes", [])]
+    flags += [f"-D{d}" for d in cd.get("defines", [])]
+    sdk = sh(["xcrun", "--show-sdk-path"], timeout=60)
+    if sdk.rc == 0 and sdk.stdout.strip():
+        flags += ["-isysroot", sdk.stdout.strip()]
+    entries = []
+    for f in cd.get("files", []):
+        entries.append({"directory": str(root), "file": str(root / f), "arguments": [cc, *flags, "-c", str(root / f)]})
+    if cd.get("all_headers"):
+        tu_dir = SCIP_DIR / f"{repo_name(spec)}-tu"
+        tu_dir.mkdir(parents=True, exist_ok=True)
+        heads = sorted(p for inc in cd["all_headers"] for p in (root / inc).rglob("*") if p.suffix in (".h", ".hpp", ".hh"))
+        tu = tu_dir / ("all-headers.cc" if lang == "cpp" else "all-headers.c")
+        tu.write_text("".join(f'#include "{p}"\n' for p in heads))
+        entries.append({"directory": str(root), "file": str(tu), "arguments": [cc, *flags, "-c", str(tu)]})
+    out = SCIP_DIR / f"{repo_name(spec)}-compile_commands.json"
+    out.write_text(json.dumps(entries, indent=1))
+    return out
 
 
 def build_repo_gold(spec: dict, force: bool = False) -> dict:
@@ -104,16 +204,20 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
         indexer_seconds = None
         if not scip_out.exists() or force:
             SCIP_DIR.mkdir(parents=True, exist_ok=True)
-            cmd = _scip_command(spec, root, scip_out)
-            log(f"scip {name}: {' '.join(cmd[2:])}")
-            # npx runs outside the worktree so the repository's .npmrc (e.g.
-            # express: min-release-age) does not govern the pinned indexer.
-            res = sh(cmd, cwd=SCIP_DIR, timeout=3600)
+            if spec["indexer"] == "scip_java":
+                log(f"scip {name}: javac + scip-java plugin over {', '.join(spec['javac']['sources'])}")
+                res = run_scip_java(root, scip_out, spec["javac"]["sources"], spec["javac"].get("classpath", []), name)
+            else:
+                if "compdb" in spec:
+                    write_compdb(spec, root)
+                cmd, cwd, env = _scip_command(spec, root, scip_out)
+                log(f"scip {name}: {' '.join(cmd[1:])}")
+                res = sh(cmd, cwd=cwd, env=env, timeout=3600)
             indexer_seconds = res.seconds
             if res.rc != 0 or not scip_out.exists():
                 raise RuntimeError(f"SCIP indexer failed for {name} rc={res.rc}: {res.stderr[-1500:]} {res.stdout[-500:]}")
         docs = read_index(scip_out)
-        graph = derive_call_graph(root, docs, spec["include"])
+        graph = derive_call_graph(root, docs, spec["include"], spec["language"])
     sample = sample_functions(graph, man["sample_per_repo"], man["seed"], man["min_lines"])
     gold = {
         "suite": "scip",
@@ -122,7 +226,7 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
         "language": spec["language"],
         "commit": spec["commit"],
         "include": spec["include"],
-        "indexer": f"{load_manifest()['tools'][spec['indexer']]['npm']}@{load_manifest()['tools'][spec['indexer']]['version']}",
+        "indexer": f"{tool_spec(spec['indexer']).get('npm') or tool_spec(spec['indexer'])['name']}@{tool_spec(spec['indexer'])['version']}",
         "indexer_seconds": indexer_seconds,
         "stats": graph["stats"],
         "callables": graph["callables"],
@@ -275,17 +379,19 @@ def build_pycg_gold(force: bool = False) -> dict:
 # `function`). Every key is a question (functions without calls have []).
 
 
-def rueca_micro_graph(snip: Path, answer: dict) -> dict:
+def rueca_micro_graph(snip: Path, answer: dict, language: str | None = None) -> dict:
     files = sorted(str(p.relative_to(snip)) for p in snip.rglob("*") if p.is_file() and ".git" not in p.parts and p.name != "callgraph.json")
     callables: dict[str, dict] = {}
     by_label: dict[str, str] = {}
     for rel in files:
-        for f in extract_functions(rel, (snip / rel).read_bytes()):
+        for f in extract_functions(rel, (snip / rel).read_bytes(), language):
             d = f.as_dict()
             d["path"] = rel
             k = fid(rel, d)
             callables[k] = d
             by_label.setdefault(f"{rel}:{d['qualname']}", k)
+            # overloads share a qualified name: `path:Qualified@<name line>` picks one
+            by_label[f"{rel}:{d['qualname']}@{d['def_line']}"] = k
     unmapped = sorted({lab for src, dsts in answer.items() for lab in [src, *dsts] if lab not in by_label})
     if unmapped:
         raise ValueError(f"{snip.name}: answer-key labels without a tree-sitter callable: {unmapped}")
@@ -342,6 +448,65 @@ def _phpstan_agreement(dest: Path, snippets: dict[str, dict], name: str) -> dict
     }
 
 
+def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
+    """Cross-check hand-written answer keys against a SCIP indexer
+    (manifest `crosscheck = "scip_go" | "scip_clang"`): each snippet is
+    copied to a scratch directory, indexed, and its call edges derived exactly
+    like the repository gold (scip.derive_call_graph); edge-level agreement
+    with the key is reported. Nothing is written into the snippet trees the
+    arms index."""
+    tool = spec["crosscheck"]
+    ok, why = tool_available(tool)
+    if not ok:
+        return {"available": False, "reason": why}
+    binary = fetch_tool(tool)
+    scratch = CACHE / "scip" / "micro" / spec["name"]
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True)
+    lang = spec["language"]
+    per: dict[str, dict] = {}
+    tp = fp = fn = 0
+    failed: list[str] = []
+    for sname, g in sorted(snippets.items()):
+        root = scratch / sname
+        shutil.copytree(dest / sname, root)
+        out = scratch / f"{sname}.scip"
+        if tool == "scip_go":
+            env = {"GOMODCACHE": str(CACHE / "go" / "mod"), "GOCACHE": str(CACHE / "go" / "build"), "GOTOOLCHAIN": "local", "GOFLAGS": "-mod=mod"}
+            res = sh([str(binary), "--output", str(out)], cwd=root, env=env, timeout=600)
+        elif tool == "scip_java":
+            res = run_scip_java(root, out, ["."], [], f"micro-{sname}")
+        else:
+            files = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.suffix in (".c", ".cc", ".cpp", ".cxx"))
+            cspec = {"repo": f"micro/{sname}", "language": lang, "compdb": {"includes": ["."], "files": files}}
+            compdb = write_compdb(cspec, root)
+            res = sh([str(binary), f"--compdb-path={compdb}", f"--index-output-path={out}"], cwd=root, timeout=600)
+        if res.rc != 0 or not out.exists():
+            failed.append(sname)
+            continue
+        graph = derive_call_graph(root, read_index(out), [""], lang)
+        got = {(a, b) for a, bs in graph["callees"].items() for b in bs}
+        want = {(a, b) for a, bs in g["callees"].items() for b in bs}
+        tp += len(got & want)
+        fp += len(got - want)
+        fn += len(want - got)
+        per[sname] = {"scip_only": sorted(f"{a} -> {b}" for a, b in got - want), "key_only": sorted(f"{a} -> {b}" for a, b in want - got)}
+    shutil.rmtree(scratch, ignore_errors=True)
+    ts = tool_spec(tool)
+    return {
+        "available": True,
+        "tool": f"{ts['name']}@{ts['version']}",
+        "edges_key": tp + fn,
+        "edges_scip": tp + fp,
+        "agree": tp,
+        "precision": tp / (tp + fp) if tp + fp else None,
+        "recall": tp / (tp + fn) if tp + fn else None,
+        "snippets_identical": sum(1 for v in per.values() if not v["scip_only"] and not v["key_only"]),
+        "snippets_failed": failed,
+        "per_snippet": {k: v for k, v in per.items() if v["scip_only"] or v["key_only"]},
+    }
+
+
 def build_rueca_micro_gold(spec: dict, force: bool = False) -> dict:
     name = spec["name"]
     gp = gold_path(name)
@@ -361,10 +526,12 @@ def build_rueca_micro_gold(spec: dict, force: bool = False) -> dict:
     gold: dict = {"suite": "micro", "name": name, "language": spec["language"], "source": spec["local"], "snippets": {}}
     for sname in sorted(keys):
         snip = dest / sname
-        gold["snippets"][sname] = rueca_micro_graph(snip, keys[sname])
+        gold["snippets"][sname] = rueca_micro_graph(snip, keys[sname], spec["language"])
         (snip / "callgraph.json").unlink()
     if lang_family(spec["language"]) == "php":
         gold["phpstan_agreement"] = _phpstan_agreement(dest, gold["snippets"], name)
+    if spec.get("crosscheck"):
+        gold["crosscheck"] = _scip_agreement(spec, dest, gold["snippets"])
     for sname in sorted(keys):
         _git_snapshot(dest / sname)
     n_q = sum(len(g["sample"]) for g in gold["snippets"].values())
