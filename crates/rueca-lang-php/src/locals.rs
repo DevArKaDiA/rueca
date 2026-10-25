@@ -219,7 +219,12 @@ fn binding_class(def: Node<'_>, kind: DefKind, source: &[u8]) -> Option<String> 
         DefKind::Var if def.kind() == "variable_name" && parent.kind() == "assignment_expression" => {
             let right = parent.child_by_field_name("right")?;
             if right.kind() != "object_creation_expression" {
-                return None;
+                // `/** @var Cache $cache */` right before the statement.
+                let stmt = parent.parent().filter(|s| s.kind() == "expression_statement")?;
+                let doc = docblock_of(stmt, source)?;
+                let name = String::from_utf8_lossy(&source[def.start_byte()..def.end_byte()]).into_owned();
+                return doc_tag_class(&doc, "@var", Some(&name))
+                    .or_else(|| (!doc.contains('$')).then(|| doc_tag_class(&doc, "@var", None)).flatten());
             }
             let mut cursor = right.walk();
             let class = right

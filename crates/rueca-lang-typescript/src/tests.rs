@@ -268,9 +268,10 @@ fn nest_service_references() {
     assert!(
         refs(&f, RefKind::Call, "findOne")
             .iter()
-            .any(|r| r.receiver.as_deref() == Some("this.repo") && r.enclosing == Some(find))
+            .any(|r| r.receiver.as_deref() == Some("$type:Repository") && r.enclosing == Some(find))
     );
-    assert!(has_ref(&f, RefKind::Call, "record", Some("this.audit")), "optional call");
+    // `private readonly audit: AuditLog` is a typed field (optional call too).
+    assert!(has_ref(&f, RefKind::Call, "record", Some("$type:AuditLog")), "optional call");
     assert!(has_ref(&f, RefKind::Throw, "NotFoundException", None));
     assert!(has_ref(&f, RefKind::New, "NotFoundException", None));
     assert!(has_ref(&f, RefKind::Write, "lastCreated", Some("this")));
@@ -325,7 +326,7 @@ fn nest_controller_decorators() {
     assert!(
         refs(&f, RefKind::Call, "findById")
             .iter()
-            .any(|r| r.receiver.as_deref() == Some("this.users") && r.enclosing == Some(find_id))
+            .any(|r| r.receiver.as_deref() == Some("$type:UserService") && r.enclosing == Some(find_id))
     );
     assert!(has_ref(&f, RefKind::Type, "UserService", None));
 }
@@ -397,7 +398,7 @@ fn test_blocks() {
     assert!(
         refs(&f, RefKind::Call, "findById")
             .iter()
-            .any(|r| r.enclosing == Some(leaf_id) && r.receiver.as_deref() == Some("svc"))
+            .any(|r| r.enclosing == Some(leaf_id) && r.receiver.as_deref() == Some("$type:UserService"))
     );
     assert!(refs(&f, RefKind::Call, "expect").is_empty());
     assert!(refs(&f, RefKind::Read, "repo").is_empty(), "describe-callback locals");
@@ -791,7 +792,7 @@ fn local_exports_are_self_reexports() {
 #[test]
 fn pack_metadata() {
     let p = TypeScriptPack;
-    assert_eq!(p.extractor_version(), 3);
+    assert_eq!(p.extractor_version(), 4);
     assert_eq!(p.self_receivers(), &["this"]);
     assert!(p.is_builtin("console") && p.is_builtin("Promise") && p.is_builtin("Record"));
     assert!(!p.is_builtin("UserService"));
@@ -1185,4 +1186,109 @@ function shadow(process: { env: Record<string, string> }) {
     assert!(f.references.iter().all(|r| r.kind != RefKind::ConfigKey));
     let f = facts("src/b.js", "const config = require(\"config\");\nexport const p = config.get(\"a.b\");\n");
     assert!(has_ref(&f, RefKind::ConfigKey, "a.b", Some("node-config")));
+}
+
+// ---------------------------------------------------------------------------
+// Receiver types from declarations and assignments (`types.rs`)
+// ---------------------------------------------------------------------------
+
+fn call_receiver(f: &FileFacts, name: &str) -> Vec<Option<String>> {
+    refs(f, RefKind::Call, name).iter().map(|r| r.receiver.clone()).collect()
+}
+
+#[test]
+fn receivers_typed_from_annotations_and_constructions() {
+    let f = facts(
+        "src/app.ts",
+        r#"import { Hono } from "./hono";
+import type { Context } from "./context";
+const app = new Hono();
+let maybe = new Hono();
+maybe = makeApp();
+export function handler(c: Context, opt?: Store | undefined, list: Store[], u: Store | Cache) {
+  c.header("x");
+  opt.get();
+  list.at(0);
+  u.get();
+  app.get("/", () => {});
+  maybe.route();
+  const s = new Store();
+  s.put();
+  const t = other() as Store;
+  t.flush();
+  let r: Repo = make();
+  r = something();
+  r.save();
+  let k = new Store();
+  if (x) { k = new Cache(); }
+  k.drop();
+  (new Store()).open();
+  new Store().close();
+}
+function shadow(app: Other) {
+  app.get();
+}
+export class Router<T> {
+  #node: Node = new Node();
+  private cache = new Cache();
+  plain;
+  constructor(private repo: Repo, readonly name: string, t: T) {
+    this.plain = new Store();
+    t.go();
+  }
+  add() {
+    this.#node.insert();
+    this.repo.save();
+    this.cache.read();
+    this.plain.write();
+    const f = () => this.cache.evict();
+    function g() { this.cache.nope(); }
+  }
+}
+"#,
+    );
+    let ty = |s: &str| Some(format!("$type:{s}"));
+    assert_eq!(call_receiver(&f, "header"), vec![ty("Context")]);
+    // `opt?: Store | undefined` → Store; arrays and real unions are untyped.
+    assert_eq!(call_receiver(&f, "at"), vec![Some("list".into())]);
+    assert!(call_receiver(&f, "get").contains(&ty("Store")));
+    assert!(call_receiver(&f, "get").contains(&Some("u".into())));
+    // Module-level `const app = new Hono()`, shadowed by a parameter in `shadow`.
+    assert!(call_receiver(&f, "get").contains(&ty("Hono")));
+    assert!(call_receiver(&f, "get").contains(&ty("Other")));
+    // Reassigned to an untyped value: untyped.
+    assert_eq!(call_receiver(&f, "route"), vec![Some("maybe".into())]);
+    assert_eq!(call_receiver(&f, "put"), vec![ty("Store")]);
+    assert_eq!(call_receiver(&f, "flush"), vec![ty("Store")]);
+    // An annotation holds whatever is assigned later.
+    assert_eq!(call_receiver(&f, "save"), vec![ty("Repo"), ty("Repo")]);
+    // Two different constructed types: untyped.
+    assert_eq!(call_receiver(&f, "drop"), vec![Some("k".into())]);
+    assert_eq!(call_receiver(&f, "open"), vec![ty("Store")]);
+    assert_eq!(call_receiver(&f, "close"), vec![ty("Store")]);
+    // Class fields: annotated, constructed, parameter properties, `this.x = new T()`.
+    assert_eq!(call_receiver(&f, "insert"), vec![ty("Node")]);
+    assert_eq!(call_receiver(&f, "read"), vec![ty("Cache")]);
+    assert_eq!(call_receiver(&f, "write"), vec![ty("Store")]);
+    assert_eq!(call_receiver(&f, "evict"), vec![ty("Cache")]);
+    // `this` in a plain function is not the instance; type parameters are not types.
+    assert_eq!(call_receiver(&f, "nope"), vec![Some("this.cache".into())]);
+    assert_eq!(call_receiver(&f, "go"), vec![Some("t".into())]);
+}
+
+#[test]
+fn receivers_typed_in_javascript() {
+    let f = facts(
+        "lib/app.js",
+        r#"var View = require('./view');
+function render(name, options) {
+  var view = new View(name, options);
+  view.render(options);
+  var other = new View(name);
+  other = options.view;
+  other.render();
+}
+"#,
+    );
+    assert_eq!(call_receiver(&f, "render"), vec![Some("$type:View".into()), Some("other".into())]);
 }

@@ -149,6 +149,7 @@ mod extract;
 mod locals;
 mod modules;
 mod text;
+mod types;
 
 use rueca_extract::{Budget, ExtractError, LanguagePack, ProjectFiles};
 use rueca_model::{FileFacts, Import, Language};
@@ -170,8 +171,9 @@ impl LanguagePack for PythonPack {
         &[Language::Python]
     }
     fn extractor_version(&self) -> u32 {
-        // 2: env var reads (`EnvVar` references, RFC 0003 §7.2).
-        2
+        // 2: env var reads (`EnvVar` references, RFC 0003 §7.2); 3:
+        // `$type:` receivers from annotations and assignments.
+        3
     }
     fn extract(
         &self,

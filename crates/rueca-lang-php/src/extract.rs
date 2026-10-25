@@ -247,6 +247,17 @@ impl<'s> Extractor<'s> {
             );
         }
         self.visit(object, depth + 1);
+        // `(new Foo())->m()`: the constructed class.
+        let created = Some(object)
+            .filter(|o| o.kind() == "parenthesized_expression")
+            .and_then(|o| named_children(o).into_iter().find(|c| c.kind() != "comment"))
+            .filter(|n| n.kind() == "object_creation_expression")
+            .and_then(|n| named_children(n).into_iter().find(|c| matches!(c.kind(), "name" | "qualified_name")));
+        if let Some(class) = created
+            && let Some(r) = self.typed_receiver(&self.name_text(class), "->")
+        {
+            return r;
+        }
         truncate_chars(&one_line(object, object.start_byte(), object.end_byte(), &[], self.source), MAX_ONE_LINE)
     }
 

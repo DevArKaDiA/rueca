@@ -164,7 +164,8 @@ fn service_references() {
         (Read, "CONFIG", "InvoiceService.issue"),
         (Call, "InvoiceService", "issue_all"),
         (Call, "get_repo", "issue_all"),
-        (Call, "service.issue", "issue_all"),
+        // `service = InvoiceService(…)`: a typed receiver.
+        (Call, "$type:InvoiceService.issue", "issue_all"),
         (Call, "get_client().session.close", "issue_all"),
         (Call, "get_client", "issue_all"),
         (Throw, "ValueError", "issue_all"),
@@ -756,7 +757,7 @@ fn builtins() {
     }
     assert!(builtins::BUILTINS.windows(2).all(|w| w[0] < w[1]), "builtins must be sorted");
     assert_eq!(p.self_receivers(), &["self", "cls"]);
-    assert_eq!(p.extractor_version(), 2);
+    assert_eq!(p.extractor_version(), 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -938,4 +939,107 @@ def main(name):
     // Without `import os` there is no evidence: nothing is emitted.
     let f = facts("def f():\n    return os.getenv(\"X\"), environ[\"Y\"], getenv(\"Z\")\n");
     assert!(f.references.iter().all(|r| r.kind != RefKind::EnvVar));
+}
+
+// ---------------------------------------------------------------------------
+// Receiver types from annotations and assignments (`types.rs`)
+// ---------------------------------------------------------------------------
+
+fn typed_receivers(f: &FileFacts, name: &str) -> Vec<Option<String>> {
+    f.references.iter().filter(|r| r.kind == RefKind::Call && r.name == name).map(|r| r.receiver.clone()).collect()
+}
+
+#[test]
+fn receivers_typed_from_annotations_and_assignments() {
+    let f = facts(
+        r#"from typing import Optional
+from .models import Session, models
+import requests
+
+app = Flask(__name__)
+cache = Cache()
+cache = other()
+
+def make() -> "Session":
+    return Session()
+
+class Client:
+    session: Session
+    adapter = HTTPAdapter()
+
+    def __init__(self, store: Optional[Store] = None) -> None:
+        self.pool = Pool()
+        self.helper = None
+        self.store = store
+
+    def context(self, env) -> "RequestContext":
+        return RequestContext(env)
+
+    @classmethod
+    def create(cls) -> "Client":
+        return cls()
+
+    def run(self, req: Request, resp: "Response | None", raw, items: list[Item]):
+        req.prepare()
+        resp.close()
+        raw.close()
+        items.clear()
+        s = Session()
+        s.send()
+        r = requests.get("x")
+        r.json()
+        m = models.Model()
+        m.save()
+        ctx = self.context(raw)
+        ctx.push()
+        self.context(raw).pop()
+        made = make()
+        made.mount()
+        c = Client.create()
+        c.close_all()
+        both = Session()
+        both = Other()
+        both.merge()
+        loop = Session()
+        for loop in items:
+            pass
+        loop.merge()
+        self.pool.acquire()
+        self.helper.assist()
+        self.session.request()
+        self.adapter.build()
+        app.route()
+        cache.clear()
+        def inner():
+            s.inner_send()
+            self.pool.release()
+        lam = lambda q: q.go()
+"#,
+    );
+    let ty = |s: &str| Some(format!("$type:{s}"));
+    assert_eq!(typed_receivers(&f, "prepare"), vec![ty("Request")]);
+    assert_eq!(typed_receivers(&f, "close"), vec![ty("Response"), Some("raw".into())]);
+    assert_eq!(typed_receivers(&f, "clear"), vec![Some("items".into()), Some("cache".into())]);
+    assert_eq!(typed_receivers(&f, "send"), vec![ty("Session")]);
+    // `requests.get` is not class-like: untyped.
+    assert_eq!(typed_receivers(&f, "json"), vec![Some("r".into())]);
+    assert_eq!(typed_receivers(&f, "save"), vec![ty("models.Model")]);
+    // Return annotations of this file's methods and functions.
+    assert_eq!(typed_receivers(&f, "push"), vec![ty("RequestContext")]);
+    assert_eq!(typed_receivers(&f, "pop"), vec![ty("RequestContext")]);
+    assert_eq!(typed_receivers(&f, "mount"), vec![ty("Session")]);
+    assert_eq!(typed_receivers(&f, "close_all"), vec![ty("Client")]);
+    // Reassigned to another type, or rebound by a loop: untyped.
+    assert_eq!(typed_receivers(&f, "merge"), vec![Some("both".into()), Some("loop".into())]);
+    // Instance attributes: assigned in a method, or annotated / assigned in the class body.
+    assert_eq!(typed_receivers(&f, "acquire"), vec![ty("Pool")]);
+    assert_eq!(typed_receivers(&f, "assist"), vec![Some("self.helper".into())]);
+    assert_eq!(typed_receivers(&f, "request"), vec![ty("Session")]);
+    assert_eq!(typed_receivers(&f, "build"), vec![ty("HTTPAdapter")]);
+    // Module-level names.
+    assert_eq!(typed_receivers(&f, "route"), vec![ty("Flask")]);
+    // Closures see the enclosing function's bindings and `self`.
+    assert_eq!(typed_receivers(&f, "inner_send"), vec![ty("Session")]);
+    assert_eq!(typed_receivers(&f, "release"), vec![ty("Pool")]);
+    assert_eq!(typed_receivers(&f, "go"), vec![Some("q".into())]);
 }

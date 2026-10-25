@@ -512,7 +512,7 @@ impl<'a> Resolver<'a> {
             return TypeLookup::Unknown;
         }
         let family = self.families[f as usize];
-        let is_type = |n: NodeId| self.nodes[n as usize].label.is_type();
+        let is_type = |n: NodeId| self.nodes[n as usize].label.is_type() || self.is_constructor_function(n);
         let item = |name, receiver| RefItem {
             kind: RefKind::Type,
             name,

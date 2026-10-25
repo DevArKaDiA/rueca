@@ -1814,12 +1814,26 @@ impl<'a> Resolver<'a> {
         let defs = self.defs(f);
         let mut cur = scope;
         while let Some(a) = cur {
-            if defs[a as usize].label.is_type() {
-                return Some(self.node_of(f, a));
+            let node = self.node_of(f, a);
+            if defs[a as usize].label.is_type() || self.is_constructor_function(node) {
+                return Some(node);
             }
             cur = self.parents[f as usize][a as usize];
         }
         None
+    }
+
+    /// An ECMAScript function used as a class: it owns methods
+    /// (`View.prototype.render = function render() {}` makes `render` a
+    /// method of `View`), so `this` inside it and its methods, and a
+    /// receiver typed `View` (`new View()`), find those members.
+    pub(crate) fn is_constructor_function(&self, n: NodeId) -> bool {
+        let node = &self.nodes[n as usize];
+        node.label == Label::Function
+            && node.language.map(Language::family) == Some(LanguageFamily::EcmaScript)
+            && self.members.get(&n).is_some_and(|m| {
+                m.values().any(|s| s.callable.is_some_and(|c| self.nodes[c as usize].label == Label::Method))
+            })
     }
 
     /// Walks a dotted path from a starting binding.

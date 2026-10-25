@@ -173,6 +173,7 @@ mod builtins;
 mod extract;
 mod locals;
 mod resolve;
+mod types;
 
 use std::time::Instant;
 
@@ -192,8 +193,9 @@ impl LanguagePack for TypeScriptPack {
     }
 
     fn extractor_version(&self) -> u32 {
-        // 3: env var / config key reads (RFC 0003 §7.2).
-        3
+        // 3: env var / config key reads (RFC 0003 §7.2); 4: `$type:`
+        // receivers from declarations and assignments.
+        4
     }
 
     fn extract(

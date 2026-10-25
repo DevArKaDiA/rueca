@@ -697,6 +697,30 @@ class Svc {
 }
 
 #[test]
+fn receiver_typing_from_parenthesized_new_and_inline_var() {
+    let src = r#"<?php
+namespace App;
+function run(Container $c) {
+    (new Plain())->go();
+    /** @var Cache $cache */
+    $cache = $c->service('cache');
+    $cache->get('k');
+    /** @var Store */
+    $store = $c->service('store');
+    $store->put();
+    /** @var Other $elsewhere */
+    $mine = $c->service('x');
+    $mine->unknown();
+}
+"#;
+    let f = facts(src);
+    let calls = names_of_kind(&f, RefKind::Call);
+    for expected in ["\\App\\Plain-> go", "\\App\\Cache-> get", "\\App\\Store-> put", "$mine unknown"] {
+        assert!(calls.contains(&expected.to_string()), "missing {expected}: {calls:#?}");
+    }
+}
+
+#[test]
 fn types_instanceof_catch_and_unions() {
     let src = r#"<?php
 namespace N;

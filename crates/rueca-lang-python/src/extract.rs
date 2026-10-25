@@ -9,11 +9,12 @@
 use std::collections::{HashMap, HashSet};
 
 use rueca_extract::tree_sitter::{self, Node};
-use rueca_extract::{Budget, ExtractError, count_errors, first_line, line_count, span_of, text_of};
+use rueca_extract::{Budget, ExtractError, count_errors, first_line, line_count, span_of, text_of, type_receiver};
 use rueca_model::{Definition, FileFacts, Import, ImportedName, Label, LocalDefId, RefKind, Reference, Span};
 
 use crate::is_builtin_name;
 use crate::locals::{self, Locals};
+use crate::types::TypeTable;
 use crate::text::{
     MAX_DOC, MAX_ONE_LINE, cleandoc, is_dotted_identifier, is_upper_case, one_line, string_literal_value,
     truncate_chars,
@@ -45,8 +46,9 @@ pub(crate) fn extract(source: &[u8], budget: &Budget) -> Result<FileFacts, Extra
         enc_override: None,
         locals,
         env: crate::bridge::EnvApi::scan(root, source),
+        types: TypeTable::build(root, source, budget.max_depth),
     };
-    ex.scopes.push(Scope { kind: ScopeKind::Module, def: None, self_name: None, init_class: None });
+    ex.scopes.push(Scope { kind: ScopeKind::Module, def: None, self_name: None, init_class: None, node: root.id() });
     ex.visit_children(root, 0);
 
     Ok(FileFacts {
@@ -75,6 +77,9 @@ struct Scope {
     self_name: Option<String>,
     /// For `__init__` methods: the class whose fields `self.x = …` creates.
     init_class: Option<LocalDefId>,
+    /// The scope's node (module, class, function or lambda), the key of
+    /// its bindings in [`TypeTable`].
+    node: usize,
 }
 
 struct Extractor<'s> {
@@ -101,6 +106,9 @@ struct Extractor<'s> {
     locals: Locals,
     /// Env var APIs bound by the file's imports (the bridge, `bridge.rs`).
     env: crate::bridge::EnvApi,
+    /// Annotated and constructed types of bindings (`types.rs`), for
+    /// `$type:` receivers.
+    types: TypeTable,
 }
 
 /// Identifier nodes of a pure attribute chain `a.b.c` (root first) and the
@@ -250,6 +258,70 @@ impl<'s> Extractor<'s> {
             Some((idents, _)) => idents.iter().map(|n| self.text(*n)).collect::<Vec<_>>().join("."),
             None => truncate_chars(&one_line(obj, obj.start_byte(), obj.end_byte(), self.source), MAX_ONE_LINE),
         }
+    }
+
+    /// The type of a call's receiver when the file says it (`types.rs`): a
+    /// local or module-level name with an annotation or a constructed /
+    /// returned type, `self.attr` of the enclosing class, or a call of a
+    /// method / function of this file with a return annotation
+    /// (`self.make()`, `make()`, `Factory.create()`).
+    fn receiver_type(&self, obj: Node<'_>) -> Option<String> {
+        match obj.kind() {
+            "identifier" => {
+                let name = self.text(obj);
+                if SELF_RECEIVERS.contains(&name.as_str()) || self.method_self(&name).is_some() {
+                    return None;
+                }
+                if !self.is_local(obj) {
+                    let module = self.scopes.first()?.node;
+                    return self.types.var(module, &name).map(str::to_string);
+                }
+                let owner = self
+                    .scopes
+                    .iter()
+                    .rev()
+                    .filter(|s| matches!(s.kind, ScopeKind::Function | ScopeKind::Lambda))
+                    .find(|s| self.types.binds(s.node, &name))?;
+                self.types.var(owner.node, &name).map(str::to_string)
+            }
+            "attribute" => {
+                let o = obj.child_by_field_name("object")?;
+                let a = obj.child_by_field_name("attribute")?;
+                if o.kind() != "identifier" {
+                    return None;
+                }
+                let class = self.method_self(&self.text(o))?;
+                self.types.attr(class, &self.text(a)).map(str::to_string)
+            }
+            "call" => {
+                let f = obj.child_by_field_name("function")?;
+                let (idents, _) = chain(f)?;
+                let segs: Vec<String> = idents.iter().map(|n| self.text(*n)).collect();
+                if let [s, m] = &segs[..]
+                    && let Some(class) = self.method_self(s)
+                {
+                    return self.types.method_return(class, m).map(str::to_string);
+                }
+                if self.is_local(idents[0]) {
+                    return None;
+                }
+                let segs: Vec<&str> = segs.iter().map(String::as_str).collect();
+                self.types.call_return(&segs).map(str::to_string)
+            }
+            _ => None,
+        }
+    }
+
+    /// When `name` is the `self` parameter of the enclosing method (also
+    /// from a nested function or lambda), the class node of that method.
+    fn method_self(&self, name: &str) -> Option<usize> {
+        let i = self.scopes.iter().rposition(|s| s.kind == ScopeKind::Function && s.self_name.is_some())?;
+        let s = &self.scopes[i];
+        if s.self_name.as_deref() != Some(name) {
+            return None;
+        }
+        let class = self.scopes.get(i.checked_sub(1)?)?;
+        (class.kind == ScopeKind::Class).then_some(class.node)
     }
 
     /// `(name, receiver)` of a pure chain: `a.b.c` → (`c`, `a.b`).
@@ -424,7 +496,10 @@ impl<'s> Extractor<'s> {
                     let attr = func.child_by_field_name("attribute");
                     if let (Some(obj), Some(attr)) = (obj, attr) {
                         let name = self.text(attr);
-                        let receiver = self.receiver_text(obj);
+                        let receiver = match self.receiver_type(obj) {
+                            Some(t) => type_receiver(&t),
+                            None => self.receiver_text(obj),
+                        };
                         self.push_ref(RefKind::Call, name, Some(receiver), span_of(func));
                         match chain(obj) {
                             // `self.repo.save()` also reads field `repo`.
@@ -471,7 +546,7 @@ impl<'s> Extractor<'s> {
 
     fn visit_lambda(&mut self, node: Node<'_>, depth: usize) {
         let def = self.scopes.last().and_then(|s| s.def);
-        self.scopes.push(Scope { kind: ScopeKind::Lambda, def, self_name: None, init_class: None });
+        self.scopes.push(Scope { kind: ScopeKind::Lambda, def, self_name: None, init_class: None, node: node.id() });
         if let Some(params) = node.child_by_field_name("parameters") {
             for p in named_children(params) {
                 if p.kind() == "default_parameter" {
@@ -736,7 +811,7 @@ impl<'s> Extractor<'s> {
         let body = def.child_by_field_name("body");
         let self_name = if in_class { params.and_then(|p| self.first_param_name(p)) } else { None };
         let init_class = if in_class && self.defs[idx as usize].name == "__init__" { parent } else { None };
-        self.scopes.push(Scope { kind: ScopeKind::Function, def: Some(idx), self_name, init_class });
+        self.scopes.push(Scope { kind: ScopeKind::Function, def: Some(idx), self_name, init_class, node: def.id() });
         if let Some(p) = params {
             for param in named_children(p) {
                 match param.kind() {
@@ -814,7 +889,7 @@ impl<'s> Extractor<'s> {
             });
         }
         let body = def.child_by_field_name("body");
-        self.scopes.push(Scope { kind: ScopeKind::Class, def: Some(idx), self_name: None, init_class: None });
+        self.scopes.push(Scope { kind: ScopeKind::Class, def: Some(idx), self_name: None, init_class: None, node: def.id() });
         if let Some(b) = body {
             self.visit_children(b, depth + 1);
         }

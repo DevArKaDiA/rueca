@@ -237,8 +237,9 @@ impl LanguagePack for PhpPack {
         &[Language::Php]
     }
     fn extractor_version(&self) -> u32 {
-        // 2: env var / config key reads and Laravel config keys (RFC 0003 §7).
-        2
+        // 2: env var / config key reads and Laravel config keys (RFC 0003 §7);
+        // 3: `(new Foo())->m()` and inline `/** @var Foo $x */` receivers.
+        3
     }
     fn extract(
         &self,
