@@ -791,7 +791,7 @@ fn local_exports_are_self_reexports() {
 #[test]
 fn pack_metadata() {
     let p = TypeScriptPack;
-    assert_eq!(p.extractor_version(), 2);
+    assert_eq!(p.extractor_version(), 3);
     assert_eq!(p.self_receivers(), &["this"]);
     assert!(p.is_builtin("console") && p.is_builtin("Promise") && p.is_builtin("Record"));
     assert!(!p.is_builtin("UserService"));
@@ -1119,4 +1119,70 @@ fn real_repo(root: &std::path::Path) {
     };
     println!("resolved bare packages: {:?}", top(&resolved_bare));
     println!("unresolved bare packages (top 15): {:?}", top(&unresolved_bare));
+}
+
+// ---------------------------------------------------------------------------
+// Env var and config key reads (the code ↔ config bridge, RFC 0003 §7.2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn env_and_config_reads() {
+    let f = facts(
+        "src/env.ts",
+        r#"import config from "config";
+const TOP = process.env.TOP_LEVEL;
+
+export function start(): string {
+  const url = process.env.DATABASE_URL ?? "";
+  const level = process.env["LOG_LEVEL"];
+  const { REDIS_URL, QUEUE: queue, MODE = "dev" } = process.env;
+  const vite = import.meta.env.VITE_API;
+  const deno = Deno.env.get("DENO_X");
+  const port = config.get("server.port");
+  const has = config.has("db.host");
+  process.env.SET_ONLY = "1";
+  delete process.env.GONE;
+  const dynamic = process.env[url];
+  return `${url}${level}${REDIS_URL}${queue}${MODE}${vite}${deno}${port}${has}${dynamic}${TOP}`;
+}
+
+function shadow(process: { env: Record<string, string> }) {
+  return process.env.NOT_ENV;
+}
+"#,
+    );
+    let mut env: Vec<(String, Option<u32>)> =
+        f.references.iter().filter(|r| r.kind == RefKind::EnvVar).map(|r| (r.name.clone(), r.enclosing)).collect();
+    env.sort();
+    let start = id(&f, "start");
+    let top = id(&f, "TOP");
+    let expect: Vec<(String, Option<u32>)> = [
+        ("DATABASE_URL", Some(start)),
+        ("DENO_X", Some(start)),
+        ("LOG_LEVEL", Some(start)),
+        ("MODE", Some(start)),
+        ("QUEUE", Some(start)),
+        ("REDIS_URL", Some(start)),
+        ("TOP_LEVEL", Some(top)),
+        ("VITE_API", Some(start)),
+    ]
+    .iter()
+    .map(|(n, e)| (n.to_string(), *e))
+    .collect();
+    assert_eq!(env, expect);
+    let cfg: Vec<(&str, Option<&str>)> = f
+        .references
+        .iter()
+        .filter(|r| r.kind == RefKind::ConfigKey)
+        .map(|r| (r.name.as_str(), r.receiver.as_deref()))
+        .collect();
+    assert_eq!(cfg, [("server.port", Some("node-config")), ("db.host", Some("node-config"))]);
+    // Ordinary facts are unchanged.
+    assert!(has_ref(&f, RefKind::Call, "get", Some("config")));
+
+    // `config.get` without the `config` package import is not a config read.
+    let f = facts("src/a.js", "const config = load();\nexport const p = config.get(\"server.port\");\n");
+    assert!(f.references.iter().all(|r| r.kind != RefKind::ConfigKey));
+    let f = facts("src/b.js", "const config = require(\"config\");\nexport const p = config.get(\"a.b\");\n");
+    assert!(has_ref(&f, RefKind::ConfigKey, "a.b", Some("node-config")));
 }

@@ -63,6 +63,14 @@
 //!   deduplicated like reads.
 //! - No references for keyword-argument names, string contents (f-string
 //!   interpolations are code and are visited), comments or `match` patterns.
+//! - `EnvVar` (the code ↔ config bridge, RFC 0003 §7.2): `os.getenv("X")`,
+//!   `os.environ["X"]`, `os.environ.get("X")`, and `getenv("X")` /
+//!   `environ["X"]` / `environ.get("X")` after `from os import getenv,
+//!   environ` (aliases followed), with `name` = the variable. Only plain
+//!   string literals count, and only with the file's own `import os` /
+//!   `from os import …` as evidence; assignment and `del` targets are
+//!   writes, not reads. The resolver links them to the canonical
+//!   `$env:NAME` node with `READS`.
 //! - At most 20,000 references per file.
 //!
 //! # Local bindings (vendored `queries/locals.scm`)
@@ -135,6 +143,7 @@
 //! `level - 1` directories and append the module path; `from . import x`
 //! resolves to the package `__init__.py`.
 
+mod bridge;
 mod builtins;
 mod extract;
 mod locals;
@@ -161,7 +170,8 @@ impl LanguagePack for PythonPack {
         &[Language::Python]
     }
     fn extractor_version(&self) -> u32 {
-        1
+        // 2: env var reads (`EnvVar` references, RFC 0003 §7.2).
+        2
     }
     fn extract(
         &self,

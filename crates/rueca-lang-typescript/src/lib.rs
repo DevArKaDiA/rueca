@@ -86,6 +86,14 @@
 //!   is neither a local binding nor a global builtin. Deduplicated per
 //!   `(enclosing, receiver, name)`.
 //! - `Write`: `this.x = …` → name `x`, receiver `this`.
+//! - `EnvVar` / `ConfigKey` (the code ↔ config bridge, RFC 0003 §7.2):
+//!   `process.env.X`, `process.env["X"]`, `const { X } = process.env`,
+//!   `import.meta.env.X` (also destructured) and `Deno.env.get("X")` →
+//!   `EnvVar` named `X`; `config.get("a.b")` / `config.has("a.b")` with
+//!   `config` imported or required from the `config` package → `ConfigKey`
+//!   `a.b`, receiver `node-config`. Only literal names; `process` / `Deno`
+//!   must not be local bindings; assignment and `delete` targets are not
+//!   reads. The resolver links them with `READS` (see `rueca-resolve`).
 //! - At most 20,000 references per file.
 //!
 //! # Imports
@@ -160,6 +168,7 @@
 //! - `oxc_resolver` is pinned to the 11.x line compatible with the workspace
 //!   MSRV (Rust 1.90): 11.23 (11.24 requires Rust 1.95).
 
+mod bridge;
 mod builtins;
 mod extract;
 mod locals;
@@ -183,7 +192,8 @@ impl LanguagePack for TypeScriptPack {
     }
 
     fn extractor_version(&self) -> u32 {
-        2
+        // 3: env var / config key reads (RFC 0003 §7.2).
+        3
     }
 
     fn extract(

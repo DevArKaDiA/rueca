@@ -1088,3 +1088,104 @@ fn pack_contract() {
     let request = f.imports.iter().find(|i| i.module == "Illuminate\\Http\\Request").unwrap();
     assert_eq!(p.resolve_import("app/Http/Kernel.php", request, &project), None);
 }
+
+// ---------------------------------------------------------------------------
+// The code ↔ config bridge (RFC 0003 §7.2) and Laravel config keys
+// ---------------------------------------------------------------------------
+
+#[test]
+fn env_and_config_reads() {
+    let f = facts(
+        r#"<?php
+
+namespace App;
+
+use Illuminate\Support\Facades\Config;
+
+class Branding
+{
+    public function title(string $name): string
+    {
+        $url = getenv('DATABASE_URL');
+        $key = $_ENV['APP_KEY'] ?? '';
+        $host = $_SERVER["HTTP_HOST"] ?? '';
+        $_ENV['SET_ONLY'] = 'x';
+        $dynamic = getenv($name);
+        $interp = env("X_{$name}");
+        config(['app.locale' => 'es']);
+        return config('app.name') . env('APP_SUFFIX', '') . Config::get('mail.from') . \getenv('HOME');
+    }
+}
+"#,
+    );
+    let mut got: Vec<(RefKind, String, Option<String>, String)> = f
+        .references
+        .iter()
+        .filter(|r| matches!(r.kind, RefKind::EnvVar | RefKind::ConfigKey))
+        .map(|r| (r.kind, r.name.clone(), r.receiver.clone(), enc_name(&f, r)))
+        .collect();
+    got.sort_by(|a, b| a.1.cmp(&b.1));
+    let m = "App\\Branding::title".to_string();
+    let laravel = Some("laravel".to_string());
+    assert_eq!(
+        got,
+        vec![
+            (RefKind::EnvVar, "APP_KEY".into(), None, m.clone()),
+            (RefKind::EnvVar, "APP_SUFFIX".into(), None, m.clone()),
+            (RefKind::EnvVar, "DATABASE_URL".into(), None, m.clone()),
+            (RefKind::EnvVar, "HOME".into(), None, m.clone()),
+            (RefKind::EnvVar, "HTTP_HOST".into(), None, m.clone()),
+            (RefKind::ConfigKey, "app.name".into(), laravel.clone(), m.clone()),
+            (RefKind::ConfigKey, "mail.from".into(), laravel, m),
+        ]
+    );
+}
+
+#[test]
+fn laravel_config_file_keys() {
+    let src = r#"<?php
+
+return [
+    // The application name.
+    'name' => env('APP_NAME', 'Shop'),
+    'password' => 'hunter2',
+    'key' => env('APP_KEY'),
+    'providers' => [
+        'cache' => ['driver' => 'redis'],
+        App\Providers\AppServiceProvider::class,
+    ],
+];
+"#;
+    let pack = PhpPack::default();
+    assert!(pack.facts_depend_on_path());
+    let f = pack.extract("config/app.php", Language::Php, src.as_bytes(), &Budget::default()).unwrap();
+    let keys: Vec<(&str, Option<&str>)> = f
+        .definitions
+        .iter()
+        .map(|d| (d.qualified_name.as_str(), d.parent.map(|p| f.definitions[p as usize].qualified_name.as_str())))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            ("name", None),
+            ("password", None),
+            ("key", None),
+            ("providers", None),
+            ("providers.cache", Some("providers")),
+            ("providers.cache.driver", Some("providers.cache"))
+        ]
+    );
+    let name = def(&f, "name");
+    assert_eq!(name.label, Label::Key);
+    assert_eq!(name.signature.as_deref(), Some("name: env('APP_NAME', 'Shop')"));
+    assert_eq!(name.doc.as_deref(), Some("The application name."));
+    assert_eq!(def(&f, "password").signature.as_deref(), Some("password: •••"));
+    assert_eq!(def(&f, "key").signature.as_deref(), Some("key: env('APP_KEY')"));
+    // env() inside an entry is a read by that key.
+    let reads: Vec<(String, String)> =
+        f.references.iter().filter(|r| r.kind == RefKind::EnvVar).map(|r| (r.name.clone(), enc_name(&f, r))).collect();
+    assert_eq!(reads, [("APP_NAME".to_string(), "name".to_string()), ("APP_KEY".into(), "key".into())]);
+    // The same bytes elsewhere are plain PHP.
+    let other = pack.extract("app/app.php", Language::Php, src.as_bytes(), &Budget::default()).unwrap();
+    assert!(other.definitions.is_empty());
+}

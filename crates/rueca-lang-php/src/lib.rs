@@ -129,7 +129,25 @@
 //! - Variables (`$x`) are never references; `$this` only as a receiver.
 //!   Inside anonymous classes `$this` / `self` / `static` become the
 //!   receiver `class@anonymous` (unknown).
+//! - `EnvVar` / `ConfigKey` (the code ↔ config bridge, RFC 0003 §7.2):
+//!   `getenv('X')`, `$_ENV['X']`, `$_SERVER['X']` and Laravel `env('X')` →
+//!   `EnvVar` named `X`; Laravel `config('app.name')` and
+//!   `Config::get('app.name')` → `ConfigKey` `app.name`, receiver
+//!   `laravel`. String literals only (module `bridge`).
 //! - At most 20,000 references per file.
+//!
+//! # Laravel config files
+//!
+//! `config/<file>.php` returns an array; its string-keyed entries become
+//! `Key` definitions by key path (`name`, `providers.cache.driver`; list
+//! elements are not nodes) with signature `key: <value>` (secret-looking
+//! names masked), so `config('app.name')` resolves to key `name` of
+//! `config/app.php` (RFC 0003 §7.3). Bridge reads inside an entry
+//! (`'name' => env('APP_NAME')`) are enclosed by that key, giving
+//! `Key` → `READS` → `$env:APP_NAME`. PHP definitions have no module name,
+//! so these keys' global qualified names are their key paths; their symbol
+//! ids carry the file (`config/app.php#name`). This is the one
+//! path-dependent rule of the pack (`facts_depend_on_path`).
 //!
 //! # Imports
 //!
@@ -172,6 +190,7 @@
 //! - Docblock types are read only for `@param` of untyped parameters and
 //!   `@var` of untyped properties, and only when they name one class.
 
+mod bridge;
 mod builtins;
 mod composer;
 mod extract;
@@ -218,11 +237,12 @@ impl LanguagePack for PhpPack {
         &[Language::Php]
     }
     fn extractor_version(&self) -> u32 {
-        1
+        // 2: env var / config key reads and Laravel config keys (RFC 0003 §7).
+        2
     }
     fn extract(
         &self,
-        _path: &str,
+        path: &str,
         language: Language,
         source: &[u8],
         budget: &Budget,
@@ -230,7 +250,11 @@ impl LanguagePack for PhpPack {
         if language != Language::Php {
             return Err(ExtractError::Unsupported(language));
         }
-        extract::extract(source, budget)
+        let mut facts = extract::extract(source, budget)?;
+        if bridge::is_config_file(path) {
+            bridge::config_keys(source, budget, &mut facts)?;
+        }
+        Ok(facts)
     }
     /// Always empty: PHP definitions carry their namespace in their local
     /// qualified names (crate docs, *Qualified names*).
@@ -245,6 +269,10 @@ impl LanguagePack for PhpPack {
     }
     fn self_receivers(&self) -> &'static [&'static str] {
         &["$this", "self", "static"]
+    }
+    /// Laravel `config/<file>.php` arrays become `Key`s (chosen by path).
+    fn facts_depend_on_path(&self) -> bool {
+        true
     }
 }
 
