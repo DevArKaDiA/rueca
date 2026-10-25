@@ -245,15 +245,34 @@ What packs deliberately do and don't do:
   different parameters, all of them get the parameter types as a suffix
   (`geo::scale(double)`, `geo::scale(double, double)`). Macros are
   definitions (`#define GEO_PI 3.14` → `Constant`, `#define GEO_SQ(x) …` →
-  `Function`), and their invocations are calls or reads. There is no
-  preprocessor: both branches of `#if` are parsed, and macro tokens that
-  would derail the parser (`FMT_API`, `FMT_BEGIN_NAMESPACE`,
-  `FMT_ENABLE_IF(…)` in a template head) are blanked first when their
-  position allows no other reading (`rueca-lang-cpp` crate docs). Receivers
+  `Function`), and their invocations are **uses** (`Read`, so `REFERENCES`
+  edges), not calls: the code a macro expands to runs at the call site.
+  A class template specialization is its own class, named with its
+  arguments (`formatter<std::error_code>`).
+  There is no C preprocessor; the pack prepares the text the grammar parses
+  with **same-length rewrites** (offsets, lines and the text read for names
+  stay the original's): macro tokens whose position allows no other reading
+  are blanked (`FMT_API`, `FMT_ENABLE_IF(…)` in a template head); an `#if`
+  group keeps all its branches when the grammar can take them together and
+  otherwise collapses to one branch, as a preprocessor with one
+  configuration would (a function header written once per branch, a group
+  inside an expression); and at each remaining parse error a targeted
+  repair is tried (`va_arg(ap, char*)`, a loop macro before a block, a
+  statement macro without `;`, an unknown specifier macro such as
+  `static redisAtomic size_t n`, …), kept only when the file's error count
+  drops (`rueca-lang-cpp` crate docs, *Macros and conditional
+  compilation*). A namespace macro (`FMT_BEGIN_NAMESPACE` …
+  `FMT_END_NAMESPACE`) leaves the segment `${FMT_BEGIN_NAMESPACE}` in the
+  qualified names inside, which the resolver expands from the macro's
+  definition anywhere in the snapshot (`fmt::v12::format_to`). Receivers
   are typed from declarations in the file: `obj.m()` / `p->m()` is reported
   with the receiver `$type:Foo` when `obj` is a parameter, local, field of
   the enclosing class or global declared `Foo`, `Foo*`, `const Foo&`, or
-  `auto obj = new Foo`.
+  `auto obj = new Foo`, or the result of a callable of the file declared
+  to return `Foo` (`Conn::open()->close()`). A member chain whose type the
+  file does not know (`member_.m()` in an out-of-line body whose class is
+  declared in a header) is `$member:member_`, typed by the resolver; a
+  namespace-qualified name `ns::f()` is `$ns:ns`.
 - **Tests are definitions too**: `test_*` functions and `Test*` classes in
   Python; `describe` / `it` / `test` blocks in JS/TS and Pest become `Test`
   nodes whose qualified name is the describe chain; PHPUnit `test*`,
@@ -506,11 +525,15 @@ overrides and includes):
 |---|---|---|---|
 | package scope | `module_scope` = `Package` / `Directory` | rung 4 and module lookups cover every file of the package; a top-level `T.m` (Go method) is a member of `T` | as rung 4 (0.90) |
 | implicit self (rung 1b) | `implicit_self` | a receiver-less name inside a method is first a member of the enclosing class, then of outer classes (C++, Java) | `type_resolved` 0.90 / 0.85 inherited |
+| namespace scope (rung 1c) | C/C++ family | a receiver-less name inside `a::b::f` is `a::b::name`, else `a::name` (exact qualified name) | `same_module` 0.90 / `import_resolved` 0.95 |
+| namespace-qualified name | receiver `$ns:a` | `a::name` from the innermost enclosing namespace outwards, then global; else the bare name through includes — never an implicit member | as namespace scope |
+| member chain | receiver `$member:a.b` | member `a` of the enclosing type, typed by its declaration (its first `Type` reference, in its own file), then `b`, then the name | `type_resolved` 0.85 |
+| namespace macros | C/C++ family | `${M}` segments become the namespaces `M`'s definition opens (`fmt::v12`); exact lookups see through its inline namespaces | — |
 | typed receiver (strategy 5) | receiver text `$type:T` | `T` resolves like a type reference (or as an exact qualified name), the member through its bases (also for Python, ECMAScript and PHP, whose packs type receivers from declarations and assignments) | `type_resolved` 0.85 |
 | normalized self | receiver `$self` in `self_receivers` | the enclosing type, or the type named by the method's qualified-name prefix (Go) | `type_resolved` 0.90 |
-| declarations | `Definition::is_declaration` | a C/C++ prototype or in-class declaration is replaced by its unique body | as the rung |
-| overloads | `overloads` | `parse(String)` / `parse(Reader)` chosen by the call's argument count, then by the static argument types the pack reports (`value$args:long`): overloads that cannot accept a known argument (a primitive that does not widen, a non-`String` for `String`) are dropped, and of the rest the one whose parameter types equal the arguments', else the one whose primitive parameters are the narrowest, wins; else all remaining linked | as the rung, × 0.8 when several |
-| overrides | `overrides` | `OVERRIDES` from a method to the same-named method of each base, paired by signature: same parameter count (overload suffix, else the signature's parameter list) and, among several, the same parameter types | `type_resolved` 0.90 |
+| declarations | `Definition::is_declaration` | a C/C++ prototype or in-class declaration is replaced by its unique body; in the same file the two are one node with the body's span | as the rung |
+| overloads | `overloads` | `parse(String)` / `parse(Reader)` chosen by the call's argument count, then by the static argument types the pack reports (`value$args:long`): overloads that cannot accept a known argument (a primitive that does not widen, a non-`String` for `String`) are dropped, and of the rest the one whose parameter types equal the arguments', else the one whose primitive parameters are the narrowest, wins; else all remaining linked | as the rung, × 0.8 when several; C/C++ arity comes from the signature (default arguments optional), a C++ set spans files and only overloads visible through includes are candidates |
+| overrides | `overrides` | `OVERRIDES` from a method to the same-named method of each base, paired by signature: same parameter count (overload suffix, else the signature's parameter list) and, among several, the same parameter types ; between C/C++ bodies when they exist | `type_resolved` 0.90 |
 | includes | C/C++ family | `#include` is a transitive star import | as rung 3 |
 | implicit interfaces | Go family | a type whose method names (own and promoted through embedding) cover an interface's gets `IMPLEMENTS` to it and `OVERRIDES` from each covering method; ≤ 64 implementers per interface | `heuristic` 0.50 |
 
@@ -518,12 +541,16 @@ A C++ example: in `double Circle::area() const { return GEO_PI * GEO_SQ(r_); }`
 (in `src/shape.cpp`, which includes `geo/shape.h`), `r_` is a member of
 `geo::Circle` found through the body's qualified name (implicit self,
 0.90), and `GEO_SQ` / `GEO_PI` are the header's macros bound by the include
-(0.95). In `geo::Circle c(2.0); c.area();`, the receiver `$type:geo::Circle`
-finds the in-class declaration of `area`, which is replaced by its unique
-body in `shape.cpp` (0.85); the construction calls the class and its
-constructor (× 0.95). `geo::scale(a, 2.0)` has no receiver (namespaces are
-not nodes), binds `scale` through the include, and its two arguments pick
-`geo::scale(double, double)`.
+(`REFERENCES`, 0.95: a macro is used, not called). In `geo::Circle c(2.0);
+c.area();`, the receiver `$type:geo::Circle` finds the in-class
+declaration of `area`, which is replaced by its unique body in
+`shape.cpp` (0.85); the construction calls the class and its constructor
+(× 0.95). `geo::scale(a, 2.0)` has the receiver `$ns:geo` (namespaces are
+not nodes): `geo::scale` is found by its exact qualified name, and the two
+arguments pick `geo::scale(double, double)`. In `double
+geo::Circle::reach() const { return center_.norm(); }` (`center_` is a
+`Point` field declared in the header), `$member:center_` types the call
+through the field's declaration and reaches `geo::Point::norm`.
 
 A reference to a builtin, a name bound to an external module, or a
 `self` member that does not exist **stops** resolution: it is counted as an
@@ -881,12 +908,15 @@ Known gaps behind low-confidence or missing edges, in rough order of impact:
 - `search_symbols` ranks symbols, not files: a file is found through its
   best-matching definition. Module-level code that is not inside a
   definition is only reachable through `search_code`.
-- C and C++ without a preprocessor: code generated by macros is invisible,
-  both `#if` branches are parsed, and files the grammars cannot fully parse
-  (17–40% of the files of the smoke repositories have at least one error,
-  mostly local) lose the definitions and references inside the broken
-  region. Overloads are chosen by argument count only; ADL, calls through
-  function pointers and virtual dispatch are not followed.
+- C and C++ without a preprocessor: code generated by macros is invisible
+  (a macro invocation is a use of the macro, not the calls in its body),
+  `#if` groups the grammar can take keep all their branches, and files the
+  grammars still cannot fully parse lose the definitions and references
+  inside the broken region (0–1.3% of the files of the C smoke
+  repositories, 5.7% of fmt's with its vendored GoogleTest). Conditions
+  are not evaluated with the project's `-D` flags. Overloads are chosen by
+  argument count only; ADL, calls through function pointers and virtual
+  dispatch are not followed.
 
 The benchmark ([alpha results](bench/alpha-results.md)) measures how these
 gaps show up on real repositories.
@@ -921,7 +951,7 @@ gaps show up on real repositories.
 | PHP extraction, name resolution, Composer autoload | `rueca-lang-php` | crate docs, `src/names.rs`, `src/composer.rs` |
 | Go extraction, receivers, `go.mod` module model | `rueca-lang-go` | crate docs, `src/locals.rs`, `src/modules.rs` |
 | Java extraction, packages, Maven / Gradle source roots | `rueca-lang-java` | crate docs, `src/extract.rs`, `src/project.rs`, `queries/locals.scm` |
-| C/C++ extraction, macro masking, include directories | `rueca-lang-cpp` | crate docs, `src/extract.rs`, `src/mask.rs`, `src/includes.rs` |
+| C/C++ extraction, preprocessing (masking, conditionals, repairs), include directories | `rueca-lang-cpp` | crate docs, `src/extract.rs`, `src/preprocess.rs`, `src/mask.rs`, `src/cond.rs`, `src/repair.rs`, `src/includes.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
 | Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |

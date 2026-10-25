@@ -196,8 +196,11 @@ Against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md),
 from the current numbers: Go meets every structural, micro and localization
 floor; PHP misses only the micro-benchmark floor by about one point; Python
 lacks a valid micro-benchmark and TS/JS misses callee recall (70 vs 75);
-Java misses precision (86–88 vs 90); C and C++ miss several floors (parsing
-without a preprocessor). Configuration meets its floors: key recall 100%
+Java misses precision (86–88 vs 90); C meets its structural, micro and
+parse-error floors and is not significantly below BM25 on localization;
+C++ misses callee precision / recall on fmt (88 / 70 vs 90 / 75), the
+parse-error floor on fmt (5.7% of files, vendored GoogleTest included) and
+function localization against BM25. Configuration meets its floors: key recall 100%
 (YAML, JSON) and 99.6% (HCL), env-var bridge precision / recall 100 / 98.6.
 codebase-memory-mcp is published alongside as reference. The per-language
 scorecard (RFC 0004 §9) replaces this paragraph once the rebuilt benchmark

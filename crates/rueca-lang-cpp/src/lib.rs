@@ -41,7 +41,9 @@
 //! | typedef / `using` alias | `geo::Vec` |
 //! | variable, constant | `ns::counter` |
 //! | macro | `GEO_PI` (macros ignore namespaces) |
-//! | anonymous namespace | contributes nothing (`describe`); its names are not exported |
+//! | inside a namespace macro (`FMT_BEGIN_NAMESPACE` … `FMT_END_NAMESPACE`) | `fmt::v12::format_to` once the resolver expands the macro (see *Macros*) |
+//! | anonymous namespace | contributes nothing (`describe`) |
+//! | class template specialization | `formatter<std::error_code>`, `formatter<std::vector<T>>` (with its arguments; members `formatter<std::error_code>::parse`) |
 //! | GoogleTest `TEST(Suite, Name)` | `ns::Suite::Name` (`name` is `Name`) |
 //! | Catch2 / doctest `TEST_CASE("title")` | `title`; `TEST_CASE_METHOD(Fixture, "title")` → `ns::Fixture::title` |
 //!
@@ -53,21 +55,26 @@
 //! `(void)` written `()`, a C variadic as `...`); a declaration and its body
 //! with the same parameters share the suffix, so the declaration still
 //! links to its body. Names that are not overloaded stay bare. The resolver
-//! picks an overload by argument count, else links all of them at × 0.8;
-//! `qualified_name` lookups treat the suffix as optional. Limits: overloads
-//! split across files (two `.cpp` files each defining one) are not seen as
-//! overloads there, and default arguments are not part of the arity
-//! (`f(int, int = 0)` called with one argument links every overload).
+//! picks an overload by argument count (read from the signature, so
+//! default arguments are optional), else links all of them at × 0.8;
+//! `qualified_name` lookups treat the suffix as optional. An overload set
+//! split across files (one `vformat` per header) is one set in the
+//! resolver: bare same-name callables join it (`rueca-resolve`, *RFC 0003
+//! hooks*).
 //!
-//! **Templates** are named without arguments: a class template and its
-//! explicit specializations share one qualified name (`Vec`), and the
-//! resolver merges same-named definitions of one file into one node.
+//! **Templates** are named without arguments (`Vec`, `clamp_value`); a
+//! class template **specialization** (explicit or partial) is its own
+//! class, named with its arguments (`Vec<bool>`, `formatter<std::tm,
+//! Char>`), so the members of distinct specializations do not merge. An
+//! out-of-line member of the primary template (`template <typename Char>
+//! void basic_string_view<Char>::f()`, arguments = the template's
+//! parameters) belongs to the template (`basic_string_view::f`).
 //!
 //! # Definitions
 //!
 //! | Source | Label | Notes |
 //! |---|---|---|
-//! | function definition (also `static`, `inline`, templates, trailing return) | `Function` | `exported` unless `static` or in an anonymous namespace |
+//! | function definition (also `static`, `inline`, templates, trailing return) | `Function` | `exported`, also when `static` or in an anonymous namespace (`#include` is textual: a header's `static inline` helper is visible to its includers) |
 //! | prototype `void f(int);` | `Function`, `is_declaration` | |
 //! | `class` | `Class` | `bases` from the base clause; default access private |
 //! | `struct`, `union` | `Struct` | default access public; anonymous struct / union members belong to the enclosing class |
@@ -81,7 +88,7 @@
 //! | `typedef`, `using X = T;` | `TypeAlias` | `bases` = the aliased type, so members are found through the alias (`node_t` → `node`) |
 //! | `typedef struct tag {…} name_t;` | `Struct` `tag` + `TypeAlias` `name_t` | an anonymous struct takes the alias name; `typedef struct x x;` adds nothing |
 //! | `#define NAME value` | `Constant` | top level, global name; valueless include guards skipped |
-//! | `#define NAME(args) body` | `Function` | signature = the define line |
+//! | `#define NAME(args) body` | `Function` | signature = the whole definition, continuation lines joined |
 //! | `TEST`, `TEST_F`, `TEST_P`, `TYPED_TEST`, `TYPED_TEST_P` | `Test`, `is_test` | references in the body belong to the test |
 //! | `TEST_CASE`, `TEST_CASE_METHOD`, `SCENARIO`, `TEMPLATE_TEST_CASE`, `TEST_CASE_FIXTURE` | `Test`, `is_test` | the grammar's missing `;` after the head is not counted as a parse error |
 //!
@@ -103,8 +110,9 @@
 //!   `///`, `//!`, `//` blocks, `/** */`, `/*! */`, `/* */`; markers and
 //!   leading `*` stripped, ≤ 1000 chars. Doxygen `///<` member comments are
 //!   not docs of the next member.
-//! - `exported`: namespace-level definitions unless `static` or in an
-//!   anonymous namespace; members when public; macros always; out-of-line
+//! - `exported`: namespace-level definitions (also `static` and
+//!   anonymous-namespace ones: an include binds what the included file
+//!   declares, textually); members when public; macros always; out-of-line
 //!   bodies and tests never (the in-class declaration carries the
 //!   visibility, and an include must not bind a method body by its bare
 //!   name).
@@ -122,9 +130,20 @@
 //!   parameter, local, field of the enclosing class, or namespace-level
 //!   variable declared `T`, `T*`, `const T&`, `T x(…)`, `auto x = new T` /
 //!   `std::make_unique<T>()`; also `this->field.m()` and `a.b.m()` through
-//!   fields of classes of the file), `this`, else the receiver's text (≤ 200
-//!   chars); `arity` = argument count. Calls of function-like macros are
-//!   calls (`GEO_SQ(r)`), casts (`static_cast<T>`) are not.
+//!   fields of classes of the file, and the return type of a callable of
+//!   the file: `Conn::open()->close()`, `make().m()`, `a.get().m()`),
+//!   `this`; inside a method, a receiver that is a member chain the file
+//!   cannot type (`member_.m()`, `this->a_.b_->m()` in an out-of-line body
+//!   whose class is declared in a header, or a member of a base declared
+//!   elsewhere) is `$member:member_` / `$member:a_.b_`, typed by the
+//!   resolver from the members' declarations; else the receiver's text (≤
+//!   200 chars). `arity` = argument count. Operators called by name are
+//!   calls (`a.operator+(b)`, `operator==(o)` → `operator+`, `operator==`);
+//!   casts (`static_cast<T>`) are not. **Macro invocations are uses, not
+//!   calls**: a call of a function-like macro of the file or of an
+//!   upper-case name (`GEO_SQ(r)`, `FMT_ASSERT(…)`) is a `Read` (a
+//!   `REFERENCES` edge to the macro), since the code it expands to runs at
+//!   the call site; its arguments are code as usual.
 //! - **Qualified calls** `Q::f()`: a qualifier rooted in `std`, `testing`,
 //!   `Catch`, `doctest` or `__gnu_cxx` is kept as receiver (external). A
 //!   qualifier that is a type — written with template arguments, written
@@ -132,10 +151,10 @@
 //!   capitalized — gives `$type:Q` (a static member); a relative qualified
 //!   type inside a namespace is prefixed with it (`detail::buffer` inside
 //!   `fmt::v11` → `$type:fmt::v11::detail::buffer`) for an exact match. A
-//!   namespace qualifier gives no receiver (namespaces are not nodes): the
-//!   name resolves through includes, the same file and unique names; inside
-//!   a method with a member of that name, the qualifier is kept so the
-//!   implicit-self rung does not pick the member.
+//!   namespace qualifier gives `$ns:Q` (`ns::util()` → `$ns:ns`, `::f()` →
+//!   `$ns:`, `::a::f()` → `$ns:::a`): the resolver looks `Q::name` up from
+//!   the enclosing namespaces outwards, never as an implicit member
+//!   (`rueca_extract::NAMESPACE_RECEIVER_PREFIX`).
 //! - `New`: `new T(…)` → `T` with its arity; a nested class `new
 //!   Outer::Inner` → `Inner` with receiver `$type:Outer`.
 //! - Constructions: `T x(…)`, `T x{…}` and `T{…}` are `Call`s of `T` (the
@@ -147,8 +166,9 @@
 //!   namespace. Fundamental types and `auto` are skipped.
 //! - `Read`: non-local identifiers in expressions (globals, enumerators,
 //!   object-like macros, implicit members, functions passed as values),
-//!   `Q::name` (as qualified calls), `this->x` / `obj.x` with a typed
-//!   receiver. Deduplicated per `(enclosing, receiver, name)`.
+//!   macro invocations (above), `Q::name` (as qualified calls), `this->x` /
+//!   `obj.x` with a typed or member-chain receiver. Deduplicated per
+//!   `(enclosing, receiver, name)`.
 //! - `Write`: assignment and increment targets (`g = 1`, `this->n = v`,
 //!   `++n`).
 //! - `EnvVar`: `getenv("NAME")`, `secure_getenv("NAME")`,
@@ -173,44 +193,101 @@
 //!
 //! # Macros and conditional compilation
 //!
-//! There is no preprocessor. Both branches of `#if` are parsed, code
-//! produced by macro expansion is invisible, and macros that expand to
-//! declaration syntax (`FMT_API`, `FMT_BEGIN_NAMESPACE`, `Q_OBJECT`,
-//! `FMT_ENABLE_IF(…)` in a template head, `extern "C" {` split by `#ifdef
-//! __cplusplus`, function headers written once per `#if` branch) are
-//! **masked** before parsing: replaced by spaces when their position makes
-//! any other reading invalid C/C++ (`mask.rs` lists the nine rules). Byte
-//! offsets and lines are preserved and all text is read from the original
-//! source. A masked namespace macro (`FMT_BEGIN_NAMESPACE`) contributes
-//! nothing to qualified names. [`mask_macros`] exposes the masked text.
+//! There is no C preprocessor (no headers, no compiler flags: extraction
+//! sees one file). Instead the pack prepares the text the grammar parses
+//! with **same-length rewrites** — bytes become spaces, a keyword or
+//! punctuation, newlines are never touched — so every byte offset, line
+//! and column of the parsed text is the original's (the source map is the
+//! identity) and names, signatures and docs are read from the original
+//! source. Three stages ([`preprocessed`] exposes the result):
+//!
+//! 1. **Masking** (`mask.rs`): macro tokens whose position allows no other
+//!    reading are blanked (`FMT_API`, `FMT_BEGIN_NAMESPACE`, `Q_OBJECT`,
+//!    `FMT_ENABLE_IF(…)` in a template head, `extern "C" {` split by
+//!    `#ifdef __cplusplus`; `mask.rs` lists the rules), null directives
+//!    (`#` alone) go, and `#if` conditions become `1`.
+//! 2. **Conditional compilation** (`cond.rs`): each `#if` group is kept
+//!    with all its branches when every branch is balanced, ends at a
+//!    statement boundary and the group stands where the grammar takes one;
+//!    branches dead whatever the target (`#if 0`, `#ifdef __cplusplus` in
+//!    C) are blanked. Otherwise the group **collapses** to one branch — the
+//!    first whose condition is not known to be false, evaluated in
+//!    three-valued logic with `__cplusplus` per language, GCC / Clang
+//!    defined and Windows undefined — as a preprocessor with one
+//!    configuration would: a function header written once per branch, a
+//!    group inside an expression, an initializer list or an `if` without
+//!    braces. `#include` / `#define` lines inside initializer lists, enum
+//!    bodies or after an `=` (X-macro tables) are blanked. C test heads
+//!    before a block (`TEST(Group, Name) {`) become `if  (Group, Name)`,
+//!    and operators called by name in C++ expressions (`a.operator+(b)`)
+//!    become identifiers (`a.operator_(b)`), both read back from the
+//!    original text.
+//! 3. **Error-driven repair** (`repair.rs`): the file is parsed and, at
+//!    each parse error, a targeted rewrite is tried — a type as a call
+//!    argument (`va_arg(ap, char*)`), a block or loop macro (`each(a, i, x)
+//!    {` gets its `;`), a statement macro without `;`, an `if`-like macro
+//!    (`run_with_period(100) cron();`), unknown specifier macros
+//!    (`static redisAtomic size_t n`, `int CJSON_CDECL main`), trailing
+//!    attribute macros, calling conventions, `__attribute__`, `= {}`
+//!    default arguments, `enum : T`, `typename` in expressions, keyword
+//!    arguments of test macros (`TEST(s, enum)`), `decltype(a, b)`,
+//!    explicit instantiations, `= delete` declarations, member pointers,
+//!    Qt `signals:` (the table in `repair.rs`) — or the `#if` group next
+//!    to the error collapses (keeping the branch with the error). A round
+//!    is kept only when the error count drops (each site is retried alone
+//!    when a whole round does not help), at most six rounds and 32 parses
+//!    per file.
+//!
+//! Collapses make one configuration per file: a macro a collapse assumed
+//! defined (or not) stays so for the groups after it. A goto label right
+//! before a directive and a branch of prose (an `#error`-like text) go.
+//!
+//! **Namespace macros.** A masked bare-line macro at declaration level whose
+//! name has a `BEGIN` segment (`FMT_BEGIN_NAMESPACE`,
+//! `NLOHMANN_JSON_NAMESPACE_BEGIN`) opens a scope until one with an `END`
+//! segment closes it; its definition is usually in another file, so the
+//! definitions inside get the qualified-name segment `${FMT_BEGIN_NAMESPACE}`
+//! (`${FMT_BEGIN_NAMESPACE}::detail::buffer`), which the resolver replaces
+//! by the namespaces the macro's definition opens anywhere in the snapshot
+//! (`fmt::v12::detail::buffer`), or drops (`rueca-resolve`,
+//! `expand_namespace_macros`). A macro's signature is its whole definition
+//! (continuation lines joined): `#define FMT_BEGIN_NAMESPACE namespace fmt {
+//! inline namespace v12 {`.
+//!
+//! On the smoke repositories (files with at least one parse error, before →
+//! after): hiredis 17.0 → 0.0%, jq 26.7 → 1.3% (the Bison parser), cJSON
+//! (with its vendored Unity) 31.3 → 0.0%, redis `src/` 15.3 → 0.5%
+//! (`redismodule.h`), fmt 37.1 → 5.7% (1.5% without the vendored
+//! GoogleTest / gMock).
 //!
 //! # Deviations and limitations
 //!
-//! - Parse errors remain common on real code (the grammars cannot parse
-//!   `va_arg(ap, char*)`, functional casts of keyword types
-//!   `unsigned(x)`, statement macros whose arguments are statements,
-//!   splices of statements across `#if` branches, C++26 annotations): the
-//!   smoke repositories have parse errors in 17–40% of their files, mostly
-//!   one to a few local errors per file (see RFC 0003 §10.3).
-//! - Receiver typing is syntactic and file-local: return types are not
-//!   followed (`make().m()`), and fields declared in a header are not known
-//!   while extracting an out-of-line body in a `.cpp` (`member_.m()` there
-//!   falls back to the unique-method rung; `m()` and `this->m()` resolve
-//!   through implicit self in the resolver).
-//! - Lower-case macros (`ffc_inline`, `__unused`) and macros in other
-//!   positions are not masked.
-//! - `OVERRIDES` edges join the in-class declarations (where the override
-//!   relation is written), not the out-of-line bodies.
+//! - The remaining parse errors are grammar limits without a preprocessor:
+//!   macros that expand to a function header (`YY_DECL`) or hold
+//!   declarations (`YY_INITIAL_VALUE (static …)`), statements and
+//!   `throw` expressions as macro arguments in some nestings, and
+//!   GoogleTest / gMock internals.
+//! - Conditions are not evaluated with the project's `-D` flags
+//!   (`compile_commands.json`): extraction sees one file, and a group is
+//!   collapsed only when its branches cannot be parsed together.
+//! - Receiver typing is syntactic: return types are followed only for
+//!   callables of the same file, and a member's type declared in another
+//!   file is typed by the resolver (`$member:`), not here.
+//! - Lower-case macros are not masked before parsing; the repairs blank
+//!   them where the grammar fails (`ffc_inline`, `__unused`).
 //! - ADL, overload choice by argument types, calls through function
 //!   pointers and virtual dispatch are not modelled (RFC 0003 §10.3
 //!   *Heuristic*).
 //! - C++20 modules are out of scope.
 
 mod builtins;
+mod cond;
 mod extract;
 mod includes;
 mod locals;
 mod mask;
+mod preprocess;
+mod repair;
 mod text;
 
 use rueca_extract::{Budget, ExtractError, LanguagePack, ProjectFiles};
@@ -218,10 +295,20 @@ use rueca_model::{FileFacts, Import, Language};
 
 pub use extract::MAX_REFS;
 
-/// `source` with the macro tokens the pack masks before parsing replaced by
-/// spaces (crate docs, *Macros*); offsets and lines are unchanged.
-pub fn mask_macros(source: &[u8]) -> Vec<u8> {
-    mask::mask(source).unwrap_or_else(|| source.to_vec())
+/// The text the grammar parses for `source` (crate docs, *Macros and
+/// conditional compilation*): masked macros, collapsed or dead `#if`
+/// branches and error-driven repairs, all as same-length rewrites, so
+/// offsets and lines are the original's.
+pub fn preprocessed(source: &[u8], language: Language) -> Result<Vec<u8>, ExtractError> {
+    preprocess::prepare(source, language, &Budget::default()).map(|(text, _)| text)
+}
+
+/// Byte offsets where the grammar reports a parse error (ERROR or MISSING
+/// node, outermost only) in `source` as the pack parses it, after the
+/// preprocessing of the crate docs (*Macros*). A diagnostic: `parse_errors`
+/// in the facts counts the same nodes (nested ones included).
+pub fn parse_error_offsets(source: &[u8], language: Language) -> Result<Vec<usize>, ExtractError> {
+    extract::error_offsets(source, language, &Budget::default())
 }
 
 /// C and C++ pack (one pack for both languages, family `C`). Construct with
@@ -249,7 +336,7 @@ impl LanguagePack for CppPack {
         &[Language::Cpp, Language::C]
     }
     fn extractor_version(&self) -> u32 {
-        1
+        2
     }
     fn extract(
         &self,

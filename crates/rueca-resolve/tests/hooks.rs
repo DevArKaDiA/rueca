@@ -15,8 +15,15 @@
 //!   canonical `$env:NAME` nodes, providers, config scopes.
 //! - `data_pointers_and_directory_scope` — `RefKind::DataRef`, data bases,
 //!   `ModuleScope::Directory`, folder imports without a binding.
+//! - `cpp_like_namespaces_member_chains_and_bodies` — `$ns:` receivers and
+//!   enclosing-namespace lookup, `$member:` chains through a header's field
+//!   types, a declaration and its body in one file, overloads split across
+//!   files.
 
-use rueca_extract::{Budget, ExtractError, LanguagePack, ModuleScope, ProjectFiles, Registry, type_receiver};
+use rueca_extract::{
+    Budget, ExtractError, LanguagePack, ModuleScope, ProjectFiles, Registry, member_receiver, namespace_receiver,
+    type_receiver,
+};
 use rueca_model::{
     Definition, EdgeKind, EdgeMeta, FileFacts, Import, ImportedName, Label, Language, NodeId, RefKind, Reference,
     ResolvedGraph, SnapshotInfo, Span, Strategy,
@@ -555,9 +562,10 @@ fn cpp_like_declarations_and_includes() {
     let m = calls(bar_body, body("ns::Foo::baz")).expect("bar → baz body");
     assert_eq!((m.strategy, m.confidence), (Strategy::TypeResolved, 0.9));
     assert!(calls(bar_body, node("ns::Foo::baz", "include/foo.h")).is_none(), "never the declaration");
-    // Transitive include (foo.cpp → all.h → foo.h) binds `util`; body preferred.
+    // Inside `ns::Foo::bar`, `util` is `ns::util` (the enclosing namespace),
+    // found in the same file.
     let m = calls(bar_body, body("ns::util")).expect("bar → util body");
-    assert_eq!(m.strategy, Strategy::ImportResolved);
+    assert_eq!(m.strategy, Strategy::SameModule);
     let m = calls(main, body("ns::util")).expect("main → util body");
     assert_eq!(m.strategy, Strategy::ImportResolved);
     // $type:ns::Foo → exact qualified type, member bar → its body.
@@ -808,4 +816,132 @@ fn data_pointers_and_directory_scope() {
     // Never fuzzy: an unknown key path stays unresolved.
     assert_eq!(out.stats.references_total, 6);
     assert_eq!(out.stats.references_resolved, 5);
+}
+
+// ---------------------------------------------------------------------------
+// C++-like: namespaces, member chains, declaration + body in one file
+// ---------------------------------------------------------------------------
+
+/// `FakeCpp` with overloads, as the real C/C++ pack.
+struct FakeCppOverloads;
+
+impl LanguagePack for FakeCppOverloads {
+    no_extract!();
+    fn languages(&self) -> &'static [Language] {
+        FakeCpp.languages()
+    }
+    fn module_name(&self, path: &str, project: &ProjectFiles) -> String {
+        FakeCpp.module_name(path, project)
+    }
+    fn resolve_import(&self, from: &str, imp: &Import, project: &ProjectFiles) -> Option<String> {
+        FakeCpp.resolve_import(from, imp, project)
+    }
+    fn is_builtin(&self, name: &str) -> bool {
+        FakeCpp.is_builtin(name)
+    }
+    fn self_receivers(&self) -> &'static [&'static str] {
+        FakeCpp.self_receivers()
+    }
+    fn implicit_self(&self) -> bool {
+        true
+    }
+    fn overloads(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn cpp_like_namespaces_member_chains_and_bodies() {
+    use Label::*;
+    let mut files = Vec::new();
+
+    // inc/net.h:
+    //   namespace net { int connect(); int connect(int, int); }
+    //   struct Point { double norm() const; };
+    //   class Client { Point origin_; int open(); int run(); void flush(); };
+    //   void Client::flush() {}            (declaration and body in one file)
+    let mut f = F::default();
+    let c0 = f.def(Function, "connect", "net::connect", None);
+    f.d(c0).is_declaration = true;
+    let point = f.def(Struct, "Point", "Point", None);
+    let norm = f.def(Method, "norm", "Point::norm", Some(point));
+    f.d(norm).is_declaration = true;
+    let client = f.def(Class, "Client", "Client", None);
+    let origin = f.def(Field, "origin_", "Client::origin_", Some(client));
+    f.r(RefKind::Type, "Point", None, Some(origin), None);
+    for (name, qn) in [("open", "Client::open"), ("run", "Client::run"), ("flush", "Client::flush")] {
+        let m = f.def(Method, name, qn, Some(client));
+        f.d(m).is_declaration = true;
+    }
+    let flush_body = f.def(Method, "flush", "Client::flush", None);
+    f.d(flush_body).signature = Some("void Client::flush()".into());
+    files.push(f.file("inc/net.h", Language::Cpp));
+
+    // src/net.cpp: #include "../inc/net.h"
+    //   namespace net { int connect() {…}  int connect(int a, int b = 0) {…}  int start() { return connect(); } }
+    //   double Point::norm() const {…}
+    //   int Client::open() { return net::connect() + origin_.norm(); }
+    //   int Client::run() { return ::helper() + this->origin_.norm(); }
+    //   int helper() {…}
+    let mut f = F::default();
+    f.import("../inc/net.h", &["*"], None);
+    let a = f.def(Function, "connect", "net::connect", None);
+    f.d(a).signature = Some("int connect()".into());
+    let b = f.def(Function, "connect", "net::connect(int, int)", None);
+    f.d(b).signature = Some("int connect(int a, int b = 0)".into());
+    let start = f.def(Function, "start", "net::start", None);
+    f.r(RefKind::Call, "connect", None, Some(start), Some(0));
+    f.def(Method, "norm", "Point::norm", None);
+    let open = f.def(Method, "open", "Client::open", None);
+    f.r(RefKind::Call, "connect", Some(&namespace_receiver("net")), Some(open), Some(2));
+    f.r(RefKind::Call, "norm", Some(&member_receiver("origin_")), Some(open), Some(0));
+    let run_m = f.def(Method, "run", "Client::run", None);
+    f.r(RefKind::Call, "helper", Some(&namespace_receiver("")), Some(run_m), Some(0));
+    f.r(RefKind::Call, "norm", Some(&member_receiver("origin_")), Some(run_m), Some(0));
+    f.def(Function, "helper", "helper", None);
+    files.push(f.file("src/net.cpp", Language::Cpp));
+
+    let mut registry = Registry::new();
+    registry.register(Box::new(FakeCppOverloads));
+    let out = run(registry, files);
+    let g = &out.graph;
+    let node = |qn: &str, path: &str| -> NodeId {
+        let f = g.files.iter().position(|f| f.path == path).unwrap() as u32;
+        let v: Vec<usize> = g
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.qualified_name == qn && n.file == Some(f))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(v.len(), 1, "one node {qn} in {path}");
+        v[0] as NodeId
+    };
+    let calls = |src: NodeId, dst: NodeId| {
+        g.edges.iter().find(|e| e.src == src && e.dst == dst && e.kind == EdgeKind::Calls).map(|e| e.meta)
+    };
+    let cpp = "src/net.cpp";
+    // Inside `net::start`, `connect()` is `net::connect` (enclosing
+    // namespace) with zero arguments: the bare overload only.
+    let m = calls(node("net::start", cpp), node("net::connect", cpp)).expect("start → connect()");
+    assert_eq!((m.strategy, m.confidence), (Strategy::SameModule, 0.9));
+    assert!(calls(node("net::start", cpp), node("net::connect(int, int)", cpp)).is_none());
+    // `net::connect(1, 2)`: the overload set spans the header's bare
+    // declaration and the source's suffixed overloads; arity 2 (with a
+    // default argument read from the signature) picks one.
+    let open = node("Client::open", cpp);
+    assert!(calls(open, node("net::connect(int, int)", cpp)).is_some(), "open → connect(int, int)");
+    assert!(calls(open, node("net::connect", cpp)).is_none());
+    // `origin_.norm()`: the field's type comes from the header.
+    let m = calls(open, node("Point::norm", cpp)).expect("open → Point::norm body");
+    assert_eq!((m.strategy, m.confidence), (Strategy::TypeResolved, 0.85));
+    assert!(calls(node("Client::run", cpp), node("Point::norm", cpp)).is_some());
+    // `::helper()`: the global function.
+    assert!(calls(node("Client::run", cpp), node("helper", cpp)).is_some());
+    // A declaration and its body in one file are one node with the body's
+    // signature, still a member of the class.
+    let flush = node("Client::flush", "inc/net.h");
+    assert_eq!(g.nodes[flush as usize].signature.as_deref(), Some("void Client::flush()"));
+    let client = node("Client", "inc/net.h");
+    assert!(g.edges.iter().any(|e| e.src == client && e.dst == flush && e.kind == EdgeKind::Defines));
 }

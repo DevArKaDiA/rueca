@@ -95,6 +95,23 @@ impl G<'_> {
         assert_eq!(v.len(), 1, "expected one node {qn} in {path}, got {}", v.len());
         v[0]
     }
+    /// The node `qn` of `path` whose span starts on (1-based) `line`: a
+    /// declaration and its body in one file are two nodes.
+    fn at_line(&self, qn: &str, path: &str, line: u32) -> NodeId {
+        let f = self.0.files.iter().position(|f| f.path == path).unwrap_or_else(|| panic!("no file {path}"));
+        let v: Vec<NodeId> = self
+            .0
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| {
+                n.qualified_name == qn && n.file == Some(f as u32) && n.span.is_some_and(|s| s.start_line + 1 == line)
+            })
+            .map(|(i, _)| i as NodeId)
+            .collect();
+        assert_eq!(v.len(), 1, "expected one node {qn} in {path} at line {line}, got {}", v.len());
+        v[0]
+    }
     fn file(&self, path: &str) -> NodeId {
         self.0.files.iter().find(|f| f.path == path).unwrap().node
     }
@@ -133,7 +150,7 @@ fn includes_resolve_through_compile_commands() {
     g.has(g.file("tests/shape_test.cpp"), g.file(SHAPE_H), Imports, Strategy::ImportResolved, 1.0);
     // System headers are not project files.
     let imports_of_main = out.graph.edges.iter().filter(|e| e.src == g.file(MAIN) && e.kind == Imports).count();
-    assert_eq!(imports_of_main, 2);
+    assert_eq!(imports_of_main, 3, "shape.h, units.h, list.h");
     assert_eq!(out.graph.modules[out.graph.files.iter().position(|f| f.path == MAIN).unwrap()], "");
 }
 
@@ -162,9 +179,19 @@ fn declarations_link_to_bodies() {
     let shape_area = g.at("geo::Shape::area", SHAPE_H);
     let report = g.at("report", MAIN);
     g.has(report, shape_area, EdgeKind::Calls, Strategy::TypeResolved, 0.85);
-    // A free function declared in a header, defined in a nested namespace.
+    // A namespace macro defined in another header (`GEO_BEGIN_NAMESPACE`
+    // opens `geo::v1`, an inline namespace): `geo::to_radians(a)` reaches
+    // the body of `geo::v1::to_radians`.
+    let to_radians = g.at("geo::v1::to_radians", "src/units.cpp");
+    g.has(main, to_radians, EdgeKind::Calls, Strategy::ImportResolved, 0.95);
+    assert_eq!(
+        out.graph.nodes[g.at("geo::v1::to_radians", "lib/inc/geo/units.h") as usize].doc.as_deref(),
+        Some("Degrees to radians.")
+    );
+    // A free function declared in a header, defined in a nested namespace:
+    // `detail::next_id()` is looked up from the enclosing namespace `geo`.
     let next_id = g.at("geo::detail::next_id", SHAPE_CPP);
-    g.has(ctor_body, next_id, EdgeKind::Calls, Strategy::ImportResolved, 0.95);
+    g.has(ctor_body, next_id, EdgeKind::Calls, Strategy::SameModule, 0.9);
 }
 
 #[test]
@@ -175,18 +202,25 @@ fn implicit_self_macros_and_anonymous_namespaces() {
     // A file-local helper in an anonymous namespace (same module).
     let describe = g.at("describe", SHAPE_CPP);
     g.has(name_body, describe, EdgeKind::Calls, Strategy::SameModule, 0.9);
-    assert!(!out.graph.nodes[describe as usize].exported);
+    // Exported: `#include` is textual, so includers see it too.
+    assert!(out.graph.nodes[describe as usize].exported);
     // `id_` in an out-of-line body: a member of the class named by the
     // body's qualified name.
     let id_field = g.at("geo::Shape::id_", SHAPE_H);
     g.has(name_body, id_field, EdgeKind::References, Strategy::TypeResolved, 0.9);
     let ctor_body = g.at("geo::Circle::Circle", SHAPE_CPP);
     g.has(ctor_body, id_field, EdgeKind::Writes, Strategy::TypeResolved, 0.85);
-    // Macros through the include: function-like → Function, object-like → Constant.
+    // Macros through the include: function-like → Function, object-like →
+    // Constant; an invocation is a use (`REFERENCES`), not a call.
     let area_body = g.at("geo::Circle::area", SHAPE_CPP);
-    g.has(area_body, g.at("GEO_SQ", SHAPE_H), EdgeKind::Calls, Strategy::ImportResolved, 0.95);
+    g.has(area_body, g.at("GEO_SQ", SHAPE_H), EdgeKind::References, Strategy::ImportResolved, 0.95);
+    g.lacks(area_body, g.at("GEO_SQ", SHAPE_H), EdgeKind::Calls);
     g.has(area_body, g.at("GEO_PI", SHAPE_H), EdgeKind::References, Strategy::ImportResolved, 0.95);
     g.has(area_body, g.at("geo::Circle::r_", SHAPE_H), EdgeKind::References, Strategy::TypeResolved, 0.9);
+    // A field declared in the header (`Point center_`) types a call in an
+    // out-of-line body of the `.cpp` (`$member:center_`).
+    let reach = g.at("geo::Circle::reach", SHAPE_CPP);
+    g.has(reach, g.at("geo::Point::norm", SHAPE_CPP), EdgeKind::Calls, Strategy::TypeResolved, 0.85);
     // An inline method's implicit member read.
     let center = g.at("geo::Circle::center", SHAPE_H);
     g.has(center, g.at("geo::Circle::center_", SHAPE_H), EdgeKind::References, Strategy::TypeResolved, 0.9);
@@ -219,13 +253,16 @@ fn overloads_templates_operators_inheritance() {
     let circle = g.at("geo::Circle", SHAPE_H);
     let shape = g.at("geo::Shape", SHAPE_H);
     g.has(circle, shape, EdgeKind::Inherits, Strategy::SameModule, 0.9);
+    // `OVERRIDES` joins the bodies: `Circle::area` is defined in the `.cpp`,
+    // the pure virtual `Shape::area` has only its declaration.
     g.has(
-        g.at("geo::Circle::area", SHAPE_H),
+        g.at("geo::Circle::area", SHAPE_CPP),
         g.at("geo::Shape::area", SHAPE_H),
         EdgeKind::Overrides,
         Strategy::TypeResolved,
         0.9,
     );
+    g.lacks(g.at("geo::Circle::area", SHAPE_H), g.at("geo::Shape::area", SHAPE_H), EdgeKind::Overrides);
 }
 
 #[test]
@@ -248,7 +285,10 @@ fn c_structs_function_pointers_and_tests() {
     assert!(out.graph.nodes[area as usize].is_test);
     g.has(area, g.at("geo::Circle::area", SHAPE_CPP), EdgeKind::Tests, Strategy::TypeResolved, 0.85);
     let radius = g.at("CircleFixture::Radius", "tests/shape_test.cpp");
-    g.has(radius, g.at("CircleFixture::reset", "tests/shape_test.cpp"), EdgeKind::Calls, Strategy::TypeResolved, 0.9);
+    // The in-class declaration and the body in the same file are one node
+    // with the body's span.
+    let reset = g.at_line("CircleFixture::reset", "tests/shape_test.cpp", 10);
+    g.has(radius, reset, EdgeKind::Calls, Strategy::TypeResolved, 0.9);
     // The env var bridge.
     let home = out.graph.nodes.iter().position(|n| n.qualified_name == "$env:GEO_HOME").expect("$env:GEO_HOME");
     g.has(g.at("main", MAIN), home as NodeId, EdgeKind::Reads, Strategy::Contract, 0.95);

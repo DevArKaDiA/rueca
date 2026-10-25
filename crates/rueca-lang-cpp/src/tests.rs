@@ -75,7 +75,9 @@ fn functions_static_inline_and_prototypes() {
     let add = def(&f, "add");
     assert_eq!((add.label, add.exported, add.is_declaration), (Label::Function, true, false));
     assert_eq!(add.signature.as_deref(), Some("int add(int a, int b)"));
-    assert!(!def(&f, "helper").exported, "static is file-local");
+    // `#include` is textual: a static function of a header is visible to
+    // every file that includes it.
+    assert!(def(&f, "helper").exported, "static is visible to includers");
     assert!(def(&f, "twice").exported);
     let later = def(&f, "later");
     assert!(later.is_declaration);
@@ -91,8 +93,9 @@ fn namespaces_nested_inline_and_anonymous() {
         qns(&f),
         ["Function a::b::f", "Variable a::c::g", "Struct v1::S", "Function hidden", "Variable a::secret"]
     );
-    assert!(!def(&f, "hidden").exported);
-    assert!(!def(&f, "a::secret").exported);
+    // Visible to includers (textual inclusion), like static.
+    assert!(def(&f, "hidden").exported);
+    assert!(def(&f, "a::secret").exported);
     assert!(def(&f, "a::c::g").exported);
 }
 
@@ -165,8 +168,24 @@ fn templates_and_specializations() {
     let f = facts(
         "template <typename T> class Vec { T* data_; };\ntemplate <> class Vec<bool> { int bits_; };\ntemplate <typename T, int N = 3> T first(const T (&a)[N]) { return a[0]; }\ntemplate <typename T> using Ptr = T*;\n",
     );
-    let vecs: Vec<&Definition> = f.definitions.iter().filter(|d| d.qualified_name == "Vec").collect();
-    assert_eq!(vecs.len(), 2, "primary and specialization share the name");
+    // A specialization is its own class: its arguments are in its
+    // qualified name, its simple name is the template's.
+    assert_eq!(def(&f, "Vec").label, Label::Class);
+    assert_eq!(def(&f, "Vec<bool>").name, "Vec");
+    assert!(f.definitions.iter().any(|d| d.qualified_name == "Vec<bool>::bits_"));
+    let g = facts(
+        "template <typename T> struct F { void parse(); };
+template <> struct F<int> { void parse(); };
+template <typename T> struct F<std::vector<T>> { void parse(); };
+template <typename T> void F<T>::parse() {}
+template <> void F<int>::parse() {}
+",
+    );
+    let parses: Vec<&str> =
+        g.definitions.iter().filter(|d| d.name == "parse").map(|d| d.qualified_name.as_str()).collect();
+    // Out-of-line members of the primary template (`F<T>::`) are the
+    // template's; those of a specialization keep its arguments.
+    assert_eq!(parses, ["F::parse", "F<int>::parse", "F<std::vector<T>>::parse", "F::parse", "F<int>::parse"]);
     assert!(f.definitions.iter().any(|d| d.qualified_name == "first" && d.label == Label::Function));
     // The template parameter is not a type reference, nor an alias base.
     assert!(!refs(&f).iter().any(|r| r.1 == "T"));
@@ -201,7 +220,7 @@ fn variables_and_constants() {
     assert_eq!(def(&f, "kLimit").label, Label::Constant);
     assert_eq!(def(&f, "kPi").label, Label::Constant);
     assert_eq!(def(&f, "name").label, Label::Variable, "pointer to const");
-    assert!(!def(&f, "file_local").exported);
+    assert!(def(&f, "file_local").exported, "static: visible to includers");
     assert!(def(&f, "shared").is_declaration);
     assert_eq!(def(&f, "handler").label, Label::Variable, "function pointer variable");
     assert!(f.definitions.iter().all(|d| d.name != "local"), "locals are not definitions");
@@ -222,10 +241,15 @@ fn macros() {
     assert!(f.definitions.iter().all(|d| d.name != "X_H"), "include guard");
     assert!(f.definitions.iter().any(|d| d.qualified_name == "FEATURE"), "a flag without a guard name");
     assert_eq!(def(&f, "INNER").qualified_name, "INNER", "macros ignore namespaces");
-    // Invocations are calls (function-like) and reads (object-like).
-    let g = facts("int area(int r) { return SQUARE(r) + MAX_SIZE; }\n");
-    assert!(has_ref(&g, RefKind::Call, "SQUARE", None, Some("area")));
+    // Invocations are uses, not calls: function-like macros of the file and
+    // upper-case callees are reads (the expansion runs at the call site);
+    // their arguments are code as usual.
+    let g = facts("#define twice(x) (2 * (x))\nint area(int r) { return SQUARE(g(r)) + MAX_SIZE + twice(r); }\n");
+    assert!(has_ref(&g, RefKind::Read, "SQUARE", None, Some("area")));
     assert!(has_ref(&g, RefKind::Read, "MAX_SIZE", None, Some("area")));
+    assert!(has_ref(&g, RefKind::Read, "twice", None, Some("area")));
+    assert!(has_ref(&g, RefKind::Call, "g", None, Some("area")));
+    assert!(!refs(&g).iter().any(|r| r.0 == RefKind::Call && r.1 != "g"));
 }
 
 #[test]
@@ -287,11 +311,13 @@ fn calls_receivers_and_arity() {
     let saves: Vec<Option<String>> =
         refs(&f).into_iter().filter(|r| r.0 == RefKind::Call && r.1 == "save").map(|r| r.2).collect();
     assert_eq!(saves.iter().filter(|r| r.as_deref() == Some("$type:Repo")).count(), 8, "{saves:?}");
-    assert!(saves.contains(&Some("unknown".into())));
+    // Not a local, global or typed field: maybe a member declared in a base
+    // of another file (the resolver walks the enclosing class).
+    assert!(saves.contains(&Some("$member:unknown".into())));
     assert!(saves.contains(&Some("make()".into())));
     assert!(has_ref(&f, RefKind::Call, "tick", None, enc));
     assert!(has_ref(&f, RefKind::Call, "tick", Some("this"), enc));
-    assert!(has_ref(&f, RefKind::Call, "util", None, enc), "namespace call: no receiver");
+    assert!(has_ref(&f, RefKind::Call, "util", Some("$ns:ns"), enc), "namespace call");
     assert!(has_ref(&f, RefKind::Call, "create", Some("$type:Repo"), enc));
     assert!(has_ref(&f, RefKind::Call, "move", Some("std"), enc));
     assert!(has_ref(&f, RefKind::New, "Repo", None, enc));
@@ -301,14 +327,50 @@ fn calls_receivers_and_arity() {
 }
 
 #[test]
-fn namespace_calls_inside_methods_keep_their_qualifier_when_shadowed() {
-    let src = "namespace detail { void write(int); }\nstruct W {\n  void write(int x) { detail::write(x); }\n  void put(int x) { detail::write(x); }\n};\n";
+fn namespace_macros_leave_a_segment_for_the_resolver() {
+    let src = "#define GEO_BEGIN_NAMESPACE \\\n  namespace geo { /* v1 */ \\\n  inline namespace v1 {\n#define GEO_END_NAMESPACE }}\nGEO_BEGIN_NAMESPACE\nvoid f();\nnamespace detail { int g(); }\nGEO_END_NAMESPACE\nvoid h();\n";
     let f = facts(src);
-    // A same-named member would win through implicit self: keep `detail`.
-    assert!(has_ref(&f, RefKind::Call, "write", Some("detail"), Some("W::write")));
-    assert!(has_ref(&f, RefKind::Call, "write", Some("detail"), Some("W::put")));
-    let g = facts("namespace detail { void emit(int); }\nstruct W { void put(int x) { detail::emit(x); } };\n");
-    assert!(has_ref(&g, RefKind::Call, "emit", None, Some("W::put")));
+    assert_eq!(
+        qns(&f),
+        [
+            "Constant GEO_BEGIN_NAMESPACE",
+            "Constant GEO_END_NAMESPACE",
+            "Function ${GEO_BEGIN_NAMESPACE}::f",
+            "Function ${GEO_BEGIN_NAMESPACE}::detail::g",
+            "Function h"
+        ]
+    );
+    // The whole definition is the signature: the resolver reads the
+    // namespaces it opens from there.
+    assert_eq!(
+        def(&f, "GEO_BEGIN_NAMESPACE").signature.as_deref(),
+        Some("#define GEO_BEGIN_NAMESPACE namespace geo { inline namespace v1 {")
+    );
+}
+
+#[test]
+fn member_chains_for_members_declared_elsewhere() {
+    // An out-of-line body of a class declared in a header.
+    let src = "void Svc::run() {\n  repo_.save(1);\n  this->repo_.save(2);\n  this->a_.b_->save(3);\n  int local = 0;\n  local_obj.save(4);\n}\nvoid free_fn() { thing.save(5); }\n";
+    let f = facts(src);
+    let enc = Some("Svc::run");
+    assert!(has_ref(&f, RefKind::Call, "save", Some("$member:repo_"), enc));
+    assert_eq!(refs(&f).iter().filter(|r| r.2.as_deref() == Some("$member:repo_") && r.1 == "save").count(), 2);
+    assert!(has_ref(&f, RefKind::Call, "save", Some("$member:a_.b_"), enc));
+    assert!(has_ref(&f, RefKind::Read, "b_", Some("$member:a_"), enc));
+    // Outside a method the text stays.
+    assert!(has_ref(&f, RefKind::Call, "save", Some("thing"), Some("free_fn")));
+}
+
+#[test]
+fn namespace_qualified_names_carry_their_namespace() {
+    let src = "namespace detail { void write(int); }\nstruct W {\n  void write(int x) { detail::write(x); }\n  void put(int x) { ::emit(x); ::a::b(); }\n};\n";
+    let f = facts(src);
+    // `$ns:`: never an implicit member (the resolver looks `detail::write`
+    // up from the enclosing namespaces); `::name` is global.
+    assert!(has_ref(&f, RefKind::Call, "write", Some("$ns:detail"), Some("W::write")));
+    assert!(has_ref(&f, RefKind::Call, "emit", Some("$ns:"), Some("W::put")));
+    assert!(has_ref(&f, RefKind::Call, "b", Some("$ns:::a"), Some("W::put")));
 }
 
 #[test]
@@ -370,7 +432,7 @@ fn c_files() {
     let f = c_facts(src);
     assert_eq!(f.parse_errors, 0);
     assert_eq!(def(&f, "node").label, Label::Struct);
-    assert!(!def(&f, "count").exported);
+    assert!(def(&f, "count").exported, "static: visible to includers");
     assert!(has_ref(&f, RefKind::Read, "v", Some("$type:node"), Some("count")));
     assert!(has_ref(&f, RefKind::Call, "count", None, Some("walk")));
     assert!(!refs(&f).iter().any(|r| r.0 == RefKind::Call && r.1 == "fn"), "calls through a parameter are local");

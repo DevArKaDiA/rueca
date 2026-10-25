@@ -4,6 +4,9 @@
 //! RUECA_CPP_REPO=/path/to/checkout cargo test -p rueca-lang-cpp --test real_repo -- --ignored --nocapture
 //! ```
 //!
+//! With `RUECA_CPP_SHOW_ERRORS=1` it also prints every remaining parse
+//! error (`ERR path:line: source line`), after preprocessing.
+//!
 //! Extracts every C / C++ file under the directory (skipping hidden
 //! directories and `third_party` / `vendor` / `build`), detects `.h` as C++
 //! when the checkout has C++ sources (as the indexer does), checks the
@@ -64,6 +67,7 @@ fn extract_real_repository() {
 
     let pack = CppPack::default();
     let budget = Budget::default();
+    let show_errors = std::env::var_os("RUECA_CPP_SHOW_ERRORS").is_some();
     let (mut defs, mut decls, mut refs, mut calls, mut typed, mut tests, mut macros) = (0, 0, 0, 0, 0, 0, 0);
     let (mut errors, mut lines, mut bytes) = (0usize, 0usize, 0usize);
     let (mut includes, mut includes_resolved, mut system, mut system_resolved) = (0, 0, 0, 0);
@@ -96,6 +100,14 @@ fn extract_real_repository() {
                 if f.parse_errors > 0 {
                     errors += 1;
                     errored.push((p.clone(), f.parse_errors));
+                    if show_errors {
+                        for at in rueca_lang_cpp::parse_error_offsets(&source, language).unwrap() {
+                            let line = source[..at].iter().filter(|b| **b == b'\n').count() + 1;
+                            let text =
+                                String::from_utf8_lossy(&source).lines().nth(line - 1).unwrap_or("").trim().to_string();
+                            eprintln!("ERR {p}:{line}: {}", text.chars().take(140).collect::<String>());
+                        }
+                    }
                 }
                 for d in &f.definitions {
                     assert!(d.span.contains(&d.name_span), "{p}: {}", d.qualified_name);

@@ -18,7 +18,12 @@
 //!   (`App\Models\User::save`, `ns::Foo::bar`). The module name of every
 //!   file is returned in `ResolvedGraph::modules`. Identical `(label,
 //!   qualified_name, file)` triples are merged, keeping the first definition
-//!   (Python redefinitions); later local ids map to the kept node.
+//!   (Python redefinitions); later local ids map to the kept node. When the
+//!   kept definition is a declaration (`Definition::is_declaration`, C/C++)
+//!   and a body follows in the same file (a prototype, or an in-class
+//!   declaration with its out-of-line body), the node takes the body's span
+//!   and signature (and its doc, if it has one): the node is the
+//!   definition, still a member of its class.
 //! - Structural edges (`Syntactic`, 1.0): `CONTAINS` Repository→Folder/File and
 //!   Folder→Folder/File; `DEFINES` File→top-level definition and
 //!   parent→child definition.
@@ -177,7 +182,8 @@
 //! - **Declarations** (`Definition::is_declaration`): a declaration whose
 //!   global qualified name has exactly one body in the same family is
 //!   replaced by that body as a target, and leaves the strategy-6
-//!   candidates.
+//!   candidates. A declaration and its body in the same file are one node
+//!   with the body's span (see *Graph shape*).
 //! - **Overloads** (`overloads`): definitions whose qualified name ends in a
 //!   parameter suffix (`parse(String)`) are grouped by (family, name without
 //!   suffix); a reference that hits one is linked to the overloads whose
@@ -198,6 +204,34 @@
 //!   signature), and among several, the overload with the same normalized
 //!   parameter types wins. Constructors override nothing. For these families
 //!   `IMPLEMENTS` targets also contribute members.
+//!   C++ callables without a suffix join the group of their name (a pack
+//!   suffixes per file, so a set split across files has bare members); bare
+//!   members alone form a set only when their arities differ. C/C++ arity
+//!   comes from the signature (default arguments optional, `...` and
+//!   parameter packs variadic), else from the suffix.
+//!   A C/C++ declaration stands for its body at either end of `OVERRIDES`.
+//! - **C++ namespaces** (C family): rung 1c, after implicit self — a
+//!   receiver-less name inside `a::b::f` is the definition named exactly
+//!   `a::b::name`, else `a::name` (overload suffixes optional; `SameModule`
+//!   0.90 in the same file, else `ImportResolved` 0.95). A `$ns:a::b`
+//!   receiver (`a::b::name` written in code; `$ns:` for `::name`, `$ns:::a`
+//!   for `::a::name`) looks `a::b::name` up from the innermost enclosing
+//!   namespace outwards, then globally, else resolves the bare name through
+//!   imports, the same file and unique names — never as an implicit member.
+//! - **Namespace macros** (C family, before nodes are built): a segment
+//!   `${M}` that a pack wrote for a masked namespace macro
+//!   (`${FMT_BEGIN_NAMESPACE}::format_to`) becomes the namespaces the
+//!   object-like macro `M` opens in its definition anywhere in the snapshot
+//!   (`#define FMT_BEGIN_NAMESPACE namespace fmt { inline namespace v12 {` →
+//!   `fmt::v12::format_to`), in qualified names and receivers; it is
+//!   dropped when `M` is not defined or opens no namespace. Exact
+//!   namespace lookups see through the inline namespaces it opens
+//!   (`fmt::format_to` finds `fmt::v12::format_to`).
+//! - **`$member:a.b`** receivers (C++ members whose types are declared in
+//!   another file): member `a` of the enclosing type (through bases), its
+//!   declared type (the member's first `Type` reference, resolved in its
+//!   file), member `b` of that type, then the name (`TypeResolved` 0.85). A
+//!   first segment that is no member falls back to the unique-method rung.
 //!
 //! # Go
 //!
@@ -273,8 +307,8 @@ use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use rueca_extract::{
-    DATA_REF_ANY, DATA_REF_QN, LanguagePack, ModuleScope, ProjectFiles, Registry, SELF_RECEIVER, TYPE_RECEIVER_PREFIX,
-    split_arg_types,
+    DATA_REF_ANY, DATA_REF_QN, LanguagePack, MEMBER_RECEIVER_PREFIX, ModuleScope, NAMESPACE_RECEIVER_PREFIX,
+    ProjectFiles, Registry, SELF_RECEIVER, TYPE_RECEIVER_PREFIX, split_arg_types,
 };
 use rueca_model::{
     Definition, Edge, EdgeKind, EdgeMeta, FileEntry, FileFacts, FileId, Import, Label, Language, LanguageFamily,
@@ -379,8 +413,10 @@ pub fn resolve(
 ) -> ResolveOutput {
     files.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.blob_sha.cmp(&b.blob_sha)));
     files.dedup_by(|later, first| later.path == first.path);
+    let inline_aliases = hooks::expand_namespace_macros(&mut files);
 
     let mut r = Resolver::new(&files, project, registry, &snapshot);
+    r.inline_aliases = inline_aliases;
     r.structural_edges();
     r.import_edges();
     r.build_envs();
@@ -522,6 +558,15 @@ struct Resolver<'a> {
     data_by_local: Vec<HashMap<&'a str, NodeId>>,
     /// Every node by global qualified name, built on first use.
     by_qn: OnceCell<HashMap<String, Vec<NodeId>>>,
+    /// C/C++ nodes by global qualified name without overload suffix.
+    by_base_qn: OnceCell<HashMap<String, Vec<NodeId>>>,
+    /// C++ namespace paths opened by namespace macros and the same path
+    /// without its inline namespaces (`fmt::v12`, `fmt`).
+    inline_aliases: Vec<(String, String)>,
+    /// C/C++ body → files of the declarations paired with it.
+    declared_in: HashMap<NodeId, Vec<FileId>>,
+    /// C/C++ file → files it sees through includes (memo).
+    visible_memo: RefCell<HashMap<FileId, std::rc::Rc<HashSet<FileId>>>>,
 
     /// Key: (module, name, reached through `export *`).
     lookup_memo: RefCell<HashMap<(FileId, String, bool), Option<Target>>>,
@@ -813,6 +858,10 @@ impl<'a> Resolver<'a> {
             keys_by_path: HashMap::new(),
             data_by_local: Vec::new(),
             by_qn: OnceCell::new(),
+            by_base_qn: OnceCell::new(),
+            inline_aliases: Vec::new(),
+            declared_in: HashMap::new(),
+            visible_memo: RefCell::new(HashMap::new()),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
@@ -892,6 +941,9 @@ impl<'a> Resolver<'a> {
         }
 
         let mut seen: HashMap<(Label, String, FileId), NodeId> = HashMap::new();
+        // Nodes kept from a declaration (C/C++ `is_declaration`): a body
+        // merged into one gives it its span and signature.
+        let mut declaration_only: HashSet<NodeId> = HashSet::new();
         for (i, f) in self.files.iter().enumerate() {
             let fid = i as FileId;
             let defs = self.defs(fid);
@@ -906,8 +958,19 @@ impl<'a> Resolver<'a> {
                 };
                 let key = (d.label, qn, fid);
                 if let Some(&existing) = seen.get(&key) {
+                    if !d.is_declaration && declaration_only.remove(&existing) {
+                        let n = &mut self.nodes[existing as usize];
+                        n.span = Some(d.span);
+                        n.signature = d.signature.clone();
+                        if d.doc.is_some() {
+                            n.doc = d.doc.clone();
+                        }
+                    }
                     map.push(existing);
                     continue;
+                }
+                if d.is_declaration {
+                    declaration_only.insert(self.nodes.len() as NodeId);
                 }
                 let id = self.nodes.len() as NodeId;
                 self.nodes.push(Node {
@@ -1906,6 +1969,10 @@ impl<'a> Resolver<'a> {
             if let Some(hit) = self.implicit_member(f, scope, name, Want::of(item.kind)) {
                 return hit;
             }
+            // 1c. C++: a member of an enclosing namespace.
+            if let Some(hit) = self.namespace_scope(f, scope, name) {
+                return hit;
+            }
             // 3. Imported binding.
             match self.envs[f as usize].get(name) {
                 Some(Some(Target::Symbol(n))) => return Outcome::Hit(*n, Strategy::ImportResolved, 0.95),
@@ -1934,6 +2001,14 @@ impl<'a> Resolver<'a> {
         // 5. Typed receiver: `$type:T` (declared type known in the file).
         if let Some(ty) = receiver.strip_prefix(TYPE_RECEIVER_PREFIX) {
             return self.resolve_typed(f, item, scope, ty);
+        }
+        // C++ namespace-qualified name: `$ns:a::b`.
+        if let Some(path) = receiver.strip_prefix(NAMESPACE_RECEIVER_PREFIX) {
+            return self.resolve_namespaced(f, item, scope, path);
+        }
+        // A chain of members of the enclosing type: `$member:a.b`.
+        if let Some(chain) = receiver.strip_prefix(MEMBER_RECEIVER_PREFIX) {
+            return self.resolve_member_chain(f, item, scope, chain);
         }
         if receiver == "super()" || receiver == "super" {
             return self.super_member(f, scope, name, Want::of(item.kind));
@@ -2175,7 +2250,7 @@ impl<'a> Resolver<'a> {
         // Declarations → their body; overloads → by arity (RFC 0003 §10).
         let target = self.prefer_body(target);
         let args = item.arg_types.as_deref();
-        for (target, strategy, confidence) in self.expand_overloads(target, item.arity, args, strategy, confidence) {
+        for (target, strategy, confidence) in self.expand_overloads(f, target, item.arity, args, strategy, confidence) {
             let meta = EdgeMeta { confidence, strategy, evidence: Some((f, item.span)) };
             match edge_kind {
                 EdgeKind::Decorates => {
@@ -2204,7 +2279,8 @@ impl<'a> Resolver<'a> {
                         };
                         if let Some((c, _)) = ctor {
                             let c = self.prefer_body(c);
-                            for (c, s, conf) in self.expand_overloads(c, item.arity, args, strategy, confidence * 0.95)
+                            for (c, s, conf) in
+                                self.expand_overloads(f, c, item.arity, args, strategy, confidence * 0.95)
                             {
                                 let m = EdgeMeta { confidence: conf, strategy: s, ..meta };
                                 self.add_edge(caller, c, EdgeKind::Calls, m);

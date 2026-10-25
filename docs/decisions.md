@@ -51,6 +51,61 @@ no model, facts-format or tool change (extractor versions: Java 2, TS/JS
   root, so self-calls never count) and gold edges attributed by line to a
   function expression passed as an argument (express `defineGetter`).
 
+## 2026-10-25 — C/C++: a same-length preprocessor in the pack, resolver rules for C++ names
+
+Toward the RFC 0004 floors (`rueca-lang-cpp`, `rueca-resolve`; crate docs
+and [how-it-works](how-it-works.md) have the details):
+
+- **Assemble before build, but nothing fit.** The Rust C preprocessors on
+  crates.io (`ancpp`, `includium`) are MPL-2.0, and every real preprocessor
+  needs the headers and the compiler flags and emits an expanded token
+  stream without a byte map back to the source. Extraction sees one file
+  (facts are cached per blob), so the pack prepares the parsed text itself.
+- **Same-length rewrites only.** Masking, conditional compilation and
+  repairs replace bytes with bytes (spaces, a keyword, `;`) and never touch
+  newlines: offsets, lines and the text read for names and signatures are
+  the original's, so the "source map" is the identity and no span needs
+  translating. The one expansion that would grow the text, a namespace
+  macro, is a qualified-name segment instead (below).
+- **`#if` groups: keep when the grammar can, collapse when it cannot.** A
+  group stays with all its branches (the old behaviour, and what keeps
+  platform-specific code in the index) unless a branch is unbalanced, ends
+  mid-statement or the group sits where the grammar takes none
+  (expressions, initializer lists, after `if (…)`); then it collapses to
+  one branch, chosen in three-valued logic with a fixed define set
+  (`__cplusplus` per language, GCC / Clang defined, Windows undefined) and
+  one configuration per file. Only dead code (`#if 0`, C++-only code in C)
+  is dropped otherwise. Project `-D` flags are not used: they would need a
+  project context at extraction time, which the contract does not give.
+- **Error-driven repair, never worse.** Rewrites that would be risky
+  before parsing (a lower-case specifier macro, a statement macro without
+  `;`, a type as a call argument) run only where tree-sitter reports an
+  error, and a round is kept only when the error count drops. Files with
+  parse errors: hiredis 17.0 → 0.0%, jq 26.7 → 1.3%, cJSON 31.3 → 0.0%,
+  redis `src/` 15.3 → 0.5%, fmt 37.1 → 5.7% (1.5% without vendored
+  GoogleTest).
+- **Macro invocations are uses, not calls** (`REFERENCES`): the code a
+  macro expands to runs at the call site, and both SCIP and the micro
+  answer keys treat macros as non-callables. `static` and
+  anonymous-namespace definitions are exported, because an include is
+  textual. Class template specializations are their own classes, named
+  with their arguments, so the members of `formatter<A>` and
+  `formatter<B>` no longer merge.
+- **Namespace macros are expanded by the resolver.** A masked
+  `FMT_BEGIN_NAMESPACE` … `FMT_END_NAMESPACE` region gives its definitions
+  the segment `${FMT_BEGIN_NAMESPACE}`; before nodes are built the
+  resolver replaces it with the namespaces the macro's definition opens
+  anywhere in the snapshot (`fmt::v12`), keeping extraction per file and
+  names consistent across files. Exact lookups see through the inline
+  namespaces it opens.
+- **Resolver, keyed on the C family or on texts only the C/C++ pack
+  emits:** a declaration and its body in one file are one node with the
+  body's span; `$ns:` receivers and rung 1c (enclosing namespaces);
+  `$member:` receivers typed from members declared in another file; C++
+  overload sets across files with arity from signatures (default
+  arguments), limited to the declarations the calling file includes;
+  `OVERRIDES` between bodies. Golden unchanged (C/C++ are not in it).
+
 ## 2026-10-25 — Quality bar: deterministic metrics, absolute floors, cbm as reference
 
 [RFC 0004](rfcs/0004-quality-and-benchmark.md) replaces the adoption gate

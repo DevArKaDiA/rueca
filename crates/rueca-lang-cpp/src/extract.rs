@@ -15,7 +15,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
 use rueca_extract::tree_sitter::Node;
-use rueca_extract::{Budget, ExtractError, count_errors, line_count, span_of, type_receiver};
+use rueca_extract::{
+    Budget, ExtractError, MEMBER_RECEIVER_PREFIX, count_errors, line_count, member_receiver, namespace_receiver,
+    span_of, type_receiver,
+};
 use rueca_model::{Definition, FileFacts, Import, ImportedName, Label, Language, LocalDefId, RefKind, Reference, Span};
 
 use crate::locals::{self, DefKind, Locals, named_type};
@@ -34,6 +37,11 @@ const MAX_NESTING: usize = 64;
 
 /// GoogleTest macros that define a test with a body: `TEST(Suite, Name) {}`.
 const GTEST_MACROS: &[&str] = &["TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED_TEST_P"];
+
+/// Test macros of C code whose head the preprocessor rewrites to `if` so
+/// the grammar takes the block: Unity fixtures (`TEST(Group, Name)`) and
+/// GoogleTest-style macros.
+pub(crate) const C_TEST_MACROS: &[&str] = &["TEST", "TEST_F", "IGNORE_TEST", "TEST_SETUP", "TEST_TEAR_DOWN"];
 
 /// Catch2 / doctest macros: `TEST_CASE("title", "[tags]") {}`.
 const CATCH_MACROS: &[&str] = &["TEST_CASE", "TEST_CASE_METHOD", "SCENARIO", "TEMPLATE_TEST_CASE", "TEST_CASE_FIXTURE"];
@@ -54,8 +62,6 @@ const GETENV: &[&str] = &["getenv", "secure_getenv"];
 struct Ctx {
     /// Enclosing named namespaces (inline namespaces included).
     ns: Vec<String>,
-    /// Inside an anonymous namespace.
-    anon: bool,
     /// Enclosing definition (a class, for members).
     parent: Option<LocalDefId>,
     /// Enclosing class, for members.
@@ -77,9 +83,6 @@ struct RefCx {
     /// Class whose members are implicitly in scope (a method, a field
     /// initializer, an out-of-line body `Foo::bar`).
     class_qn: Option<String>,
-    /// Name of the enclosing function or method.
-    fn_name: Option<String>,
-    is_method: bool,
     ns: Vec<String>,
 }
 
@@ -159,6 +162,90 @@ struct Extractor<'s, 't> {
     globals: HashMap<String, Option<String>>,
     /// MISSING `;` nodes after Catch2 test heads (not real parse errors).
     benign_errors: u32,
+    /// Function-like macros defined in the file.
+    fn_macros: HashSet<String>,
+    /// Callable qualified name (no overload suffix) → declared return type
+    /// (`None` when overloads disagree or the type is not a class name).
+    returns: HashMap<String, Option<String>>,
+    /// Masked namespace-like macros at declaration level, by offset:
+    /// `Some(name)` opens (`FMT_BEGIN_NAMESPACE`), `None` closes.
+    ns_events: Vec<(usize, Option<String>)>,
+}
+
+/// The qualified-name segment a masked namespace-like macro stands for
+/// until the resolver expands it from the macro's definition
+/// (`rueca-resolve`, `expand_namespace_macros`): `${FMT_BEGIN_NAMESPACE}`.
+pub(crate) fn macro_segment(name: &str) -> String {
+    format!("${{{name}}}")
+}
+
+/// Masked bare-line macros at declaration level whose name says they open
+/// (`…BEGIN…`) or close (`…END…`) a scope: `FMT_BEGIN_NAMESPACE` /
+/// `FMT_END_NAMESPACE`, `NLOHMANN_JSON_NAMESPACE_BEGIN` / `…_END`.
+fn namespace_macro_events(source: &[u8], parsed: &[u8]) -> Vec<(usize, Option<String>)> {
+    let toks = mask::lex(source);
+    let levels = mask::declaration_levels(&toks, source);
+    let mut out = Vec::new();
+    for (i, t) in toks.iter().enumerate() {
+        let word = &source[t.start..t.end];
+        if t.kind != mask::Kind::Ident || !levels[i] || !mask::is_macro(word, 3) {
+            continue;
+        }
+        let alone_before = i == 0 || toks[i - 1].line < t.line || toks[i - 1].kind == mask::Kind::Directive;
+        let alone_after = toks.get(i + 1).is_none_or(|n| n.line > t.line || n.kind == mask::Kind::Directive);
+        let masked = parsed.get(t.start..t.end).is_some_and(|b| b.iter().all(|c| *c == b' '));
+        if !(alone_before && alone_after && masked) {
+            continue;
+        }
+        let name = String::from_utf8_lossy(word);
+        let words: Vec<&str> = name.split('_').collect();
+        if words.contains(&"BEGIN") {
+            out.push((t.start, Some(name.into_owned())));
+        } else if words.contains(&"END") {
+            out.push((t.start, None));
+        }
+    }
+    out
+}
+
+/// `text` without `/* … */` and `// …` comments (outside string literals).
+fn strip_comments(text: &str) -> String {
+    let b = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let (mut i, mut quote) = (0, None::<u8>);
+    while i < b.len() {
+        let c = b[i];
+        match quote {
+            Some(q) => {
+                if c == b'\\' {
+                    out.push(c as char);
+                    i += 1;
+                } else if c == q {
+                    quote = None;
+                }
+            }
+            None if c == b'"' || c == b'\'' => quote = Some(c),
+            None if text[i..].starts_with("/*") => {
+                i = text[i + 2..].find("*/").map_or(b.len(), |e| i + 2 + e + 2);
+                out.push(' ');
+                continue;
+            }
+            None if text[i..].starts_with("//") => break,
+            None => {}
+        }
+        if i < b.len() {
+            out.push_str(&text[i..i + text[i..].chars().next().map_or(1, char::len_utf8)]);
+            i += text[i..].chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    out
+}
+
+/// Whether a callee name reads as a macro: upper case, digits and `_`,
+/// with at least two letters (`MAX`, `FMT_ASSERT`, `GEO_SQ`).
+fn macro_case(name: &str) -> bool {
+    name.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        && name.bytes().filter(u8::is_ascii_uppercase).count() >= 2
 }
 
 fn named_kids<'t>(node: Node<'t>) -> Vec<Node<'t>> {
@@ -208,6 +295,22 @@ fn function_declarator(mut node: Node<'_>) -> Option<Node<'_>> {
     None
 }
 
+/// An operator function's name as declarations spell it: `operator ==` →
+/// `operator==`, `operator  bool` → `operator bool`; other names as they are.
+fn operator_name(raw: &str) -> String {
+    let raw = collapse(raw);
+    let Some(rest) = raw.strip_prefix("operator") else { return raw };
+    let rest = rest.trim();
+    if rest.is_empty() || !raw[8..].starts_with(|c: char| c.is_whitespace() || !c.is_ascii_alphanumeric() && c != '_') {
+        return raw;
+    }
+    if rest.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        format!("operator {rest}")
+    } else {
+        format!("operator{}", rest.replace(' ', ""))
+    }
+}
+
 /// Whether `word` looks like a type name rather than a namespace (used when
 /// the file says nothing about it): it starts with an upper-case letter.
 fn looks_like_type(word: &str) -> bool {
@@ -234,6 +337,9 @@ impl<'s, 't> Extractor<'s, 't> {
             classes_by_name: HashMap::new(),
             globals: HashMap::new(),
             benign_errors: 0,
+            fn_macros: HashSet::new(),
+            returns: HashMap::new(),
+            ns_events: Vec::new(),
         }
     }
 
@@ -337,6 +443,22 @@ impl<'s, 't> Extractor<'s, 't> {
         (self.defs.len() - 1) as LocalDefId
     }
 
+    /// Records the return type of callable `qn` declared by `node` (its
+    /// `type`, or the trailing return type of an `auto` function).
+    fn record_return(&mut self, qn: &str, node: Node<'t>, declarator: Option<Node<'t>>) {
+        let ty = node.child_by_field_name("type");
+        let trailing = declarator.and_then(function_declarator).and_then(|fd| {
+            let mut cursor = fd.walk();
+            let t = fd.named_children(&mut cursor).find(|c| c.kind() == "trailing_return_type");
+            t.and_then(|t| named_kids(t).into_iter().find_map(|k| named_type(k, self.src)))
+        });
+        let named = trailing.or_else(|| ty.and_then(|t| named_type(t, self.src)));
+        let entry = self.returns.entry(qn.to_string()).or_insert_with(|| named.clone());
+        if *entry != named {
+            *entry = None;
+        }
+    }
+
     fn cx(&mut self, cx: RefCx) -> usize {
         self.cxs.push(cx);
         self.cxs.len() - 1
@@ -350,7 +472,7 @@ impl<'s, 't> Extractor<'s, 't> {
     /// the class's fields).
     fn plain_cx(&mut self, ctx: &Ctx) -> usize {
         let class_qn = ctx.class.as_ref().map(|c| c.qn.clone());
-        self.cx(RefCx { class_qn, fn_name: None, is_method: false, ns: ctx.ns.clone() })
+        self.cx(RefCx { class_qn, ns: ctx.ns.clone() })
     }
 
     /// Owner path for a definition directly under `ctx`.
@@ -385,9 +507,20 @@ impl<'s, 't> Extractor<'s, 't> {
             v
         };
         let preproc = node.kind().starts_with("preproc_");
+        // Namespace-like macros between the children open and close
+        // namespaces for the children that follow.
+        let mut opened: Vec<String> = Vec::new();
+        let mut inner = ctx.clone();
+        let mut after = node.start_byte();
         let mut k = 0;
         while k < kids.len() {
             let (c, is_condition) = kids[k];
+            if self.namespace_events(after, c.start_byte(), &mut opened) {
+                inner = ctx.clone();
+                inner.ns.extend(opened.iter().cloned());
+            }
+            after = c.end_byte();
+            let ctx = &inner;
             // The condition of `#if` / the name of `#ifdef` is not code.
             if preproc && is_condition {
                 k += 1;
@@ -401,12 +534,35 @@ impl<'s, 't> Extractor<'s, 't> {
             if let Some(next) = kids.get(k + 1).map(|(n, _)| *n)
                 && self.catch_test(c, next, ctx)
             {
+                after = next.end_byte();
                 k += 2;
                 continue;
             }
             self.decl(c, c, ctx, depth + 1, access);
             k += 1;
         }
+    }
+
+    /// Applies the namespace-macro events in `from..to` to `opened`;
+    /// returns whether it changed.
+    fn namespace_events(&self, from: usize, to: usize, opened: &mut Vec<String>) -> bool {
+        let start = self.ns_events.partition_point(|(at, _)| *at < from);
+        let mut changed = false;
+        for (at, ev) in &self.ns_events[start..] {
+            if *at >= to {
+                break;
+            }
+            match ev {
+                Some(name) => opened.push(macro_segment(name)),
+                None => {
+                    if opened.pop().is_none() {
+                        continue;
+                    }
+                }
+            }
+            changed = true;
+        }
+        changed
     }
 
     fn decl(&mut self, node: Node<'t>, outer: Node<'t>, ctx: &Ctx, depth: usize, access: Option<bool>) {
@@ -421,14 +577,12 @@ impl<'s, 't> Extractor<'s, 't> {
                 }
                 let mut c = ctx.clone();
                 c.level += 1;
-                match node.child_by_field_name("name") {
-                    None => c.anon = true,
-                    Some(n) => {
-                        for seg in self.t(n).split("::") {
-                            let seg = seg.trim();
-                            if !seg.is_empty() {
-                                c.ns.push(seg.to_string());
-                            }
+                // An anonymous namespace adds nothing to qualified names.
+                if let Some(n) = node.child_by_field_name("name") {
+                    for seg in self.t(n).split("::") {
+                        let seg = seg.trim();
+                        if !seg.is_empty() {
+                            c.ns.push(seg.to_string());
                         }
                     }
                 }
@@ -473,11 +627,58 @@ impl<'s, 't> Extractor<'s, 't> {
             "alias_declaration" => self.alias(node, outer, ctx, public),
             "preproc_def" | "preproc_function_def" => self.macro_def(node, ctx),
             "declaration_list" | "ERROR" => self.scope(node, ctx, depth, access),
-            "static_assert_declaration" | "expression_statement" | "compound_statement" => {
+            "if_statement" if ctx.class.is_none() && self.c_test(node, ctx) => {}
+            "static_assert_declaration" | "expression_statement" | "compound_statement" | "if_statement" => {
                 let cx = self.plain_cx(ctx);
                 self.job(node, ctx.parent, cx, Mode::Body);
             }
             _ => {}
+        }
+    }
+
+    /// The name of a class template specialization written `Name<args>`
+    /// (`formatter<std::error_code>`, `formatter<std::vector<T>>`), with
+    /// its arguments; `None` when the arguments are the enclosing
+    /// template's own parameters (`basic_string_view<Char>::size` is a
+    /// member of the primary template) or the node has none.
+    fn specialization_name(&self, node: Node<'_>) -> Option<String> {
+        let name = node.child_by_field_name("name")?;
+        let args = node.child_by_field_name("arguments")?;
+        let arg_texts: Vec<String> =
+            named_kids(args).iter().map(|a| collapse(&self.t(*a)).trim_end_matches("...").trim().to_string()).collect();
+        let mut cur = node.parent();
+        let mut params: Option<Vec<String>> = None;
+        for _ in 0..64 {
+            let Some(n) = cur else { break };
+            if n.kind() == "template_declaration" {
+                let list = n.child_by_field_name("parameters");
+                params =
+                    Some(list.map(named_kids).unwrap_or_default().iter().filter_map(|p| self.param_name(*p)).collect());
+                break;
+            }
+            cur = n.parent();
+        }
+        if params.is_some_and(|p| p == arg_texts) {
+            return None;
+        }
+        Some(truncate(format!("{}<{}>", self.t(name), tidy(&arg_texts.join(", "))), 160))
+    }
+
+    /// The name a template parameter declares (`typename T`, `int N`,
+    /// `typename... Ts`).
+    fn param_name(&self, p: Node<'_>) -> Option<String> {
+        match p.kind() {
+            "type_parameter_declaration" | "variadic_type_parameter_declaration" => {
+                named_kids(p).into_iter().rev().find(|c| c.kind() == "type_identifier").map(|c| self.t(c))
+            }
+            "optional_type_parameter_declaration" => p.child_by_field_name("name").map(|c| self.t(c)),
+            "parameter_declaration" | "optional_parameter_declaration" | "variadic_parameter_declaration" => {
+                p.child_by_field_name("declarator").and_then(declarator_ident).map(|c| self.t(c))
+            }
+            "template_template_parameter_declaration" => {
+                named_kids(p).into_iter().rev().find_map(|c| self.param_name(c))
+            }
+            _ => None,
         }
     }
 
@@ -516,7 +717,9 @@ impl<'s, 't> Extractor<'s, 't> {
                 for _ in 0..32 {
                     if let Some(scope) = cur.child_by_field_name("scope") {
                         let seg = match scope.kind() {
-                            "template_type" => scope.child_by_field_name("name").map(|n| self.t(n)),
+                            "template_type" => self
+                                .specialization_name(scope)
+                                .or_else(|| scope.child_by_field_name("name").map(|n| self.t(n))),
                             _ => Some(strip_template_args(&self.t(scope))),
                         };
                         template_scope = scope.kind() == "template_type";
@@ -546,7 +749,6 @@ impl<'s, 't> Extractor<'s, 't> {
         dn: &DeclName<'t>,
         ctx: &Ctx,
         public: bool,
-        is_static: bool,
     ) -> (Label, String, Option<LocalDefId>, bool, Option<String>) {
         if let Some(class) = &ctx.class
             && dn.qualifier.is_empty()
@@ -568,12 +770,12 @@ impl<'s, 't> Extractor<'s, 't> {
             let last = dn.qualifier.last().map(String::as_str).unwrap_or("");
             let namespace = !dn.template_scope && self.known_ns.contains(last) && !self.known_types.contains(last);
             return if namespace {
-                (Label::Function, qn, None, !is_static && !ctx.anon, None)
+                (Label::Function, qn, None, true, None)
             } else {
                 (Label::Method, qn, None, false, Some(owner_qn))
             };
         }
-        (Label::Function, join_qn(&ctx.ns, &dn.name), ctx.parent, !is_static && !ctx.anon, None)
+        (Label::Function, join_qn(&ctx.ns, &dn.name), ctx.parent, true, None)
     }
 
     fn function_def(&mut self, node: Node<'t>, outer: Node<'t>, ctx: &Ctx, public: bool) {
@@ -613,8 +815,8 @@ impl<'s, 't> Extractor<'s, 't> {
             self.job(node, ctx.parent, cx, Mode::Function);
             return;
         };
-        let is_static = has_child_text(node, "storage_class_specifier", "static", self.src);
-        let (label, qn, parent, exported, class_qn) = self.place(&dn, ctx, public, is_static);
+        let (label, qn, parent, exported, class_qn) = self.place(&dn, ctx, public);
+        self.record_return(&qn, node, Some(declarator));
         let until = node.child_by_field_name("body").or_else(|| {
             let mut cursor = node.walk();
             node.children(&mut cursor).find(|c| c.kind() == "field_initializer_list")
@@ -634,8 +836,7 @@ impl<'s, 't> Extractor<'s, 't> {
             bases: Vec::new(),
             params: Some(params.map(|p| parameter_types(p, self.src)).unwrap_or_default()),
         });
-        let is_method = label == Label::Method;
-        let cx = self.cx(RefCx { class_qn, fn_name: Some(dn.name), is_method, ns: ctx.ns.clone() });
+        let cx = self.cx(RefCx { class_qn, ns: ctx.ns.clone() });
         self.job(node, Some(id), cx, Mode::Function);
     }
 
@@ -667,7 +868,7 @@ impl<'s, 't> Extractor<'s, 't> {
         });
         // TEST_F / TEST_P bodies are members of the fixture class.
         let fixture = Some(owner.join("::"));
-        let cx = self.cx(RefCx { class_qn: fixture, fn_name: None, is_method: true, ns: ctx.ns.clone() });
+        let cx = self.cx(RefCx { class_qn: fixture, ns: ctx.ns.clone() });
         if let Some(body) = node.child_by_field_name("body") {
             self.job(body, Some(id), cx, Mode::Body);
         }
@@ -728,8 +929,63 @@ impl<'s, 't> Extractor<'s, 't> {
             params: None,
         });
         let class_qn = fixture.map(|f| join_qn(&ctx.ns, &f));
-        let is_method = class_qn.is_some();
-        let cx = self.cx(RefCx { class_qn, fn_name: None, is_method, ns: ctx.ns.clone() });
+        let cx = self.cx(RefCx { class_qn, ns: ctx.ns.clone() });
+        self.job(body, Some(id), cx, Mode::Body);
+        true
+    }
+
+    /// `TEST(Group, Name) { … }` in C (Unity fixtures, GoogleTest-style
+    /// macros): the preprocessor rewrites the head to `if  (Group, Name)`
+    /// so the C grammar takes the block (`preprocess.rs`); the macro name
+    /// is read from the original text.
+    fn c_test(&mut self, node: Node<'t>, ctx: &Ctx) -> bool {
+        let at = node.start_byte();
+        let original = &self.src[at..node.end_byte().min(at + 32)];
+        let is_test = C_TEST_MACROS.iter().any(|m| {
+            original.starts_with(m.as_bytes())
+                && original.get(m.len()).is_some_and(|c| *c == b'(' || c.is_ascii_whitespace())
+        });
+        let (Some(cond), Some(body)) = (node.child_by_field_name("condition"), node.child_by_field_name("consequence"))
+        else {
+            return false;
+        };
+        if !is_test || body.kind() != "compound_statement" {
+            return false;
+        }
+        let mut names = Vec::new();
+        let mut stack = vec![cond];
+        while let Some(n) = stack.pop() {
+            if n.kind() == "identifier" {
+                names.push(n);
+            } else {
+                stack.extend(named_kids(n).into_iter().rev());
+            }
+        }
+        if names.is_empty() || names.len() > 2 {
+            return false;
+        }
+        let name_node = names[names.len() - 1];
+        let name = self.t(name_node);
+        let mut owner = ctx.ns.clone();
+        if names.len() == 2 {
+            owner.push(self.t(names[0]));
+        }
+        let id = self.push(NewDef {
+            label: Label::Test,
+            name: name.clone(),
+            qn: join_qn(&owner, &name),
+            parent: None,
+            outer: node,
+            node,
+            name_node: Some(name_node),
+            signature: signature(node, Some(body), self.src),
+            exported: false,
+            is_test: true,
+            is_declaration: false,
+            bases: Vec::new(),
+            params: None,
+        });
+        let cx = self.cx(RefCx { class_qn: None, ns: ctx.ns.clone() });
         self.job(body, Some(id), cx, Mode::Body);
         true
     }
@@ -770,7 +1026,8 @@ impl<'s, 't> Extractor<'s, 't> {
                     Some(fd) => fd.child_by_field_name("parameters"),
                     None => d.child_by_field_name("declarator").and_then(|a| a.child_by_field_name("parameters")),
                 };
-                let (label, qn, parent, exported, class_qn) = self.place(&dn, ctx, public, is_static);
+                let (label, qn, parent, exported, class_qn) = self.place(&dn, ctx, public);
+                self.record_return(&qn, node, Some(d));
                 let id = self.push(NewDef {
                     label,
                     name: dn.name.clone(),
@@ -786,7 +1043,7 @@ impl<'s, 't> Extractor<'s, 't> {
                     bases: Vec::new(),
                     params: Some(params.map(|p| parameter_types(p, self.src)).unwrap_or_default()),
                 });
-                let cx = self.cx(RefCx { class_qn, fn_name: Some(dn.name), is_method: false, ns: ctx.ns.clone() });
+                let cx = self.cx(RefCx { class_qn, ns: ctx.ns.clone() });
                 self.jobs.push(Job { node: d, ty, enc: Some(id), cx, mode: Mode::Declarator });
                 continue;
             }
@@ -818,7 +1075,7 @@ impl<'s, 't> Extractor<'s, 't> {
                     None => {
                         self.globals.insert(name.clone(), declared.clone());
                         let label = if constant { Label::Constant } else { Label::Variable };
-                        (label, name.clone(), join_qn(&ctx.ns, &name), ctx.parent, !is_static && !ctx.anon)
+                        (label, name.clone(), join_qn(&ctx.ns, &name), ctx.parent, true)
                     }
                 }
             };
@@ -884,7 +1141,8 @@ impl<'s, 't> Extractor<'s, 't> {
             if let Some(fd) = function_declarator(d) {
                 let Some(dn) = fd.child_by_field_name("declarator").and_then(|n| self.decl_name(n)) else { continue };
                 let params = fd.child_by_field_name("parameters").map(|p| parameter_types(p, self.src));
-                let (label, qn, parent, exported, class_qn) = self.place(&dn, ctx, public, is_static);
+                let (label, qn, parent, exported, class_qn) = self.place(&dn, ctx, public);
+                self.record_return(&qn, node, Some(d));
                 let id = self.push(NewDef {
                     label,
                     name: dn.name.clone(),
@@ -900,7 +1158,7 @@ impl<'s, 't> Extractor<'s, 't> {
                     bases: Vec::new(),
                     params: Some(params.unwrap_or_default()),
                 });
-                let cx = self.cx(RefCx { class_qn, fn_name: Some(dn.name), is_method: false, ns: ctx.ns.clone() });
+                let cx = self.cx(RefCx { class_qn, ns: ctx.ns.clone() });
                 self.jobs.push(Job { node: d, ty, enc: Some(id), cx, mode: Mode::Declarator });
                 continue;
             }
@@ -983,7 +1241,9 @@ impl<'s, 't> Extractor<'s, 't> {
         let label = if node.kind() == "class_specifier" { Label::Class } else { Label::Struct };
         let mut owner = Self::owner(ctx);
         owner.extend(quals);
-        let qn = join_qn(&owner, &name);
+        // A specialization keeps its arguments in its qualified name.
+        let spec = node.child_by_field_name("name").filter(|n| n.kind() == "template_type");
+        let qn = join_qn(&owner, &spec.and_then(|n| self.specialization_name(n)).unwrap_or_else(|| name.clone()));
         let mut bases = Vec::new();
         let mut cursor = node.walk();
         let clause = node.children(&mut cursor).find(|c| c.kind() == "base_class_clause");
@@ -997,7 +1257,7 @@ impl<'s, 't> Extractor<'s, 't> {
                 }
             }
         }
-        let exported = if ctx.class.is_some() { public } else { !ctx.anon };
+        let exported = ctx.class.is_none() || public;
         if let Some(c) = &ctx.class {
             self.class_members.entry(c.qn.clone()).or_default().insert(name.clone());
         }
@@ -1024,7 +1284,6 @@ impl<'s, 't> Extractor<'s, 't> {
         self.classes_by_name.entry(name).or_default().push(qn.clone());
         let inner = Ctx {
             ns: ctx.ns.clone(),
-            anon: ctx.anon,
             parent: Some(id),
             class: Some(Rc::new(ClassCtx { qn: qn.clone(), def: id })),
             guard: ctx.guard.clone(),
@@ -1052,7 +1311,7 @@ impl<'s, 't> Extractor<'s, 't> {
         let body = node.child_by_field_name("body")?;
         let named = node.child_by_field_name("name").map(|n| (self.t(n), n)).or(alias);
         let owner = Self::owner(ctx);
-        let exported = if ctx.class.is_some() { public } else { !ctx.anon };
+        let exported = ctx.class.is_none() || public;
         let (enum_id, member_owner, member_parent) = match named {
             Some((name, name_node)) => {
                 let name = strip_template_args(&name).rsplit("::").next().unwrap_or("").to_string();
@@ -1152,7 +1411,7 @@ impl<'s, 't> Extractor<'s, 't> {
         }
         let sig = signature(node, None, self.src);
         let owner = Self::owner(ctx);
-        let exported = if ctx.class.is_some() { public } else { !ctx.anon };
+        let exported = ctx.class.is_none() || public;
         let mut first_alias = None;
         for (i, (name, n)) in names.into_iter().enumerate() {
             if (i == 0 && skip_first) || target.as_deref() == Some(name.as_str()) {
@@ -1205,7 +1464,7 @@ impl<'s, 't> Extractor<'s, 't> {
             node,
             name_node: Some(n),
             signature: signature(node, None, self.src),
-            exported: if ctx.class.is_some() { public } else { !ctx.anon },
+            exported: ctx.class.is_none() || public,
             is_test: false,
             is_declaration: false,
             bases: target.filter(|t| *t != name).into_iter().collect(),
@@ -1232,9 +1491,26 @@ impl<'s, 't> Extractor<'s, 't> {
                 return;
             }
         }
+        if function_like {
+            self.fn_macros.insert(name.clone());
+        }
+        // The whole definition, continuation lines joined, comments out:
+        // `#define FMT_BEGIN_NAMESPACE namespace fmt { inline namespace v12 {`.
         let line = self.t(node);
-        let sig =
-            truncate(collapse(line.lines().next().unwrap_or("").trim_end_matches('\\')), crate::text::MAX_SIGNATURE);
+        let mut joined = String::new();
+        for l in line.lines() {
+            let l = l.trim_end();
+            let (body, more) = match l.strip_suffix('\\') {
+                Some(b) => (b, true),
+                None => (l, false),
+            };
+            joined.push_str(body);
+            joined.push(' ');
+            if !more {
+                break;
+            }
+        }
+        let sig = truncate(collapse(&strip_comments(&joined)), crate::text::MAX_SIGNATURE);
         self.push(NewDef {
             label: if function_like { Label::Function } else { Label::Constant },
             name: name.clone(),
@@ -1451,7 +1727,7 @@ impl<'s, 't> Extractor<'s, 't> {
                         if leaf.kind() == "template_type" { leaf.child_by_field_name("name") } else { Some(leaf) };
                     if let Some(leaf) = leaf {
                         let name = self.t(leaf);
-                        let recv = self.qualified_receiver(&quals, global, template_scope, &name, cx);
+                        let recv = self.qualified_receiver(&quals, global, template_scope, cx);
                         self.emit(RefKind::Call, &name, recv, leaf, enc, arity);
                     }
                 }
@@ -1506,15 +1782,11 @@ impl<'s, 't> Extractor<'s, 't> {
     }
 
     /// Receiver for `Q::name` (see the crate docs, *Qualified calls*).
-    fn qualified_receiver(
-        &self,
-        quals: &[String],
-        global: bool,
-        template_scope: bool,
-        name: &str,
-        cx: usize,
-    ) -> Option<String> {
-        let root = quals.first()?;
+    fn qualified_receiver(&self, quals: &[String], global: bool, template_scope: bool, cx: usize) -> Option<String> {
+        let Some(root) = quals.first() else {
+            // `::name`: the global scope.
+            return global.then(|| namespace_receiver(""));
+        };
         if BUILTIN_NAMESPACES.contains(&root.as_str()) {
             return Some(root.clone());
         }
@@ -1525,15 +1797,11 @@ impl<'s, 't> Extractor<'s, 't> {
         if is_type {
             return Some(type_receiver(&self.qualify_type(quals, global, cx)));
         }
-        // A namespace function: no receiver (namespaces are not nodes), so
-        // it resolves through includes and same-file names. Inside a method
-        // with a member of that name, the implicit-self rung would pick the
-        // member; keep the qualifier so it does not.
-        let c = &self.cxs[cx];
-        let shadowed = c.is_method
-            && (c.fn_name.as_deref() == Some(name)
-                || c.class_qn.as_ref().and_then(|q| self.class_members.get(q)).is_some_and(|m| m.contains(name)));
-        shadowed.then(|| quals.join("::"))
+        // A namespace member: `$ns:Q` (namespaces are not nodes; the
+        // resolver looks `Q::name` up from the enclosing namespaces, never
+        // as an implicit member).
+        let path = quals.join("::");
+        Some(namespace_receiver(&if global { format!("::{path}") } else { path }))
     }
 
     /// Declared type of a variable named `name` at `node`: a local, a field
@@ -1584,6 +1852,60 @@ impl<'s, 't> Extractor<'s, 't> {
                 let inner = named_kids(node).into_iter().next_back()?;
                 self.expr_type(inner, cx, depth + 1)
             }
+            // `make().m()`, `Conn::open()->close()`, `a.get().m()`: the
+            // return type of a callable declared in the file.
+            "call_expression" => {
+                let f = node.child_by_field_name("function")?;
+                match f.kind() {
+                    "identifier" => {
+                        let name = text(f, self.src);
+                        let c = &self.cxs[cx];
+                        let member = c.class_qn.as_ref().map(|q| format!("{q}::{name}"));
+                        let free = join_qn(&c.ns, &name);
+                        member
+                            .iter()
+                            .chain([&free, &name.to_string()])
+                            .find_map(|q| self.returns.get(q).cloned())
+                            .flatten()
+                    }
+                    "qualified_identifier" => {
+                        let (quals, _, _, leaf) = self.split_qualified(f)?;
+                        let name = text(leaf, self.src);
+                        let owner = quals.join("::");
+                        // A class qualifier: its qualified name in the file.
+                        let class = quals.last().and_then(|q| match self.classes_by_name.get(q).map(Vec::as_slice) {
+                            Some([c]) => Some(c.clone()),
+                            _ => None,
+                        });
+                        class
+                            .iter()
+                            .chain([&owner])
+                            .find_map(|o| self.returns.get(&format!("{o}::{name}")).cloned())
+                            .flatten()
+                    }
+                    "field_expression" => {
+                        let owner = self.expr_type(f.child_by_field_name("argument")?, cx, depth + 1)?;
+                        let field = f.child_by_field_name("field")?;
+                        let owner = self.class_qn_of(&owner)?;
+                        self.returns.get(&format!("{owner}::{}", self.member_name(field))).cloned().flatten()
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// The qualified name of the class of the file a type text names
+    /// (exact, else the only class with that simple name).
+    fn class_qn_of(&self, ty: &str) -> Option<String> {
+        let t = strip_template_args(ty);
+        let t = t.trim_start_matches("::");
+        if self.class_members.contains_key(t) {
+            return Some(t.to_string());
+        }
+        match self.classes_by_name.get(t.rsplit("::").next()?).map(Vec::as_slice) {
+            Some([q]) => Some(q.clone()),
             _ => None,
         }
     }
@@ -1612,7 +1934,47 @@ impl<'s, 't> Extractor<'s, 't> {
                 return type_receiver(&self.qualify_type(&quals, global, cx));
             }
         }
+        if let Some(chain) = self.member_chain(arg, cx, 0) {
+            return member_receiver(&chain);
+        }
         truncate(collapse(&text(arg, self.src)), MAX_RECEIVER)
+    }
+
+    /// `member_`, `this->a.b`: a chain of members of the enclosing class
+    /// whose types the file does not declare (a class or base declared in
+    /// a header, used in an out-of-line body). `None` outside methods and
+    /// for locals and globals of the file.
+    fn member_chain(&self, node: Node<'_>, cx: usize, depth: usize) -> Option<String> {
+        if depth > 4 {
+            return None;
+        }
+        let class = self.cxs[cx].class_qn.as_ref()?;
+        match node.kind() {
+            "identifier" => {
+                let name = text(node, self.src);
+                if self.locals.lookup(&name, node.start_byte() as u32).is_some()
+                    || self.globals.contains_key(name.as_ref())
+                {
+                    return None;
+                }
+                // A field the file types is handled by `expr_type`.
+                let known =
+                    self.class_fields.get(class).and_then(|f| f.get(name.as_ref())).is_some_and(|t| t.is_some());
+                (!known).then(|| name.into_owned())
+            }
+            "field_expression" => {
+                let arg = node.child_by_field_name("argument")?;
+                let field = text(node.child_by_field_name("field")?, self.src);
+                if arg.kind() == "this" {
+                    return Some(field.into_owned());
+                }
+                self.member_chain(arg, cx, depth + 1).map(|c| format!("{c}.{field}"))
+            }
+            "parenthesized_expression" | "pointer_expression" => {
+                self.member_chain(named_kids(node).into_iter().next_back()?, cx, depth + 1)
+            }
+            _ => None,
+        }
     }
 
     /// Reference walk. A thin dispatcher: every construct with its own logic
@@ -1747,7 +2109,10 @@ impl<'s, 't> Extractor<'s, 't> {
             return;
         };
         let recv = self.receiver(arg, cx);
-        if recv == "this" || recv.starts_with(rueca_extract::TYPE_RECEIVER_PREFIX) {
+        if recv == "this"
+            || recv.starts_with(rueca_extract::TYPE_RECEIVER_PREFIX)
+            || recv.starts_with(MEMBER_RECEIVER_PREFIX)
+        {
             let name = self.member_name(field);
             self.emit(RefKind::Read, &name, Some(recv), field, enc, None);
         }
@@ -1846,9 +2211,11 @@ impl<'s, 't> Extractor<'s, 't> {
         }
     }
 
-    /// Name of a member in a field expression: `m`, `template get<T>`, `~T`.
+    /// Name of a member in a field expression: `m`, `template get<T>`, `~T`,
+    /// `operator+` (an operator called by name).
     fn member_name(&self, field: Node<'_>) -> String {
         match field.kind() {
+            "field_identifier" => operator_name(&self.t(field)),
             "template_method" => field.child_by_field_name("name").map(|n| self.t(n)).unwrap_or_default(),
             "qualified_identifier" => {
                 let mut cur = field;
@@ -1933,8 +2300,12 @@ impl<'s, 't> Extractor<'s, 't> {
         match f.kind() {
             "identifier" => {
                 if !self.is_local(f) {
-                    let name = self.t(f);
-                    self.emit(kind, &name, None, f, enc, arity);
+                    let name = operator_name(&self.t(f));
+                    // A macro invocation is a use of the macro, not a call:
+                    // the code it expands to runs at the call site.
+                    let is_macro = kind == RefKind::Call && (self.fn_macros.contains(&name) || macro_case(&name));
+                    let kind = if is_macro { RefKind::Read } else { kind };
+                    self.emit(kind, &name, None, f, enc, if is_macro { None } else { arity });
                 }
             }
             "template_function" => {
@@ -1965,7 +2336,7 @@ impl<'s, 't> Extractor<'s, 't> {
                 if CASTS.contains(&name.as_str()) {
                     return;
                 }
-                let recv = self.qualified_receiver(&quals, global, template_scope, &name, cx);
+                let recv = self.qualified_receiver(&quals, global, template_scope, cx);
                 self.emit(kind, &name, recv, n, enc, arity);
             }
             _ => {}
@@ -1987,7 +2358,7 @@ impl<'s, 't> Extractor<'s, 't> {
         match leaf.kind() {
             "identifier" => {
                 let name = self.t(leaf);
-                let recv = self.qualified_receiver(&quals, global, template_scope, &name, cx);
+                let recv = self.qualified_receiver(&quals, global, template_scope, cx);
                 self.emit(kind, &name, recv, leaf, enc, arity);
             }
             // A qualified type in a type position.
@@ -2048,7 +2419,7 @@ impl<'s, 't> Extractor<'s, 't> {
                         // found by its name (includes, same file, unique).
                         None
                     } else {
-                        self.qualified_receiver(&quals, global, template_scope, &name, cx)
+                        self.qualified_receiver(&quals, global, template_scope, cx)
                             .filter(|r| r.starts_with(rueca_extract::TYPE_RECEIVER_PREFIX))
                     };
                     self.emit(kind, &name, recv, n, enc, arity);
@@ -2076,7 +2447,10 @@ impl<'s, 't> Extractor<'s, 't> {
                     (target.child_by_field_name("argument"), target.child_by_field_name("field"))
                 {
                     let recv = self.receiver(arg, cx);
-                    if recv == "this" || recv.starts_with(rueca_extract::TYPE_RECEIVER_PREFIX) {
+                    if recv == "this"
+                        || recv.starts_with(rueca_extract::TYPE_RECEIVER_PREFIX)
+                        || recv.starts_with(MEMBER_RECEIVER_PREFIX)
+                    {
                         let name = self.member_name(field);
                         self.emit(RefKind::Write, &name, Some(recv), field, enc, None);
                     }
@@ -2111,21 +2485,46 @@ impl<'s, 't> Extractor<'s, 't> {
     }
 }
 
+/// Byte offsets of the outermost ERROR / MISSING nodes of `source` as the
+/// pack parses it (after preprocessing); empty when the file parses
+/// cleanly. A diagnostic for the smoke test and the `errors` example.
+pub(crate) fn error_offsets(source: &[u8], language: Language, budget: &Budget) -> Result<Vec<usize>, ExtractError> {
+    let (_, tree) = crate::preprocess::prepare(source, language, budget)?;
+    let mut out = Vec::new();
+    let mut cursor = tree.walk();
+    if !tree.root_node().has_error() {
+        return Ok(out);
+    }
+    loop {
+        let node = cursor.node();
+        if node.is_error() || node.is_missing() {
+            out.push(node.start_byte());
+        }
+        if node.has_error() && !node.is_error() && cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return Ok(out);
+            }
+        }
+    }
+}
+
 /// Extracts the facts of one C (`Language::C`) or C++ file.
 pub(crate) fn extract(source: &[u8], language: Language, budget: &Budget) -> Result<FileFacts, ExtractError> {
     if source.len() > budget.max_bytes {
         return Err(ExtractError::TooLarge { size: source.len(), limit: budget.max_bytes });
     }
-    let masked = mask::mask(source);
-    let parsed: &[u8] = masked.as_deref().unwrap_or(source);
-    let grammar: rueca_extract::tree_sitter::Language = match language {
-        Language::C => tree_sitter_c::LANGUAGE.into(),
-        Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
-        other => return Err(ExtractError::Unsupported(other)),
-    };
-    let tree = rueca_extract::parse(&grammar, parsed, budget)?;
-    let locals = locals::build(&tree, parsed, language, budget.max_parse_time)?;
+    let (parsed, tree) = crate::preprocess::prepare(source, language, budget)?;
+    let locals = locals::build(&tree, &parsed, language, budget.max_parse_time)?;
     let mut x = Extractor::new(source, &locals, budget);
+    if language == Language::Cpp {
+        x.ns_events = namespace_macro_events(source, &parsed);
+    }
     let root = tree.root_node();
     x.prescan(root);
     x.includes();

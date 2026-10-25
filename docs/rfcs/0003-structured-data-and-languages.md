@@ -807,6 +807,24 @@ choices and deviations (details in the crate docs and
   is grammar limits without a preprocessor (`va_arg(ap, char*)`,
   `unsigned(x)` casts, statement macros with statement arguments, `if` /
   `else` split across `#if` branches, C++26 annotations).
+- **Floors work** (RFC 0004; details in the crate docs and
+  [decisions](../decisions.md)): a same-length preprocessor in the pack —
+  masking, `#if` groups kept or collapsed to one branch (three-valued
+  conditions, one configuration per file), and error-driven repairs kept
+  only when a file's error count drops — took the files with parse errors
+  to 0.0% (hiredis), 1.3% (jq), 0.0% (cJSON), 0.5% (redis `src/`) and 5.7%
+  (fmt with vendored GoogleTest; 1.5% without). Deviations from the table
+  above: `static` and anonymous-namespace definitions are exported (an
+  include is textual); a macro invocation is a use (`REFERENCES`), not a
+  call; class template specializations are their own classes, named with
+  their arguments; a declaration and its body in one file are one node;
+  `OVERRIDES` joins bodies. New receivers `$ns:` (namespace-qualified
+  names, looked up from the enclosing namespaces) and `$member:` (member
+  chains typed from declarations in other files), C++ namespace scope as
+  rung 1c, overload sets across files with arity from signatures and
+  limited to the declarations a file includes, and namespace macros
+  (`FMT_BEGIN_NAMESPACE`) expanded by the resolver from their definition
+  (`fmt::v12::format_to`).
 
 ### 10.4 Java
 
