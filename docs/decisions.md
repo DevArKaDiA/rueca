@@ -54,6 +54,20 @@ measurable effect), an in-degree "popularity" prior to break same-name ties
 (no gain on Python lookups, worse on raw issue text). BM25 `k1` / `b` were
 not tuned: tantivy 0.27 fixes them unless a custom scorer is written.
 
+## 2026-10-24 — Markdown: sections and links, parsed with pulldown-cmark
+
+Markdown documents join the code graph (`rueca-lang-markdown`): headings are
+`Section` nodes nested by `DEFINES` (local name = heading chain joined by
+` > `, duplicates suffixed ` (2)`), module name = path with extension, and
+links / images to repository paths are imports that resolve to `IMPORTS`
+File→File edges. Parser: `pulldown-cmark` 0.13 (MIT, pure Rust, offset
+iterator) rather than `tree-sitter-md`, following RFC 0002 §3.3 (pure-Rust
+parsers for data kinds on untrusted input); the pack does not need a syntax
+tree, only headings, paragraphs and link destinations with byte ranges.
+Inline code spans are deliberately not emitted as references: the resolver's
+unique-name fallback would turn prose into 0.6-confidence noise edges.
+Anchor → section references, front-matter titles and MDX are future work.
+
 ## 2026-10-22 — Project renamed from Telar to Rueca
 
 `telar` is taken on crates.io by an unrelated Rust UI framework with its own

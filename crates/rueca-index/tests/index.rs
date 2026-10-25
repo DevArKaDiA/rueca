@@ -43,7 +43,8 @@ fn calls(seg: &Segment, src: u32, dst: u32) -> bool {
     seg.out_edges(src, Some(EdgeKind::Calls)).iter().any(|e| e.other == dst)
 }
 
-const CODE_FILES: u64 = 5;
+/// Files with a language pack: four Python / TypeScript files and README.md.
+const CODE_FILES: u64 = 6;
 
 fn demo_project(root: &Path) {
     write(root, ".gitignore", b"ignored/\n");
@@ -75,7 +76,7 @@ fn index_small_project_and_reindex_from_cache() {
     assert_eq!(first.files_total, 8, "{first:?}");
     assert_eq!(first.files_extracted, CODE_FILES);
     assert_eq!(first.facts_cache_hits, 0);
-    assert_eq!(first.files_unsupported, 2);
+    assert_eq!(first.files_unsupported, 1);
     assert_eq!(first.files_skipped, 1);
     assert_eq!(first.segment.snapshot.repo, "local/demo");
     assert_eq!(first.segment.snapshot.commit, "worktree");
@@ -87,8 +88,14 @@ fn index_small_project_and_reindex_from_cache() {
     assert!(seg.file_by_path("node_modules/dep/index.js").is_none());
     let bin = seg.file_by_path("data.bin").expect("binary files are listed");
     assert_eq!(seg.file(bin).status, "skipped:binary");
-    let readme = seg.file_by_path("README.md").expect("non-code files are listed");
-    assert_eq!(seg.file(readme).status, "skipped:unsupported");
+    let gitignore = seg.file_by_path(".gitignore").expect("files without a pack are listed");
+    assert_eq!(seg.file(gitignore).status, "skipped:unsupported");
+    let readme = seg.file_by_path("README.md").unwrap();
+    assert_eq!(seg.file(readme).status, "ok");
+    // Markdown headings are sections; inline code in prose is not a reference.
+    let demo = node(&seg, "README.md", "Demo");
+    assert_eq!(seg.node(demo).qualified_name, "README.md:Demo");
+    assert!(seg.out_edges(demo, None).is_empty() && seg.in_edges(demo, None).len() == 1);
     assert_eq!(seg.file(seg.file_by_path("app.py").unwrap()).status, "ok");
 
     // Cross-file calls through imports.

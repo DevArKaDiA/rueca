@@ -42,6 +42,8 @@ agent can follow.
   cross-reference.
 
 Languages: Python, TypeScript, TSX, JavaScript (incl. JSX, CommonJS, ESM).
+Documents: Markdown headings become `Section` symbols and file links become
+`IMPORTS` edges, in the same graph as the code.
 
 ## Install
 
@@ -187,6 +189,7 @@ See [RFC 0001](docs/rfcs/0001-architecture.md) for the full plan.
 | [`rueca-extract`](crates/rueca-extract) | language-pack contract, budgeted parsing |
 | [`rueca-lang-python`](crates/rueca-lang-python) | Python extraction and module resolution |
 | [`rueca-lang-typescript`](crates/rueca-lang-typescript) | TS/TSX/JS extraction and module resolution |
+| [`rueca-lang-markdown`](crates/rueca-lang-markdown) | Markdown sections and file links |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |
 | [`rueca-segment`](crates/rueca-segment) | segment format, search, content packs, catalog |
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
