@@ -39,8 +39,13 @@ pub(crate) const OWNERS: &[&str] = &[
 ];
 
 /// Nodes whose `this` is a fresh object (not the enclosing class instance).
-const THIS_BINDERS: &[&str] =
-    &["function", "function_declaration", "function_expression", "generator_function", "generator_function_declaration"];
+const THIS_BINDERS: &[&str] = &[
+    "function",
+    "function_declaration",
+    "function_expression",
+    "generator_function",
+    "generator_function_declaration",
+];
 
 const CLASSES: &[&str] = &["class", "class_declaration", "abstract_class_declaration"];
 
@@ -111,7 +116,8 @@ impl TypeTable {
     }
 
     pub(crate) fn build(root: Node<'_>, src: &[u8], max_depth: usize) -> TypeTable {
-        let mut b = Builder { src, max_depth, table: TypeTable::default(), owners: vec![root.id()], type_params: Vec::new() };
+        let mut b =
+            Builder { src, max_depth, table: TypeTable::default(), owners: vec![root.id()], type_params: Vec::new() };
         b.walk(root, None, 0);
         b.table
     }
@@ -194,7 +200,9 @@ impl Builder<'_> {
                     "identifier" => Some(self.text(c)),
                     "member_expression" => {
                         let t: String = self.text(c).split_whitespace().collect();
-                        t.split('.').all(|s| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')).then_some(t)
+                        t.split('.')
+                            .all(|s| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$'))
+                            .then_some(t)
                     }
                     _ => None,
                 }
@@ -249,7 +257,9 @@ impl Builder<'_> {
                 }
                 let name = self.text(pat);
                 let ty = p.child_by_field_name("type").and_then(|t| self.type_name(t));
-                let property = named_children(p).iter().any(|c| matches!(c.kind(), "accessibility_modifier" | "override_modifier"))
+                let property = named_children(p)
+                    .iter()
+                    .any(|c| matches!(c.kind(), "accessibility_modifier" | "override_modifier"))
                     || {
                         let mut cur = p.walk();
                         p.children(&mut cur).any(|c| c.kind() == "readonly")
@@ -360,7 +370,9 @@ impl Builder<'_> {
         }
         match kind {
             // Names of declarations bind in the enclosing owner.
-            "function_declaration" | "generator_function_declaration" | "class_declaration"
+            "function_declaration"
+            | "generator_function_declaration"
+            | "class_declaration"
             | "abstract_class_declaration" => {
                 if let Some(name) = n.child_by_field_name("name") {
                     let (o, t) = (self.owner(), self.text(name));

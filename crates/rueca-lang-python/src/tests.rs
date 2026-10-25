@@ -1014,6 +1014,8 @@ class Client:
             s.inner_send()
             self.pool.release()
         lam = lambda q: q.go()
+        Session().head()
+        make_thing().tail()
 "#,
     );
     let ty = |s: &str| Some(format!("$type:{s}"));
@@ -1042,4 +1044,7 @@ class Client:
     assert_eq!(typed_receivers(&f, "inner_send"), vec![ty("Session")]);
     assert_eq!(typed_receivers(&f, "release"), vec![ty("Pool")]);
     assert_eq!(typed_receivers(&f, "go"), vec![Some("q".into())]);
+    // Calls on a constructed instance: `Session().head()`.
+    assert_eq!(typed_receivers(&f, "head"), vec![ty("Session")]);
+    assert_eq!(typed_receivers(&f, "tail"), vec![Some("make_thing()".into())]);
 }

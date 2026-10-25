@@ -760,6 +760,23 @@ pub(crate) fn overload_by_types(typed: &[(NodeId, Vec<String>)], args: &[&str]) 
     if exact.len() == 1 && (0..args.len()).any(|i| known(i).is_some()) {
         return exact;
     }
+    // The most specific candidate: one whose parameters all pass to every
+    // other's, and not the reverse (`twice(long)` over `twice(double)` for
+    // an `int`). Class parameters always pass both ways (subtyping is not
+    // known), so this only decides between primitives and `String`.
+    let more_specific = |a: &[String], b: &[String]| {
+        a.len() == b.len()
+            && a.iter().zip(b).all(|(x, y)| may_accept(y, x))
+            && !a.iter().zip(b).all(|(x, y)| may_accept(x, y))
+    };
+    let best: Vec<NodeId> = compatible
+        .iter()
+        .filter(|(n, p)| compatible.iter().all(|(m, q)| m == n || more_specific(p, q)))
+        .map(|(n, _)| *n)
+        .collect();
+    if best.len() == 1 && compatible.len() > 1 {
+        return best;
+    }
     compatible.into_iter().map(|(n, _)| *n).collect()
 }
 
@@ -925,8 +942,11 @@ mod tests {
         let value = set(&[&["String"], &["boolean"], &["long"], &["double"], &["Number"]]);
         assert_eq!(overload_by_types(&value, &["long"]), vec![2]);
         assert_eq!(overload_by_types(&value, &["boolean"]), vec![1]);
-        // `int` widens to long / double and boxes to Number: no exact match.
+        // `int` widens to long / double and boxes to Number: no exact match,
+        // and `Number` is not comparable with the primitives.
         assert_eq!(overload_by_types(&value, &["int"]), vec![2, 3, 4]);
+        // twice(long) / twice(double) with an `int`: long is the most specific.
+        assert_eq!(overload_by_types(&set(&[&["long"], &["double"]]), &["int"]), vec![0]);
         assert_eq!(overload_by_types(&value, &["?"]), vec![0, 1, 2, 3, 4]);
         // JsonSyntaxException(String) / (Throwable): a caught exception is not a String.
         let ctor = set(&[&["String"], &["Throwable"]]);

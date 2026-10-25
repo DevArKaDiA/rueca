@@ -2168,7 +2168,8 @@ impl<'s> Extractor<'s> {
         };
         let t = if t.kind() == "generic_type" { field(t, "name")? } else { t };
         let text: String = self.text(t).split_whitespace().collect();
-        let simple = text.split('.').all(|s| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$'));
+        let simple =
+            text.split('.').all(|s| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$'));
         (simple && !self.type_params.contains(&text) && !is_builtin(&text)).then_some(text)
     }
 

@@ -300,8 +300,8 @@ fn generics_type_parameters_are_not_references() {
     has_ref(&f, RefKind::Type, None, "Number");
     has_ref(&f, RefKind::Type, None, "Function");
     has_ref(&f, RefKind::Type, None, "Key");
-    // A receiver typed by a type parameter stays untyped.
-    has_ref(&f, RefKind::Call, Some("local"), "compareTo");
+    // A receiver typed by a bounded type parameter has the bound's type.
+    has_ref(&f, RefKind::Call, Some("$type:Comparable"), "compareTo");
 }
 
 // ---------------------------------------------------------------------------
@@ -766,6 +766,21 @@ fn calls_carry_static_argument_types() {
     has_ref(&f, RefKind::Call, Some("$type:JsonWriter"), "flush");
     assert!(f.references.iter().any(|r| r.name == "flush"));
     assert!(f.references.iter().any(|r| r.kind == RefKind::New && r.name == "JsonSyntaxException$args:IOException"));
+}
+
+#[test]
+fn bounded_type_parameters_type_receivers() {
+    let f = facts(
+        r#"class Stats<C extends Comparable<C>> {
+    <F extends Figure> double sum(F a, java.util.List<F> all, C c, T t) { a.area(); c.compareTo(c); return 0; }
+    <G> void any(G g) { g.go(); }
+}
+"#,
+    );
+    has_ref(&f, RefKind::Call, Some("$type:Figure"), "area");
+    has_ref(&f, RefKind::Call, Some("$type:Comparable"), "compareTo");
+    // Unbounded: no receiver type.
+    has_ref(&f, RefKind::Call, Some("g"), "go");
 }
 
 #[test]

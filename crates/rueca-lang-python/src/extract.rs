@@ -14,11 +14,11 @@ use rueca_model::{Definition, FileFacts, Import, ImportedName, Label, LocalDefId
 
 use crate::is_builtin_name;
 use crate::locals::{self, Locals};
-use crate::types::TypeTable;
 use crate::text::{
     MAX_DOC, MAX_ONE_LINE, cleandoc, is_dotted_identifier, is_upper_case, one_line, string_literal_value,
     truncate_chars,
 };
+use crate::types::TypeTable;
 
 /// Hard cap on references per file.
 pub const MAX_REFS: usize = 20_000;
@@ -306,7 +306,12 @@ impl<'s> Extractor<'s> {
                     return None;
                 }
                 let segs: Vec<&str> = segs.iter().map(String::as_str).collect();
-                self.types.call_return(&segs).map(str::to_string)
+                if let Some(r) = self.types.call_return(&segs) {
+                    return Some(r.to_string());
+                }
+                // `Session().request()`: a call of a class-like name.
+                let last = segs.last()?;
+                crate::types::is_class_like(last).then(|| segs.join("."))
             }
             _ => None,
         }
@@ -889,7 +894,13 @@ impl<'s> Extractor<'s> {
             });
         }
         let body = def.child_by_field_name("body");
-        self.scopes.push(Scope { kind: ScopeKind::Class, def: Some(idx), self_name: None, init_class: None, node: def.id() });
+        self.scopes.push(Scope {
+            kind: ScopeKind::Class,
+            def: Some(idx),
+            self_name: None,
+            init_class: None,
+            node: def.id(),
+        });
         if let Some(b) = body {
             self.visit_children(b, depth + 1);
         }

@@ -152,6 +152,14 @@ fn is_dotted(t: &str) -> bool {
     !t.is_empty() && t.split('.').all(|s| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_'))
 }
 
+/// A name written like a class (`Session`, `HTTPAdapter`; not `MAX`, not a
+/// builtin such as `ValueError`): calling it constructs an instance.
+pub(crate) fn is_class_like(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_uppercase())
+        && name.chars().any(|c| c.is_ascii_lowercase())
+        && !is_builtin_name(name)
+}
+
 /// The function definition of a (possibly decorated) definition node.
 fn function_of(n: Node<'_>) -> Option<Node<'_>> {
     match n.kind() {
@@ -228,7 +236,9 @@ impl Builder<'_> {
                 };
                 let args: Vec<Node<'_>> = args
                     .into_iter()
-                    .flat_map(|a| if a.kind() == "type_parameter" || a.kind() == "tuple" { named_children(a) } else { vec![a] })
+                    .flat_map(|a| {
+                        if a.kind() == "type_parameter" || a.kind() == "tuple" { named_children(a) } else { vec![a] }
+                    })
                     .collect();
                 let real: Vec<Node<'_>> = args.into_iter().filter(|a| self.text(*a).trim() != "None").collect();
                 match (head.as_str(), &real[..]) {
@@ -306,11 +316,7 @@ impl Builder<'_> {
                 if let Some(r) = self.table.call_return(&segs) {
                     return Some(r.to_string());
                 }
-                let last = segs.last()?;
-                let class_like = last.starts_with(|c: char| c.is_ascii_uppercase())
-                    && last.chars().any(|c| c.is_ascii_lowercase())
-                    && !is_builtin_name(last);
-                class_like.then_some(callee)
+                is_class_like(segs.last()?).then_some(callee)
             }
             _ => None,
         }

@@ -75,6 +75,7 @@ pub(crate) fn extract(source: &[u8], budget: &Budget) -> Result<FileFacts, Extra
         enc: None,
         types: Vec::new(),
         type_params: Vec::new(),
+        type_bounds: Vec::new(),
         anon_counts: HashMap::new(),
         locals,
         file_types: Vec::new(),
@@ -163,6 +164,9 @@ struct Extractor<'s> {
     types: Vec<TypeCtx>,
     /// Generic type parameters in scope.
     type_params: Vec<String>,
+    /// First bound of each type parameter in `type_params` (`T extends
+    /// Figure` → `Figure`), the receiver type of a value of that type.
+    type_bounds: Vec<Option<String>>,
     /// Anonymous classes named so far per (enclosing definition, base
     /// name), for their `Base$N` names.
     anon_counts: HashMap<(Option<LocalDefId>, String), u32>,
@@ -654,8 +658,11 @@ impl<'s> Extractor<'s> {
     fn typed(&mut self, class: Option<String>, span: Span) -> Option<String> {
         let c = self.unqualify(&class?, span);
         let head = c.split('.').next().unwrap_or(&c);
-        if self.is_type_param(head) {
-            return None;
+        if let Some(i) = self.type_params.iter().rposition(|t| t == head) {
+            // A bounded type parameter (`F extends Figure`): its bound.
+            let bound = self.type_bounds.get(i).cloned().flatten()?;
+            let bound_head = bound.split('.').next().unwrap_or(&bound);
+            return (!self.is_type_param(bound_head) && c == head).then(|| type_receiver(&bound));
         }
         Some(type_receiver(&c))
     }
@@ -1579,7 +1586,13 @@ impl<'s> Extractor<'s> {
         if let Some(tp) = node.child_by_field_name("type_parameters") {
             for p in named_children(tp) {
                 if let Some(id) = named_children(p).into_iter().find(|c| c.kind() == "type_identifier") {
+                    let bound = named_children(p)
+                        .into_iter()
+                        .find(|c| c.kind() == "type_bound")
+                        .and_then(|b| named_children(b).into_iter().next())
+                        .and_then(|t| class_of_type(t, self.source));
                     self.type_params.push(self.text(id).to_string());
+                    self.type_bounds.push(bound);
                 }
             }
             for p in named_children(tp) {
@@ -1717,6 +1730,7 @@ impl<'s> Extractor<'s> {
             self.defs[id as usize].is_test = true;
         }
         self.type_params.truncate(mark);
+        self.type_bounds.truncate(mark);
         self.enc = saved_enc;
     }
 
@@ -2026,6 +2040,7 @@ impl<'s> Extractor<'s> {
             }
         }
         self.type_params.truncate(mark);
+        self.type_bounds.truncate(mark);
     }
 
     fn visit_ctor(&mut self, node: Node<'_>, overloaded: bool, depth: usize) {
