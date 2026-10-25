@@ -58,8 +58,8 @@ Two ideas carry the whole design:
 | **Definition** | A named thing declared in a file (class, function, method, field, variable, constant, interface, type alias, enum, test…), with its span, signature, docstring and parent. |
 | **Reference** | A use of a name: a call, `new`, type annotation, decorator, `raise`/`throw`, read or write. Has a name, an optional receiver (`self`, `app`, `a.b`) and the definition that encloses it. |
 | **Import** | A module specifier plus imported names (`from .http import Session`). |
-| **Module name** | How other files refer to a file: Python `shop.http`; ECMAScript `src/util/index` (path without extension). |
-| **Qualified name** | Global name of a definition: module name + separator + local name. Python `shop.http.Session.send`; ECMAScript `src/util/index:formatAmount`. |
+| **Module name** | How other files refer to a file: Python `shop.http`; ECMAScript `src/util/index` (path without extension); Markdown `docs/guide.md` (path with extension). |
+| **Qualified name** | Global name of a definition: module name + separator + local name. Python `shop.http.Session.send`; ECMAScript `src/util/index:formatAmount`; Markdown `docs/guide.md:Install > Linux`. |
 | **Node / edge** | The resolved graph. Nodes are definitions plus `Repository` / `Folder` / `File`; edges are typed relations between them. |
 | **Strategy / confidence** | How a reference edge was resolved, and how much to trust it (0–1). |
 | **Segment** | The immutable file that stores one snapshot's graph and indexes. |
@@ -129,9 +129,9 @@ disappears. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-markdown`)
 
-Each supported file is parsed with tree-sitter under a budget (size, time,
+Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
 `shop/http.py` yields:
 
@@ -172,6 +172,26 @@ What packs deliberately do and don't do:
   re-exports of the file's own names, so `import x from "./m"` binds the
   right definition instead of a guess.
 
+**Documents** (`.md`, `.markdown`) are parsed with the pure-Rust
+[`pulldown-cmark`](https://github.com/pulldown-cmark/pulldown-cmark) instead
+of tree-sitter, and become structure in the same graph:
+
+- Every top-level heading (ATX or setext) is a `Section` definition whose
+  parent is the nearest preceding heading of a lower level, so `DEFINES`
+  gives the document tree (`# Install` contains `## Linux`). The local
+  qualified name is the heading chain joined by ` > ` (`Install > Linux`);
+  a repeated chain gets a ` (2)`, ` (3)`, … suffix. The span runs from the
+  heading to the last non-blank line before the next heading of the same or
+  a higher level, the signature is the heading line (`## Linux`) and the doc
+  is the section's first prose paragraph (badges skipped, ≤ 500 chars).
+- Every link, image and raw-HTML `href` / `src` whose destination is a path
+  (not a URL, `mailto:` or a same-page `#anchor`) is an import of that path.
+- Nothing else: inline code that looks like an identifier is **not** a
+  reference (it would turn prose into 0.6-confidence name guesses), and code
+  blocks record nothing in the graph (they stay searchable with
+  `search_code`). Headings inside block quotes and lists, front matter and
+  MDX are not extracted.
+
 Facts are cached at `<store>/facts/<sha>-<lang>-v<extractor version>.bin`.
 Re-indexing an unchanged file is a cache hit; bumping a pack's
 `extractor_version` invalidates its entries.
@@ -190,8 +210,15 @@ Two per-language hooks, still without guessing symbols:
   file system built from the snapshot: extension probing, `index` files,
   `.js` → `.ts` aliasing, `tsconfig` `paths` / `baseUrl` / `extends`,
   `package.json` `exports`, and workspace packages mounted by name.
+  Markdown keeps the path as the module name (`README.md:Usage` never
+  collides with `README.py`) and resolves a link relative to the document
+  (`/x` from the repository root): `#anchor` and `?query` are dropped, the
+  path is percent-decoded and tried as written, with `.md`, `x.html` →
+  `x.md`, and as a directory (`README.md`, `index.md`, …); a bare path that
+  misses is retried from the root.
 
-Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0).
+Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0);
+for documents that means "links to" (docs → docs, code files, images).
 An import that resolves to nothing marks its names **external**: later
 references through them are never fuzzy-matched to a project symbol.
 
@@ -290,6 +317,7 @@ then points the indexed root at it. Query time never reads the working tree.
 | `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters |
 | `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, module-level assignments (`UPPER_CASE` → `Constant`) |
 | `Test` | JS/TS `describe` / `it` / `test` blocks (Python tests are `Function` / `Method` / `Class` with `is_test: true`) |
+| `Section` | Markdown headings, nested by `DEFINES` |
 
 Every symbol node carries: name, qualified name, file, span, language,
 signature, docstring, `exported`, `is_test`.
@@ -355,8 +383,9 @@ On top of that:
   `*.spec.ts`, …), so code an agent navigates to comes first.
 
 Filters (`labels`, `language`) are exact terms; `path_glob` filters after
-ranking. Default labels exclude `File`, `Folder`, `Module` and `Repository`.
-Ties break by node id so pages are stable.
+ranking. Default labels exclude `File`, `Folder`, `Module` and `Repository`, so
+document sections are found alongside code (`install linux` →
+`README.md:Install > Linux`). Ties break by node id so pages are stable.
 
 ### `search_code` — "where does this text appear?"
 
@@ -369,7 +398,7 @@ with no usable literal scan every text file. Each match is then **placed in
 the graph**: the file's symbols (sorted by position) give the innermost
 definition containing that line, returned as `symbol`. In the example,
 searching `self.send` returns line 5 of `shop/http.py` with symbol
-`Session.request`.
+`Session.request`; a match in a document is placed in its section.
 
 ### `get_symbol` — "tell me about this symbol and its neighbourhood"
 
@@ -387,7 +416,8 @@ One hop around the node:
 Resolves the symbol to its file and span (or takes `path` + lines), fetches
 the blob from the content packs, and returns those lines plus
 `context_lines`, capped by `max_lines`. It serves the indexed version of the
-file, which matches what the graph describes.
+file, which matches what the graph describes. For a Markdown `Section` the
+span is the whole section, subsections included.
 
 ### `trace` — "who calls this, and what does it call?"
 
@@ -419,14 +449,16 @@ Which neighbours count:
   `["Function", "Method"]` for a callables-only call graph. The root is never
   filtered. Other edge kinds make `trace` a
 general traversal: `["INHERITS"]` walks a class hierarchy, `["IMPORTS"]`
-from a `File` node walks module dependencies, `["TESTS"]` finds the tests
-that exercise a function.
+from a `File` node walks module dependencies (and, from a document, the
+files it links to; `callers` gives the documents that link to a file),
+`["TESTS"]` finds the tests that exercise a function.
 
 ### `get_file_outline` — "what is in this file?"
 
 Takes the file's symbols (already sorted by position) and nests them by
 `DEFINES` parent, falling back to span containment, children ordered by
-line. No content is read; signatures come from the node table.
+line. No content is read; signatures come from the node table. For a
+Markdown file the outline is its heading tree.
 
 ### Putting them together
 
@@ -500,6 +532,7 @@ gaps show up on real repositories.
 | Language-pack contract, budgeted parsing | `rueca-extract` | `LanguagePack` |
 | Python extraction, module names, imports | `rueca-lang-python` | crate docs, `queries/locals.scm` |
 | TS/TSX/JS extraction, `oxc_resolver` | `rueca-lang-typescript` | crate docs, `src/resolve.rs` |
+| Markdown sections and links (`pulldown-cmark`) | `rueca-lang-markdown` | crate docs, `src/links.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
 | Resolution | `rueca-resolve` | crate docs (strategy table) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |

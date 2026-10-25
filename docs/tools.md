@@ -41,7 +41,7 @@ other definitions with the same text score. Ranking details:
 | Arg | Type | Default |
 |---|---|---|
 | `query` | string, required | — |
-| `labels` | array of label names (`Function`, `Method`, `Class`, …) | all symbol labels |
+| `labels` | array of label names (`Function`, `Method`, `Class`, `Section`, …) | all symbol labels (everything but `File`, `Folder`, `Module`, `Repository`) |
 | `path_glob` | string | — |
 | `language` | `python` / `typescript` / `tsx` / `javascript` / `php` / `markdown` | — |
 | `limit` | int, 1–200 | 20 |

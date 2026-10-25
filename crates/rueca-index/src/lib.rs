@@ -101,11 +101,13 @@ pub struct PhaseTimings {
     pub write_ms: u64,
 }
 
-/// Language packs shipped with this build (Python, TypeScript/TSX/JavaScript).
+/// Language packs shipped with this build (Python, TypeScript/TSX/JavaScript,
+/// Markdown).
 pub fn default_registry() -> Registry {
     let mut r = Registry::new();
     r.register(Box::new(rueca_lang_python::PythonPack));
     r.register(Box::new(rueca_lang_typescript::TypeScriptPack));
+    r.register(Box::new(rueca_lang_markdown::MarkdownPack));
     r
 }
 
