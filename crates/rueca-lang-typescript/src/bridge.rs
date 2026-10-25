@@ -53,6 +53,10 @@ fn first_arg<'t>(call: Node<'t>) -> Option<Node<'t>> {
 
 /// `process.env` / `import.meta.env` (the env object).
 fn env_object(n: Node<'_>, src: &[u8]) -> Option<&'static str> {
+    // Cheap reject first: receivers of long call chains are large texts.
+    if n.byte_range().len() > 40 {
+        return None;
+    }
     match compact(n, src).as_str() {
         "process.env" => Some("process"),
         "import.meta.env" => Some("import"),
@@ -171,7 +175,7 @@ impl EnvApi {
             "call_expression" => {
                 let Some(callee) = field(n, "function") else { return Vec::new() };
                 let Some(arg) = first_arg(n).and_then(|a| string_literal(a, src)) else { return Vec::new() };
-                if compact(callee, src) == "Deno.env.get" && !is_local("Deno") {
+                if callee.byte_range().len() <= 40 && compact(callee, src) == "Deno.env.get" && !is_local("Deno") {
                     return env(RefKind::EnvVar, arg);
                 }
                 if callee.kind() == "member_expression"

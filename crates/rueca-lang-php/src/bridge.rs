@@ -69,6 +69,9 @@ pub(crate) fn call(written: &str, call: Node<'_>, src: &[u8]) -> Option<Fact> {
 /// `Config::get('a.b')` (the Laravel facade, imported or global alias).
 pub(crate) fn scoped_call(node: Node<'_>, src: &[u8]) -> Option<Fact> {
     let scope = node.child_by_field_name("scope")?;
+    if scope.byte_range().len() > 200 {
+        return None;
+    }
     let scope = text_of(scope, src);
     let class = scope.rsplit('\\').next().unwrap_or(&scope);
     let method = text_of(node.child_by_field_name("name")?, src);
