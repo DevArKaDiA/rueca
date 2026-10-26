@@ -3,13 +3,19 @@
 //!
 //! ```text
 //! rueca index [PATH] [--store DIR] [--repo ID] [--json]
-//! rueca query <TOOL> '<JSON ARGS>' [--root PATH] [--store DIR] [--pretty] [--text]
-//! rueca mcp [--root PATH] [--store DIR] [--no-auto-index]
+//! rueca index --org FILE [PATH] [--store DIR] [--json]
+//! rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
+//! rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
 //! rueca status [--store DIR] [--json]
 //! ```
 //!
-//! `--store`, `--root`, `-v`, `--json` and `--pretty` are global (accepted
-//! before or after the subcommand). JSON output is compact unless `--pretty`.
+//! `--store`, `--root`, `--org`, `-v`, `--json` and `--pretty` are global
+//! (accepted before or after the subcommand). `--org` names an organization
+//! (RFC 0006): its file (`rueca-org.toml`) or, for `query` and `mcp`, the
+//! name of an organization already built in the store. `index --org FILE`
+//! indexes every repository of the file (or only the one containing PATH)
+//! and updates the organization; a plain `index PATH` of a member also
+//! updates the organizations that hold it. JSON output is compact unless `--pretty`.
 //! Logs go to stderr (`-v` debug, `-vv` trace, or `RUECA_LOG=<filter>`).
 //! `query` prints the tool's JSON result to stdout (with `--text`, the
 //! compact text rendering an MCP client gets as text content); on error it
@@ -46,6 +52,10 @@ struct Cli {
     /// (default: the indexed root containing the current directory).
     #[arg(long, global = true, value_name = "PATH")]
     root: Option<PathBuf>,
+    /// Organization: its file (`rueca-org.toml`) or, for `query` / `mcp`,
+    /// the name of an organization built in the store.
+    #[arg(long, global = true, value_name = "FILE|NAME")]
+    org: Option<String>,
     /// More logging on stderr (-v debug, -vv trace).
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
@@ -61,9 +71,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Index the working tree at PATH (default: current directory).
+    /// Index the working tree at PATH (default: current directory); with
+    /// --org FILE, every repository of the organization (or the one
+    /// containing PATH) and then the organization layer.
     Index {
-        /// Working tree to index.
+        /// Working tree to index (with --org: only this member).
         path: Option<PathBuf>,
         /// Repository id override (`github.com/owner/name`, `local/name`).
         #[arg(long, value_name = "ID")]
@@ -73,8 +85,10 @@ enum Command {
         threads: Option<usize>,
     },
     /// Run one tool and print its JSON result. Same semantics as MCP.
-    #[command(after_help = "Tools: search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline\n\
-Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\"}'")]
+    #[command(
+        after_help = "Tools: search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline, list_repositories\n\
+Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\"}'"
+    )]
     Query {
         /// Tool name.
         tool: String,
@@ -90,7 +104,8 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         #[arg(long)]
         no_auto_index: bool,
     },
-    /// List indexed roots with repo, commit, node/edge/file counts and age.
+    /// List indexed roots with repo, commit, node/edge/file counts and age,
+    /// and the organizations of the store.
     Status,
 }
 
@@ -99,9 +114,14 @@ fn main() -> ExitCode {
     init_logging(cli.verbose, matches!(cli.command, Command::Mcp { .. }));
     let store = cli.store.clone().unwrap_or_else(Store::default_dir);
     let result = match cli.command {
-        Command::Index { path, repo, threads } => cmd_index(&store, path, repo, cli.json, cli.pretty, threads),
-        Command::Query { tool, args, text } => return cmd_query(&store, cli.root, &tool, args, cli.pretty, text),
-        Command::Mcp { no_auto_index } => cmd_mcp(&store, cli.root, !no_auto_index),
+        Command::Index { path, repo, threads } => match cli.org {
+            Some(org) => cmd_index_org(&store, &org, path, repo, cli.json, cli.pretty, threads),
+            None => cmd_index(&store, path, repo, cli.json, cli.pretty, threads),
+        },
+        Command::Query { tool, args, text } => {
+            return cmd_query(&store, cli.root, cli.org.as_deref(), &tool, args, cli.pretty, text);
+        }
+        Command::Mcp { no_auto_index } => cmd_mcp(&store, cli.root, cli.org.as_deref(), !no_auto_index),
         Command::Status => cmd_status(&store, cli.json, cli.pretty),
     };
     match result {
@@ -150,8 +170,14 @@ fn cmd_index(
         threads,
     };
     let report = rueca_index::index_worktree(&opts)?;
+    // Organizations holding this root replace its part (RFC 0006 §3.2).
+    let orgs = rueca_index::org::update_orgs_containing(store, Path::new(&report.root))?;
     if json {
-        println!("{}", render(&serde_json::to_value(&report)?, pretty));
+        let mut v = serde_json::to_value(&report)?;
+        if !orgs.is_empty() {
+            v["orgs"] = serde_json::to_value(&orgs)?;
+        }
+        println!("{}", render(&v, pretty));
         return Ok(());
     }
     let s = &report.segment;
@@ -175,7 +201,88 @@ fn cmd_index(
     println!("  graph:      {} nodes, {} edges", s.node_count, s.edge_count);
     println!("  references: {}/{} resolved ({pct:.1}%)", report.references_resolved, report.references_total);
     println!("  segment:    {} ({}) in {} ms", s.id, human_bytes(s.bytes), report.duration_ms);
+    for u in &orgs {
+        print_org_update(u);
+    }
     Ok(())
+}
+
+/// `--org` of `query` / `mcp`: an organization file, or the name of an
+/// organization built in the store.
+fn org_arg(arg: &str) -> anyhow::Result<(String, Option<rueca_index::org::OrgConfig>)> {
+    let p = Path::new(arg);
+    if p.is_file() {
+        let config = rueca_index::org::OrgConfig::load(p)?;
+        return Ok((config.name.clone(), Some(config)));
+    }
+    if rueca_segment::org::validate_name(arg).is_err() || arg.ends_with(".toml") {
+        anyhow::bail!("organization file `{arg}` not found");
+    }
+    Ok((arg.to_string(), None))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_index_org(
+    store: &Path,
+    org: &str,
+    path: Option<PathBuf>,
+    repo: Option<String>,
+    json: bool,
+    pretty: bool,
+    threads: Option<usize>,
+) -> anyhow::Result<()> {
+    if repo.is_some() {
+        anyhow::bail!("`--repo` cannot be combined with `--org`; set `id` on the `[[repo]]` in the organization file");
+    }
+    let (_, config) = org_arg(org)?;
+    let Some(config) = config else {
+        anyhow::bail!("`rueca index --org` needs the organization file (`rueca-org.toml`), not a name");
+    };
+    let report = rueca_index::org::index_org(&rueca_index::org::OrgIndexOptions {
+        config,
+        store: store.to_path_buf(),
+        budget: rueca_extract::Budget::default(),
+        threads,
+        only: path,
+    })?;
+    if json {
+        println!("{}", render(&serde_json::to_value(&report)?, pretty));
+        return Ok(());
+    }
+    for r in &report.indexed {
+        let snap = &r.segment.snapshot;
+        println!(
+            "indexed {} ({} @ {}{}): {} files, {} nodes, {} edges in {} ms",
+            r.root,
+            snap.repo,
+            short(&snap.commit),
+            if snap.dirty { ", dirty" } else { "" },
+            r.files_total,
+            r.segment.node_count,
+            r.segment.edge_count,
+            r.duration_ms
+        );
+    }
+    print_org_update(&report.update);
+    Ok(())
+}
+
+fn print_org_update(u: &rueca_segment::org::OrgUpdate) {
+    println!(
+        "organization {}: generation {}{}, {} repositories ({} added, {} replaced, {} removed, {} unchanged) in {} ms",
+        u.name,
+        u.generation,
+        if u.published { "" } else { " (unchanged)" },
+        u.repos,
+        u.added.len(),
+        u.replaced.len(),
+        u.removed.len(),
+        u.unchanged,
+        u.duration_ms
+    );
+    if !u.missing.is_empty() {
+        println!("  not indexed yet (left out): {}", u.missing.join(", "));
+    }
 }
 
 /// The default root for `query`/`mcp`: `--root`, else the current directory
@@ -193,12 +300,13 @@ fn default_root(store: &Path, root: Option<PathBuf>) -> Option<PathBuf> {
 fn cmd_query(
     store: &Path,
     root: Option<PathBuf>,
+    org: Option<&str>,
     tool: &str,
     args: Option<String>,
     pretty: bool,
     text: bool,
 ) -> ExitCode {
-    match run_query(store, root, tool, args) {
+    match run_query(store, root, org, tool, args) {
         Ok(response) if text => {
             print!("{}", response.text);
             if !response.text.ends_with('\n') {
@@ -220,6 +328,7 @@ fn cmd_query(
 fn run_query(
     store: &Path,
     root: Option<PathBuf>,
+    org: Option<&str>,
     tool: &str,
     args: Option<String>,
 ) -> anyhow::Result<rueca_query::Response> {
@@ -237,7 +346,10 @@ fn run_query(
     if !rueca_query::TOOL_NAMES.contains(&tool) {
         anyhow::bail!("unknown tool `{tool}` (available: {})", rueca_query::TOOL_NAMES.join(", "));
     }
-    let engine = rueca_query::Engine::new(store.to_path_buf(), default_root(store, root))?;
+    let engine = match org {
+        Some(o) => rueca_query::Engine::for_org(store.to_path_buf(), &org_arg(o)?.0)?,
+        None => rueca_query::Engine::new(store.to_path_buf(), default_root(store, root))?,
+    };
     engine.respond(tool, args)
 }
 
@@ -245,7 +357,17 @@ fn render(v: &Value, pretty: bool) -> String {
     if pretty { serde_json::to_string_pretty(v) } else { serde_json::to_string(v) }.unwrap_or_else(|_| v.to_string())
 }
 
-fn cmd_mcp(store: &Path, root: Option<PathBuf>, auto_index: bool) -> anyhow::Result<()> {
+fn cmd_mcp(store: &Path, root: Option<PathBuf>, org: Option<&str>, auto_index: bool) -> anyhow::Result<()> {
+    if let Some(o) = org {
+        let (name, config) = org_arg(o)?;
+        return rueca_mcp::serve_stdio(rueca_mcp::ServerOptions {
+            store_dir: store.to_path_buf(),
+            root: None,
+            auto_index,
+            org: Some(name),
+            org_config: config,
+        });
+    }
     let explicit = root.is_some();
     let root = default_root(store, root);
     rueca_mcp::serve_stdio(rueca_mcp::ServerOptions {
@@ -253,6 +375,7 @@ fn cmd_mcp(store: &Path, root: Option<PathBuf>, auto_index: bool) -> anyhow::Res
         root,
         // Only an explicit --root is indexed automatically.
         auto_index: auto_index && explicit,
+        ..rueca_mcp::ServerOptions::default()
     })
 }
 
@@ -286,8 +409,29 @@ fn cmd_status(store: &Path, json: bool, pretty: bool) -> anyhow::Result<()> {
             row
         })
         .collect();
+    let orgs = rueca_segment::org::list_orgs(store)?;
+    let org_rows: Vec<Value> = orgs
+        .iter()
+        .map(|g| {
+            json!({
+                "name": g.name,
+                "generation": g.generation,
+                "created_at": g.created_at,
+                "age_secs": now.saturating_sub(g.created_at),
+                "repos": g.repos.iter().map(|r| json!({
+                    "repo": r.repo,
+                    "root": r.root,
+                    "url": r.url,
+                    "commit": r.snapshot.commit,
+                    "segment_id": r.segment_id,
+                    "docs": r.docs,
+                    "index_bytes": r.index_bytes,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
     if json {
-        println!("{}", render(&json!({ "store": store, "roots": rows }), pretty));
+        println!("{}", render(&json!({ "store": store, "roots": rows, "orgs": org_rows }), pretty));
         return Ok(());
     }
     if rows.is_empty() {
@@ -335,6 +479,23 @@ fn cmd_status(store: &Path, json: bool, pretty: bool) -> anyhow::Result<()> {
     }
     for r in rows.iter().filter(|r| r.get("error").is_some()) {
         eprintln!("rueca: cannot open segment of {}: {}", r["root"].as_str().unwrap_or_default(), r["error"]);
+    }
+    for g in &orgs {
+        let docs: u64 = g.repos.iter().map(|r| u64::from(r.docs)).sum();
+        let bytes: u64 = g.repos.iter().map(|r| r.index_bytes).sum();
+        println!();
+        println!(
+            "organization {}: generation {}, {} repositories, {} symbol documents ({}), {} old",
+            g.name,
+            g.generation,
+            g.repos.len(),
+            docs,
+            human_bytes(bytes),
+            human_age(now.saturating_sub(g.created_at))
+        );
+        for r in &g.repos {
+            println!("  {}  {}  {}", r.repo, short(&r.snapshot.commit), r.root);
+        }
     }
     Ok(())
 }

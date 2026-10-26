@@ -19,6 +19,8 @@ pub struct View {
     pub snap: SnapshotDesc,
     /// `commit12[+]`, cached for ids.
     id_commit: String,
+    /// Index of the repository in the organization generation (organization mode).
+    pub org_repo: Option<usize>,
 }
 
 /// How a tool names a symbol.
@@ -52,7 +54,7 @@ impl View {
     pub fn new(seg: Arc<Segment>, entry: CatalogEntry) -> View {
         let snap = SnapshotDesc::from_info(seg.snapshot());
         let id_commit = snap.id_commit();
-        View { seg, entry, snap, id_commit }
+        View { seg, entry, snap, id_commit, org_repo: None }
     }
 
     pub fn repo(&self) -> &str {

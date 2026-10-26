@@ -1,4 +1,5 @@
-//! MCP server over stdio exposing the six alpha tools (`docs/tools.md`).
+//! MCP server over stdio exposing the Rueca tools (`docs/tools.md`), for one
+//! working tree (`--root`) or an organization (`--org`, RFC 0006).
 //!
 //! Built on the official Rust SDK, [`rmcp`]. Tools are listed from
 //! [`rueca_query::tool_definitions`] (deterministic order) and every call is
@@ -17,10 +18,10 @@
 //! 2025-11-25. An `initialize` naming 2026-07-28 or an unknown version is
 //! answered with 2025-11-25, the newest version that has a handshake.
 //!
-//! When the served root is not indexed yet, [`serve_stdio`] indexes it on a
-//! background thread so `initialize` is answered immediately (clients time
-//! out slow start-ups); tool calls wait for the index for up to
-//! [`INDEX_WAIT`] and then report "still indexing".
+//! When the served root (or organization, given its file) is not indexed yet,
+//! [`serve_stdio`] indexes it on a background thread so `initialize` is
+//! answered immediately (clients time out slow start-ups); tool calls wait
+//! for the index for up to [`INDEX_WAIT`] and then report "still indexing".
 //!
 //! Nothing is written to stdout except protocol messages; logs go through
 //! `tracing` and the binary installs a stderr subscriber.
@@ -38,12 +39,19 @@ use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt};
 use rueca_query::Engine;
 
+#[derive(Debug, Clone, Default)]
 pub struct ServerOptions {
     pub store_dir: PathBuf,
     /// Working tree served by default. If not indexed yet and `auto_index` is
     /// set, it is indexed before serving.
     pub root: Option<PathBuf>,
     pub auto_index: bool,
+    /// Organization served instead of a root (RFC 0006): `repo` omitted
+    /// means the whole organization.
+    pub org: Option<String>,
+    /// The organization's file, used to build it when the store has no
+    /// generation yet (with `auto_index`).
+    pub org_config: Option<rueca_index::org::OrgConfig>,
 }
 
 /// Instructions sent to clients in `initialize` / `server/discover`.
@@ -58,8 +66,9 @@ and callees (impact analysis). Use `search_code` for literals, messages and conf
 printed name also works as `qualified_name`. Symbol ids returned by any tool can be passed as `id` \
 to the others. Lines are 1-based. Every tool takes `repo` (one, a list, or \"*\" for every indexed \
 repository), `ref` and `budget_tokens` (default 2000); a cut response says `truncated` and how to \
-continue (`cursor`). Results come from the last index of the working tree; edges carry a confidence \
-(0–1) and the strategy used to resolve them.";
+continue (`cursor`). When the server serves an organization, omitting `repo` searches every \
+repository of it in one ranking; `list_repositories` lists them. Results come from the last index of \
+the working tree; edges carry a confidence (0–1) and the strategy used to resolve them.";
 
 /// The MCP handler: a shared engine plus the advertised tool list.
 #[derive(Clone)]
@@ -94,7 +103,7 @@ impl RuecaServer {
     }
 }
 
-/// The six tools as MCP [`Tool`]s, in `rueca_query::TOOL_NAMES` order.
+/// The tools as MCP [`Tool`]s, in `rueca_query::TOOL_NAMES` order.
 pub fn tools() -> Vec<Tool> {
     rueca_query::tool_definitions()
         .into_iter()
@@ -178,7 +187,8 @@ pub const INDEX_WAIT: Duration = Duration::from_secs(120);
 /// Tracks a background auto-index of the served root. Tool calls wait on it
 /// (up to [`INDEX_WAIT`]) so the first query after start-up sees the index.
 pub struct IndexGate {
-    root: PathBuf,
+    /// What is being indexed, for messages (`` `/src/x` ``, ``organization `acme` ``).
+    what: String,
     state: Mutex<IndexState>,
     changed: Condvar,
 }
@@ -192,7 +202,11 @@ enum IndexState {
 
 impl IndexGate {
     fn new(root: PathBuf) -> IndexGate {
-        IndexGate { root, state: Mutex::new(IndexState::Indexing(Instant::now())), changed: Condvar::new() }
+        IndexGate::named(format!("`{}`", root.display()))
+    }
+
+    fn named(what: String) -> IndexGate {
+        IndexGate { what, state: Mutex::new(IndexState::Indexing(Instant::now())), changed: Condvar::new() }
     }
 
     fn finish(&self, outcome: Result<(), String>) {
@@ -216,8 +230,8 @@ impl IndexGate {
             IndexState::Done => Ok(None),
             IndexState::Failed(e) => Ok(Some(e.clone())),
             IndexState::Indexing(since) => Err(format!(
-                "`{}` is still being indexed ({} s so far); retry in a moment",
-                self.root.display(),
+                "{} is still being indexed ({} s so far); retry in a moment",
+                self.what,
                 since.elapsed().as_secs()
             )),
         }
@@ -297,18 +311,51 @@ pub fn ensure_indexed(opts: &ServerOptions) {
 /// returns the gate tool calls wait on.
 pub fn spawn_auto_index(opts: &ServerOptions) -> Option<Arc<IndexGate>> {
     let root = root_to_index(opts)?;
-    let gate = Arc::new(IndexGate::new(root.clone()));
     let store = opts.store_dir.clone();
+    let r = root.clone();
+    spawn_gate(IndexGate::new(root), move || index_root(&r, &store))
+}
+
+/// Starts building the organization on a background thread when it has no
+/// generation in the store yet and its file is known (`auto_index`).
+pub fn spawn_org_index(opts: &ServerOptions) -> Option<Arc<IndexGate>> {
+    let name = opts.org.as_ref().filter(|_| opts.auto_index)?;
+    let config = opts.org_config.clone()?;
+    match rueca_segment::org::current_generation(&opts.store_dir, name) {
+        Ok(Some(g)) => {
+            tracing::info!(org = %name, generation = g.generation, "serving existing organization");
+            return None;
+        }
+        Ok(None) => tracing::info!(org = %name, "organization is not built yet; indexing it"),
+        Err(err) => tracing::warn!(org = %name, error = %err, "cannot read the organization; indexing it"),
+    }
+    let store = opts.store_dir.clone();
+    spawn_gate(IndexGate::named(format!("organization `{name}`")), move || {
+        let report = rueca_index::org::index_org(&rueca_index::org::OrgIndexOptions {
+            config,
+            store,
+            budget: rueca_extract::Budget::default(),
+            threads: None,
+            only: None,
+        })?;
+        tracing::info!(org = %report.org, generation = report.update.generation, repos = report.update.repos, ms = report.duration_ms, "organization indexed");
+        Ok(())
+    })
+}
+
+/// Runs `job` on a background thread; tool calls wait on the returned gate.
+fn spawn_gate(gate: IndexGate, job: impl FnOnce() -> anyhow::Result<()> + Send + 'static) -> Option<Arc<IndexGate>> {
+    let gate = Arc::new(gate);
     let g = gate.clone();
     let spawned = std::thread::Builder::new().name("rueca-auto-index".into()).spawn(move || {
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| index_root(&root, &store)));
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
         let outcome = match outcome {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) => Err(format!("{err:#}")),
             Err(_) => Err("the indexer panicked".to_string()),
         };
         if let Err(e) = &outcome {
-            tracing::error!(root = %root.display(), error = %e, "indexing failed");
+            tracing::error!(what = %g.what, error = %e, "indexing failed");
         }
         g.finish(outcome);
     });
@@ -334,13 +381,16 @@ where
 
 /// Serves MCP on stdin/stdout until the client disconnects. Logs go to stderr.
 ///
-/// If `opts.root` needs indexing (see [`root_to_index`]) it is indexed on a
-/// background thread while the server already answers `initialize`,
-/// `server/discover` and `tools/list`; tool calls wait for it (up to
-/// [`INDEX_WAIT`]).
+/// If `opts.root` needs indexing (see [`root_to_index`]), or `opts.org` is
+/// not built yet and its file is known, it is indexed on a background thread
+/// while the server already answers `initialize`, `server/discover` and
+/// `tools/list`; tool calls wait for it (up to [`INDEX_WAIT`]). With
+/// `opts.org` the server serves the organization (`opts.root` is ignored).
 pub fn serve_stdio(opts: ServerOptions) -> anyhow::Result<()> {
-    let gate = spawn_auto_index(&opts);
-    let engine = Engine::new(opts.store_dir.clone(), opts.root.clone())?;
+    let (engine, gate) = match &opts.org {
+        Some(name) => (Engine::for_org(opts.store_dir.clone(), name)?, spawn_org_index(&opts)),
+        None => (Engine::new(opts.store_dir.clone(), opts.root.clone())?, spawn_auto_index(&opts)),
+    };
     let server = RuecaServer::with_index_gate(engine, gate);
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async move {
@@ -373,6 +423,10 @@ mod tests {
         let failed = IndexGate::new(PathBuf::from("/repo"));
         failed.finish(Err("disk full".into()));
         assert_eq!(failed.wait(Duration::ZERO), Ok(Some("disk full".to_string())));
+
+        let org = IndexGate::named("organization `acme`".into());
+        let msg = org.wait(Duration::from_millis(1)).unwrap_err();
+        assert!(msg.starts_with("organization `acme` is still being indexed"), "{msg}");
     }
 
     #[test]
@@ -380,7 +434,12 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("app.py"), "def main():\n    pass\n").unwrap();
         let store = tempfile::tempdir().unwrap();
-        let opts = ServerOptions { store_dir: store.path().into(), root: Some(root.path().into()), auto_index: true };
+        let opts = ServerOptions {
+            store_dir: store.path().into(),
+            root: Some(root.path().into()),
+            auto_index: true,
+            ..ServerOptions::default()
+        };
         assert!(root_to_index(&opts).is_some(), "not indexed yet");
         index_root(root.path(), store.path()).unwrap();
         assert_eq!(root_to_index(&opts), None, "current format is served");
@@ -396,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn six_read_only_tools() {
+    fn read_only_tools() {
         let tools = tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
         assert_eq!(names, rueca_query::TOOL_NAMES);

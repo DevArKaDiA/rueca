@@ -106,8 +106,9 @@ const COMMON_ARGS: &[&str] = &["repo", "ref", "format", "budget_tokens", "cursor
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct CommonArgs {
     /// Repository: an id (`github.com/o/r`, `local/<dir>`) or indexed root path, a list of them,
-    /// or `"*"` for every indexed repository. Default: the server's root, else the repository of
-    /// an `id` argument, else the only indexed repository.
+    /// or `"*"` for every indexed repository. Default: in an organization, every repository (the
+    /// repository of an `id` argument for tools that take one); otherwise the server's root, else
+    /// the repository of an `id` argument, else the only indexed repository.
     pub repo: Option<RepoArg>,
     /// Ref to read: a branch name, `HEAD`, `worktree`, or a commit (full, or a unique prefix of at
     /// least 7 hex digits). Local mode indexes the working tree of each root (its checked-out
@@ -257,6 +258,13 @@ pub struct GetFileOutlineArgs {
     pub common: CommonArgs,
 }
 
+/// Arguments of `list_repositories`.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ListRepositoriesArgs {
+    #[serde(flatten)]
+    pub common: CommonArgs,
+}
+
 /// Generates the JSON schema of an argument type as a plain JSON object
 /// (`type: object`, `properties`, `required`), without `$schema`.
 pub(crate) fn input_schema<T: JsonSchema>() -> Value {
@@ -390,6 +398,7 @@ mod tests {
             input_schema::<GetSnippetArgs>(),
             input_schema::<TraceArgs>(),
             input_schema::<GetFileOutlineArgs>(),
+            input_schema::<ListRepositoriesArgs>(),
         ] {
             let p = &s["properties"];
             assert_eq!(s["additionalProperties"], false);

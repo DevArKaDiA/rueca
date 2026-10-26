@@ -88,6 +88,24 @@ fn envelope(
     Value::Object(m)
 }
 
+/// The snapshots that the items' `s` values refer to, renumbered in snapshot
+/// order, and the old → new `s` map (RFC 0006 §6: a response lists the
+/// snapshots its answer touched, not every snapshot searched). A single
+/// selected snapshot is always listed, also for an empty answer.
+fn touched<'a>(
+    snaps: &[&'a SnapshotDesc],
+    used: impl IntoIterator<Item = usize>,
+) -> (Vec<&'a SnapshotDesc>, HashMap<usize, usize>) {
+    if snaps.len() == 1 {
+        return (snaps.to_vec(), HashMap::from([(0, 0)]));
+    }
+    let mut u: Vec<usize> = used.into_iter().collect();
+    u.sort_unstable();
+    u.dedup();
+    let remap = u.iter().enumerate().map(|(new, &old)| (old, new)).collect();
+    (u.iter().map(|&old| snaps[old]).collect(), remap)
+}
+
 fn with_text(tool: &str, json: Value) -> (Value, String) {
     let text = render_text(tool, &json);
     (json, text)
@@ -169,15 +187,16 @@ pub(crate) fn search_symbols(
 ) -> Response {
     let n = hits.len();
     fit(n.min(1), n, budget, |k| {
+        let (listed, remap) = touched(snaps, hits[..k].iter().map(|(s, _)| *s));
         let items = hits[..k].iter().map(|(s, h)| {
             let mut m = symbol_item(&h.brief, h.signature.as_ref());
             if scores {
                 put(&mut m, "score", sig3(h.score));
             }
-            (*s, h.brief.path.clone(), Value::Object(m))
+            (remap[s], h.brief.path.clone(), Value::Object(m))
         });
         let (truncated, cursor) = next(offset, k, n, more);
-        with_text("search_symbols", envelope(snaps, group(items, "symbols"), truncated, cursor, vec![]))
+        with_text("search_symbols", envelope(&listed, group(items, "symbols"), truncated, cursor, vec![]))
     })
 }
 
@@ -191,6 +210,7 @@ pub(crate) fn search_code(
 ) -> Response {
     let n = matches.len();
     fit(n.min(1), n, budget, |k| {
+        let (listed, remap) = touched(snaps, matches[..k].iter().map(|(s, _)| *s));
         let items = matches[..k].iter().map(|(s, cm)| {
             let mut m = Map::new();
             put(&mut m, "line", cm.line);
@@ -198,11 +218,11 @@ pub(crate) fn search_code(
             put_opt(&mut m, "before", cm.before.clone().filter(|v| !v.is_empty()));
             put_opt(&mut m, "after", cm.after.clone().filter(|v| !v.is_empty()));
             put_opt(&mut m, "symbol", cm.symbol.as_ref().map(|b| Value::Object(brief(b, false))));
-            (*s, Some(cm.path.clone()), Value::Object(m))
+            (remap[s], Some(cm.path.clone()), Value::Object(m))
         });
         let (truncated, cursor) = next(offset, k, n, more);
         let extra = vec![("files_scanned", json!(files_scanned))];
-        with_text("search_code", envelope(snaps, group(items, "matches"), truncated, cursor, extra))
+        with_text("search_code", envelope(&listed, group(items, "matches"), truncated, cursor, extra))
     })
 }
 
@@ -408,6 +428,39 @@ pub(crate) fn outline(snap: &SnapshotDesc, r: &FileOutlineResult, offset: usize,
     })
 }
 
+pub(crate) fn list_repositories(
+    snaps: &[&SnapshotDesc],
+    repos: &[(usize, RepositorySummary)],
+    org: Option<&str>,
+    offset: usize,
+    budget: usize,
+) -> Response {
+    let start = offset.min(repos.len());
+    let page = &repos[start..];
+    let n = page.len();
+    fit(n.min(1), n, budget, |k| {
+        let (listed, remap) = touched(snaps, page[..k].iter().map(|(s, _)| *s));
+        let items: Vec<Value> = page[..k]
+            .iter()
+            .map(|(s, r)| {
+                let mut m = Map::new();
+                put(&mut m, "s", remap[s]);
+                put(&mut m, "repo", r.repo.clone());
+                put(&mut m, "default_ref", r.default_ref.clone());
+                put(&mut m, "refs", json!(r.refs));
+                put(&mut m, "languages", json!(r.languages));
+                put(&mut m, "files", r.files);
+                put(&mut m, "symbols", r.symbols);
+                put(&mut m, "edges", r.edges);
+                Value::Object(m)
+            })
+            .collect();
+        let (truncated, cursor) = next(start, k, n, false);
+        let extra = vec![("org", org.map_or(Value::Null, |o| Value::String(o.to_string())))];
+        with_text("list_repositories", envelope(&listed, Value::Array(items), truncated, cursor, extra))
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Text rendering
 // ---------------------------------------------------------------------------
@@ -440,6 +493,7 @@ pub fn render_text(tool: &str, v: &Value) -> String {
         "get_snippet" => text_get_snippet(&mut out, r),
         "trace" => text_trace(&mut out, r),
         "get_file_outline" => text_outline(&mut out, r),
+        "list_repositories" => text_repositories(&mut out, r, multi),
         _ => out.push_str(&r.to_string()),
     }
     if let Some(o) = v.get("omitted").and_then(Value::as_object) {
@@ -689,6 +743,32 @@ fn text_trace(out: &mut String, r: &Value) {
     }
     if let Some(t) = r["tests_excluded"].as_u64().filter(|&t| t > 0) {
         let _ = writeln!(out, "({t} tests excluded; `include_tests: true` lists them)");
+    }
+}
+
+fn text_repositories(out: &mut String, r: &Value, multi: bool) {
+    for item in r.as_array().into_iter().flatten() {
+        if multi {
+            let _ = write!(out, "[{}] ", item["s"]);
+        }
+        let refs: Vec<&str> = item["refs"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        let _ = write!(
+            out,
+            "{}  refs {}  {} files, {} symbols, {} edges",
+            str_of(item, "repo"),
+            refs.join(", "),
+            item["files"],
+            item["symbols"],
+            item["edges"]
+        );
+        let mut langs: Vec<(&String, u64)> =
+            item["languages"].as_object().into_iter().flatten().map(|(k, v)| (k, v.as_u64().unwrap_or(0))).collect();
+        langs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        if !langs.is_empty() {
+            let parts: Vec<String> = langs.iter().map(|(l, n)| format!("{l} {n}")).collect();
+            let _ = write!(out, "  {}", parts.join(", "));
+        }
+        out.push('\n');
     }
 }
 

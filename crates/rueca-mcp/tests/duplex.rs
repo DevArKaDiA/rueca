@@ -109,7 +109,7 @@ async fn stateless_discover_and_list() {
         result["supportedVersions"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
     assert!(versions.contains(&"2026-07-28") && versions.contains(&"2024-11-05"), "{disc}");
     let list = c.request(2, "tools/list", json!({"_meta": meta()})).await;
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 6, "{list}");
+    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), rueca_query::TOOL_NAMES.len(), "{list}");
     let call = c.request(3, "tools/call", json!({"_meta": meta(), "name": "trace", "arguments": {"bogus": 1}})).await;
     assert_eq!(call["result"]["isError"], true, "{call}");
     assert!(call["result"]["content"][0]["text"].as_str().unwrap().contains("unknown argument `bogus`"));

@@ -1,5 +1,5 @@
 //! The RFC 0005 response contract: pinned ids, the snapshot envelope, `ref`,
-//! several repositories with rank fusion, grouping and short fields, `trace`
+//! several repositories in one ranking (RFC 0006 §6), grouping and short fields, `trace`
 //! edges by index, the token budget with cursors, and the text rendering.
 
 mod common;
@@ -143,21 +143,24 @@ fn ref_argument() {
 }
 
 #[test]
-fn several_repositories_merge_by_rank_fusion() {
+fn several_repositories_in_one_ranking() {
     let t = two();
     for repo in [json!("*"), json!([BILLING, WEB]), json!([WEB, "*"])] {
         let r = call(&t.engine, "search_symbols", json!({"query": "helper", "repo": repo, "scores": true}));
         let snaps: Vec<&str> = r["snapshots"].as_array().unwrap().iter().map(|s| s["repo"].as_str().unwrap()).collect();
         assert_eq!(snaps.len(), 2, "{r}");
         let groups = r["results"].as_array().unwrap();
-        // Rank 1 of each snapshot fuses to 1 / (60 + 1) (prior 1).
+        // One ranking with statistics over both snapshots: the same
+        // definition in two identical repositories has the same BM25 score
+        // (not a fused rank), so the two first groups come from different
+        // snapshots, in snapshot order.
         let top: Vec<(u64, f64)> = groups
             .iter()
             .take(2)
             .map(|g| (g["s"].as_u64().unwrap(), g["symbols"][0]["score"].as_f64().unwrap()))
             .collect();
-        assert_eq!(top.iter().map(|t| t.1).collect::<Vec<_>>(), [0.0164, 0.0164], "{r}");
-        assert_ne!(top[0].0, top[1].0, "the two first groups come from different snapshots: {r}");
+        assert!(top[0].1 > 1.0 && top[0].1 == top[1].1, "{r}");
+        assert_eq!((top[0].0, top[1].0), (0, 1), "{r}");
         // Ids are pinned to their own snapshot.
         for g in groups {
             let repo = snaps[g["s"].as_u64().unwrap() as usize];

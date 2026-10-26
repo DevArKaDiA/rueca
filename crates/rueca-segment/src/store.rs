@@ -146,9 +146,12 @@ impl Store {
         // The catalog no longer points at the replaced segment, so deleting it
         // is best effort: a failure (e.g. a reader still holding it open on a
         // platform that forbids unlinking mapped files) only leaks a file.
-        // Readers that already mapped it keep working on Unix.
+        // Readers that already mapped it keep working on Unix. Segments an
+        // organization generation still reads are kept (the organization
+        // deletes them when it drops that generation).
+        let pinned = crate::org::referenced_segments(&self.dir);
         for old in replaced {
-            if old != meta.id && !entries.iter().any(|e| e.segment_id == old) {
+            if old != meta.id && !entries.iter().any(|e| e.segment_id == old) && !pinned.contains(&old) {
                 let _ = fs::remove_file(self.segment_path(&old));
             }
         }
