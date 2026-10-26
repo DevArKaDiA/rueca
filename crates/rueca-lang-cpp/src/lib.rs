@@ -54,9 +54,16 @@
 //! std::string&, int)`; names, default values and attributes dropped,
 //! `(void)` written `()`, a C variadic as `...`); a declaration and its body
 //! with the same parameters share the suffix, so the declaration still
-//! links to its body. Names that are not overloaded stay bare. The resolver
+//! links to its body. Callables with the same parameter types are told
+//! apart by a comment at the end of the list, which lookups and arities
+//! ignore: their cv / ref qualifiers when those differ (`get()` and
+//! `get(/*const*/)`), then, for another body with the same suffix (SFINAE
+//! overloads, one body per `#if` branch), its ordinal (`write(OutputIt,
+//! T/*#2*/)`); before, the second merged into the first and was lost.
+//! Names that are not overloaded stay bare. The resolver
 //! picks an overload by argument count (read from the signature, so
-//! default arguments are optional), else links all of them at × 0.8;
+//! default arguments are optional), then by the argument types the call
+//! carries (*References*), else links all of them at × 0.8;
 //! `qualified_name` lookups treat the suffix as optional. An overload set
 //! split across files (one `vformat` per header) is one set in the
 //! resolver: bare same-name callables join it (`rueca-resolve`, *RFC 0003
@@ -65,7 +72,10 @@
 //! **Templates** are named without arguments (`Vec`, `clamp_value`); a
 //! class template **specialization** (explicit or partial) is its own
 //! class, named with its arguments (`Vec<bool>`, `formatter<std::tm,
-//! Char>`), so the members of distinct specializations do not merge. An
+//! Char>`), so the members of distinct specializations do not merge; so is
+//! an explicit specialization of a function template (`template <> int
+//! num_bits<int128_opt>()` → `num_bits<int128_opt>`, name `num_bits`), so
+//! calls bind the primary template. An
 //! out-of-line member of the primary template (`template <typename Char>
 //! void basic_string_view<Char>::f()`, arguments = the template's
 //! parameters) belongs to the template (`basic_string_view::f`).
@@ -75,7 +85,8 @@
 //! | Source | Label | Notes |
 //! |---|---|---|
 //! | function definition (also `static`, `inline`, templates, trailing return) | `Function` | `exported`, also when `static` or in an anonymous namespace (`#include` is textual: a header's `static inline` helper is visible to its includers) |
-//! | prototype `void f(int);` | `Function`, `is_declaration` | |
+//! | prototype `void f(int);` | `Function`, `is_declaration` | also with a parenthesized name, `int (lua_gettop) (lua_State *L);` (Lua's API) |
+//! | `friend` function defined in a class | `Function` of the enclosing namespace | `friend bool operator==(A, A) {…}` → `ns::operator==` |
 //! | `class` | `Class` | `bases` from the base clause; default access private |
 //! | `struct`, `union` | `Struct` | default access public; anonymous struct / union members belong to the enclosing class |
 //! | `enum`, `enum class` | `Enum` | enumerators → `Constant` children |
@@ -143,7 +154,24 @@
 //!   calls**: a call of a function-like macro of the file or of an
 //!   upper-case name (`GEO_SQ(r)`, `FMT_ASSERT(…)`) is a `Read` (a
 //!   `REFERENCES` edge to the macro), since the code it expands to runs at
-//!   the call site; its arguments are code as usual.
+//!   the call site; its arguments are code as usual. The calls the
+//!   macro's **body** makes are `Call`s enclosed by the macro's definition
+//!   (`#define lua_pop(L,n) lua_settop(L, -(n)-1)` calls `lua_settop`),
+//!   read lexically (`macros.rs`: a name or `a::b::name` before `(`, not a
+//!   parameter, keyword, member call or pasted token); the resolver passes
+//!   them on to every user of the macro (`rueca-resolve`, *Macro
+//!   expansion*). A macro defined once per branch of an `#if` group
+//!   reports the calls of one definition, the first that is not for
+//!   release builds (`#ifdef NDEBUG`), as one configuration would
+//!   (`FMT_ASSERT` calls `assert_fail`, not `ignore_unused`).
+//! - **Argument types** (C++): a call or construction whose arguments
+//!   include literals (`1` → `int`, `'a'` → `char`, `"s"` → `char*`,
+//!   `1.0` → `double`, `true` → `bool`), casts (`static_cast<char>(v)`,
+//!   `(int)x`), `std::string(…)` / constructions of the file's classes, or
+//!   locals and parameters with a declared type (not a template type
+//!   parameter; `const std::string& s` → `string`) carries their types in
+//!   its name (`Write$args:char`, `rueca_extract::with_arg_types`; `?` for
+//!   the others), for overload choice in the resolver.
 //! - **Qualified calls** `Q::f()`: a qualifier rooted in `std`, `testing`,
 //!   `Catch`, `doctest` or `__gnu_cxx` is kept as receiver (external). A
 //!   qualifier that is a type — written with template arguments, written
@@ -232,7 +260,16 @@
 //!    default arguments, `enum : T`, `typename` in expressions, keyword
 //!    arguments of test macros (`TEST(s, enum)`), `decltype(a, b)`,
 //!    explicit instantiations, `= delete` declarations, member pointers,
-//!    Qt `signals:` (the table in `repair.rs`) — or the `#if` group next
+//!    Qt `signals:` and access macros (`JSON_PRIVATE_UNLESS_TESTED:`),
+//!    declaration macros after `static` (`static MP_DEFINE_CONST_DICT(…);`),
+//!    macros wrapping declarations or statements (`LUAI_DDEC(…;)`,
+//!    `LUAI_TRY(L, c, f(););`), operators and empty statements as macro
+//!    arguments (`intop(+, a, b)`, `EXPECT_NO_FATAL_FAILURE(;)`), empty
+//!    arguments, attribute macros around a declaration, `asm` macros and
+//!    labels, a subscripted macro call first in a block
+//!    (`MP_STATE_PORT(h)[i] = c;`), `using ns::MACRO(name);`, unnamed
+//!    pointer template parameters with a default (the table in
+//!    `repair.rs`) — or the `#if` group next
 //!    to the error collapses (keeping the branch with the error). A round
 //!    is kept only when the error count drops (each site is retried alone
 //!    when a whole round does not help), at most six rounds and 32 parses
@@ -258,7 +295,10 @@
 //! after): hiredis 17.0 → 0.0%, jq 26.7 → 1.3% (the Bison parser), cJSON
 //! (with its vendored Unity) 31.3 → 0.0%, redis `src/` 15.3 → 0.5%
 //! (`redismodule.h`), fmt 37.1 → 5.7% (1.5% without the vendored
-//! GoogleTest / gMock).
+//! GoogleTest / gMock). On the benchmark corpus (RFC 0004 health, gated
+//! repositories): C 12.0 → 3.1% (micropython 16.7 → 2.7%, Lua 14.7 →
+//! 1.5%), C++ 11.3 → 7.0% (nlohmann/json 11.6 → 4.9%, simdjson 11.7 →
+//! 5.0%; most of the rest is vendored GoogleTest and Objective-C).
 //!
 //! # Deviations and limitations
 //!
@@ -275,9 +315,11 @@
 //!   file is typed by the resolver (`$member:`), not here.
 //! - Lower-case macros are not masked before parsing; the repairs blank
 //!   them where the grammar fails (`ffc_inline`, `__unused`).
-//! - ADL, overload choice by argument types, calls through function
-//!   pointers and virtual dispatch are not modelled (RFC 0003 §10.3
-//!   *Heuristic*).
+//! - Argument types are known only for literals, casts, constructions and
+//!   declared locals (not fields, calls or template-dependent expressions);
+//!   overloads that differ only by template constraints are all linked.
+//!   ADL, calls through function pointers and virtual dispatch are not
+//!   modelled (RFC 0003 §10.3 *Heuristic*).
 //! - C++20 modules are out of scope.
 
 mod builtins;
@@ -285,6 +327,7 @@ mod cond;
 mod extract;
 mod includes;
 mod locals;
+mod macros;
 mod mask;
 mod preprocess;
 mod repair;
@@ -336,7 +379,7 @@ impl LanguagePack for CppPack {
         &[Language::Cpp, Language::C]
     }
     fn extractor_version(&self) -> u32 {
-        2
+        3
     }
     fn extract(
         &self,

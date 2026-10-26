@@ -199,7 +199,13 @@
 //!   the one whose parameters pass to every other's (the narrowest
 //!   primitives), wins. One candidate keeps the confidence; several are all
 //!   linked × 0.8; none fitting links the whole set × 0.8. Constructors of
-//!   Java and C/C++ are the members named like the class.
+//!   Java and C/C++ are the members named like the class. A trailing
+//!   comment in a suffix (C/C++ `get(/*const*/)`, `write(T/*#2*/)`: same
+//!   parameters, other qualifiers or constraints) is not a parameter. For
+//!   C/C++, a reference parameter binds an argument of its type, a string
+//!   literal (`char*`) is matched exactly by a `string` / `string_view`
+//!   parameter, never by a primitive one, and parameters past the
+//!   arguments are defaults.
 //! - **`OVERRIDES`** (`overrides`): a method of a type → the method with the
 //!   same name in each resolved base (`TypeResolved` 0.90), paired by
 //!   signature when the base has overloads: the parameter count must match
@@ -211,7 +217,8 @@
 //!   suffixes per file, so a set split across files has bare members); bare
 //!   members alone form a set only when their arities differ. C/C++ arity
 //!   comes from the signature (default arguments optional, `...` and
-//!   parameter packs variadic), else from the suffix.
+//!   parameter packs variadic), else from the suffix, and an out-of-line
+//!   body's range covers its declarations' (defaults are written there).
 //!   A C/C++ declaration stands for its body at either end of `OVERRIDES`.
 //! - **C++ namespaces** (C family): rung 1c, after implicit self — a
 //!   receiver-less name inside `a::b::f` is the definition named exactly
@@ -233,8 +240,21 @@
 //! - **`$member:a.b`** receivers (C++ members whose types are declared in
 //!   another file): member `a` of the enclosing type (through bases), its
 //!   declared type (the member's first `Type` reference, resolved in its
-//!   file), member `b` of that type, then the name (`TypeResolved` 0.85). A
-//!   first segment that is no member falls back to the unique-method rung.
+//!   file; `std::unique_ptr<T>` / `std::shared_ptr<T>` stand for `T`),
+//!   member `b` of that type, then the name (`TypeResolved` 0.85). A first
+//!   segment that is no member falls back to the unique-method rung.
+//! - **`$type:Q` that names no type** (C family): `Q::name` is looked up
+//!   as a namespace-qualified name (`Exp::Break()` with `namespace Exp`
+//!   declared in another file) before the unique-method rung.
+//! - **Macro expansion** (C family, after references): a pack reports the
+//!   calls in a macro's body as calls of the macro's definition (a node
+//!   whose signature starts with `#`). A definition that uses the macro —
+//!   a `CALLS` edge (a lower-case macro called like a function) or a
+//!   `REFERENCES` edge (a macro invocation) — also `CALLS` the definitions
+//!   the body calls, through nested macros (depth ≤ 8, cycle-safe), with
+//!   the use's strategy and call site and the product of the confidences ×
+//!   0.95: `lua_pop(L, 1)` calls `lua_settop`, `FMT_ASSERT(…)` calls
+//!   `assert_fail` (`hooks::expand_macro_calls`).
 //!
 //! # Go
 //!
@@ -427,6 +447,7 @@ pub fn resolve(
     r.override_edges();
     r.go_implicit_interfaces();
     r.resolve_references();
+    r.expand_macro_calls();
     r.env_provider_edges();
     r.tests_edges();
 
@@ -568,6 +589,8 @@ struct Resolver<'a> {
     inline_aliases: Vec<(String, String)>,
     /// C/C++ body → files of the declarations paired with it.
     declared_in: HashMap<NodeId, Vec<FileId>>,
+    /// C/C++ body → its declarations (`body_of` reversed), sorted.
+    decls_of: HashMap<NodeId, Vec<NodeId>>,
     /// C/C++ file → files it sees through includes (memo).
     visible_memo: RefCell<HashMap<FileId, std::rc::Rc<HashSet<FileId>>>>,
 
@@ -864,6 +887,7 @@ impl<'a> Resolver<'a> {
             by_base_qn: OnceCell::new(),
             inline_aliases: Vec::new(),
             declared_in: HashMap::new(),
+            decls_of: HashMap::new(),
             visible_memo: RefCell::new(HashMap::new()),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),

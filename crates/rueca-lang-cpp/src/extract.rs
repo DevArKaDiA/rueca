@@ -17,7 +17,7 @@ use std::rc::Rc;
 use rueca_extract::tree_sitter::Node;
 use rueca_extract::{
     Budget, ExtractError, MEMBER_RECEIVER_PREFIX, count_errors, line_count, member_receiver, namespace_receiver,
-    span_of, type_receiver,
+    span_of, type_receiver, with_arg_types,
 };
 use rueca_model::{Definition, FileFacts, Import, ImportedName, Label, Language, LocalDefId, RefKind, Reference, Span};
 
@@ -44,7 +44,21 @@ const GTEST_MACROS: &[&str] = &["TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED
 pub(crate) const C_TEST_MACROS: &[&str] = &["TEST", "TEST_F", "IGNORE_TEST", "TEST_SETUP", "TEST_TEAR_DOWN"];
 
 /// Catch2 / doctest macros: `TEST_CASE("title", "[tags]") {}`.
-const CATCH_MACROS: &[&str] = &["TEST_CASE", "TEST_CASE_METHOD", "SCENARIO", "TEMPLATE_TEST_CASE", "TEST_CASE_FIXTURE"];
+const CATCH_MACROS: &[&str] = &[
+    "CATCH_SCENARIO",
+    "CATCH_TEST_CASE",
+    "CATCH_TEST_CASE_METHOD",
+    "SCENARIO",
+    "TEMPLATE_LIST_TEST_CASE",
+    "TEMPLATE_PRODUCT_TEST_CASE",
+    "TEMPLATE_TEST_CASE",
+    "TEMPLATE_TEST_CASE_SIG",
+    "TEST_CASE",
+    "TEST_CASE_FIXTURE",
+    "TEST_CASE_METHOD",
+    "TEST_CASE_TEMPLATE",
+    "TEST_CASE_TEMPLATE_DEFINE",
+];
 
 /// Namespaces outside every project: a qualified name rooted here is
 /// reported with the namespace as receiver, which the resolver treats as
@@ -134,7 +148,22 @@ struct DeclName<'t> {
     global: bool,
     /// The last qualifier segment has template arguments (`Box<T>::get`).
     template_scope: bool,
+    /// Template arguments of an explicit specialization of a function
+    /// template (`template <> int num_bits<int128_opt>()` → `<int128_opt>`).
+    targs: Option<String>,
     node: Node<'t>,
+}
+
+impl DeclName<'_> {
+    /// The last segment of the qualified name: the name, with the
+    /// arguments of a specialization (its own definition, like a class
+    /// template specialization, so calls bind the primary template).
+    fn qn_name(&self) -> String {
+        match &self.targs {
+            Some(a) => format!("{}{a}", self.name),
+            None => self.name.clone(),
+        }
+    }
 }
 
 struct Extractor<'s, 't> {
@@ -164,6 +193,13 @@ struct Extractor<'s, 't> {
     benign_errors: u32,
     /// Function-like macros defined in the file.
     fn_macros: HashSet<String>,
+    /// (macro, `#if` group) pairs whose calls are reported: one definition
+    /// per group (`expands_here`).
+    macro_groups: HashSet<(String, usize)>,
+    /// C++: static argument types of the call being emitted (overload
+    /// choice, `rueca_extract::with_arg_types`).
+    call_args: Option<Vec<Option<String>>>,
+    cpp: bool,
     /// Callable qualified name (no overload suffix) → declared return type
     /// (`None` when overloads disagree or the type is not a class name).
     returns: HashMap<String, Option<String>>,
@@ -278,14 +314,16 @@ fn strip_template_args(s: &str) -> String {
 }
 
 /// The `function_declarator` of a function declarator chain (`*f()`,
-/// `&f()`, `f() [[attr]]`), unless it declares a function pointer
-/// (`(*fp)(int)`), which is a variable.
+/// `&f()`, `f() [[attr]]`, a parenthesized name `int (lua_gettop) (…)`, as
+/// Lua declares its API to keep macros of the same name out), unless it
+/// declares a function pointer (`(*fp)(int)`), which is a variable.
 fn function_declarator(mut node: Node<'_>) -> Option<Node<'_>> {
     for _ in 0..16 {
         match node.kind() {
             "function_declarator" => {
                 let inner = node.child_by_field_name("declarator")?;
-                return (inner.kind() != "parenthesized_declarator").then_some(node);
+                return (inner.kind() != "parenthesized_declarator" || parenthesized_name(inner).is_some())
+                    .then_some(node);
             }
             "pointer_declarator" | "attributed_declarator" => node = node.child_by_field_name("declarator")?,
             "reference_declarator" => node = named_kids(node).into_iter().next()?,
@@ -293,6 +331,101 @@ fn function_declarator(mut node: Node<'_>) -> Option<Node<'_>> {
         }
     }
     None
+}
+
+/// The cv / ref qualifiers written after the parameter list of `name` in
+/// a signature: `const node& get() const` → `const`, `T&& value() &&` →
+/// `&&`, none → empty.
+fn trailing_qualifiers(signature: &str, name: &str) -> String {
+    let ident = |c: char| c.is_alphanumeric() || c == '_';
+    let mut from = 0;
+    while let Some(i) = signature[from..].find(name).map(|i| i + from) {
+        from = i + name.len();
+        let rest = signature[from..].trim_start();
+        if signature[..i].ends_with(ident) || !rest.starts_with('(') {
+            continue;
+        }
+        let open = signature.len() - rest.len();
+        let mut depth = 0i32;
+        let mut close = None;
+        for (k, c) in signature[open..].char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(open + k + 1);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(close) = close else { return String::new() };
+        let mut out = String::new();
+        let mut rest = &signature[close..];
+        loop {
+            rest = rest.trim_start();
+            let tok = ["const", "volatile", "&&", "&"]
+                .into_iter()
+                .find(|t| rest.starts_with(t) && (t.starts_with('&') || !rest[t.len()..].starts_with(ident)));
+            let Some(tok) = tok else { break };
+            out.push_str(tok);
+            rest = &rest[tok.len()..];
+        }
+        return out;
+    }
+    String::new()
+}
+
+/// A macro definition's name.
+fn name_of_macro(node: Node<'_>, src: &[u8]) -> String {
+    node.child_by_field_name("name").map(|n| text(n, src).into_owned()).unwrap_or_default()
+}
+
+/// Whether a preprocessor branch is compiled only in release builds:
+/// `#ifdef NDEBUG`, `#if defined(NDEBUG)` / `#elif NDEBUG`, or the `#else`
+/// of `#ifndef NDEBUG` / `#if !defined(NDEBUG)`.
+fn release_branch(branch: Node<'_>, src: &[u8]) -> bool {
+    // Some(true): NDEBUG defined, Some(false): NDEBUG undefined. Read from
+    // the original directive line (the parsed text has conditions masked).
+    let says = |b: Node<'_>| -> Option<bool> {
+        let start = b.start_byte();
+        let end = src[start..].iter().position(|c| *c == b'\n').map_or(src.len(), |k| start + k);
+        let line = String::from_utf8_lossy(&src[start..end]);
+        let rest = line.trim_start().strip_prefix('#')?.trim_start();
+        let word_end = rest.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(rest.len());
+        let (word, rest) = rest.split_at(word_end);
+        let c: String = rest.chars().filter(|c| !c.is_whitespace()).collect();
+        let (negated, cond) = if matches!(word, "ifndef" | "elifndef") {
+            (true, c)
+        } else if matches!(word, "ifdef" | "elifdef") {
+            (false, c)
+        } else if matches!(word, "if" | "elif") {
+            if !c.contains("NDEBUG") {
+                return None;
+            }
+            let neg = c.contains("!defined(NDEBUG)") || c.contains("!definedNDEBUG") || c.contains("!NDEBUG");
+            return Some(!neg);
+        } else {
+            return None;
+        };
+        (cond == "NDEBUG").then_some(!negated)
+    };
+    match branch.kind() {
+        "preproc_else" => branch.parent().and_then(says) == Some(false),
+        _ => says(branch) == Some(true),
+    }
+}
+
+/// The name inside a parenthesized declarator that holds only a name
+/// (`(lua_gettop)`), not a pointer or another declarator.
+fn parenthesized_name(node: Node<'_>) -> Option<Node<'_>> {
+    let kids: Vec<Node<'_>> = named_kids(node).into_iter().filter(|c| c.kind() != "comment").collect();
+    match kids.as_slice() {
+        [n] if matches!(n.kind(), "identifier" | "field_identifier" | "qualified_identifier") => Some(*n),
+        _ => None,
+    }
 }
 
 /// An operator function's name as declarations spell it: `operator ==` →
@@ -338,6 +471,9 @@ impl<'s, 't> Extractor<'s, 't> {
             globals: HashMap::new(),
             benign_errors: 0,
             fn_macros: HashSet::new(),
+            macro_groups: HashSet::new(),
+            call_args: None,
+            cpp: false,
             returns: HashMap::new(),
             ns_events: Vec::new(),
         }
@@ -615,6 +751,18 @@ impl<'s, 't> Extractor<'s, 't> {
                 }
             }
             "function_definition" => self.function_def(node, outer, ctx, public),
+            // A friend function defined in a class is a function of the
+            // enclosing namespace (found by argument-dependent lookup).
+            "friend_declaration" if ctx.class.is_some() => {
+                let mut c = ctx.clone();
+                c.class = None;
+                c.parent = None;
+                for k in named_kids(node) {
+                    if k.kind() == "function_definition" {
+                        self.function_def(k, outer, &c, true);
+                    }
+                }
+            }
             "declaration" => self.declaration(node, outer, ctx, public, depth),
             "field_declaration" => self.field_declaration(node, outer, ctx, public, depth),
             "class_specifier" | "struct_specifier" | "union_specifier" => {
@@ -689,10 +837,12 @@ impl<'s, 't> Extractor<'s, 't> {
             qualifier: Vec::new(),
             global: false,
             template_scope: false,
+            targs: None,
             node: n,
         };
         match node.kind() {
             "identifier" | "field_identifier" | "type_identifier" => Some(simple(self.t(node), node)),
+            "parenthesized_declarator" => self.decl_name(parenthesized_name(node)?),
             "destructor_name" => Some(simple(format!("~{}", self.t(node).trim_start_matches('~').trim()), node)),
             "operator_name" => {
                 let raw = collapse(&self.t(node));
@@ -707,7 +857,8 @@ impl<'s, 't> Extractor<'s, 't> {
             }
             "template_function" => {
                 let name = node.child_by_field_name("name")?;
-                Some(simple(self.t(name), name))
+                let targs = node.child_by_field_name("arguments").map(|a| truncate(tidy(&self.t(a)), 160));
+                Some(DeclName { targs, ..simple(self.t(name), name) })
             }
             "qualified_identifier" => {
                 let global = self.t(node).trim_start().starts_with("::");
@@ -733,7 +884,7 @@ impl<'s, 't> Extractor<'s, 't> {
                         continue;
                     }
                     let leaf = self.decl_name(name)?;
-                    return Some(DeclName { name: leaf.name, qualifier, global, template_scope, node: leaf.node });
+                    return Some(DeclName { qualifier, global, template_scope, ..leaf });
                 }
                 None
             }
@@ -756,7 +907,7 @@ impl<'s, 't> Extractor<'s, 't> {
             self.class_members.entry(class.qn.clone()).or_default().insert(dn.name.clone());
             return (
                 Label::Method,
-                join_qn(std::slice::from_ref(&class.qn), &dn.name),
+                join_qn(std::slice::from_ref(&class.qn), &dn.qn_name()),
                 Some(class.def),
                 public,
                 Some(class.qn.clone()),
@@ -766,7 +917,7 @@ impl<'s, 't> Extractor<'s, 't> {
             let mut owner = if dn.global { Vec::new() } else { Self::owner(ctx) };
             owner.extend(dn.qualifier.iter().cloned());
             let owner_qn = owner.join("::");
-            let qn = join_qn(std::slice::from_ref(&owner_qn), &dn.name);
+            let qn = join_qn(std::slice::from_ref(&owner_qn), &dn.qn_name());
             let last = dn.qualifier.last().map(String::as_str).unwrap_or("");
             let namespace = !dn.template_scope && self.known_ns.contains(last) && !self.known_types.contains(last);
             return if namespace {
@@ -775,7 +926,7 @@ impl<'s, 't> Extractor<'s, 't> {
                 (Label::Method, qn, None, false, Some(owner_qn))
             };
         }
-        (Label::Function, join_qn(&ctx.ns, &dn.name), ctx.parent, true, None)
+        (Label::Function, join_qn(&ctx.ns, &dn.qn_name()), ctx.parent, true, None)
     }
 
     fn function_def(&mut self, node: Node<'t>, outer: Node<'t>, ctx: &Ctx, public: bool) {
@@ -892,7 +1043,13 @@ impl<'s, 't> Extractor<'s, 't> {
             return false;
         }
         let args = call.child_by_field_name("arguments").map(named_kids).unwrap_or_default();
-        let Some(title_node) = args.iter().copied().find(|a| a.kind() == "string_literal") else { return false };
+        // `TEST_CASE("title")`, doctest `TEST_CASE("title" * doctest::skip())`.
+        let literal = |a: Node<'t>| match a.kind() {
+            "string_literal" => Some(a),
+            "binary_expression" => a.child_by_field_name("left").filter(|l| l.kind() == "string_literal"),
+            _ => None,
+        };
+        let Some(title_node) = args.iter().copied().find_map(literal) else { return false };
         let title = named_kids(title_node)
             .into_iter()
             .find(|c| c.kind() == "string_content")
@@ -1511,7 +1668,7 @@ impl<'s, 't> Extractor<'s, 't> {
             }
         }
         let sig = truncate(collapse(&strip_comments(&joined)), crate::text::MAX_SIGNATURE);
-        self.push(NewDef {
+        let id = self.push(NewDef {
             label: if function_like { Label::Function } else { Label::Constant },
             name: name.clone(),
             qn: name,
@@ -1526,6 +1683,87 @@ impl<'s, 't> Extractor<'s, 't> {
             bases: Vec::new(),
             params: None,
         });
+        if let Some(value) = node.child_by_field_name("value")
+            && self.expands_here(node, &name_of_macro(node, self.src))
+        {
+            self.macro_body_calls(node, value, id);
+        }
+    }
+
+    /// Whether the calls of this definition of a macro are reported. A
+    /// macro defined once per branch of an `#if` group is expanded as one
+    /// configuration would: the first branch that defines it, skipping a
+    /// branch for release builds (`NDEBUG` defined), since a compilation
+    /// database describes a development build (`FMT_ASSERT` calls
+    /// `assert_fail`, not `ignore_unused`).
+    fn expands_here(&mut self, node: Node<'t>, name: &str) -> bool {
+        const BRANCHES: &[&str] = &["preproc_if", "preproc_ifdef", "preproc_elif", "preproc_elifdef", "preproc_else"];
+        let Some(branch) = node.parent().filter(|p| BRANCHES.contains(&p.kind())) else { return true };
+        if release_branch(branch, self.src) {
+            return false;
+        }
+        let mut root = branch;
+        while matches!(root.kind(), "preproc_elif" | "preproc_elifdef" | "preproc_else")
+            && let Some(p) = root.parent().filter(|p| BRANCHES.contains(&p.kind()))
+        {
+            root = p;
+        }
+        self.macro_groups.insert((name.to_string(), root.start_byte()))
+    }
+
+    /// The calls a macro's replacement list makes (`macros.rs`), as calls
+    /// of the macro's definition: the resolver links every caller of the
+    /// macro to them (`rueca-resolve`, *Macro expansion*).
+    fn macro_body_calls(&mut self, node: Node<'t>, value: Node<'t>, id: LocalDefId) {
+        let params: Vec<String> = node
+            .child_by_field_name("parameters")
+            .map(named_kids)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.kind() == "identifier")
+            .map(|p| self.t(p))
+            .collect();
+        let base = value.start_byte();
+        let body = &self.src[base..value.end_byte()];
+        let pos = value.start_position();
+        for c in crate::macros::body_calls(body, &params) {
+            let before = &body[..c.start];
+            let newlines = before.iter().filter(|b| **b == b'\n').count();
+            let (line, col) = match before.iter().rposition(|b| *b == b'\n') {
+                Some(nl) => (pos.row + newlines, c.start - nl - 1),
+                None => (pos.row, pos.column + c.start),
+            };
+            let span = Span {
+                start_byte: (base + c.start) as u32,
+                end_byte: (base + c.end) as u32,
+                start_line: line as u32,
+                start_col: col as u32,
+                end_line: line as u32,
+                end_col: (col + c.end - c.start) as u32,
+            };
+            let receiver = if c.qualifier.is_empty() && !c.global {
+                None
+            } else if BUILTIN_NAMESPACES.contains(&c.qualifier.split("::").next().unwrap_or("")) {
+                Some(c.qualifier.clone())
+            } else if c.qualifier.rsplit("::").next().is_some_and(|l| l.starts_with(|ch: char| ch.is_ascii_uppercase()))
+            {
+                Some(type_receiver(&c.qualifier))
+            } else {
+                let path = if c.global { format!("::{}", c.qualifier) } else { c.qualifier.clone() };
+                Some(namespace_receiver(if path == "::" { "" } else { &path }))
+            };
+            if self.refs.len() >= MAX_REFS {
+                return;
+            }
+            self.refs.push(Reference {
+                kind: RefKind::Call,
+                name: c.name,
+                receiver,
+                enclosing: Some(id),
+                span,
+                arity: Some(c.arity),
+            });
+        }
     }
 
     /// Includes, read lexically (they survive parse errors around them).
@@ -1594,7 +1832,86 @@ impl<'s, 't> Extractor<'s, 't> {
                 return;
             }
         }
-        self.refs.push(Reference { kind, name: name.to_string(), receiver, enclosing: enc, span: span_of(at), arity });
+        let name = match (&self.call_args, kind) {
+            (Some(types), RefKind::Call) => with_arg_types(name, types),
+            _ => name.to_string(),
+        };
+        self.refs.push(Reference { kind, name, receiver, enclosing: enc, span: span_of(at), arity });
+    }
+
+    /// C++: static types of a call's arguments, when any is known
+    /// (literals, and locals and parameters with a declared type; a
+    /// template type parameter is unknown), as `rueca_extract::with_arg_types`
+    /// writes them.
+    fn arg_types(&self, args: Option<Node<'_>>) -> Option<Vec<Option<String>>> {
+        if !self.cpp {
+            return None;
+        }
+        let types: Vec<Option<String>> = named_kids(args?).into_iter().map(|a| self.arg_type(a)).collect();
+        types.iter().any(Option::is_some).then_some(types)
+    }
+
+    fn arg_type(&self, a: Node<'_>) -> Option<String> {
+        let t = match a.kind() {
+            "number_literal" => {
+                let n = self.t(a).to_ascii_lowercase().replace('\'', "");
+                let hex = n.starts_with("0x");
+                if !hex && (n.contains('.') || n.contains('e')) {
+                    if n.ends_with('f') { "float" } else { "double" }
+                } else if n.contains('u') {
+                    return None;
+                } else if n.ends_with('l') {
+                    "long"
+                } else {
+                    "int"
+                }
+            }
+            "char_literal" => "char",
+            "string_literal" | "concatenated_string" | "raw_string_literal" => "char*",
+            "true" | "false" => "bool",
+            "parenthesized_expression" => return named_kids(a).first().and_then(|e| self.arg_type(*e)),
+            // `(char)x`, `static_cast<char>(x)`.
+            "cast_expression" => {
+                let t = a.child_by_field_name("type")?;
+                return crate::locals::arg_type_text(&self.t(t), 0);
+            }
+            "call_expression" => {
+                let f = a.child_by_field_name("function")?;
+                return match f.kind() {
+                    "template_function" => {
+                        let name = self.t(f.child_by_field_name("name")?);
+                        if !CASTS.contains(&name.as_str()) {
+                            return None;
+                        }
+                        let targs = f.child_by_field_name("arguments")?;
+                        crate::locals::arg_type_text(&self.t(*named_kids(targs).first()?), 0)
+                    }
+                    // A construction: `std::string(v)`, `Foo(1)`.
+                    "qualified_identifier" | "identifier" => {
+                        let written = self.t(f);
+                        let last = written.rsplit("::").next().unwrap_or(&written).trim().to_string();
+                        let std_type = written.trim_start_matches("::").starts_with("std::")
+                            && matches!(last.as_str(), "string" | "string_view" | "wstring");
+                        (std_type || self.classes_by_name.contains_key(&last))
+                            .then(|| crate::locals::arg_type_text(&last, 0))
+                            .flatten()
+                    }
+                    _ => None,
+                };
+            }
+            "identifier" => {
+                let pos = a.start_byte() as u32;
+                let b = self.locals.lookup(&self.t(a), pos)?;
+                let arg = b.arg.clone()?;
+                let core = arg.trim_end_matches('*');
+                if b.kind == DefKind::Type || self.locals.lookup(core, pos).is_some_and(|t| t.kind == DefKind::Type) {
+                    return None;
+                }
+                return Some(arg);
+            }
+            _ => return None,
+        };
+        Some(t.to_string())
     }
 
     fn is_local(&self, node: Node<'_>) -> bool {
@@ -1709,6 +2026,12 @@ impl<'s, 't> Extractor<'s, 't> {
     #[inline(never)]
     fn constructor_call(&mut self, ty: Node<'t>, args: Node<'t>, enc: Option<LocalDefId>, cx: usize) {
         let arity = self.arity(Some(args));
+        self.call_args = self.arg_types(Some(args));
+        self.constructor_ref(ty, arity, enc, cx);
+        self.call_args = None;
+    }
+
+    fn constructor_ref(&mut self, ty: Node<'t>, arity: Option<u32>, enc: Option<LocalDefId>, cx: usize) {
         match ty.kind() {
             "type_identifier" => {
                 if !self.is_local(ty) {
@@ -1718,7 +2041,7 @@ impl<'s, 't> Extractor<'s, 't> {
             }
             "template_type" => {
                 if let Some(n) = ty.child_by_field_name("name") {
-                    self.constructor_call(n, args, enc, cx);
+                    self.constructor_ref(n, arity, enc, cx);
                 }
             }
             "qualified_identifier" => {
@@ -2232,7 +2555,9 @@ impl<'s, 't> Extractor<'s, 't> {
     fn call(&mut self, node: Node<'t>, enc: Option<LocalDefId>, cx: usize, depth: usize) {
         let args = node.child_by_field_name("arguments");
         if let Some(f) = node.child_by_field_name("function") {
+            self.call_args = self.arg_types(args);
             self.callee(f, RefKind::Call, self.arity(args), enc, cx);
+            self.call_args = None;
             self.env_read(f, args, enc);
             self.callee_parts(f, enc, cx, depth);
         }
@@ -2466,20 +2791,62 @@ impl<'s, 't> Extractor<'s, 't> {
 
     /// Overload suffixes: callables sharing a qualified name with different
     /// parameter lists in this file get `(<parameter types>)` appended.
+    /// Callables with the same parameter types are told apart by a comment
+    /// at the end of the list, which lookups and arities ignore: their cv /
+    /// ref qualifiers (`get()` and `get(/*const*/)`), then, for a repeated
+    /// body (SFINAE overloads, one body per `#if` branch), its ordinal
+    /// among the bodies (`write(OutputIt, T/*#2*/)`). A declaration and its
+    /// body keep the same suffix.
     fn overload_suffixes(&mut self) {
-        let mut groups: HashMap<&str, BTreeSet<&str>> = HashMap::new();
-        for (d, p) in self.defs.iter().zip(&self.params) {
+        let quals: Vec<String> = self
+            .defs
+            .iter()
+            .zip(&self.params)
+            .map(|(d, p)| match (p, d.signature.as_deref()) {
+                (Some(_), Some(s)) => trailing_qualifiers(s, &d.name),
+                _ => String::new(),
+            })
+            .collect();
+        // Qualifiers matter only between callables with the same parameters.
+        let mut qual_sets: HashMap<(&str, &str), BTreeSet<&str>> = HashMap::new();
+        for ((d, p), q) in self.defs.iter().zip(&self.params).zip(&quals) {
             if let Some(p) = p {
-                groups.entry(d.qualified_name.as_str()).or_default().insert(p.as_str());
+                qual_sets.entry((d.qualified_name.as_str(), p.as_str())).or_default().insert(q.as_str());
+            }
+        }
+        let mut variants: Vec<Option<String>> = Vec::with_capacity(self.defs.len());
+        let mut bodies: HashMap<(String, String), u32> = HashMap::new();
+        for ((d, p), q) in self.defs.iter().zip(&self.params).zip(&quals) {
+            let Some(p) = p else {
+                variants.push(None);
+                continue;
+            };
+            let mut tags = Vec::new();
+            if !q.is_empty() && qual_sets.get(&(d.qualified_name.as_str(), p.as_str())).is_some_and(|s| s.len() > 1) {
+                tags.push(q.clone());
+            }
+            if !d.is_declaration {
+                let n = bodies.entry((d.qualified_name.clone(), format!("{p}{}", tags.join(" ")))).or_default();
+                *n += 1;
+                if *n > 1 {
+                    tags.push(format!("#{n}"));
+                }
+            }
+            variants.push(Some(if tags.is_empty() { p.clone() } else { format!("{p}/*{}*/", tags.join(" ")) }));
+        }
+        let mut groups: HashMap<&str, BTreeSet<&str>> = HashMap::new();
+        for (d, v) in self.defs.iter().zip(&variants) {
+            if let Some(v) = v {
+                groups.entry(d.qualified_name.as_str()).or_default().insert(v.as_str());
             }
         }
         let overloaded: HashSet<String> =
-            groups.into_iter().filter(|(_, ps)| ps.len() > 1).map(|(qn, _)| qn.to_string()).collect();
-        for (d, p) in self.defs.iter_mut().zip(&self.params) {
-            if let Some(p) = p
+            groups.into_iter().filter(|(_, vs)| vs.len() > 1).map(|(qn, _)| qn.to_string()).collect();
+        for (d, v) in self.defs.iter_mut().zip(&variants) {
+            if let Some(v) = v
                 && overloaded.contains(&d.qualified_name)
             {
-                d.qualified_name = format!("{}({p})", d.qualified_name);
+                d.qualified_name = format!("{}({v})", d.qualified_name);
             }
         }
     }
@@ -2522,6 +2889,7 @@ pub(crate) fn extract(source: &[u8], language: Language, budget: &Budget) -> Res
     let (parsed, tree) = crate::preprocess::prepare(source, language, budget)?;
     let locals = locals::build(&tree, &parsed, language, budget.max_parse_time)?;
     let mut x = Extractor::new(source, &locals, budget);
+    x.cpp = language == Language::Cpp;
     if language == Language::Cpp {
         x.ns_events = namespace_macro_events(source, &parsed);
     }

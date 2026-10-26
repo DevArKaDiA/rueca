@@ -35,7 +35,9 @@ fn refs(f: &FileFacts) -> Vec<Ref> {
         .iter()
         .map(|r: &Reference| {
             let enc = r.enclosing.map(|e| f.definitions[e as usize].qualified_name.clone());
-            (r.kind, r.name.clone(), r.receiver.clone(), enc, r.arity)
+            // Argument types (`save$args:int`) are checked apart.
+            let name = rueca_extract::split_arg_types(&r.name).0.to_string();
+            (r.kind, name, r.receiver.clone(), enc, r.arity)
         })
         .collect()
 }

@@ -14,8 +14,20 @@ use super::*;
 const OVERLOAD_FANOUT: f32 = 0.8;
 
 /// Splits an overload suffix off a qualified name: `Parser.parse(String)` →
-/// (`Parser.parse`, `String`). `None` when the name has no suffix.
+/// (`Parser.parse`, `String`). `None` when the name has no suffix. A
+/// trailing comment that tells apart callables with the same parameter
+/// types (C/C++ `get(/*const*/)`, `write(OutputIt, T/*#2*/)`) is not part
+/// of the parameters.
 pub(crate) fn overload_suffix(qn: &str) -> Option<(&str, &str)> {
+    let (base, params) = overload_suffix_raw(qn)?;
+    let params = match params.find("/*") {
+        Some(i) if params.ends_with("*/") => params[..i].trim_end(),
+        _ => params,
+    };
+    Some((base, params))
+}
+
+fn overload_suffix_raw(qn: &str) -> Option<(&str, &str)> {
     if !qn.ends_with(')') {
         return None;
     }
@@ -318,7 +330,90 @@ pub(crate) enum TypeLookup {
     Unknown,
 }
 
+/// Deepest macro-in-macro nesting followed by [`Resolver::expand_macro_calls`].
+const MAX_MACRO_DEPTH: usize = 8;
+
+/// Confidence multiplier of a call reached through a macro expansion.
+const MACRO_EXPANSION: f32 = 0.95;
+
 impl<'a> Resolver<'a> {
+    /// Whether node `n` is a C/C++ macro definition (`#define`).
+    fn is_macro(&self, n: NodeId) -> bool {
+        let node = &self.nodes[n as usize];
+        matches!(node.label, Label::Function | Label::Constant)
+            && node.language.map(Language::family) == Some(LanguageFamily::C)
+            && node.signature.as_deref().is_some_and(|s| s.trim_start().starts_with('#'))
+    }
+
+    /// C/C++ macro expansion: a pack reports the calls a macro's body makes
+    /// as calls of the macro's definition (`#define lua_pop(L,n)
+    /// lua_settop(L, -(n)-1)` calls `lua_settop`), and every use of the
+    /// macro by another definition — a `CALLS` edge (a lower-case macro
+    /// called like a function) or a `REFERENCES` edge (a macro invocation)
+    /// — also calls those targets, through nested macros (depth ≤
+    /// [`MAX_MACRO_DEPTH`]), as the code after preprocessing does. The edge
+    /// keeps the use's strategy and call site; its confidence is the
+    /// product of both edges' × [`MACRO_EXPANSION`].
+    pub(crate) fn expand_macro_calls(&mut self) {
+        let mut direct: BTreeMap<NodeId, Vec<(NodeId, f32)>> = BTreeMap::new();
+        for (&(src, kind, dst), meta) in &self.edges {
+            if kind == EdgeKind::Calls && src != dst && self.is_macro(src) {
+                direct.entry(src).or_default().push((dst, meta.confidence));
+            }
+        }
+        if direct.is_empty() {
+            return;
+        }
+        let uses: Vec<(NodeId, NodeId, EdgeMeta)> = self
+            .edges
+            .iter()
+            .filter(|((src, kind, dst), _)| {
+                matches!(kind, EdgeKind::Calls | EdgeKind::References)
+                    && direct.contains_key(dst)
+                    && !self.is_macro(*src)
+            })
+            .map(|(&(src, _, dst), meta)| (src, dst, *meta))
+            .collect();
+        let mut closures: HashMap<NodeId, Vec<(NodeId, f32)>> = HashMap::new();
+        for (src, m, meta) in uses {
+            let targets = closures.entry(m).or_insert_with(|| self.macro_closure(m, &direct)).clone();
+            for &(target, conf) in &targets {
+                let confidence = meta.confidence * conf * MACRO_EXPANSION;
+                self.add_edge(src, target, EdgeKind::Calls, EdgeMeta { confidence, ..meta });
+            }
+        }
+    }
+
+    /// Definitions that are not macros reached from macro `m` through the
+    /// calls of its body and of the macros it uses, with the best product
+    /// of confidences, sorted by node.
+    fn macro_closure(&self, m: NodeId, direct: &BTreeMap<NodeId, Vec<(NodeId, f32)>>) -> Vec<(NodeId, f32)> {
+        let mut best: BTreeMap<NodeId, f32> = BTreeMap::new();
+        let mut seen: HashSet<NodeId> = HashSet::from([m]);
+        let mut level: Vec<(NodeId, f32)> = vec![(m, 1.0)];
+        for _ in 0..MAX_MACRO_DEPTH {
+            let mut next = Vec::new();
+            for (n, c) in level {
+                for &(t, tc) in direct.get(&n).map(Vec::as_slice).unwrap_or_default() {
+                    let conf = c * tc;
+                    if self.is_macro(t) {
+                        if seen.insert(t) {
+                            next.push((t, conf));
+                        }
+                    } else {
+                        let e = best.entry(t).or_insert(0.0);
+                        *e = e.max(conf);
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            level = next;
+        }
+        best.into_iter().collect()
+    }
+
     // -- packages ------------------------------------------------------------
 
     pub(crate) fn scope_of(&self, f: FileId) -> ModuleScope {
@@ -508,12 +603,18 @@ impl<'a> Resolver<'a> {
             v.retain(|n| !body_of.contains_key(n));
         }
         let mut declared_in: HashMap<NodeId, Vec<FileId>> = HashMap::new();
+        let mut decls_of: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
         for (&d, &b) in &body_of {
             if let Some(file) = self.nodes[d as usize].file {
                 declared_in.entry(b).or_default().push(file);
             }
+            decls_of.entry(b).or_default().push(d);
+        }
+        for v in decls_of.values_mut() {
+            v.sort_unstable();
         }
         self.declared_in = declared_in;
+        self.decls_of = decls_of;
         self.body_of = body_of;
     }
 
@@ -579,6 +680,19 @@ impl<'a> Resolver<'a> {
     /// arguments are optional, `...` and parameter packs variadic), else
     /// from its overload suffix.
     fn def_arity(&self, n: NodeId) -> Option<(u32, Option<u32>)> {
+        let own = self.own_arity(n)?;
+        // C++ default arguments are written on the declaration, not on an
+        // out-of-line body: the range covers both.
+        let decls = self.decls_of.get(&n).map(Vec::as_slice).unwrap_or_default();
+        Some(
+            decls
+                .iter()
+                .filter_map(|&d| self.own_arity(d))
+                .fold(own, |(lo, hi), (dlo, dhi)| (lo.min(dlo), hi.zip(dhi).map(|(a, b)| a.max(b)))),
+        )
+    }
+
+    fn own_arity(&self, n: NodeId) -> Option<(u32, Option<u32>)> {
         let node = &self.nodes[n as usize];
         let from_signature = match node.language.map(Language::family) {
             Some(LanguageFamily::C) => node.signature.as_deref().and_then(|s| signature_arity(s, &node.name)),
@@ -827,15 +941,7 @@ impl<'a> Resolver<'a> {
             Some(p) => (true, p),
             None => (path.is_empty(), path),
         };
-        let qualified = if path.is_empty() { name.to_string() } else { format!("{path}::{name}") };
-        if !global {
-            for p in self.enclosing_scopes(f, scope) {
-                if let Some(hit) = self.by_exact_name(f, &format!("{p}::{qualified}")) {
-                    return hit;
-                }
-            }
-        }
-        if let Some(hit) = self.by_exact_name(f, &qualified) {
+        if let Some(hit) = self.namespaced_exact(f, scope, global, path, name) {
             return hit;
         }
         match self.envs[f as usize].get(name) {
@@ -849,6 +955,27 @@ impl<'a> Resolver<'a> {
         self.unique_name(f, item.kind, name, false)
     }
 
+    /// `path::name` looked up exactly from the innermost enclosing namespace
+    /// outwards (unless `global`), then from the global namespace.
+    fn namespaced_exact(
+        &self,
+        f: FileId,
+        scope: Option<LocalDefId>,
+        global: bool,
+        path: &str,
+        name: &str,
+    ) -> Option<Outcome> {
+        let qualified = if path.is_empty() { name.to_string() } else { format!("{path}::{name}") };
+        if !global {
+            for p in self.enclosing_scopes(f, scope) {
+                if let Some(hit) = self.by_exact_name(f, &format!("{p}::{qualified}")) {
+                    return Some(hit);
+                }
+            }
+        }
+        self.by_exact_name(f, &qualified)
+    }
+
     // -- member chains -------------------------------------------------------
 
     /// Declared type of a member (field) node: its first `Type` reference
@@ -860,8 +987,16 @@ impl<'a> Resolver<'a> {
         };
         let j = j as LocalDefId;
         let refs = self.files[g as usize].facts.as_ref().map_or(&[][..], |x| x.references.as_slice());
-        let Some(r) =
-            refs.iter().filter(|r| r.kind == RefKind::Type && r.enclosing == Some(j)).min_by_key(|r| r.span.start_byte)
+        // C++ smart pointers stand for their pointee (`std::unique_ptr<T>
+        // p_; p_->m()`).
+        let c_family = self.families[g as usize] == Some(LanguageFamily::C);
+        let pointer = |r: &Reference| {
+            c_family && r.receiver.as_deref() == Some("std") && matches!(r.name.as_str(), "unique_ptr" | "shared_ptr")
+        };
+        let Some(r) = refs
+            .iter()
+            .filter(|r| r.kind == RefKind::Type && r.enclosing == Some(j) && !pointer(r))
+            .min_by_key(|r| r.span.start_byte)
         else {
             return TypeLookup::Unknown;
         };
@@ -1024,7 +1159,16 @@ impl<'a> Resolver<'a> {
                 None => Outcome::Miss,
             },
             TypeLookup::External => Outcome::External,
-            TypeLookup::Unknown => self.unique_name(f, item.kind, item.name, true),
+            TypeLookup::Unknown => {
+                // C++: a qualifier the pack took for a type may be a
+                // namespace declared in another file (`Exp::Break()`).
+                if self.families[f as usize] == Some(LanguageFamily::C)
+                    && let Some(hit) = self.namespaced_exact(f, scope, false, ty, item.name)
+                {
+                    return hit;
+                }
+                self.unique_name(f, item.kind, item.name, true)
+            }
         }
     }
 
@@ -1184,7 +1328,8 @@ fn may_accept(param: &str, arg: &str) -> bool {
         }
         // Boxing: `int` → `Integer`, `Number`, `Object`, …; never `String`.
         (false, true) => param != "String",
-        (true, false) => arg != "String",
+        // Never a C/C++ pointer for a primitive.
+        (true, false) => arg != "String" && !arg.ends_with('*'),
         (false, false) => param != "String" || arg == "String",
     }
 }
@@ -1212,12 +1357,23 @@ pub(crate) fn overload_by_types(typed: &[(NodeId, Vec<String>)], args: &[&str]) 
             _ => true,
         })
     };
+    // A C++ reference parameter binds an argument of its type, and a
+    // string literal (`char*`) is best taken by a string parameter.
+    let value = |t: &str| {
+        let t = t.trim_end_matches('&');
+        match t {
+            "string" | "string_view" | "basic_string" | "basic_string_view" => "char*".to_string(),
+            _ => t.to_string(),
+        }
+    };
     let exact = |params: &[String]| {
         (0..args.len()).all(|i| match (known(i), params.get(i)) {
-            (Some(a), Some(p)) => normalize_param_type(a, false) == *p,
+            (Some(a), Some(p)) => value(&normalize_param_type(a, false)) == value(p),
             (None, Some(_)) => true,
             _ => false,
-        }) && params.len() == args.len()
+        }) && params.len() >= args.len()
+        // Trailing parameters beyond the arguments have defaults (C++): the
+        // arity filter ran before.
     };
     let compatible: Vec<&(NodeId, Vec<String>)> = typed.iter().filter(|(_, p)| accepts(p)).collect();
     if compatible.is_empty() {
@@ -1380,6 +1536,8 @@ mod tests {
         assert_eq!(overload_suffix("f(std::function<void(int)>)"), Some(("f", "std::function<void(int)>")));
         assert_eq!(overload_suffix("Parser.parse"), None);
         assert_eq!(overload_suffix("(x)"), None);
+        assert_eq!(overload_suffix("n::get(/*const*/)"), Some(("n::get", "")));
+        assert_eq!(overload_suffix("write(OutputIt, T/*#2*/)"), Some(("write", "OutputIt, T")));
         assert_eq!(params_arity(""), (0, Some(0)));
         assert_eq!(params_arity("void"), (0, Some(0)));
         assert_eq!(params_arity("String"), (1, Some(1)));

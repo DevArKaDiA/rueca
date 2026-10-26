@@ -36,6 +36,20 @@
 //! | deleted declaration | `template <…> void f(T) = delete;` | `= delete` blanked |
 //! | member pointers | `v.*(&G::c)`, `p->*m`, `int (T::*)()`, `A<&T::m>` | `+`, `int (   *)()`, `&` blanked |
 //! | dangling `=` | `N =` before `}` (an X-macro table removed) | `=` blanked |
+//! | access macro | `JSON_PRIVATE_UNLESS_TESTED:` at a statement start | `public` and spaces |
+//! | storage class before a declaration macro | `static MP_DEFINE_CONST_DICT(d, t);` | blanked with the call (`;` stays) |
+//! | wrapping macro | `LUAI_DDEC(const int t[N];)`, `LUAI_TRY(L, c, f(););` | the name, `(` and `)` blanked |
+//! | parenthesized name | `T *(lua_newstate) (…);` | the parentheses blanked |
+//! | operator argument | `intop(+, a, b)`, `intop(>>, a, b)` | `0` and spaces |
+//! | empty argument | `BEST_TIME("x", f(), n, , r)` | a `0` in the space |
+//! | empty statement argument | `EXPECT_NO_FATAL_FAILURE(;)` | the `;` blanked |
+//! | attribute macros | `__ALIGN_BEGIN static T b[N] __ALIGN_END;`, `size_t n MACRO_INIT(0);` | every one of the statement blanked |
+//! | `asm` macro and labels | `__ASM volatile ("…")`, `register int r __asm__("r0") = v;` | `asm`; the label blanked |
+//! | subscripted call first in a block | `MP_STATE_PORT(h)[i] = c;` | a `*` in the space before (an expression) |
+//! | macro in a `using` | `using testing::GMOCK_FLAG(verbose);` | the name, `(` and `)` blanked |
+//! | unnamed pointer template parameter | `template <typename R, R* = nullptr>` | the `*` blanked |
+//! | lower-case specifier before an operator | `really_inline ~stream();`, `really_inline bool operator!=(…)` | blanked |
+//! | qualified type argument | `CHECK_THROWS_AS(f(), json::error const&)` | the `&` / `*` blanked |
 
 use crate::mask::{Kind, Tok, matching_paren};
 
@@ -314,7 +328,18 @@ pub(crate) fn repair(src: &[u8], toks: &[Tok], site: Site) -> Option<Vec<Edit>> 
     // Local rewrites first, on the tokens at and inside the error; then
     // statement-level ones, nearest candidate first.
     type Rule = fn(&Cx<'_>, usize, Site) -> Option<Vec<Edit>>;
-    let local: [Rule; 19] = [
+    let local: [Rule; 30] = [
+        specifier_before_operator,
+        empty_argument,
+        asm_label,
+        unnamed_pointer_parameter,
+        using_macro,
+        empty_statement_argument,
+        asm_macro,
+        subscripted_call,
+        wrapper_macro,
+        operator_argument,
+        parenthesized_name,
         deleted_function,
         extern_template,
         member_pointers,
@@ -335,7 +360,8 @@ pub(crate) fn repair(src: &[u8], toks: &[Tok], site: Site) -> Option<Vec<Edit>> 
         string_macro,
         adjacent_operands,
     ];
-    let statement: [Rule; 8] = [
+    let statement: [Rule; 9] = [
+        declaration_attributes,
         trailing_macro,
         brace_macro,
         block_call,
@@ -391,7 +417,7 @@ fn type_argument(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
     if open == 0 || !cx.name(open - 1) {
         return None;
     }
-    let close = matching_paren(cx.toks, open)?;
+    let close = matching_paren_braced(cx, open)?;
     let mut edits = Vec::new();
     let mut a = open + 1;
     while a < close {
@@ -416,13 +442,75 @@ fn type_argument(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
             let tagged = core.len() == 2 && (cx.is(a, "struct") || cx.is(a, "union") || cx.is(a, "enum"));
             if !core.is_empty() && (keywords || tagged) {
                 edits.push(Edit { start: cx.toks[a].start, end: cx.toks[b - 1].end, with: b"0" });
-            } else if core.len() == 1 && cx.name(a) && stars > 0 {
+            } else if stars > 0 && {
+                let mut c = core.clone();
+                while c.start < c.end && cx.word_in(c.start, &["const", "volatile", "struct", "union", "enum"]) {
+                    c.start += 1;
+                }
+                while c.end > c.start && cx.word_in(c.end - 1, &["const", "volatile"]) {
+                    c.end -= 1;
+                }
+                qualified_name(cx, c)
+            } {
                 edits.push(Edit::blank(cx.toks[b - stars].start, cx.toks[b - 1].end));
             }
         }
         a = b + 1;
     }
     (!edits.is_empty()).then_some(edits)
+}
+
+/// The `)` matching the `(` at `open`, across balanced braces (brace
+/// initializers as arguments); `None` at a `;` outside braces.
+fn matching_paren_braced(cx: &Cx<'_>, open: usize) -> Option<usize> {
+    let (mut parens, mut braces) = (0i32, 0i32);
+    for k in open..cx.toks.len().min(open + 512) {
+        match cx.toks[k].kind {
+            Kind::Punct(b'(') => parens += 1,
+            Kind::Punct(b')') => {
+                parens -= 1;
+                if parens == 0 {
+                    return Some(k);
+                }
+            }
+            Kind::Punct(b'{') => braces += 1,
+            Kind::Punct(b'}') => {
+                braces -= 1;
+                if braces < 0 {
+                    return None;
+                }
+            }
+            Kind::Punct(b';') if braces == 0 => return None,
+            Kind::Directive => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Tokens `range` spell a (possibly qualified) name: `T`, `json::error`,
+/// `::ns::T`.
+fn qualified_name(cx: &Cx<'_>, range: std::ops::Range<usize>) -> bool {
+    let (mut k, end) = (range.start, range.end);
+    if k >= end {
+        return false;
+    }
+    if cx.punct(k, b':') && cx.punct(k + 1, b':') {
+        k += 2;
+    }
+    loop {
+        if k >= end || !cx.name(k) {
+            return false;
+        }
+        k += 1;
+        if k == end {
+            return true;
+        }
+        if !(cx.punct(k, b':') && cx.punct(k + 1, b':')) {
+            return false;
+        }
+        k += 2;
+    }
 }
 
 /// `= delete;` / `= default;` on a declaration the grammar reads as a
@@ -543,6 +631,9 @@ fn template_default_pointer(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>>
 
 /// Qt `signals:` / `slots:` sections.
 fn qt_section(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    if i >= cx.toks.len() {
+        return None;
+    }
     let w = cx.text(i);
     if !cx.ident(i) || !cx.punct(i + 1, b':') || cx.punct(i + 2, b':') {
         return None;
@@ -552,8 +643,18 @@ fn qt_section(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
         b"slots" | b"Q_SLOTS" if i > 0 && cx.word_in(i - 1, &["public", "private", "protected"]) => {
             Some(vec![Edit::blank(cx.toks[i].start, cx.toks[i].end)])
         }
+        // An access macro (`JSON_PRIVATE_UNLESS_TESTED:`) at a statement
+        // start in a class body.
+        _ if cx.macro_like(i) && w.len() >= 6 && cx.starts_statement(i) && !site_is_case(cx, i) => {
+            Some(vec![Edit { start: cx.toks[i].start, end: cx.toks[i].end, with: b"public" }])
+        }
         _ => None,
     }
+}
+
+/// Whether token `i` is a `case` label's value.
+fn site_is_case(cx: &Cx<'_>, i: usize) -> bool {
+    i > 0 && (cx.is(i - 1, "case") || cx.is(i - 1, "default"))
 }
 
 /// `enum : unsigned {` (an anonymous enum with a base): the base goes.
@@ -733,11 +834,282 @@ fn brace_macro(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
 /// `DECLARE_X(a, b);`): a declaration macro, blanked (the `;` stays, an
 /// empty declaration).
 fn declaration_macro_call(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
-    if site.in_body || !cx.macro_like(i) || !cx.punct(i + 1, b'(') || !cx.starts_statement(i) {
+    if site.in_body || !cx.macro_like(i) || !cx.punct(i + 1, b'(') {
         return None;
     }
+    // `static MP_DEFINE_CONST_FUN_OBJ_1(f_obj, f);`: storage specifiers
+    // before the macro go with it.
+    let start = cx.statement_start(i);
+    let head = if start < i && (start..i).all(|k| cx.word_in(k, &["static", "const", "extern", "inline"])) {
+        start
+    } else if cx.starts_statement(i) {
+        i
+    } else {
+        return None;
+    };
     let close = matching_paren(cx.toks, i + 1)?;
-    cx.punct(close + 1, b';').then(|| vec![Edit::blank(cx.toks[i].start, cx.toks[close].end)])
+    cx.punct(close + 1, b';').then(|| vec![Edit::blank(cx.toks[head].start, cx.toks[close].end)])
+}
+
+/// Attribute macros around a declaration (`__ALIGN_BEGIN static uint8_t
+/// buf[N] __ALIGN_END;`, `size_t n JEMALLOC_CC_SILENCE_INIT(0);`, `const
+/// T t[N] BSP_PLACE_IN_SECTION(".v") = {…}`): every one of the statement
+/// goes in one edit, since blanking one alone may not lower the error
+/// count. A leading macro must be followed by a keyword or by a type and
+/// a name; a trailing one must follow the declared name (or its `[…]`)
+/// and precede `;`, `=`, `{`, `,` or another macro.
+fn declaration_attributes(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let start = cx.statement_start(i);
+    let span =
+        |k: usize| -> usize { if cx.punct(k + 1, b'(') { matching_paren(cx.toks, k + 1).unwrap_or(k) } else { k } };
+    let mut edits = Vec::new();
+    let mut k = start;
+    // Leading macros.
+    while cx.macro_like(k) {
+        let e = span(k);
+        let next_kw = cx.word_in(e + 1, DECL_WORDS) || cx.word_in(e + 1, TYPE_WORDS);
+        let type_and_name = cx.name(e + 1) && (cx.name(e + 2) || cx.punct(e + 2, b'*'));
+        if !(next_kw || type_and_name) {
+            break;
+        }
+        edits.push(Edit::blank(cx.toks[k].start, cx.toks[e].end));
+        k = e + 1;
+    }
+    // Trailing macros: after the declared name, up to the end of the head.
+    let mut depth = 0i32;
+    let mut names = 0;
+    while k < cx.toks.len() && k < start + 64 {
+        match cx.toks[k].kind {
+            Kind::Punct(b';' | b'=' | b'{') if depth == 0 => break,
+            Kind::Punct(b'[') => depth += 1,
+            Kind::Punct(b']') => depth -= 1,
+            Kind::Punct(b'(' | b')') if depth == 0 => {
+                // A function declarator: not this rule's shape.
+                if !(k > 0 && cx.macro_like(k - 1)) {
+                    return None;
+                }
+            }
+            Kind::Ident if depth == 0 && names >= 2 && cx.macro_like(k) => {
+                let after_name = cx.name(k - 1) || cx.punct(k - 1, b']');
+                let e = span(k);
+                let follows =
+                    matches!(cx.toks.get(e + 1).map(|t| t.kind), Some(Kind::Punct(b';' | b'=' | b'{' | b',')))
+                        || cx.macro_like(e + 1);
+                if after_name && follows {
+                    edits.push(Edit::blank(cx.toks[k].start, cx.toks[e].end));
+                    k = e + 1;
+                    continue;
+                }
+            }
+            Kind::Ident if depth == 0 => names += 1,
+            _ => {}
+        }
+        k += 1;
+    }
+    (!edits.is_empty()).then_some(edits)
+}
+
+/// `MP_STATE_PORT(h)[i] = c;` first in a block: the grammar reads a
+/// macro type and an unnamed array declarator. A `*` in the space before
+/// the call makes it an expression (the call and its arguments stay).
+fn subscripted_call(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
+    if !site.in_body {
+        return None;
+    }
+    let k = (i.saturating_sub(1)..=i + 2).find(|&k| {
+        cx.name(k)
+            && cx.punct(k + 1, b'(')
+            && matching_paren(cx.toks, k + 1).is_some_and(|c| cx.punct(c + 1, b'['))
+            && cx.starts_statement(k)
+    })?;
+    let at = cx.toks[k].start;
+    (at > 0 && matches!(cx.src[at - 1], b' ' | b'\t')).then(|| vec![Edit { start: at - 1, end: at, with: b"*" }])
+}
+
+/// `template <typename R, R* = nullptr>`: an unnamed pointer parameter
+/// with a default loses its `*` (`R = nullptr`).
+fn unnamed_pointer_parameter(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let star = (i.saturating_sub(3)..=i + 1)
+        .find(|&k| cx.punct(k, b'*') && cx.punct(k + 1, b'=') && !cx.punct(k + 2, b'=') && k > 0 && cx.name(k - 1))?;
+    // Inside a template head: an unclosed `<` after `template` before it.
+    let mut depth = 0i32;
+    for p in (star.saturating_sub(128)..star).rev() {
+        match cx.toks[p].kind {
+            Kind::Punct(b'>') => depth += 1,
+            Kind::Punct(b'<') if depth > 0 => depth -= 1,
+            Kind::Punct(b'<') => {
+                return (p > 0 && cx.is(p - 1, "template"))
+                    .then(|| vec![Edit::blank(cx.toks[star].start, cx.toks[star].end)]);
+            }
+            Kind::Punct(b';' | b'{' | b'}') => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `using testing::GMOCK_FLAG(verbose);`: a macro naming the declared
+/// entity loses its name and parentheses.
+fn using_macro(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let start = cx.statement_start(i);
+    if !cx.is(start, "using") {
+        return None;
+    }
+    let m = (start + 1..(start + 16).min(cx.toks.len())).find(|&k| cx.macro_like(k) && cx.punct(k + 1, b'('))?;
+    let close = matching_paren(cx.toks, m + 1)?;
+    (cx.punct(close + 1, b';') && close == m + 3).then(|| {
+        vec![Edit::blank(cx.toks[m].start, cx.toks[m + 1].end), Edit::blank(cx.toks[close].start, cx.toks[close].end)]
+    })
+}
+
+/// `BEST_TIME("x", f(), size, , repeat)`: an empty macro argument gets a
+/// `0` in its space.
+fn empty_argument(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let k = (i.saturating_sub(3)..=i + 3).find(|&k| {
+        (cx.punct(k, b',') || cx.punct(k, b'('))
+            && cx.punct(k + 1, b',')
+            && cx.src[cx.toks[k].end..cx.toks[k + 1].start].iter().any(|c| matches!(c, b' ' | b'\t'))
+    })?;
+    let at =
+        cx.toks[k].end + cx.src[cx.toks[k].end..cx.toks[k + 1].start].iter().position(|c| matches!(c, b' ' | b'\t'))?;
+    Some(vec![Edit { start: at, end: at + 1, with: b"0" }])
+}
+
+/// `really_inline ~stream();`, `really_inline bool operator!=(…)`: a
+/// lower-case specifier macro (with `_`, not a `…_t` type) before a
+/// destructor or an operator goes.
+fn specifier_before_operator(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
+    if site.in_body {
+        return None;
+    }
+    let s = cx.statement_start(i);
+    let w = cx.toks.get(s).map(|t| &cx.src[t.start..t.end])?;
+    let lower = w.iter().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_')
+        && w.contains(&b'_')
+        && !w.ends_with(b"_t");
+    if !lower || !cx.name(s) {
+        return None;
+    }
+    // `~name(`, `operator…(`, or a type (with template arguments,
+    // qualifiers and `*` / `&`) then `operator` or a qualified name ending
+    // in `operator`.
+    if cx.punct(s + 1, b'~') || cx.is(s + 1, "operator") {
+        return Some(vec![Edit::blank(cx.toks[s].start, cx.toks[s].end)]);
+    }
+    let mut depth = 0i32;
+    for k in s + 1..(s + 48).min(cx.toks.len()) {
+        match cx.toks[k].kind {
+            Kind::Punct(b'<') => depth += 1,
+            Kind::Punct(b'>') => depth -= 1,
+            Kind::Punct(b'(' | b';' | b'{' | b'=') if depth == 0 => return None,
+            Kind::Ident if depth == 0 && cx.is(k, "operator") => {
+                return Some(vec![Edit::blank(cx.toks[s].start, cx.toks[s].end)]);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `EXPECT_NO_FATAL_FAILURE(;)`: an empty statement as an argument goes.
+fn empty_statement_argument(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let k = (i.saturating_sub(2)..=i + 2)
+        .find(|&k| cx.punct(k, b';') && k > 0 && cx.punct(k - 1, b'(') && cx.punct(k + 1, b')'))?;
+    Some(vec![Edit::blank(cx.toks[k].start, cx.toks[k].end)])
+}
+
+/// `register uint32_t r __asm__("r0") = v;`: a register variable's asm
+/// label goes.
+fn asm_label(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let k = (cx.statement_start(i)..=i + 1).find(|&k| {
+        cx.ident(k)
+            && matches!(cx.text(k), b"__asm__" | b"__asm" | b"asm" | b"__ASM")
+            && cx.punct(k + 1, b'(')
+            && k > 0
+            && cx.name(k - 1)
+    })?;
+    let close = matching_paren(cx.toks, k + 1)?;
+    (cx.punct(close + 1, b'=') || cx.punct(close + 1, b';'))
+        .then(|| vec![Edit::blank(cx.toks[k].start, cx.toks[close].end)])
+}
+
+/// `__ASM volatile ("…")`, `__ASM("r0")`: a macro for the `asm` keyword.
+fn asm_macro(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let k = (cx.statement_start(i)..=i + 1).find(|&k| {
+        cx.ident(k)
+            && matches!(cx.text(k), b"__ASM" | b"__asm_" | b"ASM" | b"__ASM__")
+            && (cx.punct(k + 1, b'(') || cx.is(k + 1, "volatile"))
+    })?;
+    Some(vec![Edit { start: cx.toks[k].start, end: cx.toks[k].end, with: b"asm" }])
+}
+
+/// `LUAI_DDEC(const lu_byte luai_ctype_[N];)`, `LUAI_TRY(L, c, f(););`:
+/// a macro wrapping whole declarations or statements loses its name and
+/// parentheses (what remains is a declaration, or a comma expression and
+/// an empty statement).
+fn wrapper_macro(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let i = cx.statement_start(i);
+    if !cx.macro_like(i) || !cx.punct(i + 1, b'(') {
+        return None;
+    }
+    // The matching `)`, across the `;` inside (`matching_paren` stops there).
+    let mut depth = 0i32;
+    let close = (i + 1..cx.toks.len().min(i + 256)).find(|&k| {
+        match cx.toks[k].kind {
+            Kind::Punct(b'(') => depth += 1,
+            Kind::Punct(b')') => depth -= 1,
+            _ => {}
+        }
+        depth == 0
+    })?;
+    (close > i + 3 && cx.punct(close - 1, b';')).then(|| {
+        vec![Edit::blank(cx.toks[i].start, cx.toks[i + 1].end), Edit::blank(cx.toks[close].start, cx.toks[close].end)]
+    })
+}
+
+/// `LUA_API lua_State *(lua_newstate) (…);`: parentheses around a declared
+/// name go (`(*fp)(…)` keeps them: a function pointer).
+fn parenthesized_name(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
+    if site.in_body {
+        return None;
+    }
+    let open = (cx.statement_start(i)..=i + 1).find(|&k| {
+        cx.punct(k, b'(')
+            && cx.name(k + 1)
+            && cx.punct(k + 2, b')')
+            && cx.punct(k + 3, b'(')
+            && k > 0
+            && !cx.name(k - 1)
+    })?;
+    Some(vec![
+        Edit::blank(cx.toks[open].start, cx.toks[open].end),
+        Edit::blank(cx.toks[open + 2].start, cx.toks[open + 2].end),
+    ])
+}
+
+/// `intop(+, a, b)`: an operator as a whole macro argument becomes `0`.
+fn operator_argument(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let op = |k: usize| {
+        cx.toks.get(k).is_some_and(|t| {
+            matches!(
+                t.kind,
+                Kind::Punct(b'+' | b'-' | b'*' | b'/' | b'%' | b'&' | b'|' | b'^' | b'<' | b'>' | b'=' | b'!')
+            )
+        })
+    };
+    for k in i.saturating_sub(3)..=(i + 3).min(cx.toks.len().saturating_sub(1)) {
+        if k == 0 || !(cx.punct(k - 1, b'(') || cx.punct(k - 1, b',')) || !op(k) {
+            continue;
+        }
+        let mut e = k;
+        while op(e + 1) && e < k + 2 {
+            e += 1;
+        }
+        if cx.punct(e + 1, b',') || cx.punct(e + 1, b')') {
+            return Some(vec![Edit { start: cx.toks[k].start, end: cx.toks[e].end, with: b"0" }]);
+        }
+    }
+    None
 }
 
 /// `MACRO(args) "text"` / `"text" MACRO(args)`: a macro producing a string
@@ -1060,6 +1432,54 @@ mod tests {
         assert_eq!(fix("n = va_arg(ap, long long);", "long", true), "n = va_arg(ap, 0        );");
         assert_eq!(fix("p = va_arg(ap, robj*);", "*", true), "p = va_arg(ap, robj );");
         assert_eq!(fix("s = va_arg(ap, struct x *);", "struct", true), "s = va_arg(ap, 0         );");
+    }
+
+    #[test]
+    fn macro_wrapped_declarations_and_arguments() {
+        // A storage class before a declaration macro goes with it.
+        assert_eq!(
+            fix("static MP_DEFINE_CONST_FUN_OBJ_1(f_obj, f);\n", "MP_", false),
+            format!("{};\n", " ".repeat(42))
+        );
+        // A macro wrapping a declaration.
+        assert_eq!(fix("LUAI_DDEC(const lu_byte t[N];)\n", "t[", false), "          const lu_byte t[N]; \n");
+        // An operator as an argument.
+        assert_eq!(fix("x = intop(+, a, 1);", "+", true), "x = intop(0, a, 1);");
+        assert_eq!(fix("x = intop(>>, a, 1);", ">>", true), "x = intop(0 , a, 1);");
+        // A qualified reference type as an argument.
+        assert_eq!(
+            fix("CHECK_THROWS_AS(f(), json::type_error&);", "&", true),
+            "CHECK_THROWS_AS(f(), json::type_error );"
+        );
+        // Attribute macros around a declaration, all at once.
+        assert_eq!(
+            fix("__ALIGN_BEGIN static uint8_t buf[N] __ALIGN_END;", "static", false),
+            "              static uint8_t buf[N]            ;"
+        );
+        let src = "  size_t n JEMALLOC_CC_SILENCE_INIT(0);";
+        assert_eq!(fix(src, "JEM", true), blanked(src, "JEMALLOC_CC_SILENCE_INIT(0)"));
+        assert_eq!(fix("  __ASM volatile (\"nop\");", "volatile", true), "  asm   volatile (\"nop\");");
+        assert_eq!(fix("{\n    S(h)[i] = c;", "{", true), "{\n   *S(h)[i] = c;");
+        assert_eq!(fix("template <typename R, R* = nullptr>", "*", false), "template <typename R, R  = nullptr>");
+        assert_eq!(fix("  T(\"x\", f(), n, , r);", ", ,", true), "  T(\"x\", f(), n,0, r);");
+        assert_eq!(fix("really_inline ~stream();", "~", false), "              ~stream();");
+        assert_eq!(
+            fix("really_inline simd8<T> operator|(T o) const;", "simd8", false),
+            "              simd8<T> operator|(T o) const;"
+        );
+        assert_eq!(fix("CHECK_AS(s >> j, json::error const&);", "&", true), "CHECK_AS(s >> j, json::error const );");
+        assert_eq!(fix("CHECK_AS(f({1, 2}), json::error&);", "&", true), "CHECK_AS(f({1, 2}), json::error );");
+        assert_eq!(fix("using testing::GMOCK_FLAG(verbose);", "GMOCK", false), "using testing::           verbose ;");
+        assert_eq!(fix("  X(;);", ";", true), "  X( );");
+        let src = "  register int r __asm__ (\"r0\") = v;";
+        assert_eq!(fix(src, "__asm__", true), blanked(src, "__asm__ (\"r0\")"));
+        assert_eq!(fix("  SWAP(const byte *, a, b);", "*", true), "  SWAP(const byte  , a, b);");
+        assert_eq!(fix("  TRY(L, c,\n    (*f)(L);\n  );", "(*f)", true), "      L, c,\n    (*f)(L);\n   ;");
+        // An access macro in a class body.
+        assert_eq!(
+            fix("class A {\n  JSON_PRIVATE_UNLESS_TESTED:\n  int x;\n};", "JSON", false),
+            "class A {\n  public                    :\n  int x;\n};"
+        );
     }
 
     #[test]
