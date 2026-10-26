@@ -405,6 +405,12 @@ impl Registry {
         self.for_language(lang).map(|p| (lang, p))
     }
 
+    /// The registered packs, in registration order (to wrap them in another
+    /// registry, e.g. the organization linker's).
+    pub fn into_packs(self) -> Vec<Box<dyn LanguagePack>> {
+        self.packs
+    }
+
     /// Cache key component combining every pack's version.
     pub fn versions(&self) -> Vec<(Language, u32)> {
         let mut v: Vec<_> =

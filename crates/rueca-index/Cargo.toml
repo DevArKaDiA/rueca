@@ -24,6 +24,7 @@ rueca-lang-java.workspace = true
 rueca-lang-cpp.workspace = true
 anyhow.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 ignore = "0.4"
 rayon = "1.10"

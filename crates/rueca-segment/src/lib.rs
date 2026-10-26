@@ -593,7 +593,7 @@ pub fn search_symbols_merged(segments: &[&Segment], query: &SymbolQuery) -> Resu
         let keep = |_: tantivy::index::SegmentId, doc: u32| {
             (doc as usize) < n && glob.as_ref().is_none_or(|g| g.is_match(seg.inner.node_path(doc)))
         };
-        let hits = symbols::top_hits(&searchers[i], q.as_ref(), &stats, priors, want, &keep)?;
+        let hits = symbols::top_hits(&searchers[i], q.as_ref(), &stats, priors, &Default::default(), want, &keep)?;
         all.extend(hits.into_iter().map(|h| (i, SymbolHit { node: h.doc, score: h.score })));
     }
     all.sort_by(|a, b| b.1.score.total_cmp(&a.1.score).then(a.0.cmp(&b.0)).then(a.1.node.cmp(&b.1.node)));

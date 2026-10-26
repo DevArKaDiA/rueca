@@ -113,6 +113,10 @@ pub struct TraceNode {
     pub depth: u32,
     /// `callers` or `callees`.
     pub direction: String,
+    /// Snapshot (index into the selection's views) the node is in.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub view: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
@@ -134,6 +138,10 @@ pub struct TraceEdge {
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct TraceResult {
+    /// Snapshot (view index) of the root.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub root_view: usize,
     pub root: Brief,
     pub nodes: Vec<TraceNode>,
     pub edges: Vec<TraceEdge>,
@@ -178,6 +186,15 @@ pub struct RepositorySummary {
     /// Nodes that are not containers (files, folders, modules, packages).
     pub symbols: u32,
     pub edges: u32,
+    /// Packages the repository publishes (organization mode).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub packages: Vec<String>,
+    /// Repositories of the organization it depends on (it imports packages they publish).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
+    /// Relevance for `query` (0–1, 1 = the best repository).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

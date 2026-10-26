@@ -47,7 +47,8 @@
 //! (`tracing`). [`IndexReport`] carries the same numbers.
 //!
 //! Organizations (RFC 0006 §7): [`org`] reads `rueca-org.toml`, indexes its
-//! repositories with this pipeline and builds the organization layer.
+//! repositories with this pipeline and builds the organization layer, with
+//! [`link`] computing package registries and cross-repository edges.
 
 use std::collections::HashMap;
 use std::fs;
@@ -59,7 +60,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use rayon::prelude::*;
 use rueca_extract::{Budget, ExtractError, LanguagePack, ProjectFiles, Registry};
-use rueca_model::{FACTS_FORMAT, FileEntry, FileFacts, Language, SnapshotInfo, git_blob_sha};
+use rueca_model::{FileEntry, FileFacts, Language, SnapshotInfo, git_blob_sha};
 use rueca_resolve::FileInput;
 use rueca_segment::{ContentSource, SegmentMeta, Store};
 use tracing::{debug, info, warn};
@@ -67,6 +68,7 @@ use tracing::{debug, info, warn};
 mod git;
 #[cfg(test)]
 mod golden;
+pub mod link;
 pub mod org;
 
 #[derive(Debug, Clone)]
@@ -485,9 +487,7 @@ impl ExtractCtx<'_> {
     /// `<sha>-<lang>-v<version>-f<FACTS_FORMAT>[-p<path hash>].bin`; the
     /// path hash only for packs whose facts depend on the path.
     fn cache_path(&self, sha: &str, lang: Language, version: u32, path: Option<&str>) -> PathBuf {
-        let prefix = sha.get(..2).unwrap_or("00");
-        let path_part = path.map(|p| format!("-p{}", &git_blob_sha(p.as_bytes())[..16])).unwrap_or_default();
-        self.facts_dir.join(prefix).join(format!("{sha}-{}-v{version}-f{FACTS_FORMAT}{path_part}.bin", lang.as_str()))
+        link::facts_cache_path(self.facts_dir, sha, lang, version, path)
     }
 }
 
@@ -600,6 +600,7 @@ pub fn normalize_remote(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rueca_model::FACTS_FORMAT;
 
     #[test]
     fn remote_normalization() {

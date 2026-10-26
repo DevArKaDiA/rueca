@@ -102,6 +102,12 @@ pub(crate) fn schema() -> Schema {
     b.build()
 }
 
+/// Fields whose per-repository document frequencies route a query
+/// (`org::route`): name, path and body.
+pub(crate) fn routing_fields(f: &Fields) -> [Field; 3] {
+    [f.text[0].0, f.text[3].0, f.text[BODY_FIELD].0]
+}
+
 pub(crate) fn fields(schema: &Schema) -> Result<Fields> {
     let f = |n: &str| schema.get_field(n).map_err(terr);
     Ok(Fields {
@@ -445,10 +451,15 @@ impl SymbolIndex {
         let searcher = self.reader.searcher();
         let query = build_query(&self.fields, q);
         let priors: Arc<PriorsBySegment> = Arc::new(self.segment.iter().map(|id| (*id, self.priors.clone())).collect());
-        let hits =
-            top_hits(&searcher, query.as_ref(), &searcher, priors, q.offset.saturating_add(limit), &|_, doc| {
-                path_ok(doc)
-            })?;
+        let hits = top_hits(
+            &searcher,
+            query.as_ref(),
+            &searcher,
+            priors,
+            &HashMap::new(),
+            q.offset.saturating_add(limit),
+            &|_, doc| path_ok(doc),
+        )?;
         // doc id == node id (checked at open).
         Ok(hits.into_iter().skip(q.offset).take(limit).map(|h| SymbolHit { node: h.doc, score: h.score }).collect())
     }
@@ -496,11 +507,15 @@ pub(crate) struct RankedDoc {
 /// `keep(segment, doc)` post-filters (path globs) with over-fetching.
 /// Ordered by (score desc, segment ordinal asc, doc id asc): tantivy breaks
 /// score ties by doc address, so paging is exact.
+///
+/// `boost` multiplies every score of a segment (a repository's routing
+/// prior in an organization index); missing segments keep their scores.
 pub(crate) fn top_hits(
     searcher: &Searcher,
     query: &dyn Query,
     stats: &dyn Bm25StatisticsProvider,
     priors: Arc<PriorsBySegment>,
+    boost: &HashMap<SegmentId, f32>,
     want: usize,
     keep: &dyn Fn(SegmentId, DocId) -> bool,
 ) -> Result<Vec<RankedDoc>> {
@@ -514,14 +529,17 @@ pub(crate) fn top_hits(
         return Ok(Vec::new());
     }
     let scope: Arc<HashSet<SegmentId>> = Arc::new(priors.keys().copied().collect());
+    let boost: Arc<HashMap<SegmentId, f32>> = Arc::new(boost.clone());
     let mut fetch = want.saturating_mul(2).saturating_add(16).min(total);
     loop {
         let p = priors.clone();
+        let b = boost.clone();
         let collector = InScope {
             inner: TopDocs::with_limit(fetch).tweak_score(move |sr: &SegmentReader| {
                 let seg_priors = p.get(&sr.segment_id()).cloned();
+                let seg_boost = b.get(&sr.segment_id()).copied().unwrap_or(1.0);
                 move |doc: DocId, score: Score| {
-                    score * seg_priors.as_ref().and_then(|x| x.get(doc as usize).copied()).unwrap_or(1.0)
+                    score * seg_boost * seg_priors.as_ref().and_then(|x| x.get(doc as usize).copied()).unwrap_or(1.0)
                 }
             }),
             scope: scope.clone(),

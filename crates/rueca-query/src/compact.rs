@@ -300,9 +300,15 @@ struct TNode<'a> {
     brief: &'a Brief,
     depth: u32,
     dir: &'static str,
+    view: usize,
 }
 
-pub(crate) fn trace(snap: &SnapshotDesc, r: &TraceResult, offset: usize, budget: usize) -> Response {
+/// `trace` over one snapshot, or several when the walk followed
+/// cross-repository link edges: then every node carries its snapshot `s`
+/// (RFC 0006 §6) and the envelope lists the snapshots the answer touched.
+pub(crate) fn trace(snaps: &[&SnapshotDesc], r: &TraceResult, offset: usize, budget: usize) -> Response {
+    let (listed, remap) = touched(snaps, std::iter::once(r.root_view).chain(r.nodes.iter().map(|n| n.view)));
+    let multi = listed.len() > 1;
     // One entry per distinct node: `dir` is in / out / both, `d` the smallest depth.
     let mut uniq: Vec<TNode<'_>> = Vec::new();
     let mut pos: HashMap<&str, usize> = HashMap::new();
@@ -318,7 +324,7 @@ pub(crate) fn trace(snap: &SnapshotDesc, r: &TraceResult, offset: usize, budget:
             }
             None => {
                 pos.insert(&n.brief.id, uniq.len());
-                uniq.push(TNode { brief: &n.brief, depth: n.depth, dir });
+                uniq.push(TNode { brief: &n.brief, depth: n.depth, dir, view: n.view });
             }
         }
     }
@@ -329,12 +335,20 @@ pub(crate) fn trace(snap: &SnapshotDesc, r: &TraceResult, offset: usize, budget:
     fit(n.min(1), n, budget, |k| {
         let page = start..start + k;
         let node_json = |t: &TNode<'_>| {
-            let mut m = brief(t.brief, true);
+            let mut m = Map::new();
+            if multi {
+                put(&mut m, "s", remap[&t.view]);
+            }
+            m.extend(brief(t.brief, true));
             put(&mut m, "d", t.depth);
             put(&mut m, "dir", t.dir);
             Value::Object(m)
         };
-        let mut root = brief(&r.root, true);
+        let mut root = Map::new();
+        if multi {
+            put(&mut root, "s", remap[&r.root_view]);
+        }
+        root.extend(brief(&r.root, true));
         put(&mut root, "d", 0);
         let mut nodes: Vec<Value> = vec![Value::Object(root)];
         let mut local: HashMap<usize, usize> = HashMap::from([(0, 0)]);
@@ -374,9 +388,9 @@ pub(crate) fn trace(snap: &SnapshotDesc, r: &TraceResult, offset: usize, budget:
             }
             edges.push(Value::Array(edge));
         }
-        let res = json!({"s": 0, "nodes": nodes, "edges": edges, "tests_excluded": r.tests_excluded});
+        let res = json!({"s": remap[&r.root_view], "nodes": nodes, "edges": edges, "tests_excluded": r.tests_excluded});
         let (truncated, cursor) = next(start, k, n, r.truncated);
-        with_text("trace", envelope(&[snap], res, truncated, cursor, vec![]))
+        with_text("trace", envelope(&listed, res, truncated, cursor, vec![]))
     })
 }
 
@@ -452,6 +466,13 @@ pub(crate) fn list_repositories(
                 put(&mut m, "files", r.files);
                 put(&mut m, "symbols", r.symbols);
                 put(&mut m, "edges", r.edges);
+                if !r.packages.is_empty() {
+                    put(&mut m, "packages", json!(r.packages));
+                }
+                if !r.depends_on.is_empty() {
+                    put(&mut m, "depends_on", json!(r.depends_on));
+                }
+                put_opt(&mut m, "score", r.score);
                 Value::Object(m)
             })
             .collect();
@@ -703,6 +724,9 @@ fn text_trace(out: &mut String, r: &Value) {
     let edges = r["edges"].as_array().cloned().unwrap_or_default();
     for (i, n) in nodes.iter().enumerate() {
         let _ = write!(out, "{i}");
+        if let Some(s) = n.get("s") {
+            let _ = write!(out, " [{s}]");
+        }
         if let Some(dir) = n.get("dir").and_then(Value::as_str) {
             let _ = write!(out, " {dir} d{}", n["d"]);
         }
@@ -767,6 +791,17 @@ fn text_repositories(out: &mut String, r: &Value, multi: bool) {
         if !langs.is_empty() {
             let parts: Vec<String> = langs.iter().map(|(l, n)| format!("{l} {n}")).collect();
             let _ = write!(out, "  {}", parts.join(", "));
+        }
+        let list =
+            |k: &str| -> Vec<&str> { item[k].as_array().into_iter().flatten().filter_map(Value::as_str).collect() };
+        if !list("packages").is_empty() {
+            let _ = write!(out, "  packages {}", list("packages").join(", "));
+        }
+        if !list("depends_on").is_empty() {
+            let _ = write!(out, "  depends on {}", list("depends_on").join(", "));
+        }
+        if let Some(score) = item.get("score") {
+            let _ = write!(out, "  ({score})");
         }
         out.push('\n');
     }
