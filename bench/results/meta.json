@@ -1,5 +1,5 @@
 {
- "date": "2026-10-26 04:49 UTC",
+ "date": "2026-10-26 22:29 UTC",
  "machine": {
   "platform": "macOS-26.4.1-arm64-arm-64bit",
   "machine": "arm64",
@@ -20,7 +20,7 @@
   },
   "cbm": {
    "available": true,
-   "reason": "/Users/juanro/Documents/githings/rueca-wt/bench5/bench/.cache/bin/codebase-memory-mcp missing (run `rueca-bench setup`)",
+   "reason": "",
    "version": "codebase-memory-mcp 0.12.0",
    "recorded_versions": [
     "codebase-memory-mcp 0.12.0"
@@ -29,9 +29,10 @@
   "rueca": {
    "available": true,
    "reason": "",
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5); rueca 0.1.0-alpha.1 (binary sha256 abb2d6532f0f, rfc0005 contract, main@1ff5e82)",
    "recorded_versions": [
-    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "rueca 0.1.0-alpha.1 (binary sha256 abb2d6532f0f, rfc0005 contract, main@1ff5e82)"
    ]
   }
  },
@@ -44,7 +45,8 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "rueca 0.1.0-alpha.1 (binary sha256 abb2d6532f0f, rfc0005 contract, main@1ff5e82)"
    ]
   },
   "java": {
@@ -55,7 +57,8 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "rueca 0.1.0-alpha.1 (binary sha256 abb2d6532f0f, rfc0005 contract, main@1ff5e82)"
    ]
   },
   "ts/js": {
@@ -66,7 +69,8 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "rueca 0.1.0-alpha.1 (binary sha256 abb2d6532f0f, rfc0005 contract, main@1ff5e82)"
    ]
   },
   "go": {
@@ -77,7 +81,8 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "rueca 0.1.0-alpha.1 (binary sha256 abb2d6532f0f, rfc0005 contract, main@1ff5e82)"
    ]
   },
   "cpp": {
@@ -88,7 +93,8 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "rueca 0.1.0-alpha.1 (binary sha256 abb2d6532f0f, rfc0005 contract, main@1ff5e82)"
    ]
   },
   "c": {
@@ -99,7 +105,8 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "rueca 0.1.0-alpha.1 (binary sha256 abb2d6532f0f, rfc0005 contract, main@1ff5e82)"
    ]
   },
   "python": {
@@ -110,11 +117,12 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "rueca 0.1.0-alpha.1 (binary sha256 abb2d6532f0f, rfc0005 contract, main@1ff5e82)"
    ]
   }
  },
- "manifest_sha256": "c61dca3ae903432b48cbbcbc3dc139cbd9791ca5cf8eb33ad3bab886f7d5d8b7",
+ "manifest_sha256": "f4ca48b493fe7c14104b3cf97b4e2e0d4e1b3b9cba7d6ddf37e1551c3f117d62",
  "manifest_tools": {
   "cbm": {
    "name": "codebase-memory-mcp",
@@ -211,7 +219,7 @@
    "name": "rueca",
    "binary": "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)",
    "contract": "docs/tools.md (RFC 0005; the alpha contract is still understood, arms/rueca.py)",
-   "results": "feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886)"
+   "results": "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886)"
   }
  },
  "carried_groups": [
@@ -223,9 +231,9 @@
   "python",
   "ts/js"
  ],
- "carried": "grep:c (35 instances), grep:cpp (43 instances), grep:go (46 instances), grep:java (45 instances), grep:php (45 instances), grep:python (45 instances), grep:ts/js (46 instances), S3 grep:cJSON, S3 grep:cli, S3 grep:click, S3 grep:commonmark, S3 grep:cpp-micro, S3 grep:ecma-micro, S3 grep:express, S3 grep:flask, S3 grep:fmt, S3 grep:gin, S3 grep:go-micro, S3 grep:goawk, S3 grep:gson, S3 grep:hono, S3 grep:java-micro, S3 grep:javapoet, S3 grep:jinja, S3 grep:lua, S3 grep:monolog, S3 grep:php-micro, S3 grep:pycg, S3 grep:python-micro, S3 grep:requests, S3 grep:yaml-cpp, S3 grep:zod",
+ "carried": "cbm:c (35 instances), cbm:cpp (43 instances), cbm:go (46 instances), cbm:java (45 instances), cbm:php (45 instances), cbm:python (45 instances), cbm:ts/js (46 instances), grep:c (35 instances), grep:cpp (43 instances), grep:go (46 instances), grep:java (45 instances), grep:php (45 instances), grep:python (45 instances), grep:ts/js (46 instances), rueca:c (35 instances), rueca:cpp (43 instances), rueca:go (46 instances), rueca:java (45 instances), rueca:php (45 instances), rueca:python (45 instances), rueca:ts/js (46 instances), health (60 repositories)",
  "carried_from": {
-  "date": "2026-10-26 04:47 UTC",
+  "date": "2026-10-26 04:49 UTC",
   "machine": {
    "platform": "macOS-26.4.1-arm64-arm-64bit",
    "machine": "arm64",

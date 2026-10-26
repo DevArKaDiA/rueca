@@ -263,14 +263,14 @@ scorecard (`stable` = every floor met; full tables in
 - **Go** `stable`
 - **Java** `stable`
 - **C** `stable` (1.3% of files with parse errors; 3.1% counting vendored `deps/` and `lib/`)
-- **C++** `preview` — callees precision 89.2 (87.9–90.5) vs ≥ 90; 5.0% of files with parse errors vs ≤ 2% (7.0% raw)
+- **C++** `preview` — 5.0% of files with parse errors vs ≤ 2% (7.0% raw); callees precision 92.3 (91.2–93.4) counting definitions the SCIP gold cannot tell apart as one (89.0 strict)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 **Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),
 measured on what an agent reads, same queries as codebase-memory-mcp;
 target ≤ 50% of cbm): with the RFC 0005 responses, `search_symbols` costs
 0.33–0.89× cbm's tokens until the first gold hit (target met for Python,
-TS/JS, PHP and Java) and `trace` 0.89–1.75× cbm's tokens per true call
+TS/JS, PHP and Java) and `trace` 0.88–1.74× cbm's tokens per true call
 edge (target not met; Rueca also returns more true edges). In an
 organization, one ranking over the organization index weighed by
 repository routing keeps the right repository's file in the top 5 for

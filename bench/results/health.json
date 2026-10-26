@@ -13,7 +13,8 @@
    "duration_ms": 319,
    "raw_files_extracted": 37,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-flask",
@@ -28,7 +29,8 @@
    "duration_ms": 308,
    "raw_files_extracted": 83,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-jinja",
@@ -43,7 +45,8 @@
    "duration_ms": 307,
    "raw_files_extracted": 60,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-click",
@@ -58,7 +61,8 @@
    "duration_ms": 289,
    "raw_files_extracted": 70,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-hono",
@@ -73,7 +77,8 @@
    "duration_ms": 1261,
    "raw_files_extracted": 450,
    "raw_files_partial": 8,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-zod",
@@ -88,7 +93,8 @@
    "duration_ms": 489,
    "raw_files_extracted": 169,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-express",
@@ -103,7 +109,8 @@
    "duration_ms": 535,
    "raw_files_extracted": 141,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-monolog",
@@ -118,7 +125,8 @@
    "duration_ms": 631,
    "raw_files_extracted": 217,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-commonmark",
@@ -133,7 +141,8 @@
    "duration_ms": 1149,
    "raw_files_extracted": 486,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-gin",
@@ -148,7 +157,8 @@
    "duration_ms": 342,
    "raw_files_extracted": 95,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-cli",
@@ -163,7 +173,8 @@
    "duration_ms": 307,
    "raw_files_extracted": 66,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-goawk",
@@ -178,7 +189,8 @@
    "duration_ms": 262,
    "raw_files_extracted": 39,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-gson",
@@ -193,7 +205,8 @@
    "duration_ms": 700,
    "raw_files_extracted": 264,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-javapoet",
@@ -208,7 +221,8 @@
    "duration_ms": 239,
    "raw_files_extracted": 39,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-fmt",
@@ -225,7 +239,8 @@
    "raw_files_partial": 4,
    "excluded": {
     "gtest copy": 4
-   }
+   },
+   "carried": true
   },
   {
    "name": "s3-yaml-cpp",
@@ -242,7 +257,8 @@
    "raw_files_partial": 21,
    "excluded": {
     "gtest copy": 148
-   }
+   },
+   "carried": true
   },
   {
    "name": "s3-cJSON",
@@ -257,7 +273,8 @@
    "duration_ms": 335,
    "raw_files_extracted": 99,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-lua",
@@ -272,7 +289,8 @@
    "duration_ms": 343,
    "raw_files_extracted": 68,
    "raw_files_partial": 1,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-psf__requests",
@@ -287,7 +305,8 @@
    "duration_ms": 309,
    "raw_files_extracted": 83,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-pallets__flask",
@@ -302,7 +321,8 @@
    "duration_ms": 297,
    "raw_files_extracted": 80,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-pylint-dev__pylint",
@@ -317,7 +337,8 @@
    "duration_ms": 1695,
    "raw_files_extracted": 1923,
    "raw_files_partial": 6,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-pytest-dev__pytest",
@@ -332,7 +353,8 @@
    "duration_ms": 562,
    "raw_files_extracted": 222,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-sphinx-doc__sphinx",
@@ -347,7 +369,8 @@
    "duration_ms": 1467,
    "raw_files_extracted": 530,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-pallets__click",
@@ -362,7 +385,8 @@
    "duration_ms": 292,
    "raw_files_extracted": 63,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-tailwindlabs__tailwindcss",
@@ -377,7 +401,8 @@
    "duration_ms": 247,
    "raw_files_extracted": 102,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-coder__code-server",
@@ -392,7 +417,8 @@
    "duration_ms": 319,
    "raw_files_extracted": 71,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-vuejs__core",
@@ -407,7 +433,8 @@
    "duration_ms": 1239,
    "raw_files_extracted": 510,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-preactjs__preact",
@@ -422,7 +449,8 @@
    "duration_ms": 538,
    "raw_files_extracted": 241,
    "raw_files_partial": 18,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-axios__axios",
@@ -437,7 +465,8 @@
    "duration_ms": 381,
    "raw_files_extracted": 139,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-yargs__yargs",
@@ -452,7 +481,8 @@
    "duration_ms": 302,
    "raw_files_extracted": 86,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-briannesbitt__carbon",
@@ -467,7 +497,8 @@
    "duration_ms": 2100,
    "raw_files_extracted": 1992,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-php-cs-fixer__php-cs-fixer",
@@ -482,7 +513,8 @@
    "duration_ms": 2054,
    "raw_files_extracted": 1212,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-laravel__framework",
@@ -499,7 +531,8 @@
    "raw_files_partial": 1,
    "excluded": {
     "vendored": 9
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-phpoffice__phpspreadsheet",
@@ -514,7 +547,8 @@
    "duration_ms": 2388,
    "raw_files_extracted": 2269,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-twigphp__Twig",
@@ -529,7 +563,8 @@
    "duration_ms": 669,
    "raw_files_extracted": 360,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-Seldaek__monolog",
@@ -544,7 +579,8 @@
    "duration_ms": 462,
    "raw_files_extracted": 214,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-thephpleague__commonmark",
@@ -559,7 +595,8 @@
    "duration_ms": 1308,
    "raw_files_extracted": 471,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-JsonMapper__JsonMapper",
@@ -574,7 +611,8 @@
    "duration_ms": 351,
    "raw_files_extracted": 150,
    "raw_files_partial": 1,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-caddyserver__caddy",
@@ -589,7 +627,8 @@
    "duration_ms": 841,
    "raw_files_extracted": 240,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-gin-gonic__gin",
@@ -604,7 +643,8 @@
    "duration_ms": 300,
    "raw_files_extracted": 84,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-prometheus__prometheus",
@@ -619,7 +659,8 @@
    "duration_ms": 1129,
    "raw_files_extracted": 394,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-gohugoio__hugo",
@@ -636,7 +677,8 @@
    "raw_files_partial": 0,
    "excluded": {
     "vendored": 2
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-hashicorp__terraform",
@@ -651,7 +693,8 @@
    "duration_ms": 2469,
    "raw_files_extracted": 1601,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-benhoyt__goawk",
@@ -666,7 +709,8 @@
    "duration_ms": 226,
    "raw_files_extracted": 37,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-google__gson",
@@ -681,7 +725,8 @@
    "duration_ms": 628,
    "raw_files_extracted": 218,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-projectlombok__lombok",
@@ -698,7 +743,8 @@
    "raw_files_partial": 90,
    "excluded": {
     "vendored": 1
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-apache__dubbo",
@@ -713,7 +759,8 @@
    "duration_ms": 3751,
    "raw_files_extracted": 3118,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-apache__rocketmq",
@@ -728,7 +775,8 @@
    "duration_ms": 2631,
    "raw_files_extracted": 1615,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-apolloconfig__apollo",
@@ -743,7 +791,8 @@
    "duration_ms": 1836,
    "raw_files_extracted": 809,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-decorators-squad__eo-yaml",
@@ -758,7 +807,8 @@
    "duration_ms": 264,
    "raw_files_extracted": 81,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-redis__redis",
@@ -775,7 +825,8 @@
    "raw_files_partial": 25,
    "excluded": {
     "vendored": 356
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-jqlang__jq",
@@ -790,7 +841,8 @@
    "duration_ms": 348,
    "raw_files_extracted": 73,
    "raw_files_partial": 1,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-micropython__micropython",
@@ -808,7 +860,8 @@
    "excluded": {
     "not the language (qstr list)": 10,
     "vendored": 277
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-valkey-io__valkey",
@@ -825,7 +878,8 @@
    "raw_files_partial": 29,
    "excluded": {
     "vendored": 478
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-nanomsg__nng",
@@ -840,7 +894,8 @@
    "duration_ms": 626,
    "raw_files_extracted": 287,
    "raw_files_partial": 64,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-fmtlib__fmt",
@@ -857,7 +912,8 @@
    "raw_files_partial": 12,
    "excluded": {
     "gtest copy": 4
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-nlohmann__json",
@@ -875,7 +931,8 @@
    "excluded": {
     "vendored": 97,
     "amalgamation": 3
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-catchorg__Catch2",
@@ -894,7 +951,8 @@
     "vendored": 2,
     "not the language (Objective-C)": 5,
     "amalgamation": 4
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-simdjson__simdjson",
@@ -912,7 +970,8 @@
    "excluded": {
     "vendored": 3,
     "amalgamation": 3
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-randombit__botan",
@@ -927,7 +986,9 @@
    "duration_ms": 2372,
    "raw_files_extracted": 1185,
    "raw_files_partial": 55,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   }
- ]
+ ],
+ "carried": 60
 }

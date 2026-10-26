@@ -211,7 +211,8 @@
       "src/recommendationservice/recommendation_server.py|<module>|DISABLE_PROFILER"
      ],
      "reads_spurious": []
-    }
+    },
+    "carried": true
    }
   },
   "awesome-compose": {
@@ -371,7 +372,8 @@
      },
      "reads_missed": [],
      "reads_spurious": []
-    }
+    },
+    "carried": true
    }
   },
   "terraform-aws-vpc": {
@@ -463,7 +465,8 @@
       "files": 77,
       "with_kind_nodes": 20
      }
-    }
+    },
+    "carried": true
    }
   }
  },

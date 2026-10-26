@@ -4,22 +4,22 @@
    "trace": {
     "rueca": {
      "n": 745,
-     "true_edges": 2056,
-     "per_true_edge": 57.32149805447471,
+     "true_edges": 2076,
+     "per_true_edge": 56.76926782273603,
      "tokens_median": 108.0,
      "ci": [
-      54.78200440045687,
-      60.39877770695562
+      54.302892113644134,
+      59.80447902699845
      ]
     },
     "cbm": {
      "n": 745,
-     "true_edges": 1974,
-     "per_true_edge": 48.5339412360689,
+     "true_edges": 1978,
+     "per_true_edge": 48.43579373104146,
      "tokens_median": 114.0,
      "ci": [
-      44.82980154659513,
-      52.662581393495046
+      44.743405610918416,
+      52.570397712303844
      ]
     }
    },
@@ -107,23 +107,23 @@
   "ts/js": {
    "trace": {
     "rueca": {
-     "n": 728,
-     "true_edges": 1736,
-     "per_true_edge": 65.42857142857143,
+     "n": 730,
+     "true_edges": 1778,
+     "per_true_edge": 64.08942632170978,
      "tokens_median": 108.0,
      "ci": [
-      59.53776082695321,
-      74.84048828399328
+      58.41545087912088,
+      73.19891827553721
      ]
     },
     "cbm": {
-     "n": 728,
+     "n": 730,
      "true_edges": 1574,
-     "per_true_edge": 53.9853875476493,
+     "per_true_edge": 54.12198221092757,
      "tokens_median": 108.0,
      "ci": [
-      50.523444783358755,
-      57.669190790415726
+      50.63602781946318,
+      57.814132134883444
      ]
     }
    },
@@ -182,17 +182,17 @@
     "cbm": {
      "n": 100,
      "found": 89,
-     "per_found": 213.75280898876406
+     "per_found": 213.73033707865167
     }
    },
    "raw": {
     "trace": {
-     "n": 728,
+     "n": 730,
      "rueca_median": 379.5,
      "cbm_median": 166.0,
-     "rueca_mean": 498.08104395604397,
-     "cbm_mean": 172.5260989010989,
-     "agent_n": 728,
+     "rueca_mean": 498.64246575342463,
+     "cbm_mean": 172.4945205479452,
+     "agent_n": 730,
      "agent_rueca_median": 108.0,
      "agent_cbm_median": 108.0
     },
@@ -201,7 +201,7 @@
      "rueca_median": 961.0,
      "cbm_median": 128.0,
      "rueca_mean": 969.09,
-     "cbm_mean": 222.17,
+     "cbm_mean": 222.15,
      "agent_n": 100,
      "agent_rueca_median": 315.0,
      "agent_cbm_median": 113.0
@@ -212,12 +212,12 @@
    "trace": {
     "rueca": {
      "n": 1196,
-     "true_edges": 3699,
-     "per_true_edge": 71.80400108137334,
+     "true_edges": 3713,
+     "per_true_edge": 71.53326151360086,
      "tokens_median": 147.5,
      "ci": [
-      69.59595531431663,
-      74.3846915574222
+      69.34611066017315,
+      74.09323543287697
      ]
     },
     "cbm": {
@@ -285,8 +285,8 @@
     },
     "cbm": {
      "n": 100,
-     "found": 78,
-     "per_found": 328.12820512820514
+     "found": 77,
+     "per_found": 331.15584415584414
     }
    },
    "raw": {
@@ -305,7 +305,7 @@
      "rueca_median": 1134.0,
      "cbm_median": 206.5,
      "rueca_mean": 1156.76,
-     "cbm_mean": 290.74,
+     "cbm_mean": 289.79,
      "agent_n": 100,
      "agent_rueca_median": 400.0,
      "agent_cbm_median": 177.5
@@ -315,23 +315,23 @@
   "go": {
    "trace": {
     "rueca": {
-     "n": 538,
-     "true_edges": 1490,
-     "per_true_edge": 47.939597315436245,
+     "n": 539,
+     "true_edges": 1520,
+     "per_true_edge": 47.02105263157895,
      "tokens_median": 98.0,
      "ci": [
-      45.91357213964117,
-      50.13874939208248
+      45.08005599538459,
+      49.11955372328126
      ]
     },
     "cbm": {
-     "n": 538,
+     "n": 539,
      "true_edges": 1249,
-     "per_true_edge": 44.99359487590072,
+     "per_true_edge": 45.04883907125701,
      "tokens_median": 93.0,
      "ci": [
-      41.00211777007404,
-      49.52024200867033
+      41.04883110957329,
+      49.49868124436429
      ]
     }
    },
@@ -390,26 +390,26 @@
     "cbm": {
      "n": 100,
      "found": 88,
-     "per_found": 164.2840909090909
+     "per_found": 164.27272727272728
     }
    },
    "raw": {
     "trace": {
-     "n": 538,
-     "rueca_median": 367.0,
-     "cbm_median": 151.0,
-     "rueca_mean": 447.09293680297395,
-     "cbm_mean": 157.23605947955392,
-     "agent_n": 538,
-     "agent_rueca_median": 98.0,
-     "agent_cbm_median": 93.0
+     "n": 539,
+     "rueca_median": 367,
+     "cbm_median": 151,
+     "rueca_mean": 446.64935064935065,
+     "cbm_mean": 157.0890538033395,
+     "agent_n": 539,
+     "agent_rueca_median": 98,
+     "agent_cbm_median": 93
     },
     "search": {
      "n": 100,
      "rueca_median": 905.5,
      "cbm_median": 102.0,
      "rueca_mean": 903.87,
-     "cbm_mean": 172.38,
+     "cbm_mean": 172.37,
      "agent_n": 100,
      "agent_rueca_median": 276.5,
      "agent_cbm_median": 87.0
@@ -419,23 +419,23 @@
   "java": {
    "trace": {
     "rueca": {
-     "n": 796,
-     "true_edges": 2951,
-     "per_true_edge": 67.74076584208743,
+     "n": 797,
+     "true_edges": 2999,
+     "per_true_edge": 66.67989329776591,
      "tokens_median": 176.0,
      "ci": [
-      65.51398009213453,
-      70.21301234939752
+      64.44755261573354,
+      69.1684255715607
      ]
     },
     "cbm": {
-     "n": 796,
+     "n": 797,
      "true_edges": 1923,
-     "per_true_edge": 75.73790951638065,
-     "tokens_median": 153.5,
+     "per_true_edge": 75.79355174206968,
+     "tokens_median": 153.0,
      "ci": [
-      70.5955771331928,
-      81.32550643386422
+      70.65757574912944,
+      81.34144987929638
      ]
     }
    },
@@ -494,26 +494,26 @@
     "cbm": {
      "n": 100,
      "found": 70,
-     "per_found": 420.64285714285717
+     "per_found": 419.75714285714287
     }
    },
    "raw": {
     "trace": {
-     "n": 796,
-     "rueca_median": 518.5,
-     "cbm_median": 215.0,
-     "rueca_mean": 685.5201005025126,
-     "cbm_mean": 242.6143216080402,
-     "agent_n": 796,
-     "agent_rueca_median": 176.0,
-     "agent_cbm_median": 153.5
+     "n": 797,
+     "rueca_median": 518,
+     "cbm_median": 215,
+     "rueca_mean": 684.9498117942284,
+     "cbm_mean": 242.51191969887077,
+     "agent_n": 797,
+     "agent_rueca_median": 176,
+     "agent_cbm_median": 153
     },
     "search": {
      "n": 100,
      "rueca_median": 1036.5,
      "cbm_median": 279.5,
      "rueca_mean": 1032.86,
-     "cbm_mean": 334.13,
+     "cbm_mean": 333.5,
      "agent_n": 100,
      "agent_rueca_median": 330.0,
      "agent_cbm_median": 244.0
@@ -524,22 +524,22 @@
    "trace": {
     "rueca": {
      "n": 1206,
-     "true_edges": 6651,
-     "per_true_edge": 52.249887235002255,
+     "true_edges": 6705,
+     "per_true_edge": 51.8496644295302,
      "tokens_median": 220.5,
      "ci": [
-      50.77322755586951,
-      53.93784128950457
+      50.383271276218146,
+      53.518580938873505
      ]
     },
     "cbm": {
      "n": 1206,
-     "true_edges": 5681,
-     "per_true_edge": 29.852666784016897,
-     "tokens_median": 129.5,
+     "true_edges": 5705,
+     "per_true_edge": 29.736021034180542,
+     "tokens_median": 130.0,
      "ci": [
-      28.86273956817079,
-      30.906383705879037
+      28.7515639213728,
+      30.755174861797602
      ]
     }
    },
@@ -593,12 +593,12 @@
     "rueca": {
      "n": 100,
      "found": 99,
-     "per_found": 293.54545454545456
+     "per_found": 293.2020202020202
     },
     "cbm": {
      "n": 100,
      "found": 99,
-     "per_found": 113.05050505050505
+     "per_found": 107.29292929292929
     }
    },
    "raw": {
@@ -606,18 +606,18 @@
      "n": 1206,
      "rueca_median": 638.0,
      "cbm_median": 180.0,
-     "rueca_mean": 794.257048092869,
-     "cbm_mean": 192.57048092868988,
+     "rueca_mean": 794.5174129353234,
+     "cbm_mean": 192.59618573797678,
      "agent_n": 1206,
      "agent_rueca_median": 220.5,
-     "agent_cbm_median": 129.5
+     "agent_cbm_median": 130.0
     },
     "search": {
      "n": 100,
-     "rueca_median": 857.0,
+     "rueca_median": 855.0,
      "cbm_median": 82.0,
-     "rueca_mean": 791.03,
-     "cbm_mean": 130.18,
+     "rueca_mean": 788.64,
+     "cbm_mean": 123.47,
      "agent_n": 100,
      "agent_rueca_median": 308.0,
      "agent_cbm_median": 73.0
@@ -627,23 +627,23 @@
   "cpp": {
    "trace": {
     "rueca": {
-     "n": 879,
-     "true_edges": 3543,
-     "per_true_edge": 64.15184871577759,
+     "n": 891,
+     "true_edges": 3621,
+     "per_true_edge": 63.410383871858606,
      "tokens_median": 184.0,
      "ci": [
-      62.27588768606225,
-      66.21811418170363
+      61.64187532022396,
+      65.3971697024882
      ]
     },
     "cbm": {
-     "n": 879,
-     "true_edges": 2164,
-     "per_true_edge": 60.36829944547135,
-     "tokens_median": 133.0,
+     "n": 891,
+     "true_edges": 2175,
+     "per_true_edge": 60.55954022988506,
+     "tokens_median": 132.0,
      "ci": [
-      56.58735473484087,
-      64.56505295950156
+      56.67082417629494,
+      64.93173671012092
      ]
     }
    },
@@ -696,35 +696,35 @@
    "lookup": {
     "rueca": {
      "n": 100,
-     "found": 92,
-     "per_found": 402.35869565217394
+     "found": 89,
+     "per_found": 409.02247191011236
     },
     "cbm": {
      "n": 100,
-     "found": 69,
-     "per_found": 335.5072463768116
+     "found": 62,
+     "per_found": 390.1774193548387
     }
    },
    "raw": {
     "trace": {
-     "n": 879,
+     "n": 891,
      "rueca_median": 531,
-     "cbm_median": 189,
-     "rueca_mean": 702.3572241183163,
-     "cbm_mean": 205.19453924914677,
-     "agent_n": 879,
+     "cbm_median": 188,
+     "rueca_mean": 700.1997755331089,
+     "cbm_mean": 204.39281705948372,
+     "agent_n": 891,
      "agent_rueca_median": 184,
-     "agent_cbm_median": 133
+     "agent_cbm_median": 132
     },
     "search": {
      "n": 100,
-     "rueca_median": 1015.0,
-     "cbm_median": 167.5,
-     "rueca_mean": 1032.31,
-     "cbm_mean": 263.93,
+     "rueca_median": 1004.5,
+     "cbm_median": 203.0,
+     "rueca_mean": 1022.04,
+     "cbm_mean": 276.85,
      "agent_n": 100,
-     "agent_rueca_median": 350.5,
-     "agent_cbm_median": 146.5
+     "agent_rueca_median": 351.0,
+     "agent_cbm_median": 176.0
     }
    }
   }
