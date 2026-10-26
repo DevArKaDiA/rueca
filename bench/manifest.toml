@@ -104,6 +104,38 @@ target = 0.90
 gated = false
 
 [[scorecard.metrics]]
+key = "callers_precision@strict"
+family = "Structure"
+label = "Callers precision, strict (no SCIP equivalence classes)"
+floor = 0.90
+target = 0.97
+gated = false
+
+[[scorecard.metrics]]
+key = "callers_recall@strict"
+family = "Structure"
+label = "Callers recall, strict (no SCIP equivalence classes)"
+floor = 0.75
+target = 0.90
+gated = false
+
+[[scorecard.metrics]]
+key = "callees_precision@strict"
+family = "Structure"
+label = "Callees precision, strict (no SCIP equivalence classes)"
+floor = 0.90
+target = 0.97
+gated = false
+
+[[scorecard.metrics]]
+key = "callees_recall@strict"
+family = "Structure"
+label = "Callees recall, strict (no SCIP equivalence classes)"
+floor = 0.75
+target = 0.90
+gated = false
+
+[[scorecard.metrics]]
 key = "definition_found"
 family = "Structure"
 label = "Definition found"
@@ -412,6 +444,7 @@ labeler = "c"
 separator = "::"
 calls = { call_expression = "function", new_expression = "type" }
 members = { field_expression = "field", qualified_identifier = "name", template_function = "name", template_method = "name", parenthesized_expression = "@0" }
+constructions = true  # `T x(a);` / `T x{a};` / `T x;` in a body: scip-clang's constructor reference on `x` is a call
 
 [grammars.c]
 binding = "tree_sitter_c:language"
@@ -532,12 +565,12 @@ role = "compile-only dependency of gson (annotations), for the scip-java gold"
 name = "rueca"
 binary = "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)"
 contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arms/rueca.py)"
-# Binary behind the published Rueca numbers (every language and suite):
-# `cargo build --release -p rueca` of the RFC 0005 contract branch
-# (macOS arm64): main 2c5a384 plus the response contract. Every quality
-# metric is identical to main's binary (alpha contract) on the same run;
-# only tokens and latency differ.
-results = "feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886)"
+# Binaries behind the published Rueca numbers (`cargo build --release -p
+# rueca`, macOS arm64). Structure (S3, every set, S3 schema 4): main
+# 1ff5e82. Every other suite (carried): the RFC 0005 contract branch, main
+# 2c5a384 plus the response contract, whose quality metrics are identical
+# to main's binary on the same run (only tokens and latency differ).
+results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.

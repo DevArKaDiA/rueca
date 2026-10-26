@@ -13,9 +13,19 @@ Call-edge derivation (RFC 0002 §4.2):
 2. For every non-definition reference occurrence to a bound symbol, keep it
    only if tree-sitter says it is a call site (identifier is the callee of a
    call / new expression, directly or as the property of a member access).
+   For C++ (`constructions` in the grammar's manifest entry) a reference
+   on the name a declaration in a body declares is a construction
+   (`Token token(a, b);`, `Parser parser(input);`, `T x{a};`, `T x;`):
+   scip-clang puts the constructor reference there.
 3. The caller is the innermost callable whose extent contains the occurrence.
    Occurrences outside any callable (module level) produce no edge.
 4. Both endpoints must be in-scope (repo `include` prefixes, not test paths).
+5. Equivalence classes: when one SCIP symbol binds to several callables
+   (scip-clang gives same-signature overloads, function template
+   specializations and `#if` alternatives one symbol; two C `static`
+   functions of one name share one), edges keep the first bound callable
+   and `classes` lists every group of callables the gold cannot tell apart
+   (`match.py`); class-aware scoring treats a class as one neighbour.
 """
 
 from __future__ import annotations
@@ -27,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .common import is_test_path
+from .match import UnionFind, class_edges
 from .treesitter import Func, extract_functions, grammar_for, is_call_site, parse, utf16_col_to_byte
 
 ROLE_DEFINITION = 1
@@ -208,6 +219,8 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
     texts: dict[str, list[str]] = {}
     stats = defaultdict(int)
     overload_alias: dict[tuple[str, int, str], dict] = {}
+    same_symbol = UnionFind()  # callables bound to one SCIP symbol
+    bound: set[str] = set()
 
     scoped = [d for d in docs if in_scope(d.path, include, exclude)]
     stats["documents_total"] = len(docs)
@@ -262,15 +275,22 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
                 aliased = f is not None
             if f is None:
                 continue
+            bound.add(fid(d.path, f))
             if o.symbol not in sym_to_fid:
                 sym_to_fid[o.symbol] = fid(d.path, f)
                 stats["definitions_bound"] += 1
                 stats["definitions_bound_via_overload"] += int(aliased)
+            elif sym_to_fid[o.symbol] != fid(d.path, f):
+                # one symbol, several callables: the gold cannot tell them apart
+                same_symbol.union(sym_to_fid[o.symbol], fid(d.path, f))
             if o.enclosing is not None and not aliased:
                 stats["definitions_with_enclosing_range"] += 1
                 es, ee = o.enclosing[0] + 1, o.enclosing[2] + 1
                 if es <= f["def_line"] <= ee and not f.get("_enc"):
                     f["start"], f["end"], f["_enc"] = min(es, f["start"]), ee, True
+
+    stats["classes_by_symbol"] = len(same_symbol.groups())
+    stats["class_members_unbound"] = join_unbound_alternatives(callables, bound, same_symbol, language)
 
     callers: dict[str, set[str]] = defaultdict(set)
     callees: dict[str, set[str]] = defaultdict(set)
@@ -310,12 +330,63 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
     stats["edges"] = sum(len(v) for v in callees.values())
     for f in callables.values():
         f.pop("_enc", None)
-    return {
+    graph = {
         "callables": callables,
         "callers": {k: sorted(v) for k, v in callers.items()},
         "callees": {k: sorted(v) for k, v in callees.items()},
+        "classes": same_symbol.groups(),
         "stats": dict(stats),
     }
+    add_class_stats(graph)
+    return graph
+
+
+# Languages where a definition can exist in alternatives the indexer did not
+# compile: C / C++ `#if` branches and Go build tags (whose build
+# configuration also selects files of a directory: `_win.cc`, `_unix.go`),
+# Python conditional `def`s and `typing.overload` stubs spelled another way.
+# Java, TS/JS and PHP have none: an unbound callable there is another
+# function (scip-java's anonymous classes are `local` symbols).
+_FILE_ALTERNATIVES = ("python",)
+_DIR_ALTERNATIVES = ("c", "cpp", "go")
+
+
+def join_unbound_alternatives(callables: dict[str, dict], bound: set[str], uf: UnionFind, language: str | None) -> int:
+    """A callable no SCIP definition binds to (the `#if` / build-tag
+    alternative the indexer did not compile, a conditional Python `def`)
+    joins the class of the bound callables with its qualified name in the
+    same file — or, for C, C++ and Go, the same directory — when they are
+    one class; with several distinguishable candidates (overloads with
+    their own symbols) it stays alone. Returns how many joined."""
+    family = (language or "").lower()
+    if family in _DIR_ALTERNATIVES:
+        scope_of = lambda p: p.rsplit("/", 1)[0] if "/" in p else ""
+    elif family in _FILE_ALTERNATIVES:
+        scope_of = lambda p: p
+    else:
+        return 0
+    by_key: dict[tuple, list[str]] = defaultdict(list)
+    for k, f in callables.items():
+        if k in bound:
+            by_key[(scope_of(f["path"]), f["qualname"])].append(k)
+    joined = 0
+    for k, f in sorted(callables.items()):
+        if k in bound:
+            continue
+        others = by_key.get((scope_of(f["path"]), f["qualname"]), [])
+        roots = {uf.find(o) for o in others}
+        if len(roots) == 1:
+            uf.union(next(iter(roots)), k)
+            joined += 1
+    return joined
+
+
+def add_class_stats(graph: dict) -> None:
+    """`classes`, `class_members`, `class_edges` in the graph's stats."""
+    st = graph["stats"]
+    st["classes"] = len(graph.get("classes") or [])
+    st["class_members"] = sum(len(c) for c in graph.get("classes") or [])
+    st["class_edges"] = class_edges(graph)
 
 
 def _byte_col(line: str, col: int, encoding: int) -> int:
@@ -368,9 +439,9 @@ def eligible(f: dict, min_lines: int) -> bool:
 
 
 def gold_neighbours(graph: dict, fid_: str, direction: str) -> list[str]:
-    """Gold depth-1 neighbours of a callable, without the callable itself
-    (trace tools never list their root, so recursion is not a question)."""
-    return [x for x in graph[direction].get(fid_, []) if x != fid_ and x in graph["callables"]]
+    """Gold depth-1 neighbours of a callable; a recursive callable is its
+    own caller and callee."""
+    return [x for x in graph[direction].get(fid_, []) if x in graph["callables"]]
 
 
 def questions(graph: dict, min_lines: int) -> dict[str, list[str]]:

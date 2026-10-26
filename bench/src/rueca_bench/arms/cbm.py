@@ -20,7 +20,7 @@ from typing import Any
 
 from ..common import BIN_DIR, CACHE, count_tokens, load_manifest, pinned_asset, run, safe_name, sha256_file
 from ..efficiency import text_prefix_tokens
-from .base import Arm, CallResult, Handle, is_callable_label, same_def
+from .base import Arm, CallResult, Handle, is_callable_label, line_distance, same_def
 
 
 def cbm_platform_key() -> str:
@@ -268,9 +268,10 @@ class CbmArm(Arm):
     def resolve(self, h: Handle, func: dict) -> CallResult:
         t0 = time.perf_counter()
         self._nodes(h)
-        for n in h.state["every_node"]:
-            if same_def(n, func):
-                return CallResult(True, time.perf_counter() - t0, hits=[n], extra={"ref": n["qn"]})
+        ok = [n for n in h.state["every_node"] if same_def(n, func)]
+        if ok:
+            n = min(ok, key=lambda n: line_distance(n.get("start_line"), func))
+            return CallResult(True, time.perf_counter() - t0, hits=[n], extra={"ref": n["qn"]})
         return CallResult(False, time.perf_counter() - t0, error="definition not found in graph")
 
     def neighbors(self, h: Handle, ref: Any) -> CallResult:

@@ -441,6 +441,33 @@ def _is_callee(node: Node, calls: dict[str, str], members: dict[str, str], depth
     return False
 
 
+# statements a local declaration can be a direct child of
+_BODY_PARENTS = {"compound_statement", "case_statement", "for_statement", "condition_clause"}
+
+
+def _is_construction(node: Node) -> bool:
+    """C++ construction by declaration (manifest `constructions = true`): the
+    name a declaration in a function body declares — `Token token(a, b);`
+    (`init_declarator` with arguments), `Parser parser(input);` (the most
+    vexing parse: a `function_declarator`), `T x{a};`, `T x;`. scip-clang
+    records the constructor it calls on that name; the occurrence still has
+    to reference a bound callable, so a plain variable never counts."""
+    parent = node.parent
+    if node.type != "identifier" or parent is None:
+        return False
+    decl = parent
+    if parent.type in ("init_declarator", "function_declarator"):
+        if parent.child_by_field_name("declarator") != node:
+            return False
+        decl = parent.parent
+    elif parent.type == "declaration":
+        if not any(c == node for c in parent.children_by_field_name("declarator")):
+            return False
+    else:
+        return False
+    return decl is not None and decl.type == "declaration" and decl.parent is not None and decl.parent.type in _BODY_PARENTS
+
+
 def is_call_site(tree, grammar: str, line0: int, byte_col: int, end_byte_col: int) -> bool:
     node = tree.root_node.named_descendant_for_point_range((line0, byte_col), (line0, max(byte_col, end_byte_col - 1)))
     if node is None:
@@ -450,7 +477,7 @@ def is_call_site(tree, grammar: str, line0: int, byte_col: int, end_byte_col: in
         return False
     spec = _grammars().get(grammar, {})
     if "calls" in spec:
-        return _is_callee(node, spec["calls"], spec.get("members", {}))
+        return _is_callee(node, spec["calls"], spec.get("members", {})) or (bool(spec.get("constructions")) and _is_construction(node))
     if grammar == "python":
         if parent.type == "call" and parent.child_by_field_name("function") == node:
             return True

@@ -72,8 +72,8 @@ uv run --project bench rueca-bench check                 # regression check vs t
 - `clean --work` removes worktrees; `clean --runs rueca` drops cached Rueca outputs.
 - `uv run --project bench pytest bench/tests` — unit tests of the harness
   pieces (efficiency counting, contract normalizers, health rules, rank
-  fusion, the organization file and RFC 0006 metrics, and the multi-ref
-  scorer).
+  fusion, the organization file and RFC 0006 metrics, the multi-ref scorer,
+  S3 gold derivation and scoring); CI runs them in the `bench harness` job.
 - Per-call timeouts: 120 s per query, 1800 s per index (`arms/__init__.py`).
 - S1 runs repositories in parallel (`--workers`, default 2), instances of one
   repository sequentially (one partial clone per repository, one detached
@@ -220,8 +220,9 @@ harness code; it must return the same graph shape as `scip.derive_call_graph`
 `report` scores what is in the local cache and **carries forward** the
 published entries of `bench/results/*.json` for everything else: S1
 per-instance rows (and gold summaries), S3 per-question rows (compact
-counts per question, `s3.json` schema 3, carried only when the set's gold
-commit is unchanged), and data-suite entries per (arm, repository). So a
+counts per question, `s3.json` schema 4, carried only when the set's gold
+commit is unchanged), data-suite entries per (arm, repository) and health
+rows per repository (same commit). So a
 checkout that only adds a language, or the CI regression check that runs
 only the Rueca arm, reproduces every other number without re-running it,
 and the report lists what was carried, from which run (date, machine).
@@ -409,7 +410,8 @@ a test path (`common.py: is_test_path`).
 edge in that direction — minus dunders and one-line bodies (extent shorter
 than `[s3] min_lines` = 3 lines) — not a sample: callers questions and
 callees questions are scored separately. For each question: resolve the
-definition (path + name + def line ±2), then one depth-1 neighbours answer
+definition (path + name + def line ±2; the nearest when several arm symbols
+are within ±2), then one depth-1 neighbours answer
 (Rueca `trace` with `direction: "both"`, cbm `trace_path` with `direction:
 "both"`, grep its textual heuristic). The symbol lookup (is the definition
 in the top 1 / top 10 of the arm's symbol search for its bare name?) needs
@@ -431,22 +433,64 @@ confidences: same numbers in both rows). Micro-benchmarks gate the
 **callee F1 pooled over every callable** (precision and recall pooled over
 the snippet set's edges, so spurious edges on callables without gold count).
 
-**Scoring rules.** Predictions are restricted to the gold's scope before
-scoring: in-scope, non-test files, a callable label (Function / Method /
-Test / Constructor), **and a callable of the gold's universe** (a definition
-the bench labeler sees as a callable: functions and methods with a body), so
-module, file, class or variable pseudo-neighbours, C/C++ macros and
-prototypes are neither rewarded nor penalised (the report counts what this
-dropped per arm). Self-edges (recursion) are not neighbours: trace tools
-never list their root. `typing.overload` stubs are not callables;
-scip-python emits the definition only on the first stub, which is aliased to
-the implementation.
+**Scoring rules** (`report.py: score_answers`, `match.py`). Predictions are
+restricted to the gold's scope before scoring: in-scope, non-test files, a
+callable label (Function / Method / Test / Constructor), **and a callable of
+the gold's universe** (a definition the bench labeler sees as a callable:
+functions and methods with a body), so module, file, class or variable
+pseudo-neighbours, C/C++ macros and prototypes are neither rewarded nor
+penalised (the report counts what this dropped per arm).
 
-**Populations** (gated sets, questions callers / callees): Python 508 / 565
-(requests 105 / 88, flask 133 / 124, jinja 270 / 353), TS/JS 438 / 556 (hono
-364 / 367, zod 74 / 189), PHP 709 / 810 (monolog, commonmark), Go 348 / 516
-(gin, urfave/cli), Java 665 / 878 (gson, javapoet), C 976 / 1034 (cJSON,
-Lua), C++ 863 / 1073 (fmt, yaml-cpp) — every language above the ≥ 300 per
+- **One hit, one callable.** Each hit is assigned to at most one gold
+  callable: same path and bare name, a name line, declaration start or
+  decorator start within ±2 lines of the hit's start line; when the arm
+  gives a qualified name (Rueca), the callables whose qualified name agrees
+  with it come first (trailing segments equal, template arguments as
+  written, then without them; parameter lists ignored); then the nearest
+  line. Predictions and gold neighbours are compared as sets of callables,
+  so a hit never matches two neighbouring overloads (or a constructor two
+  lines from another), and two hits naming one callable are one prediction.
+- **Recursion is an edge.** A recursive callable is its own caller and
+  callee in the gold and in every arm: Rueca's `trace` reports the self-edge
+  in `edges` (never in `nodes`), the grep heuristic sees `name(` in the
+  body, cbm reports what `trace_path` returns.
+- **Equivalence classes** (class-aware scoring, the gated numbers): when the
+  gold cannot tell callables apart (below), a predicted callee that is any
+  member of a class matches a gold edge to the class, and a class counts
+  once per question (two members predicted are one prediction). A callers
+  question on a class member is asked of the whole class: the gold callers
+  of every member, against the union of the arm's callers for every member
+  (the run asks the arm about each member). The same scoring without
+  classes is reported as the **strict** diagnostic row.
+
+`typing.overload` stubs are not callables; scip-python emits the definition
+only on the first stub, which is aliased to the implementation.
+
+**Equivalence classes in the gold** (`classes` in each gold file, counted
+per set in the report's gold table). SCIP gives references to symbols, and
+some indexers give one symbol to several definitions: scip-clang to
+same-signature overloads (fmt's three SFINAE `copy(InputIt, InputIt,
+OutputIt)`), function template specializations (`num_bits<int128_opt>` and
+the primary template) and members of class template specializations, and
+two C `static` functions of one name in different files; scip-python to
+same-named functions nested in the methods of one class. The gold binds
+the symbol's references to one definition (the first bound), so an arm that
+names another is no worse in fact but would count as a false positive and a
+miss. Every definition bound to one symbol is therefore one class; so is a
+callable no SCIP definition binds to whose qualified name is that of one
+class in the same file (Python: conditional `def`s, overload stubs written
+`@t.overload`) or directory (C, C++, Go: the `#if` branch or build-tagged
+file the indexer did not compile, e.g. Lua's three `lsys_load`) — not in
+Java, TS/JS or PHP, where an unbound callable is another function (an
+anonymous class). For PHPStan gold, a call target that maps to several
+callables (same-named functions in one file, same-named methods within the
+line tolerance) is a class too; the two PHP repositories have none.
+
+**Populations** (gated sets, questions callers / callees): Python 508 / 570
+(requests 105 / 88, flask 133 / 125, jinja 270 / 357), TS/JS 440 / 562 (hono
+365 / 372, zod 75 / 190), PHP 710 / 811 (monolog, commonmark), Go 351 / 521
+(gin, urfave/cli), Java 667 / 884 (gson, javapoet), C 978 / 1035 (cJSON,
+Lua), C++ 878 / 1085 (fmt, yaml-cpp) — every language above the ≥ 300 per
 direction of §7.2. Calibration: click 210 / 191, goawk 245 / 186;
 diagnostic: express 8 / 19.
 
@@ -484,7 +528,10 @@ not calls, so (`scip.py`):
    selectors and generic instantiations, Java `method_invocation.name`,
    `object_creation_expression.type` and `this(...)` / `super(...)`, C/C++
    `call_expression.function` through `.`/`->`, `::` and template
-   arguments, C++ `new T`);
+   arguments, C++ `new T`, and C++ constructions by declaration — the name
+   a declaration in a function body declares, `Token token(a, b);`,
+   `Parser parser(input);` (the most vexing parse), `T x{a};`, `T x;`,
+   where scip-clang puts the constructor reference; manifest `constructions`);
 3. the caller is the innermost callable containing the occurrence
    (module-level calls produce no edge).
 
@@ -612,10 +659,11 @@ members of returned object literals are SCIP `local` symbols, a
 default-exported object literal, `super(id)` and a constructor inherited two
 levels up are not resolved; the 3 extra edges are decorator applications
 inside a method's range), Go vs scip-go 156 / 156 edges (60 snippets identical),
-Java vs scip-java 109 / 109 (65 identical), C vs scip-clang 50 / 51 key
-edges with 1 extra SCIP edge (25 of 26 identical: two `static helper`
-functions in different files share one SCIP symbol; the macro-body call
-of `macros/macro_body_calls` now follows scip-clang's convention), C++ 79 / 82 with no extra edges (scip-clang misses a
+Java vs scip-java 109 / 109 (65 identical), C vs scip-clang 51 / 51 key
+edges (26 identical; two `static helper` functions in different files
+share one SCIP symbol, compared as one equivalence class like the
+repository scoring — strictly 50 / 51 with one extra edge; the macro-body
+call of `macros/macro_body_calls` follows scip-clang's convention), C++ 79 / 82 with no extra edges (scip-clang misses a
 `using`-declared function and two explicit `operator` calls).
 
 **Gold from PyCG** (Apache-2.0, **diagnostic**): the hand-written
@@ -979,12 +1027,23 @@ file paths and function names of the public corpus repositories.
   hit either copy (only the patched one is gold). Java S1 has no lucene /
   druid / trino (size). C S1 has exactly the 30 instances of SWE-bench
   Multilingual.
+- **Equivalence classes are lenient by construction.** Members of a class
+  are interchangeable for scoring, so an arm that picks the wrong
+  same-signature overload, specialization or `#if` alternative is not
+  penalised (the gold cannot tell which is right), and a callers question
+  on a class pools the callers of all its members. The strict row shows the
+  numbers without classes; the gold table counts classes, their callables
+  and the gold edges that point to a class per set. Classes come only from
+  the indexer (one symbol, several definitions) or from definitions it did
+  not compile; same-named callables the indexer tells apart are never
+  merged.
 - **SCIP gold for Go, Java, C/C++** has the usual SCIP blind spots: interface
   dispatch (scip-go, scip-java resolve to the interface method only, so
   implementations get no caller edges), function pointers, macros
   (scip-clang attributes a call written in a macro body to the expansion
   site, which tree-sitter tools cannot see), `static` functions with the same
-  name in different C files (one SCIP symbol). The fmt and yaml-cpp golds
+  name in different C files (one SCIP symbol, scored as one equivalence
+  class). The fmt and yaml-cpp golds
   index the library translation units plus one TU including every public
   header, so header-only templates are covered without a CMake configure
   (template code only instantiated in user code keeps dependent calls
@@ -1015,6 +1074,27 @@ file paths and function names of the public corpus repositories.
   Multilingual (RFC 0003 §10.2, §10.3 list them). They are cloned at runtime
   as benchmark input; no code is vendored or copied, and results only name
   their files and functions.
+
+## Changelog of scoring rules
+
+Rule changes that move published numbers, newest first (the results files
+carry the S3 schema version; rows scored under an older schema are never
+carried forward).
+
+- **2026-10-26 — S3 schema 4.** (1) Equivalence classes: callables one SCIP
+  symbol binds to (and unbound alternatives of one class) are one
+  neighbour; class-aware scores are the gated numbers, the old scoring is
+  the *strict* diagnostic row. (2) Recursion: self-edges are gold edges and
+  every arm reports them (Rueca's arm reads `trace` `edges`, where the
+  self-edge is, instead of only `nodes`; the grep heuristic stops excluding
+  its root). (3) Matching: one hit → at most one callable (qualified name
+  when the arm gives one, then the nearest line) instead of "any callable
+  within ±2 lines", and arms resolve a question's definition to the nearest
+  symbol within ±2. (4) C++ call sites: constructions by declaration
+  (`Token token(...);`, `Parser parser(input);`, `T x{...};`, `T x;`),
+  which scip-clang records on the variable name, are call edges.
+- **2026-10-25 — RFC 0004** (S3 schema 3): every eligible callable is a
+  question, callable universe filter, confidence ≥ 0.6 row.
 
 ## Deviations from the RFCs
 

@@ -93,3 +93,6 @@ jobs:
       - run: uv run --project bench --locked rueca-bench --help
         env:
           UV_NO_EDITABLE: "1"
+      - run: uv run --project bench --locked pytest bench/tests
+        env:
+          UV_NO_EDITABLE: "1"

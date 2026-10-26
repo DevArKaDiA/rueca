@@ -123,6 +123,12 @@ pseudo-neighbours), and are scored **at every confidence** (default `trace`)
 and **at confidence ≥ 0.6** (heuristic edges dropped); the floor applies to
 the default, the second row shows what an agent filtering by confidence
 gets.
+Callables the gold cannot tell apart — several definitions one SCIP symbol
+binds to (same-signature overloads, template specializations, `#if`
+alternatives) — form an equivalence class: a neighbour in a class matches a
+gold edge to the class, once per question; the same scores without classes
+are published as the *strict* row (diagnostic). A recursive callable is its
+own caller and callee.
 
 **Micro-benchmarks**, population = every callable of the snippet set: F1 of
 callees (precision and recall shown).
@@ -223,14 +229,20 @@ RFC 0003's "supported" becomes `stable`; its "parity row" becomes the
 9. **Gold bias disclosed per row.** The scorecard links each structural row
    to its gold source (SCIP indexer and version, PHPStan, hand labels) and the
    README of the bench keeps the list of known blind spots (interface
-   dispatch, function pointers, macros, untyped JavaScript).
+   dispatch, function pointers, macros, untyped JavaScript), and the report
+   counts, per gold set, the equivalence classes (§5) — definitions the gold
+   cannot tell apart — and the gold edges that point to one.
 
 ## 8. What does not change
 
 - Corpora at pinned commits, datasets by revision and sha256, tools by
   version and sha256, Docker images by digest; nothing proprietary.
 - Same inputs for every arm; identical post-filtering (language, non-test).
-- The matching rules of S1 and S3 (path + bare name + line ±2).
+- The matching rules of S1 and S3 (path + bare name + line ±2). S3 refines
+  them (amended 2026-10-26): each hit is assigned to one callable — the
+  arm's qualified name first, then the nearest line within ±2 — and
+  equivalence classes of the gold (§5) count as one neighbour
+  (`bench/README.md`, *Changelog of scoring rules*).
 - Results are generated (`rueca-bench report`), never edited by hand.
 
 ## 9. Reporting: the scorecard
