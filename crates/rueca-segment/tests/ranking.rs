@@ -1,6 +1,7 @@
 //! Ranking of `search_symbols` on realistic sources: body tokens, qualified
-//! (dotted) queries, the test prior, query term frequency. The label prior
-//! is covered in `segment.rs` (`symbol_search_camel_case_and_exact_first`).
+//! (dotted) queries, the test, declaration, copy and vendored priors, query
+//! term frequency. The label prior is covered in `segment.rs`
+//! (`symbol_search_camel_case_and_exact_first`).
 
 use std::collections::HashMap;
 
@@ -97,16 +98,24 @@ fn open() -> (tempfile::TempDir, Segment) {
     build(&sources, defs)
 }
 
+/// Language of a fixture path, by extension.
+fn language(path: &str) -> Option<Language> {
+    match path.rsplit('.').next() {
+        Some("c" | "h") => Some(Language::C),
+        Some("cc" | "cpp" | "hpp") => Some(Language::Cpp),
+        _ => Some(Language::Python),
+    }
+}
+
 /// Writes and opens a segment with one `File` node per source, then `defs`.
 fn build(sources: &[(&str, &str)], defs: Vec<Def>) -> (tempfile::TempDir, Segment) {
-    let py = Some(Language::Python);
     let files: Vec<FileEntry> = sources
         .iter()
         .enumerate()
         .map(|(i, (p, c))| FileEntry {
             path: (*p).into(),
             blob_sha: git_blob_sha(c.as_bytes()),
-            language: py,
+            language: language(p),
             size: c.len() as u64,
             line_count: c.lines().count() as u32,
             node: i as u32,
@@ -122,7 +131,7 @@ fn build(sources: &[(&str, &str)], defs: Vec<Def>) -> (tempfile::TempDir, Segmen
             qualified_name: (*p).into(),
             file: Some(i as u32),
             span: None,
-            language: py,
+            language: language(p),
             signature: None,
             doc: None,
             exported: true,
@@ -137,7 +146,7 @@ fn build(sources: &[(&str, &str)], defs: Vec<Def>) -> (tempfile::TempDir, Segmen
             qualified_name: d.qn.into(),
             file: Some(d.file),
             span: Some(lines(src, d.lines.0, d.lines.1)),
-            language: py,
+            language: language(sources[d.file as usize].0),
             signature: None,
             doc: None,
             exported: true,
@@ -236,4 +245,80 @@ fn ranking_is_deterministic_and_pages_exactly() {
     };
     assert_eq!(page(0), all[..2].to_vec());
     assert_eq!(page(2), all[2..4].to_vec());
+}
+
+/// A C prototype in a header and its body in a source file share the
+/// qualified name; the body (code an agent edits) ranks first, though the
+/// prototype's short text alone would score higher on BM25.
+#[test]
+fn bodies_rank_above_their_declarations() {
+    let header = "int parse_config(const char *path, int flags);\nint config_flags(void);\n";
+    let source =
+        "int parse_config(const char *path, int flags)\n{\n    return open_config(path, flags | config_flags());\n}\n";
+    let sources = [("include/config.h", header), ("src/config.c", source)];
+    let defs = vec![
+        def(Label::Function, "parse_config", "parse_config", 0, (1, 1)), // 2: prototype
+        def(Label::Function, "config_flags", "config_flags", 0, (2, 2)), // 3: prototype, no body anywhere
+        def(Label::Function, "parse_config", "parse_config", 1, (1, 4)), // 4: body
+    ];
+    let (_d, seg) = build(&sources, defs);
+    let hits = |q: &str| {
+        let q = SymbolQuery { text: q.into(), limit: 20, ..Default::default() };
+        seg.search_symbols(&q).unwrap().iter().map(|h| h.node).collect::<Vec<_>>()
+    };
+    for q in ["parse_config", "parse config path flags"] {
+        assert_eq!(hits(q)[0], 4, "{q}: {:?}", hits(q));
+    }
+    // A declaration stays findable by its name.
+    assert_eq!(hits("config_flags")[0], 3);
+}
+
+/// A generated single header that copies the definitions of many headers
+/// (an amalgamation) ranks below the headers it copies; the copied
+/// definitions stay listed.
+#[test]
+fn amalgamated_copies_rank_below_their_sources() {
+    let func = |k: usize| format!("int step_{k}(int x)\n{{\n    int y = x + {k};\n    return y * 2;\n}}\n");
+    let parts: Vec<String> = (0..4).map(|p| (p * 15..p * 15 + 15).map(func).collect()).collect();
+    let all: String = parts.concat();
+    let mut sources: Vec<(String, String)> = vec![("single_include/lib.hpp".into(), all)];
+    sources.extend(parts.iter().enumerate().map(|(p, c)| (format!("include/lib/part{p}.hpp"), c.clone())));
+    let refs: Vec<(&str, &str)> = sources.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    // `Def` holds `&'static str` names; leaking 60 short strings in a test is fine.
+    let names: Vec<&'static str> = (0..60).map(|k| &*Box::leak(format!("step_{k}").into_boxed_str())).collect();
+    let mut defs = Vec::new();
+    for (k, name) in names.iter().enumerate() {
+        let k = k as u32;
+        defs.push(def(Label::Function, name, name, 0, (k * 5 + 1, k * 5 + 5)));
+    }
+    for (k, name) in names.iter().enumerate() {
+        let (part, local) = (k as u32 / 15, k as u32 % 15);
+        defs.push(def(Label::Function, name, name, 1 + part, (local * 5 + 1, local * 5 + 5)));
+    }
+    let (_d, seg) = build(&refs, defs);
+    for q in ["step_17", "step 17"] {
+        let q = SymbolQuery { text: q.into(), limit: 5, ..Default::default() };
+        let hits = seg.search_symbols(&q).unwrap();
+        let paths: Vec<String> = hits.iter().map(|h| seg.file(seg.node(h.node).file.unwrap()).path.clone()).collect();
+        assert_eq!(paths[0], "include/lib/part1.hpp", "{paths:?}");
+        assert!(paths.contains(&"single_include/lib.hpp".to_string()), "{paths:?}");
+    }
+}
+
+/// Vendored third-party code ranks below first-party code with the same
+/// text.
+#[test]
+fn vendored_code_ranks_below_first_party() {
+    // The vendored copy has the lower node id and the shorter path, so
+    // without the prior it would come first.
+    let src = "def inflate(data):\n    return data\n";
+    let sources = [("deps/inflate.py", src), ("src/codec/inflate.py", src)];
+    let defs = vec![
+        def(Label::Function, "inflate", "a.inflate", 0, (1, 2)), // 2
+        def(Label::Function, "inflate", "b.inflate", 1, (1, 2)), // 3
+    ];
+    let (_d, seg) = build(&sources, defs);
+    for q in ["inflate", "inflate data"] {
+        assert_eq!(search(&seg, q)[0], "b.inflate", "{q}");
+    }
 }

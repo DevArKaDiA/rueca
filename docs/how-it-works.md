@@ -679,6 +679,7 @@ component exists because a tool needs it:
 | name indexes | node ids sorted by qualified name and by name | symbol lookup (`get_symbol`, `get_snippet`, `trace`) |
 | file → symbols | symbol nodes per file, sorted by position | `get_file_outline`, `search_code` (enclosing symbol) |
 | tantivy symbol index | BM25 over name, qualified name, signature, path, docstring and the symbol's source (`body`, from the content packs) | `search_symbols` |
+| bodiless set | C/C++ functions and methods whose source has no body (prototypes, in-class declarations), for the declaration prior | `search_symbols` |
 | trigram index | which files contain each 3-byte sequence | `search_code` |
 | content packs | zstd-compressed file contents by blob SHA | `search_code`, `get_snippet` |
 
@@ -781,7 +782,16 @@ On top of that:
 - **Priors**: the score is multiplied by 0.5 for fields, variables and
   constants, and by 0.5 for tests (test functions, `describe`/`it` blocks,
   files under `test`/`tests`/`__tests__`/`spec` or named `test_*.py`,
-  `*.spec.ts`, …), so code an agent navigates to comes first.
+  `*.spec.ts`, …), so code an agent navigates to comes first. Three more
+  factors of 0.5 keep copies of code from crowding the code itself:
+  C/C++ **declarations without a body** (a prototype in `config.h` ranks
+  below `parse_config`'s body in `config.c`; the segment marks them at index
+  time), definitions in an **amalgamated copy** (a single header such as
+  `single_include/nlohmann/json.hpp`, recognised because most of its
+  definitions reappear, same name, signature and length, spread over many
+  other files), and **vendored** directories (`third_party`, `deps`, …).
+  Demoted symbols are still listed — an exact name match still finds a
+  prototype — they just come after the code they declare or copy.
 
 Filters (`labels`, `language`) are exact terms; `path_glob` filters after
 ranking. Default labels exclude `File`, `Folder`, `Module` and `Repository`, so
