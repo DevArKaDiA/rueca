@@ -1,16 +1,17 @@
-"""Org-path scenarios (RFC 0005 §5, §6, §8): several repositories in one
-store, and one repository at two commits.
+"""Org-path scenarios (RFC 0005 §5, §6, §8; RFC 0006 §8): several
+repositories as one organization, and one repository at two commits.
 
 **Multi-repository** (manifest `[org]`). The first gated S1 instance of the
 first `repos_per_family` gated S1 repositories of every language family
 (manifest order) — each repository at that instance's base commit — are
-indexed into one store (Rueca: one `--store`, one root per repository; cbm:
-one project per repository, its own cache). Each instance's keyword query is
-then asked of the whole organization:
+indexed into one store (Rueca: one organization, `rueca index --org
+<file> <root>` once per repository as its worktree is added, so the
+organization grows one repository at a time; cbm: one project per
+repository, its own cache). Each instance's keyword query is then asked of
+the whole organization:
 
-- Rueca **native**: one `search_symbols` with `repo: "*"` (RFC 0005 §5: rank
-  fusion across the locally indexed roots); pending when the binary rejects
-  `"*"`;
+- Rueca **native**: one `search_symbols` served with `--org` and no `repo`
+  (RFC 0006: one ranking over the organization symbol index);
 - Rueca and cbm **per repository**: one search per repository (`repo:` id /
   `project`), merged by the bench with reciprocal rank fusion (k = 60; one
   item per repository at each rank, ties broken by the raw per-repository
@@ -22,6 +23,17 @@ qualified by repository and the candidate filter of every language, and
 compared, per instance, with the same arm's single-repository S1 answer.
 Tokens: the efficiency query (top 10) of the org view against the
 single-repository one; the per-repository mode costs the sum of its calls.
+Tokens per correct answer (RFC 0006 §8): Σ tokens of the top-10 answers /
+number of queries whose top 10 holds a gold file of the instance's own
+repository, for the organization answer and for the S1 single-repository
+answer of the same instances.
+
+**Incremental update** (RFC 0006 §8, Rueca): each `index --org <file>
+<root>` reports the repository's own index time and the organization-layer
+update time (`org_ms`, adding one repository to the ones already there);
+after the 21, the repository with the most symbol documents is re-indexed
+the same way (its part of the organization replaced), the measure of the
+"re-index one repository of 21" row.
 
 **Multi-ref** (manifest `[multiref]`). One S1 instance's repository at its
 base commit and at a fix commit (the base plus the instance's gold patch,
@@ -55,6 +67,7 @@ from .common import CACHE, RUNS_DIR, candidate_path, count_tokens, families, lan
 from .corpus import add_worktree, git_show, remove_worktree
 from .datasets import instance_row
 from .gold import parse_patch
+from .efficiency import _median
 from .s1 import EFF_LIMIT, queries_for, s1_gold
 from .s1 import instances as s1_instances
 from .treesitter import extract_functions, grammar_for
@@ -146,43 +159,86 @@ def _items(hits: list[dict], repo: str | None = None) -> list[list]:
     return [[h.get("repo") or repo, h.get("path"), h.get("name"), h.get("start_line"), h.get("label")] for h in hits]
 
 
+def write_org_file(path: Path, roots: list[Path], name: str = "bench") -> None:
+    """The organization file of the Rueca arm: one `[[repo]]` per root."""
+    lines = [f'name = "{name}"', ""]
+    for r in roots:
+        lines += ["[[repo]]", f"path = {json.dumps(str(r))}", ""]
+    path.write_text("\n".join(lines))
+
+
+def _org_index(arm, org_file: Path, root: Path, store: Path) -> dict:
+    """`rueca index --org <file> <root>`: one repository indexed, then the
+    organization layer updated. Repository id, both times, documents."""
+    res = run([arm.bin, "index", "--org", str(org_file), str(root), "--store", str(store), "--json"], timeout=arm.index_timeout)
+    out: dict = {"ok": res.rc == 0, "seconds": res.seconds, "repo_id": None, "error": None if res.rc == 0 else res.stderr[-300:]}
+    if res.rc != 0:
+        return out
+    try:
+        rep = json.loads(res.stdout)
+        seg = rep["indexed"][0]["segment"]
+        up = rep["update"]
+        out.update(
+            repo_id=seg["snapshot"]["repo"],
+            docs=seg["node_count"],
+            repo_ms=rep["indexed"][0]["duration_ms"],
+            org_ms=rep["org_ms"],
+            org_repos=up["repos"],
+            generation=up["generation"],
+            added=up["added"],
+            replaced=up["replaced"],
+            bytes_copied=up["bytes_copied"],
+        )
+    except (json.JSONDecodeError, KeyError, IndexError) as exc:
+        out.update(ok=False, error=f"unexpected index report: {exc}")
+    return out
+
+
 def _multirepo_arm(arm, insts: list[dict]) -> dict:
     store = CACHE / "org" / f"{arm.name}-store"
     shutil.rmtree(store, ignore_errors=True)
     store.mkdir(parents=True, exist_ok=True)
+    org_file = CACHE / "org" / f"{arm.name}-org.toml"
+    roots: list[Path] = []
     handles: dict[str, Any] = {}
     index: dict[str, dict] = {}
     for inst in insts:
         repo = inst["repo"]
         root = add_worktree(repo, inst["base_commit"], f"org-{repo}")
         try:
+            s1_gold(inst)
             if arm.name == "rueca":
-                res = run([arm.bin, "index", str(root), "--store", str(store), "--json"], timeout=arm.index_timeout)
-                ok = res.rc == 0
-                rid = None
-                if ok:
-                    try:
-                        rid = json.loads(res.stdout)["segment"]["snapshot"]["repo"]
-                    except (json.JSONDecodeError, KeyError):
-                        ok = False
-                index[repo] = {"ok": ok, "seconds": res.seconds, "repo_id": rid, "error": None if ok else res.stderr[-300:]}
+                roots.append(root)
+                write_org_file(org_file, roots)
+                index[repo] = _org_index(arm, org_file, root, store)
             else:
                 h = arm.index(root, f"org-{repo}", inst["language"])
                 handles[repo] = h
                 index[repo] = {"ok": h.ok, "seconds": h.index_seconds, "error": h.error}
         finally:
             remove_worktree(repo, root)
+    incremental = None
+    if arm.name == "rueca":
+        # re-index one repository of the full organization: the one with the
+        # most symbol documents (the largest part to replace)
+        target = max(insts, key=lambda i: index.get(i["repo"], {}).get("docs") or 0)
+        root = add_worktree(target["repo"], target["base_commit"], f"org-{target['repo']}")
+        try:
+            incremental = {"repo": target["repo"], **_org_index(arm, org_file, root, store)}
+            incremental["first_repo_ms"] = index.get(target["repo"], {}).get("repo_ms")
+        finally:
+            remove_worktree(target["repo"], root)
     answers: dict[str, dict] = {}
     for inst in insts:
         q = queries_for(inst)["kw"]
         a: dict = {}
         if arm.name == "rueca":
-            data, secs, err, raw = arm.call("search_symbols", {"query": q, "limit": ORG_LIMIT, "repo": "*"}, None, store)
+            data, secs, err, raw = arm.call("search_symbols", {"query": q, "limit": ORG_LIMIT}, None, store, org=org_file)
             if err:
                 a["native"] = {"ok": False, "error": err}
             else:
                 hits = flat_results(data)
-                eff = arm.search_eff(None, q, EFF_LIMIT, root=None, store=store, repo="*")
+                eff = arm.search_eff(None, q, EFF_LIMIT, root=None, store=store, org=org_file)
                 a["native"] = {"ok": True, "seconds": secs, "items": _items(hits)[:50], "eff": _eff(eff)}
             per: list[list[dict]] = []
             tokens = 0
@@ -221,7 +277,7 @@ def _multirepo_arm(arm, insts: list[dict]) -> dict:
     for h in handles.values():
         arm.cleanup(h)
     shutil.rmtree(store, ignore_errors=True)
-    return {"status": "ok", "instances": [i["id"] for i in insts], "index": index, "answers": answers}
+    return {"status": "ok", "instances": [i["id"] for i in insts], "index": index, "incremental": incremental, "answers": answers}
 
 
 def _eff(res) -> dict:
@@ -258,6 +314,44 @@ def _acc(items: list[list], repo: str, gold: dict) -> dict:
     return {"file_acc@5": float(f5), "func_acc@10": None if fn10 is None else float(fn10), "other_repo_top10": other / len(top10) if top10 else None}
 
 
+def eff_hit(eff: dict | None, repo: str, gold: dict) -> tuple[int, int | None]:
+    """(1-based rank of the first item of an efficiency answer in a gold file
+    of the instance's own repository, 0 if none; tokens read until it — the
+    whole answer when none)."""
+    if not eff or not eff.get("ok"):
+        return 0, None
+    gfiles = set(gold["files"])
+    prefix = eff.get("prefix") or []
+    for i, (r, path, *_rest) in enumerate(eff.get("items") or [], 1):
+        if r is not None and (r == repo or r.endswith("/" + repo)) and path in gfiles:
+            return i, prefix[i - 1] if i - 1 < len(prefix) else eff.get("tokens")
+    return 0, eff.get("tokens")
+
+
+def org_layer_stats(index: dict, incremental: dict | None) -> dict | None:
+    """RFC 0006 §8 incremental update: the organization-layer time of every
+    `index --org` step (one repository added) and of the re-index of one
+    repository, against that repository's own index time."""
+    steps = [v for v in index.values() if v.get("ok") and v.get("org_ms") is not None and v.get("repo_ms")]
+    if not steps:
+        return None
+    ratios = [v["org_ms"] / v["repo_ms"] for v in steps]
+    out: dict = {
+        "steps": len(steps),
+        "org_ms_median": _median([v["org_ms"] for v in steps]),
+        "org_ms_max": max(v["org_ms"] for v in steps),
+        "repo_ms_median": _median([v["repo_ms"] for v in steps]),
+        "ratio_median": _median(ratios),
+        "ratio_max": max(ratios),
+    }
+    if incremental and incremental.get("ok"):
+        inc = {k: incremental.get(k) for k in ("repo", "docs", "repo_ms", "first_repo_ms", "org_ms", "org_repos", "replaced", "bytes_copied")}
+        inc["ratio"] = incremental["org_ms"] / incremental["repo_ms"] if incremental.get("repo_ms") else None
+        inc["ratio_first"] = incremental["org_ms"] / incremental["first_repo_ms"] if incremental.get("first_repo_ms") else None
+        out["replace"] = inc
+    return out
+
+
 def score_multirepo(s1: dict) -> dict:
     """Per arm and mode: accuracy under the org view vs the same instances'
     single-repository S1 answers (kw), and tokens."""
@@ -291,6 +385,7 @@ def score_multirepo(s1: dict) -> dict:
                 srow = single.get((arm, iid)) or {}
                 se = srow.get("e") or {}
                 tokens = (m.get("eff") or {}).get("tokens") if mode == "native" else m.get("tokens")
+                fh, pf = eff_hit(m.get("eff"), insts[iid]["repo"], gold) if mode == "native" else (None, None)
                 rows.append({
                     "id": iid,
                     **acc,
@@ -298,6 +393,10 @@ def score_multirepo(s1: dict) -> dict:
                     "single_func_acc@10": (srow.get("function") or {}).get("acc@10") if srow.get("function") else None,
                     "tokens": tokens,
                     "single_tokens": se.get("t"),
+                    "fh": fh,
+                    "pf": pf,
+                    "single_fh": se.get("fh"),
+                    "single_pf": se.get("pf"),
                 })
             if not rows and pending:
                 modes[mode] = {"status": "pending", "reason": str(pending)[:300]}
@@ -312,6 +411,14 @@ def score_multirepo(s1: dict) -> dict:
             st = [r["single_tokens"] for r in rows if r["single_tokens"] is not None]
             ot = [r["other_repo_top10"] for r in rows if r["other_repo_top10"] is not None]
             med = lambda xs: sorted(xs)[len(xs) // 2] if xs else None
+            # tokens per correct answer over the queries both answers exist for
+            paired = [r for r in rows if r["fh"] is not None and r["tokens"] is not None and r["single_tokens"] is not None and r["single_fh"] is not None]
+            found = sum(1 for r in paired if r["fh"])
+            sfound = sum(1 for r in paired if r["single_fh"])
+            tpc = sum(r["tokens"] for r in paired) / found if found else None
+            stpc = sum(r["single_tokens"] for r in paired) / sfound if sfound else None
+            fa_org = sum(fa) / len(fa)
+            fa_single = sum(sa) / len(sa) if sa else None
             modes[mode] = {
                 "status": "ok",
                 "n": len(rows),
@@ -323,9 +430,18 @@ def score_multirepo(s1: dict) -> dict:
                 "other_repo_top10": sum(ot) / len(ot) if ot else None,
                 "tokens_median": med(tk),
                 "single_tokens_median": med(st),
+                "file_acc@5_ratio": fa_org / fa_single if fa_single else None,
+                "tokens_per_correct": tpc,
+                "single_tokens_per_correct": stpc,
+                "tokens_per_correct_ratio": tpc / stpc if tpc is not None and stpc else None,
+                "found_top10": found if paired else None,
+                "single_found_top10": sfound if paired else None,
                 "rows": rows,
             }
         out["arms"][arm] = {"status": "ok", "modes": modes, "index_seconds": sum((v.get("seconds") or 0) for v in rec["index"].values()), "version": rec.get("arm_version")}
+        layer = org_layer_stats(rec["index"], rec.get("incremental"))
+        if layer:
+            out["arms"][arm]["org_layer"] = layer
     return out
 
 

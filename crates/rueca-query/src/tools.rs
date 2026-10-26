@@ -1,23 +1,22 @@
-//! The six tool implementations: snapshot selection, per-snapshot execution,
-//! merging across snapshots, and the output format (compact envelope or the
-//! alpha `verbose` shapes).
+//! The tool implementations: snapshot selection, per-snapshot execution,
+//! one ranking across snapshots (the organization index, or summed BM25
+//! statistics), and the output format (compact envelope or the alpha
+//! `verbose` shapes).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rueca_model::{EdgeKind, FileId, Label, NodeId, SymbolIdParts};
-use rueca_segment::{ContentMatch, ContentQuery, EdgeRef, SymbolQuery};
+use rueca_segment::org::OrgScope;
+use rueca_segment::{ContentMatch, ContentQuery, EdgeRef, Segment, SymbolQuery};
 
 use crate::args::{
-    CommonArgs, DirectionArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, SearchCodeArgs, SearchSymbolsArgs,
-    TraceArgs, clamp_int,
+    CommonArgs, DirectionArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, ListRepositoriesArgs, RepoArg,
+    SearchCodeArgs, SearchSymbolsArgs, TraceArgs, clamp_int,
 };
 use crate::text::{join_window, split_lines, window};
 use crate::types::*;
 use crate::view::{Lookup, Selector, View, innermost_at_line, is_container};
 use crate::{Engine, Response, compact};
-
-/// Reciprocal rank fusion constant (RFC 0005 §5).
-pub const RRF_K: f64 = 60.0;
 
 fn parse_labels(labels: Option<&[String]>) -> anyhow::Result<Vec<Label>> {
     let mut out = Vec::new();
@@ -69,21 +68,6 @@ fn cursor_offset(c: &CommonArgs, fallback: Option<i64>) -> anyhow::Result<usize>
 /// `budget_tokens`, clamped to [100, 1,000,000].
 fn budget(c: &CommonArgs) -> usize {
     clamp_int(c.budget_tokens, compact::DEFAULT_BUDGET_TOKENS as i64, 100, 1_000_000) as usize
-}
-
-/// Query-independent priors re-applied after rank fusion (RFC 0005 §5): ×0.5
-/// for tests (flag, label or path) and ×0.5 for fields, variables and
-/// constants.
-fn global_prior(view: &View, n: NodeId) -> f64 {
-    let node = view.node(n);
-    let mut p = 1.0;
-    if node.is_test || node.label == Label::Test || view.node_path(n).is_some_and(rueca_segment::is_test_path) {
-        p *= 0.5;
-    }
-    if matches!(node.label, Label::Field | Label::Variable | Label::Constant) {
-        p *= 0.5;
-    }
-    p
 }
 
 fn selector<'a>(
@@ -179,7 +163,8 @@ impl Engine {
         let limit = clamp_int(a.limit, if verbose_fmt { 20 } else { 10 }, 1, 200) as usize;
         let offset = cursor_offset(&a.common, a.offset)?;
         let labels = parse_labels(a.labels.as_deref())?;
-        let views = self.scope(&a.common, None)?;
+        let sel = self.select(&a.common, None)?;
+        let views = &sel.views;
         let base = SymbolQuery {
             text: a.query,
             labels,
@@ -188,28 +173,32 @@ impl Engine {
             limit: limit + 1,
             offset,
         };
-        // (view, node, score): one ranking per snapshot; several are merged
-        // by reciprocal rank fusion with the global priors re-applied.
-        let mut ranked: Vec<(usize, NodeId, f64)> = Vec::new();
-        if views.len() == 1 {
-            for h in views[0].seg.search_symbols(&base)? {
-                ranked.push((0, h.node, f32_to_f64(h.score)));
+        // (view, node, score): one ranking over every selected snapshot
+        // (RFC 0006 §6) — the organization index, or the snapshots' indexes
+        // scored with summed statistics.
+        let mut ranked: Vec<(usize, NodeId, f64)> = match &sel.org {
+            Some(org) => {
+                let selected: Vec<(usize, &Segment)> =
+                    views.iter().filter_map(|v| v.org_repo.map(|i| (i, v.seg.as_ref()))).collect();
+                let view_of: HashMap<usize, usize> =
+                    views.iter().enumerate().filter_map(|(vi, v)| v.org_repo.map(|i| (i, vi))).collect();
+                org.index
+                    .search(&base, &OrgScope { visible: &org.visible, selected: &selected })?
+                    .into_iter()
+                    .filter_map(|h| view_of.get(&h.repo).map(|&vi| (vi, h.node, f32_to_f64(h.score))))
+                    .collect()
             }
-        } else {
-            // Priors can lift an item past a deeper one of another snapshot,
-            // so each snapshot is read deeper than the page.
-            let fetch = (offset + limit) * 2 + 10;
-            let mut fused: Vec<(f64, usize, usize, NodeId)> = Vec::new();
-            for (vi, view) in views.iter().enumerate() {
-                let q = SymbolQuery { limit: fetch, offset: 0, ..base.clone() };
-                for (rank, h) in view.seg.search_symbols(&q)?.into_iter().enumerate() {
-                    let score = global_prior(view, h.node) / (RRF_K + (rank + 1) as f64);
-                    fused.push((score, rank, vi, h.node));
-                }
+            None if views.len() == 1 => {
+                views[0].seg.search_symbols(&base)?.into_iter().map(|h| (0, h.node, f32_to_f64(h.score))).collect()
             }
-            fused.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)).then(x.2.cmp(&y.2)));
-            ranked = fused.into_iter().skip(offset).take(limit + 1).map(|(s, _, vi, n)| (vi, n, s)).collect();
-        }
+            None => {
+                let segs: Vec<&Segment> = views.iter().map(|v| v.seg.as_ref()).collect();
+                rueca_segment::search_symbols_merged(&segs, &base)?
+                    .into_iter()
+                    .map(|(vi, h)| (vi, h.node, f32_to_f64(h.score)))
+                    .collect()
+            }
+        };
         let more = ranked.len() > limit;
         ranked.truncate(limit);
         let hits: Vec<(usize, SymbolSearchHit)> = ranked
@@ -514,6 +503,57 @@ impl Engine {
             return verbose(&result);
         }
         Ok(compact::outline(&view.snap, &result, offset, budget(&a.common)))
+    }
+}
+
+impl Engine {
+    pub(crate) fn list_repositories(&self, a: ListRepositoriesArgs) -> anyhow::Result<Response> {
+        let offset = cursor_offset(&a.common, None)?;
+        // A listing reads every repository unless `repo` narrows it.
+        let mut common = a.common.clone();
+        if common.repo.is_none() {
+            common.repo = Some(RepoArg::One("*".into()));
+        }
+        let sel = self.select(&common, None)?;
+        let views = &sel.views;
+        let mut repos: Vec<(usize, RepositorySummary)> = Vec::new();
+        for (vi, v) in views.iter().enumerate() {
+            if let Some((_, r)) = repos.iter_mut().find(|(_, r)| r.repo == v.repo()) {
+                r.refs.push(v.snap.ref_name.clone());
+                continue;
+            }
+            let seg = &v.seg;
+            let mut languages = BTreeMap::new();
+            for f in seg.files() {
+                if let Some(l) = f.language {
+                    *languages.entry(l.as_str().to_string()).or_insert(0u32) += 1;
+                }
+            }
+            let symbols = seg.nodes().iter().filter(|n| !is_container(n.label)).count() as u32;
+            repos.push((
+                vi,
+                RepositorySummary {
+                    repo: v.repo().to_string(),
+                    root: v.snap.root.clone(),
+                    default_ref: v.snap.ref_name.clone(),
+                    commit: v.snap.commit.clone(),
+                    refs: vec![v.snap.ref_name.clone()],
+                    languages,
+                    files: seg.files().len() as u32,
+                    symbols,
+                    edges: seg.meta().edge_count,
+                },
+            ));
+        }
+        repos.sort_by(|a, b| a.1.repo.cmp(&b.1.repo));
+        if a.common.verbose() {
+            return verbose(&ListRepositoriesResult {
+                org: self.org.clone(),
+                repositories: repos.into_iter().map(|(_, r)| r).collect(),
+            });
+        }
+        let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
+        Ok(compact::list_repositories(&snaps, &repos, self.org.as_deref(), offset, budget(&a.common)))
     }
 }
 

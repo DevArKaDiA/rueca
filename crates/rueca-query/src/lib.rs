@@ -1,8 +1,9 @@
 //! Query engine over local segments.
 //!
-//! Implements the six tools defined in `docs/tools.md` (`search_symbols`,
-//! `search_code`, `get_symbol`, `get_snippet`, `trace`, `get_file_outline`)
-//! with the response contract of RFC 0005. The MCP server and the CLI both
+//! Implements the tools defined in `docs/tools.md` (`search_symbols`,
+//! `search_code`, `get_symbol`, `get_snippet`, `trace`, `get_file_outline`,
+//! `list_repositories`) with the response contract of RFC 0005 and the
+//! organization scope of RFC 0006. The MCP server and the CLI both
 //! dispatch through [`Engine::respond`] (or [`Engine::call`] for the JSON
 //! alone), so their behavior is identical; [`tool_definitions`] provides
 //! names, descriptions and JSON input schemas for the MCP layer.
@@ -52,15 +53,36 @@
 //! detached, `worktree` outside git), and any other ref is an error listing
 //! the indexed refs (with `"*"`, snapshots without the ref are skipped).
 //!
-//! With several snapshots, `search_symbols` merges the per-snapshot rankings
-//! by reciprocal rank fusion (k = 60) and re-applies the global priors (×0.5
-//! tests, ×0.5 fields / variables / constants); `search_code` concatenates
+//! With several snapshots, `search_symbols` returns **one ranking** (RFC 0006
+//! §6, no rank fusion): every snapshot's symbol index is scored with BM25
+//! statistics summed over all selected snapshots
+//! ([`rueca_segment::search_symbols_merged`]), so scores are comparable and
+//! the order is the one a single index would give. `search_code` concatenates
 //! matches in snapshot order; `get_symbol`, `get_snippet` and `trace` resolve
 //! an `id` in its own snapshot and a name in every snapshot (the best match
 //! wins, the best match of each other snapshot is a candidate);
 //! `get_file_outline` and path snippets need the path to exist in exactly one
 //! selected snapshot. [`multiref`] holds the collapse of identical symbols
-//! across refs (RFC 0005 §6), which no local tool reaches yet.
+//! across refs (RFC 0005 §6), which no local tool reaches yet. Responses list
+//! only the snapshots their items come from (with one selected snapshot,
+//! that snapshot is always listed).
+//!
+//! # Organization mode (RFC 0006)
+//!
+//! [`Engine::for_org`] serves an organization built by `rueca index --org`
+//! ([`rueca_segment::org`]). The repositories are those of the
+//! organization's **current generation** (read once per call, so a call sees
+//! one generation even while the organization is updated), filtered by the
+//! engine's [`Visibility`]. `repo` omitted means the whole organization (the
+//! repository of an `id` argument for `get_symbol`, `get_snippet` and
+//! `trace`); one repository or a list narrows it. `search_symbols` runs on
+//! the organization symbol index: the visible set and the selection are
+//! applied inside the index before top-k (statistics over the visible
+//! repositories only), so results, totals and scores never depend on a
+//! repository the caller cannot read, and a repository named in `repo` that
+//! is not visible is reported exactly like one that does not exist. Other
+//! tools read the selected repositories' segments. Local mode passes
+//! [`Visibility::All`].
 //!
 //! # Symbol lookup
 //!
@@ -130,13 +152,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use std::collections::BTreeSet;
+
 use rueca_model::SymbolIdParts;
+use rueca_segment::org::OrgIndex;
 use rueca_segment::{CatalogEntry, Segment, Store};
 use serde_json::Value;
 
 pub use args::{
-    CommonArgs, DirectionArg, FormatArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, LanguageArg, RepoArg,
-    SearchCodeArgs, SearchSymbolsArgs, TraceArgs,
+    CommonArgs, DirectionArg, FormatArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, LanguageArg,
+    ListRepositoriesArgs, RepoArg, SearchCodeArgs, SearchSymbolsArgs, TraceArgs,
 };
 pub use compact::render_text;
 pub use text::split_lines;
@@ -160,7 +185,7 @@ impl Response {
 }
 
 pub const TOOL_NAMES: &[&str] =
-    &["search_symbols", "search_code", "get_symbol", "get_snippet", "trace", "get_file_outline"];
+    &["search_symbols", "search_code", "get_symbol", "get_snippet", "trace", "get_file_outline", "list_repositories"];
 
 /// A tool as advertised to MCP clients.
 #[derive(Debug, Clone, PartialEq)]
@@ -171,7 +196,7 @@ pub struct ToolDef {
     pub input_schema: Value,
 }
 
-/// The six tools, in [`TOOL_NAMES`] order.
+/// Every tool, in [`TOOL_NAMES`] order.
 pub fn tool_definitions() -> Vec<ToolDef> {
     definitions().to_vec()
 }
@@ -206,6 +231,11 @@ fn definitions() -> &'static [ToolDef] {
                 description: DESC_GET_FILE_OUTLINE,
                 input_schema: args::input_schema::<GetFileOutlineArgs>(),
             },
+            ToolDef {
+                name: "list_repositories",
+                description: DESC_LIST_REPOSITORIES,
+                input_schema: args::input_schema::<ListRepositoriesArgs>(),
+            },
         ]
     })
 }
@@ -219,7 +249,8 @@ their code does. BM25 ranking over symbol names, qualified names, signatures, do
 symbol's source code; identifiers are split on camelCase, snake_case and path separators, so `invoice issue` finds \
 `InvoiceService.issue_invoice`, and `Session.request` ranks that method first. Start here with a name, or with words \
 from an error message or issue to locate the code involved. Results are grouped by file (label, name, 1-based lines, \
-signature); `repo: \"*\"` searches every indexed repository. Continue with `cursor` = `next_cursor`. \
+signature) in one ranking over every selected repository (in an organization, all of them unless `repo` narrows \
+it). Continue with `cursor` = `next_cursor`. \
 Example: {\"query\": \"parse config\", \"labels\": [\"Function\", \"Method\"], \"path_glob\": \"src/**\"}";
 
 const DESC_SEARCH_CODE: &str = "Grep the indexed file contents: literal text (default) or a regular expression \
@@ -249,22 +280,93 @@ is module-level code; a `Class` callee is a constructor call. Other relations ca
 config key). Use it for impact analysis before changing a function. \
 Example: {\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\", \"depth\": 3}";
 
+const DESC_LIST_REPOSITORIES: &str = "List the repositories this server can read (in an organization, every \
+repository you may see): repository id, default ref, indexed refs, languages (files per language) and counts of \
+files, symbols and edges. Use it to learn what exists and to narrow other tools with `repo`. Example: {}";
+
 const DESC_GET_FILE_OUTLINE: &str = "Outline of one file: its classes, functions, methods and other definitions, \
 nested by containment and ordered by line, with signatures and 1-based line ranges. Cheaper than reading the file; \
 use it to orient yourself before `get_snippet`. Example: {\"path\": \"src/billing/service.py\"}";
+
+/// Which repositories a caller may read (RFC 0001 §13, RFC 0006 §5). Applied
+/// inside the organization query path: before top-k, before counts and
+/// before BM25 statistics.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Visibility {
+    /// Every repository (local mode).
+    #[default]
+    All,
+    /// Only these repository ids.
+    Repos(BTreeSet<String>),
+}
+
+impl Visibility {
+    pub fn allows(&self, repo: &str) -> bool {
+        match self {
+            Visibility::All => true,
+            Visibility::Repos(set) => set.contains(repo),
+        }
+    }
+}
 
 /// The query engine. See the crate docs.
 pub struct Engine {
     pub store_dir: PathBuf,
     /// Root used when a request does not name a repository.
     pub default_root: Option<PathBuf>,
+    /// Organization served (organization mode, RFC 0006).
+    pub org: Option<String>,
+    visibility: Visibility,
     segments: Mutex<HashMap<String, Arc<Segment>>>,
+    /// The last opened generation of the organization index.
+    org_index: Mutex<Option<Arc<OrgIndex>>>,
+}
+
+/// The snapshots a call reads, plus the organization context in organization
+/// mode.
+pub(crate) struct Selection {
+    pub views: Vec<View>,
+    pub org: Option<OrgCtx>,
+}
+
+/// The organization generation a call reads and the repositories (indexes
+/// into its `repos`) the caller may see.
+pub(crate) struct OrgCtx {
+    pub index: Arc<OrgIndex>,
+    pub visible: Vec<usize>,
 }
 
 impl Engine {
     pub fn new(store_dir: PathBuf, default_root: Option<PathBuf>) -> anyhow::Result<Engine> {
         let default_root = default_root.map(|r| std::fs::canonicalize(&r).unwrap_or(r));
-        Ok(Engine { store_dir, default_root, segments: Mutex::new(HashMap::new()) })
+        Ok(Engine {
+            store_dir,
+            default_root,
+            org: None,
+            visibility: Visibility::All,
+            segments: Mutex::new(HashMap::new()),
+            org_index: Mutex::new(None),
+        })
+    }
+
+    /// An engine serving organization `name` of the store (see the crate
+    /// docs, *Organization mode*). The organization must exist when a tool
+    /// is called, not when the engine is created.
+    pub fn for_org(store_dir: PathBuf, name: &str) -> anyhow::Result<Engine> {
+        rueca_segment::org::validate_name(name)?;
+        let mut e = Engine::new(store_dir, None)?;
+        e.org = Some(name.to_string());
+        Ok(e)
+    }
+
+    /// Restricts what callers of this engine may read.
+    pub fn with_visibility(mut self, visibility: Visibility) -> Engine {
+        self.visibility = visibility;
+        self
+    }
+
+    pub fn visibility(&self) -> &Visibility {
+        &self.visibility
     }
 
     /// Runs tool `name` with JSON `args` and returns the JSON result described
@@ -286,22 +388,50 @@ impl Engine {
             "get_snippet" => self.get_snippet(args::parse_args(name, schema, args)?),
             "trace" => self.trace(args::parse_args(name, schema, args)?),
             "get_file_outline" => self.get_file_outline(args::parse_args(name, schema, args)?),
+            "list_repositories" => self.list_repositories(args::parse_args(name, schema, args)?),
             _ => unreachable!(),
         }
     }
 
-    /// The snapshots a request reads (RFC 0005 §5), in response order: the
-    /// `repo` argument (one, a list, or `"*"`), else the repository of an `id`
-    /// argument, else the default root, else the only indexed root; then
-    /// filtered by `ref`.
+    /// The snapshots a request reads (RFC 0005 §5, RFC 0006 §6), in response
+    /// order: the `repo` argument (one, a list, or `"*"`), else the
+    /// repository of an `id` argument, else (organization mode) every
+    /// visible repository of the organization, else the default root, else
+    /// the only indexed root; then filtered by `ref`.
     ///
     /// Local mode has one snapshot per indexed root, so a repository has as
     /// many snapshots as roots indexing it (worktrees); the code below works
     /// on lists of snapshots per repository so a catalog keeping several per
     /// (repository, ref) slots in.
-    fn scope(&self, c: &CommonArgs, id: Option<&SymbolIdParts>) -> anyhow::Result<Vec<View>> {
+    pub(crate) fn scope(&self, c: &CommonArgs, id: Option<&SymbolIdParts>) -> anyhow::Result<Vec<View>> {
+        Ok(self.select(c, id)?.views)
+    }
+
+    pub(crate) fn select(&self, c: &CommonArgs, id: Option<&SymbolIdParts>) -> anyhow::Result<Selection> {
         let store = Store::open(&self.store_dir)?;
-        let entries = store.entries()?;
+        let (entries, org) = match &self.org {
+            Some(name) => {
+                let index = self.org_index(name)?;
+                let mut entries = Vec::new();
+                let mut visible = Vec::new();
+                for (i, r) in index.generation().repos.iter().enumerate() {
+                    if self.visibility.allows(&r.repo) {
+                        visible.push(i);
+                        entries.push(CatalogEntry {
+                            root: r.root.clone(),
+                            repo: r.repo.clone(),
+                            segment_id: r.segment_id.clone(),
+                            indexed_at: r.snapshot.indexed_at,
+                        });
+                    }
+                }
+                if entries.is_empty() {
+                    anyhow::bail!("organization `{name}` has no repositories you can read");
+                }
+                (entries, Some(OrgCtx { index, visible }))
+            }
+            None => (store.entries()?, None),
+        };
         self.evict_stale(&entries);
         if entries.is_empty() {
             anyhow::bail!(
@@ -319,6 +449,10 @@ impl Engine {
         match &c.repo {
             None => match id {
                 Some(p) => add(self.entry_for_id(&store, &entries, p)?, &mut selected),
+                None if self.org.is_some() => {
+                    star = true;
+                    entries.iter().cloned().for_each(|e| add(e, &mut selected));
+                }
                 None => add(self.select_entry(&store, &entries, None, None)?, &mut selected),
             },
             Some(RepoArg::One(r)) if r.trim() == "*" => {
@@ -340,12 +474,18 @@ impl Engine {
                 }
             }
         }
+        let org_repo = |e: &CatalogEntry| -> Option<usize> {
+            org.as_ref().and_then(|o| o.index.generation().repos.iter().position(|r| r.root == e.root))
+        };
         let mut views = Vec::with_capacity(selected.len());
         for e in selected {
             let seg = self.open_cached(&store, &e.segment_id)?;
-            views.push(View::new(seg, e));
+            let i = org_repo(&e);
+            let mut v = View::new(seg, e);
+            v.org_repo = i;
+            views.push(v);
         }
-        let Some(r) = c.ref_.as_deref() else { return Ok(views) };
+        let Some(r) = c.ref_.as_deref() else { return Ok(Selection { views, org }) };
         let (keep, miss): (Vec<View>, Vec<View>) = views.into_iter().partition(|v| v.snap.matches_ref(r));
         if let Some(v) = miss.first()
             && (!star || keep.is_empty())
@@ -358,7 +498,28 @@ impl Engine {
                 v.repo()
             );
         }
-        Ok(keep)
+        Ok(Selection { views: keep, org })
+    }
+
+    /// The current generation of organization `name`, opened (cached while
+    /// the generation does not change).
+    fn org_index(&self, name: &str) -> anyhow::Result<Arc<OrgIndex>> {
+        let Some(generation) = rueca_segment::org::current_generation(&self.store_dir, name)? else {
+            anyhow::bail!(
+                "organization `{name}` is not built in store `{}`; run `rueca index --org <file>` first",
+                self.store_dir.display()
+            );
+        };
+        let mut cache = self.org_index.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(idx) = cache.as_ref()
+            && idx.generation().generation == generation.generation
+            && idx.generation().name == generation.name
+        {
+            return Ok(idx.clone());
+        }
+        let idx = Arc::new(OrgIndex::open_generation(&self.store_dir, generation)?);
+        *cache = Some(idx.clone());
+        Ok(idx)
     }
 
     /// Indexed refs of repository `repo`, for error messages.
@@ -395,6 +556,9 @@ impl Engine {
             }
         }
         if same.is_empty() {
+            if let Some(org) = &self.org {
+                anyhow::bail!("repository `{}` of symbol id is not indexed in organization `{org}`", p.repo);
+            }
             return self.select_entry(store, entries, None, None);
         }
         self.select_entry(store, entries, None, Some(&p.repo))
@@ -414,11 +578,19 @@ impl Engine {
             }
             let p = Path::new(r);
             let canon = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-            if let Some(e) = store.entry_for_path(&canon)? {
-                return Ok(e);
+            // The entry of the selection whose root is that path's root.
+            if let Some(e) = store.entry_for_path(&canon)?
+                && let Some(mine) = entries.iter().find(|x| x.root == e.root)
+            {
+                return Ok(mine.clone());
             }
             if let Some(e) = entries.iter().find(|e| e.root == r) {
                 return Ok(e.clone());
+            }
+            if let Some(org) = &self.org {
+                anyhow::bail!(
+                    "repository `{r}` is not indexed in organization `{org}`; `list_repositories` lists them"
+                );
             }
             anyhow::bail!("repository `{r}` is not indexed; indexed: {}", roots());
         }

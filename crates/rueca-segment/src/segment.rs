@@ -252,7 +252,14 @@ impl Inner {
         ids[a as usize..b as usize].to_vec()
     }
 
-    fn node_path(&self, node: NodeId) -> &str {
+    /// The symbol index of the segment.
+    pub(crate) fn symbols(&self) -> &SymbolIndex {
+        &self.symbols
+    }
+
+    /// Path of a node's file (its qualified name when it has none), the
+    /// subject of `path_glob`.
+    pub(crate) fn node_path(&self, node: NodeId) -> &str {
         let nd = &self.nodes[node as usize];
         match nd.file {
             Some(f) => &self.files[f as usize].path,

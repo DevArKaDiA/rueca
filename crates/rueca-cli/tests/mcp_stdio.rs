@@ -128,7 +128,18 @@ fn legacy_handshake_list_and_call() {
     let list = s.request(1, "tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["search_symbols", "search_code", "get_symbol", "get_snippet", "trace", "get_file_outline"]);
+    assert_eq!(
+        names,
+        [
+            "search_symbols",
+            "search_code",
+            "get_symbol",
+            "get_snippet",
+            "trace",
+            "get_file_outline",
+            "list_repositories"
+        ]
+    );
     let trace_tool = tools.iter().find(|t| t["name"] == "trace").unwrap();
     assert_eq!(trace_tool["inputSchema"]["additionalProperties"], false);
     assert!(trace_tool["inputSchema"]["properties"]["min_confidence"].is_object());
@@ -218,7 +229,7 @@ fn stateless_flow_with_auto_index() {
     assert!(disc["result"]["instructions"].as_str().unwrap().contains("Recommended flow"));
 
     let list = s.request(2, "tools/list", json!({"_meta": meta}));
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 6, "{list}");
+    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 7, "{list}");
     let call = s.request(
         3,
         "tools/call",

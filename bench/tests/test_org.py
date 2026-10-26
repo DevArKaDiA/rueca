@@ -1,6 +1,9 @@
-"""Org scenarios: rank fusion and the multi-ref collapse scorer (org.py)."""
+"""Org scenarios: rank fusion, the organization file and RFC 0006 metrics,
+and the multi-ref collapse scorer (org.py)."""
 
-from rueca_bench.org import collapse_gold, rrf_merge, score_collapse
+import tomllib
+
+from rueca_bench.org import collapse_gold, eff_hit, org_layer_stats, rrf_merge, score_collapse, write_org_file
 
 BASE = "def f():\n    return 1\n\n\ndef g():\n    return 2\n\n\ndef gone():\n    pass\n"
 FIX = "def f():\n    return 10\n\n\ndef g():\n    return 2\n\n\ndef new():\n    pass\n"
@@ -42,3 +45,37 @@ def test_score_collapse_perfect_and_broken():
     assert (c["identical_ok"], c["identical"]) == (0, 1)
     assert (c["changed_tp"], c["changed_fp"], c["changed_fn"]) == (0, 1, 1)
     assert c["in_ok"] == 0
+
+
+def test_org_file_lists_every_root(tmp_path):
+    f = tmp_path / "org.toml"
+    write_org_file(f, [tmp_path / "a b", tmp_path / 'q"x'])
+    cfg = tomllib.loads(f.read_text())
+    assert cfg["name"] == "bench"
+    assert [r["path"] for r in cfg["repo"]] == [str(tmp_path / "a b"), str(tmp_path / 'q"x')]
+
+
+def test_eff_hit_counts_own_repository_gold_files():
+    gold = {"files": ["src/a.py"], "functions": []}
+    eff = {"ok": True, "tokens": 90, "prefix": [10, 25, 40], "items": [
+        ["github.com/x/other", "src/a.py", "f", 1, "Function"],
+        ["github.com/acme/repo", "src/b.py", "g", 1, "Function"],
+        ["github.com/acme/repo", "src/a.py", "h", 1, "Function"],
+    ]}
+    assert eff_hit(eff, "acme/repo", gold) == (3, 40)
+    assert eff_hit(dict(eff, items=eff["items"][:2]), "acme/repo", gold) == (0, 90)
+    assert eff_hit({"ok": False}, "acme/repo", gold) == (0, None)
+
+
+def test_org_layer_stats_ratios():
+    index = {
+        "a": {"ok": True, "repo_ms": 1000, "org_ms": 20},
+        "b": {"ok": True, "repo_ms": 200, "org_ms": 40},
+        "c": {"ok": False},
+    }
+    inc = {"ok": True, "repo": "a", "repo_ms": 500, "first_repo_ms": 1000, "org_ms": 25, "docs": 7, "org_repos": 2}
+    s = org_layer_stats(index, inc)
+    assert s["steps"] == 2 and s["org_ms_max"] == 40
+    assert abs(s["ratio_max"] - 0.2) < 1e-9
+    assert s["replace"]["ratio"] == 0.05 and s["replace"]["ratio_first"] == 0.025
+    assert org_layer_stats({}, None) is None

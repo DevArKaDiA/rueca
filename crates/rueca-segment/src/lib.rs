@@ -15,6 +15,7 @@
 //! <store>/segments/<id>.rcseg     one bundle file per segment
 //! <store>/packs/<pack-id>.rcpack  content packs (one zstd frame per blob)
 //! <store>/packs/index.rcpi        store-level blob index (derived, rebuildable)
+//! <store>/orgs/<name>/            organizations: pointer, generations, shared symbol index ([`org`])
 //! <store>/tmp/                    writer scratch space (same filesystem)
 //! ```
 //!
@@ -160,6 +161,11 @@
 //! `symbols.bodiless` (a tantivy `tweak_score` collector), so changing them
 //! needs no re-index.
 //!
+//! Several segments ranked together ([`search_symbols_merged`]) use BM25
+//! statistics summed over all of them, and an organization ([`org`]) lists
+//! the segments' tantivy segments in one index: in both cases scores are
+//! comparable across repositories and there is one ranking.
+//!
 //! Labels and language are exact-term filters (an empty label list excludes
 //! `File`, `Folder`, `Module`, `Repository`, and `Key` / `Document` unless the
 //! language is a data language); `path_glob` is a post-filter
@@ -250,6 +256,7 @@ compile_error!("rueca-segment format v2 reads little-endian arrays zero-copy; bi
 mod bundle;
 mod graph;
 mod ngram;
+pub mod org;
 mod packs;
 mod priors;
 mod segment;
@@ -265,8 +272,7 @@ use serde::{Deserialize, Serialize};
 
 /// Whether `path` looks like test code (a `test`, `tests`, `__tests__`,
 /// `spec`, … directory, `test_*.py`, `*.spec.ts`, …): the path part of the
-/// test prior. Exposed so rankings merged across segments (RFC 0005 §5) can
-/// re-apply it.
+/// test prior.
 pub fn is_test_path(path: &str) -> bool {
     priors::is_test_path(path)
 }
@@ -363,7 +369,8 @@ impl Store {
     /// entry. Garbage-collects the replaced segment file.
     ///
     /// `root` is canonicalized. The replaced segment file is deleted unless
-    /// another entry still references it.
+    /// another entry or a kept organization generation ([`org`]) still
+    /// references it.
     pub fn register(&self, root: &str, meta: &SegmentMeta) -> Result<()> {
         self.register_impl(root, meta)
     }
@@ -561,4 +568,34 @@ impl Segment {
     pub fn content(&self, file: FileId) -> Result<Vec<u8>> {
         self.inner.content(file)
     }
+}
+
+/// One ranking of `query` over the symbol indexes of several segments
+/// (RFC 0006 §6, no rank fusion): every index is scored with BM25
+/// statistics summed over all of them, so the merged order is the order one
+/// index holding every document would give (the organization index computes
+/// the same scores, see [`org`]). Returns (position in `segments`, hit),
+/// ordered by score descending, then position, then node id; `offset` and
+/// `limit` (`0` = 20) apply to the merged ranking.
+pub fn search_symbols_merged(segments: &[&Segment], query: &SymbolQuery) -> Result<Vec<(usize, SymbolHit)>> {
+    let limit = symbols::effective_limit(query);
+    let want = query.offset.saturating_add(limit);
+    let glob = query.path_glob.as_deref().map(symbols::compile_glob).transpose()?;
+    let searchers: Vec<tantivy::Searcher> = segments.iter().map(|s| s.inner.symbols().searcher()).collect();
+    let stats = symbols::SummedStats { searchers: &searchers };
+    let mut all: Vec<(usize, SymbolHit)> = Vec::new();
+    for (i, seg) in segments.iter().enumerate() {
+        let index = seg.inner.symbols();
+        let q = symbols::build_query(index.fields(), query);
+        let priors: std::sync::Arc<symbols::PriorsBySegment> =
+            std::sync::Arc::new(index.segment_id().map(|id| (id, index.priors())).into_iter().collect());
+        let n = seg.nodes().len();
+        let keep = |_: tantivy::index::SegmentId, doc: u32| {
+            (doc as usize) < n && glob.as_ref().is_none_or(|g| g.is_match(seg.inner.node_path(doc)))
+        };
+        let hits = symbols::top_hits(&searchers[i], q.as_ref(), &stats, priors, want, &keep)?;
+        all.extend(hits.into_iter().map(|h| (i, SymbolHit { node: h.doc, score: h.score })));
+    }
+    all.sort_by(|a, b| b.1.score.total_cmp(&a.1.score).then(a.0.cmp(&b.0)).then(a.1.node.cmp(&b.1.node)));
+    Ok(all.into_iter().skip(query.offset).take(limit).collect())
 }

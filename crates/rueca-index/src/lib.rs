@@ -45,6 +45,9 @@
 //!
 //! Logging: one `info` summary per run and `debug` timings per phase
 //! (`tracing`). [`IndexReport`] carries the same numbers.
+//!
+//! Organizations (RFC 0006 §7): [`org`] reads `rueca-org.toml`, indexes its
+//! repositories with this pipeline and builds the organization layer.
 
 use std::collections::HashMap;
 use std::fs;
@@ -64,6 +67,7 @@ use tracing::{debug, info, warn};
 mod git;
 #[cfg(test)]
 mod golden;
+pub mod org;
 
 #[derive(Debug, Clone)]
 pub struct IndexOptions {

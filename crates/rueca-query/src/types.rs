@@ -1,4 +1,4 @@
-//! Result types of the six tools, serialized exactly as `docs/tools.md`
+//! Result types of the tools, serialized exactly as `docs/tools.md`
 //! specifies. Fields documented as optional are omitted when absent; every
 //! other field is always present (possibly `null`).
 
@@ -160,6 +160,33 @@ pub struct FileOutlineResult {
 
 /// Converts an `f32` to the `f64` with the same shortest decimal form, so
 /// `0.9f32` serializes as `0.9` rather than `0.8999999761581421`.
+/// One repository of `list_repositories`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RepositorySummary {
+    pub repo: String,
+    /// Indexed root (local mode).
+    pub root: Option<String>,
+    /// The ref read when `ref` is not given.
+    pub default_ref: String,
+    /// Full commit of the default ref.
+    pub commit: String,
+    /// Every indexed ref of the repository (its snapshots).
+    pub refs: Vec<String>,
+    /// Indexed files per language.
+    pub languages: std::collections::BTreeMap<String, u32>,
+    pub files: u32,
+    /// Nodes that are not containers (files, folders, modules, packages).
+    pub symbols: u32,
+    pub edges: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ListRepositoriesResult {
+    /// Organization served, if any.
+    pub org: Option<String>,
+    pub repositories: Vec<RepositorySummary>,
+}
+
 pub(crate) fn f32_to_f64(x: f32) -> f64 {
     if !x.is_finite() {
         return 0.0;

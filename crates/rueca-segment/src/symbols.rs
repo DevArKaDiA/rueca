@@ -8,7 +8,7 @@
 //! `d`. tantivy breaks score ties by ascending doc address, so its own top-k
 //! cut is already ordered by (score desc, node id asc) and paging is exact.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io;
 use std::ops::Range;
@@ -18,14 +18,19 @@ use std::sync::Arc;
 use globset::GlobMatcher;
 use roaring::RoaringBitmap;
 use rueca_model::{FileEntry, Label, LanguageFamily, Node};
-use tantivy::collector::TopDocs;
+use tantivy::collector::{Collector, SegmentCollector, TopDocs};
 use tantivy::directory::error::{DeleteError, LockError, OpenReadError, OpenWriteError};
 use tantivy::directory::{DirectoryLock, FileHandle, Lock, OwnedBytes, WatchCallback, WatchHandle, WritePtr};
 use tantivy::index::SegmentId;
 use tantivy::indexer::NoMergePolicy;
-use tantivy::query::{AllQuery, BooleanQuery, BoostQuery, ConstScoreQuery, Occur, Query, TermQuery};
+use tantivy::query::{
+    AllQuery, Bm25StatisticsProvider, BooleanQuery, BoostQuery, ConstScoreQuery, Occur, Query, TermQuery, Weight,
+};
 use tantivy::schema::{Field, IndexRecordOption, NumericOptions, STRING, Schema, TextFieldIndexing, TextOptions};
-use tantivy::{Directory, Index, IndexReader, ReloadPolicy, Searcher, TantivyDocument, Term};
+use tantivy::{
+    Directory, DocId, Index, IndexReader, ReloadPolicy, Score, Searcher, SegmentOrdinal, SegmentReader,
+    TantivyDocument, Term,
+};
 
 use crate::bundle::{Bundle, BundleWriter, SharedMmap};
 use crate::priors;
@@ -71,7 +76,7 @@ fn terr(e: tantivy::TantivyError) -> SegmentError {
     SegmentError::Other(format!("tantivy: {e}"))
 }
 
-struct Fields {
+pub(crate) struct Fields {
     text: Vec<(Field, f32)>,
     name_exact: Field,
     qname_exact: Field,
@@ -80,7 +85,7 @@ struct Fields {
     language: Field,
 }
 
-fn schema() -> Schema {
+pub(crate) fn schema() -> Schema {
     let mut b = Schema::builder();
     let text = TextOptions::default().set_indexing_options(
         TextFieldIndexing::default().set_tokenizer(CODE_TOKENIZER).set_index_option(IndexRecordOption::WithFreqs),
@@ -97,7 +102,7 @@ fn schema() -> Schema {
     b.build()
 }
 
-fn fields(schema: &Schema) -> Result<Fields> {
+pub(crate) fn fields(schema: &Schema) -> Result<Fields> {
     let f = |n: &str| schema.get_field(n).map_err(terr);
     Ok(Fields {
         text: BOOSTS.iter().map(|(n, w)| Ok((f(n)?, *w))).collect::<Result<_>>()?,
@@ -401,6 +406,8 @@ pub(crate) struct SymbolIndex {
     fields: Fields,
     /// Score multiplier per node (doc id), see [`crate::priors`].
     priors: Arc<[f32]>,
+    /// The index's only tantivy segment (`None` for an empty graph).
+    segment: Option<SegmentId>,
 }
 
 impl SymbolIndex {
@@ -427,106 +434,296 @@ impl SymbolIndex {
             .map_err(|e| SegmentError::Corrupt(format!("symbol index: {e}")))?;
         check_doc_ids(&reader.searcher(), nodes).map_err(|e| SegmentError::Corrupt(format!("symbol index: {e}")))?;
         let priors: Arc<[f32]> = priors::priors(node_table, files, bodiless).into();
-        Ok(SymbolIndex { reader, fields, priors })
-    }
-
-    fn build_query(&self, q: &SymbolQuery) -> Box<dyn Query> {
-        let f = &self.fields;
-        let mut counts: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
-        for t in tokens(&q.text) {
-            *counts.entry(t).or_default() += 1;
-        }
-        let scoring: Box<dyn Query> = if counts.is_empty() {
-            Box::new(ConstScoreQuery::new(Box::new(AllQuery), 1.0))
-        } else {
-            let mut should: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-            // One chunk (`getUserById`, `Session.request`) is a name lookup:
-            // the body only breaks ties. Several words describe behaviour.
-            let name_lookup = q.text.split_whitespace().count() <= 1;
-            for (t, &c) in &counts {
-                // Sublinear query term frequency: issue text that keeps
-                // naming a term is about it.
-                let qtf = 1.0 + (c as f32).ln();
-                for (i, &(field, boost)) in f.text.iter().enumerate() {
-                    let boost = if i == BODY_FIELD && name_lookup { BODY_BOOST_NAME_LOOKUP } else { boost };
-                    let tq = TermQuery::new(Term::from_field_text(field, t), IndexRecordOption::WithFreqs);
-                    should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), boost * qtf))));
-                }
-            }
-            let whole = q.text.trim().to_lowercase();
-            for (field, boost) in [(f.name_exact, NAME_EXACT_BOOST), (f.qname_exact, QNAME_EXACT_BOOST)] {
-                let tq = TermQuery::new(Term::from_field_text(field, &whole), IndexRecordOption::Basic);
-                should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), boost))));
-            }
-            for part in dotted_parts(&q.text) {
-                let tq = TermQuery::new(Term::from_field_text(f.qname_suffix, &part), IndexRecordOption::Basic);
-                should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), QNAME_SUFFIX_BOOST))));
-            }
-            for part in adjacent_pairs(&q.text) {
-                let tq = TermQuery::new(Term::from_field_text(f.qname_suffix, &part), IndexRecordOption::Basic);
-                should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), QNAME_PAIR_BOOST))));
-            }
-            Box::new(BooleanQuery::new(should))
-        };
-        let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, scoring)];
-        let label_terms = |labels: &[Label]| -> Box<dyn Query> {
-            let should = labels
-                .iter()
-                .map(|l| {
-                    let tq = TermQuery::new(Term::from_field_text(f.label, l.as_str()), IndexRecordOption::Basic);
-                    (Occur::Should, Box::new(tq) as Box<dyn Query>)
-                })
-                .collect();
-            Box::new(BooleanQuery::new(should))
-        };
-        if q.labels.is_empty() {
-            let mut excluded = DEFAULT_EXCLUDED.to_vec();
-            if q.language.is_none_or(|l| l.family() != LanguageFamily::Data) {
-                excluded.extend(DATA_DETAIL);
-            }
-            clauses.push((Occur::MustNot, label_terms(&excluded)));
-        } else {
-            clauses.push((Occur::Must, Box::new(ConstScoreQuery::new(label_terms(&q.labels), 0.0))));
-        }
-        if let Some(lang) = q.language {
-            let tq = TermQuery::new(Term::from_field_text(f.language, lang.as_str()), IndexRecordOption::Basic);
-            clauses.push((Occur::Must, Box::new(ConstScoreQuery::new(Box::new(tq), 0.0))));
-        }
-        Box::new(BooleanQuery::new(clauses))
+        let segment = reader.searcher().segment_readers().first().map(|sr| sr.segment_id());
+        Ok(SymbolIndex { reader, fields, priors, segment })
     }
 
     /// Runs `q`; `path_ok(node)` post-filters (path glob). Over-fetches until
     /// `offset + limit` filtered hits are found or the index is exhausted.
     pub fn search(&self, q: &SymbolQuery, path_ok: &dyn Fn(u32) -> bool) -> Result<Vec<SymbolHit>> {
-        let limit = if q.limit == 0 { DEFAULT_LIMIT } else { q.limit };
-        let want = q.offset.saturating_add(limit);
-        let query = self.build_query(q);
+        let limit = effective_limit(q);
         let searcher = self.reader.searcher();
-        let total_docs = searcher.num_docs() as usize;
-        let mut fetch = want.saturating_mul(2).saturating_add(16).min(total_docs.max(1));
-        loop {
-            let priors = self.priors.clone();
-            let collector = TopDocs::with_limit(fetch).tweak_score(move |_: &tantivy::SegmentReader| {
-                let priors = priors.clone();
-                move |doc: tantivy::DocId, score: tantivy::Score| {
-                    score * priors.get(doc as usize).copied().unwrap_or(1.0)
-                }
-            });
-            let top = searcher.search(&query, &collector).map_err(terr)?;
-            let exhausted = top.len() < fetch || fetch >= total_docs;
-            // doc id == node id (checked at open).
-            let mut hits: Vec<SymbolHit> = top
-                .iter()
-                .filter(|(_, addr)| path_ok(addr.doc_id))
-                .map(|(score, addr)| SymbolHit { node: addr.doc_id, score: *score })
-                .collect();
-            if hits.len() >= want || exhausted {
-                hits.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.node.cmp(&b.node)));
-                return Ok(hits.into_iter().skip(q.offset).take(limit).collect());
-            }
-            fetch = fetch.saturating_mul(4).min(total_docs);
-        }
+        let query = build_query(&self.fields, q);
+        let priors: Arc<PriorsBySegment> = Arc::new(self.segment.iter().map(|id| (*id, self.priors.clone())).collect());
+        let hits =
+            top_hits(&searcher, query.as_ref(), &searcher, priors, q.offset.saturating_add(limit), &|_, doc| {
+                path_ok(doc)
+            })?;
+        // doc id == node id (checked at open).
+        Ok(hits.into_iter().skip(q.offset).take(limit).map(|h| SymbolHit { node: h.doc, score: h.score }).collect())
     }
+
+    pub fn searcher(&self) -> Searcher {
+        self.reader.searcher()
+    }
+
+    pub fn fields(&self) -> &Fields {
+        &self.fields
+    }
+
+    pub fn priors(&self) -> Arc<[f32]> {
+        self.priors.clone()
+    }
+
+    pub fn segment_id(&self) -> Option<SegmentId> {
+        self.segment
+    }
+}
+
+/// `limit` of a query, `0` meaning [`DEFAULT_LIMIT`].
+pub(crate) fn effective_limit(q: &SymbolQuery) -> usize {
+    if q.limit == 0 { DEFAULT_LIMIT } else { q.limit }
+}
+
+/// Score multipliers per tantivy segment (indexed by doc id = node id). A
+/// ranking reads exactly the segments listed here.
+pub(crate) type PriorsBySegment = HashMap<SegmentId, Arc<[f32]>>;
+
+/// One ranked document.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RankedDoc {
+    pub segment: SegmentId,
+    pub segment_ord: SegmentOrdinal,
+    pub doc: DocId,
+    pub score: Score,
+}
+
+/// The best `want` documents for `query` over the segments of `searcher`
+/// listed in `priors` (the others are skipped before any scoring, so they
+/// never reach the top-k), each BM25 score multiplied by its prior. BM25
+/// statistics come from `stats`: the searcher itself, a subset of its
+/// segments ([`SubsetStats`]) or several indexes ([`SummedStats`]).
+/// `keep(segment, doc)` post-filters (path globs) with over-fetching.
+/// Ordered by (score desc, segment ordinal asc, doc id asc): tantivy breaks
+/// score ties by doc address, so paging is exact.
+pub(crate) fn top_hits(
+    searcher: &Searcher,
+    query: &dyn Query,
+    stats: &dyn Bm25StatisticsProvider,
+    priors: Arc<PriorsBySegment>,
+    want: usize,
+    keep: &dyn Fn(SegmentId, DocId) -> bool,
+) -> Result<Vec<RankedDoc>> {
+    let total: usize = searcher
+        .segment_readers()
+        .iter()
+        .filter(|sr| priors.contains_key(&sr.segment_id()))
+        .map(|sr| sr.max_doc() as usize)
+        .sum();
+    if total == 0 || want == 0 {
+        return Ok(Vec::new());
+    }
+    let scope: Arc<HashSet<SegmentId>> = Arc::new(priors.keys().copied().collect());
+    let mut fetch = want.saturating_mul(2).saturating_add(16).min(total);
+    loop {
+        let p = priors.clone();
+        let collector = InScope {
+            inner: TopDocs::with_limit(fetch).tweak_score(move |sr: &SegmentReader| {
+                let seg_priors = p.get(&sr.segment_id()).cloned();
+                move |doc: DocId, score: Score| {
+                    score * seg_priors.as_ref().and_then(|x| x.get(doc as usize).copied()).unwrap_or(1.0)
+                }
+            }),
+            scope: scope.clone(),
+        };
+        let top = searcher.search_with_statistics_provider(query, &collector, stats).map_err(terr)?;
+        let exhausted = top.len() < fetch || fetch >= total;
+        let mut hits: Vec<RankedDoc> = top
+            .iter()
+            .filter_map(|(score, addr)| {
+                let segment = searcher.segment_reader(addr.segment_ord).segment_id();
+                keep(segment, addr.doc_id).then_some(RankedDoc {
+                    segment,
+                    segment_ord: addr.segment_ord,
+                    doc: addr.doc_id,
+                    score: *score,
+                })
+            })
+            .collect();
+        if hits.len() >= want || exhausted {
+            hits.sort_by(|a, b| {
+                b.score.total_cmp(&a.score).then(a.segment_ord.cmp(&b.segment_ord)).then(a.doc.cmp(&b.doc))
+            });
+            hits.truncate(want);
+            return Ok(hits);
+        }
+        fetch = fetch.saturating_mul(4).min(total);
+    }
+}
+
+/// A collector that reads only the segments in `scope`: the others yield an
+/// empty fruit without being scored (the visibility and repository filters
+/// of an organization index, applied before top-k).
+struct InScope<C> {
+    inner: C,
+    scope: Arc<HashSet<SegmentId>>,
+}
+
+impl<C: Collector> Collector for InScope<C> {
+    type Fruit = C::Fruit;
+    type Child = C::Child;
+
+    fn check_schema(&self, schema: &Schema) -> tantivy::Result<()> {
+        self.inner.check_schema(schema)
+    }
+
+    fn for_segment(&self, ord: SegmentOrdinal, reader: &SegmentReader) -> tantivy::Result<C::Child> {
+        self.inner.for_segment(ord, reader)
+    }
+
+    fn requires_scoring(&self) -> bool {
+        self.inner.requires_scoring()
+    }
+
+    fn merge_fruits(&self, fruits: Vec<<C::Child as SegmentCollector>::Fruit>) -> tantivy::Result<C::Fruit> {
+        self.inner.merge_fruits(fruits)
+    }
+
+    fn collect_segment(
+        &self,
+        weight: &dyn Weight,
+        ord: SegmentOrdinal,
+        reader: &SegmentReader,
+    ) -> tantivy::Result<<C::Child as SegmentCollector>::Fruit> {
+        if !self.scope.contains(&reader.segment_id()) {
+            return Ok(self.inner.for_segment(ord, reader)?.harvest());
+        }
+        self.inner.collect_segment(weight, ord, reader)
+    }
+}
+
+/// BM25 statistics over a subset of the segments of one index (the
+/// repositories a caller may read).
+pub(crate) struct SubsetStats<'a> {
+    pub searcher: &'a Searcher,
+    pub segments: &'a HashSet<SegmentId>,
+}
+
+impl SubsetStats<'_> {
+    fn readers(&self) -> impl Iterator<Item = &SegmentReader> {
+        self.searcher.segment_readers().iter().filter(|sr| self.segments.contains(&sr.segment_id()))
+    }
+}
+
+impl Bm25StatisticsProvider for SubsetStats<'_> {
+    fn total_num_tokens(&self, field: Field) -> tantivy::Result<u64> {
+        let mut n = 0u64;
+        for sr in self.readers() {
+            n += sr.inverted_index(field)?.total_num_tokens();
+        }
+        Ok(n)
+    }
+
+    fn total_num_docs(&self) -> tantivy::Result<u64> {
+        Ok(self.readers().map(|sr| u64::from(sr.max_doc())).sum())
+    }
+
+    fn doc_freq(&self, term: &Term) -> tantivy::Result<u64> {
+        let mut n = 0u64;
+        for sr in self.readers() {
+            n += u64::from(sr.inverted_index(term.field())?.doc_freq(term)?);
+        }
+        Ok(n)
+    }
+}
+
+/// BM25 statistics summed over several indexes with the same schema (the
+/// symbol indexes of several segments read together): a ranking with these
+/// scores every document as if the indexes were one.
+pub(crate) struct SummedStats<'a> {
+    pub searchers: &'a [Searcher],
+}
+
+impl Bm25StatisticsProvider for SummedStats<'_> {
+    fn total_num_tokens(&self, field: Field) -> tantivy::Result<u64> {
+        let mut n = 0u64;
+        for s in self.searchers {
+            n += s.total_num_tokens(field)?;
+        }
+        Ok(n)
+    }
+
+    fn total_num_docs(&self) -> tantivy::Result<u64> {
+        let mut n = 0u64;
+        for s in self.searchers {
+            n += Bm25StatisticsProvider::total_num_docs(s)?;
+        }
+        Ok(n)
+    }
+
+    fn doc_freq(&self, term: &Term) -> tantivy::Result<u64> {
+        let mut n = 0u64;
+        for s in self.searchers {
+            n += s.doc_freq(term)?;
+        }
+        Ok(n)
+    }
+}
+
+/// The scoring query of `q` (see the crate docs, *Symbol index*) plus its
+/// label and language filters.
+pub(crate) fn build_query(f: &Fields, q: &SymbolQuery) -> Box<dyn Query> {
+    let mut counts: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    for t in tokens(&q.text) {
+        *counts.entry(t).or_default() += 1;
+    }
+    let scoring: Box<dyn Query> = if counts.is_empty() {
+        Box::new(ConstScoreQuery::new(Box::new(AllQuery), 1.0))
+    } else {
+        let mut should: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+        // One chunk (`getUserById`, `Session.request`) is a name lookup:
+        // the body only breaks ties. Several words describe behaviour.
+        let name_lookup = q.text.split_whitespace().count() <= 1;
+        for (t, &c) in &counts {
+            // Sublinear query term frequency: issue text that keeps
+            // naming a term is about it.
+            let qtf = 1.0 + (c as f32).ln();
+            for (i, &(field, boost)) in f.text.iter().enumerate() {
+                let boost = if i == BODY_FIELD && name_lookup { BODY_BOOST_NAME_LOOKUP } else { boost };
+                let tq = TermQuery::new(Term::from_field_text(field, t), IndexRecordOption::WithFreqs);
+                should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), boost * qtf))));
+            }
+        }
+        let whole = q.text.trim().to_lowercase();
+        for (field, boost) in [(f.name_exact, NAME_EXACT_BOOST), (f.qname_exact, QNAME_EXACT_BOOST)] {
+            let tq = TermQuery::new(Term::from_field_text(field, &whole), IndexRecordOption::Basic);
+            should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), boost))));
+        }
+        for part in dotted_parts(&q.text) {
+            let tq = TermQuery::new(Term::from_field_text(f.qname_suffix, &part), IndexRecordOption::Basic);
+            should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), QNAME_SUFFIX_BOOST))));
+        }
+        for part in adjacent_pairs(&q.text) {
+            let tq = TermQuery::new(Term::from_field_text(f.qname_suffix, &part), IndexRecordOption::Basic);
+            should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), QNAME_PAIR_BOOST))));
+        }
+        Box::new(BooleanQuery::new(should))
+    };
+    let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, scoring)];
+    let label_terms = |labels: &[Label]| -> Box<dyn Query> {
+        let should = labels
+            .iter()
+            .map(|l| {
+                let tq = TermQuery::new(Term::from_field_text(f.label, l.as_str()), IndexRecordOption::Basic);
+                (Occur::Should, Box::new(tq) as Box<dyn Query>)
+            })
+            .collect();
+        Box::new(BooleanQuery::new(should))
+    };
+    if q.labels.is_empty() {
+        let mut excluded = DEFAULT_EXCLUDED.to_vec();
+        if q.language.is_none_or(|l| l.family() != LanguageFamily::Data) {
+            excluded.extend(DATA_DETAIL);
+        }
+        clauses.push((Occur::MustNot, label_terms(&excluded)));
+    } else {
+        clauses.push((Occur::Must, Box::new(ConstScoreQuery::new(label_terms(&q.labels), 0.0))));
+    }
+    if let Some(lang) = q.language {
+        let tq = TermQuery::new(Term::from_field_text(f.language, lang.as_str()), IndexRecordOption::Basic);
+        clauses.push((Occur::Must, Box::new(ConstScoreQuery::new(Box::new(tq), 0.0))));
+    }
+    Box::new(BooleanQuery::new(clauses))
 }
 
 pub(crate) fn compile_glob(glob: &str) -> Result<GlobMatcher> {
