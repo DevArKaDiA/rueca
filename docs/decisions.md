@@ -1,5 +1,17 @@
 # Decisions log
 
+## 2026-10-26 — Organization graph on top of repository graphs
+
+[RFC 0006](rfcs/0006-org-graph.md): the graph of one repository and ref stays
+the unit of work (indexed, versioned, branches and pull requests as deltas).
+When repositories are configured as an organization, Rueca also builds one
+organization graph on top: a single symbol index (one tantivy segment per
+repository, so BM25 statistics and scores are organization-wide), the union
+of repository graphs and a link layer of cross-repository edges (packages
+first, contracts later), updated one repository at a time. Federated search
+with rank fusion (RFC 0005 §5) is dropped: it measured 9.5% File Acc@5
+organization-wide against 61.9% on the right repository.
+
 ## 2026-10-25 — Tool responses designed for the org mode
 
 [RFC 0005](rfcs/0005-agent-responses.md): token efficiency must not cost
