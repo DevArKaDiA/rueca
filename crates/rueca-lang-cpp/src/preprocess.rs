@@ -340,6 +340,7 @@ mod tests {
         let facts = crate::extract::extract(src.as_bytes(), Language::Cpp, &Budget::default()).unwrap();
         let calls: Vec<&str> =
             facts.references.iter().filter(|r| r.kind == rueca_model::RefKind::Call).map(|r| r.name.as_str()).collect();
+        let calls: Vec<&str> = calls.into_iter().map(|n| rueca_extract::split_arg_types(n).0).collect();
         assert!(calls.contains(&"operator==") && calls.contains(&"operator+"), "{calls:?}");
     }
 

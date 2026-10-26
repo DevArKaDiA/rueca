@@ -26,11 +26,16 @@
 //!    by another such macro. A macro with arguments in that position is
 //!    masked with its argument list (`JSON_HEDLEY_DEPRECATED_FOR(…) static`),
 //!    and before a type and a name (`FFC_INLINE ffc_result f(…)`: a type
-//!    name cannot be followed by another).
+//!    name cannot be followed by another; also `LUA_API lua_State
+//!    *(lua_newstate) (…)`). A macro with arguments before `[` is masked
+//!    only before an attribute (`[[…]]`): `MP_STATE_PORT(h)[i] = c` is a
+//!    subscripted call.
 //! 4. **Trailing specifier**: containing `_`, after the `)` of a parameter
-//!    list (not of a cast or an `if` condition), `const`, `override` or
-//!    `noexcept`, and followed by `;`, `{`, `=`, `:`, `->`, `const`,
-//!    `override`, `final` or another such macro
+//!    list (not of a cast or an `if` condition; `operator=(…)` included),
+//!    or a method's `const`, `override` or `noexcept` (not a pointer's:
+//!    `const char* const NAME = …` declares `NAME`), possibly with
+//!    arguments (`GTEST_LOCK_EXCLUDED_(mu)`), and followed by `;`, `{`,
+//!    `=`, `:`, `->`, `const`, `override`, `final` or another such macro
 //!    (`void f() const FMT_NOEXCEPT;`).
 //! 5. **Statement-like call at declaration level**: `MACRO(args)` at the
 //!    start of a declaration in a file, namespace, `extern "C"` or class
@@ -624,7 +629,12 @@ pub(crate) fn plan(src: &[u8]) -> Plan {
                     && !ident_in(f, &["const", "volatile"])
                     && (g.is_some_and(|t| t.kind == Kind::Ident)
                         || ((punct(g, b'*') || punct(g, b'&') || punct(g, b'<'))
-                            && toks.get(last + 3).is_some_and(|t| t.kind == Kind::Ident)));
+                            && toks.get(last + 3).is_some_and(|t| t.kind == Kind::Ident))
+                        // `LUA_API lua_State *(lua_newstate) (…)`.
+                        || ((punct(g, b'*') || punct(g, b'&'))
+                            && punct(toks.get(last + 3), b'(')
+                            && toks.get(last + 4).is_some_and(|t| t.kind == Kind::Ident)
+                            && punct(toks.get(last + 5), b')')));
                 // `MACRO Name(args) [noexcept] : init(…)`: a constructor; also
                 // `MACRO1 MACRO2 Name(args)` (two macros cannot be a type and
                 // a name).
@@ -644,10 +654,13 @@ pub(crate) fn plan(src: &[u8]) -> Plan {
                             }
                             punct(toks.get(k), b':') && !punct(toks.get(k + 1), b':')
                         }));
+                // `MACRO(args)[i] = x;` is a subscripted call, unless an
+                // attribute follows (`MACRO(args) [[nodiscard]]`).
+                let with_args = ends.last().is_some_and(|&(a, b)| a != b);
                 let follows = ident_in(f, FOLLOWERS)
                     || (is_ident(f, "const") && ident_in(g, FUNDAMENTAL))
                     || punct(f, b'~')
-                    || punct(f, b'[')
+                    || (punct(f, b'[') && (!with_args || punct(g, b'[')))
                     || qualified
                     || two_types
                     || constructor;
@@ -713,16 +726,29 @@ pub(crate) fn plan(src: &[u8]) -> Plan {
         // the `(` must follow a name).
         let after_params = punct(prev, b')')
             && matching_open(&toks, i - 1).is_some_and(|o| {
-                o > 0
+                (o > 0
                     && toks[o - 1].kind == Kind::Ident
                     && !ident_in(
                         Some(&toks[o - 1]),
                         &["if", "while", "for", "switch", "return", "sizeof", "alignof", "decltype", "catch", "case"],
-                    )
+                    ))
+                    // `operator=(…)`, `operator()(…)`.
+                    || (o.saturating_sub(3)..o).any(|k| is_ident(toks.get(k), "operator"))
             });
-        let after_decl = after_params || ident_in(prev, &["const", "override", "noexcept"]) || prev_masked;
+        // A qualifier of a method (`f() const MACRO`), not of a pointer
+        // (`const char* const NAME = …` declares `NAME`).
+        let qualifier = ident_in(prev, &["const", "override", "noexcept"])
+            && i >= 2
+            && (punct(toks.get(i - 2), b')') || ident_in(toks.get(i - 2), &["const", "override", "noexcept"]));
+        let after_decl = after_params || qualifier || prev_masked;
         if after_decl {
             let mut j = i;
+            // `GTEST_LOCK_EXCLUDED_(mutex_)`: a trailing macro with arguments.
+            if punct(next, b'(')
+                && let Some(close) = matching_paren(&toks, i + 1)
+            {
+                j = close;
+            }
             while macro_tok(toks.get(j + 1), 3, true) {
                 j += 1;
             }
@@ -733,7 +759,7 @@ pub(crate) fn plan(src: &[u8]) -> Plan {
                 || punct(f, b':')
                 || (punct(f, b'-') && punct(toks.get(j + 2), b'>'))
                 || ident_in(f, &["const", "override", "final"]);
-            if follows && !punct(next, b'(') {
+            if follows && (!punct(next, b'(') || j > i) {
                 mask_range(&mut masked, &mut out, i, j);
             }
         }
@@ -962,6 +988,7 @@ mod tests {
         assert!(masked_words("obj = (void*)REDIS_REPLY_NIL;").is_empty());
         assert!(masked_words("if (x) RETURN_IF;").is_empty());
         assert_eq!(masked_words("FFC_IMPL_INLINE ffc_result ffc_parse(const char *s);"), ["FFC_IMPL_INLINE"]);
+        assert_eq!(masked_words("LUA_API lua_State *(lua_newstate) (lua_Alloc f);"), ["LUA_API"]);
         assert!(masked_words("MY_TYPE value, other;").is_empty());
         let p =
             plan(b"#if defined(X) && __has_include(<a.h>) \\\n  || 0\nint x;\n#ifdef __has_include\n#elif X\n#endif\n");

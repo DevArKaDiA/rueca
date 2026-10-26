@@ -107,6 +107,43 @@ pub(crate) struct Binding {
     /// qualifiers (`Foo`, `ns::Foo<int>`); `None` for fundamental types,
     /// `auto` without a known initializer, and template type parameters.
     pub(crate) ty: Option<String>,
+    /// Static type of the binding as an argument, for overload choice
+    /// ([`arg_type_text`]): fundamental types included (`int`, `char*`,
+    /// `string`); `None` for `auto`.
+    pub(crate) arg: Option<String>,
+}
+
+/// A written type in the form the resolver compares with overload
+/// parameters (`rueca-resolve`, `normalize_param_type`): qualifiers
+/// (`const`, `struct`, …), template arguments, namespace qualifiers and
+/// references dropped, words joined, `pointers` stars appended:
+/// `const std::string&` → `string`, `unsigned int` → `unsignedint`.
+pub(crate) fn arg_type_text(written: &str, pointers: usize) -> Option<String> {
+    let mut plain = String::new();
+    let mut depth = 0i32;
+    for c in written.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            _ if depth == 0 => plain.push(c),
+            _ => {}
+        }
+    }
+    let words: Vec<&str> = plain
+        .split(|c: char| c.is_whitespace() || c == '&')
+        .filter(|w| {
+            !w.is_empty() && !matches!(*w, "const" | "volatile" | "struct" | "class" | "enum" | "union" | "typename")
+        })
+        .collect();
+    let joined = words.concat();
+    let stars = joined.chars().rev().take_while(|c| *c == '*').count() + pointers;
+    let core = joined.trim_end_matches('*');
+    let core = core.rsplit("::").next().unwrap_or(core);
+    if core.is_empty() || matches!(core, "auto" | "decltype") || !core.chars().all(|c| c.is_alphanumeric() || c == '_')
+    {
+        return None;
+    }
+    Some(format!("{core}{}", "*".repeat(stars)))
 }
 
 struct ScopeInfo {
@@ -210,17 +247,22 @@ fn initializer_type(value: Node<'_>, source: &[u8]) -> Option<String> {
     }
 }
 
-/// Declared type of the binding whose identifier is `ident`.
-fn binding_type(ident: Node<'_>, source: &[u8]) -> Option<String> {
+/// Declared type of the binding whose identifier is `ident` (see
+/// [`Binding::ty`]) and its argument type ([`Binding::arg`]).
+fn binding_type(ident: Node<'_>, source: &[u8]) -> (Option<String>, Option<String>) {
     let mut init: Option<Node<'_>> = None;
-    let mut cur = ident.parent()?;
+    let mut pointers = 0;
+    let Some(mut cur) = ident.parent() else { return (None, None) };
     for _ in 0..16 {
         let kind = cur.kind();
         if DECLARATOR_WRAPPERS.contains(&kind) {
-            if kind == "init_declarator" {
-                init = cur.child_by_field_name("value");
+            match kind {
+                "init_declarator" => init = cur.child_by_field_name("value"),
+                "pointer_declarator" | "array_declarator" => pointers += 1,
+                _ => {}
             }
-            cur = cur.parent()?;
+            let Some(p) = cur.parent() else { return (None, None) };
+            cur = p;
             continue;
         }
         return match kind {
@@ -230,17 +272,19 @@ fn binding_type(ident: Node<'_>, source: &[u8]) -> Option<String> {
             | "variadic_parameter_declaration"
             | "for_range_loop"
             | "condition_clause" => {
-                let ty = cur.child_by_field_name("type")?;
+                let Some(ty) = cur.child_by_field_name("type") else { return (None, None) };
                 if matches!(ty.kind(), "placeholder_type_specifier" | "auto") {
-                    init.and_then(|v| initializer_type(v, source))
+                    let t = init.and_then(|v| initializer_type(v, source));
+                    let arg = t.as_deref().and_then(|t| arg_type_text(t, 0));
+                    (t, arg)
                 } else {
-                    named_type(ty, source)
+                    (named_type(ty, source), arg_type_text(&text(ty, source), pointers))
                 }
             }
-            _ => None,
+            _ => (None, None),
         };
     }
-    None
+    (None, None)
 }
 
 enum Point {
@@ -290,11 +334,11 @@ pub(crate) fn build(
                     }
                     Role::Def(kind) => {
                         let name = text(node, source).into_owned();
-                        let ty = if kind == DefKind::Type { None } else { binding_type(node, source) };
+                        let (ty, arg) = if kind == DefKind::Type { (None, None) } else { binding_type(node, source) };
                         points.push(Point::Def {
                             pos: node.start_byte() as u32,
                             name,
-                            binding: Binding { pos: node.start_byte() as u32, kind, ty },
+                            binding: Binding { pos: node.start_byte() as u32, kind, ty, arg },
                         });
                     }
                     Role::Ignore => {}

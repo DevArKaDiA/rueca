@@ -307,3 +307,121 @@ fn deterministic_under_shuffled_inputs() {
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
+
+fn sources(files: &[(&str, &str)]) -> Vec<(String, Vec<u8>)> {
+    files.iter().map(|(p, s)| (p.to_string(), s.as_bytes().to_vec())).collect()
+}
+
+/// Lua's style: API prototypes with parenthesized names, macros that
+/// expand to calls (nested), and a debug-only assertion macro.
+#[test]
+fn macros_expand_to_the_calls_they_make() {
+    let out = build(sources(&[
+        (
+            "lua.h",
+            "#define LUA_API extern\n\
+             LUA_API void (lua_settop) (lua_State *L, int idx);\n\
+             LUA_API lua_State *(lua_newstate) (void *ud);\n\
+             LUA_API long (lua_tointegerx) (lua_State *L, int idx, int *isnum);\n\
+             #define lua_pop(L,n) lua_settop(L, -(n)-1)\n\
+             #define lua_tointeger(L,i) lua_tointegerx(L,(i),NULL)\n\
+             #define luaL_checkint(L,n) ((int)lua_tointeger(L, (n)))\n\
+             #if defined(NDEBUG)\n\
+             #define api_check(e) ignore(e)\n\
+             #else\n\
+             #define api_check(e) check_failed(e)\n\
+             #endif\n\
+             void ignore(int e);\n\
+             void check_failed(int e);\n",
+        ),
+        (
+            "lapi.c",
+            "#include \"lua.h\"\n\
+             void lua_settop(lua_State *L, int idx) { api_check(idx); }\n\
+             long lua_tointegerx(lua_State *L, int idx, int *isnum) { return 0; }\n\
+             lua_State *lua_newstate(void *ud) { return 0; }\n\
+             void ignore(int e) {}\n\
+             void check_failed(int e) {}\n",
+        ),
+        (
+            "lbase.c",
+            "#include \"lua.h\"\n\
+             static int base(lua_State *L) {\n  lua_pop(L, 1);\n  return luaL_checkint(L, 2);\n}\n\
+             lua_State *open(void) { return lua_newstate(0); }\n",
+        ),
+    ]));
+    let g = G(&out.graph);
+    let base = g.at("base", "lbase.c");
+    // Prototypes with parenthesized names are functions linked to their bodies.
+    assert_eq!(g.0.nodes[g.at("lua_settop", "lua.h") as usize].label, rueca_model::Label::Function);
+    let settop = g.at("lua_settop", "lapi.c");
+    assert!(g.edge(base, settop, EdgeKind::Calls).is_some(), "lua_pop → lua_settop");
+    // Through two macros: luaL_checkint → lua_tointeger → lua_tointegerx.
+    assert!(g.edge(base, g.at("lua_tointegerx", "lapi.c"), EdgeKind::Calls).is_some());
+    assert!(g.edge(g.at("open", "lbase.c"), g.at("lua_newstate", "lapi.c"), EdgeKind::Calls).is_some());
+    // The debug definition of a macro defined per `#if` branch.
+    assert!(g.edge(settop, g.at("check_failed", "lapi.c"), EdgeKind::Calls).is_some());
+    g.lacks(settop, g.at("ignore", "lapi.c"), EdgeKind::Calls);
+}
+
+/// C++: overloads by argument type, cv-qualified and SFINAE overloads,
+/// friend functions, smart-pointer members and namespaces taken for types.
+#[test]
+fn cpp_overloads_members_and_namespaces() {
+    let out = build(sources(&[
+        (
+            "emitter.h",
+            "#include <memory>\n\
+             namespace YAML {\n\
+             class State { public: int Count() const; };\n\
+             class Emitter {\n public:\n  Emitter& Write(bool b);\n  Emitter& Write(char c);\n  Emitter& Write(const std::string& s);\n  void Run();\n  const int& get() const { return n_; }\n  int& get() { return n_; }\n\
+             friend bool operator==(const Emitter& a, const Emitter& b) { return a.n_ == b.n_; }\n\
+              private:\n  std::unique_ptr<State> m_pState;\n  int n_;\n};\n\
+             enum Op { Seq, Or };\n\
+             class RegEx {\n public:\n  explicit RegEx(char ch);\n  RegEx(const std::string& s, Op op = Seq);\n  explicit RegEx(Op op);\n};\n\
+             namespace Exp {\ninline int Break() { return 1; }\n}\n\
+             template <typename T, typename std::enable_if<sizeof(T) == 1, int>::type = 0>\nint pick(T v) {\n  return 1;\n}\n\
+             template <typename T, typename std::enable_if<sizeof(T) != 1, int>::type = 0>\nint pick(T v) {\n  return 2;\n}\n\
+             }\n",
+        ),
+        (
+            "emitter.cpp",
+            "#include \"emitter.h\"\n\
+             namespace YAML {\n\
+             Emitter& Emitter::Write(bool b) { return *this; }\n\
+             Emitter& Emitter::Write(char c) { return *this; }\n\
+             Emitter& Emitter::Write(const std::string& s) { return *this; }\n\
+             RegEx::RegEx(char ch) {}\n\
+             RegEx::RegEx(const std::string& s, Op op) {}\n\
+             RegEx::RegEx(Op op) {}\n\
+             void Emitter::Run() {\n  RegEx('a');\n  RegEx(\"ab\");\n  Write('x');\n  bool flag = true;\n  Write(flag);\n  Write(std::string(\"a\"));\n  m_pState->Count();\n  Exp::Break();\n}\n\
+             }\n",
+        ),
+    ]));
+    let g = G(&out.graph);
+    let run = g.at("YAML::Emitter::Run", "emitter.cpp");
+    let w = |p: &str| g.at(&format!("YAML::Emitter::Write({p})"), "emitter.cpp");
+    for p in ["char", "bool", "const std::string&"] {
+        assert_eq!(
+            g.edge(run, w(p), EdgeKind::Calls).map(|m| m.confidence),
+            Some(0.9),
+            "Write({p}) chosen by argument type (no overload fan-out)"
+        );
+    }
+    // A string literal takes the string overload, whose default argument
+    // is written on the declaration only.
+    let ctor = |p: &str| g.at(&format!("YAML::RegEx::RegEx({p})"), "emitter.cpp");
+    assert!(g.edge(run, ctor("char"), EdgeKind::Calls).is_some());
+    assert!(g.edge(run, ctor("const std::string&, Op"), EdgeKind::Calls).is_some());
+    g.lacks(run, ctor("Op"), EdgeKind::Calls);
+    assert!(g.edge(run, g.at("YAML::State::Count", "emitter.h"), EdgeKind::Calls).is_some(), "unique_ptr member");
+    assert!(g.edge(run, g.at("YAML::Exp::Break", "emitter.h"), EdgeKind::Calls).is_some(), "namespace qualifier");
+    // Overloads that differ by qualifiers or only by their constraints are
+    // distinct definitions.
+    g.at("YAML::Emitter::get()", "emitter.h");
+    g.at("YAML::Emitter::get(/*const*/)", "emitter.h");
+    g.at("YAML::pick(T)", "emitter.h");
+    g.at("YAML::pick(T/*#2*/)", "emitter.h");
+    // A friend defined in its class is a function of the namespace.
+    assert_eq!(g.0.nodes[g.at("YAML::operator==", "emitter.h") as usize].label, rueca_model::Label::Function);
+}

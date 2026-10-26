@@ -44,6 +44,60 @@ prior on Markdown sections (no effect), body boost 12 or name / qualified
 name boosts 2 / 1.5 (Python / Go file accuracy up, C / C++ / PHP / Java
 function accuracy down).
 
+## 2026-10-25 — C/C++: macros expand to their calls, overloads by argument type, more repairs
+
+Toward the RFC 0004 C and C++ floors (`rueca-lang-cpp` extractor version
+3, `rueca-resolve` C-family rules; crate docs and
+[how-it-works](how-it-works.md) have the details):
+
+- **Macro expansion in the resolver, body calls in the pack.** The calls a
+  macro's replacement list makes are read lexically and reported as calls
+  of the macro's definition; a definition that uses the macro (`CALLS` or
+  `REFERENCES` edge) also calls them, through nested macros. The macro is
+  usually defined in a header and used in another file, so expanding at
+  extraction (one file) could not see it; expanding edges after
+  resolution keeps extraction per file and resolves each body name in the
+  macro's own file, as the preprocessor's output would. A macro defined
+  once per `#if` branch expands as one configuration: its first
+  definition that is not for release builds (`NDEBUG`), since a
+  compilation database describes a development build. The macro use
+  stays a `REFERENCES` edge (macros are still uses, not callables).
+- **Same-parameter overloads are distinct definitions.** cv-qualified
+  members (`get()` / `get() const`), SFINAE overloads and one body per
+  `#if` branch used to merge into one node (the later ones vanished). They
+  are told apart by a comment at the end of the overload suffix
+  (`get(/*const*/)`, `write(OutputIt, T/*#2*/)`), which keeps the suffix
+  ending in `)` for every consumer of qualified names and is ignored by
+  arities and lookups. Function template specializations are named with
+  their arguments, like class template specializations.
+- **Argument types for C++ calls** from literals, casts, constructions and
+  declared locals, through the existing `with_arg_types` mechanism; a
+  reference parameter binds its type, a string literal prefers a string
+  parameter and never a primitive, and default arguments come from the
+  declaration of an out-of-line body.
+- **Parenthesized prototype names** (`int (lua_gettop) (lua_State *L);`,
+  Lua's whole API) are functions, so calls reach their bodies.
+- **Repairs stay error-driven and same-length**, now covering storage
+  classes before declaration macros, macros wrapping declarations or
+  statements, operators and empty statements as arguments, attribute
+  macros around declarations, `asm` macros, access macros, and a few
+  C++ shapes (the table in `repair.rs`). Two masking rules were too eager
+  (a subscripted macro call in a body, a `const NAME` after a pointer).
+- **Measured** (RFC 0004 scorecard, S3 scip-clang gold and health
+  corpus; before → after): C callers / callees recall 81.0 / 65.8 →
+  96.3 / 98.5 (Lua callees 62.0 → 99.0) at precision 98.1 / 98.9;
+  C++ callers / callees recall 73.9 / 71.1 → 85.6 / 83.0, callers /
+  callees precision 91.7 / 86.3 → 95.4 / 89.4, definition found 94.4 →
+  98.9; files with parse errors C 12.0 → 3.1%, C++ 11.3 → 7.0%. The C
+  micro-benchmark's `macros/macro_body_calls` key still says a macro's
+  body calls are not the caller's (scip-clang says they are): C micro
+  callee F1 100 → 99.0. What remains
+  below the floors: C++ callee precision is held down by the gold on
+  dependent template calls (scip-clang lists one representative per
+  same-signature overload group, or none through a dependent base), and
+  the parse errors are a long tail (vendored GoogleTest, Objective-C
+  headers, non-C `qstrdefs.h`, token pasting).
+
 ## 2026-10-25 — Structure floors: members by kind, overloads by type, receiver types from assignments
 
 Work toward the structure floors of [RFC 0004](rfcs/0004-quality-and-benchmark.md)
