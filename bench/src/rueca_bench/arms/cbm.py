@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ..common import BIN_DIR, CACHE, count_tokens, load_manifest, pinned_asset, run, safe_name, sha256_file
+from ..efficiency import text_prefix_tokens
 from .base import Arm, CallResult, Handle, is_callable_label, same_def
 
 
@@ -122,6 +123,16 @@ class CbmArm(Arm):
             return data, res.seconds, f"rc={res.rc}: {err}", res.stdout
         return data, res.seconds, None, res.stdout
 
+    def agent_text(self, tool: str, args: dict[str, Any]) -> str | None:
+        """The MCP text content an agent reads for this request: cbm's
+        default `tree` rendering (the same request without `format`)."""
+        self._ensure_daemon()
+        args = {k: v for k, v in args.items() if k not in ("format",)}
+        res = run([str(self.bin), "cli", "--quiet", tool, json.dumps(args)], env=self.env, timeout=self.call_timeout)
+        if res.timed_out or res.rc != 0:
+            return None
+        return res.stdout
+
     @staticmethod
     def _lines(s: Any) -> tuple[int | None, int | None]:
         if isinstance(s, str):
@@ -200,7 +211,7 @@ class CbmArm(Arm):
             h.state["nodes_errors"] = errors
         return h.state["nodes"]
 
-    def _search(self, h: Handle, args: dict, limit: int) -> CallResult:
+    def _search(self, h: Handle, args: dict, limit: int, text: bool = True) -> CallResult:
         args = {
             "project": h.state["project"],
             "limit": min(limit, 500),
@@ -225,14 +236,20 @@ class CbmArm(Arm):
                     "start_line": s,
                     "end_line": e,
                     "qn": qn,
+                    "rank": r.get("rank"),
                 }
             )
-        return CallResult(True, secs, hits=hits, extra={"total": data.get("total"), "tokens": count_tokens(raw)})
+        txt = self.agent_text("search_graph", args) if text else None
+        extra = {"total": data.get("total"), "tokens": count_tokens(txt) if txt is not None else None, "tokens_json": count_tokens(raw)}
+        if txt is not None:
+            extra["prefix"], extra["approx"] = text_prefix_tokens(txt, len(hits))
+            extra["format"] = "tree"
+        return CallResult(True, secs, hits=hits, extra=extra)
 
     # -- S1 ---------------------------------------------------------------------
 
     def localize(self, h: Handle, query: str, limit: int = 100) -> CallResult:
-        res = self._search(h, {"query": query}, limit)
+        res = self._search(h, {"query": query}, limit, text=False)
         if not res.ok:
             return res
         files: list[str] = []
@@ -274,7 +291,8 @@ class CbmArm(Arm):
             return CallResult(False, secs, error=err)
         if isinstance(data, dict) and data.get("status") == "ambiguous":
             return CallResult(False, secs, error="ambiguous")
-        out: dict[str, Any] = {"tokens": count_tokens(raw), "unmapped": 0}
+        txt = self.agent_text("trace_path", args)
+        out: dict[str, Any] = {"tokens": count_tokens(txt) if txt is not None else None, "tokens_json": count_tokens(raw), "unmapped": 0}
         for key in ("callers", "callees"):
             block = data.get(key) or {}
             cols = block.get("cols", ["name", "hop"])
@@ -297,6 +315,11 @@ class CbmArm(Arm):
 
     def lookup(self, h: Handle, name: str, limit: int = 10) -> CallResult:
         return self._search(h, {"query": name}, limit)
+
+    def search_eff(self, h: Handle, query: str, limit: int = 10) -> CallResult:
+        """`search_graph` as an agent issues it (limit `limit`): hits in
+        rendered order, tokens of the tree text, prefix cost per item."""
+        return self._search(h, {"query": query}, limit)
 
     # -- data suite ----------------------------------------------------------------
 

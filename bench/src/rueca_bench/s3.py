@@ -608,12 +608,13 @@ def _ask(arm: Arm, h: Handle, graph: dict, qs: list[str], lookup: set[str]) -> l
                 "seconds": n.seconds,
                 "error": n.error,
                 "tokens": n.extra.get("tokens"),
+                "tokens_json": n.extra.get("tokens_json"),
                 "callers": [_brief(x) for x in n.extra.get("callers", [])],
                 "callees": [_brief(x) for x in n.extra.get("callees", [])],
             }
         if q in lookup:
             lk = arm.lookup(h, func["name"], 10)
-            rec["lookup"] = {"ok": lk.ok, "seconds": lk.seconds, "error": lk.error, "tokens": lk.extra.get("tokens"), "hits": [_brief(x) for x in lk.hits]}
+            rec["lookup"] = {"ok": lk.ok, "seconds": lk.seconds, "error": lk.error, "tokens": lk.extra.get("tokens"), "tokens_json": lk.extra.get("tokens_json"), "hits": [_brief(x) for x in lk.hits]}
         out.append(rec)
     return out
 

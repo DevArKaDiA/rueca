@@ -1,7 +1,7 @@
 """rueca-bench command line.
 
   rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
-  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,data,health,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
+  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,data,health,org,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
   rueca-bench report
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
@@ -19,6 +19,7 @@ import sys
 from . import check as check_mod
 from . import data as data_mod
 from . import health as health_mod
+from . import org as org_mod
 from . import report as report_mod
 from . import s1, s3
 from .arms import ARM_NAMES, make_arm
@@ -54,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rp = sub.add_parser("run", help="run arms on suites (resumable)")
     rp.add_argument("--arm", default="all")
-    rp.add_argument("--suite", default="all", help="s1, s3, data, health, all, or a comma list")
+    rp.add_argument("--suite", default="all", help="s1, s3, data, health, org, all, or a comma list")
     rp.add_argument("--only", nargs="*", help="instance ids / repos (s1) or suite names (s3)")
     rp.add_argument("--workers", type=int, default=2, help="S1 repositories / S3 sets processed in parallel")
     rp.add_argument("--force", action="store_true", help="ignore cached arm outputs")
@@ -87,8 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         run_code = not langs or bool(code_langs)
         wanted = {x.strip() for x in a.suite.split(",") if x.strip()}
         if "all" in wanted:
-            wanted = {"s1", "s3", "data", "health"}
-        unknown = wanted - {"s1", "s3", "data", "health"}
+            wanted = {"s1", "s3", "data", "health", "org"}
+        unknown = wanted - {"s1", "s3", "data", "health", "org"}
         if unknown:
             raise SystemExit(f"unknown suite(s) {sorted(unknown)}")
         if "health" in wanted and run_code and "rueca" in arms:
@@ -99,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
             s3.run(arms, only=a.only, force=a.force, languages=code_langs, workers=a.workers, prune=a.prune)
         if "data" in wanted and (not langs or "data" in langs):
             data_mod.run(arms, only=a.only, force=a.force)
+        if "org" in wanted and not langs:
+            # after S1: the org view is compared with the single-repository answers
+            org_mod.run_all(arms, force=a.force)
     elif a.cmd == "report":
         report_mod.report()
     elif a.cmd == "check":
@@ -109,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
         for arm in a.runs or []:
             for suite in ("s1", "s3", "data", "health"):
                 shutil.rmtree(RUNS_DIR / suite / arm, ignore_errors=True)
+            for kind in ("multirepo", "multiref"):
+                (RUNS_DIR / "org" / f"{kind}-{arm}.json").unlink(missing_ok=True)
     return 0
 
 

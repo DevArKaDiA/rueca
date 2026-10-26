@@ -35,7 +35,8 @@
       "src/recommendationservice/recommendation_server.py|<module>|DISABLE_PROFILER"
      ],
      "reads_spurious": []
-    }
+    },
+    "carried": true
    },
    "cbm": {
     "arm_version": "codebase-memory-mcp 0.12.0",
@@ -125,11 +126,12 @@
      "reads_spurious": [
       "src/frontend/deployment_details.go|init|PACKAGING_SERVICE_URL"
      ]
-    }
+    },
+    "carried": true
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)",
-    "index_seconds": 0.4344266249972861,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "index_seconds": 0.40329674998065457,
     "keys": {
      "yaml": {
       "keys": 2582,
@@ -243,7 +245,8 @@
      },
      "reads_missed": [],
      "reads_spurious": []
-    }
+    },
+    "carried": true
    },
    "cbm": {
     "arm_version": "codebase-memory-mcp 0.12.0",
@@ -305,11 +308,12 @@
      },
      "reads_missed": [],
      "reads_spurious": []
-    }
+    },
+    "carried": true
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)",
-    "index_seconds": 0.26969495898811147,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "index_seconds": 0.27179291599895805,
     "keys": {
      "yaml": {
       "keys": 266,
@@ -373,7 +377,8 @@
   "terraform-aws-vpc": {
    "grep": {
     "arm_version": "rueca-bench env regexes + tree-sitter",
-    "index_seconds": null
+    "index_seconds": null,
+    "carried": true
    },
    "cbm": {
     "arm_version": "codebase-memory-mcp 0.12.0",
@@ -415,11 +420,12 @@
       "files": 77,
       "with_kind_nodes": 0
      }
-    }
+    },
+    "carried": true
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)",
-    "index_seconds": 0.25616575000458397,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+    "index_seconds": 0.2673747499939054,
     "keys": {
      "yaml": {
       "keys": 143,

@@ -203,8 +203,9 @@ Every language is measured against the absolute floors of
 [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) — issue localization
 (SWE-bench family, ≥ 30 issues per language), callers / callees over every
 function of two or more SCIP / PHPStan gold repositories per language, own
-hand-labelled micro-benchmarks, parse-error rate, latency, and configuration
-key recall and env-var bridge — with 95% intervals;
+hand-labelled micro-benchmarks, parse-error rate (vendored, copied and
+misdetected files left out; the raw rate is published next to it), latency,
+and configuration key recall and env-var bridge — with 95% intervals;
 [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
 v0.12.0 and a BM25 baseline are published alongside as reference. Current
 scorecard (`stable` = every floor met; full tables in
@@ -212,13 +213,23 @@ scorecard (`stable` = every floor met; full tables in
 [bench/README.md](bench/README.md)):
 
 - **Python** `stable`
-- **TS/JS** `preview` — micro-benchmark callee F1 89.9 (85.4–93.6) vs ≥ 90
+- **TS/JS** `stable`
 - **PHP** `stable`
 - **Go** `stable`
 - **Java** `stable`
-- **C** `preview` — callees recall 65.8 (63.3–68.3) vs ≥ 75; 12.0% of files with parse errors vs ≤ 2%
-- **C++** `preview` — function Acc@10 below BM25 (Δ −18.2, −33.3 to −6.1); callees precision 86.3 vs ≥ 90; callers / callees recall 73.9 / 71.1 vs ≥ 75; definition found 94.4 vs ≥ 95; 11.3% of files with parse errors vs ≤ 2%
+- **C** `stable` (1.3% of files with parse errors; 3.1% counting vendored `deps/` and `lib/`)
+- **C++** `preview` — callees precision 89.2 (87.9–90.5) vs ≥ 90; 5.0% of files with parse errors vs ≤ 2% (7.0% raw)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
+
+**Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),
+measured on what an agent reads, same queries as codebase-memory-mcp;
+target ≤ 50% of cbm): with the RFC 0005 responses, `search_symbols` costs
+0.33–0.89× cbm's tokens until the first gold hit (target met for Python,
+TS/JS, PHP and Java) and `trace` 0.89–1.75× cbm's tokens per true call
+edge (target not met; Rueca also returns more true edges). In a store of 21
+repositories, `repo: "*"` keeps the right repository's file in the top 5
+for 9.5% of issues vs 61.9% when asking that repository alone — org-wide
+ranking is open work.
 
 Contributions that move these numbers are very welcome.
 

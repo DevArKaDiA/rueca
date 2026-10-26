@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .common import REPO_ROOT, RESULTS_DIR
 
-SKIP = {"latency_p95_ms", "tokens_per_answer"}
+SKIP = {"latency_p95_ms", "tokens_per_answer", "search_tokens_to_first_hit", "search_tokens_per_hit", "trace_tokens_per_true_edge"}
 SCORECARD = "scorecard.json"
 
 

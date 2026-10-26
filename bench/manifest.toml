@@ -126,6 +126,15 @@ target = 0.005
 better = "lower"
 
 [[scorecard.metrics]]
+key = "parse_error_rate_raw"
+family = "Health"
+label = "Files with parse errors, raw (vendored and misdetected files included)"
+floor = 0.02
+target = 0.005
+better = "lower"
+gated = false
+
+[[scorecard.metrics]]
 key = "latency_p95_ms"
 family = "Health"
 label = "Query latency p95 (ms)"
@@ -134,18 +143,28 @@ target = 20
 better = "lower"
 unit = "ms"
 
+# Efficiency (RFC 0005 §8): tokens per correct answer, measured on what an
+# agent reads; Rueca and cbm on the same queries. Reported only.
 [[scorecard.metrics]]
-key = "tokens_per_answer"
+key = "search_tokens_to_first_hit"
 family = "Efficiency"
-label = "Tokens per answer (trace, median)"
+label = "Tokens to first gold hit (search_symbols, top 10)"
 target = { cbm_ratio = 0.5 }
 better = "lower"
 unit = "tokens"
 
 [[scorecard.metrics]]
-key = "tokens_per_search"
+key = "search_tokens_per_hit"
 family = "Efficiency"
-label = "Tokens per answer (search, median)"
+label = "Tokens per gold hit (search_symbols, top 10)"
+target = { cbm_ratio = 0.5 }
+better = "lower"
+unit = "tokens"
+
+[[scorecard.metrics]]
+key = "trace_tokens_per_true_edge"
+family = "Efficiency"
+label = "Tokens per true edge (trace)"
 target = { cbm_ratio = 0.5 }
 better = "lower"
 unit = "tokens"
@@ -182,6 +201,69 @@ target = 0.90
 # `split = "calibration"` (`[[s1.repos]]`, `[[s3.repos]]`) are scored in a
 # separate section of the report and never enter the scorecard; entries
 # with `split = "diagnostic"` are reported and never gated (express, PyCG).
+
+# ---------------------------------------------------------------- health
+# Gated parse-error rate (RFC 0004 §5, S5; health.py): besides the built-in
+# rules (the vendored directories of Rueca's ranking, `vendor`,
+# `node_modules`, GoogleTest / GoogleMock copies, amalgamations), these
+# files are left out of the gated rate and counted in the raw one.
+# `exclude`: per-repository third-party trees (or copies) without a
+# conventional directory name; `not_language`: files with the language's
+# extension that are not that language (`glob` and / or `content` regex over
+# the first 64 KiB). Every entry says why (bench/README.md, *Health*).
+[health]
+
+# MicroPython's `lib/` holds its external dependencies (submodules and
+# copies: CMSIS, littlefs, libm, oofatfs, ...; lib/README.md).
+[[health.exclude]]
+repo = "micropython/micropython"
+paths = ["lib"]
+reason = "vendored"
+
+# TI CC3200 SDK driverlib and SimpleLink (Texas Instruments copyright),
+# FreeRTOS V9.0.0, ST's STM32 USB host library (MCD Application Team).
+[[health.exclude]]
+repo = "micropython/micropython"
+paths = ["ports/cc3200/hal", "ports/cc3200/simplelink", "ports/cc3200/FreeRTOS", "ports/stm32/usbhost"]
+reason = "vendored"
+
+# Catch2 2.x keeps Clara (philsquared/Clara) under include/external.
+[[health.exclude]]
+repo = "catchorg/Catch2"
+paths = ["include/external"]
+reason = "vendored"
+
+# A frozen copy of the v3.10.5 single header, for the ABI tests.
+[[health.exclude]]
+repo = "nlohmann/json"
+paths = ["tests/abi/include/nlohmann/json_v3_10_5.hpp"]
+reason = "amalgamation"
+
+# MicroPython qstr definition lists: `Q(...)` / `QCFG(...)` lines read by
+# py/makeqstrdata.py, not C.
+[[health.not_language]]
+languages = ["c", "cpp"]
+glob = "*qstrdefs*.h"
+content = '^Q(CFG)?\('
+reason = "not the language (qstr list)"
+
+# Objective-C / Objective-C++ in C and C++ repositories (`@interface`,
+# `@protocol`, `@implementation`, `#import`).
+[[health.not_language]]
+languages = ["c", "cpp"]
+content = '^\s*(@interface|@implementation|@protocol|#import\s)'
+reason = "not the language (Objective-C)"
+
+# ---------------------------------------------------------------- org scenarios
+# RFC 0005 §8 (org.py): a multi-repository store (the first gated S1
+# instance of the first `repos_per_family` gated S1 repositories of every
+# family) and one repository at two commits (`[multiref] instance`: base
+# commit vs base + gold patch).
+[org]
+repos_per_family = 3
+
+[multiref]
+instance = "psf__requests-2317"
 
 # Clone mode (corpus.py): `shallow` = true makes every new clone an empty
 # promisor repository that fetches each pinned commit with
@@ -449,11 +531,13 @@ role = "compile-only dependency of gson (annotations), for the scip-java gold"
 [tools.rueca]
 name = "rueca"
 binary = "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)"
-contract = "docs/tools.md (alpha)"
+contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arms/rueca.py)"
 # Binary behind the published Rueca numbers (every language and suite):
-# `cargo build --release -p rueca` of main (macOS arm64). The crates are
-# unchanged since 65ae154 (the alpha results' binary).
-results = "main @ 6df4324 (binary sha256 80e72f05793aeabc40e1affa5e718fbbae0955779d82c81cbcbdc012852e397a)"
+# `cargo build --release -p rueca` of the RFC 0005 contract branch
+# (macOS arm64): main 2c5a384 plus the response contract. Every quality
+# metric is identical to main's binary (alpha contract) on the same run;
+# only tokens and latency differ.
+results = "feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.

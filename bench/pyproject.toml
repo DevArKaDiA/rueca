@@ -36,3 +36,8 @@ packages = ["src/rueca_bench"]
 # Rebuild the (non-)editable install when sources change; needed with
 # UV_NO_EDITABLE=1 (see bench/README.md, macOS hidden-.pth note).
 cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
