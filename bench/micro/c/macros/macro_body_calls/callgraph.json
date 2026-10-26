@@ -3,5 +3,7 @@
   "log.c:loud": [
     "log.c:log_msg"
   ],
-  "log.c:quiet": []
+  "log.c:quiet": [
+    "log.c:log_msg"
+  ]
 }
