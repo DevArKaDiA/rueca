@@ -1,6 +1,6 @@
 # RFC 0005 — Responses for agents: org-wide, multi-ref, token-efficient
 
-- Status: Draft
+- Status: Draft; the local-mode part (§9) is implemented
 - Created: 2026-10-25
 - Depends on: RFC 0001 (§6.1 identifiers, §8.3 catalog, §11 query engine,
   §13 permissions), RFC 0004 (efficiency metric)
@@ -232,6 +232,54 @@ collapse correctness and savings).
 The local catalog grows from "one segment per root" to "snapshots per
 (repository, ref)" (RFC 0001 §8.3) when local multi-ref indexing lands; this
 RFC only requires the tool contract to be ready for it.
+
+**Implemented (local mode).** The "Local mode now" column landed in
+`rueca-query` (`snapshot`, `compact`, `multiref` modules), `rueca-mcp`
+(`structuredContent` + text rendering) and the CLI (`query --text`);
+`docs/tools.md` is the contract. Choices and deviations:
+
+- **Ref names.** A local snapshot's `ref` is its checked-out branch
+  (recorded at index time in `SnapshotInfo::branch`), `HEAD` when detached,
+  `worktree` outside git. `ref` accepts those, `worktree`, `HEAD`, or the
+  commit (full, ≥ 7-digit prefix, 12-digit form with `+`). Outside git there
+  is no base commit, so no `+` and no URL.
+- **Ids.** Both formats return the pinned 12-digit form. An id whose commit
+  is not indexed resolves against the repository's current snapshot (local
+  mode only, so ids survive a re-index); the service should be strict.
+- **Budget** (open question 1): counted on the text rendering as
+  `ceil(bytes / 4)`. At least one item is always returned. Cursors are item
+  offsets (the next line for `get_snippet`); `get_symbol` cuts its lists
+  without a cursor and reports `omitted`.
+- **Grouping**: groups are ordered by their best-ranked item, so
+  `search_symbols` order inside the response is by file, not strictly by
+  rank (`"scores": true` shows the ranking).
+- **`trace`**: node 0 is the root (`d` 0); a node reachable both ways is one
+  node with `dir: "both"`. The call-site path is a *seventh* element (§7's
+  "eighth" counted one too many).
+- **Text rendering** prints the local name (the id's `#` part) and the
+  repository id in full in the header, so header + group path + name spell
+  the id.
+- **Several repositories**: the fused score is `prior / (60 + rank)` with the
+  priors ×0.5 test, ×0.5 field / variable / constant. Name lookups take the
+  best match over the selected snapshots (others as `candidates`); a path in
+  several snapshots is an error asking for `repo`.
+- **Collapse (§6)**: `rueca_query::multiref::{collapse, collapse_edges}`
+  with unit tests on two synthetic snapshots of one repository; an item
+  absent from some requested snapshot of its repository is also `changed`.
+  No local tool calls it yet.
+- `format: "verbose"` keeps the alpha shapes *and* alpha defaults (limits,
+  depth 2, no budget).
+
+Measured on `psf/requests`, `gin-gonic/gin` and `sindresorhus/ky` (text
+content vs alpha verbose JSON, ~tokens = bytes / 4):
+
+| Tool | requests | gin | ky |
+|---|---|---|---|
+| `search_symbols`, defaults (10 vs 20) | 1,834 → 310 | 1,537 → 234 | 1,683 → 277 |
+| `search_symbols`, limit 10 both | 868 → 310 | 778 → 234 | 833 → 277 |
+| `trace` depth 1 | 2,034 → 391 | 843 → 174 | 2,306 → 434 |
+| `get_symbol` | 470 → 376 | 2,349 → 472 | 3,039 → 526 |
+| `get_file_outline` | 4,087 → 1,222 | 14,640 → 3,983 (budget: 1,998) | 6,658 → 1,904 |
 
 ## 10. Compatibility
 

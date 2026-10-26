@@ -682,6 +682,11 @@ pub struct SnapshotInfo {
     pub repo: String,
     pub commit: String,
     pub dirty: bool,
+    /// Branch checked out when the snapshot was indexed (`main`), `None`
+    /// for a detached `HEAD`, outside git, or in segments written before
+    /// RFC 0005. Reported as the snapshot's `ref` (RFC 0005 §4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     /// Absolute root path the snapshot was indexed from (local mode only).
     pub root: Option<String>,
     /// Unix seconds.

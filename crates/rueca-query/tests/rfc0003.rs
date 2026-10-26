@@ -97,7 +97,16 @@ fn setup() -> Setup {
     Setup { engine: Engine::new(store, Some(root)).unwrap(), _dir: dir }
 }
 
+/// The alpha shapes these tests assert (`format: verbose`).
+fn verbose(mut args: Value) -> Value {
+    if let Some(m) = args.as_object_mut() {
+        m.entry("format").or_insert_with(|| json!("verbose"));
+    }
+    args
+}
+
 fn call(e: &Engine, tool: &str, args: Value) -> Value {
+    let args = verbose(args);
     e.call(tool, args.clone()).unwrap_or_else(|err| panic!("{tool} {args}: {err:#}"))
 }
 

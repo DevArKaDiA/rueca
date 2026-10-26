@@ -2,9 +2,13 @@
 //!
 //! Built on the official Rust SDK, [`rmcp`]. Tools are listed from
 //! [`rueca_query::tool_definitions`] (deterministic order) and every call is
-//! dispatched to [`rueca_query::Engine::call`] on a blocking thread. Results
-//! are returned as compact JSON text content plus `structuredContent`; engine
-//! errors become tool results with `isError: true`.
+//! dispatched to [`rueca_query::Engine::respond`] on a blocking thread.
+//! Results carry the JSON response (the RFC 0005 envelope, or the alpha shape
+//! with `format: verbose`) as `structuredContent` and its compact text
+//! rendering ([`rueca_query::render_text`]; compact JSON for `verbose`) as
+//! text content, so clients that read `structuredContent` see the full data
+//! and models that read text see the short form. Engine errors become tool
+//! results with `isError: true`.
 //!
 //! Protocol versions are whatever `rmcp` 3.7 negotiates by default (Rueca does
 //! not override `supported_protocol_versions`): the 2026-07-28 stateless flow
@@ -49,9 +53,13 @@ imports), plus the full text of every indexed file. Prefer it over reading whole
 Recommended flow: `search_symbols` to find candidates by name → `get_symbol` for details (parent, \
 children, bases, caller/callee counts) or `get_snippet` for the source → `trace` to follow callers \
 and callees (impact analysis). Use `search_code` for literals, messages and config keys, and \
-`get_file_outline` to see a file's structure cheaply. Symbol ids returned by any tool can be passed \
-as `id` to the others. Lines are 1-based. Results come from the last index of the working tree; \
-edges carry a confidence (0–1) and the strategy used to resolve them.";
+`get_file_outline` to see a file's structure cheaply. Responses name each snapshot read \
+(`repo@commit (ref)`) and group items by file; an item's id is `repo@commit:path#name`, and its \
+printed name also works as `qualified_name`. Symbol ids returned by any tool can be passed as `id` \
+to the others. Lines are 1-based. Every tool takes `repo` (one, a list, or \"*\" for every indexed \
+repository), `ref` and `budget_tokens` (default 2000); a cut response says `truncated` and how to \
+continue (`cursor`). Results come from the last index of the working tree; edges carry a confidence \
+(0–1) and the strategy used to resolve them.";
 
 /// The MCP handler: a shared engine plus the advertised tool list.
 #[derive(Clone)]
@@ -74,12 +82,12 @@ impl RuecaServer {
 
     /// Runs one tool call (blocking): waits for a pending auto-index, then
     /// dispatches to the engine.
-    fn call_blocking(&self, tool: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+    fn call_blocking(&self, tool: &str, args: serde_json::Value) -> anyhow::Result<rueca_query::Response> {
         let index_failure = match &self.gate {
             Some(gate) => gate.wait(INDEX_WAIT).map_err(anyhow::Error::msg)?,
             None => None,
         };
-        self.engine.call(tool, args).map_err(|err| match index_failure {
+        self.engine.respond(tool, args).map_err(|err| match index_failure {
             Some(reason) => err.context(format!("automatic indexing failed: {reason}")),
             None => err,
         })
@@ -144,9 +152,11 @@ impl ServerHandler for RuecaServer {
         let started = Instant::now();
         let outcome = tokio::task::spawn_blocking(move || server.call_blocking(&tool, args)).await;
         let result = match outcome {
-            Ok(Ok(value)) => {
+            Ok(Ok(response)) => {
                 tracing::debug!(tool = %name, ms = started.elapsed().as_millis() as u64, "tool call ok");
-                CallToolResult::structured(value)
+                let mut result = CallToolResult::structured(response.json);
+                result.content = vec![ContentBlock::text(response.text)];
+                result
             }
             Ok(Err(err)) => {
                 tracing::debug!(tool = %name, error = %format!("{err:#}"), "tool call failed");

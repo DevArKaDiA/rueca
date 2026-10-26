@@ -1,16 +1,17 @@
 //! Query engine over local segments.
 //!
-//! Implements the six alpha tools defined in `docs/tools.md`
-//! (`search_symbols`, `search_code`, `get_symbol`, `get_snippet`, `trace`,
-//! `get_file_outline`). The MCP server and the CLI both dispatch through
-//! [`Engine::call`], so their behavior is identical; [`tool_definitions`]
-//! provides names, descriptions and JSON input schemas for the MCP layer.
+//! Implements the six tools defined in `docs/tools.md` (`search_symbols`,
+//! `search_code`, `get_symbol`, `get_snippet`, `trace`, `get_file_outline`)
+//! with the response contract of RFC 0005. The MCP server and the CLI both
+//! dispatch through [`Engine::respond`] (or [`Engine::call`] for the JSON
+//! alone), so their behavior is identical; [`tool_definitions`] provides
+//! names, descriptions and JSON input schemas for the MCP layer.
 //!
 //! ```no_run
 //! # fn main() -> anyhow::Result<()> {
 //! let engine = rueca_query::Engine::new("/tmp/store".into(), Some("/src/billing".into()))?;
-//! let hits = engine.call("search_symbols", serde_json::json!({"query": "issue invoice"}))?;
-//! println!("{hits}");
+//! let hits = engine.respond("search_symbols", serde_json::json!({"query": "issue invoice"}))?;
+//! println!("{}", hits.text); // compact rendering; `hits.json` is the envelope
 //! # Ok(()) }
 //! ```
 //!
@@ -18,21 +19,55 @@
 //! catalog is re-read on every call so a re-index is picked up immediately
 //! and replaced segments are evicted.
 //!
-//! # Repository selection
+//! # Responses (RFC 0005)
+//!
+//! By default every tool returns the **envelope**: `snapshots` (each
+//! snapshot read: `s`, `repo`, `ref`, full `commit`, `overlay`, and a host
+//! `url` template for GitHub / GitLab / Bitbucket repositories), `results`
+//! (grouped by snapshot and file, short field names `qn`, `sig`, `lines`;
+//! `trace` nodes as a list with edges `[src, dst, kind, confidence, strategy,
+//! call_site_line(, path)]` by node index), `truncated`, `next_cursor` and
+//! `budget`. [`compact`] builds it from the alpha results and renders the
+//! text form ([`render_text`]); the budget (`budget_tokens`, default 2,000)
+//! is counted on that text as `ceil(bytes / 4)`. `format: "verbose"` returns
+//! the alpha shapes and defaults unchanged (one release).
+//!
+//! Ids are pinned: `repo@commit12[+]:path#local-name`, `+` marking a working
+//! tree with uncommitted changes (the snapshot's `dirty` flag). Ids are
+//! accepted with the full commit, a prefix of at least 7 hex digits, the
+//! 12-digit form, or a ref name; a commit that is not indexed resolves
+//! against the repository's current snapshot (local mode, so ids survive a
+//! re-index).
+//!
+//! # Snapshot selection
 //!
 //! `repo` (every tool) is a repository id or an indexed root path (a path
-//! inside a root selects that root). Without it: the repository of an `id`
-//! argument, else the engine's default root, else the only indexed root, else
-//! an error listing the indexed roots.
+//! inside a root selects that root), a list of them, or `"*"` for every
+//! indexed root. Without it: the repository of an `id` argument (the root
+//! whose commit the id names when several roots index that repository), else
+//! the engine's default root, else the only indexed root, else an error
+//! listing the indexed roots. `ref` then keeps the snapshots it names
+//! ([`snapshot::SnapshotDesc::matches_ref`]); local mode has one snapshot per
+//! root (its working tree, named by the checked-out branch, `HEAD` when
+//! detached, `worktree` outside git), and any other ref is an error listing
+//! the indexed refs (with `"*"`, snapshots without the ref are skipped).
+//!
+//! With several snapshots, `search_symbols` merges the per-snapshot rankings
+//! by reciprocal rank fusion (k = 60) and re-applies the global priors (×0.5
+//! tests, ×0.5 fields / variables / constants); `search_code` concatenates
+//! matches in snapshot order; `get_symbol`, `get_snippet` and `trace` resolve
+//! an `id` in its own snapshot and a name in every snapshot (the best match
+//! wins, the best match of each other snapshot is a candidate);
+//! `get_file_outline` and path snippets need the path to exist in exactly one
+//! selected snapshot. [`multiref`] holds the collapse of identical symbols
+//! across refs (RFC 0005 §6), which no local tool reaches yet.
 //!
 //! # Symbol lookup
 //!
 //! `id` → `qualified_name` (exact, then suffix on a `.`, `:`, `/` or `\`
 //! boundary, so `util:formatAmount` finds `src/util:formatAmount` and
 //! `User::save` finds `App\Models\User::save`) →
-//! `name` (narrowed by `path`, a file, directory or path suffix). The commit
-//! in an `id` is not checked, so ids survive a re-index of the same
-//! repository. Among several matches the pick is deterministic: non-test,
+//! `name` (narrowed by `path`, a file, directory or path suffix). Among several matches the pick is deterministic: non-test,
 //! exported, symbols before containers (files, folders), shorter qualified
 //! name, lower node id; up to 20 others are returned as `candidates`.
 //! Symbol ids use the module-local name computed by walking `DEFINES` parents
@@ -52,13 +87,21 @@
 //! - Integer arguments outside their documented range are clamped, not
 //!   rejected; unknown arguments, wrong types and unknown labels / edge types
 //!   are errors.
-//! - `trace` orders `nodes` by (depth, direction, qualified_name, node id)
+//! - `trace` (verbose) orders `nodes` by (depth, direction, qualified_name, node id)
 //!   with `callers` before `callees` (the order the contract lists them), not
 //!   alphabetically. `edges` (order unspecified by the contract) are sorted
 //!   by (src qualified name, dst qualified name, kind) and contain every
 //!   traversed edge between reported nodes, keeping the highest-confidence
 //!   one per (src, dst, kind). `limit` counts nodes over both directions; a
-//!   node reachable both ways appears once per direction.
+//!   node reachable both ways appears once per direction. The compact form
+//!   lists each node once (`dir` `in` / `out` / `both`, `d` its smallest
+//!   depth), the root first.
+//! - Compact pages: `next_cursor` is an item offset (search results, matches,
+//!   `trace` nodes after the root, outline symbols in pre-order) or, for
+//!   `get_snippet`, the next line. A `trace` edge is listed on the page of its
+//!   later endpoint, repeating an endpoint from an earlier page when needed.
+//!   `get_symbol` cuts its lists (children, bases, subtypes, candidates, in
+//!   that order) and reports what it left out in `omitted`, without a cursor.
 //! - `trace` neighbour filter: tests (`is_test` or label `Test`) are skipped
 //!   unless `include_tests` is true or `edge_types` contains `TESTS`; with
 //!   `labels`, only neighbours with those labels are kept. Skipped nodes are
@@ -75,6 +118,9 @@
 //!   without a file or span (never for symbols produced by the extractors).
 
 mod args;
+pub mod compact;
+pub mod multiref;
+pub mod snapshot;
 mod text;
 mod tools;
 pub mod types;
@@ -84,16 +130,34 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use rueca_model::SymbolIdParts;
 use rueca_segment::{CatalogEntry, Segment, Store};
 use serde_json::Value;
 
 pub use args::{
-    DirectionArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, LanguageArg, SearchCodeArgs, SearchSymbolsArgs,
-    TraceArgs,
+    CommonArgs, DirectionArg, FormatArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, LanguageArg, RepoArg,
+    SearchCodeArgs, SearchSymbolsArgs, TraceArgs,
 };
+pub use compact::render_text;
 pub use text::split_lines;
 
 use view::View;
+
+/// A tool response: the JSON result (the envelope, or the alpha shape with
+/// `format: verbose`) and its text rendering ([`render_text`]; compact JSON
+/// for `verbose`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Response {
+    pub json: Value,
+    pub text: String,
+}
+
+impl Response {
+    fn verbose(json: Value) -> Response {
+        let text = json.to_string();
+        Response { json, text }
+    }
+}
 
 pub const TOOL_NAMES: &[&str] =
     &["search_symbols", "search_code", "get_symbol", "get_snippet", "trace", "get_file_outline"];
@@ -154,35 +218,35 @@ const DESC_SEARCH_SYMBOLS: &str = "Find functions, methods, classes and other de
 their code does. BM25 ranking over symbol names, qualified names, signatures, docstrings, file paths and the \
 symbol's source code; identifiers are split on camelCase, snake_case and path separators, so `invoice issue` finds \
 `InvoiceService.issue_invoice`, and `Session.request` ranks that method first. Start here with a name, or with words \
-from an error message or issue to locate the code involved. Returns brief symbols (id, qualified_name, label, \
-path, 1-based lines) with signature and score; page with `offset` = `next_offset`. \
+from an error message or issue to locate the code involved. Results are grouped by file (label, name, 1-based lines, \
+signature); `repo: \"*\"` searches every indexed repository. Continue with `cursor` = `next_cursor`. \
 Example: {\"query\": \"parse config\", \"labels\": [\"Function\", \"Method\"], \"path_glob\": \"src/**\"}";
 
 const DESC_SEARCH_CODE: &str = "Grep the indexed file contents: literal text (default) or a regular expression \
 (`regex: true`). Use it for string literals, error messages, config keys, TODOs or anything that is not a symbol \
-name. Each match has the 1-based line, the line text, optional context lines and the innermost enclosing definition \
-(`symbol`). Example: {\"pattern\": \"retry_after\", \"path_glob\": \"**/*.py\", \"context_lines\": 2}";
+name. Matches are grouped by file, with the 1-based line, the line text, optional context lines and the innermost \
+enclosing definition. Example: {\"pattern\": \"retry_after\", \"path_glob\": \"**/*.py\", \"context_lines\": 2}";
 
 const DESC_GET_SYMBOL: &str = "Details of one symbol: signature, docstring, exported/test flags, its parent \
 container, children (methods, nested definitions), base types, subtypes and caller/callee counts (plus reader/writer \
 counts for env vars and config keys). Name it by `id` \
-(from another tool's result), by `qualified_name` (or a suffix such as `Session.request`), or by `name` (+ `path` to \
-disambiguate). Other matches of an ambiguous lookup are listed in `candidates`. \
+(from another tool's result), by `qualified_name` (or a suffix such as `Session.request`, or the name another tool \
+printed), or by `name` (+ `path` to disambiguate). Other matches of an ambiguous lookup are listed in `candidates`. \
 Example: {\"qualified_name\": \"InvoiceService.issue\"}";
 
 const DESC_GET_SNIPPET: &str = "Source code of a symbol (by `id` / `qualified_name` / `name`) or of a line range \
 (`path` + `start_line` [+ `end_line`]), from the indexed snapshot. Lines are 1-based and inclusive; `context_lines` \
-adds surrounding lines and `max_lines` (default 300) bounds the output (`truncated` tells when it was cut). \
+adds surrounding lines and `max_lines` (default 300) bounds the output; a cut snippet continues with `cursor`. \
 Example: {\"qualified_name\": \"billing.service.InvoiceService.issue\", \"context_lines\": 2}";
 
 const DESC_TRACE: &str = "Walk the call graph from a symbol: who calls it (`callers`), what it calls (`callees`) or \
-both, up to `depth` hops (default 2). Every edge carries a confidence (0–1), the resolution strategy and the call \
-site (path + 1-based line); raise `min_confidence` to drop guesses. Tests are left out (counted in \
-`tests_excluded`) unless `include_tests` is true; `labels` keeps only some neighbour labels (e.g. [\"Function\", \
-\"Method\"]). A `File` caller is module-level code; a `Class` callee is a constructor call. Other relations can be \
-followed with `edge_types` (e.g. [\"CALLS\", \"INHERITS\", \"IMPORTS\", \"TESTS\"]; [\"READS\", \"WRITES\"] for who \
-reads or sets an env var or config key). Use it for impact analysis \
-before changing a function. \
+both, up to `depth` hops (default 1). Node 0 is the root; each other node shows its direction (in = caller, out = \
+callee), depth and its edges to earlier nodes (→j: calls node j, ←j: called by node j) with confidence (0–1), \
+resolution strategy and call-site line; raise `min_confidence` to drop guesses. Tests are left out (counted) unless \
+`include_tests` is true; `labels` keeps only some neighbour labels (e.g. [\"Function\", \"Method\"]). A `File` caller \
+is module-level code; a `Class` callee is a constructor call. Other relations can be followed with `edge_types` \
+(e.g. [\"CALLS\", \"INHERITS\", \"IMPORTS\", \"TESTS\"]; [\"READS\", \"WRITES\"] for who reads or sets an env var or \
+config key). Use it for impact analysis before changing a function. \
 Example: {\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\", \"depth\": 3}";
 
 const DESC_GET_FILE_OUTLINE: &str = "Outline of one file: its classes, functions, methods and other definitions, \
@@ -206,26 +270,36 @@ impl Engine {
     /// Runs tool `name` with JSON `args` and returns the JSON result described
     /// in `docs/tools.md`. Unknown tools and invalid arguments are errors.
     pub fn call(&self, name: &str, args: Value) -> anyhow::Result<Value> {
+        Ok(self.respond(name, args)?.json)
+    }
+
+    /// Like [`Engine::call`], with the text rendering of the result.
+    pub fn respond(&self, name: &str, args: Value) -> anyhow::Result<Response> {
         if !TOOL_NAMES.contains(&name) {
             anyhow::bail!("unknown tool `{name}` (available: {})", TOOL_NAMES.join(", "));
         }
         let schema = schema_for_tool(name);
-        let value = match name {
-            "search_symbols" => serde_json::to_value(self.search_symbols(args::parse_args(name, schema, args)?)?)?,
-            "search_code" => serde_json::to_value(self.search_code(args::parse_args(name, schema, args)?)?)?,
-            "get_symbol" => serde_json::to_value(self.get_symbol(args::parse_args(name, schema, args)?)?)?,
-            "get_snippet" => serde_json::to_value(self.get_snippet(args::parse_args(name, schema, args)?)?)?,
-            "trace" => serde_json::to_value(self.trace(args::parse_args(name, schema, args)?)?)?,
-            "get_file_outline" => serde_json::to_value(self.get_file_outline(args::parse_args(name, schema, args)?)?)?,
+        match name {
+            "search_symbols" => self.search_symbols(args::parse_args(name, schema, args)?),
+            "search_code" => self.search_code(args::parse_args(name, schema, args)?),
+            "get_symbol" => self.get_symbol(args::parse_args(name, schema, args)?),
+            "get_snippet" => self.get_snippet(args::parse_args(name, schema, args)?),
+            "trace" => self.trace(args::parse_args(name, schema, args)?),
+            "get_file_outline" => self.get_file_outline(args::parse_args(name, schema, args)?),
             _ => unreachable!(),
-        };
-        Ok(value)
+        }
     }
 
-    /// Selects the repository for a request and opens (or reuses) its segment.
-    /// `id_repo` is the repository of a symbol id argument, used as a hint
-    /// when `repo` is not given.
-    fn view(&self, repo: Option<&str>, id_repo: Option<&str>) -> anyhow::Result<View> {
+    /// The snapshots a request reads (RFC 0005 §5), in response order: the
+    /// `repo` argument (one, a list, or `"*"`), else the repository of an `id`
+    /// argument, else the default root, else the only indexed root; then
+    /// filtered by `ref`.
+    ///
+    /// Local mode has one snapshot per indexed root, so a repository has as
+    /// many snapshots as roots indexing it (worktrees); the code below works
+    /// on lists of snapshots per repository so a catalog keeping several per
+    /// (repository, ref) slots in.
+    fn scope(&self, c: &CommonArgs, id: Option<&SymbolIdParts>) -> anyhow::Result<Vec<View>> {
         let store = Store::open(&self.store_dir)?;
         let entries = store.entries()?;
         self.evict_stale(&entries);
@@ -235,9 +309,95 @@ impl Engine {
                 self.store_dir.display()
             );
         }
-        let entry = self.select_entry(&store, &entries, repo, id_repo)?;
-        let seg = self.open_cached(&store, &entry.segment_id)?;
-        Ok(View { seg, entry })
+        let mut star = false;
+        let mut selected: Vec<CatalogEntry> = Vec::new();
+        let add = |e: CatalogEntry, selected: &mut Vec<CatalogEntry>| {
+            if !selected.iter().any(|x| x.root == e.root) {
+                selected.push(e);
+            }
+        };
+        match &c.repo {
+            None => match id {
+                Some(p) => add(self.entry_for_id(&store, &entries, p)?, &mut selected),
+                None => add(self.select_entry(&store, &entries, None, None)?, &mut selected),
+            },
+            Some(RepoArg::One(r)) if r.trim() == "*" => {
+                star = true;
+                entries.iter().cloned().for_each(|e| add(e, &mut selected));
+            }
+            Some(RepoArg::One(r)) => add(self.select_entry(&store, &entries, Some(r), None)?, &mut selected),
+            Some(RepoArg::Many(list)) => {
+                if list.is_empty() {
+                    anyhow::bail!("`repo` must not be an empty list (pass `\"*\"` for every indexed repository)");
+                }
+                for r in list {
+                    if r.trim() == "*" {
+                        star = true;
+                        entries.iter().cloned().for_each(|e| add(e, &mut selected));
+                    } else {
+                        add(self.select_entry(&store, &entries, Some(r), None)?, &mut selected);
+                    }
+                }
+            }
+        }
+        let mut views = Vec::with_capacity(selected.len());
+        for e in selected {
+            let seg = self.open_cached(&store, &e.segment_id)?;
+            views.push(View::new(seg, e));
+        }
+        let Some(r) = c.ref_.as_deref() else { return Ok(views) };
+        let (keep, miss): (Vec<View>, Vec<View>) = views.into_iter().partition(|v| v.snap.matches_ref(r));
+        if let Some(v) = miss.first()
+            && (!star || keep.is_empty())
+        {
+            let refs = self.indexed_refs(&store, &entries, v.repo());
+            anyhow::bail!(
+                "ref `{r}` is not indexed for repository `{}`; indexed refs: {refs}. Local mode indexes the \
+                 working tree of each root (its checked-out branch plus uncommitted changes); index another \
+                 worktree to read another ref",
+                v.repo()
+            );
+        }
+        Ok(keep)
+    }
+
+    /// Indexed refs of repository `repo`, for error messages.
+    fn indexed_refs(&self, store: &Store, entries: &[CatalogEntry], repo: &str) -> String {
+        let refs: Vec<String> = entries
+            .iter()
+            .filter(|e| e.repo == repo)
+            .filter_map(|e| self.open_cached(store, &e.segment_id).ok())
+            .map(|seg| snapshot::SnapshotDesc::from_info(seg.snapshot()).describe())
+            .collect();
+        if refs.is_empty() { "none".to_string() } else { refs.join(", ") }
+    }
+
+    /// The entry an `id` argument names when no `repo` is given: the only root
+    /// of its repository, or among several the one whose snapshot matches the
+    /// id's commit (or ref), else the one containing the default root. An id
+    /// of a repository that is not indexed falls back to the default
+    /// selection, whose lookup reports the mismatch.
+    fn entry_for_id(&self, store: &Store, entries: &[CatalogEntry], p: &SymbolIdParts) -> anyhow::Result<CatalogEntry> {
+        let same: Vec<&CatalogEntry> = entries.iter().filter(|e| e.repo == p.repo).collect();
+        if same.len() > 1
+            && let Some(c) = &p.commit
+        {
+            let matching: Vec<&CatalogEntry> = same
+                .iter()
+                .copied()
+                .filter(|e| {
+                    self.open_cached(store, &e.segment_id)
+                        .is_ok_and(|seg| snapshot::SnapshotDesc::from_info(seg.snapshot()).matches_commit(c))
+                })
+                .collect();
+            if matching.len() == 1 {
+                return Ok(matching[0].clone());
+            }
+        }
+        if same.is_empty() {
+            return self.select_entry(store, entries, None, None);
+        }
+        self.select_entry(store, entries, None, Some(&p.repo))
     }
 
     fn select_entry(

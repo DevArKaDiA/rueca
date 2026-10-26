@@ -153,8 +153,12 @@ pub fn index(p: &Project) -> Value {
     stdout_json(&out)
 }
 
-/// `rueca query <tool> <args> --root <root>`, asserting success.
-pub fn query(p: &Project, tool: &str, args: Value) -> Value {
+/// `rueca query <tool> <args> --root <root>`, asserting success. Asserts the
+/// alpha shapes: `format: verbose` unless `args` names a format.
+pub fn query(p: &Project, tool: &str, mut args: Value) -> Value {
+    if let Some(m) = args.as_object_mut() {
+        m.entry("format").or_insert_with(|| Value::String("verbose".into()));
+    }
     let out = rueca(&p.store).arg("--root").arg(&p.root).args(["query", tool, &args.to_string()]).output().unwrap();
     assert!(
         out.status.success(),

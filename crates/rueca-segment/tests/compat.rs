@@ -192,6 +192,7 @@ fn graph() -> (ResolvedGraph, Mem) {
         repo: "local/compat".into(),
         commit: "3d670ea".into(),
         dirty: false,
+        branch: None,
         root: Some("/compat".into()),
         indexed_at: 0,
         rueca_version: "0.1.0-alpha.1".into(),

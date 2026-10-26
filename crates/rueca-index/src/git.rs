@@ -7,7 +7,8 @@
 //! - the repository containing the root (`gix::discover`, so a subdirectory
 //!   of a repository is indexed as part of it);
 //! - `remote.origin.url` from the repository configuration → repository id;
-//! - `HEAD` → commit id (absent / unborn → `"worktree"`);
+//! - `HEAD` → commit id (absent / unborn → `"worktree"`) and the checked-out
+//!   branch name (none when detached);
 //! - the `HEAD` tree, flattened to `path → blob id`, for the dirty check.
 //!
 //! **Dirty check.** Instead of `gix` status (index + dirwalk + attribute
@@ -33,6 +34,8 @@ pub(crate) struct GitInfo {
     pub repo_id: Option<String>,
     /// Hex id of the `HEAD` commit; `None` when `HEAD` is unborn.
     pub commit: Option<String>,
+    /// Short name of the checked-out branch (`main`); `None` when detached.
+    pub branch: Option<String>,
     /// Regular files of the `HEAD` tree under the root: root-relative path →
     /// hex blob id.
     pub head_blobs: BTreeMap<String, String>,
@@ -55,6 +58,7 @@ pub(crate) fn read(root: &Path) -> Option<GitInfo> {
             .config_snapshot()
             .string("remote.origin.url")
             .and_then(|u| crate::normalize_remote(&u.to_string())),
+        branch: repo.head_name().ok().flatten().map(|n| n.shorten().to_string()),
         ..Default::default()
     };
     let Ok(commit) = repo.head_commit() else {

@@ -34,7 +34,8 @@
 //! 4. **Snapshot identity** from git, read with `gix` (see the `git` module):
 //!    repository id from `remote.origin.url` (normalized by
 //!    [`normalize_remote`]) else `local/<dirname>`; commit = `HEAD` id, else
-//!    `"worktree"`; `dirty` = indexed content differs from the `HEAD` tree
+//!    `"worktree"`; `branch` = the checked-out branch (none when detached);
+//!    `dirty` = indexed content differs from the `HEAD` tree
 //!    (computed from the blob SHAs of step 2, no `git` process).
 //! 5. **Resolve** with `rueca_resolve::resolve`, **write** the segment with
 //!    `rueca_segment::write_segment` (contents served from memory, or re-read
@@ -558,6 +559,7 @@ fn snapshot_info(root: &Path, repo_override: Option<&str>, files: &[FileInput]) 
         repo,
         commit,
         dirty,
+        branch: info.as_ref().and_then(|i| i.branch.clone()),
         root: Some(root.to_string_lossy().into_owned()),
         indexed_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
         rueca_version: env!("CARGO_PKG_VERSION").to_string(),
