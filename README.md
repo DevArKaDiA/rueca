@@ -34,7 +34,10 @@ agent can follow.
   ([contract](docs/tools.md)).
 - **Organizations**: several repositories indexed as one organization
   (`rueca-org.toml`) share one symbol index, so a question asked of all of
-  them gets one ranking; re-indexing one repository replaces only its part.
+  them gets one ranking, weighed by which repositories it is about; a
+  repository importing a package another one publishes is linked to it
+  (imports, calls, inheritance across repositories, followed by `trace`);
+  re-indexing one repository replaces only its part.
 - **Call graph with provenance**: every edge carries the strategy that resolved
   it (scope, `self`/MRO, import, re-export, same module, unique name,
   heuristic) and a confidence, so agents can filter guesses out.
@@ -145,13 +148,21 @@ url = "https://github.com/acme/shared-lib"   # cloned under the store with git
 ```sh
 rueca index --org rueca-org.toml                  # every repository, then the organization layer
 rueca query search_symbols '{"query":"refund invoice"}' --org acme --text   # one ranking over all of them
-rueca query list_repositories '{}' --org acme --text
+rueca query list_repositories '{"query":"refund invoice"}' --org acme --text   # which repositories it is about
+rueca query trace '{"qualified_name":"payments.charge","direction":"callers"}' --org acme --text   # callers in every repository
+rueca links --org acme                            # the cross-repository edges
 rueca index ~/src/payments                        # re-index one: only its part of the organization changes
 rueca mcp --org rueca-org.toml                    # serve the organization (builds it first if needed)
 ```
 
 In an organization, `repo` omitted means every repository and `repo: "…"`
-narrows the same ranking ([RFC 0006](docs/rfcs/0006-org-graph.md),
+narrows the same ranking; the query also ranks the repositories (names,
+packages, README, central symbols, where its words occur) and weighs each
+repository's results by that relevance. Repositories that import a package
+another one publishes (npm, PyPI, Go modules, Composer, Maven / Gradle,
+C / C++ headers) are linked: imports, calls, inheritance and references
+across repositories, resolved with the publishing repository's own module
+model, which `trace` follows ([RFC 0006](docs/rfcs/0006-org-graph.md),
 [how it works](docs/how-it-works.md#46-the-organization-layer-rueca-segment-org)).
 
 ## Use it from an agent
@@ -261,12 +272,16 @@ target ≤ 50% of cbm): with the RFC 0005 responses, `search_symbols` costs
 0.33–0.89× cbm's tokens until the first gold hit (target met for Python,
 TS/JS, PHP and Java) and `trace` 0.89–1.75× cbm's tokens per true call
 edge (target not met; Rueca also returns more true edges). In an
-organization of 21 repositories, one ranking over the organization index
-keeps the right repository's file in the top 5 for 47.6% of issues vs 61.9%
-when asking that repository alone (0.77×; rank fusion across repositories
-gave 9.5%); re-indexing one repository updates the organization layer in
-~0.1 s, 0.05× the repository's own index time
-([RFC 0006 §8](docs/rfcs/0006-org-graph.md)).
+organization, one ranking over the organization index weighed by
+repository routing keeps the right repository's file in the top 5 for
+65.7% of the calibration issues vs 71.4% when asking that repository alone
+(0.92×; 0.64× without routing) and for 42.9% vs 61.9% of the 21 gated ones
+(0.69×; rank fusion across repositories gave 9.5%); cross-repository edges
+between labelled consumer–library pairs (Flask → Click / Jinja, Laravel →
+Carbon / Monolog / CommonMark, Dubbo and Apollo → Gson) have 99.7%
+precision and 95.3% recall; re-indexing one repository of 21 updates the
+organization layer in 0.5 s, 0.14× the repository's own index time
+([RFC 0006 §8, §9.2](docs/rfcs/0006-org-graph.md)).
 
 Contributions that move these numbers are very welcome.
 
@@ -287,7 +302,7 @@ absolute floors and aspirational targets).
 | **Retrieval** | Vector baseline in the bench; hybrid retrieval in Rueca (BM25 over code + static embeddings + graph signals) aimed at the localization targets | 🗺️ planned |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
 | **Service mode** | One container, segments in object storage, MCP over HTTP | 🗺️ planned |
-| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 phase 1 landed (organization symbol index, scoped queries, local `--org`); link layer next |
+| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 phases 1–2 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges); refs over the organization and contracts next |
 | **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
 | **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |
 

@@ -747,7 +747,7 @@ tiktoken `cl100k_base` over what an agent reads: Rueca — RFC 0005 text content
 
 | Arm | Mode | n | File Acc@5 org | File Acc@5 single | Function Acc@10 org | Function Acc@10 single | Other-repository share of top 10 | Tokens org (median) | Tokens single (median) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| rueca | organization `--org` | 21 | 47.6 | 61.9 | 33.3 | 47.6 | 36.7 | 435 | 337 |
+| rueca | organization `--org` | 21 | 42.9 | 61.9 | 33.3 | 47.6 | 15.7 | 357 | 337 |
 | rueca | per repository + RRF | 21 | 23.8 | 61.9 | 14.3 | 47.6 | 91.9 | 7189 | 337 |
 | cbm | per repository + RRF | 21 | 9.5 | 61.9 | 0.0 | 28.6 | 92.9 | 8659 | 450 |
 
@@ -755,10 +755,27 @@ tiktoken `cl100k_base` over what an agent reads: Rueca — RFC 0005 text content
 
 | Metric | Organization | Single repository | Ratio | Floor | Target |
 |---|---:|---:|---:|---:|---:|
-| File Acc@5, organization scope vs the right repository alone | 47.6 | 61.9 | 0.77× | ≥ 0.85× | ≥ 0.95× |
-| Tokens per correct answer (Σ top-10 tokens / queries with a gold file of the instance's repository in the top 10: 10 org, 14 single) | 886 | 529 | 1.67× | reported | ≤ 1.2× |
-| Incremental update: re-index micropython/micropython (95,353 symbols) in the organization of 21 (organization layer vs the repository's own index; its first index took 4,652 ms) | 123 ms | 2,713 ms | 0.05× | ≤ 2× | ≤ 1× |
-| Organization layer per added repository (21 `index --org` steps, median / max) | 74 / 137 ms | 870 ms (median) | 0.10× / 0.40× | ≤ 2× | ≤ 1× |
+| File Acc@5, organization scope vs the right repository alone | 42.9 | 61.9 | 0.69× | ≥ 0.85× | ≥ 0.95× |
+| Tokens per correct answer (Σ top-10 tokens / queries with a gold file of the instance's repository in the top 10: 10 org, 14 single) | 782 | 529 | 1.48× | reported | ≤ 1.2× |
+| Incremental update: re-index micropython/micropython (95,353 symbols) in the organization of 21 (organization layer vs the repository's own index; its first index took 4,663 ms) | 499 ms | 3,616 ms | 0.14× | ≤ 2× | ≤ 1× |
+| Organization layer per added repository (21 `index --org` steps, median / max) | 206 / 1,413 ms | 987 ms (median) | 0.26× / 0.48× | ≤ 2× | ≤ 1× |
+
+### Cross-repository edges (packages)
+
+Consumers pinned with the libraries they depend on, each group one organization (`rueca index --org`), its link layer listed with `rueca links --org`. Gold labelled from the consumer's source by an independent labeler (`crossrepo.py`): *imports* = (consumer file, library file) of every import of a library module or class; *uses* = (consumer file, library symbol) imported by name and used, or reached through an imported library module. A non-`IMPORTS` edge is correct when it targets a used symbol, a member of it or of one of its library ancestors; precision is a lower bound (targets the labeler cannot see count as errors).
+
+| Consumer → library | Imports P | Imports R | Uses P | Uses R | Edges |
+|---|---:|---:|---:|---:|---:|
+| pallets/flask → pallets/click (python) | 100.0 (9/9) | 100.0 (9/9) | 100.0 (142/142) | 100.0 (33/33) | 151 |
+| pallets/flask → pallets/jinja (python) | 100.0 (5/5) | 100.0 (5/5) | 100.0 (26/26) | 100.0 (10/10) | 31 |
+| laravel/framework → briannesbitt/carbon (php) | 100.0 (38/38) | 100.0 (38/38) | 99.0 (487/492) | 60.0 (27/45) | 530 |
+| laravel/framework → Seldaek/monolog (php) | 100.0 (38/38) | 100.0 (38/38) | 100.0 (127/127) | 97.4 (38/39) | 165 |
+| laravel/framework → thephpleague/commonmark (php) | 100.0 (11/11) | 100.0 (11/11) | 100.0 (22/22) | 100.0 (11/11) | 33 |
+| apache/dubbo → google/gson (java) | 100.0 (7/7) | 100.0 (7/7) | 100.0 (51/51) | 100.0 (7/7) | 58 |
+| apolloconfig/apollo → google/gson (java) | 100.0 (75/75) | 100.0 (75/75) | 100.0 (745/745) | 100.0 (75/75) | 820 |
+| **all** | 100.0 (183/183) | 100.0 (183/183) | 99.7 (1600/1605) | 91.4 (201/220) | 1788 |
+
+RFC 0006 §8 cross-repository edges (packages), all kinds pooled: precision 99.7 (1783/1788), recall 95.3 (384/403) (floor ≥ 90 / 75, target ≥ 97 / 90).
 
 ### Multi-ref (one repository at two commits)
 

@@ -1,5 +1,30 @@
 # Decisions log
 
+## 2026-10-26 — Repository routing as a prior; package links by joint resolution
+
+RFC 0006 phase 2. A query in organization mode also ranks the
+repositories — CORI over the organization index (where its terms occur,
+one dictionary lookup per term and repository segment) plus BM25 over a
+per-repository profile (names, packages, README head, most referenced
+symbols, path vocabulary) — and multiplies every symbol score by
+`((0.25 + r) / 1.25)²` inside the top-k. A prior rather than a filter, and
+organization-wide statistics rather than per-repository ones: both
+alternatives were measured on the calibration split and lost or tied.
+Calibration: organization File Acc@5 0.64× → 0.92× of the
+single-repository value, tokens per correct answer 1.69× → 1.25×; gated:
+0.77× → 0.69× (21 instances; the right repository is now routed for fmt
+and code-server but their files still rank lower under organization
+statistics; micropython is lost to fmt). Cross-repository edges reuse the
+whole resolver: a consumer and the repositories publishing what it imports
+(package registry from manifests) are resolved together, each pack
+wrapped so a dependency keeps its own module model and the consumer's
+package imports resolve with the publishing repository's pack and
+project. Edges keep their ladder strategy and confidence; name matching
+never crosses repositories. Link sets are stored per (consumer segment,
+dependency segments) and recomputed only for changed consumers and the
+reverse dependencies of changed repositories. Precision / recall on seven
+labelled consumer–library pairs: 99.7 / 95.3.
+
 ## 2026-10-26 — Organization index from the repositories' own segments
 
 RFC 0006 phase 1. The organization symbol index is a tantivy index whose

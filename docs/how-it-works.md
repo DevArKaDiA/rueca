@@ -734,9 +734,63 @@ index**, so a question asked of the whole organization gets one ranking.
   before scoring, so results, totals and scores never depend on a repository
   the caller cannot see, and narrowing `repo` keeps organization-wide scores.
 
-The repository graph stays the unit of work: `get_symbol`, `trace`,
-`get_snippet` and outlines read the repository segment of the id they are
-given. Cross-repository edges (the link layer) are phase 2.
+- **Repository routing.** Each repository of a generation has a
+  **profile** (`orgs/<name>/profiles/<segment>.json`): its id and the
+  names of the packages it publishes, manifest descriptions and the head of
+  its README, the names of its 64 most referenced symbols (distinct callers,
+  referrers, subclasses) and its 64 most frequent directory names and file
+  stems. A query in organization mode also scores the visible repositories
+  with two signals, each min-max normalized over them and mixed half and
+  half: where the query's terms occur (CORI, the classic resource-selection
+  score, read off the organization index: the number of a repository's
+  symbols holding a term in their name, path or source is one dictionary
+  lookup per term and repository segment) and BM25 over the profiles
+  (name × 3, about × 1, symbols × 1, paths × 0.5). The best repository gets
+  relevance 1; every symbol score of a repository is multiplied, inside
+  the top-k, by `((0.25 + r) / 1.25)²` — a prior, so a strong match in
+  another repository still surfaces. `list_repositories` with `query`
+  returns that ranking. On the benchmark's calibration split this lifts
+  organization File Acc@5 from 0.64× to 0.92× the single-repository value
+  (`bench/README.md`, *Org scenarios*).
+- **The link layer: packages.** `rueca index --org` also builds a
+  **package registry** from each repository's manifests (`package.json`
+  names, Python distributions and their top-level packages, `go.mod`
+  modules, Composer PSR-4 namespaces, Maven / Gradle artifacts with their
+  Java packages, C / C++ `include/` directories) and records the imports
+  each repository's own pack could not resolve inside it. A repository
+  that imports (or, by its manifests, requires) a package another one
+  publishes depends on it; the consumer and its dependencies are then
+  resolved **together** by the normal resolver (`rueca-index` `link`): the
+  dependencies' files are mounted under a private prefix, each keeps its
+  own module names and resolves its own imports with its repository's
+  configuration, and an import the consumer could not resolve is resolved
+  by the **publishing repository's pack against that repository's
+  project** (its workspaces and `exports`, source roots, `go.mod`, PSR-4
+  map). The strategy ladder does the rest, so `import { renderButton } from
+  "@acme/ui"`, `acmelib.charge(…)`, `kit.Retry(3)`, `Money::of(3)` and
+  `Strings.shout("x")` become `IMPORTS` and `CALLS` / `INHERITS` /
+  `REFERENCES` / `DECORATES` edges into the other repository, with the
+  strategy, confidence and evidence they would have inside one. Kept are
+  edges between a consumer node and a dependency node, never through the
+  name-matching rungs (`unique_name`, `heuristic`), never into a
+  dependency's tests or into a name the consumer defines itself.
+- **Link sets are versioned with the generation.** A consumer's edges are
+  stored as one file (`orgs/<name>/links/<segment>-<hash>.bin`), keyed by
+  its segment and its dependencies' segments; the generation records the
+  dependencies each set was computed against. An update recomputes exactly
+  the consumers whose own segment, one of whose dependencies, or whose set
+  of dependencies changed — re-indexing a library re-links its reverse
+  dependencies, nothing else.
+- **Across repositories at query time.** `trace` follows link edges in
+  both directions: callers of a library function include its callers in
+  other repositories, each node carrying its snapshot (`s`). A link edge is
+  returned only when both repositories are visible to the caller.
+  `list_repositories` names each repository's packages and the
+  repositories it depends on; `rueca links --org <org>` lists every edge.
+
+The repository graph stays the unit of work: `get_symbol`, `get_snippet`
+and outlines read the repository segment of the id they are given; only
+`trace` (and routing) look across repositories.
 
 ## 5. The graph schema
 

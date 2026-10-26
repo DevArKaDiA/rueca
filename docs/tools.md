@@ -154,6 +154,30 @@ top-k, before counts and before BM25 statistics, and a repository that is
 not visible is reported exactly like one that does not exist (local mode
 sees everything). `list_repositories` lists the organization.
 
+**Repository routing** (RFC 0006 phase 2): when a `search_symbols` call
+reads several repositories of an organization, the query also scores the
+repositories — where its terms occur (CORI over the organization index)
+and BM25 over each repository's profile (repository and package names,
+descriptions and README head, most referenced symbols, path vocabulary) —
+and every symbol score of a repository is multiplied by its prior
+`((0.25 + r) / 1.25)²`, `r` ∈ [0, 1] being its relevance relative to the
+best visible repository. The prior reorders, it never drops a result; with
+one selected repository it does nothing. `list_repositories` with `query`
+returns the same repository ranking with `score`s. `RUECA_ORG_ROUTE`
+overrides the parameters for experiments (`off`, `prior,alpha=2,mu=0.5`,
+`top,top=2`; see `rueca_segment::org::RouteParams`).
+
+**Cross-repository edges** (the link layer, packages): an organization
+built with `rueca index --org` also links each repository to the
+repositories publishing the packages it imports (npm, PyPI, Go modules,
+Composer, Maven / Gradle, C / C++ `include/`), resolved with the
+publishing repository's own module model: `IMPORTS`, and `CALLS`,
+`INHERITS`, `REFERENCES`, `DECORATES`, … through them, with the strategy and
+confidence they would have inside one repository. `trace` follows them (see
+below); `list_repositories` reports `packages` and `depends_on`; `rueca
+links --org` lists them all. A link edge is returned only when the caller
+can read both repositories.
+
 ## Tools
 
 ### `search_symbols`
@@ -306,6 +330,21 @@ Results:
 }
 ```
 
+In organization mode the walk also follows cross-repository link edges
+(callers of a library function in the repositories that import it, a
+consumer's calls into its dependencies), only between repositories the
+caller can read. When the answer spans several snapshots, every node
+carries its snapshot `"s"` (the result's `"s"` is the root's), the
+envelope lists the snapshots touched, and the text prefixes such nodes with
+`[s]`:
+
+```
+[0] github.com/acme/billing@7696364aef89 (main)
+[1] github.com/acme/payments@a1b2c3d4e5f6 (main)
+0 [1] Function charge_card  payments/charge.py L1-2
+1 [0] in d1 Method InvoiceService.issue  pkg/service.py L9-11  →0 CALLS 0.95 import_resolved @10
+```
+
 Node 0 is the root (`d` 0, never filtered); the others are ordered by
 (depth, direction, qualified_name), each listed once with `dir` `in`
 (caller), `out` (callee) or `both`, and `d` its smallest depth. An edge is
@@ -368,13 +407,21 @@ The repositories this server can read, sorted by id: in organization mode
 every visible repository of the organization, otherwise every indexed root
 (`repo` narrows it, `ref` filters snapshots).
 
-Results: `[{"s", "repo", "default_ref", "refs": [ref, …], "languages": {"python": files, …}, "files", "symbols", "edges"}]`
+| Arg | Type | Default |
+|---|---|---|
+| `query` | string: rank the repositories for this text (organization mode; see *Repository routing*) | — |
+
+Results: `[{"s", "repo", "default_ref", "refs": [ref, …], "languages": {"python": files, …}, "files", "symbols", "edges", "packages" (opt), "packages_more" (opt), "depends_on" (opt), "score" (opt)}]`
+(`packages`: up to 8 package names the repository publishes, `packages_more`
+the rest's count; `depends_on`: visible repositories it imports packages
+from; `score`: relevance for `query`, 1 = best, results then ordered by it)
 (`s` is the snapshot of the default ref; `symbols` counts nodes that are not
 files, folders, modules or packages), plus `"org"` (the organization name,
 or `null`) next to `next_cursor`. `next_cursor` is the number of
 repositories already returned. Verbose: `{"org", "repositories": [{"repo",
 "root", "default_ref", "commit", "refs", "languages", "files", "symbols",
-"edges"}]}`. Text:
+"edges", "packages" (all), "depends_on", "score"}]}`. Text (`packages …`,
+`depends on …` and `(score)` follow when present):
 
 ```
 [0] github.com/acme/billing@7696364aef89 (main)
@@ -393,8 +440,11 @@ rueca index [PATH] [--store DIR] [--repo ID] [--json]
 
 rueca index --org FILE [PATH] [--store DIR] [--json]
     Index every repository of the organization file (or only the one
-    containing PATH), then build or update the organization layer. JSON:
-    {"org", "indexed": [IndexReport], "update", "repos_ms", "org_ms",
+    containing PATH), then build or update the organization layer: the
+    symbol index, routing profiles and package registry, and the link
+    sets of the repositories whose links changed. JSON: {"org", "indexed":
+    [IndexReport], "update" ({…, "profiled", "linked", "link_edges",
+    "link_errors", "profile_ms", "link_ms"}), "repos_ms", "org_ms",
     "duration_ms"}.
 
 rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
@@ -408,6 +458,14 @@ rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
 rueca status [--store DIR] [--json]
     List indexed roots with repo, commit, node/edge/file counts, age, and
     the organizations (generation, repositories).
+
+rueca links --org FILE|NAME [--repo ID] [--store DIR] [--json]
+    List the organization's cross-repository edges (RFC 0006 link layer):
+    one line per edge, or JSON {"org", "generation", "edges": [{"consumer",
+    "src_repo", "src", "src_label", "src_path", "dst_repo", "dst",
+    "dst_label", "dst_path", "kind", "strategy", "confidence", "path",
+    "line"}]} (`consumer`: the repository the edge was observed in;
+    `--repo`: edges leaving that repository).
 ```
 
 **Organization file** (`rueca-org.toml`, RFC 0006 §7):
