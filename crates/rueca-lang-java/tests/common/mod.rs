@@ -72,6 +72,7 @@ pub fn build(files: Vec<(String, Vec<u8>)>) -> ResolveOutput {
         repo: "local/fixture".into(),
         commit: "c".into(),
         dirty: false,
+        branch: None,
         root: None,
         indexed_at: 0,
         rueca_version: "test".into(),

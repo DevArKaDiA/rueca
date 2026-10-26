@@ -106,6 +106,7 @@ fn run(registry: Registry, files: Vec<FileInput>) -> ResolveOutput {
         repo: "local/hooks".into(),
         commit: "c".into(),
         dirty: false,
+        branch: None,
         root: None,
         indexed_at: 0,
         rueca_version: "test".into(),

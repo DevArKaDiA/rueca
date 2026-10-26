@@ -1,11 +1,12 @@
-//! A [`View`] is one opened segment plus the helpers every tool needs:
-//! brief symbols, stable ids, symbol lookup and path resolution.
+//! A [`View`] is one opened segment (one snapshot) plus the helpers every
+//! tool needs: brief symbols, stable ids, symbol lookup and path resolution.
 
 use std::sync::Arc;
 
 use rueca_model::{ENV_PATH, EdgeKind, FileId, Label, LanguageFamily, Node, NodeId, Span, env_var_qualified_name};
 use rueca_segment::{CatalogEntry, Segment};
 
+use crate::snapshot::SnapshotDesc;
 use crate::types::Brief;
 
 /// Maximum number of alternative matches returned as `candidates`.
@@ -14,6 +15,10 @@ pub const MAX_CANDIDATES: usize = 20;
 pub struct View {
     pub seg: Arc<Segment>,
     pub entry: CatalogEntry,
+    /// What the envelope says about this snapshot.
+    pub snap: SnapshotDesc,
+    /// `commit12[+]`, cached for ids.
+    id_commit: String,
 }
 
 /// How a tool names a symbol.
@@ -44,12 +49,14 @@ pub fn is_container(label: Label) -> bool {
 }
 
 impl View {
-    pub fn repo(&self) -> &str {
-        &self.seg.snapshot().repo
+    pub fn new(seg: Arc<Segment>, entry: CatalogEntry) -> View {
+        let snap = SnapshotDesc::from_info(seg.snapshot());
+        let id_commit = snap.id_commit();
+        View { seg, entry, snap, id_commit }
     }
 
-    pub fn commit(&self) -> &str {
-        &self.seg.snapshot().commit
+    pub fn repo(&self) -> &str {
+        &self.seg.snapshot().repo
     }
 
     pub fn node(&self, id: NodeId) -> &Node {
@@ -137,8 +144,9 @@ impl View {
         rest.strip_prefix(family.module_separator()).map(str::to_string)
     }
 
-    /// Stable symbol id of a node. Canonical env vars use the pseudo-path
-    /// `$env` (`repo@commit:$env#DATABASE_URL`).
+    /// Pinned symbol id of a node: `repo@commit12[+]:path#local-name`
+    /// (RFC 0005 §3). Canonical env vars use the pseudo-path `$env`
+    /// (`repo@commit:$env#DATABASE_URL`).
     pub fn symbol_id(&self, id: NodeId) -> String {
         let node = self.node(id);
         let path = match self.node_path(id) {
@@ -147,7 +155,7 @@ impl View {
             None => node.qualified_name.as_str(),
         };
         let local = self.local_qualified_name(id);
-        rueca_model::symbol_id(self.repo(), self.commit(), path, local.as_deref())
+        rueca_model::symbol_id(self.repo(), &self.id_commit, path, local.as_deref())
     }
 
     pub fn span_lines(&self, id: NodeId) -> (Option<u32>, Option<u32>) {
@@ -286,8 +294,15 @@ impl View {
     /// Preference when several nodes match: non-test, exported, symbols
     /// before containers, shorter qualified name, then node id.
     fn preference_key(&self, id: NodeId) -> (bool, bool, bool, usize, NodeId) {
+        let (a, b, c, d) = self.preference(id);
+        (a, b, c, d, id)
+    }
+
+    /// [`Self::preference_key`] without the node id, comparable across
+    /// snapshots.
+    pub fn preference(&self, id: NodeId) -> (bool, bool, bool, usize) {
         let n = self.node(id);
-        (n.is_test, !n.exported, is_container(n.label), n.qualified_name.len(), id)
+        (n.is_test, !n.exported, is_container(n.label), n.qualified_name.len())
     }
 
     fn find_by_id(&self, id: &str) -> anyhow::Result<Vec<NodeId>> {

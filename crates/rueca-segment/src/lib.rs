@@ -263,6 +263,14 @@ use std::path::{Path, PathBuf};
 use rueca_model::{EdgeKind, EdgeMeta, FileEntry, FileId, Label, Language, Node, NodeId, ResolvedGraph, SnapshotInfo};
 use serde::{Deserialize, Serialize};
 
+/// Whether `path` looks like test code (a `test`, `tests`, `__tests__`,
+/// `spec`, … directory, `test_*.py`, `*.spec.ts`, …): the path part of the
+/// test prior. Exposed so rankings merged across segments (RFC 0005 §5) can
+/// re-apply it.
+pub fn is_test_path(path: &str) -> bool {
+    priors::is_test_path(path)
+}
+
 /// Bundle format version. 2 (alpha.2): the symbol index gained the `body`
 /// and `qname_suffix` fields; version-1 segments are rejected with
 /// [`SegmentError::Version`] and must be re-indexed.

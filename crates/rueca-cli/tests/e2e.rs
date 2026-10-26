@@ -146,11 +146,34 @@ fn reindex_and_status() {
     // The current directory selects its indexed root when --root is absent.
     let out = rueca(&p.store)
         .current_dir(p.root.join("pkg"))
-        .args(["query", "get_symbol", r#"{"name": "validate"}"#])
+        .args(["query", "get_symbol", r#"{"name": "validate", "format": "verbose"}"#])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
     assert_eq!(stdout_json(&out)["symbol"]["path"], "pkg/models.py");
+
+    // `--text` prints the compact rendering; JSON is the default.
+    let out = rueca(&p.store)
+        .arg("--root")
+        .arg(&p.root)
+        .args(["query", "search_symbols", r#"{"query": "brand_new_function"}"#, "--text"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(
+        text,
+        "local/proj@worktree (worktree)\npkg/extra.py\n  Function brand_new_function L1-2  def brand_new_function()\n"
+    );
+    let out = rueca(&p.store)
+        .arg("--root")
+        .arg(&p.root)
+        .args(["query", "search_symbols", r#"{"query": "brand_new_function"}"#])
+        .output()
+        .unwrap();
+    let v = stdout_json(&out);
+    assert_eq!(v["results"][0]["symbols"][0]["qn"], "pkg.extra.brand_new_function", "{v}");
+    assert_eq!(v["snapshots"][0]["ref"], "worktree");
 
     // Unknown symbols and files are errors (exit 2, JSON on stdout).
     for (tool, args) in [
@@ -174,7 +197,7 @@ fn index_summary_and_pretty() {
     let out = rueca(&p.store)
         .arg("--root")
         .arg(&p.root)
-        .args(["query", "get_symbol", r#"{"name": "main"}"#, "--pretty"])
+        .args(["query", "get_symbol", r#"{"name": "main", "format": "verbose"}"#, "--pretty"])
         .output()
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();

@@ -71,6 +71,7 @@ pub(crate) fn render_graph(root: &Path) -> String {
         repo: "local/golden".into(),
         commit: "golden".into(),
         dirty: false,
+        branch: None,
         root: None,
         indexed_at: 0,
         rueca_version: "golden".into(),

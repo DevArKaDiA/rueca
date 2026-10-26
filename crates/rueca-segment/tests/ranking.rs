@@ -158,6 +158,7 @@ fn build(sources: &[(&str, &str)], defs: Vec<Def>) -> (tempfile::TempDir, Segmen
             repo: "local/pkg".into(),
             commit: "worktree".into(),
             dirty: false,
+            branch: None,
             root: None,
             indexed_at: 0,
             rueca_version: "test".into(),

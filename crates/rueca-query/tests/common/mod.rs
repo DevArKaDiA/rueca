@@ -83,6 +83,7 @@ impl Builder {
                     repo: repo.into(),
                     commit: commit.into(),
                     dirty: false,
+                    branch: None,
                     root: Some(root.into()),
                     indexed_at: 1_700_000_000,
                     rueca_version: "test".into(),

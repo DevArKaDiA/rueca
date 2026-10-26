@@ -136,19 +136,26 @@ fn legacy_handshake_list_and_call() {
     let call = s.request(
         2,
         "tools/call",
-        json!({"name": "get_symbol", "arguments": {"qualified_name": "InvoiceService.issue"}}),
+        json!({"name": "get_symbol", "arguments": {"qualified_name": "InvoiceService.issue", "format": "verbose"}}),
     );
     let v = structured(&call);
     assert_eq!(v["symbol"]["id"], "local/proj@worktree:pkg/service.py#InvoiceService.issue");
     assert_eq!(v["callees_count"], 2);
 
-    let call =
-        s.request(3, "tools/call", json!({"name": "trace", "arguments": {"name": "validate", "direction": "callers"}}));
+    let call = s.request(
+        3,
+        "tools/call",
+        json!({"name": "trace", "arguments": {"name": "validate", "direction": "callers", "format": "verbose"}}),
+    );
     let v = structured(&call);
     let callers = qns(&v["nodes"]);
     assert!(callers.contains(&"pkg.service.InvoiceService.issue".to_string()), "{v}");
 
-    let call = s.request(4, "tools/call", json!({"name": "get_snippet", "arguments": {"name": "validate"}}));
+    let call = s.request(
+        4,
+        "tools/call",
+        json!({"name": "get_snippet", "arguments": {"name": "validate", "format": "verbose"}}),
+    );
     assert_eq!(structured(&call)["text"], "def validate(obj):\n    return obj is not None");
 
     // Tool errors are results with isError, not protocol errors.
@@ -158,6 +165,24 @@ fn legacy_handshake_list_and_call() {
     let call = s.request(6, "tools/call", json!({"name": "search_code", "arguments": {"pattern": "x", "limt": 3}}));
     assert_eq!(call["result"]["isError"], true, "{call}");
     assert!(call["result"]["content"][0]["text"].as_str().unwrap().contains("unknown argument `limt`"));
+
+    // Default format: the envelope as structuredContent, the compact text rendering as text.
+    let call = s.request(
+        7,
+        "tools/call",
+        json!({"name": "get_symbol", "arguments": {"qualified_name": "InvoiceService.issue"}}),
+    );
+    let result = &call["result"];
+    assert_eq!(result["isError"], false, "{call}");
+    let structured = &result["structuredContent"];
+    assert_eq!(structured["snapshots"][0]["repo"], "local/proj");
+    assert_eq!(structured["results"]["symbol"]["id"], "local/proj@worktree:pkg/service.py#InvoiceService.issue");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.starts_with("local/proj@worktree (worktree)\nMethod InvoiceService.issue  pkg/service.py L8-11  python"),
+        "{text}"
+    );
+    assert!(text.contains("callers 1, callees 2"), "{text}");
     s.shutdown();
 }
 
@@ -197,7 +222,7 @@ fn stateless_flow_with_auto_index() {
     let call = s.request(
         3,
         "tools/call",
-        json!({"_meta": meta, "name": "search_symbols", "arguments": {"query": "validate"}}),
+        json!({"_meta": meta, "name": "search_symbols", "arguments": {"query": "validate", "format": "verbose"}}),
     );
     let v = structured(&call);
     assert_eq!(v["results"][0]["qualified_name"], "pkg.models.validate", "{v}");

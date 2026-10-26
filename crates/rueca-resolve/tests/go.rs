@@ -67,6 +67,7 @@ fn build(files: Vec<(String, Vec<u8>)>) -> ResolveOutput {
         repo: "local/shop".into(),
         commit: "worktree".into(),
         dirty: true,
+        branch: None,
         root: None,
         indexed_at: 0,
         rueca_version: "test".into(),

@@ -76,6 +76,60 @@ pub enum DirectionArg {
     Both,
 }
 
+/// `repo`: one repository, several, or every indexed one.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RepoArg {
+    /// A repository id (`github.com/o/r`, `local/<dir>`), an indexed root path, or `"*"` for
+    /// every indexed repository.
+    One(String),
+    /// Several repository ids or root paths (`"*"` inside the list selects every one).
+    Many(Vec<String>),
+}
+
+/// Response format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FormatArg {
+    /// Envelope (`snapshots`, `results`, `truncated`, `next_cursor`, `budget`) with grouped,
+    /// short-named results (RFC 0005).
+    #[default]
+    Compact,
+    /// The alpha result shapes and defaults, unchanged (kept for one release).
+    Verbose,
+}
+
+/// Names of the [`CommonArgs`] fields.
+const COMMON_ARGS: &[&str] = &["repo", "ref", "format", "budget_tokens", "cursor"];
+
+/// Arguments every tool takes (RFC 0005 §5, §7).
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct CommonArgs {
+    /// Repository: an id (`github.com/o/r`, `local/<dir>`) or indexed root path, a list of them,
+    /// or `"*"` for every indexed repository. Default: the server's root, else the repository of
+    /// an `id` argument, else the only indexed repository.
+    pub repo: Option<RepoArg>,
+    /// Ref to read: a branch name, `HEAD`, `worktree`, or a commit (full, or a unique prefix of at
+    /// least 7 hex digits). Local mode indexes the working tree of each root (its checked-out
+    /// branch plus uncommitted changes), which is the default; other refs are an error that lists
+    /// the indexed refs.
+    #[serde(rename = "ref")]
+    pub ref_: Option<String>,
+    /// `compact` (default) or `verbose` (the alpha result shapes and defaults, for one release).
+    pub format: Option<FormatArg>,
+    /// Approximate size cap of the response in tokens (bytes / 4 of the text rendering), default
+    /// 2000. Longer responses are cut, marked `truncated` and carry a `next_cursor`.
+    pub budget_tokens: Option<i64>,
+    /// Continue a cut or paginated response: pass the previous `next_cursor`.
+    pub cursor: Option<String>,
+}
+
+impl CommonArgs {
+    pub fn verbose(&self) -> bool {
+        self.format == Some(FormatArg::Verbose)
+    }
+}
+
 /// Arguments of `search_symbols`.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SearchSymbolsArgs {
@@ -90,13 +144,14 @@ pub struct SearchSymbolsArgs {
     pub path_glob: Option<String>,
     /// Restrict to one language.
     pub language: Option<LanguageArg>,
-    /// Maximum results, 1–200 (default 20).
+    /// Maximum results, 1–200 (default 10; 20 with `format: verbose`).
     pub limit: Option<i64>,
-    /// Pagination offset (default 0); pass the previous `next_offset`.
+    /// Pagination offset (default 0); `cursor` takes precedence.
     pub offset: Option<i64>,
-    /// Indexed working-tree root path or repository id (`local/<dir>`, `github.com/o/r`).
-    /// Default: the server's root, else the only indexed repository.
-    pub repo: Option<String>,
+    /// Include each result's rank score (3 significant digits). Default false.
+    pub scores: Option<bool>,
+    #[serde(flatten)]
+    pub common: CommonArgs,
 }
 
 /// Arguments of `search_code`.
@@ -112,12 +167,12 @@ pub struct SearchCodeArgs {
     pub path_glob: Option<String>,
     /// Restrict to one language.
     pub language: Option<LanguageArg>,
-    /// Maximum matches, 1–500 (default 50).
+    /// Maximum matches, 1–500 (default 20; 50 with `format: verbose`).
     pub limit: Option<i64>,
     /// Lines of context before and after each match, 0–10 (default 0).
     pub context_lines: Option<i64>,
-    /// Indexed working-tree root path or repository id. Default: the server's root.
-    pub repo: Option<String>,
+    #[serde(flatten)]
+    pub common: CommonArgs,
 }
 
 /// Arguments of `get_symbol`.
@@ -133,8 +188,8 @@ pub struct GetSymbolArgs {
     pub name: Option<String>,
     /// Repository-relative file (or directory) path that narrows a `name` lookup.
     pub path: Option<String>,
-    /// Indexed working-tree root path or repository id. Default: the server's root.
-    pub repo: Option<String>,
+    #[serde(flatten)]
+    pub common: CommonArgs,
 }
 
 /// Arguments of `get_snippet`.
@@ -157,8 +212,8 @@ pub struct GetSnippetArgs {
     pub context_lines: Option<i64>,
     /// Maximum lines returned, 1–2000 (default 300); longer ranges set `truncated`.
     pub max_lines: Option<i64>,
-    /// Indexed working-tree root path or repository id. Default: the server's root.
-    pub repo: Option<String>,
+    #[serde(flatten)]
+    pub common: CommonArgs,
 }
 
 /// Arguments of `trace`.
@@ -174,13 +229,14 @@ pub struct TraceArgs {
     pub path: Option<String>,
     /// `callers`, `callees` or `both` (default).
     pub direction: Option<DirectionArg>,
-    /// Maximum hops from the root, 1–10 (default 2).
+    /// Maximum hops from the root, 1–10 (default 1; 2 with `format: verbose`).
     pub depth: Option<i64>,
     /// Edge kinds to follow (default `["CALLS"]`), e.g. `["CALLS", "INHERITS"]`.
     pub edge_types: Option<Vec<String>>,
     /// Ignore edges below this confidence, 0.0–1.0 (default 0.0).
     pub min_confidence: Option<f64>,
-    /// Maximum nodes returned, 1–2000 (default 200); hitting it sets `truncated`.
+    /// Maximum nodes returned, 1–2000 (default 50; 200 with `format: verbose`); hitting it sets
+    /// `truncated`.
     pub limit: Option<i64>,
     /// Only report and traverse neighbours with these labels, e.g. `["Function", "Method"]`.
     /// Default: every label (a `File` caller is module-level code, a `Class` callee a constructor call).
@@ -188,8 +244,8 @@ pub struct TraceArgs {
     /// Include tests (test functions, `describe`/`it` blocks) as neighbours. Default false,
     /// unless `edge_types` contains `TESTS`.
     pub include_tests: Option<bool>,
-    /// Indexed working-tree root path or repository id. Default: the server's root.
-    pub repo: Option<String>,
+    #[serde(flatten)]
+    pub common: CommonArgs,
 }
 
 /// Arguments of `get_file_outline`.
@@ -197,8 +253,8 @@ pub struct TraceArgs {
 pub struct GetFileOutlineArgs {
     /// Repository-relative file path, e.g. `src/billing/service.py`.
     pub path: String,
-    /// Indexed working-tree root path or repository id. Default: the server's root.
-    pub repo: Option<String>,
+    #[serde(flatten)]
+    pub common: CommonArgs,
 }
 
 /// Generates the JSON schema of an argument type as a plain JSON object
@@ -269,6 +325,16 @@ pub(crate) fn parse_args<T: DeserializeOwned>(tool: &str, schema: &Value, args: 
             }
         }
     }
+    // The common arguments are flattened into every tool's struct, which
+    // hides their names from serde errors: check them on their own first.
+    let common: serde_json::Map<String, Value> =
+        obj.iter().filter(|(k, _)| COMMON_ARGS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
+    if !common.is_empty() {
+        serde_path_to_error::deserialize::<_, CommonArgs>(&Value::Object(common)).map_err(|e| {
+            let path = e.path().to_string();
+            anyhow::anyhow!("invalid argument `{path}` for `{tool}`: {}", e.into_inner())
+        })?;
+    }
     let value = Value::Object(obj);
     serde_path_to_error::deserialize::<_, T>(&value).map_err(|e| {
         let path = e.path().to_string();
@@ -313,6 +379,46 @@ mod tests {
         assert!(t.get("$defs").is_none());
         assert_eq!(t["properties"]["direction"]["oneOf"].as_array().unwrap().len(), 3);
         assert_eq!(t["properties"]["edge_types"]["type"], "array");
+    }
+
+    #[test]
+    fn common_arguments_in_every_schema() {
+        for s in [
+            input_schema::<SearchSymbolsArgs>(),
+            input_schema::<SearchCodeArgs>(),
+            input_schema::<GetSymbolArgs>(),
+            input_schema::<GetSnippetArgs>(),
+            input_schema::<TraceArgs>(),
+            input_schema::<GetFileOutlineArgs>(),
+        ] {
+            let p = &s["properties"];
+            assert_eq!(s["additionalProperties"], false);
+            assert_eq!(p["ref"]["type"], "string", "{s}");
+            assert_eq!(p["cursor"]["type"], "string", "{s}");
+            assert_eq!(p["budget_tokens"]["type"], "integer", "{s}");
+            let formats: Vec<&str> = p["format"]["oneOf"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v["const"].as_str()).collect())
+                .or_else(|| p["format"]["enum"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect()))
+                .unwrap_or_default();
+            assert_eq!(formats, ["compact", "verbose"], "{s}");
+            let repo = p["repo"]["anyOf"].as_array().unwrap_or_else(|| panic!("{s}"));
+            assert_eq!(repo[0]["type"], "string");
+            assert_eq!(repo[1]["type"], "array");
+            assert!(s["required"].as_array().is_none_or(|r| !r.contains(&json!("repo"))));
+        }
+        let a = parse_args::<TraceArgs>(
+            "trace",
+            &input_schema::<TraceArgs>(),
+            json!({"name": "f", "repo": ["a", "b"], "ref": "main", "format": "verbose", "cursor": "3"}),
+        )
+        .unwrap();
+        assert_eq!(a.common.repo, Some(RepoArg::Many(vec!["a".into(), "b".into()])));
+        assert_eq!(a.common.ref_.as_deref(), Some("main"));
+        assert!(a.common.verbose());
+        let e = parse_args::<TraceArgs>("trace", &input_schema::<TraceArgs>(), json!({"name": "f", "format": "short"}))
+            .unwrap_err();
+        assert!(e.to_string().contains("invalid argument `format`"), "{e}");
     }
 
     #[test]

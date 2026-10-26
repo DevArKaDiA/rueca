@@ -147,6 +147,7 @@ fn fixture() -> (ResolvedGraph, Mem) {
             repo: "local/demo".into(),
             commit: "0123456789abcdef0123".into(),
             dirty: false,
+            branch: None,
             root: Some("/tmp/demo".into()),
             indexed_at: 1_700_000_000,
             rueca_version: "0.1.0-test".into(),

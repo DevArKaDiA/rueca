@@ -1,22 +1,23 @@
-//! The six tool implementations.
+//! The six tool implementations: snapshot selection, per-snapshot execution,
+//! merging across snapshots, and the output format (compact envelope or the
+//! alpha `verbose` shapes).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use rueca_model::{EdgeKind, FileId, Label, NodeId};
-use rueca_segment::{ContentQuery, EdgeRef, SymbolQuery};
+use rueca_model::{EdgeKind, FileId, Label, NodeId, SymbolIdParts};
+use rueca_segment::{ContentMatch, ContentQuery, EdgeRef, SymbolQuery};
 
-use crate::Engine;
 use crate::args::{
-    DirectionArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, SearchCodeArgs, SearchSymbolsArgs, TraceArgs,
-    clamp_int,
+    CommonArgs, DirectionArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, SearchCodeArgs, SearchSymbolsArgs,
+    TraceArgs, clamp_int,
 };
 use crate::text::{join_window, split_lines, window};
 use crate::types::*;
-use crate::view::{Selector, View, innermost_at_line, is_container};
+use crate::view::{Lookup, Selector, View, innermost_at_line, is_container};
+use crate::{Engine, Response, compact};
 
-fn id_repo(id: Option<&str>) -> Option<String> {
-    id.and_then(rueca_model::parse_symbol_id).map(|p| p.repo)
-}
+/// Reciprocal rank fusion constant (RFC 0005 §5).
+pub const RRF_K: f64 = 60.0;
 
 fn parse_labels(labels: Option<&[String]>) -> anyhow::Result<Vec<Label>> {
     let mut out = Vec::new();
@@ -55,13 +56,131 @@ fn distinct_others(edges: &[EdgeRef]) -> u32 {
     edges.iter().map(|e| e.other).collect::<HashSet<_>>().len() as u32
 }
 
+/// Item offset named by `cursor` (else `fallback`, else 0).
+fn cursor_offset(c: &CommonArgs, fallback: Option<i64>) -> anyhow::Result<usize> {
+    match c.cursor.as_deref() {
+        Some(s) => s.trim().parse::<usize>().map_err(|_| {
+            anyhow::anyhow!("invalid `cursor` `{s}`: pass the `next_cursor` of a previous response unchanged")
+        }),
+        None => Ok(fallback.unwrap_or(0).max(0) as usize),
+    }
+}
+
+/// `budget_tokens`, clamped to [100, 1,000,000].
+fn budget(c: &CommonArgs) -> usize {
+    clamp_int(c.budget_tokens, compact::DEFAULT_BUDGET_TOKENS as i64, 100, 1_000_000) as usize
+}
+
+/// Query-independent priors re-applied after rank fusion (RFC 0005 §5): ×0.5
+/// for tests (flag, label or path) and ×0.5 for fields, variables and
+/// constants.
+fn global_prior(view: &View, n: NodeId) -> f64 {
+    let node = view.node(n);
+    let mut p = 1.0;
+    if node.is_test || node.label == Label::Test || view.node_path(n).is_some_and(rueca_segment::is_test_path) {
+        p *= 0.5;
+    }
+    if matches!(node.label, Label::Field | Label::Variable | Label::Constant) {
+        p *= 0.5;
+    }
+    p
+}
+
+fn selector<'a>(
+    id: Option<&'a str>,
+    qualified_name: Option<&'a str>,
+    name: Option<&'a str>,
+    path: Option<&'a str>,
+) -> (Selector<'a>, Option<SymbolIdParts>) {
+    (Selector { id, qualified_name, name, path }, id.and_then(rueca_model::parse_symbol_id))
+}
+
+/// The snapshot an `id` lives in: among `views` of the id's repository, the one
+/// whose ref or commit the id names, else the first (local mode resolves an id
+/// with a stale commit against the current snapshot, so ids survive a
+/// re-index). With no view of that repository, view 0, whose lookup reports the
+/// mismatch.
+fn pick_for_id(views: &[View], parts: Option<&SymbolIdParts>) -> usize {
+    let Some(p) = parts else { return 0 };
+    let same: Vec<usize> = (0..views.len()).filter(|&i| views[i].repo() == p.repo).collect();
+    if let Some(c) = &p.commit
+        && let Some(&i) = same.iter().find(|&&i| views[i].snap.matches_ref(c))
+    {
+        return i;
+    }
+    same.first().copied().unwrap_or(0)
+}
+
+/// Resolves a symbol selector over the selected snapshots: an `id` within its
+/// own snapshot; a name in every snapshot, keeping the best match (the
+/// lookup preference, then snapshot order) and listing the best match of each
+/// other snapshot as an extra candidate.
+fn resolve_symbol(
+    views: &[View],
+    sel: &Selector<'_>,
+    parts: Option<&SymbolIdParts>,
+) -> anyhow::Result<(usize, Lookup, Vec<Brief>)> {
+    if sel.id.is_some() || views.len() == 1 {
+        let vi = if sel.id.is_some() { pick_for_id(views, parts) } else { 0 };
+        return Ok((vi, views[vi].lookup(sel)?, Vec::new()));
+    }
+    let mut found = Vec::new();
+    let mut first_err = None;
+    for (vi, v) in views.iter().enumerate() {
+        match v.lookup(sel) {
+            Ok(l) => found.push((vi, l)),
+            Err(e) => {
+                first_err.get_or_insert(e);
+            }
+        }
+    }
+    if found.is_empty() {
+        return Err(first_err.unwrap_or_else(|| anyhow::anyhow!("no symbol found")));
+    }
+    found.sort_by_key(|(vi, l)| (views[*vi].preference(l.node), *vi));
+    let (vi, l) = found.remove(0);
+    let extra = found.iter().map(|(vj, lj)| views[*vj].brief(lj.node)).collect();
+    Ok((vi, l, extra))
+}
+
+/// Resolves a file path over the selected snapshots; a path present in several
+/// is ambiguous.
+fn resolve_path(views: &[View], path: &str) -> anyhow::Result<(usize, FileId)> {
+    if views.len() == 1 {
+        return Ok((0, views[0].resolve_file(path)?));
+    }
+    let mut hits = Vec::new();
+    let mut first_err = None;
+    for (vi, v) in views.iter().enumerate() {
+        match v.resolve_file(path) {
+            Ok(f) => hits.push((vi, f)),
+            Err(e) => {
+                first_err.get_or_insert(e);
+            }
+        }
+    }
+    match hits.len() {
+        1 => Ok(hits[0]),
+        0 => Err(first_err.unwrap_or_else(|| anyhow::anyhow!("file not indexed: `{path}`"))),
+        _ => {
+            let repos: Vec<String> = hits.iter().map(|(vi, _)| views[*vi].snap.header()).collect();
+            anyhow::bail!("`{path}` is indexed in several repositories ({}); pass one as `repo`", repos.join(", "))
+        }
+    }
+}
+
+fn verbose<T: serde::Serialize>(value: &T) -> anyhow::Result<Response> {
+    Ok(Response::verbose(serde_json::to_value(value)?))
+}
+
 impl Engine {
-    pub(crate) fn search_symbols(&self, a: SearchSymbolsArgs) -> anyhow::Result<SearchSymbolsResult> {
-        let limit = clamp_int(a.limit, 20, 1, 200) as usize;
-        let offset = a.offset.unwrap_or(0).max(0) as usize;
+    pub(crate) fn search_symbols(&self, a: SearchSymbolsArgs) -> anyhow::Result<Response> {
+        let verbose_fmt = a.common.verbose();
+        let limit = clamp_int(a.limit, if verbose_fmt { 20 } else { 10 }, 1, 200) as usize;
+        let offset = cursor_offset(&a.common, a.offset)?;
         let labels = parse_labels(a.labels.as_deref())?;
-        let view = self.view(a.repo.as_deref(), None)?;
-        let query = SymbolQuery {
+        let views = self.scope(&a.common, None)?;
+        let base = SymbolQuery {
             text: a.query,
             labels,
             path_glob: a.path_glob,
@@ -69,72 +188,120 @@ impl Engine {
             limit: limit + 1,
             offset,
         };
-        let mut hits = view.seg.search_symbols(&query)?;
-        let truncated = hits.len() > limit;
-        hits.truncate(limit);
-        let results = hits
-            .iter()
-            .map(|h| SymbolSearchHit {
-                brief: view.brief(h.node),
-                signature: view.node(h.node).signature.clone(),
-                score: f32_to_f64(h.score),
+        // (view, node, score): one ranking per snapshot; several are merged
+        // by reciprocal rank fusion with the global priors re-applied.
+        let mut ranked: Vec<(usize, NodeId, f64)> = Vec::new();
+        if views.len() == 1 {
+            for h in views[0].seg.search_symbols(&base)? {
+                ranked.push((0, h.node, f32_to_f64(h.score)));
+            }
+        } else {
+            // Priors can lift an item past a deeper one of another snapshot,
+            // so each snapshot is read deeper than the page.
+            let fetch = (offset + limit) * 2 + 10;
+            let mut fused: Vec<(f64, usize, usize, NodeId)> = Vec::new();
+            for (vi, view) in views.iter().enumerate() {
+                let q = SymbolQuery { limit: fetch, offset: 0, ..base.clone() };
+                for (rank, h) in view.seg.search_symbols(&q)?.into_iter().enumerate() {
+                    let score = global_prior(view, h.node) / (RRF_K + (rank + 1) as f64);
+                    fused.push((score, rank, vi, h.node));
+                }
+            }
+            fused.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)).then(x.2.cmp(&y.2)));
+            ranked = fused.into_iter().skip(offset).take(limit + 1).map(|(s, _, vi, n)| (vi, n, s)).collect();
+        }
+        let more = ranked.len() > limit;
+        ranked.truncate(limit);
+        let hits: Vec<(usize, SymbolSearchHit)> = ranked
+            .into_iter()
+            .map(|(vi, n, score)| {
+                let v = &views[vi];
+                (vi, SymbolSearchHit { brief: v.brief(n), signature: v.node(n).signature.clone(), score })
             })
             .collect();
-        Ok(SearchSymbolsResult { results, truncated, next_offset: truncated.then_some((offset + limit) as u64) })
+        if verbose_fmt {
+            return verbose(&SearchSymbolsResult {
+                results: hits.into_iter().map(|(_, h)| h).collect(),
+                truncated: more,
+                next_offset: more.then_some((offset + limit) as u64),
+            });
+        }
+        let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
+        Ok(compact::search_symbols(&snaps, &hits, offset, more, a.scores.unwrap_or(false), budget(&a.common)))
     }
 
-    pub(crate) fn search_code(&self, a: SearchCodeArgs) -> anyhow::Result<SearchCodeResult> {
+    pub(crate) fn search_code(&self, a: SearchCodeArgs) -> anyhow::Result<Response> {
         if a.pattern.is_empty() {
             anyhow::bail!("`pattern` must not be empty");
         }
-        let limit = clamp_int(a.limit, 50, 1, 500) as usize;
+        let verbose_fmt = a.common.verbose();
+        let limit = clamp_int(a.limit, if verbose_fmt { 50 } else { 20 }, 1, 500) as usize;
+        let skip = cursor_offset(&a.common, None)?;
         let context = clamp_int(a.context_lines, 0, 0, 10) as u32;
-        let view = self.view(a.repo.as_deref(), None)?;
-        let query = ContentQuery {
+        let views = self.scope(&a.common, None)?;
+        let base = ContentQuery {
             pattern: a.pattern,
             regex: a.regex.unwrap_or(false),
             case_insensitive: a.case_insensitive.unwrap_or(false),
             path_glob: a.path_glob,
             language: a.language.map(|l| l.to_language()),
-            max_matches: limit + 1,
+            max_matches: skip + limit + 1,
             context_lines: context,
             ..ContentQuery::default()
         };
-        let res = view.seg.search_content(&query)?;
-        let truncated = res.truncated || res.matches.len() > limit;
-        let mut symbols_by_file: HashMap<FileId, Vec<(NodeId, rueca_model::Span)>> = HashMap::new();
-        let matches = res
-            .matches
+        let mut all: Vec<(usize, ContentMatch)> = Vec::new();
+        let mut more = false;
+        let mut files_scanned = 0u32;
+        for (vi, view) in views.iter().enumerate() {
+            if all.len() > skip + limit {
+                more = true;
+                break;
+            }
+            let res = view.seg.search_content(&base)?;
+            more |= res.truncated;
+            files_scanned += res.files_scanned;
+            all.extend(res.matches.into_iter().map(|m| (vi, m)));
+        }
+        more |= all.len() > skip + limit;
+        let mut symbols_by_file: HashMap<(usize, FileId), Vec<(NodeId, rueca_model::Span)>> = HashMap::new();
+        let matches: Vec<(usize, CodeMatch)> = all
             .into_iter()
+            .skip(skip)
             .take(limit)
-            .map(|m| {
-                let syms = symbols_by_file.entry(m.file).or_insert_with(|| view.file_symbols(m.file));
+            .map(|(vi, m)| {
+                let view = &views[vi];
+                let syms = symbols_by_file.entry((vi, m.file)).or_insert_with(|| view.file_symbols(m.file));
                 let symbol = innermost_at_line(syms, m.line.saturating_sub(1)).map(|n| view.brief(n));
-                CodeMatch {
+                let cm = CodeMatch {
                     path: view.seg.file(m.file).path.clone(),
                     line: m.line,
                     text: m.text,
                     before: (context > 0).then_some(m.before),
                     after: (context > 0).then_some(m.after),
                     symbol,
-                }
+                };
+                (vi, cm)
             })
             .collect();
-        Ok(SearchCodeResult { matches, truncated, files_scanned: res.files_scanned })
+        if verbose_fmt {
+            return verbose(&SearchCodeResult {
+                matches: matches.into_iter().map(|(_, m)| m).collect(),
+                truncated: more,
+                files_scanned,
+            });
+        }
+        let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
+        Ok(compact::search_code(&snaps, &matches, skip, more, files_scanned, budget(&a.common)))
     }
 
-    pub(crate) fn get_symbol(&self, a: GetSymbolArgs) -> anyhow::Result<GetSymbolResult> {
-        let sel = Selector {
-            id: a.id.as_deref(),
-            qualified_name: a.qualified_name.as_deref(),
-            name: a.name.as_deref(),
-            path: a.path.as_deref(),
-        };
+    pub(crate) fn get_symbol(&self, a: GetSymbolArgs) -> anyhow::Result<Response> {
+        let (sel, parts) = selector(a.id.as_deref(), a.qualified_name.as_deref(), a.name.as_deref(), a.path.as_deref());
         if sel.is_empty() {
             anyhow::bail!("one of `id`, `qualified_name` or `name` is required");
         }
-        let view = self.view(a.repo.as_deref(), id_repo(sel.id).as_deref())?;
-        let found = view.lookup(&sel)?;
+        let views = self.scope(&a.common, parts.as_ref())?;
+        let (vi, found, extra) = resolve_symbol(&views, &sel, parts.as_ref())?;
+        let view = &views[vi];
         let n = found.node;
         let node = view.node(n);
         let seg = &view.seg;
@@ -158,8 +325,11 @@ impl Engine {
         // The code ↔ config bridge (RFC 0003 §7.4): who reads / sets it.
         let bridge = matches!(node.label, Label::EnvVar | Label::Key);
         let count_in = |kind| bridge.then(|| distinct_others(&seg.in_edges(n, Some(kind))));
+        let mut candidates = view.briefs(found.candidates);
+        candidates.extend(extra);
+        candidates.truncate(crate::view::MAX_CANDIDATES);
 
-        Ok(GetSymbolResult {
+        let result = GetSymbolResult {
             symbol: SymbolDetail {
                 brief: view.brief(n),
                 language: node.language.map(|l| l.as_str().to_string()),
@@ -176,19 +346,18 @@ impl Engine {
             callees_count: distinct_others(&seg.out_edges(n, Some(EdgeKind::Calls))),
             readers_count: count_in(EdgeKind::Reads),
             writers_count: count_in(EdgeKind::Writes),
-            candidates: view.briefs(found.candidates),
-        })
+            candidates,
+        };
+        if a.common.verbose() {
+            return verbose(&result);
+        }
+        Ok(compact::get_symbol(&view.snap, &result, budget(&a.common)))
     }
 
-    pub(crate) fn get_snippet(&self, a: GetSnippetArgs) -> anyhow::Result<SnippetResult> {
+    pub(crate) fn get_snippet(&self, a: GetSnippetArgs) -> anyhow::Result<Response> {
         let context = clamp_int(a.context_lines, 0, 0, 50) as u32;
         let max_lines = clamp_int(a.max_lines, 300, 1, 2000) as u32;
-        let sel = Selector {
-            id: a.id.as_deref(),
-            qualified_name: a.qualified_name.as_deref(),
-            name: a.name.as_deref(),
-            path: a.path.as_deref(),
-        };
+        let (sel, parts) = selector(a.id.as_deref(), a.qualified_name.as_deref(), a.name.as_deref(), a.path.as_deref());
         if sel.is_empty() && a.path.is_none() {
             anyhow::bail!("give a symbol (`id`, `qualified_name` or `name`) or a `path` with `start_line`");
         }
@@ -197,9 +366,15 @@ impl Engine {
         {
             anyhow::bail!("`end_line` ({e}) is before `start_line` ({s})");
         }
-        let view = self.view(a.repo.as_deref(), id_repo(sel.id).as_deref())?;
-        let (file, start, end, symbol) = if !sel.is_empty() {
-            let found = view.lookup(&sel)?;
+        // `cursor` = the line to continue from.
+        let resume = match a.common.cursor {
+            Some(_) => Some(cursor_offset(&a.common, None)?.clamp(1, u32::MAX as usize) as u32),
+            None => None,
+        };
+        let views = self.scope(&a.common, parts.as_ref())?;
+        let (vi, file, start, end, symbol) = if !sel.is_empty() {
+            let (vi, found, _) = resolve_symbol(&views, &sel, parts.as_ref())?;
+            let view = &views[vi];
             let n = found.node;
             let node = view.node(n);
             let Some(file) = node.file else {
@@ -208,17 +383,18 @@ impl Engine {
             let (s, e) = view.span_lines(n);
             let s = s.unwrap_or(1);
             let e = e.unwrap_or(u32::MAX);
-            (file, s, e, Some(view.brief(n)))
+            (vi, file, s, e, Some(view.brief(n)))
         } else {
             let path = a.path.as_deref().unwrap_or_default();
-            let file = view.resolve_file(path)?;
+            let (vi, file) = resolve_path(&views, path)?;
             let s = a.start_line.unwrap_or(1);
             if s < 1 {
                 anyhow::bail!("`start_line` is 1-based (got {s})");
             }
             let e = a.end_line.unwrap_or(i64::from(u32::MAX));
-            (file, s.min(i64::from(u32::MAX)) as u32, e.min(i64::from(u32::MAX)) as u32, None)
+            (vi, file, s.min(i64::from(u32::MAX)) as u32, e.min(i64::from(u32::MAX)) as u32, None)
         };
+        let view = &views[vi];
         let entry = view.seg.file(file);
         let content = view.seg.content(file)?;
         let lines = split_lines(&content);
@@ -226,8 +402,15 @@ impl Engine {
         if symbol.is_none() && start > line_count.max(1) {
             anyhow::bail!("`start_line` {start} is past the end of `{}` ({line_count} lines)", entry.path);
         }
-        let w = window(start, end, context, max_lines, line_count);
-        Ok(SnippetResult {
+        let mut w = window(start, end, context, max_lines, line_count);
+        // A cursor continues a cut snippet from that line.
+        if let Some(from) = resume
+            && from > w.start
+        {
+            let full_end = end.saturating_add(context).min(line_count);
+            w = window(from.min(full_end.max(1)), full_end, 0, max_lines, line_count);
+        }
+        let result = SnippetResult {
             path: entry.path.clone(),
             language: entry.language.map(|l| l.as_str().to_string()),
             start_line: w.start,
@@ -235,38 +418,41 @@ impl Engine {
             text: join_window(&lines, w),
             truncated: w.truncated,
             symbol,
-        })
+        };
+        if a.common.verbose() {
+            return verbose(&result);
+        }
+        Ok(compact::get_snippet(&view.snap, &result, budget(&a.common)))
     }
 
-    pub(crate) fn trace(&self, a: TraceArgs) -> anyhow::Result<TraceResult> {
-        let depth = clamp_int(a.depth, 2, 1, 10) as u32;
-        let limit = clamp_int(a.limit, 200, 1, 2000) as usize;
+    pub(crate) fn trace(&self, a: TraceArgs) -> anyhow::Result<Response> {
+        let verbose_fmt = a.common.verbose();
+        let depth = clamp_int(a.depth, if verbose_fmt { 2 } else { 1 }, 1, 10) as u32;
+        let limit = clamp_int(a.limit, if verbose_fmt { 200 } else { 50 }, 1, 2000) as usize;
+        let offset = if verbose_fmt { 0 } else { cursor_offset(&a.common, None)? };
         let min_conf = a.min_confidence.unwrap_or(0.0);
         if !min_conf.is_finite() {
             anyhow::bail!("`min_confidence` must be a number between 0 and 1");
         }
         let min_conf = min_conf.clamp(0.0, 1.0) as f32;
         let kinds = parse_edge_kinds(a.edge_types.as_deref())?;
-        let sel = Selector {
-            id: a.id.as_deref(),
-            qualified_name: a.qualified_name.as_deref(),
-            name: a.name.as_deref(),
-            path: a.path.as_deref(),
-        };
+        let (sel, parts) = selector(a.id.as_deref(), a.qualified_name.as_deref(), a.name.as_deref(), a.path.as_deref());
         if sel.is_empty() {
             anyhow::bail!("one of `id`, `qualified_name` or `name` is required");
         }
         let labels = parse_labels(a.labels.as_deref())?;
         let include_tests = a.include_tests.unwrap_or(kinds.contains(&EdgeKind::Tests));
-        let view = self.view(a.repo.as_deref(), id_repo(sel.id).as_deref())?;
-        let root = view.lookup(&sel)?.node;
+        let views = self.scope(&a.common, parts.as_ref())?;
+        let (vi, found, _) = resolve_symbol(&views, &sel, parts.as_ref())?;
+        let view = &views[vi];
+        let root = found.node;
         let filter = NeighbourFilter { labels: &labels, include_tests };
         let dirs: &[Dir] = match a.direction.unwrap_or(DirectionArg::Both) {
             DirectionArg::Callers => &[Dir::Callers],
             DirectionArg::Callees => &[Dir::Callees],
             DirectionArg::Both => &[Dir::Callers, Dir::Callees],
         };
-        let out = bfs(&view, root, dirs, &kinds, depth, min_conf, limit, &filter);
+        let out = bfs(view, root, dirs, &kinds, depth, min_conf, offset + limit, &filter);
 
         let mut nodes: Vec<(u32, Dir, String, NodeId)> =
             out.nodes.iter().map(|&(d, dir, n)| (d, dir, view.node(n).qualified_name.clone(), n)).collect();
@@ -281,7 +467,7 @@ impl Engine {
             })
             .collect();
         edges.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(TraceResult {
+        let result = TraceResult {
             root: view.brief(root),
             nodes: nodes
                 .into_iter()
@@ -303,21 +489,31 @@ impl Engine {
                 .collect(),
             truncated: out.truncated,
             tests_excluded: out.tests_excluded.len() as u32,
-        })
+        };
+        if verbose_fmt {
+            return verbose(&result);
+        }
+        Ok(compact::trace(&view.snap, &result, offset, budget(&a.common)))
     }
 
-    pub(crate) fn get_file_outline(&self, a: GetFileOutlineArgs) -> anyhow::Result<FileOutlineResult> {
-        let view = self.view(a.repo.as_deref(), None)?;
-        let file = view.resolve_file(&a.path)?;
+    pub(crate) fn get_file_outline(&self, a: GetFileOutlineArgs) -> anyhow::Result<Response> {
+        let offset = cursor_offset(&a.common, None)?;
+        let views = self.scope(&a.common, None)?;
+        let (vi, file) = resolve_path(&views, &a.path)?;
+        let view = &views[vi];
         let entry = view.seg.file(file);
         let symbols = view.file_symbols(file);
-        let tree = outline_tree(&view, &symbols);
-        Ok(FileOutlineResult {
+        let tree = outline_tree(view, &symbols);
+        let result = FileOutlineResult {
             path: entry.path.clone(),
             language: entry.language.map(|l| l.as_str().to_string()),
             line_count: entry.line_count,
             symbols: tree,
-        })
+        };
+        if a.common.verbose() {
+            return verbose(&result);
+        }
+        Ok(compact::outline(&view.snap, &result, offset, budget(&a.common)))
     }
 }
 

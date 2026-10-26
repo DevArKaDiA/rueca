@@ -126,6 +126,7 @@ fn synth(files_n: usize, syms_per_file: usize, edges_n: usize) -> (ResolvedGraph
             repo: "github.com/acme/scale".into(),
             commit: "deadbeefdeadbeefdeadbeef".into(),
             dirty: false,
+            branch: None,
             root: None,
             indexed_at: 0,
             rueca_version: "test".into(),

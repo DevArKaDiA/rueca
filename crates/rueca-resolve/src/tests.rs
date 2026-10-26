@@ -231,6 +231,7 @@ fn snapshot() -> SnapshotInfo {
         repo: "github.com/acme/demo".into(),
         commit: "abc".into(),
         dirty: false,
+        branch: None,
         root: None,
         indexed_at: 0,
         rueca_version: "test".into(),

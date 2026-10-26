@@ -1,21 +1,44 @@
-# Tools and CLI (alpha contract)
+# Tools and CLI
 
-This is the contract for v0.1.0-alpha. The MCP server, the CLI and the
-benchmark all use it. Results are JSON objects; every field listed is present
-unless marked optional.
+This is the tool contract of Rueca since RFC 0005 ([responses for
+agents](rfcs/0005-agent-responses.md)). The MCP server, the CLI and the
+benchmark all use it. The alpha shapes (v0.1.0-alpha) stay available for one
+release with `"format": "verbose"` ([below](#verbose-alpha-format)).
 
 ## Common conventions
 
 - **Lines are 1-based** in every tool result.
-- **`repo`** (optional in every tool): an indexed working-tree root path or a
-  repository id (`local/<dir>`, `github.com/o/r`). Default: the server's
-  `--root`, else the only indexed root, else an error listing indexed roots.
-- **Symbol IDs**: `<repo>@<commit>:<path>#<local-qualified-name>`
-  (`rueca_model::symbol_id`). For PHP the local qualified name is the fully
-  qualified name (`app/Models/User.php#App\Models\User::save`); for C/C++
-  too (`src/foo.cpp#ns::Foo::bar`). Canonical env vars have no file and use
-  the pseudo-path `$env`: `local/shop@abc:$env#DATABASE_URL`. Tools
-  accept an `id`, a global `qualified_name`, or a suffix of it
+- **Arguments every tool takes:**
+
+  | Arg | Type | Default |
+  |---|---|---|
+  | `repo` | a repository id (`github.com/o/r`, `local/<dir>`) or indexed root path; a list of them; or `"*"` for every indexed repository | the server's `--root`, else the repository of an `id` argument, else the only indexed root, else an error listing indexed roots |
+  | `ref` | branch name, `HEAD`, `worktree`, or a commit (full, or a unique prefix of ≥ 7 hex digits) | the working tree |
+  | `budget_tokens` | int, 100–1,000,000 | 2000 |
+  | `cursor` | string: the `next_cursor` of a previous response | — |
+  | `format` | `compact` or `verbose` | `compact` |
+
+- **Refs in local mode.** Each indexed root is one snapshot: its working tree,
+  i.e. the checked-out branch (`main`; `HEAD` when detached; `worktree`
+  outside git) plus uncommitted changes. `ref` accepts that branch, `HEAD`,
+  `worktree` or the commit; any other ref is an error that lists the indexed
+  refs of the repository (index another worktree to read another branch).
+  With `repo: "*"`, snapshots that do not have the ref are skipped. The
+  service and org modes will hold several snapshots per repository
+  (branches, `pr/<n>`, tags) under the same argument.
+- **Symbol ids** are pinned: `<repo>@<commit12>[+]:<path>#<local-qualified-name>`
+  (`rueca_model::symbol_id`), with the first 12 hex digits of the commit and
+  `+` when the indexed working tree has uncommitted changes (the overlay):
+  `github.com/acme/billing@7696364aef89+:src/invoices/service.py#InvoiceService.issue`.
+  Outside git the commit is `worktree`. Tools accept the full commit, any
+  prefix of ≥ 7 hex digits, the 12-digit form (with or without `+`) or a ref
+  name (`@main`). An id whose commit is no longer indexed resolves against
+  the repository's current snapshot (local mode), so ids survive a re-index.
+  For PHP the local qualified name is the fully qualified name
+  (`app/Models/User.php#App\Models\User::save`); for C/C++ too
+  (`src/foo.cpp#ns::Foo::bar`). Canonical env vars have no file and use the
+  pseudo-path `$env`: `local/shop@abc:$env#DATABASE_URL`. Files have no `#`
+  part. Tools accept an `id`, a global `qualified_name`, or a suffix of it
   (`Session.request`, `User::save`, `server.port`, `["DATABASE_URL"]`), in
   that order of precedence. For Java and C/C++ an overload's parameter
   suffix is optional: `Parser.parse` matches `Parser.parse(String)` and
@@ -41,12 +64,76 @@ unless marked optional.
   under the enclosing definition, `Gson.fromJson.TypeAdapter$1.read`); C/C++ `geo::Circle::area` (namespace and
   class path, no module; overloads in one file carry their parameter types,
   `geo::scale(double, double)`; macros `GEO_PI`; GoogleTest `Suite::Name`).
-- **Brief symbol** (used inside results):
-  `{ "id", "name", "qualified_name", "label", "path", "start_line", "end_line" }`
-- **Truncation**: list results include `"truncated": bool`; paginated ones
-  include `"next_offset"` (integer or null).
 - **Errors**: MCP tool errors use `isError: true` with a message; the CLI
   prints `{"error": "..."}` to stdout and exits with status 2.
+
+## The envelope
+
+Every response (default `format: compact`) is:
+
+```json
+{
+  "snapshots": [
+    {"s": 0, "repo": "github.com/acme/billing", "ref": "main",
+     "commit": "7696364aef89a22e4a2fe84f6fd23e186bef9aa8", "overlay": true,
+     "url": "https://github.com/acme/billing/blob/7696364aef89a22e4a2fe84f6fd23e186bef9aa8/{path}#L{start}-L{end}"}
+  ],
+  "results": "…tool-specific…",
+  "truncated": false,
+  "next_cursor": null,
+  "budget": {"limit_tokens": 2000, "used_tokens": 312}
+}
+```
+
+- `snapshots`: every snapshot the response read. Items refer to one by `s`
+  (an index valid within the response); their ids stay fully pinned, so an
+  id copied out of a response is valid on its own. `commit` is the full id
+  (`worktree` outside git); `overlay: true` means the working tree had
+  uncommitted changes when indexed (ids carry `+`). `url` is a template for
+  links on the repository's host (`{path}`, `{start}`, `{end}`), present for
+  `github.com`, `gitlab.com`, `bitbucket.org` and hosts named `github.*` /
+  `gitlab.*`; with an overlay it points at the base commit, whose lines may
+  differ in modified files.
+- `truncated`: the results stop before the end, because of a limit or the
+  budget. `next_cursor`: pass it as `cursor` (with the same other
+  arguments) to continue; `null` when there is nothing more or the tool
+  cannot continue (`get_symbol`).
+- `budget`: `limit_tokens` is `budget_tokens`; `used_tokens` is the size of
+  the **text rendering** (below) as `ceil(bytes / 4)` — a model-neutral
+  estimate, no tokenizer (RFC 0005 open question 1). A response over budget
+  keeps the longest prefix of its items that fits, and at least one item, so
+  a cursor always makes progress (a single huge item can exceed the budget).
+- Fields absent from an item mean `null` / unknown (`lines` of a node
+  without a span, `sig`, `doc`, `lang`).
+
+**Brief** (inside results): `{"id", "qn", "label", "lines": [start, end]}`
+(`qn` is the global qualified name; the path is in the id).
+
+**Text rendering.** MCP results carry the envelope in `structuredContent`
+and a compact text rendering as text content; the CLI prints the JSON, or
+the text with `--text`. One header line per snapshot
+(`repo@commit12[+] (ref)`, prefixed by `[s]` when there are several), then
+one line per group (file path) and item. Items show the **local** name (the
+`#` part of the id), so `<header repo@commit>:<path>#<name>` is the item's
+id, and the name also works as a `qualified_name` argument:
+
+```
+github.com/acme/billing@7696364aef89+ (main)
+src/invoices/service.py
+  Method InvoiceService.issue L41-63  def issue(self, invoice_id: str) -> Invoice
+  Method InvoiceService.cancel L65-80  def cancel(self, invoice_id: str) -> None
+(truncated; continue with "cursor": "10")
+```
+
+**Several repositories.** With `repo` a list or `"*"`, `search_symbols`
+ranks each snapshot separately and merges the rankings by reciprocal rank
+fusion (score `1 / (60 + rank)`), then re-applies the global priors (×0.5
+for tests, ×0.5 for fields, variables and constants): BM25 scores are not
+comparable across segments. `search_code` lists matches in snapshot order.
+`get_symbol`, `get_snippet` and `trace` resolve an `id` in its own snapshot,
+and a name in every selected snapshot (the best match wins; the best match
+of each other snapshot is listed in `candidates`). `get_file_outline` and
+path snippets need the path to exist in exactly one selected snapshot.
 
 ## Tools
 
@@ -67,10 +154,23 @@ other definitions with the same text score. Ranking details:
 | `labels` | array of label names (`Function`, `Method`, `Class`, `Section`, `EnvVar`, `Key`, …) | all symbol labels except `File`, `Folder`, `Module`, `Repository`, and except `Key` / `Document` unless `language` is a data language |
 | `path_glob` | string | — |
 | `language` | one language name (see below) | — |
-| `limit` | int, 1–200 | 20 |
-| `offset` | int | 0 |
+| `limit` | int, 1–200 | 10 |
+| `offset` | int (`cursor` takes precedence) | 0 |
+| `scores` | bool: include each result's score (3 significant digits) | false |
 
-Result: `{ "results": [ brief + "signature" (opt) + "score" ], "truncated", "next_offset" }`
+Results, grouped by snapshot and file in rank order (a group sits where its
+best result ranks):
+
+```json
+"results": [
+  {"s": 0, "path": "src/invoices/service.py", "symbols": [
+    {"id": "github.com/acme/billing@7696364aef89+:src/invoices/service.py#InvoiceService.issue",
+     "name": "issue", "qn": "billing.invoices.service.InvoiceService.issue", "label": "Method",
+     "lines": [41, 63], "sig": "def issue(self, invoice_id: str) -> Invoice"}]}
+]
+```
+
+`next_cursor` is the offset of the next result.
 
 **Language names** (`search_symbols`, `search_code`): `python`,
 `typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`, `java`, `cpp`, `c` (a `.h` header is `cpp` when the
@@ -98,10 +198,20 @@ Literal or regex search over file contents (from content packs).
 | `case_insensitive` | bool | false |
 | `path_glob` | string | — |
 | `language` | one language name (as `search_symbols`) | — |
-| `limit` | int (matches), 1–500 | 50 |
+| `limit` | int (matches), 1–500 | 20 |
 | `context_lines` | int, 0–10 | 0 |
 
-Result: `{ "matches": [ { "path", "line", "text", "before" (opt), "after" (opt), "symbol" (opt brief: innermost enclosing definition) } ], "truncated", "files_scanned" }`
+Results: `[ {"s", "path", "matches": [ {"line", "text", "before" (opt), "after" (opt), "symbol" (opt brief: innermost enclosing definition)} ]} ]`,
+plus `"files_scanned"` next to `next_cursor`. Text:
+
+```
+src/http.py
+  [Method Session.request L3-9]
+  4- def request(self, method, url):
+  5:     return self.send(method, url)
+```
+
+`next_cursor` is the number of matches already returned.
 
 ### `get_symbol`
 
@@ -110,26 +220,30 @@ Result: `{ "matches": [ { "path", "line", "text", "before" (opt), "after" (opt),
 | `id` / `qualified_name` / `name` | string, one required | — |
 | `path` | string, narrows `name` lookup | — |
 
-Result:
+Results:
 
 ```json
 {
-  "symbol": { brief…, "language", "signature", "doc", "exported", "is_test" },
+  "s": 0,
+  "symbol": {"id", "name", "qn", "label", "path", "lines", "lang", "sig", "doc", "exported", "test"},
   "parent": brief | null,
   "children": [brief],
   "bases": [brief],          // INHERITS / IMPLEMENTS targets
   "subtypes": [brief],       // reverse INHERITS / IMPLEMENTS
-  "callers_count": int,
-  "callees_count": int,
-  "readers_count": int,      // optional: EnvVar and Key only (distinct incoming READS)
-  "writers_count": int,      // optional: EnvVar and Key only (distinct incoming WRITES)
+  "callers": int,            // distinct nodes over incoming CALLS
+  "callees": int,
+  "readers": int,            // optional: EnvVar and Key only (distinct incoming READS)
+  "writers": int,            // optional: EnvVar and Key only (distinct incoming WRITES)
   "candidates": [brief]      // other matches when the lookup was ambiguous
 }
 ```
 
-`readers_count` / `writers_count` answer "is this env var / config key
-used, and is it set anywhere?" before a `trace`. A canonical env var
-(`$env:NAME`) has `path`, `start_line` and `end_line` `null`.
+`readers` / `writers` answer "is this env var / config key used, and is it
+set anywhere?" before a `trace`. A canonical env var (`$env:NAME`) has no
+`path` or `lines`. Over budget, the lists are cut (children, then bases,
+subtypes, candidates), `truncated` is set and `"omitted": {"children": n, …}`
+says what was left out; there is no cursor (use `get_file_outline` or
+`trace` for the rest).
 
 ### `get_snippet`
 
@@ -140,7 +254,9 @@ used, and is it set anywhere?" before a `trace`. A canonical env var
 | `context_lines` | int, 0–50 | 0 |
 | `max_lines` | int, 1–2000 | 300 |
 
-Result: `{ "path", "language", "start_line", "end_line", "text", "truncated", "symbol" (opt brief) }`
+Results: `{"s", "path", "lang", "lines": [start, end], "text", "symbol" (opt brief)}`.
+A snippet cut by `max_lines` or the budget is `truncated`; `next_cursor` is
+the next line, and the same call with that `cursor` continues there.
 
 ### `trace`
 
@@ -150,28 +266,46 @@ Call graph traversal.
 |---|---|---|
 | `id` / `qualified_name` / `name` | string, one required | — |
 | `direction` | `callers` / `callees` / `both` | `both` |
-| `depth` | int, 1–10 | 2 |
+| `depth` | int, 1–10 | 1 |
 | `edge_types` | array of edge kinds | `["CALLS"]` |
 | `min_confidence` | float 0–1 | 0.0 |
-| `limit` | int (nodes), 1–2000 | 200 |
+| `limit` | int (nodes), 1–2000 | 50 |
 | `labels` | array of label names: only neighbours with these labels are reported and traversed | all labels |
 | `include_tests` | bool: report and traverse tests (`is_test` or label `Test`) | false, or true when `edge_types` contains `TESTS` |
 
-Result:
+Results:
 
 ```json
 {
-  "root": brief,
-  "nodes": [ brief + { "depth": int, "direction": "callers" | "callees" } ],
-  "edges": [ { "src": id, "dst": id, "kind", "confidence", "strategy",
-               "call_site": { "path", "line" } | null } ],
-  "truncated": bool,
-  "tests_excluded": int      // distinct tests left out because include_tests is false
+  "s": 0,
+  "nodes": [
+    {"id": "…#InvoiceService.issue", "qn": "…", "label": "Method", "path": "src/invoices/service.py", "lines": [41, 63], "d": 0},
+    {"id": "…#Api.issue", "qn": "…", "label": "Method", "path": "src/api.py", "lines": [7, 8], "d": 1, "dir": "in"}
+  ],
+  "edges": [[1, 0, "CALLS", 0.9, "type_resolved", 8]],
+  "tests_excluded": 2        // distinct tests left out because include_tests is false
 }
 ```
 
-`nodes` is ordered by (depth, direction, qualified_name); the root is not
-repeated in `nodes` and is never filtered.
+Node 0 is the root (`d` 0, never filtered); the others are ordered by
+(depth, direction, qualified_name), each listed once with `dir` `in`
+(caller), `out` (callee) or `both`, and `d` its smallest depth. An edge is
+`[src, dst, kind, confidence, strategy, call_site_line]` with node indexes,
+plus a seventh element, the call-site path, when it is not the source
+node's file (`call_site_line` is `null` without evidence). Text:
+
+```
+github.com/acme/billing@7696364aef89+ (main)
+0 Method InvoiceService.issue  src/invoices/service.py L41-63
+1 in d1 Method Api.issue  src/api.py L7-8  →0 CALLS 0.9 type_resolved @8
+2 out d1 Function validate  src/invoices/rules.py L3-9  ←0 CALLS 0.95 import_resolved @44
+(2 tests excluded; `include_tests: true` lists them)
+```
+
+Each edge is printed on its later endpoint: `→j` this node calls node `j`,
+`←j` node `j` calls this node. `next_cursor` is the number of non-root
+nodes already returned; a later page repeats the root as node 0 and any
+earlier node an edge needs.
 
 Edge types beyond calls: `["INHERITS"]` walks a class hierarchy,
 `["IMPORTS"]` file dependencies (`File` → `File`, and `File` → `Folder` for
@@ -204,8 +338,10 @@ body or initializer, and a `Class` callee is a constructor call (its
 |---|---|---|
 | `path` | string, required (repository-relative) | — |
 
-Result: `{ "path", "language", "line_count", "symbols": [ brief + "signature" + "children": [ … ] ] }`
-(nested by containment, ordered by line).
+Results: `{"s", "path", "lang", "line_count", "symbols": [ {"id", "name", "qn", "label", "lines", "sig", "children" (opt): [ … ]} ] }`
+(nested by containment, ordered by line). `next_cursor` is the number of
+symbols already returned in pre-order; a later page nests what it can and
+lists the rest at the top level.
 
 ## CLI
 
@@ -214,8 +350,9 @@ rueca index [PATH] [--store DIR] [--repo ID] [--json]
     Index the working tree at PATH (default: current dir). Prints a summary
     (or the IndexReport as JSON).
 
-rueca query <TOOL> '<JSON ARGS>' [--root PATH] [--store DIR]
-    Run one tool and print its JSON result. Same semantics as MCP.
+rueca query <TOOL> '<JSON ARGS>' [--root PATH] [--store DIR] [--pretty] [--text]
+    Run one tool and print its JSON result (with --text, the compact text
+    rendering MCP clients get as text content). Same semantics as MCP.
 
 rueca mcp [--root PATH] [--store DIR] [--no-auto-index]
     MCP server on stdio. Indexes --root first if it has no segment.
@@ -225,3 +362,25 @@ rueca status [--store DIR] [--json]
 ```
 
 Store default: `$RUECA_HOME`, else `~/.cache/rueca`.
+
+## Verbose (alpha) format
+
+`"format": "verbose"` returns the v0.1.0-alpha result shapes and defaults
+unchanged, for one release (the next minor removes it): no envelope, long
+field names, `search_symbols` limit 20, `search_code` 50, `trace` depth 2 and
+200 nodes, no budget. Ids are the pinned RFC 0005 form in both formats;
+`repo`, `ref` and `cursor` work in both. The MCP text content of a verbose
+result is the compact JSON.
+
+- **Brief**: `{ "id", "name", "qualified_name", "label", "path", "start_line", "end_line" }`
+  (`path`, `start_line`, `end_line` are `null` for nodes without a file or
+  span).
+- `search_symbols`: `{ "results": [ brief + "signature" (opt) + "score" ], "truncated", "next_offset" }`
+  (with several repositories, `score` is the fused score).
+- `search_code`: `{ "matches": [ { "path", "line", "text", "before" (opt), "after" (opt), "symbol" (opt brief) } ], "truncated", "files_scanned" }`
+- `get_symbol`: `{ "symbol": { brief…, "language", "signature", "doc", "exported", "is_test" }, "parent", "children", "bases", "subtypes", "callers_count", "callees_count", "readers_count" (opt), "writers_count" (opt), "candidates" }`
+- `get_snippet`: `{ "path", "language", "start_line", "end_line", "text", "truncated", "symbol" (opt brief) }`
+- `trace`: `{ "root": brief, "nodes": [ brief + { "depth", "direction": "callers" | "callees" } ], "edges": [ { "src": id, "dst": id, "kind", "confidence", "strategy", "call_site": { "path", "line" } | null } ], "truncated", "tests_excluded" }`
+  (`nodes` ordered by (depth, direction, qualified_name); a node reachable
+  both ways appears once per direction; the root is not repeated).
+- `get_file_outline`: `{ "path", "language", "line_count", "symbols": [ brief + "signature" + "children": [ … ] ] }`

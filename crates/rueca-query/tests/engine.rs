@@ -14,12 +14,21 @@ fn engine(f: &Fixture) -> Engine {
     Engine::new(f.store.clone(), Some(f.root.clone())).unwrap()
 }
 
+/// The alpha shapes these tests assert (`format: verbose`).
+fn verbose(mut args: Value) -> Value {
+    if let Some(m) = args.as_object_mut() {
+        m.entry("format").or_insert_with(|| json!("verbose"));
+    }
+    args
+}
+
 fn call(e: &Engine, tool: &str, args: Value) -> Value {
+    let args = verbose(args);
     e.call(tool, args.clone()).unwrap_or_else(|err| panic!("{tool} {args}: {err:#}"))
 }
 
 fn err(e: &Engine, tool: &str, args: Value) -> String {
-    format!("{:#}", e.call(tool, args).expect_err("expected an error"))
+    format!("{:#}", e.call(tool, verbose(args)).expect_err("expected an error"))
 }
 
 fn brief(id: &str, name: &str, qn: &str, label: &str, path: &str, s: u32, e: u32) -> Value {

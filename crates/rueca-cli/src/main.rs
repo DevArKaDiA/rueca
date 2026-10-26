@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! rueca index [PATH] [--store DIR] [--repo ID] [--json]
-//! rueca query <TOOL> '<JSON ARGS>' [--root PATH] [--store DIR] [--pretty]
+//! rueca query <TOOL> '<JSON ARGS>' [--root PATH] [--store DIR] [--pretty] [--text]
 //! rueca mcp [--root PATH] [--store DIR] [--no-auto-index]
 //! rueca status [--store DIR] [--json]
 //! ```
@@ -11,8 +11,9 @@
 //! `--store`, `--root`, `-v`, `--json` and `--pretty` are global (accepted
 //! before or after the subcommand). JSON output is compact unless `--pretty`.
 //! Logs go to stderr (`-v` debug, `-vv` trace, or `RUECA_LOG=<filter>`).
-//! `query` prints the tool's JSON result to stdout; on error it prints
-//! `{"error": "..."}` and exits with status 2. Other commands report errors on
+//! `query` prints the tool's JSON result to stdout (with `--text`, the
+//! compact text rendering an MCP client gets as text content); on error it
+//! prints `{"error": "..."}` and exits with status 2. Other commands report errors on
 //! stderr and exit with status 1.
 //!
 //! `query` and `mcp` default to the indexed root that contains the current
@@ -79,6 +80,9 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         tool: String,
         /// Tool arguments as a JSON object (`-` reads stdin). Default `{}`.
         args: Option<String>,
+        /// Print the compact text rendering (the MCP text content) instead of JSON.
+        #[arg(long)]
+        text: bool,
     },
     /// Serve MCP on stdio. Indexes --root first if it has no segment.
     Mcp {
@@ -96,7 +100,7 @@ fn main() -> ExitCode {
     let store = cli.store.clone().unwrap_or_else(Store::default_dir);
     let result = match cli.command {
         Command::Index { path, repo, threads } => cmd_index(&store, path, repo, cli.json, cli.pretty, threads),
-        Command::Query { tool, args } => return cmd_query(&store, cli.root, &tool, args, cli.pretty),
+        Command::Query { tool, args, text } => return cmd_query(&store, cli.root, &tool, args, cli.pretty, text),
         Command::Mcp { no_auto_index } => cmd_mcp(&store, cli.root, !no_auto_index),
         Command::Status => cmd_status(&store, cli.json, cli.pretty),
     };
@@ -186,10 +190,24 @@ fn default_root(store: &Path, root: Option<PathBuf>) -> Option<PathBuf> {
     Some(PathBuf::from(entry.root))
 }
 
-fn cmd_query(store: &Path, root: Option<PathBuf>, tool: &str, args: Option<String>, pretty: bool) -> ExitCode {
+fn cmd_query(
+    store: &Path,
+    root: Option<PathBuf>,
+    tool: &str,
+    args: Option<String>,
+    pretty: bool,
+    text: bool,
+) -> ExitCode {
     match run_query(store, root, tool, args) {
-        Ok(value) => {
-            println!("{}", render(&value, pretty));
+        Ok(response) if text => {
+            print!("{}", response.text);
+            if !response.text.ends_with('\n') {
+                println!();
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(response) => {
+            println!("{}", render(&response.json, pretty));
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -199,7 +217,12 @@ fn cmd_query(store: &Path, root: Option<PathBuf>, tool: &str, args: Option<Strin
     }
 }
 
-fn run_query(store: &Path, root: Option<PathBuf>, tool: &str, args: Option<String>) -> anyhow::Result<Value> {
+fn run_query(
+    store: &Path,
+    root: Option<PathBuf>,
+    tool: &str,
+    args: Option<String>,
+) -> anyhow::Result<rueca_query::Response> {
     let raw = match args.as_deref() {
         None => "{}".to_string(),
         Some("-") => {
@@ -215,7 +238,7 @@ fn run_query(store: &Path, root: Option<PathBuf>, tool: &str, args: Option<Strin
         anyhow::bail!("unknown tool `{tool}` (available: {})", rueca_query::TOOL_NAMES.join(", "));
     }
     let engine = rueca_query::Engine::new(store.to_path_buf(), default_root(store, root))?;
-    engine.call(tool, args)
+    engine.respond(tool, args)
 }
 
 fn render(v: &Value, pretty: bool) -> String {

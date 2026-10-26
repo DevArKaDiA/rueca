@@ -742,12 +742,18 @@ config bridge).
 
 ## 6. How each tool uses the graph
 
-All six tools first pick the segment (the `repo` argument, the server's
-`--root`, or the only indexed root) and, if they take a symbol, run the same
-**symbol lookup**:
+All six tools first pick the snapshots to read — one segment per indexed
+root: the `repo` argument (one repository, a list, or `"*"`), else the
+repository of an `id` argument, the server's `--root`, or the only indexed
+root — keep those the `ref` argument names (local mode: the working tree,
+named by its branch), and, if they take a symbol, run the same **symbol
+lookup**:
 
-1. `id` → parse `repo@commit:path#local.name` and find that definition in
-   that file (the commit is ignored, so ids survive re-indexing);
+1. `id` → parse `repo@commit:path#local.name`, pick the snapshot of that
+   repository whose commit (full, ≥ 7-digit prefix, 12-digit form with the
+   overlay `+`) or ref the id names, and find that definition in that file;
+   a commit that is no longer indexed resolves against the current snapshot,
+   so ids survive re-indexing;
 2. else `qualified_name` → exact match in the qualified-name index, then
    suffix match on a `.` / `:` / `/` / `\` boundary (`Session.send` finds
    `shop.http.Session.send`, `User::save` finds `App\Models\User::save`,
@@ -759,7 +765,9 @@ All six tools first pick the segment (the `repo` argument, the server's
 
 When several nodes match, the pick is deterministic (non-test, exported,
 symbol before container, shorter qualified name, lower id) and the others
-are returned as `candidates`.
+are returned as `candidates`. A name looked up in several snapshots keeps
+the best match over all of them; the best match of each other snapshot is a
+candidate.
 
 | Tool | Reads | Graph traversal |
 |---|---|---|
@@ -805,7 +813,12 @@ On top of that:
   prototype — they just come after the code they declare or copy.
 
 Filters (`labels`, `language`) are exact terms; `path_glob` filters after
-ranking. Default labels exclude `File`, `Folder`, `Module` and `Repository`, so
+ranking. Over several snapshots (`repo: "*"`) each segment ranks on its own
+— BM25 statistics and priors are per segment, so scores are not comparable —
+and the rankings are merged by **reciprocal rank fusion**: a result at rank
+*r* of its snapshot scores `1 / (60 + r)`, multiplied again by the global
+priors (×0.5 tests, ×0.5 fields / variables / constants), so the top code
+definition of each repository comes before the tests and constants of any. Default labels exclude `File`, `Folder`, `Module` and `Repository`, so
 document sections are found alongside code (`install linux` →
 `README.md:Install > Linux`); they also exclude structured-data `Key` and
 `Document` nodes unless `language` is a data language, because a repository
@@ -887,6 +900,38 @@ Takes the file's symbols (already sorted by position) and nests them by
 `DEFINES` parent, falling back to span containment, children ordered by
 line. No content is read; signatures come from the node table. For a
 Markdown file the outline is its heading tree.
+
+### Responses: the envelope, grouping and the budget
+
+The tools compute their results as before (the `format: "verbose"` alpha
+shapes), and a last step (`rueca_query::compact`, RFC 0005) shapes them for
+an agent:
+
+- **Envelope.** `snapshots` lists what was read (`repo`, `ref`, full
+  `commit`, `overlay` when uncommitted changes were indexed, a host `url`
+  template); items refer to a snapshot by index `s` but keep a fully pinned
+  id `repo@commit12[+]:path#name`, valid on its own.
+- **Structure instead of repetition.** Search results and matches are
+  grouped by snapshot and file, so the path is written once per file; field
+  names are short (`qn`, `sig`, `lines`); scores are left out unless asked
+  for. `trace` lists each node once and edges as
+  `[src, dst, kind, confidence, strategy, line]` over node indexes instead
+  of two full ids per edge.
+- **Text.** MCP text content (and `rueca query --text`) is a rendering of
+  that JSON with one line per item and the local name of each symbol, which
+  together with the header and the group path spells the id.
+- **Budget.** `budget_tokens` (default 2,000) bounds the text: the builder
+  binary-searches the longest prefix of items whose rendering fits
+  (`ceil(bytes / 4)` tokens), marks the response `truncated` and returns a
+  `next_cursor` (an item offset, or the next line of a snippet).
+  Smaller defaults (`search_symbols` 10, `search_code` 20, `trace` depth 1
+  and 50 nodes) keep the first answer short; cursors fetch the rest.
+
+Measured on `psf/requests`, `gin-gonic/gin` and `sindresorhus/ky` (text
+content vs the alpha JSON, same arguments): `search_symbols` −64 to −70% at
+the same limit (−83 to −85% with the new default limit), `trace` depth 1
+−79 to −81%, `get_file_outline` −70 to −73%, `get_symbol` −20% (a long
+docstring dominates) to −83% (a class with many children).
 
 ### Putting them together
 

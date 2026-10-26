@@ -39,6 +39,7 @@ fn build(files: &[(&str, &str)]) -> ResolveOutput {
         repo: "local/test".into(),
         commit: "worktree".into(),
         dirty: true,
+        branch: None,
         root: None,
         indexed_at: 0,
         rueca_version: "test".into(),

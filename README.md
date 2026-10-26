@@ -90,10 +90,34 @@ cargo build --release -p rueca      # binary at target/release/rueca
 
 ```sh
 rueca index path/to/repo
-rueca query search_symbols '{"query":"session request"}' --root path/to/repo --pretty
-rueca query trace '{"qualified_name":"Session.request","direction":"callers","depth":2}' --root path/to/repo
+rueca query search_symbols '{"query":"session request","limit":3}' --root path/to/repo --text
+rueca query trace '{"qualified_name":"Session.request","direction":"callers"}' --root path/to/repo --text
 rueca status
 ```
+
+`--text` prints what an agent reads over MCP (without it, `query` prints the
+JSON envelope; see [docs/tools.md](docs/tools.md)). On
+[psf/requests](https://github.com/psf/requests):
+
+```
+github.com/psf/requests@611c6162cbc4 (main)
+src/requests/sessions.py
+  Method Session.request L557-653  def request(self, method: str, url: _t.UriType, params: …
+  Method Session.prepare_request L511-555  def prepare_request(self, request: Request) -> PreparedRequest
+  Function session L908-920  def session() -> Session
+(truncated; continue with "cursor": "3")
+
+github.com/psf/requests@611c6162cbc4 (main)
+0 Method Session.request  src/requests/sessions.py L557-653
+1 in d1 Function request  src/requests/api.py L24-71  →0 CALLS 0.5 heuristic @71
+2 in d1 Method Session.delete  src/requests/sessions.py L742-750  →0 CALLS 0.9 type_resolved @750
+…
+```
+
+Ids are `repo@commit:path#name` (here
+`github.com/psf/requests@611c6162cbc4:src/requests/sessions.py#Session.request`),
+and every tool takes `repo` (a list, or `"*"` for every indexed repository),
+`ref` and a token `budget_tokens`.
 
 Indexes live in `$RUECA_HOME` (default `~/.cache/rueca`). Re-run
 `rueca index` after changes; only changed files are re-extracted.
