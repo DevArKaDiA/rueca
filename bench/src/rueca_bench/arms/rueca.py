@@ -251,11 +251,12 @@ class RuecaArm(Arm):
             return {**args, "budget_tokens": SCORING_BUDGET} if text else {**args, "format": "verbose"}
         return args
 
-    def call(self, tool: str, args: dict[str, Any], root: Path | None, store: Path, text: bool = False, mode: str = "scoring") -> tuple[Any, float, str | None, str]:
+    def call(self, tool: str, args: dict[str, Any], root: Path | None, store: Path, text: bool = False, mode: str = "scoring", org: Path | None = None) -> tuple[Any, float, str | None, str]:
         """One `rueca query` process (the segment the index step wrote, warm
         OS page cache). (parsed JSON or None for text, seconds, error, raw
         stdout). An argument the binary rejects as unknown is dropped once
-        and the call retried (contract drift between branches)."""
+        and the call retried (contract drift between branches). `org`: an
+        organization file (RFC 0006), served instead of `root`."""
         args = self._args(args, mode, text)
         for _ in range(2):
             cmd = [self.bin, "query", tool, json.dumps(args)]
@@ -263,6 +264,8 @@ class RuecaArm(Arm):
                 cmd.append("--text")
             if root is not None:
                 cmd += ["--root", str(root)]
+            if org is not None:
+                cmd += ["--org", str(org)]
             cmd += ["--store", str(store)]
             res = run(cmd, timeout=self.call_timeout)
             if res.timed_out:
@@ -335,7 +338,7 @@ class RuecaArm(Arm):
         tokens, tj = self.agent_tokens(h, "search_symbols", args, raw) if text else (None, count_tokens(raw))
         return CallResult(True, secs, hits=hits, extra={"tokens": tokens, "tokens_json": tj})
 
-    def search_eff(self, h: Handle, query: str, limit: int = 10, root: Path | None = None, store: Path | None = None, repo: str | None = None) -> CallResult:
+    def search_eff(self, h: Handle, query: str, limit: int = 10, root: Path | None = None, store: Path | None = None, repo: str | None = None, org: Path | None = None) -> CallResult:
         """The search an agent would issue (limit `limit`, every other
         argument at its default): parsed items in rendered order, the tokens
         an agent reads, and the prefix cost after each item."""
@@ -344,14 +347,14 @@ class RuecaArm(Arm):
             args["repo"] = repo
         r = h.root if h is not None else root
         st = h.state["store"] if h is not None else store
-        data, secs, err, raw = self.call("search_symbols", args, r, st, mode="agent")
+        data, secs, err, raw = self.call("search_symbols", args, r, st, mode="agent", org=org)
         if err:
             return CallResult(False, secs, error=err)
         items = flat_results(data)
         prefix, approx = json_prefix_tokens(raw, data.get("results") or [])
         tokens, fmt = count_tokens(raw), "json"
         if self.contract != "alpha":
-            _, _, terr, txt = self.call("search_symbols", args, r, st, text=True, mode="agent")
+            _, _, terr, txt = self.call("search_symbols", args, r, st, text=True, mode="agent", org=org)
             if not terr:
                 prefix, approx = text_prefix_tokens(txt, len(items))
                 tokens, fmt = count_tokens(txt), "text"

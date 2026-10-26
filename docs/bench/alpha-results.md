@@ -743,13 +743,22 @@ tiktoken `cl100k_base` over what an agent reads: Rueca — RFC 0005 text content
 
 ### Multi-repository store
 
-21 S1 instances, one per repository (the first gated instance of the first `[org] repos_per_family` gated repositories of every language), all 21 repositories indexed into one store at those instances' base commits. Each keyword query is asked of the whole organization: **native** = one Rueca `search_symbols` with `repo: "*"`; **per repository** = one search per repository, merged by the bench with reciprocal rank fusion (k = 60) — what an agent must do without an org query (cbm has no cross-project search). Localization as in S1 with repository-qualified paths and the candidate filter of every language; *single* = the same arm's S1 answer on the instance's repository alone. Tokens: the top-10 answer an agent reads (per repository: the sum of its calls).
+21 S1 instances, one per repository (the first gated instance of the first `[org] repos_per_family` gated repositories of every language), all 21 repositories indexed into one store at those instances' base commits. Each keyword query is asked of the whole organization: **native** = one Rueca `search_symbols` served with `--org` (RFC 0006: one ranking over the organization symbol index, the organization built one repository at a time with `rueca index --org`); **per repository** = one search per repository, merged by the bench with reciprocal rank fusion (k = 60) — what an agent must do without an org query (cbm has no cross-project search). Localization as in S1 with repository-qualified paths and the candidate filter of every language; *single* = the same arm's S1 answer on the instance's repository alone. Tokens: the top-10 answer an agent reads (per repository: the sum of its calls).
 
 | Arm | Mode | n | File Acc@5 org | File Acc@5 single | Function Acc@10 org | Function Acc@10 single | Other-repository share of top 10 | Tokens org (median) | Tokens single (median) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| rueca | native `repo: "*"` | 21 | 9.5 | 61.9 | 9.5 | 47.6 | 94.3 | 831 | 337 |
+| rueca | organization `--org` | 21 | 47.6 | 61.9 | 33.3 | 47.6 | 36.7 | 435 | 337 |
 | rueca | per repository + RRF | 21 | 23.8 | 61.9 | 14.3 | 47.6 | 91.9 | 7189 | 337 |
 | cbm | per repository + RRF | 21 | 9.5 | 61.9 | 0.0 | 28.6 | 92.9 | 8659 | 450 |
+
+**RFC 0006 §8 — organization suite (Rueca).**
+
+| Metric | Organization | Single repository | Ratio | Floor | Target |
+|---|---:|---:|---:|---:|---:|
+| File Acc@5, organization scope vs the right repository alone | 47.6 | 61.9 | 0.77× | ≥ 0.85× | ≥ 0.95× |
+| Tokens per correct answer (Σ top-10 tokens / queries with a gold file of the instance's repository in the top 10: 10 org, 14 single) | 886 | 529 | 1.67× | reported | ≤ 1.2× |
+| Incremental update: re-index micropython/micropython (95,353 symbols) in the organization of 21 (organization layer vs the repository's own index; its first index took 4,652 ms) | 123 ms | 2,713 ms | 0.05× | ≤ 2× | ≤ 1× |
+| Organization layer per added repository (21 `index --org` steps, median / max) | 74 / 137 ms | 870 ms (median) | 0.10× / 0.40× | ≤ 2× | ≤ 1× |
 
 ### Multi-ref (one repository at two commits)
 

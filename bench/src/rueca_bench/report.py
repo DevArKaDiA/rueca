@@ -1597,6 +1597,48 @@ def _render_efficiency(L: list[str], eff: dict, s3: dict, meta: dict) -> None:
     L.append("")
 
 
+def _x(r: float | None) -> str:
+    return "—" if r is None else f"{r:.2f}×"
+
+
+def _render_org_rfc0006(L: list[str], mr: dict) -> None:
+    """RFC 0006 §8: organization File Acc@5 against the right repository
+    alone, incremental update of the organization layer, tokens per correct
+    answer at organization scope (Rueca)."""
+    a = (mr.get("arms") or {}).get("rueca") or {}
+    m = (a.get("modes") or {}).get("native") or {}
+    if a.get("carried") or m.get("status") != "ok":
+        return
+    L.append("**RFC 0006 §8 — organization suite (Rueca).**")
+    L.append("")
+    L.append("| Metric | Organization | Single repository | Ratio | Floor | Target |")
+    L.append("|---|---:|---:|---:|---:|---:|")
+    L.append(
+        f"| File Acc@5, organization scope vs the right repository alone | {_f(m.get('file_acc@5'))} | {_f(m.get('single_file_acc@5'))} | "
+        f"{_x(m.get('file_acc@5_ratio'))} | ≥ 0.85× | ≥ 0.95× |"
+    )
+    L.append(
+        f"| Tokens per correct answer (Σ top-10 tokens / queries with a gold file of the instance's repository in the top 10: "
+        f"{m.get('found_top10')} org, {m.get('single_found_top10')} single) | {_tok(m.get('tokens_per_correct'))} | "
+        f"{_tok(m.get('single_tokens_per_correct'))} | {_x(m.get('tokens_per_correct_ratio'))} | reported | ≤ 1.2× |"
+    )
+    layer = a.get("org_layer") or {}
+    rep = layer.get("replace") or {}
+    if rep:
+        L.append(
+            f"| Incremental update: re-index {rep.get('repo')} ({rep.get('docs') or 0:,} symbols) in the organization of {rep.get('org_repos')} "
+            f"(organization layer vs the repository's own index; its first index took {rep.get('first_repo_ms') or 0:,} ms) | "
+            f"{rep.get('org_ms') or 0:,} ms | {rep.get('repo_ms') or 0:,} ms | {_x(rep.get('ratio'))} | ≤ 2× | ≤ 1× |"
+        )
+    if layer.get("steps"):
+        L.append(
+            f"| Organization layer per added repository ({layer['steps']} `index --org` steps, median / max) | "
+            f"{layer['org_ms_median']:,.0f} / {layer['org_ms_max']:,} ms | {layer['repo_ms_median']:,.0f} ms (median) | "
+            f"{_x(layer.get('ratio_median'))} / {_x(layer.get('ratio_max'))} | ≤ 2× | ≤ 1× |"
+        )
+    L.append("")
+
+
 def _render_org(L: list[str], orgs: dict) -> None:
     mr = orgs.get("multirepo") or {}
     L.append("## Org scenarios (RFC 0005 §5–§6, §8)")
@@ -1610,7 +1652,8 @@ def _render_org(L: list[str], orgs: dict) -> None:
         L.append(
             f"{mr['instances']} S1 instances, one per repository (the first gated instance of the first `[org] repos_per_family` gated repositories of "
             f"every language), all {len(mr['repos'])} repositories indexed into one store at those instances' base commits. Each keyword query is asked of "
-            "the whole organization: **native** = one Rueca `search_symbols` with `repo: \"*\"`; **per repository** = one search per repository, merged "
+            "the whole organization: **native** = one Rueca `search_symbols` served with `--org` (RFC 0006: one ranking over the organization symbol index, "
+            "the organization built one repository at a time with `rueca index --org`); **per repository** = one search per repository, merged "
             "by the bench with reciprocal rank fusion (k = 60) — what an agent must do without an org query (cbm has no cross-project search). "
             "Localization as in S1 with repository-qualified paths and the candidate filter of every language; *single* = the same arm's S1 answer "
             "on the instance's repository alone. Tokens: the top-10 answer an agent reads (per repository: the sum of its calls)."
@@ -1624,7 +1667,7 @@ def _render_org(L: list[str], orgs: dict) -> None:
                 L.append(f"| {arm} | — | | {a.get('status')}: {a.get('error', '')[:120]} | | | | | | |")
                 continue
             for mode, m in a["modes"].items():
-                label = "native `repo: \"*\"`" if mode == "native" else "per repository + RRF"
+                label = ("organization `--org`" if not a.get("carried") else "native `repo: \"*\"`") if mode == "native" else "per repository + RRF"
                 if m.get("status") != "ok":
                     L.append(f"| {arm} | {label} | — | pending: {m.get('reason', '')[:160]} | | | | | | |")
                     continue
@@ -1633,6 +1676,7 @@ def _render_org(L: list[str], orgs: dict) -> None:
                     f"{_f(m.get('other_repo_top10'))} | {_tok(m.get('tokens_median'))} | {_tok(m.get('single_tokens_median'))} |"
                 )
         L.append("")
+        _render_org_rfc0006(L, mr)
     mf = orgs.get("multiref") or {}
     L.append("### Multi-ref (one repository at two commits)")
     L.append("")
@@ -1757,6 +1801,13 @@ def report() -> None:
         if not orgs[k] or not orgs[k].get("arms", orgs[k].get("status")):
             if published_eff.get("org", {}).get(k):
                 orgs[k] = dict(published_eff["org"][k], carried=True)
+    # an arm not run this time keeps its published multi-repository numbers
+    pub_mr = (published_eff.get("org") or {}).get("multirepo") or {}
+    mr = orgs["multirepo"]
+    if mr.get("arms") is not None and not mr.get("carried"):
+        for arm, rec in (pub_mr.get("arms") or {}).items():
+            if arm not in mr["arms"]:
+                mr["arms"][arm] = dict(rec, carried=True)
     log("report: scorecard")
     card = build_scorecard(s1, s3, health, data, eff)
     carried_pairs = {tuple(k.split(":", 1)) for k in s1.get("carried", {})}

@@ -72,7 +72,8 @@ uv run --project bench rueca-bench check                 # regression check vs t
 - `clean --work` removes worktrees; `clean --runs rueca` drops cached Rueca outputs.
 - `uv run --project bench pytest bench/tests` — unit tests of the harness
   pieces (efficiency counting, contract normalizers, health rules, rank
-  fusion and the multi-ref scorer).
+  fusion, the organization file and RFC 0006 metrics, and the multi-ref
+  scorer).
 - Per-call timeouts: 120 s per query, 1800 s per index (`arms/__init__.py`).
 - S1 runs repositories in parallel (`--workers`, default 2), instances of one
   repository sequentially (one partial clone per repository, one detached
@@ -709,21 +710,37 @@ better.
 
 **Multi-repository store.** The first gated S1 instance of the first
 `[org] repos_per_family` (3) gated S1 repositories of every language family
-— 21 repositories, each at that instance's base commit — are indexed into
-one store (Rueca: one `--store`, one root per repository; cbm: one project
-per repository). Each instance's keyword query is asked of the whole
-organization: Rueca **native**, one `search_symbols` with `repo: "*"` (rank
-fusion across roots; *pending* when the binary rejects `"*"`), and, for
-Rueca and cbm, **per repository**: one search per repository, merged by the
-bench with reciprocal rank fusion (k = 60; one item per repository at each
-rank, ties broken by the raw per-repository score) — what an agent without
-an org query must do; cbm has no cross-project search. Scored like S1
-(File Acc@5, Function Acc@10) with repository-qualified paths and the
-candidate filter of every language, against the same arm's
-single-repository S1 answer for the same instance; tokens of the top-10
-answer (per repository: the sum of its calls) and the share of the top 10
-taken by other repositories. Worktrees are removed after indexing (the
-stores keep what queries need), so disk stays bounded.
+— 21 repositories, each at that instance's base commit — are indexed
+together. Rueca: **one organization** (RFC 0006), built one repository at a
+time — as each worktree is added, the bench appends it to an organization
+file (`.cache/org/rueca-org.toml`) and runs `rueca index --org <file>
+<root>`, which indexes that repository and adds it to the organization
+layer; cbm: one project per repository. Each instance's keyword query is
+asked of the whole organization: Rueca **native**, one `search_symbols`
+served with `--org` and no `repo` (one ranking over the organization symbol
+index), and, for Rueca and cbm, **per repository**: one search per
+repository, merged by the bench with reciprocal rank fusion (k = 60; one
+item per repository at each rank, ties broken by the raw per-repository
+score) — what an agent without an org query must do; cbm has no
+cross-project search. Scored like S1 (File Acc@5, Function Acc@10) with
+repository-qualified paths and the candidate filter of every language,
+against the same arm's single-repository S1 answer for the same instance;
+tokens of the top-10 answer (per repository: the sum of its calls) and the
+share of the top 10 taken by other repositories. Worktrees are removed after
+indexing (the stores keep what queries need), so disk stays bounded; the S1
+gold of each instance is computed (or read from the cache) on the way.
+
+RFC 0006 §8 metrics (Rueca, report table "organization suite"): File Acc@5
+at organization scope over the single-repository S1 value (floor ≥ 0.85×,
+target ≥ 0.95×); **tokens per correct answer** at organization scope — Σ
+tokens of the top-10 answers / number of queries whose top 10 holds a gold
+file of the instance's own repository — against the same ratio of the S1
+single-repository answers (target ≤ 1.2×); **incremental update** — the
+organization-layer time `org_ms` that every `index --org` step reports
+(adding one repository) and, after the 21, of re-indexing the repository
+with the most symbol documents (its part replaced), each over that
+repository's own index time (floor ≤ 2×, target ≤ 1×). An arm not run keeps
+its published numbers (marked carried).
 
 **Multi-ref.** `[multiref] instance` (psf__requests-2317): the repository at
 the base commit and at a fix commit (base + the instance's gold patch,
@@ -975,7 +992,10 @@ file paths and function names of the public corpus repositories.
   `trace` collapse across refs (§6) is not scored (no per-commit call-graph
   gold); the multi-repository scenario fuses per-repository rankings for
   cbm and for Rueca's per-repository mode in the bench (cbm has no
-  cross-project query). RFC 0004 §5 counts health over "extracted files";
+  cross-project query). The organization's incremental update time is
+  measured on one re-index after the facts cache is warm (the repository's
+  own index time is then lower than its first index, so the ratio is
+  conservative); both times are reported. RFC 0004 §5 counts health over "extracted files";
   the gated rate now leaves out vendored, copied and misdetected files (the
   raw rate is shown next to it).
 - RFC 0004 §7.7 asks for a calibration split per language; S3 calibration

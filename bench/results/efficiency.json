@@ -762,64 +762,90 @@
       "native": {
        "status": "ok",
        "n": 21,
-       "file_acc@5": 0.09523809523809523,
+       "file_acc@5": 0.47619047619047616,
        "single_file_acc@5": 0.6190476190476191,
-       "func_acc@10": 0.09523809523809523,
+       "func_acc@10": 0.3333333333333333,
        "single_func_acc@10": 0.47619047619047616,
        "n_func": 21,
-       "other_repo_top10": 0.9428571428571428,
-       "tokens_median": 831,
+       "other_repo_top10": 0.3666666666666667,
+       "tokens_median": 435,
        "single_tokens_median": 337,
+       "file_acc@5_ratio": 0.7692307692307692,
+       "tokens_per_correct": 886.0,
+       "single_tokens_per_correct": 529.4285714285714,
+       "tokens_per_correct_ratio": 1.6735024284943334,
+       "found_top10": 10,
+       "single_found_top10": 14,
        "rows": [
         {
          "id": "psf__requests-2317",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 1.0,
+         "other_repo_top10": 0.7,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 1.0,
-         "tokens": 830,
-         "single_tokens": 264
+         "tokens": 484,
+         "single_tokens": 264,
+         "fh": 0,
+         "pf": 484,
+         "single_fh": 0,
+         "single_pf": 264
         },
         {
          "id": "pallets__flask-5063",
-         "file_acc@5": 0.0,
+         "file_acc@5": 1.0,
          "func_acc@10": 1.0,
-         "other_repo_top10": 1.0,
+         "other_repo_top10": 0.1,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 851,
-         "single_tokens": 478
+         "tokens": 493,
+         "single_tokens": 478,
+         "fh": 1,
+         "pf": 77,
+         "single_fh": 1,
+         "single_pf": 48
         },
         {
          "id": "pylint-dev__pylint-7114",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 1.0,
+         "other_repo_top10": 0.1,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 832,
-         "single_tokens": 443
+         "tokens": 474,
+         "single_tokens": 443,
+         "fh": 0,
+         "pf": 474,
+         "single_fh": 0,
+         "single_pf": 443
         },
         {
          "id": "tailwindlabs__tailwindcss-553",
-         "file_acc@5": 0.0,
-         "func_acc@10": 0.0,
-         "other_repo_top10": 1.0,
+         "file_acc@5": 1.0,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 827,
-         "single_tokens": 239
+         "tokens": 253,
+         "single_tokens": 239,
+         "fh": 1,
+         "pf": 53,
+         "single_fh": 1,
+         "single_pf": 53
         },
         {
          "id": "coder__code-server-4923",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "other_repo_top10": 1.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
-         "tokens": 845,
-         "single_tokens": 316
+         "tokens": 480,
+         "single_tokens": 316,
+         "fh": 0,
+         "pf": 480,
+         "single_fh": 3,
+         "single_pf": 103
         },
         {
          "id": "vuejs__core-11899",
@@ -828,158 +854,222 @@
          "other_repo_top10": 1.0,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 764,
-         "single_tokens": 295
+         "tokens": 397,
+         "single_tokens": 295,
+         "fh": 0,
+         "pf": 397,
+         "single_fh": 0,
+         "single_pf": 295
         },
         {
          "id": "briannesbitt__carbon-3103",
-         "file_acc@5": 0.0,
+         "file_acc@5": 1.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "other_repo_top10": 0.1,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
-         "tokens": 881,
-         "single_tokens": 289
+         "tokens": 404,
+         "single_tokens": 289,
+         "fh": 5,
+         "pf": 215,
+         "single_fh": 6,
+         "single_pf": 204
         },
         {
          "id": "php-cs-fixer__php-cs-fixer-7875",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 783,
-         "single_tokens": 467
+         "tokens": 531,
+         "single_tokens": 467,
+         "fh": 0,
+         "pf": 531,
+         "single_fh": 0,
+         "single_pf": 467
         },
         {
          "id": "laravel__framework-52451",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 800,
-         "single_tokens": 430
+         "tokens": 430,
+         "single_tokens": 430,
+         "fh": 0,
+         "pf": 430,
+         "single_fh": 0,
+         "single_pf": 430
         },
         {
          "id": "caddyserver__caddy-5761",
          "file_acc@5": 1.0,
          "func_acc@10": 1.0,
-         "other_repo_top10": 0.9,
+         "other_repo_top10": 0.8,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 860,
-         "single_tokens": 313
+         "tokens": 479,
+         "single_tokens": 313,
+         "fh": 4,
+         "pf": 290,
+         "single_fh": 1,
+         "single_pf": 53
         },
         {
          "id": "gin-gonic__gin-2755",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 813,
-         "single_tokens": 284
+         "tokens": 269,
+         "single_tokens": 284,
+         "fh": 0,
+         "pf": 269,
+         "single_fh": 0,
+         "single_pf": 284
         },
         {
          "id": "prometheus__prometheus-10633",
-         "file_acc@5": 0.0,
-         "func_acc@10": 0.0,
-         "other_repo_top10": 1.0,
+         "file_acc@5": 1.0,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 861,
-         "single_tokens": 373
+         "tokens": 357,
+         "single_tokens": 373,
+         "fh": 3,
+         "pf": 107,
+         "single_fh": 4,
+         "single_pf": 132
         },
         {
          "id": "google__gson-1703",
-         "file_acc@5": 0.0,
-         "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "file_acc@5": 1.0,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.5,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 809,
-         "single_tokens": 305
+         "tokens": 387,
+         "single_tokens": 305,
+         "fh": 4,
+         "pf": 165,
+         "single_fh": 1,
+         "single_pf": 54
         },
         {
          "id": "projectlombok__lombok-3326",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 1.0,
+         "other_repo_top10": 0.1,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 767,
-         "single_tokens": 377
+         "tokens": 437,
+         "single_tokens": 377,
+         "fh": 0,
+         "pf": 437,
+         "single_fh": 0,
+         "single_pf": 377
         },
         {
          "id": "apache__dubbo-11255",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "other_repo_top10": 0.2,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 853,
-         "single_tokens": 450
+         "tokens": 471,
+         "single_tokens": 450,
+         "fh": 0,
+         "pf": 471,
+         "single_fh": 9,
+         "single_pf": 397
         },
         {
          "id": "redis__redis-10068",
-         "file_acc@5": 0.0,
+         "file_acc@5": 1.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 1.0,
+         "other_repo_top10": 0.4,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
-         "tokens": 859,
-         "single_tokens": 400
+         "tokens": 398,
+         "single_tokens": 400,
+         "fh": 1,
+         "pf": 108,
+         "single_fh": 6,
+         "single_pf": 225
         },
         {
          "id": "jqlang__jq-2728",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "other_repo_top10": 1.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 782,
-         "single_tokens": 257
+         "tokens": 406,
+         "single_tokens": 257,
+         "fh": 0,
+         "pf": 406,
+         "single_fh": 6,
+         "single_pf": 156
         },
         {
          "id": "micropython__micropython-15898",
-         "file_acc@5": 0.0,
-         "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "file_acc@5": 1.0,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.7,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 855,
-         "single_tokens": 403
+         "tokens": 443,
+         "single_tokens": 403,
+         "fh": 8,
+         "pf": 373,
+         "single_fh": 6,
+         "single_pf": 250
         },
         {
          "id": "fmtlib__fmt-2317",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "other_repo_top10": 1.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
-         "tokens": 836,
-         "single_tokens": 275
+         "tokens": 435,
+         "single_tokens": 275,
+         "fh": 0,
+         "pf": 435,
+         "single_fh": 10,
+         "single_pf": 264
         },
         {
          "id": "nlohmann__json-4536",
-         "file_acc@5": 0.0,
+         "file_acc@5": 1.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 1.0,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 831,
-         "single_tokens": 417
+         "tokens": 501,
+         "single_tokens": 417,
+         "fh": 2,
+         "pf": 96,
+         "single_fh": 5,
+         "single_pf": 185
         },
         {
          "id": "catchorg__Catch2-1608",
          "file_acc@5": 1.0,
-         "func_acc@10": 0.0,
-         "other_repo_top10": 0.9,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 789,
-         "single_tokens": 337
+         "tokens": 331,
+         "single_tokens": 337,
+         "fh": 1,
+         "pf": 45,
+         "single_fh": 1,
+         "single_pf": 45
         }
        ]
       },
@@ -994,6 +1084,12 @@
        "other_repo_top10": 0.9190476190476191,
        "tokens_median": 7189,
        "single_tokens_median": 337,
+       "file_acc@5_ratio": 0.3846153846153846,
+       "tokens_per_correct": null,
+       "single_tokens_per_correct": null,
+       "tokens_per_correct_ratio": null,
+       "found_top10": null,
+       "single_found_top10": null,
        "rows": [
         {
          "id": "psf__requests-2317",
@@ -1003,7 +1099,11 @@
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 1.0,
          "tokens": 7189,
-         "single_tokens": 264
+         "single_tokens": 264,
+         "fh": null,
+         "pf": null,
+         "single_fh": 0,
+         "single_pf": 264
         },
         {
          "id": "pallets__flask-5063",
@@ -1013,7 +1113,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
          "tokens": 7203,
-         "single_tokens": 478
+         "single_tokens": 478,
+         "fh": null,
+         "pf": null,
+         "single_fh": 1,
+         "single_pf": 48
         },
         {
          "id": "pylint-dev__pylint-7114",
@@ -1023,7 +1127,11 @@
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
          "tokens": 6996,
-         "single_tokens": 443
+         "single_tokens": 443,
+         "fh": null,
+         "pf": null,
+         "single_fh": 0,
+         "single_pf": 443
         },
         {
          "id": "tailwindlabs__tailwindcss-553",
@@ -1033,7 +1141,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
          "tokens": 7846,
-         "single_tokens": 239
+         "single_tokens": 239,
+         "fh": null,
+         "pf": null,
+         "single_fh": 1,
+         "single_pf": 53
         },
         {
          "id": "coder__code-server-4923",
@@ -1043,7 +1155,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
          "tokens": 7472,
-         "single_tokens": 316
+         "single_tokens": 316,
+         "fh": null,
+         "pf": null,
+         "single_fh": 3,
+         "single_pf": 103
         },
         {
          "id": "vuejs__core-11899",
@@ -1053,7 +1169,11 @@
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
          "tokens": 6537,
-         "single_tokens": 295
+         "single_tokens": 295,
+         "fh": null,
+         "pf": null,
+         "single_fh": 0,
+         "single_pf": 295
         },
         {
          "id": "briannesbitt__carbon-3103",
@@ -1063,7 +1183,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
          "tokens": 7288,
-         "single_tokens": 289
+         "single_tokens": 289,
+         "fh": null,
+         "pf": null,
+         "single_fh": 6,
+         "single_pf": 204
         },
         {
          "id": "php-cs-fixer__php-cs-fixer-7875",
@@ -1073,7 +1197,11 @@
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
          "tokens": 6734,
-         "single_tokens": 467
+         "single_tokens": 467,
+         "fh": null,
+         "pf": null,
+         "single_fh": 0,
+         "single_pf": 467
         },
         {
          "id": "laravel__framework-52451",
@@ -1083,7 +1211,11 @@
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
          "tokens": 6770,
-         "single_tokens": 430
+         "single_tokens": 430,
+         "fh": null,
+         "pf": null,
+         "single_fh": 0,
+         "single_pf": 430
         },
         {
          "id": "caddyserver__caddy-5761",
@@ -1093,7 +1225,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
          "tokens": 7441,
-         "single_tokens": 313
+         "single_tokens": 313,
+         "fh": null,
+         "pf": null,
+         "single_fh": 1,
+         "single_pf": 53
         },
         {
          "id": "gin-gonic__gin-2755",
@@ -1103,7 +1239,11 @@
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
          "tokens": 7024,
-         "single_tokens": 284
+         "single_tokens": 284,
+         "fh": null,
+         "pf": null,
+         "single_fh": 0,
+         "single_pf": 284
         },
         {
          "id": "prometheus__prometheus-10633",
@@ -1113,7 +1253,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
          "tokens": 7129,
-         "single_tokens": 373
+         "single_tokens": 373,
+         "fh": null,
+         "pf": null,
+         "single_fh": 4,
+         "single_pf": 132
         },
         {
          "id": "google__gson-1703",
@@ -1123,7 +1267,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
          "tokens": 7359,
-         "single_tokens": 305
+         "single_tokens": 305,
+         "fh": null,
+         "pf": null,
+         "single_fh": 1,
+         "single_pf": 54
         },
         {
          "id": "projectlombok__lombok-3326",
@@ -1133,7 +1281,11 @@
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
          "tokens": 6839,
-         "single_tokens": 377
+         "single_tokens": 377,
+         "fh": null,
+         "pf": null,
+         "single_fh": 0,
+         "single_pf": 377
         },
         {
          "id": "apache__dubbo-11255",
@@ -1143,7 +1295,11 @@
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
          "tokens": 7366,
-         "single_tokens": 450
+         "single_tokens": 450,
+         "fh": null,
+         "pf": null,
+         "single_fh": 9,
+         "single_pf": 397
         },
         {
          "id": "redis__redis-10068",
@@ -1153,7 +1309,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
          "tokens": 7394,
-         "single_tokens": 400
+         "single_tokens": 400,
+         "fh": null,
+         "pf": null,
+         "single_fh": 6,
+         "single_pf": 225
         },
         {
          "id": "jqlang__jq-2728",
@@ -1163,7 +1323,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
          "tokens": 6896,
-         "single_tokens": 257
+         "single_tokens": 257,
+         "fh": null,
+         "pf": null,
+         "single_fh": 6,
+         "single_pf": 156
         },
         {
          "id": "micropython__micropython-15898",
@@ -1173,7 +1337,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
          "tokens": 7310,
-         "single_tokens": 403
+         "single_tokens": 403,
+         "fh": null,
+         "pf": null,
+         "single_fh": 6,
+         "single_pf": 250
         },
         {
          "id": "fmtlib__fmt-2317",
@@ -1183,7 +1351,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
          "tokens": 7409,
-         "single_tokens": 275
+         "single_tokens": 275,
+         "fh": null,
+         "pf": null,
+         "single_fh": 10,
+         "single_pf": 264
         },
         {
          "id": "nlohmann__json-4536",
@@ -1193,7 +1365,11 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
          "tokens": 7122,
-         "single_tokens": 417
+         "single_tokens": 417,
+         "fh": null,
+         "pf": null,
+         "single_fh": 5,
+         "single_pf": 185
         },
         {
          "id": "catchorg__Catch2-1608",
@@ -1203,13 +1379,39 @@
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
          "tokens": 7051,
-         "single_tokens": 337
+         "single_tokens": 337,
+         "fh": null,
+         "pf": null,
+         "single_fh": 1,
+         "single_pf": 45
         }
        ]
       }
      },
-     "index_seconds": 23.338089626049623,
-     "version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+     "index_seconds": 28.952514122764114,
+     "version": "rueca 0.1.0-alpha.1 (binary sha256 bde3cfb95fba, rfc0005 contract, feat/org-graph-phase1@433b0a8)",
+     "org_layer": {
+      "steps": 21,
+      "org_ms_median": 74.0,
+      "org_ms_max": 137,
+      "repo_ms_median": 870.0,
+      "ratio_median": 0.09770114942528736,
+      "ratio_max": 0.4036144578313253,
+      "replace": {
+       "repo": "micropython/micropython",
+       "docs": 95353,
+       "repo_ms": 2713,
+       "first_repo_ms": 4652,
+       "org_ms": 123,
+       "org_repos": 21,
+       "replaced": [
+        "github.com/micropython/micropython"
+       ],
+       "bytes_copied": 14715980,
+       "ratio": 0.045337265020272764,
+       "ratio_first": 0.0264402407566638
+      }
+     }
     },
     "cbm": {
      "status": "ok",
@@ -1440,7 +1642,8 @@
       }
      },
      "index_seconds": 43.27044066807139,
-     "version": "codebase-memory-mcp 0.12.0"
+     "version": "codebase-memory-mcp 0.12.0",
+     "carried": true
     }
    }
   },
