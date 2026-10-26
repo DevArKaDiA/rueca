@@ -762,32 +762,32 @@
       "native": {
        "status": "ok",
        "n": 21,
-       "file_acc@5": 0.47619047619047616,
+       "file_acc@5": 0.42857142857142855,
        "single_file_acc@5": 0.6190476190476191,
        "func_acc@10": 0.3333333333333333,
        "single_func_acc@10": 0.47619047619047616,
        "n_func": 21,
-       "other_repo_top10": 0.3666666666666667,
-       "tokens_median": 435,
+       "other_repo_top10": 0.15714285714285714,
+       "tokens_median": 357,
        "single_tokens_median": 337,
-       "file_acc@5_ratio": 0.7692307692307692,
-       "tokens_per_correct": 886.0,
+       "file_acc@5_ratio": 0.6923076923076923,
+       "tokens_per_correct": 782.4,
        "single_tokens_per_correct": 529.4285714285714,
-       "tokens_per_correct_ratio": 1.6735024284943334,
+       "tokens_per_correct_ratio": 1.4778197517539124,
        "found_top10": 10,
        "single_found_top10": 14,
        "rows": [
         {
          "id": "psf__requests-2317",
          "file_acc@5": 0.0,
-         "func_acc@10": 0.0,
-         "other_repo_top10": 0.7,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 1.0,
-         "tokens": 484,
+         "tokens": 264,
          "single_tokens": 264,
          "fh": 0,
-         "pf": 484,
+         "pf": 264,
          "single_fh": 0,
          "single_pf": 264
         },
@@ -795,13 +795,13 @@
          "id": "pallets__flask-5063",
          "file_acc@5": 1.0,
          "func_acc@10": 1.0,
-         "other_repo_top10": 0.1,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 493,
+         "tokens": 440,
          "single_tokens": 478,
          "fh": 1,
-         "pf": 77,
+         "pf": 52,
          "single_fh": 1,
          "single_pf": 48
         },
@@ -809,13 +809,13 @@
          "id": "pylint-dev__pylint-7114",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.1,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 474,
+         "tokens": 433,
          "single_tokens": 443,
          "fh": 0,
-         "pf": 474,
+         "pf": 433,
          "single_fh": 0,
          "single_pf": 443
         },
@@ -837,13 +837,13 @@
          "id": "coder__code-server-4923",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 1.0,
+         "other_repo_top10": 0.3,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
-         "tokens": 480,
+         "tokens": 392,
          "single_tokens": 316,
          "fh": 0,
-         "pf": 480,
+         "pf": 392,
          "single_fh": 3,
          "single_pf": 103
         },
@@ -854,10 +854,10 @@
          "other_repo_top10": 1.0,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 397,
+         "tokens": 292,
          "single_tokens": 295,
          "fh": 0,
-         "pf": 397,
+         "pf": 292,
          "single_fh": 0,
          "single_pf": 295
         },
@@ -865,13 +865,13 @@
          "id": "briannesbitt__carbon-3103",
          "file_acc@5": 1.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.1,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
-         "tokens": 404,
+         "tokens": 348,
          "single_tokens": 289,
-         "fh": 5,
-         "pf": 215,
+         "fh": 6,
+         "pf": 194,
          "single_fh": 6,
          "single_pf": 204
         },
@@ -907,13 +907,13 @@
          "id": "caddyserver__caddy-5761",
          "file_acc@5": 1.0,
          "func_acc@10": 1.0,
-         "other_repo_top10": 0.8,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 479,
+         "tokens": 338,
          "single_tokens": 313,
-         "fh": 4,
-         "pf": 290,
+         "fh": 1,
+         "pf": 53,
          "single_fh": 1,
          "single_pf": 53
         },
@@ -949,13 +949,13 @@
          "id": "google__gson-1703",
          "file_acc@5": 1.0,
          "func_acc@10": 1.0,
-         "other_repo_top10": 0.5,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 387,
+         "tokens": 336,
          "single_tokens": 305,
-         "fh": 4,
-         "pf": 165,
+         "fh": 1,
+         "pf": 54,
          "single_fh": 1,
          "single_pf": 54
         },
@@ -963,13 +963,13 @@
          "id": "projectlombok__lombok-3326",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.1,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 437,
+         "tokens": 371,
          "single_tokens": 377,
          "fh": 0,
-         "pf": 437,
+         "pf": 371,
          "single_fh": 0,
          "single_pf": 377
         },
@@ -977,13 +977,13 @@
          "id": "apache__dubbo-11255",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.2,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 471,
+         "tokens": 459,
          "single_tokens": 450,
-         "fh": 0,
-         "pf": 471,
+         "fh": 10,
+         "pf": 448,
          "single_fh": 9,
          "single_pf": 397
         },
@@ -991,13 +991,13 @@
          "id": "redis__redis-10068",
          "file_acc@5": 1.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 0.4,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
-         "tokens": 398,
+         "tokens": 343,
          "single_tokens": 400,
          "fh": 1,
-         "pf": 108,
+         "pf": 40,
          "single_fh": 6,
          "single_pf": 225
         },
@@ -1008,24 +1008,24 @@
          "other_repo_top10": 1.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 406,
+         "tokens": 383,
          "single_tokens": 257,
          "fh": 0,
-         "pf": 406,
+         "pf": 383,
          "single_fh": 6,
          "single_pf": 156
         },
         {
          "id": "micropython__micropython-15898",
-         "file_acc@5": 1.0,
-         "func_acc@10": 1.0,
-         "other_repo_top10": 0.7,
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 443,
+         "tokens": 396,
          "single_tokens": 403,
-         "fh": 8,
-         "pf": 373,
+         "fh": 0,
+         "pf": 396,
          "single_fh": 6,
          "single_pf": 250
         },
@@ -1033,13 +1033,13 @@
          "id": "fmtlib__fmt-2317",
          "file_acc@5": 0.0,
          "func_acc@10": 0.0,
-         "other_repo_top10": 1.0,
+         "other_repo_top10": 0.0,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 0.0,
-         "tokens": 435,
+         "tokens": 357,
          "single_tokens": 275,
          "fh": 0,
-         "pf": 435,
+         "pf": 357,
          "single_fh": 10,
          "single_pf": 264
         },
@@ -1388,28 +1388,28 @@
        ]
       }
      },
-     "index_seconds": 28.952514122764114,
-     "version": "rueca 0.1.0-alpha.1 (binary sha256 bde3cfb95fba, rfc0005 contract, feat/org-graph-phase1@433b0a8)",
+     "index_seconds": 34.208977043104824,
+     "version": "rueca 0.1.0-alpha.1 (binary sha256 f4a33507702d, rfc0005 contract)",
      "org_layer": {
       "steps": 21,
-      "org_ms_median": 74.0,
-      "org_ms_max": 137,
-      "repo_ms_median": 870.0,
-      "ratio_median": 0.09770114942528736,
-      "ratio_max": 0.4036144578313253,
+      "org_ms_median": 206.0,
+      "org_ms_max": 1413,
+      "repo_ms_median": 987.0,
+      "ratio_median": 0.25894736842105265,
+      "ratio_max": 0.47601476014760147,
       "replace": {
        "repo": "micropython/micropython",
        "docs": 95353,
-       "repo_ms": 2713,
-       "first_repo_ms": 4652,
-       "org_ms": 123,
+       "repo_ms": 3616,
+       "first_repo_ms": 4663,
+       "org_ms": 499,
        "org_repos": 21,
        "replaced": [
         "github.com/micropython/micropython"
        ],
        "bytes_copied": 14715980,
-       "ratio": 0.045337265020272764,
-       "ratio_first": 0.0264402407566638
+       "ratio": 0.13799778761061948,
+       "ratio_first": 0.1070126527986275
       }
      }
     },
@@ -1664,12 +1664,497 @@
    },
    "queries": 21,
    "single_tokens_sum": 10660,
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 f4a33507702d, rfc0005 contract)",
    "status": "pending",
    "reason": "local catalog holds one snapshot per root (RFC 0005 \u00a79)",
    "errors": [
     "rc=2: invalid argument `ref` for `search_symbols`: invalid type: sequence, expected a string"
    ]
+  },
+  "crossrepo": {
+   "status": "ok",
+   "summary": {
+    "imports": {
+     "predicted": 183,
+     "gold": 183,
+     "correct": 183,
+     "found": 183,
+     "precision": 1.0,
+     "recall": 1.0
+    },
+    "uses": {
+     "predicted": 1605,
+     "gold": 220,
+     "correct": 1600,
+     "found": 201,
+     "precision": 0.9968847352024922,
+     "recall": 0.9136363636363637
+    },
+    "all": {
+     "predicted": 1788,
+     "gold": 403,
+     "correct": 1783,
+     "found": 384,
+     "precision": 0.9972035794183445,
+     "recall": 0.9528535980148883
+    }
+   },
+   "groups": [
+    {
+     "consumer": "pallets/flask",
+     "commit": "22d924701a6ae2e4cd01e9a15bbaf3946094af65",
+     "language": "python",
+     "status": "ok",
+     "org_ms": 410,
+     "link_ms": 66,
+     "edges": 182,
+     "libraries": [
+      {
+       "repo": "pallets/click",
+       "commit": "934813e4d421071a1b3db3973c02fe2721359a6e",
+       "score": {
+        "imports": {
+         "predicted": 9,
+         "gold": 9,
+         "correct": 9,
+         "found": 9
+        },
+        "uses": {
+         "predicted": 142,
+         "gold": 33,
+         "correct": 142,
+         "found": 33
+        },
+        "by_kind": {
+         "CALLS": {
+          "predicted": 72,
+          "correct": 72
+         },
+         "DECORATES": {
+          "predicted": 12,
+          "correct": 12
+         },
+         "INHERITS": {
+          "predicted": 5,
+          "correct": 5
+         },
+         "REFERENCES": {
+          "predicted": 35,
+          "correct": 35
+         },
+         "TESTS": {
+          "predicted": 15,
+          "correct": 15
+         },
+         "THROWS": {
+          "predicted": 3,
+          "correct": 3
+         }
+        },
+        "missed_imports": [],
+        "wrong_imports": [],
+        "missed_uses": [],
+        "wrong_uses": []
+       }
+      },
+      {
+       "repo": "pallets/jinja",
+       "commit": "15206881c006c79667fe5154fe80c01c65410679",
+       "score": {
+        "imports": {
+         "predicted": 5,
+         "gold": 5,
+         "correct": 5,
+         "found": 5
+        },
+        "uses": {
+         "predicted": 26,
+         "gold": 10,
+         "correct": 26,
+         "found": 10
+        },
+        "by_kind": {
+         "CALLS": {
+          "predicted": 7,
+          "correct": 7
+         },
+         "INHERITS": {
+          "predicted": 2,
+          "correct": 2
+         },
+         "REFERENCES": {
+          "predicted": 15,
+          "correct": 15
+         },
+         "THROWS": {
+          "predicted": 2,
+          "correct": 2
+         }
+        },
+        "missed_imports": [],
+        "wrong_imports": [],
+        "missed_uses": [],
+        "wrong_uses": []
+       }
+      }
+     ]
+    },
+    {
+     "consumer": "laravel/framework",
+     "commit": "b8ca298a5475497d01b194ed5688441454d8ee34",
+     "language": "php",
+     "status": "ok",
+     "org_ms": 1780,
+     "link_ms": 845,
+     "edges": 856,
+     "libraries": [
+      {
+       "repo": "briannesbitt/carbon",
+       "commit": "d481d8d69a94dc00e5c1b147ec1f7e7492626b12",
+       "score": {
+        "imports": {
+         "predicted": 38,
+         "gold": 38,
+         "correct": 38,
+         "found": 38
+        },
+        "uses": {
+         "predicted": 492,
+         "gold": 45,
+         "correct": 487,
+         "found": 27
+        },
+        "by_kind": {
+         "CALLS": {
+          "predicted": 293,
+          "correct": 291
+         },
+         "INHERITS": {
+          "predicted": 1,
+          "correct": 1
+         },
+         "REFERENCES": {
+          "predicted": 31,
+          "correct": 28
+         },
+         "TESTS": {
+          "predicted": 167,
+          "correct": 167
+         }
+        },
+        "missed_imports": [],
+        "wrong_imports": [],
+        "missed_uses": [
+         [
+          "src/Illuminate/Bus/DatabaseBatchRepository.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonImmutable"
+         ],
+         [
+          "src/Illuminate/Bus/DynamoBatchRepository.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonImmutable"
+         ],
+         [
+          "src/Illuminate/Console/CacheCommandMutex.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonInterval"
+         ],
+         [
+          "src/Illuminate/Foundation/Console/DocsCommand.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonInterval"
+         ],
+         [
+          "src/Illuminate/Http/Concerns/InteractsWithInput.php",
+          "briannesbitt/carbon",
+          "Carbon\\Exceptions\\InvalidFormatException"
+         ],
+         [
+          "src/Illuminate/Support/Carbon.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonImmutable"
+         ],
+         [
+          "src/Illuminate/Support/Facades/Artisan.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonInterval"
+         ],
+         [
+          "src/Illuminate/Support/Facades/DB.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonInterval"
+         ],
+         [
+          "src/Illuminate/Support/InteractsWithTime.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonInterval"
+         ],
+         [
+          "src/Illuminate/Support/Stringable.php",
+          "briannesbitt/carbon",
+          "Carbon\\Exceptions\\InvalidFormatException"
+         ],
+         [
+          "src/Illuminate/Support/Testing/Fakes/BatchRepositoryFake.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonImmutable"
+         ],
+         [
+          "src/Illuminate/Support/ValidatedInput.php",
+          "briannesbitt/carbon",
+          "Carbon\\Exceptions\\InvalidFormatException"
+         ],
+         [
+          "tests/Database/QueryDurationThresholdTest.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonInterval"
+         ],
+         [
+          "tests/Integration/Console/CommandDurationThresholdTest.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonInterval"
+         ],
+         [
+          "tests/Integration/Http/RequestDurationThresholdTest.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonInterval"
+         ],
+         [
+          "tests/Integration/Queue/SkipIfBatchCancelledTest.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonImmutable"
+         ],
+         [
+          "tests/Queue/DynamoDbFailedJobProviderTest.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonImmutable"
+         ],
+         [
+          "tests/Support/SupportCarbonTest.php",
+          "briannesbitt/carbon",
+          "Carbon\\CarbonImmutable"
+         ]
+        ],
+        "wrong_uses": [
+         [
+          "src/Illuminate/Contracts/Events/Dispatcher.php",
+          "briannesbitt/carbon",
+          "Carbon\\Laravel\\ServiceProvider::isEventDispatcher",
+          "REFERENCES",
+          "import_resolved"
+         ],
+         [
+          "src/Illuminate/Foundation/helpers.php",
+          "briannesbitt/carbon",
+          "Carbon\\Laravel\\ServiceProvider::getGlobalApp",
+          "CALLS",
+          "import_resolved"
+         ],
+         [
+          "src/Illuminate/Support/Carbon.php",
+          "briannesbitt/carbon",
+          "Carbon\\Laravel\\ServiceProvider::updateLocale",
+          "REFERENCES",
+          "import_resolved"
+         ],
+         [
+          "src/Illuminate/Support/Facades/Date.php",
+          "briannesbitt/carbon",
+          "Carbon\\Laravel\\ServiceProvider::updateLocale",
+          "REFERENCES",
+          "import_resolved"
+         ],
+         [
+          "src/Illuminate/Support/Facades/Facade.php",
+          "briannesbitt/carbon",
+          "Carbon\\Laravel\\ServiceProvider::updateLocale",
+          "CALLS",
+          "import_resolved"
+         ]
+        ]
+       }
+      },
+      {
+       "repo": "Seldaek/monolog",
+       "commit": "10d85740180ecba7896c87e06a166e0c95a0e3b6",
+       "score": {
+        "imports": {
+         "predicted": 38,
+         "gold": 38,
+         "correct": 38,
+         "found": 38
+        },
+        "uses": {
+         "predicted": 127,
+         "gold": 39,
+         "correct": 127,
+         "found": 38
+        },
+        "by_kind": {
+         "CALLS": {
+          "predicted": 52,
+          "correct": 52
+         },
+         "INHERITS": {
+          "predicted": 2,
+          "correct": 2
+         },
+         "REFERENCES": {
+          "predicted": 67,
+          "correct": 67
+         },
+         "TESTS": {
+          "predicted": 6,
+          "correct": 6
+         }
+        },
+        "missed_imports": [],
+        "wrong_imports": [],
+        "missed_uses": [
+         [
+          "src/Illuminate/Log/LogManager.php",
+          "Seldaek/monolog",
+          "Monolog\\Formatter\\FormatterInterface"
+         ]
+        ],
+        "wrong_uses": []
+       }
+      },
+      {
+       "repo": "thephpleague/commonmark",
+       "commit": "1902f60f984235023acbe03db6ad614a37b3c3e7",
+       "score": {
+        "imports": {
+         "predicted": 11,
+         "gold": 11,
+         "correct": 11,
+         "found": 11
+        },
+        "uses": {
+         "predicted": 22,
+         "gold": 11,
+         "correct": 22,
+         "found": 11
+        },
+        "by_kind": {
+         "CALLS": {
+          "predicted": 20,
+          "correct": 20
+         },
+         "REFERENCES": {
+          "predicted": 2,
+          "correct": 2
+         }
+        },
+        "missed_imports": [],
+        "wrong_imports": [],
+        "missed_uses": [],
+        "wrong_uses": []
+       }
+      }
+     ]
+    },
+    {
+     "consumer": "apache/dubbo",
+     "commit": "d8e6dfa42a22e9c21697ad37709abec7ae33895b",
+     "language": "java",
+     "status": "ok",
+     "org_ms": 1505,
+     "link_ms": 961,
+     "edges": 58,
+     "libraries": [
+      {
+       "repo": "google/gson",
+       "commit": "fcd416909db2bea96eb916bcfb2d0a83cb9b86c3",
+       "score": {
+        "imports": {
+         "predicted": 7,
+         "gold": 7,
+         "correct": 7,
+         "found": 7
+        },
+        "uses": {
+         "predicted": 51,
+         "gold": 7,
+         "correct": 51,
+         "found": 7
+        },
+        "by_kind": {
+         "CALLS": {
+          "predicted": 46,
+          "correct": 46
+         },
+         "INHERITS": {
+          "predicted": 2,
+          "correct": 2
+         },
+         "REFERENCES": {
+          "predicted": 3,
+          "correct": 3
+         }
+        },
+        "missed_imports": [],
+        "wrong_imports": [],
+        "missed_uses": [],
+        "wrong_uses": []
+       }
+      }
+     ]
+    },
+    {
+     "consumer": "apolloconfig/apollo",
+     "commit": "63c16c117a869426f2cbbfdaa099de449789fd18",
+     "language": "java",
+     "status": "ok",
+     "org_ms": 590,
+     "link_ms": 201,
+     "edges": 820,
+     "libraries": [
+      {
+       "repo": "google/gson",
+       "commit": "fcd416909db2bea96eb916bcfb2d0a83cb9b86c3",
+       "score": {
+        "imports": {
+         "predicted": 75,
+         "gold": 75,
+         "correct": 75,
+         "found": 75
+        },
+        "uses": {
+         "predicted": 745,
+         "gold": 75,
+         "correct": 745,
+         "found": 75
+        },
+        "by_kind": {
+         "CALLS": {
+          "predicted": 532,
+          "correct": 532
+         },
+         "INHERITS": {
+          "predicted": 20,
+          "correct": 20
+         },
+         "REFERENCES": {
+          "predicted": 61,
+          "correct": 61
+         },
+         "TESTS": {
+          "predicted": 132,
+          "correct": 132
+         }
+        },
+        "missed_imports": [],
+        "wrong_imports": [],
+        "missed_uses": [],
+        "wrong_uses": []
+       }
+      }
+     ]
+    }
+   ],
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 f4a33507702d, rfc0005 contract)"
   }
  }
 }
