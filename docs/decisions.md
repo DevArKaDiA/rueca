@@ -1,5 +1,16 @@
 # Decisions log
 
+## 2026-10-25 — Tool responses designed for the org mode
+
+[RFC 0005](rfcs/0005-agent-responses.md): token efficiency must not cost
+identity. Ids keep repository and commit (abbreviated to 12 hex digits);
+responses open with an envelope of the snapshots read (repository, ref,
+commit, overlay); every tool takes `ref` and a multi-repository `repo`, with
+rank fusion across snapshots; symbols identical across refs are returned
+once with the refs they appear in. Savings come from grouping, short fields,
+index-based `trace` edges, smaller defaults, a token budget and a compact
+text rendering. Efficiency is measured as tokens per correct answer.
+
 ## 2026-10-25 — Ranking: bodies over declarations, sources over copies
 
 C++ function localization failed its RFC 0004 floor (Function Acc@10 24.2

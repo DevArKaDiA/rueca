@@ -170,6 +170,7 @@ Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
 [building blocks (RFC 0002)](docs/rfcs/0002-building-blocks.md),
 [structured data and the next languages (RFC 0003)](docs/rfcs/0003-structured-data-and-languages.md),
 [quality bar and benchmark (RFC 0004)](docs/rfcs/0004-quality-and-benchmark.md),
+[responses for agents: org-wide, multi-ref, token-efficient (RFC 0005)](docs/rfcs/0005-agent-responses.md),
 [decisions log](docs/decisions.md).
 
 ## Benchmark
@@ -209,6 +210,7 @@ absolute floors and aspirational targets).
 | **Local mode** | One binary, MCP over stdio, six tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
 | **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)) | ✅ landed, most languages `preview` |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | 🚧 in progress |
+| **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | 🚧 design |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases once every language is `stable` | ⏳ next |
 | **Retrieval** | Vector baseline in the bench; hybrid retrieval in Rueca (BM25 over code + static embeddings + graph signals) aimed at the localization targets | 🗺️ planned |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
