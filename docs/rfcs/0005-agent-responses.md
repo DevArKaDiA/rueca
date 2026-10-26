@@ -123,6 +123,10 @@ Every tool response is:
 - An unknown or unindexed ref is an error that lists the indexed refs of
   that repository.
 
+> *Amended by [RFC 0006](0006-org-graph.md) (2026-10-26): rank fusion
+> across repositories is removed; an organization has one symbol index and
+> one ranking. The paragraph below is kept for history.*
+
 **Merging results across snapshots.** BM25 scores and the ranking priors
 (RFC 0004, segment `priors`) are computed per segment and are not comparable
 across repositories. Search results from several snapshots are merged by

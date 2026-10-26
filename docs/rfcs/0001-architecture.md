@@ -418,6 +418,10 @@ Canonicalization is shared across languages:
 
 ## 10. Org linker
 
+> *Amended by [RFC 0006](0006-org-graph.md) (2026-10-26): the org linker is
+> the contract producer of the organization link layer, which sits in an
+> organization graph built on top of the repository graphs.*
+
 The org linker runs after base segments of default branches change. It loads
 the contracts of every repository in the organization, matches consumers to
 providers by canonical key, and writes an **org-link segment** with

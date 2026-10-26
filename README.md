@@ -195,6 +195,7 @@ Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
 [structured data and the next languages (RFC 0003)](docs/rfcs/0003-structured-data-and-languages.md),
 [quality bar and benchmark (RFC 0004)](docs/rfcs/0004-quality-and-benchmark.md),
 [responses for agents: org-wide, multi-ref, token-efficient (RFC 0005)](docs/rfcs/0005-agent-responses.md),
+[the organization graph (RFC 0006)](docs/rfcs/0006-org-graph.md),
 [decisions log](docs/decisions.md).
 
 ## Benchmark
@@ -250,6 +251,7 @@ absolute floors and aspirational targets).
 | **Retrieval** | Vector baseline in the bench; hybrid retrieval in Rueca (BM25 over code + static embeddings + graph signals) aimed at the localization targets | 🗺️ planned |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
 | **Service mode** | One container, segments in object storage, MCP over HTTP | 🗺️ planned |
+| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 design |
 | **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
 | **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |
 
