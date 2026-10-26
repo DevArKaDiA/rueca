@@ -10,12 +10,34 @@ a hard-linked scratch tree that holds only that language's files, so
 repository: C++ when it has C++ sources). Query latency p95 comes from the
 S1 / S3 runs (report.py).
 
+Two rates per repository (manifest `[health]`): **raw** over every file of
+the language, and **gated** (the scorecard floor) over the same files minus
+
+- vendored third-party code, by the directory names Rueca's ranking demotes
+  (`rueca-segment` priors: `third_party`, `thirdparty`, `third-party`,
+  `3rdparty`, `vendored`, `deps`, `dependencies`) plus `vendor` /
+  `node_modules` (never indexed) and the manifest's per-repository
+  third-party trees (`[[health.exclude]]`, each with its evidence);
+- copies of GoogleTest / GoogleMock (`googletest`, `googlemock`, `gtest`,
+  `gmock` directories, `gtest-all.cc`, `gmock-all.cc`);
+- amalgamations (`single_include/`, `singleheader/`, file names containing
+  `amalgamat`, and per-repository copies listed in `[[health.exclude]]`);
+- files misdetected as the language (`[[health.not_language]]`: a path glob
+  or a content pattern per rule, e.g. Objective-C headers or MicroPython's
+  `qstrdefs*.h` macro tables in a C repository).
+
+Each repository is indexed twice (all files, then the gated subset); the
+excluded files are counted per rule in the output.
+
 Raw outputs: .cache/runs/health/rueca/<name>.json.
 """
 
 from __future__ import annotations
 
+import fnmatch
+import re
 import traceback
+from pathlib import Path
 
 from .arms import make_arm
 from .common import RUNS_DIR, family_of, is_code_file, lang_family, load_manifest, log, read_json, safe_name, split_of, write_json
@@ -41,6 +63,54 @@ def targets(languages: set[str] | None = None) -> list[dict]:
     return out
 
 
+# Rueca's ranking (rueca-segment priors.rs, VENDORED_DIRS) plus the index's
+# own excludes (`vendor`, `node_modules`).
+RANKING_VENDORED_DIRS = ("third_party", "thirdparty", "third-party", "3rdparty", "vendored", "deps", "dependencies")
+INDEX_EXCLUDED_DIRS = ("vendor", "node_modules")
+GTEST_DIRS = ("googletest", "googlemock", "gtest", "gmock")
+GTEST_FILES = ("gtest-all.cc", "gmock-all.cc", "gtest_main.cc", "gmock_main.cc")
+AMALGAMATION_DIRS = ("single_include", "singleheader")
+
+
+def _rules() -> dict:
+    return load_manifest().get("health", {})
+
+
+def exclusion_reason(path: str, language: str, repo: str | None = None, root: Path | None = None) -> str | None:
+    """Why a file is out of the gated parse-error rate, or None (see the
+    module docstring). Content rules read the first 64 KiB from `root`."""
+    parts = path.split("/")
+    dirs, name = parts[:-1], parts[-1]
+    rules = _rules()
+    if any(d in RANKING_VENDORED_DIRS or d in INDEX_EXCLUDED_DIRS for d in dirs):
+        return "vendored"
+    for spec in rules.get("exclude", []):
+        if spec.get("repo") in (None, repo) and any(path == p or path.startswith(p.rstrip("/") + "/") for p in spec["paths"]):
+            return spec.get("reason", "vendored")
+    if any(d in GTEST_DIRS for d in dirs) or name in GTEST_FILES:
+        return "gtest copy"
+    if any(d in AMALGAMATION_DIRS for d in dirs) or "amalgamat" in name.lower():
+        return "amalgamation"
+    for rule in rules.get("not_language", []):
+        if language not in rule.get("languages", [language]):
+            continue
+        if rule.get("repo") not in (None, repo):
+            continue
+        if "glob" in rule and not fnmatch.fnmatch(path, rule["glob"]):
+            continue
+        if "content" in rule:
+            if root is None:
+                continue
+            try:
+                head = (root / path).read_bytes()[:65536].decode("utf-8", "replace")
+            except OSError:
+                continue
+            if not re.search(rule["content"], head, re.MULTILINE):
+                continue
+        return rule["reason"]
+    return None
+
+
 def run_path(name: str):
     return RUNS_DIR / "health" / "rueca" / f"{safe_name(name)}.json"
 
@@ -62,7 +132,18 @@ def run(languages: set[str] | None = None, force: bool = False, only: list[str] 
         try:
             with worktree(t["repo"], t["commit"], f"health-{t['name']}") as root:
                 files = [f for f in list_files(root) if is_code_file(f, t["language"])]
-                rec = arm.health(root, t["name"], files)
+                raw = arm.health(root, t["name"], files)
+                excluded: dict[str, int] = {}
+                kept: list[str] = []
+                for f in files:
+                    why = exclusion_reason(f, t["language"], t["repo"], root)
+                    if why:
+                        excluded[why] = excluded.get(why, 0) + 1
+                    else:
+                        kept.append(f)
+                rec = arm.health(root, t["name"], kept) if excluded else dict(raw)
+                rec["raw"] = {k: raw.get(k) for k in ("ok", "files_listed", "files_extracted", "files_partial", "duration_ms")}
+                rec["excluded"] = excluded
         except Exception as exc:
             rec = {"ok": False, "error": f"{exc}\n{traceback.format_exc()[-1000:]}"}
         rec.update({k: t[k] for k in ("name", "repo", "commit", "language", "source", "split")})
@@ -91,6 +172,9 @@ def score() -> dict:
                 "files_extracted": rec.get("files_extracted") or 0,
                 "files_partial": rec.get("files_partial") or 0,
                 "duration_ms": rec.get("duration_ms"),
+                "raw_files_extracted": (rec.get("raw") or rec).get("files_extracted") or 0,
+                "raw_files_partial": (rec.get("raw") or rec).get("files_partial") or 0,
+                "excluded": rec.get("excluded") or {},
             }
         )
     return {"rows": rows}

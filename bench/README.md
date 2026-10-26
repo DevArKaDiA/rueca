@@ -10,7 +10,7 @@ the gate. It compares, on the same inputs and with the same scoring:
 |---|---|---|
 | `grep` | No graph. BM25 (k1=1.2, b=0.75) over file contents, function bodies and function names (tree-sitter); textual `name(` heuristic for callers/callees | in-process |
 | `cbm` | codebase-memory-mcp **v0.12.0**, official release binary pinned by sha256 in `manifest.toml` (never a binary on `PATH`) | `codebase-memory-mcp cli --quiet <tool> '<json>'`, with `CBM_CACHE_DIR` / `CBM_RUNTIME_DIR` inside `bench/.cache`; one warm `daemon start` per bench process (as in an MCP session; stopped at exit), UI disabled |
-| `rueca` | Rueca at HEAD | `$RUECA_BIN index <root> --store <dir> --json`, `$RUECA_BIN query <tool> '<json>' --root <root> --store <dir>` (alpha contract, `docs/tools.md`) |
+| `rueca` | Rueca at HEAD | `$RUECA_BIN index <root> --store <dir> --json`, `$RUECA_BIN query <tool> '<json>' --root <root> --store <dir> [--text]` (`docs/tools.md`; both the alpha contract and the RFC 0005 contract are understood, see *Rueca arm*) |
 
 Suites, by name (the S-numbers stay as short identifiers):
 
@@ -20,7 +20,8 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Structure** (S3) | "Who calls this function, and what does it call?" | callers / callees precision and recall, definition found |
 | **Micro-benchmarks** (part of S3) | the same on hand-labelled snippets, one language feature each | callee F1 |
 | **Health** (S5) | "Does it parse, and is it fast?" | files with parse errors, query latency p95 |
-| **Efficiency** | "How many tokens does an answer cost?" | reported only |
+| **Efficiency** | "How many tokens does a correct answer cost?" (RFC 0005 §8) | reported only |
+| **Org scenarios** | "Does it still find the code in a store of many repositories, and of one repository at two commits?" (RFC 0005 §5–§6) | reported only |
 | **Configuration** (RFC 0003 §3.3) | "Which keys exist, who reads this env var, who sets it?" | key recall, span accuracy, bridge precision / recall |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
@@ -50,13 +51,15 @@ uv run --project bench rueca-bench check                 # regression check vs t
   to language families (manifest `[languages]` keys: `python`, `ecma`,
   `php`, `go`, `java`, `c`, `cpp`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
-- `run --arm {grep,cbm,rueca,all|a,b} --suite {s1,s3,data,health,all|a,b} [--only ID|REPO|SET ...] [--workers N] [--force] [--prune]`.
+- `run --arm {grep,cbm,rueca,all|a,b} --suite {s1,s3,data,health,org,all|a,b} [--only ID|REPO|SET ...] [--workers N] [--force] [--prune]`.
   Outputs are cached per (arm, instance) in `.cache/runs/`; re-running only
   computes what is missing (`--force` recomputes). Arm failures are recorded
   (and scored as misses), never dropped. `--workers` runs S1 repositories
   and S3 sets in parallel; `--prune` deletes each repository clone once its
   runs are done (bounded disk; re-created from the pinned commits on next
-  use). `health` runs the Rueca arm only.
+  use). `health` runs the Rueca arm only; `org` (the multi-repository and
+  multi-ref scenarios) runs the Rueca and cbm arms after S1 and is skipped
+  with `--lang`.
 - `check [--baseline FILE] [--current FILE]` — the regression check
   (below): compares `bench/results/scorecard.json` with the one committed
   at `HEAD`; exit status 1 when a floor metric dropped by more than its
@@ -67,6 +70,9 @@ uv run --project bench rueca-bench check                 # regression check vs t
   only those families are re-selected; every other instance keeps its entry
   and position.
 - `clean --work` removes worktrees; `clean --runs rueca` drops cached Rueca outputs.
+- `uv run --project bench pytest bench/tests` — unit tests of the harness
+  pieces (efficiency counting, contract normalizers, health rules, rank
+  fusion and the multi-ref scorer).
 - Per-call timeouts: 120 s per query, 1800 s per index (`arms/__init__.py`).
 - S1 runs repositories in parallel (`--workers`, default 2), instances of one
   repository sequentially (one partial clone per repository, one detached
@@ -89,6 +95,18 @@ branch (e.g. in a temporary worktree with its own `CARGO_TARGET_DIR`) and run
 `RUECA_BIN_LABEL=<branch>@<sha>` (recorded in every output's arm version).
 The report lists the Rueca binary per language, and `manifest.toml`
 (`[tools.rueca]`) records which binary produced the published numbers.
+
+**Contracts.** The arm detects the binary's response contract: `rueca query
+--help` lists `--text` → RFC 0005 (envelope, grouped results, `trace`
+edges by node index), else alpha. Under RFC 0005 the structural scoring
+calls ask for `"format": "verbose"` (the alpha shapes, no token budget), the
+tokens an agent reads are counted on the same request rendered with
+`--text` (the MCP text content) and the JSON diagnostic on its compact JSON;
+the efficiency search is the agent's own call (compact, default budget),
+parsed from its compact JSON so items line up with the text. Normalizers
+(`arms/rueca.py`: `flat_results`, `trace_neighbours`, `trace_graph`)
+accept both shapes, so the same harness scores either binary and the
+report says which contract produced the numbers.
 
 Without `RUECA_BIN` the Rueca column is reported as *pending* (and every
 scorecard floor of that language is *pending*, so it cannot be `stable`); a
@@ -224,9 +242,10 @@ unless noted:
 | Micro | Callee F1 | ≥ 90 | ≥ 98 |
 | Configuration | Key recall, span accuracy (per format) | ≥ 95 | 100 |
 | Configuration | Env bridge precision / recall | ≥ 95 / ≥ 75 | ≥ 99 / ≥ 90 |
-| Health | Files with parse errors | ≤ 2 | ≤ 0.5 |
+| Health | Files with parse errors (gated: vendored, copied and misdetected files out, see *Health*) | ≤ 2 | ≤ 0.5 |
 | Health | Query latency p95 | ≤ 100 ms | ≤ 20 ms |
-| Efficiency | Tokens per answer (trace and search, median) | — (reported) | ≤ 50% of cbm |
+| Health | Files with parse errors, raw (vendored and misdetected files included) | shown, not gated | — |
+| Efficiency | Tokens to first gold hit and per gold hit (`search_symbols`, top 10); tokens per true edge (`trace`) | — (reported) | ≤ 50% of cbm |
 
 **How a floor is checked** (§6.1). Absolute floors: the point estimate must
 meet the floor and the population must reach its minimum (≥ 300 structural
@@ -245,7 +264,8 @@ found, lookup Acc, key recall, bridge P / R, files with parse errors);
 percentile bootstrap with a fixed seed and 10,000 resamples for macro
 averages (P / R over questions, recall / MRR over instances), pooled ratios
 (micro-benchmark F1 over callables) and paired differences; binomial order
-statistics for quantiles (latency p95, median tokens). Seeds are derived per
+statistics for quantiles (latency p95); percentile bootstrap over queries
+for the pooled tokens-per-correct-answer ratios. Seeds are derived per
 metric from `bootstrap_seed`, so intervals are reproducible and independent
 of evaluation order (`stats.py`).
 
@@ -570,10 +590,12 @@ method, anonymous- and local-class methods are their own callables
 callables are function definitions with a body (prototypes, in-class
 declarations, pure virtuals and macros are not); edges point to the body
 wherever it lives; virtual calls point to the static type's definition;
-calls through function pointers, implicit calls (destructors, conversions,
-operators used as operators) and calls written inside a macro body give no
-edge, while calls written in a macro's arguments and explicit
-`a.operator+(b)` do; `new T(...)` points to `T::T` when it has a body.
+calls through function pointers and implicit calls (destructors,
+conversions, operators used as operators) give no edge; a call written in
+a macro body belongs to the macro's expansion site — the function that uses
+the macro calls the callee, as scip-clang records it (`quiet` → `log_msg`
+through `LOG(m)`) — and so do calls written in a macro's arguments and
+explicit `a.operator+(b)`; `new T(...)` points to `T::T` when it has a body.
 
 Setup cross-checks every answer key against a SCIP indexer, deriving edges
 exactly like the repository gold (`crosscheck` in the manifest; scratch
@@ -589,10 +611,10 @@ members of returned object literals are SCIP `local` symbols, a
 default-exported object literal, `super(id)` and a constructor inherited two
 levels up are not resolved; the 3 extra edges are decorator applications
 inside a method's range), Go vs scip-go 156 / 156 edges (60 snippets identical),
-Java vs scip-java 109 / 109 (65 identical), C vs scip-clang 49 / 50 key
-edges with 2 extra SCIP edges (two `static helper` functions in different
-files share one SCIP symbol; a call written in a macro body, which the key
-excludes by convention), C++ 79 / 82 with no extra edges (scip-clang misses a
+Java vs scip-java 109 / 109 (65 identical), C vs scip-clang 50 / 51 key
+edges with 1 extra SCIP edge (25 of 26 identical: two `static helper`
+functions in different files share one SCIP symbol; the macro-body call
+of `macros/macro_body_calls` now follows scip-clang's convention), C++ 79 / 82 with no extra edges (scip-clang misses a
 `using`-declared function and two explicit `operator` calls).
 
 **Gold from PyCG** (Apache-2.0, **diagnostic**): the hand-written
@@ -611,22 +633,112 @@ repository at its tag and each S1 repository at the base commit of its
 first instance — indexed once per (repository, language) on a hard-linked
 scratch tree that holds only that language's files (tests included, the
 walk's excludes as in the repository); gated repositories pooled, Wilson
-interval over files (`health.py`). **Query latency p95**: every Rueca query
+interval over files (`health.py`). Two rates:
+
+- **gated** (the scorecard floor): every file of the language except
+  - vendored third-party code, by the same directory names Rueca's ranking
+    demotes (`rueca-segment` priors: `third_party`, `thirdparty`,
+    `third-party`, `3rdparty`, `vendored`, `deps`, `dependencies`) plus
+    `vendor` and `node_modules` (never indexed) — e.g. redis' and valkey's
+    `deps/` (jemalloc, Lua, hiredis);
+  - GoogleTest / GoogleMock copies (`googletest`, `googlemock`, `gtest`,
+    `gmock` directories; `gtest-all.cc`, `gmock-all.cc`) — fmt's
+    `test/gtest`, yaml-cpp's `test/gtest-1.11.0`;
+  - amalgamations (`single_include/`, `singleheader/`, names containing
+    `amalgamat`) — nlohmann/json, simdjson, Catch2;
+  - per-repository third-party trees and copies without a conventional
+    name (manifest `[[health.exclude]]`, each with its evidence):
+    MicroPython's `lib/` (its external dependencies: CMSIS, littlefs, libm,
+    oofatfs, …), the TI CC3200 driverlib and SimpleLink, FreeRTOS 9.0.0 and
+    ST's USB host library under `ports/`, Catch2's `include/external`
+    (Clara), nlohmann/json's frozen v3.10.5 single header for the ABI tests;
+  - files that carry the language's extension but are not the language
+    (manifest `[[health.not_language]]`): MicroPython's `qstrdefs*.h`
+    (`Q(...)` / `QCFG(...)` lists read by `py/makeqstrdata.py`) and
+    Objective-C / Objective-C++ headers in C and C++ repositories (a line
+    starting with `@interface`, `@implementation`, `@protocol` or
+    `#import`; Catch2's `catch_objc*.hpp` and its Xcode sample);
+- **raw**: every file of the language, shown next to the gated rate (not
+  gated). The report lists, per repository, how many files each rule
+  excluded.
+
+Generated code (jq's bison `parser.c`), test files and code fragments
+(MicroPython's `*_globals.h` initializer lists) stay in: they are the
+project's own C. **Query latency p95**: every Rueca query
 of the language's gated S1 instances and S3 repository sets (`search_symbols`,
 `get_symbol`, `trace`), one `rueca query` process per call on a warm segment
 (the process opens the memory-mapped segment each time; process start-up is
 included, so this overstates an MCP session). **Index throughput**: files
 per second of the health index, reported.
 
-### Efficiency
+### Efficiency — tokens per correct answer (RFC 0005 §8)
 
-**Tokens per answer**: tiktoken `cl100k_base` over the JSON text each tool
-printed, Rueca and cbm on the same questions of the gated S3 repository sets
-— the neighbours answer (`trace` / `trace_path`, direction `both`, depth 1)
-and the lookup sample's symbol search (limit 10) — median per language.
-Reported only; target ≤ 50% of cbm. Rueca's `trace` returns ids, qualified
-names, spans and one edge record (kind, confidence, strategy, call site) per
-neighbour, cbm's `trace_path` names grouped by qualified-name prefix.
+Measured with tiktoken `cl100k_base` on **what an agent reads**: Rueca's
+MCP text content (`rueca query ... --text`) when the binary has the RFC 0005
+contract, else the JSON it prints (alpha); cbm's MCP text content, which is
+its default `tree` rendering (the bench parses cbm's `format: json` answer
+and counts the tree rendering of the same request). Rueca and cbm answer the
+same queries; a query enters a language's numbers only when both answered.
+
+- **`search_symbols`** (localization): the S1 keyword query of every gated
+  instance, issued as an agent would — top 10 (`limit` 10, every other
+  argument at its default). A *gold hit* is an item in a gold file (and,
+  as a diagnostic, a gold function). **Tokens to first gold hit** = Σ
+  tokens read until the first gold hit, the whole answer when there is
+  none / queries with a gold hit; **tokens per gold hit** = Σ answer tokens
+  / Σ gold hits in the top 10. The cost of a prefix of an answer is the
+  tokens of the text up to the end of that item's line (both text
+  renderings put one item per indented line; headers before it included);
+  for a JSON answer, the serialized items in order with the rest of the
+  document counted up front (`efficiency.py`).
+- **`trace`** (structure): one depth-1 `trace` (direction `both`) per gated
+  structural question (cbm `trace_path`), the same request as the
+  structural scoring; **tokens per true edge** = Σ answer tokens / Σ gold
+  edges returned (callers + callees, after the universe filter of S3).
+- Diagnostics: tokens per definition found by the name lookup (S3 lookup
+  sample, top 10); the alpha metric — median tokens per answer, on the JSON
+  (cbm `format: json`) and on what an agent reads.
+
+Ratios are pooled over queries with percentile-bootstrap 95% intervals;
+reported only, target (RFC 0004 §6 as amended by RFC 0005 §8): Rueca ≤ 50%
+of cbm on each of the three. A query without a correct answer costs its
+tokens and adds nothing, so a cheaper but worse answer does not look
+better.
+
+### Org scenarios (RFC 0005 §5–§6, `org.py`)
+
+**Multi-repository store.** The first gated S1 instance of the first
+`[org] repos_per_family` (3) gated S1 repositories of every language family
+— 21 repositories, each at that instance's base commit — are indexed into
+one store (Rueca: one `--store`, one root per repository; cbm: one project
+per repository). Each instance's keyword query is asked of the whole
+organization: Rueca **native**, one `search_symbols` with `repo: "*"` (rank
+fusion across roots; *pending* when the binary rejects `"*"`), and, for
+Rueca and cbm, **per repository**: one search per repository, merged by the
+bench with reciprocal rank fusion (k = 60; one item per repository at each
+rank, ties broken by the raw per-repository score) — what an agent without
+an org query must do; cbm has no cross-project search. Scored like S1
+(File Acc@5, Function Acc@10) with repository-qualified paths and the
+candidate filter of every language, against the same arm's
+single-repository S1 answer for the same instance; tokens of the top-10
+answer (per repository: the sum of its calls) and the share of the top 10
+taken by other repositories. Worktrees are removed after indexing (the
+stores keep what queries need), so disk stays bounded.
+
+**Multi-ref.** `[multiref] instance` (psf__requests-2317): the repository at
+the base commit and at a fix commit (base + the instance's gold patch,
+committed by the bench with a fixed identity and date, so its id is
+deterministic), both indexed into one store. Gold (`collapse_gold`): every
+callable of the changed files classified `changed` (its text differs),
+`added`, `removed` or `same_in_changed_file`, and every symbol of an
+unchanged file `identical` (same blob: one item listing both snapshots).
+Queries: every changed / added / removed function name and a fixed sample of
+unchanged ones, each a `search_symbols` over both refs; `score_collapse`
+counts collapsed identical symbols, `in` lists and `changed` flags. The two
+single-ref answers per query are measured today (the uncollapsed baseline);
+the multi-ref answer is *pending* while the local catalog holds one snapshot
+per root (RFC 0005 §9). Trace collapse needs per-commit call-graph gold and
+is not scored yet.
 
 ### Configuration — data formats (RFC 0003 §3.3)
 
@@ -697,7 +809,7 @@ and terraform-aws-modules/terraform-aws-vpc v6.7.3 (HCL).
 | tree-sitter-php, -go, -java, -c, -cpp (PyPI) | `uv.lock` | MIT | bench labeler for PHP, Go, Java, C, C++ |
 | PyYAML, python-hcl2 (+ lark, regex) (PyPI) | `uv.lock` | MIT / MIT (+ MIT, Apache-2.0) | data-format reference parsers |
 | numpy (PyPI) | `uv.lock` | BSD-3-Clause | bootstrap intervals |
-| tiktoken (PyPI) + the `cl100k_base` encoding file | `uv.lock`; the encoding by tiktoken's own sha256 | MIT | efficiency (tokens per answer) |
+| tiktoken (PyPI) + the `cl100k_base` encoding file | `uv.lock`; the encoding by tiktoken's own sha256 | MIT | efficiency (tokens per correct answer) |
 | scip-python / scip-typescript | npm version | MIT / Apache-2.0 | S3 gold |
 | scip-go 0.2.9 | release archive + binary sha256 (darwin-arm64, linux-amd64) | Apache-2.0 | S3 Go gold, Go micro cross-check |
 | scip-clang 0.4.1 | release binary sha256 (darwin-arm64, linux-amd64) | Apache-2.0 | S3 C / C++ gold, micro cross-checks |
@@ -857,8 +969,15 @@ file paths and function names of the public corpus repositories.
   issue-only control arm are not part of the bench (RFC 0004 §11, roadmap).
 - RFC 0004 §5 defines latency on a warm segment; the arm measures one
   `rueca query` process per call (segment re-opened each time, page cache
-  warm), which overstates it. Efficiency is measured on the S3 answers (the
-  queries both graph arms answer in this run), not on S1 searches.
+  warm), which overstates it.
+- RFC 0005 §8 replaces RFC 0004's "tokens per answer" with tokens per
+  correct answer; the alpha medians stay in the report as a diagnostic.
+  `trace` collapse across refs (§6) is not scored (no per-commit call-graph
+  gold); the multi-repository scenario fuses per-repository rankings for
+  cbm and for Rueca's per-repository mode in the bench (cbm has no
+  cross-project query). RFC 0004 §5 counts health over "extracted files";
+  the gated rate now leaves out vendored, copied and misdetected files (the
+  raw rate is shown next to it).
 - RFC 0004 §7.7 asks for a calibration split per language; S3 calibration
   sets exist for Python (click) and Go (goawk) only so far.
 - S1 uses SWE-bench Multilingual for vuejs/core, preact and axios next to

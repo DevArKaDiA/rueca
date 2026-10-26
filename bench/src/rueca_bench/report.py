@@ -25,8 +25,10 @@ from collections import Counter, defaultdict
 
 from . import data as data_mod
 from . import health as health_mod
+from . import org as org_mod
 from .arms import ARM_NAMES, make_arm
-from .arms.base import is_callable_label, line_match
+from .arms.base import is_callable_label, line_match, same_def
+from .efficiency import search_aggregate, search_row, trace_aggregate
 from .common import (
     DOCS_DIR,
     GOLD_DIR,
@@ -45,6 +47,7 @@ from .common import (
     write_json,
 )
 from .metrics import mean, median, p95, score_files, score_functions
+from .s1 import EFF_LIMIT, EFF_VARIANT
 from .s1 import instances as s1_instances
 from .s3 import gold_path, prediction_in_scope, suites
 from .scip import gold_neighbours, questions
@@ -110,7 +113,7 @@ def common_groups(rows_by_arm: dict[str, set[str]]) -> list[str]:
 
 def load_published() -> dict:
     out = {}
-    for name in ("meta", "s1", "s3", "data"):
+    for name in ("meta", "s1", "s3", "data", "efficiency"):
         p = RESULTS_DIR / f"{name}.json"
         out[name] = read_json(p) if p.exists() else {}
     return out
@@ -263,6 +266,26 @@ def agg_s1(rows: list[dict], label: str) -> dict:
     return out
 
 
+def _eff_row(eff: dict, gold: dict) -> dict:
+    """Efficiency row of one S1 instance (efficiency.search_row): gold hit =
+    an item in a gold file (and, separately, a gold function)."""
+    gfiles = set(gold["files"])
+    items = [{"path": p, "name": n, "start_line": ln, "label": lb} for p, n, ln, lb in eff.get("items", [])]
+    row = search_row(
+        items,
+        eff.get("prefix") or [],
+        eff.get("tokens"),
+        lambda it: it["path"] in gfiles,
+        lambda it: any(same_def(it, g) for g in gold["functions"]),
+        EFF_LIMIT,
+    )
+    row["tj"] = eff.get("tokens_json")
+    row["fmt"] = eff.get("format")
+    if eff.get("approx"):
+        row["approx"] = 1
+    return row
+
+
 def score_s1(published: dict | None = None) -> dict:
     insts = s1_instances()
     splits = s1_splits()
@@ -315,6 +338,9 @@ def score_s1(published: dict | None = None) -> dict:
                     "function": score_functions(funcs, gold["functions"]) if gold["functions"] else None,
                     "context": _ctx_recall(files, gold.get("context_files") or []),
                 }
+                eff = rec.get("eff") or {}
+                if variant == EFF_VARIANT and rec.get("status") == "ok" and eff.get("ok"):
+                    row["e"] = _eff_row(eff, gold)
                 if q.get("functions_name") is not None and gold["functions"]:
                     row["function_name_only"] = score_functions(q["functions_name"] if ok else [], gold["functions"])
                 per.append(row)
@@ -383,7 +409,9 @@ def score_s1(published: dict | None = None) -> dict:
 #   cr / ce        callers / callees at every confidence: [n_pred, matched_pred, n_gold, matched_gold]
 #   cr@ / ce@      the same with edges of confidence < min_confidence dropped
 #   lk  lookup rank (0 = not in the top 10; absent = not in the lookup sample)
-#   s   seconds of every tool call;  t  tokens of the neighbours answer;  x  out-of-universe predictions dropped
+#   s   seconds of every tool call;  x  out-of-universe predictions dropped
+#   t / lt     tokens of the JSON neighbours / lookup answer (alpha metric, diagnostic)
+#   ta / lta   tokens an agent reads for the same answer (RFC 0005 §8: text content)
 
 
 def _universe(graph: dict) -> dict[tuple, list[dict]]:
@@ -415,7 +443,14 @@ def score_answers(answers: list[dict], graph: dict, meta: dict, cut: float) -> l
         nb = a.get("neighbors") or {}
         if nb.get("seconds") is not None:
             row["s"].append(round(nb["seconds"], 4))
-        if nb.get("tokens") is not None:
+        # t = tokens of the JSON answer (the alpha metric, kept as a
+        # diagnostic); ta = tokens an agent reads (text content), recorded by
+        # runs that count both
+        if nb.get("tokens_json") is not None:
+            row["t"] = nb["tokens_json"]
+            if nb.get("tokens") is not None:
+                row["ta"] = nb["tokens"]
+        elif nb.get("tokens") is not None:
             row["t"] = nb["tokens"]
         for d, short in (("callers", "cr"), ("callees", "ce")):
             gold = [graph["callables"][x] for x in gold_neighbours(graph, a["fid"], d)]
@@ -434,7 +469,11 @@ def score_answers(answers: list[dict], graph: dict, meta: dict, cut: float) -> l
             row["lk"] = rank
             if lk.get("seconds") is not None:
                 row["s"].append(round(lk["seconds"], 4))
-            if lk.get("tokens") is not None:
+            if lk.get("tokens_json") is not None:
+                row["lt"] = lk["tokens_json"]
+                if lk.get("tokens") is not None:
+                    row["lta"] = lk["tokens"]
+            elif lk.get("tokens") is not None:
                 row["lt"] = lk["tokens"]
         rows.append(row)
     return rows
@@ -692,6 +731,107 @@ def _paired_tokens(s3: dict, group: str, field: str) -> tuple[list[float], list[
     return a, b
 
 
+# --- efficiency (RFC 0005 §8): tokens per correct answer ------------------------------
+
+
+def _paired_trace_eff(s3: dict, group: str) -> dict[str, tuple[list[float], list[float]]]:
+    """Per arm: (agent-read tokens of each trace answer, gold edges it
+    returned) over the gated questions both Rueca and cbm answered."""
+    out: dict[str, tuple[list[float], list[float]]] = {"rueca": ([], []), "cbm": ([], [])}
+    for name, spec, micro in suites():
+        if micro or split_of(spec) != "gated" or lang_group(spec["language"]) != group:
+            continue
+        rr = {r["f"]: r for r in s3["rows"].get("rueca", {}).get(name, []) if r.get("ta") is not None}
+        cc = {r["f"]: r for r in s3["rows"].get("cbm", {}).get(name, []) if r.get("ta") is not None}
+        for f in sorted(set(rr) & set(cc)):
+            for arm, r in (("rueca", rr[f]), ("cbm", cc[f])):
+                out[arm][0].append(r["ta"])
+                out[arm][1].append(r["cr"][1] + r["ce"][1])
+    return out
+
+
+def _paired_lookup_eff(s3: dict, group: str) -> dict[str, tuple[list[float], list[float]]]:
+    out: dict[str, tuple[list[float], list[float]]] = {"rueca": ([], []), "cbm": ([], [])}
+    for name, spec, micro in suites():
+        if micro or split_of(spec) != "gated" or lang_group(spec["language"]) != group:
+            continue
+        rr = {r["f"]: r for r in s3["rows"].get("rueca", {}).get(name, []) if r.get("lta") is not None}
+        cc = {r["f"]: r for r in s3["rows"].get("cbm", {}).get(name, []) if r.get("lta") is not None}
+        for f in sorted(set(rr) & set(cc)):
+            for arm, r in (("rueca", rr[f]), ("cbm", cc[f])):
+                out[arm][0].append(r["lta"])
+                out[arm][1].append(1.0 if 1 <= r.get("lk", 0) <= 10 else 0.0)
+    return out
+
+
+def _paired_search_eff(s1: dict, group: str) -> dict[str, list[dict]]:
+    by: dict = defaultdict(dict)
+    for r in s1["per_instance"]:
+        if r["variant"] == EFF_VARIANT and r["group"] == group and r["split"] == "gated" and r.get("e"):
+            by[r["id"]][r["arm"]] = r["e"]
+    out: dict[str, list[dict]] = {"rueca": [], "cbm": []}
+    for iid in sorted(by):
+        if "rueca" in by[iid] and "cbm" in by[iid]:
+            out["rueca"].append(by[iid]["rueca"])
+            out["cbm"].append(by[iid]["cbm"])
+    return out
+
+
+def _ratio_ci(num: list[float], den: list[float], *seed: str) -> list | None:
+    sc = _sc()
+    ci = bootstrap_ratio(num, den, sc["resamples"], seeded(sc["seed"], *seed))
+    return list(ci) if ci else None
+
+
+def score_efficiency(s1: dict, s3: dict) -> dict:
+    """Per language: tokens per correct answer, Rueca and cbm on the same
+    queries (paired), with bootstrap intervals of the pooled ratios, plus the
+    alpha raw-token medians as a diagnostic."""
+    out: dict = {}
+    for grp in language_groups():
+        g: dict = {}
+        tr = _paired_trace_eff(s3, grp)
+        if tr["rueca"][0]:
+            g["trace"] = {arm: {**trace_aggregate(*tr[arm]), "ci": _ratio_ci(*tr[arm], "eff", grp, "trace", arm)} for arm in tr}
+        se = _paired_search_eff(s1, grp)
+        if se["rueca"]:
+            g["search"] = {}
+            for arm, rows in se.items():
+                fa = search_aggregate(rows, "file")
+                fu = search_aggregate(rows, "function")
+                g["search"][arm] = {
+                    "n": fa["n"],
+                    "hit_rate": fa["hit_rate"],
+                    "to_first_hit": fa["to_first_hit"],
+                    "to_first_hit_ci": _ratio_ci(fa["num_first"], fa["den_first"], "eff", grp, "first", arm),
+                    "per_hit": fa["per_hit"],
+                    "per_hit_ci": _ratio_ci(fa["num_hit"], fa["den_hit"], "eff", grp, "hit", arm),
+                    "func_hit_rate": fu["hit_rate"],
+                    "func_to_first_hit": fu["to_first_hit"],
+                    "func_per_hit": fu["per_hit"],
+                    "tokens_median": fa["tokens_median"],
+                    "formats": sorted({r.get("fmt") or "?" for r in rows}),
+                    "approx": sum(1 for r in rows if r.get("approx")),
+                }
+        lk = _paired_lookup_eff(s3, grp)
+        if lk["rueca"][0]:
+            g["lookup"] = {arm: {"n": len(lk[arm][0]), "found": int(sum(lk[arm][1])), "per_found": (sum(lk[arm][0]) / sum(lk[arm][1])) if sum(lk[arm][1]) else None} for arm in lk}
+        raw = {}
+        for field, label in (("t", "trace"), ("lt", "search")):
+            a, b = _paired_tokens(s3, grp, field)
+            if a:
+                raw[label] = {"n": len(a), "rueca_median": statistics.median(a), "cbm_median": statistics.median(b), "rueca_mean": statistics.mean(a), "cbm_mean": statistics.mean(b)}
+        for field, label in (("ta", "trace"), ("lta", "search")):
+            a, b = _paired_tokens(s3, grp, field)
+            if a:
+                raw.setdefault(label, {}).update({"agent_n": len(a), "agent_rueca_median": statistics.median(a), "agent_cbm_median": statistics.median(b)})
+        if raw:
+            g["raw"] = raw
+        if g:
+            out[grp] = g
+    return out
+
+
 def _judge(spec: dict, value, ci, n, min_n: int | None, paired: dict | None = None) -> str:
     floor = spec.get("floor")
     if floor is None:
@@ -714,7 +854,7 @@ def _judge(spec: dict, value, ci, n, min_n: int | None, paired: dict | None = No
     return "✅"
 
 
-def _metric_values(key: str, fam_label: str, s1: dict, s3: dict, health: dict) -> dict:
+def _metric_values(key: str, fam_label: str, s1: dict, s3: dict, health: dict, eff: dict | None = None) -> dict:
     """value, ci, n, bm25, cbm (and paired difference) of one scorecard metric."""
     sc = _sc()
     v = sc["variant"]
@@ -761,6 +901,20 @@ def _metric_values(key: str, fam_label: str, s1: dict, s3: dict, health: dict) -
         cl = _latencies(s1, s3, "cbm", fam_label)
         cq = quantile_ci(cl) if cl else None
         out = {"value": q[0] * 1000 if q else None, "ci": [q[1] * 1000, q[2] * 1000] if q else None, "n": len(lat), "cbm": cq[0] * 1000 if cq else None}
+    elif key in ("trace_tokens_per_true_edge", "search_tokens_to_first_hit", "search_tokens_per_hit"):
+        e = (eff or {}).get(fam_label) or {}
+        if key == "trace_tokens_per_true_edge":
+            r, c = (e.get("trace") or {}).get("rueca") or {}, (e.get("trace") or {}).get("cbm") or {}
+            out = {"value": r.get("per_true_edge"), "ci": r.get("ci"), "n": r.get("n"), "cbm": c.get("per_true_edge")}
+        else:
+            fld = "to_first_hit" if key == "search_tokens_to_first_hit" else "per_hit"
+            r, c = (e.get("search") or {}).get("rueca") or {}, (e.get("search") or {}).get("cbm") or {}
+            out = {"value": r.get(fld), "ci": r.get(fld + "_ci"), "n": r.get("n"), "cbm": c.get(fld)}
+    elif key == "parse_error_rate_raw":
+        rows = [x for x in health["rows"] if x.get("ok") and x["split"] == "gated" and lang_group(x["language"]) == fam_label]
+        ext = sum(x.get("raw_files_extracted", x["files_extracted"]) for x in rows)
+        par = sum(x.get("raw_files_partial", x["files_partial"]) for x in rows)
+        out = {"value": par / ext if ext else None, "ci": _wil(par, ext) if ext else None, "n": ext, "repos": len(rows), "partial": par}
     elif key in ("tokens_per_answer", "tokens_per_search"):
         a, b = _paired_tokens(s3, fam_label, "t" if key == "tokens_per_answer" else "lt")
         q = quantile_ci(a, 0.5) if a else None
@@ -768,7 +922,7 @@ def _metric_values(key: str, fam_label: str, s1: dict, s3: dict, health: dict) -
     return out
 
 
-def build_scorecard(s1: dict, s3: dict, health: dict, data: dict) -> dict:
+def build_scorecard(s1: dict, s3: dict, health: dict, data: dict, eff: dict | None = None) -> dict:
     sc = _sc()
     langs: dict = {}
     for fam in families().values():
@@ -776,7 +930,7 @@ def build_scorecard(s1: dict, s3: dict, health: dict, data: dict) -> dict:
         failing: list[str] = []
         for spec in sc["metrics"]:
             key = spec["key"]
-            vals = _metric_values(key, fam.label, s1, s3, health)
+            vals = _metric_values(key, fam.label, s1, s3, health, eff)
             min_n = sc["min_s1"] if spec["family"] == "Localization" else (sc["min_s3"] if spec["family"] == "Structure" else None)
             status = _judge(spec, vals.get("value"), vals.get("ci"), vals.get("n"), min_n, vals.get("paired"))
             target = spec.get("target")
@@ -987,8 +1141,10 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
     L.append(
         f"Floors and targets are RFC 0004 §6, read from `bench/manifest.toml` `[scorecard]`. **Rueca (95% CI)**: Wilson intervals for "
         f"proportions (File Acc@5, Function Acc@10, definition found, files with parse errors), percentile bootstrap ({sc['resamples']:,} resamples, "
-        f"seed {sc['seed']}) for macro averages (precision / recall over questions) and the pooled micro-benchmark F1, binomial order statistics for "
-        "latency p95 and median tokens. **Status**: ✅ floor met with the whole interval on the right side; ⚠ met, but the interval crosses the floor; "
+        f"seed {sc['seed']}) for macro averages (precision / recall over questions), the pooled micro-benchmark F1 and the pooled tokens-per-correct-answer "
+        "ratios, binomial order statistics for latency p95. *Files with parse errors* is the gated rate (vendored, copied and misdetected files left out; "
+        "the raw rate is the row below it, not gated); the Efficiency rows are RFC 0005 §8's tokens per correct answer on what an agent reads, "
+        "target ≤ 50% of cbm (see *Efficiency*). **Status**: ✅ floor met with the whole interval on the right side; ⚠ met, but the interval crosses the floor; "
         f"❌ not met, or the population is below the minimum (≥ {sc['min_s3']} structural questions per direction, ≥ {sc['min_s1']} localization instances); "
         "Localization floors are relative: the paired bootstrap of Rueca − BM25 per instance must not lie entirely below zero (§6.1; ✅ interval ≥ 0, ⚠ "
         f"crosses 0). Rows in parentheses are not gated (the confidence ≥ {sc['cut']} rows show what an agent that filters by confidence gets; cbm and "
@@ -1039,7 +1195,9 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
             L.append(f"- Micro-benchmark callees, pooled over every callable: precision {_f(mi['precision'])}, recall {_f(mi['recall'])} ({mi['edges']} gold edges).")
         pr = c["metrics"].get("parse_error_rate", {})
         if pr.get("n"):
-            L.append(f"- Health: {pr.get('partial')} of {pr['n']:,} files with parse errors over {pr.get('repos')} corpus repositories; latency over every Rueca S1 / S3 repository query (one `rueca query` process per call).")
+            rw = c["metrics"].get("parse_error_rate_raw", {})
+            raw_txt = f" (raw, vendored and misdetected files included: {rw.get('partial')} of {rw['n']:,})" if rw.get("n") else ""
+            L.append(f"- Health: {pr.get('partial')} of {pr['n']:,} files with parse errors over {pr.get('repos')} corpus repositories{raw_txt}; latency over every Rueca S1 / S3 repository query (one `rueca query` process per call).")
         vers = meta.get("versions_by_group", {}).get(c["label"], {})
         if vers.get("rueca"):
             L.append(f"- Rueca binary: {'; '.join(vers['rueca'])}.")
@@ -1092,7 +1250,7 @@ S3_HEAD = (
 )
 
 
-def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict) -> str:
+def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict, eff: dict | None = None, orgs: dict | None = None) -> str:
     arms = list(ARM_NAMES)
     s1_groups = [g for g in language_groups() if any(g in s1["table"].get(a, {}).get(v, {}) for a in arms for v in VARIANTS)]
     groups_s1 = s1_groups + [OVERALL]
@@ -1324,39 +1482,31 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict)
     L.append(
         "Parse-error rate from Rueca's IndexReport (`files_partial / files_extracted`), one index per repository and language over a hard-linked "
         "tree holding only that language's files (tests included); throughput = extracted files per second of that index (single process, "
-        "includes resolution and segment write)."
+        "includes resolution and segment write). **Gated** (the scorecard floor) leaves out vendored third-party code — the directories Rueca's "
+        "ranking demotes (`third_party`, `thirdparty`, `third-party`, `3rdparty`, `vendored`, `deps`, `dependencies`), `vendor` / `node_modules`, "
+        "the per-repository vendored trees of manifest `[health]` —, GoogleTest / GoogleMock copies, amalgamations, and files misdetected as the "
+        "language (`[[health.not_language]]`); **raw** counts every file. Rules: bench/README.md, *Health*."
     )
     L.append("")
-    L.append("| Language | Repository | Source | Split | Files extracted | With parse errors | Rate | Files / s |")
-    L.append("|---|---|---|---|---:|---:|---:|---:|")
+    L.append("| Language | Repository | Source | Split | Files (gated) | With parse errors | Rate gated | Files (raw) | With parse errors | Rate raw | Excluded | Files / s |")
+    L.append("|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---:|")
     for r in sorted(health["rows"], key=lambda x: (language_groups().index(lang_group(x["language"])), x["source"], x["repo"])):
         if not r.get("ok"):
-            L.append(f"| {lang_group(r['language'])} | {r['repo']} | {r['source']} | {r['split']} | failed: {str(r.get('error'))[:80]} | | | |")
+            L.append(f"| {lang_group(r['language'])} | {r['repo']} | {r['source']} | {r['split']} | failed: {str(r.get('error'))[:80]} | | | | | | | |")
             continue
         ext, par = r["files_extracted"], r["files_partial"]
+        rext, rpar = r.get("raw_files_extracted", ext), r.get("raw_files_partial", par)
         tput = ext / (r["duration_ms"] / 1000) if r.get("duration_ms") else None
-        L.append(f"| {lang_group(r['language'])} | {r['repo']} | {r['source']} | {r['split']} | {ext} | {par} | {_f(par / ext if ext else None)} | {_f(tput, False) if tput else '—'} |")
+        exc = ", ".join(f"{k} {v}" for k, v in sorted((r.get("excluded") or {}).items())) or "—"
+        L.append(
+            f"| {lang_group(r['language'])} | {r['repo']} | {r['source']} | {r['split']} | {ext} | {par} | {_f(par / ext if ext else None)} | {rext} | {rpar} | "
+            f"{_f(rpar / rext if rext else None)} | {exc} | {_f(tput, False) if tput else '—'} |"
+        )
     L.append("")
 
     # ---- efficiency
-    L.append("## Efficiency")
-    L.append("")
-    L.append(
-        "Tokens returned per tool answer (tiktoken `cl100k_base` over the JSON the tool printed), Rueca and cbm on the same questions of the gated "
-        "repository sets: one depth-1 neighbours answer per question (`trace` direction `both` vs `trace_path` direction `both`) and the lookup "
-        "sample's symbol search (limit 10). Reported only (RFC 0004 §6: target ≤ 50% of cbm)."
-    )
-    L.append("")
-    L.append("| Language | Answer | n | Rueca median | cbm median | Rueca / cbm | Rueca mean | cbm mean |")
-    L.append("|---|---|---:|---:|---:|---:|---:|---:|")
-    for grp in language_groups():
-        for field, label in (("t", "trace"), ("lt", "search")):
-            a, b = _paired_tokens(s3, grp, field)
-            if not a:
-                continue
-            ma, mb = statistics.median(a), statistics.median(b)
-            L.append(f"| {grp} | {label} | {len(a)} | {ma:.0f} | {mb:.0f} | {ma / mb:.2f} | {statistics.mean(a):.0f} | {statistics.mean(b):.0f} |")
-    L.append("")
+    _render_efficiency(L, eff or {}, s3, meta)
+    _render_org(L, orgs or {})
 
     if data and data.get("gold"):
         _render_data(L, data)
@@ -1377,6 +1527,141 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict)
             L.append(f"- Arm `{a}` pending: {st['reason']}.")
     L.append("")
     return "\n".join(L) + "\n"
+
+
+def _tok(x) -> str:
+    return "—" if x is None else (f"{x:.0f}" if x >= 10 else f"{x:.1f}")
+
+
+def _tok_ci(x, ci) -> str:
+    if x is None:
+        return "—"
+    return _tok(x) + (f" ({_tok(ci[0])}–{_tok(ci[1])})" if ci else "")
+
+
+def _ratio_txt(a, b) -> str:
+    return f"{a / b:.2f}" if a is not None and b else "—"
+
+
+def _render_efficiency(L: list[str], eff: dict, s3: dict, meta: dict) -> None:
+    L.append("## Efficiency — tokens per correct answer (RFC 0005 §8)")
+    L.append("")
+    rv = meta.get("arms", {}).get("rueca", {}).get("version", "")
+    contract = "RFC 0005 text content (`rueca query --text`)" if "rfc0005" in rv else "the JSON the CLI prints (alpha contract; no text rendering in this binary)"
+    L.append(
+        "tiktoken `cl100k_base` over what an agent reads: Rueca — " + contract + "; cbm — its MCP text content (the default `tree` rendering). "
+        "Same queries for both arms (paired; a query enters only when both answered). **search_symbols**: the S1 keyword query of every gated "
+        f"instance, top {EFF_LIMIT} (the agent's call: `limit` {EFF_LIMIT}, every other argument at its default); a gold hit is an item in a gold "
+        "file. *To first hit* = Σ tokens read until the first gold hit (the whole answer when there is none) / queries with a gold hit; *per hit* = "
+        "Σ answer tokens / Σ gold hits in the top 10. **trace**: one depth-1 `trace` (direction `both`) per gated structural question (cbm "
+        "`trace_path`); *per true edge* = Σ answer tokens / Σ gold edges returned (callers + callees). Pooled ratios with percentile-bootstrap "
+        "95% intervals over queries. Target (RFC 0004 §6 as amended by RFC 0005 §8): Rueca ≤ 50% of cbm on each."
+    )
+    L.append("")
+    L.append("| Language | Tool | Metric | n | Rueca (95% CI) | cbm (95% CI) | Rueca / cbm | Target |")
+    L.append("|---|---|---|---:|---|---|---:|---|")
+    for grp in language_groups():
+        g = eff.get(grp) or {}
+        se = g.get("search") or {}
+        if se.get("rueca"):
+            r, c = se["rueca"], se["cbm"]
+            for lab, k in (("tokens to first gold hit", "to_first_hit"), ("tokens per gold hit (top 10)", "per_hit")):
+                ok = r.get(k) is not None and c.get(k) and r[k] <= 0.5 * c[k]
+                L.append(f"| {grp} | search_symbols | {lab} | {r['n']} | {_tok_ci(r.get(k), r.get(k + '_ci'))} | {_tok_ci(c.get(k), c.get(k + '_ci'))} | {_ratio_txt(r.get(k), c.get(k))} | {'✅' if ok else '❌'} |")
+            L.append(f"| {grp} | search_symbols | (gold hit in top 10: file / function) | {r['n']} | {_f(r.get('hit_rate'))} / {_f(r.get('func_hit_rate'))} | {_f(c.get('hit_rate'))} / {_f(c.get('func_hit_rate'))} | | |")
+        tr = g.get("trace") or {}
+        if tr.get("rueca"):
+            r, c = tr["rueca"], tr["cbm"]
+            ok = r.get("per_true_edge") is not None and c.get("per_true_edge") and r["per_true_edge"] <= 0.5 * c["per_true_edge"]
+            L.append(f"| {grp} | trace | tokens per true edge | {r['n']} | {_tok_ci(r.get('per_true_edge'), r.get('ci'))} | {_tok_ci(c.get('per_true_edge'), c.get('ci'))} | {_ratio_txt(r.get('per_true_edge'), c.get('per_true_edge'))} | {'✅' if ok else '❌'} |")
+            L.append(f"| {grp} | trace | (true edges returned) | {r['n']} | {r['true_edges']:,} | {c['true_edges']:,} | | |")
+        lk = g.get("lookup") or {}
+        if lk.get("rueca"):
+            r, c = lk["rueca"], lk["cbm"]
+            L.append(f"| {grp} | search_symbols (name lookup) | (tokens per definition found in top 10) | {r['n']} | {_tok(r.get('per_found'))} | {_tok(c.get('per_found'))} | {_ratio_txt(r.get('per_found'), c.get('per_found'))} | |")
+    L.append("")
+    L.append("**Diagnostic — raw tokens per answer** (the alpha metric: median over the same paired structural questions; *JSON* = the JSON each tool prints, cbm with `format: json`; *read* = what an agent reads, as above).")
+    L.append("")
+    L.append("| Language | Answer | n | Rueca JSON | cbm JSON | Rueca / cbm | Rueca read | cbm read | Rueca / cbm |")
+    L.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
+    for grp in language_groups():
+        raw = (eff.get(grp) or {}).get("raw") or {}
+        for label in ("trace", "search"):
+            x = raw.get(label)
+            if not x or "n" not in x:
+                continue
+            L.append(
+                f"| {grp} | {label} | {x['n']} | {x['rueca_median']:.0f} | {x['cbm_median']:.0f} | {_ratio_txt(x['rueca_median'], x['cbm_median'])} | "
+                f"{_tok(x.get('agent_rueca_median'))} | {_tok(x.get('agent_cbm_median'))} | {_ratio_txt(x.get('agent_rueca_median'), x.get('agent_cbm_median'))} |"
+            )
+    L.append("")
+
+
+def _render_org(L: list[str], orgs: dict) -> None:
+    mr = orgs.get("multirepo") or {}
+    L.append("## Org scenarios (RFC 0005 §5–§6, §8)")
+    L.append("")
+    L.append("### Multi-repository store")
+    L.append("")
+    if not mr.get("arms"):
+        L.append("Not run (`rueca-bench run --suite org`).")
+        L.append("")
+    else:
+        L.append(
+            f"{mr['instances']} S1 instances, one per repository (the first gated instance of the first `[org] repos_per_family` gated repositories of "
+            f"every language), all {len(mr['repos'])} repositories indexed into one store at those instances' base commits. Each keyword query is asked of "
+            "the whole organization: **native** = one Rueca `search_symbols` with `repo: \"*\"`; **per repository** = one search per repository, merged "
+            "by the bench with reciprocal rank fusion (k = 60) — what an agent must do without an org query (cbm has no cross-project search). "
+            "Localization as in S1 with repository-qualified paths and the candidate filter of every language; *single* = the same arm's S1 answer "
+            "on the instance's repository alone. Tokens: the top-10 answer an agent reads (per repository: the sum of its calls)."
+            + (" Carried from the published results." if mr.get("carried") else "")
+        )
+        L.append("")
+        L.append("| Arm | Mode | n | File Acc@5 org | File Acc@5 single | Function Acc@10 org | Function Acc@10 single | Other-repository share of top 10 | Tokens org (median) | Tokens single (median) |")
+        L.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+        for arm, a in mr["arms"].items():
+            if a.get("status") != "ok":
+                L.append(f"| {arm} | — | | {a.get('status')}: {a.get('error', '')[:120]} | | | | | | |")
+                continue
+            for mode, m in a["modes"].items():
+                label = "native `repo: \"*\"`" if mode == "native" else "per repository + RRF"
+                if m.get("status") != "ok":
+                    L.append(f"| {arm} | {label} | — | pending: {m.get('reason', '')[:160]} | | | | | | |")
+                    continue
+                L.append(
+                    f"| {arm} | {label} | {m['n']} | {_f(m['file_acc@5'])} | {_f(m.get('single_file_acc@5'))} | {_f(m.get('func_acc@10'))} | {_f(m.get('single_func_acc@10'))} | "
+                    f"{_f(m.get('other_repo_top10'))} | {_tok(m.get('tokens_median'))} | {_tok(m.get('single_tokens_median'))} |"
+                )
+        L.append("")
+    mf = orgs.get("multiref") or {}
+    L.append("### Multi-ref (one repository at two commits)")
+    L.append("")
+    if not mf:
+        L.append("Not run (`rueca-bench run --suite org`).")
+        L.append("")
+        return
+    if mf.get("status") not in ("ok", "pending"):
+        L.append(f"Failed: {mf.get('error')}")
+        L.append("")
+        return
+    cls = ", ".join(f"{k} {v}" for k, v in sorted((mf.get("gold") or {}).get("classes", {}).items()))
+    L.append(
+        f"`{mf['instance']}`: {mf['repo']} at its base commit `{mf['base_commit'][:12]}` and at a fix commit `{mf['fix_commit'][:12]}` (base + the "
+        f"instance's gold patch, committed by the bench), both indexed into one store. Gold over the changed files "
+        f"({', '.join(mf['gold'].get('changed_files', []))}; {mf['gold'].get('unchanged_files')} unchanged files of the language): {cls}. "
+        f"{mf['queries']} `search_symbols` queries (every changed / added / removed function name plus a fixed sample of unchanged ones) over both refs; "
+        "scored on collapse (an unchanged symbol is one item in both snapshots), `in` lists and `changed` flags (`org.score_collapse`)."
+    )
+    L.append("")
+    if mf["status"] == "pending":
+        L.append(f"**Rueca: pending** — {mf['reason']}; the binary answered: {'; '.join(mf.get('errors') or [])[:300]}. Uncollapsed baseline today: the two single-ref answers cost {mf['single_tokens_sum']:,} tokens over the {mf['queries']} queries.")
+    else:
+        c = mf["counts"]
+        L.append(
+            f"Rueca: unchanged symbols collapsed {c['identical_ok']} / {c['identical']}; changed flags TP {c['changed_tp']}, FP {c['changed_fp']}, FN {c['changed_fn']}; "
+            f"`in` lists correct {c['in_ok']} / {c['in_total']}; tokens {mf['multi_tokens_sum']:,} for the multi-ref answers vs {mf['paired_single_tokens_sum']:,} for two single-ref answers."
+        )
+    L.append("")
 
 
 def _render_data(L: list[str], data: dict) -> None:
@@ -1465,8 +1750,15 @@ def report() -> None:
     s3 = score_s3(published["s3"])
     data = data_mod.score(published["data"])
     health = health_mod.score()
+    eff = score_efficiency(s1, s3)
+    orgs = {"multirepo": org_mod.score_multirepo(s1), "multiref": org_mod.score_multiref()}
+    published_eff = published.get("efficiency") or {}
+    for k in ("multirepo", "multiref"):
+        if not orgs[k] or not orgs[k].get("arms", orgs[k].get("status")):
+            if published_eff.get("org", {}).get(k):
+                orgs[k] = dict(published_eff["org"][k], carried=True)
     log("report: scorecard")
-    card = build_scorecard(s1, s3, health, data)
+    card = build_scorecard(s1, s3, health, data, eff)
     carried_pairs = {tuple(k.split(":", 1)) for k in s1.get("carried", {})}
     for k in s3.get("carried", []):
         arm, name = k.split(":", 1)
@@ -1500,8 +1792,9 @@ def report() -> None:
     write_json(RESULTS_DIR / "s3.json", s3, compact=True)
     write_json(RESULTS_DIR / "data.json", data)
     write_json(RESULTS_DIR / "health.json", health)
+    write_json(RESULTS_DIR / "efficiency.json", {"tokens_per_correct_answer": eff, "org": orgs})
     write_json(RESULTS_DIR / "scorecard.json", card)
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    (DOCS_DIR / "alpha-results.md").write_text(render(meta, s1, s3, data, health, card))
-    log(f"wrote {RESULTS_DIR}/{{meta,s1,s3,data,health,scorecard}}.json and {DOCS_DIR / 'alpha-results.md'}")
+    (DOCS_DIR / "alpha-results.md").write_text(render(meta, s1, s3, data, health, card, eff, orgs))
+    log(f"wrote {RESULTS_DIR}/{{meta,s1,s3,data,health,efficiency,scorecard}}.json and {DOCS_DIR / 'alpha-results.md'}")
     print(readme_summary(card))

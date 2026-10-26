@@ -21,6 +21,26 @@ from .gold import assembled_functions, compute_s1_gold, context_files, parse_lis
 from .queries import derive_keywords, raw_query
 
 KEEP_RANKED = 50
+# Efficiency (RFC 0005 §8): the keyword query issued as an agent would, top 10.
+EFF_VARIANT = "kw"
+EFF_LIMIT = 10
+
+
+def eff_record(res) -> dict:
+    """Compact record of an efficiency search: items in rendered order
+    ([path, name, start_line, label]), tokens read, prefix cost per item."""
+    if not res.ok:
+        return {"ok": False, "error": res.error}
+    return {
+        "ok": True,
+        "seconds": res.seconds,
+        "tokens": res.extra.get("tokens"),
+        "tokens_json": res.extra.get("tokens_json"),
+        "prefix": res.extra.get("prefix") or [],
+        "approx": bool(res.extra.get("approx")),
+        "format": res.extra.get("format"),
+        "items": [[h.get("path"), h.get("name"), h.get("start_line"), h.get("label")] for h in res.hits],
+    }
 
 
 def instances() -> list[dict]:
@@ -135,13 +155,16 @@ def _run_arm(arm: Arm, inst: dict, root, qs: dict[str, str], limit: int) -> dict
     try:
         for variant, q in qs.items():
             res = arm.localize(h, q, limit)
-            entry: dict = {"ok": res.ok, "seconds": res.seconds, "error": res.error, "tokens": res.extra.get("tokens")}
+            entry: dict = {"ok": res.ok, "seconds": res.seconds, "error": res.error, "tokens": res.extra.get("tokens"), "tokens_json": res.extra.get("tokens_json")}
             if res.ok:
                 entry["files"] = _filtered_files(res.extra.get("files", []), lang)
                 entry["functions"] = _filtered_funcs(res.extra.get("functions", []), lang)
                 if "functions_name" in res.extra:
                     entry["functions_name"] = _filtered_funcs(res.extra["functions_name"], lang)
             rec["queries"][variant] = entry
+        eff_q = qs.get(EFF_VARIANT)
+        if eff_q is not None and hasattr(arm, "search_eff"):
+            rec["eff"] = eff_record(arm.search_eff(h, eff_q, EFF_LIMIT))
     finally:
         arm.cleanup(h)
     rec["status"] = "ok"
