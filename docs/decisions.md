@@ -1,5 +1,22 @@
 # Decisions log
 
+## 2026-10-26 — Organization index from the repositories' own segments
+
+RFC 0006 phase 1. The organization symbol index is a tantivy index whose
+segments are the repository segments' embedded symbol-index segments,
+copied unchanged: no second document format, no re-tokenization, and an
+update of one repository is a file copy plus a generation file and an atomic
+pointer swap (≈ 0.1 s on the benchmark's 21-repository organization, 0.05×
+the repository's own index time). The repository of a document is an
+attribute of its tantivy segment, so the `repo` filter and the visibility
+filter are segment filters inside tantivy (before top-k), and BM25
+statistics are summed over the visible segments only, so permissions never
+change scores. Rank fusion is gone everywhere: roots ranked together
+without an organization use summed statistics, which give the same scores.
+Measured: organization File Acc@5 47.6% vs 61.9% on the right repository
+alone (0.77×, floor 0.85×; rank fusion gave 9.5%); tokens per correct
+answer 1.67× single-repository. Repository routing is the next lever.
+
 ## 2026-10-26 — Organization graph on top of repository graphs
 
 [RFC 0006](rfcs/0006-org-graph.md): the graph of one repository and ref stays

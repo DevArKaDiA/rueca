@@ -1,8 +1,9 @@
 # Tools and CLI
 
 This is the tool contract of Rueca since RFC 0005 ([responses for
-agents](rfcs/0005-agent-responses.md)). The MCP server, the CLI and the
-benchmark all use it. The alpha shapes (v0.1.0-alpha) stay available for one
+agents](rfcs/0005-agent-responses.md)), with the organization scope of RFC
+0006 ([the organization graph](rfcs/0006-org-graph.md), phase 1). The MCP
+server, the CLI and the benchmark all use it. The alpha shapes (v0.1.0-alpha) stay available for one
 release with `"format": "verbose"` ([below](#verbose-alpha-format)).
 
 ## Common conventions
@@ -12,7 +13,7 @@ release with `"format": "verbose"` ([below](#verbose-alpha-format)).
 
   | Arg | Type | Default |
   |---|---|---|
-  | `repo` | a repository id (`github.com/o/r`, `local/<dir>`) or indexed root path; a list of them; or `"*"` for every indexed repository | the server's `--root`, else the repository of an `id` argument, else the only indexed root, else an error listing indexed roots |
+  | `repo` | a repository id (`github.com/o/r`, `local/<dir>`) or indexed root path; a list of them; or `"*"` for every indexed repository | organization mode (`--org`): the whole organization (for `get_symbol`, `get_snippet`, `trace`: the repository of an `id` argument); otherwise the server's `--root`, else the repository of an `id` argument, else the only indexed root, else an error listing indexed roots |
   | `ref` | branch name, `HEAD`, `worktree`, or a commit (full, or a unique prefix of ≥ 7 hex digits) | the working tree |
   | `budget_tokens` | int, 100–1,000,000 | 2000 |
   | `cursor` | string: the `next_cursor` of a previous response | — |
@@ -85,7 +86,9 @@ Every response (default `format: compact`) is:
 }
 ```
 
-- `snapshots`: every snapshot the response read. Items refer to one by `s`
+- `snapshots`: the snapshots the answer touched (RFC 0006 §6): a search
+  over several repositories lists only those its items come from (none for
+  an empty answer); a request on one snapshot always lists it. Items refer to one by `s`
   (an index valid within the response); their ids stay fully pinned, so an
   id copied out of a response is valid on its own. `commit` is the full id
   (`worktree` outside git); `overlay: true` means the working tree had
@@ -125,15 +128,31 @@ src/invoices/service.py
 (truncated; continue with "cursor": "10")
 ```
 
-**Several repositories.** With `repo` a list or `"*"`, `search_symbols`
-ranks each snapshot separately and merges the rankings by reciprocal rank
-fusion (score `1 / (60 + rank)`), then re-applies the global priors (×0.5
-for tests, ×0.5 for fields, variables and constants): BM25 scores are not
-comparable across segments. `search_code` lists matches in snapshot order.
-`get_symbol`, `get_snippet` and `trace` resolve an `id` in its own snapshot,
-and a name in every selected snapshot (the best match wins; the best match
-of each other snapshot is listed in `candidates`). `get_file_outline` and
-path snippets need the path to exist in exactly one selected snapshot.
+**Several repositories.** With `repo` a list or `"*"` (or omitted in
+organization mode), `search_symbols` returns **one ranking**: BM25
+statistics are those of every selected repository together, so scores are
+comparable and the order is the one a single index would give (RFC 0006 §6;
+the rank fusion of RFC 0005 §5 is gone). In organization mode the ranking
+comes from the organization symbol index; locally indexed roots without an
+organization are scored with summed statistics, which gives the same
+scores. `search_code` lists matches in snapshot (repository) order.
+`get_symbol`, `get_snippet` and `trace` resolve an `id` in its own
+snapshot, and a name in every selected snapshot (the best match wins; the
+best match of each other snapshot is listed in `candidates`).
+`get_file_outline` and path snippets need the path to exist in exactly one
+selected snapshot.
+
+**Organization mode** (`rueca mcp --org`, `rueca query --org`; RFC 0006).
+The server reads one organization: the repositories of its current
+generation (a call reads one generation even while the organization is
+updated). `repo` omitted means the whole organization; one repository or a
+list narrows it — the filter is applied inside the organization index
+before top-k, with organization-wide statistics, so a repository's results
+score the same whether it is searched alone or with the others. Callers see
+only the repositories they may read: the visible set is applied before
+top-k, before counts and before BM25 statistics, and a repository that is
+not visible is reported exactly like one that does not exist (local mode
+sees everything). `list_repositories` lists the organization.
 
 ## Tools
 
@@ -343,23 +362,70 @@ Results: `{"s", "path", "lang", "line_count", "symbols": [ {"id", "name", "qn", 
 symbols already returned in pre-order; a later page nests what it can and
 lists the rest at the top level.
 
+### `list_repositories`
+
+The repositories this server can read, sorted by id: in organization mode
+every visible repository of the organization, otherwise every indexed root
+(`repo` narrows it, `ref` filters snapshots).
+
+Results: `[{"s", "repo", "default_ref", "refs": [ref, …], "languages": {"python": files, …}, "files", "symbols", "edges"}]`
+(`s` is the snapshot of the default ref; `symbols` counts nodes that are not
+files, folders, modules or packages), plus `"org"` (the organization name,
+or `null`) next to `next_cursor`. `next_cursor` is the number of
+repositories already returned. Verbose: `{"org", "repositories": [{"repo",
+"root", "default_ref", "commit", "refs", "languages", "files", "symbols",
+"edges"}]}`. Text:
+
+```
+[0] github.com/acme/billing@7696364aef89 (main)
+[1] github.com/acme/payments@a1b2c3d4e5f6 (main)
+[0] github.com/acme/billing  refs main  120 files, 3400 symbols, 9100 edges  python 110, yaml 10
+[1] github.com/acme/payments  refs main  80 files, 2100 symbols, 5300 edges  typescript 78, json 2
+```
+
 ## CLI
 
 ```
 rueca index [PATH] [--store DIR] [--repo ID] [--json]
     Index the working tree at PATH (default: current dir). Prints a summary
-    (or the IndexReport as JSON).
+    (or the IndexReport as JSON). Organizations holding PATH are updated
+    (only its part; JSON: "orgs").
 
-rueca query <TOOL> '<JSON ARGS>' [--root PATH] [--store DIR] [--pretty] [--text]
+rueca index --org FILE [PATH] [--store DIR] [--json]
+    Index every repository of the organization file (or only the one
+    containing PATH), then build or update the organization layer. JSON:
+    {"org", "indexed": [IndexReport], "update", "repos_ms", "org_ms",
+    "duration_ms"}.
+
+rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
     Run one tool and print its JSON result (with --text, the compact text
     rendering MCP clients get as text content). Same semantics as MCP.
 
-rueca mcp [--root PATH] [--store DIR] [--no-auto-index]
-    MCP server on stdio. Indexes --root first if it has no segment.
+rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
+    MCP server on stdio. Indexes --root first if it has no segment; with
+    --org FILE, builds the organization first if the store has none.
 
 rueca status [--store DIR] [--json]
-    List indexed roots with repo, commit, node/edge/file counts, age.
+    List indexed roots with repo, commit, node/edge/file counts, age, and
+    the organizations (generation, repositories).
 ```
+
+**Organization file** (`rueca-org.toml`, RFC 0006 §7):
+
+```toml
+name = "acme"                      # ASCII letters, digits, `-`, `_`, `.`
+
+[[repo]]
+path = "~/src/billing"             # `~` and paths relative to this file
+
+[[repo]]
+url = "https://github.com/acme/payments"   # cloned under <store>/orgs/acme/clones/ with `git`
+id = "github.com/acme/payments"            # optional repository id (like `index --repo`)
+```
+
+The organization lives in `<store>/orgs/<name>/` ([how it
+works](how-it-works.md#46-the-organization-layer-rueca-segment-org)).
+Repository ids must be unique within an organization.
 
 Store default: `$RUECA_HOME`, else `~/.cache/rueca`.
 
@@ -375,8 +441,7 @@ result is the compact JSON.
 - **Brief**: `{ "id", "name", "qualified_name", "label", "path", "start_line", "end_line" }`
   (`path`, `start_line`, `end_line` are `null` for nodes without a file or
   span).
-- `search_symbols`: `{ "results": [ brief + "signature" (opt) + "score" ], "truncated", "next_offset" }`
-  (with several repositories, `score` is the fused score).
+- `search_symbols`: `{ "results": [ brief + "signature" (opt) + "score" ], "truncated", "next_offset" }`.
 - `search_code`: `{ "matches": [ { "path", "line", "text", "before" (opt), "after" (opt), "symbol" (opt brief) } ], "truncated", "files_scanned" }`
 - `get_symbol`: `{ "symbol": { brief…, "language", "signature", "doc", "exported", "is_test" }, "parent", "children", "bases", "subtypes", "callers_count", "callees_count", "readers_count" (opt), "writers_count" (opt), "candidates" }`
 - `get_snippet`: `{ "path", "language", "start_line", "end_line", "text", "truncated", "symbol" (opt brief) }`

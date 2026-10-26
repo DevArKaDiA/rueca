@@ -29,8 +29,12 @@ agent can follow.
 
 - **One static binary**, no services: `rueca index` builds a segment,
   `rueca mcp` serves it on stdio.
-- **Six tools** for agents: `search_symbols`, `search_code`, `get_symbol`,
-  `get_snippet`, `trace`, `get_file_outline` ([contract](docs/tools.md)).
+- **Seven tools** for agents: `search_symbols`, `search_code`, `get_symbol`,
+  `get_snippet`, `trace`, `get_file_outline`, `list_repositories`
+  ([contract](docs/tools.md)).
+- **Organizations**: several repositories indexed as one organization
+  (`rueca-org.toml`) share one symbol index, so a question asked of all of
+  them gets one ranking; re-indexing one repository replaces only its part.
 - **Call graph with provenance**: every edge carries the strategy that resolved
   it (scope, `self`/MRO, import, re-export, same module, unique name,
   heuristic) and a confidence, so agents can filter guesses out.
@@ -122,6 +126,34 @@ and every tool takes `repo` (a list, or `"*"` for every indexed repository),
 Indexes live in `$RUECA_HOME` (default `~/.cache/rueca`). Re-run
 `rueca index` after changes; only changed files are re-extracted.
 
+### Several repositories: an organization
+
+```toml
+# rueca-org.toml
+name = "acme"
+
+[[repo]]
+path = "~/src/billing"
+
+[[repo]]
+path = "~/src/payments"
+
+[[repo]]
+url = "https://github.com/acme/shared-lib"   # cloned under the store with git
+```
+
+```sh
+rueca index --org rueca-org.toml                  # every repository, then the organization layer
+rueca query search_symbols '{"query":"refund invoice"}' --org acme --text   # one ranking over all of them
+rueca query list_repositories '{}' --org acme --text
+rueca index ~/src/payments                        # re-index one: only its part of the organization changes
+rueca mcp --org rueca-org.toml                    # serve the organization (builds it first if needed)
+```
+
+In an organization, `repo` omitted means every repository and `repo: "…"`
+narrows the same ranking ([RFC 0006](docs/rfcs/0006-org-graph.md),
+[how it works](docs/how-it-works.md#46-the-organization-layer-rueca-segment-org)).
+
 ## Use it from an agent
 
 `rueca mcp --root <repo>` speaks MCP over stdio and indexes the root on first
@@ -184,7 +216,8 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    adjacency, an embedded [tantivy](https://github.com/quickwit-oss/tantivy)
    symbol index with code-aware tokenization, and a trigram index over
    zstd-compressed, content-addressed file packs.
-4. **Serve** — the six tools run against the memory-mapped segment.
+4. **Serve** — the tools run against the memory-mapped segment (and, for an
+   organization, its shared symbol index).
 
 The full method — what is extracted, how references are resolved, the graph
 schema, and exactly what each tool reads — is in
@@ -227,10 +260,13 @@ measured on what an agent reads, same queries as codebase-memory-mcp;
 target ≤ 50% of cbm): with the RFC 0005 responses, `search_symbols` costs
 0.33–0.89× cbm's tokens until the first gold hit (target met for Python,
 TS/JS, PHP and Java) and `trace` 0.89–1.75× cbm's tokens per true call
-edge (target not met; Rueca also returns more true edges). In a store of 21
-repositories, `repo: "*"` keeps the right repository's file in the top 5
-for 9.5% of issues vs 61.9% when asking that repository alone — org-wide
-ranking is open work.
+edge (target not met; Rueca also returns more true edges). In an
+organization of 21 repositories, one ranking over the organization index
+keeps the right repository's file in the top 5 for 47.6% of issues vs 61.9%
+when asking that repository alone (0.77×; rank fusion across repositories
+gave 9.5%); re-indexing one repository updates the organization layer in
+~0.1 s, 0.05× the repository's own index time
+([RFC 0006 §8](docs/rfcs/0006-org-graph.md)).
 
 Contributions that move these numbers are very welcome.
 
@@ -243,7 +279,7 @@ absolute floors and aspirational targets).
 
 | Stage | What it delivers | Status |
 |---|---|---|
-| **Local mode** | One binary, MCP over stdio, six tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
+| **Local mode** | One binary, MCP over stdio, the tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
 | **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)) | ✅ landed, most languages `preview` |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | 🚧 in progress |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | 🚧 design |
@@ -251,7 +287,7 @@ absolute floors and aspirational targets).
 | **Retrieval** | Vector baseline in the bench; hybrid retrieval in Rueca (BM25 over code + static embeddings + graph signals) aimed at the localization targets | 🗺️ planned |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
 | **Service mode** | One container, segments in object storage, MCP over HTTP | 🗺️ planned |
-| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 design |
+| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 phase 1 landed (organization symbol index, scoped queries, local `--org`); link layer next |
 | **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
 | **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |
 
@@ -276,7 +312,7 @@ the first release is out.
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |
 | [`rueca-segment`](crates/rueca-segment) | segment format, search, content packs, catalog |
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
-| [`rueca-query`](crates/rueca-query) | the six tools |
+| [`rueca-query`](crates/rueca-query) | the tools, organization scope |
 | [`rueca-mcp`](crates/rueca-mcp) | MCP stdio server |
 
 ## Contributing

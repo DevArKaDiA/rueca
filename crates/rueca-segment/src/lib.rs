@@ -15,6 +15,7 @@
 //! <store>/segments/<id>.rcseg     one bundle file per segment
 //! <store>/packs/<pack-id>.rcpack  content packs (one zstd frame per blob)
 //! <store>/packs/index.rcpi        store-level blob index (derived, rebuildable)
+//! <store>/orgs/<name>/            organizations: pointer, generations, shared symbol index ([`org`])
 //! <store>/tmp/                    writer scratch space (same filesystem)
 //! ```
 //!
@@ -159,6 +160,11 @@
 //! Priors are computed at open from the node and file tables and
 //! `symbols.bodiless` (a tantivy `tweak_score` collector), so changing them
 //! needs no re-index.
+//!
+//! Several segments ranked together ([`search_symbols_merged`]) use BM25
+//! statistics summed over all of them, and an organization ([`org`]) lists
+//! the segments' tantivy segments in one index: in both cases scores are
+//! comparable across repositories and there is one ranking.
 //!
 //! Labels and language are exact-term filters (an empty label list excludes
 //! `File`, `Folder`, `Module`, `Repository`, and `Key` / `Document` unless the
@@ -363,7 +369,8 @@ impl Store {
     /// entry. Garbage-collects the replaced segment file.
     ///
     /// `root` is canonicalized. The replaced segment file is deleted unless
-    /// another entry still references it.
+    /// another entry or a kept organization generation ([`org`]) still
+    /// references it.
     pub fn register(&self, root: &str, meta: &SegmentMeta) -> Result<()> {
         self.register_impl(root, meta)
     }

@@ -1,6 +1,6 @@
 # RFC 0006 — The organization graph
 
-- Status: Draft
+- Status: Draft; phase 1 (§9) is implemented
 - Created: 2026-10-26
 - Depends on: RFC 0001 (§8 storage, §10 org linker, §11 query engine,
   §13 permissions), RFC 0005 (responses, `repo` / `ref`)
@@ -203,6 +203,78 @@ consumer's imports.
 3. **Refs over the organization** (§4), with the multi-ref collapse of
    RFC 0005 §6.
 4. **Contracts** in the link layer (the original org linker; suite S2).
+
+### 9.1 Phase 1 — implemented
+
+The organization symbol index, the scope API and local `--org` landed in
+`rueca-segment` (`org` module), `rueca-query` (organization mode,
+`Visibility`, `list_repositories`), `rueca-index` (`org`: `rueca-org.toml`,
+`index_org`) and the CLI / MCP server (`--org`). Choices and deviations:
+
+- **Segments are the repositories' own.** The organization index does not
+  re-index documents with extra `repo` / snapshot fields: every repository
+  segment already embeds a tantivy index of one tantivy segment with doc id
+  = node id, and the organization index lists those segments, copied
+  unchanged (same schema, tokenizer, `body` text, priors). The repository,
+  snapshot and store segment of a document are attributes of its tantivy
+  segment, recorded in the generation; the hit is (repository, node id).
+  "Delete by `repo` term, add the new documents" (§3.2) is therefore
+  "drop that repository's segment from the list, add the new one" — the
+  degenerate, cheapest form of a merge policy aligned to repositories — and
+  an update is a file copy, no tokenization.
+- **The `repo` filter is a segment filter.** Applied inside tantivy before
+  top-k (the collector skips unselected segments without scoring them),
+  which is what a term filter on `repo` would select. BM25 statistics are
+  summed over the **visible** repositories (a `Bm25StatisticsProvider` over
+  a subset of segments), so a repository the caller cannot read changes
+  neither results, totals nor scores (§5), while narrowing `repo` keeps
+  organization-wide scores.
+- **Generations** (§3.4): `orgs/<name>/org.json` (pointer) →
+  `generations/<n>.json` (repositories, snapshots, store and tantivy
+  segments, the index schema) → `index/<uuid>.*` (tantivy files shared
+  between generations). The index's `meta.json` is synthesized from the
+  generation by a read-only tantivy directory. The current and previous
+  generations are kept; older ones are collected with the files and store
+  segments only they used, and `Store::register` keeps store segments a kept
+  generation still reads. A member re-indexed in the store but not yet
+  propagated stays served from its generation segment.
+- **No rank fusion anywhere** (§6): without an organization, several locally
+  indexed roots are ranked with BM25 statistics summed over their segments
+  (`rueca_segment::search_symbols_merged`) — the same scores the
+  organization index gives (tested for equality).
+- **Envelope**: a response lists only the snapshots its items come from; a
+  request on one snapshot always lists it.
+- **`list_repositories`** reports, per repository: default ref, indexed
+  refs, files per language, files, symbols (non-container nodes) and edges.
+- **Local `--org`**: `rueca index --org <file> [PATH]` (PATH: one member;
+  members never indexed are left out of the generation until they are), a
+  plain `rueca index <member>` updates the organizations holding it, `rueca
+  query --org` / `rueca mcp --org` take the file or the organization's name,
+  `rueca status` lists organizations. `url` members are cloned with `git`
+  under `orgs/<name>/clones/`. Repository ids must be unique within an
+  organization (`id = "…"` overrides one).
+- **Permissions hook**: `rueca_query::Visibility` (local mode: `All`) is
+  applied in every organization path: the snapshot selection, the index
+  statistics and collector, `list_repositories`, and errors (an invisible
+  repository named in `repo` or in an id is reported like one that does not
+  exist).
+
+Measured (bench organization suite, 21 repositories, `bench/README.md`):
+
+| Metric | Phase 1 | Floor | Target |
+|---|---|---|---|
+| File Acc@5, organization scope vs the right repository alone | 47.6% vs 61.9% (0.77×; rank fusion: 9.5%) | ≥ 0.85× | ≥ 0.95× |
+| Other repositories' share of the top 10 | 36.7% (rank fusion: 94.3%) | — | — |
+| Incremental update: re-index micropython (95k symbols) of 21 | organization layer 123 ms vs 2,713 ms (0.05×) | ≤ 2× | ≤ 1× |
+| Organization layer per added repository (21 steps) | median 74 ms, max 137 ms (0.10× median, 0.40× max) | ≤ 2× | ≤ 1× |
+| Tokens per correct answer, organization scope (top 10) | 886 vs 529 single (1.67×) | reported | ≤ 1.2× |
+
+The localization floor is not met: three issues whose file the single
+repository finds (`coder/code-server`, `jqlang/jq`, `fmtlib/fmt`) lose it to
+the same words in other repositories of the same language family, and
+answers that span several repositories cost more header lines. Repository
+routing signals (open question 1) are the next lever; the link layer
+(phase 2) does not change localization.
 
 ## 10. Amendments
 

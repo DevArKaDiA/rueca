@@ -31,7 +31,7 @@ Contents:
 ```
                  per file (parallel, cached by blob)              per snapshot                   query time
               ┌──────────────────────────────────────┐   ┌──────────────────────────┐   ┌─────────────────────────┐
-working tree ─┤ walk → read → blob SHA → tree-sitter ├──▶│ resolve: facts → graph   ├──▶│ segment (one file)      │◀── six tools
+working tree ─┤ walk → read → blob SHA → tree-sitter ├──▶│ resolve: facts → graph   ├──▶│ segment (one file)      │◀── the tools
               │        → FileFacts                   │   │ nodes + edges + evidence │   │ + content packs (zstd)  │
               └──────────────────────────────────────┘   └──────────────────────────┘   └─────────────────────────┘
                  rueca-index + rueca-lang-*                 rueca-resolve                   rueca-segment, rueca-query
@@ -697,6 +697,47 @@ component exists because a tool needs it:
 The segment is written to a temp file and atomically renamed; the catalog
 then points the indexed root at it. Query time never reads the working tree.
 
+### 4.6 The organization layer (`rueca-segment` `org`)
+
+When repositories are configured as an organization (`rueca-org.toml`,
+[RFC 0006](rfcs/0006-org-graph.md)), Rueca keeps one more structure on top
+of the repository segments, which do not change: an **organization symbol
+index**, so a question asked of the whole organization gets one ranking.
+
+- **Segments side by side.** Every segment already embeds a tantivy index
+  of exactly one tantivy segment (doc id = node id). The organization index
+  is a tantivy index whose segments are those, copied unchanged out of the
+  bundles into `<store>/orgs/<name>/index/` — same schema, tokenizer, body
+  text and priors, nothing re-tokenized. tantivy computes BM25 statistics
+  over all segments of an index, so a document scores the same way whichever
+  repository it comes from: scores are comparable by construction. A hit is
+  (repository, node id), mapped back to the repository's segment for ids,
+  paths and the graph.
+- **Incremental.** `rueca index --org <file> <root>` (or a plain `rueca
+  index <root>` of a member) re-indexes that repository with the normal
+  pipeline, then replaces only its part: the new segment's tantivy files are
+  copied in, the old ones dropped from the list. Other repositories are not
+  touched. On the benchmark's 21-repository organization this takes 70–140 ms
+  (mostly fsyncs), against 0.2–4.7 s for indexing the repository itself.
+- **Generations.** The list of repositories (id, root, snapshot, the store
+  segment and tantivy segment of each) plus the index schema is an immutable
+  **generation** file; `orgs/<name>/org.json` points at the current one and
+  is swapped atomically after the new generation is written. A query reads
+  the pointer once and keeps that generation (and its files) for its whole
+  duration; the previous generation is kept so running readers finish, older
+  ones are garbage-collected with the files and store segments only they
+  used.
+- **Scope and visibility inside the index.** A query names the repositories
+  the caller may read (local mode: all) and the ones it selects (`repo`).
+  Both are applied inside tantivy: BM25 statistics are summed over the
+  visible repositories only and the collector skips unselected segments
+  before scoring, so results, totals and scores never depend on a repository
+  the caller cannot see, and narrowing `repo` keeps organization-wide scores.
+
+The repository graph stays the unit of work: `get_symbol`, `trace`,
+`get_snippet` and outlines read the repository segment of the id they are
+given. Cross-repository edges (the link layer) are phase 2.
+
 ## 5. The graph schema
 
 **Node labels** produced by the alpha:
@@ -742,10 +783,11 @@ config bridge).
 
 ## 6. How each tool uses the graph
 
-All six tools first pick the snapshots to read — one segment per indexed
+All tools first pick the snapshots to read — one segment per indexed
 root: the `repo` argument (one repository, a list, or `"*"`), else the
-repository of an `id` argument, the server's `--root`, or the only indexed
-root — keep those the `ref` argument names (local mode: the working tree,
+repository of an `id` argument, else (organization mode) every repository of
+the organization's current generation the caller may see, the server's
+`--root`, or the only indexed root — keep those the `ref` argument names (local mode: the working tree,
 named by its branch), and, if they take a symbol, run the same **symbol
 lookup**:
 
@@ -813,12 +855,13 @@ On top of that:
   prototype — they just come after the code they declare or copy.
 
 Filters (`labels`, `language`) are exact terms; `path_glob` filters after
-ranking. Over several snapshots (`repo: "*"`) each segment ranks on its own
-— BM25 statistics and priors are per segment, so scores are not comparable —
-and the rankings are merged by **reciprocal rank fusion**: a result at rank
-*r* of its snapshot scores `1 / (60 + r)`, multiplied again by the global
-priors (×0.5 tests, ×0.5 fields / variables / constants), so the top code
-definition of each repository comes before the tests and constants of any. Default labels exclude `File`, `Folder`, `Module` and `Repository`, so
+ranking. Over several repositories there is **one ranking**: in an
+organization the organization symbol index scores every repository with
+organization-wide statistics (§4.6); locally indexed roots without an
+organization are scored with BM25 statistics summed over the selected
+segments, which gives the same scores. (RFC 0005 merged per-repository
+rankings by reciprocal rank fusion; every repository's first hit then tied,
+and the right repository's answer was lost among 21 — RFC 0006 §2.) Default labels exclude `File`, `Folder`, `Module` and `Repository`, so
 document sections are found alongside code (`install linux` →
 `README.md:Install > Linux`); they also exclude structured-data `Key` and
 `Document` nodes unless `language` is a data language, because a repository
@@ -907,10 +950,11 @@ The tools compute their results as before (the `format: "verbose"` alpha
 shapes), and a last step (`rueca_query::compact`, RFC 0005) shapes them for
 an agent:
 
-- **Envelope.** `snapshots` lists what was read (`repo`, `ref`, full
-  `commit`, `overlay` when uncommitted changes were indexed, a host `url`
-  template); items refer to a snapshot by index `s` but keep a fully pinned
-  id `repo@commit12[+]:path#name`, valid on its own.
+- **Envelope.** `snapshots` lists the snapshots the answer touched (`repo`,
+  `ref`, full `commit`, `overlay` when uncommitted changes were indexed, a
+  host `url` template) — over an organization, only the repositories whose
+  items are in the answer; items refer to a snapshot by index `s` but keep a
+  fully pinned id `repo@commit12[+]:path#name`, valid on its own.
 - **Structure instead of repetition.** Search results and matches are
   grouped by snapshot and file, so the path is written once per file; field
   names are short (`qn`, `sig`, `lines`); scores are left out unless asked
@@ -1020,7 +1064,8 @@ gaps show up on real repositories.
   instead of failing the index.
 - **Immutable**: a segment is never modified after it is written; re-indexing
   writes a new one and swaps the catalog entry atomically, so queries running
-  during a re-index keep working.
+  during a re-index keep working. An organization does the same with
+  generations: one repository's part is replaced and a pointer swapped.
 
 ## 9. Where the code lives
 
@@ -1039,5 +1084,7 @@ gaps show up on real repositories.
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
 | Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
+| Organization index, generations, visibility | `rueca-segment` | `src/org.rs` (module docs) |
+| Organization file, `index --org` | `rueca-index` | `src/org.rs` |
 | Tools | `rueca-query` | `src/tools.rs` |
 | MCP / CLI | `rueca-mcp`, `rueca` | `serve_stdio`, `src/main.rs` |

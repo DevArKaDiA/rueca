@@ -264,7 +264,9 @@ RFC only requires the tool contract to be ready for it.
   repository id in full in the header, so header + group path + name spell
   the id.
 - **Several repositories**: the fused score is `prior / (60 + rank)` with the
-  priors ×0.5 test, ×0.5 field / variable / constant. Name lookups take the
+  priors ×0.5 test, ×0.5 field / variable / constant. *(Replaced by RFC 0006
+  phase 1: one ranking with BM25 statistics over every selected repository;
+  responses list only the snapshots their answer touched.)* Name lookups take the
   best match over the selected snapshots (others as `candidates`); a path in
   several snapshots is an error asking for `repo`.
 - **Collapse (§6)**: `rueca_query::multiref::{collapse, collapse_edges}`
