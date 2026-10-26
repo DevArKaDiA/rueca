@@ -7,10 +7,10 @@ mod common;
 
 use std::collections::BTreeSet;
 
-use rueca_model::Label;
+use rueca_model::{EdgeKind, EdgeMeta, Label, Strategy};
 use rueca_query::{Engine, Visibility};
-use rueca_segment::Store;
-use rueca_segment::org::{self, OrgMember};
+use rueca_segment::org::{self, LinkEdge, LinkInput, OrgLinker, OrgMember, Package, RepoDeps, RouteMode, RouteParams};
+use rueca_segment::{Segment, Store};
 use serde_json::{Value, json};
 
 use common::*;
@@ -149,7 +149,9 @@ fn ranking(v: &Value) -> Vec<(String, String, f64)> {
 #[test]
 fn whole_organization_is_the_default_scope() {
     let f = org_fixture();
-    let e = f.engine();
+    // Without routing, the organization ranking is the plain one (BM25 with
+    // organization-wide statistics); routing is tested below.
+    let e = f.engine().with_routing(RouteParams { mode: RouteMode::Off, ..RouteParams::default() });
     // `repo` omitted: the whole organization, one ranking.
     let v = call(&e, "search_symbols", json!({"query": "refund payment invoice", "scores": true}));
     let r = ranking(&v);
@@ -294,4 +296,159 @@ fn organization_not_built_is_a_clear_error() {
     let m = err(&e, "search_symbols", json!({"query": "x"}));
     assert!(m.contains("organization `acme` is not built"), "{m}");
     assert!(Engine::for_org(dir.path().into(), "../x").is_err());
+}
+
+/// Payments publishes `payments`; billing imports it, and its
+/// `InvoiceService.issue` calls `charge_card` (a stand-in for the language
+/// packs of `rueca-index`).
+struct FakeLinker;
+
+impl OrgLinker for FakeLinker {
+    fn version(&self) -> u32 {
+        7
+    }
+    fn analyze(&self, _: &Store, seg: &Segment) -> rueca_segment::Result<RepoDeps> {
+        let repo = seg.snapshot().repo.as_str();
+        Ok(match repo {
+            PAYMENTS => RepoDeps {
+                packages: vec![Package {
+                    eco: "pypi".into(),
+                    name: "payments".into(),
+                    dir: String::new(),
+                    keys: vec!["py:payments".into()],
+                }],
+                ..Default::default()
+            },
+            BILLING => RepoDeps { imports: vec!["py:payments.charge".into()], ..Default::default() },
+            _ => RepoDeps::default(),
+        })
+    }
+    fn link(
+        &self,
+        _: &Store,
+        consumer: &LinkInput<'_>,
+        deps: &[LinkInput<'_>],
+    ) -> rueca_segment::Result<Vec<LinkEdge>> {
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].repo.repo, PAYMENTS);
+        let src = consumer.segment.nodes_by_qualified_name("pkg.service.InvoiceService.issue")[0];
+        let dst = deps[0].segment.nodes_by_qualified_name("payments.charge.charge_card")[0];
+        let file = consumer.segment.file_by_path("pkg/service.py").unwrap();
+        let meta =
+            EdgeMeta { confidence: 0.95, strategy: Strategy::ImportResolved, evidence: Some((file, line_span(PY, 9))) };
+        Ok(vec![LinkEdge { src, dep: 0, dst, kind: EdgeKind::Calls, meta, reversed: false }])
+    }
+}
+
+fn linked_fixture() -> OrgFix {
+    let f = org_fixture();
+    let st = Store::open(&f.store).unwrap();
+    let members: Vec<OrgMember> = f.roots.iter().map(|r| OrgMember { root: r.clone(), url: None }).collect();
+    let up = org::update_org_with(&st, "acme", &members, &FakeLinker).unwrap();
+    assert_eq!(up.linked, [(BILLING.to_string(), 1)]);
+    assert_eq!(up.link_edges, 1);
+    f
+}
+
+fn trace_names(v: &Value) -> Vec<(String, String)> {
+    let snaps = repos_of(v);
+    v["results"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| {
+            let s = n.get("s").map_or(v["results"]["s"].as_u64().unwrap(), |s| s.as_u64().unwrap());
+            (snaps[s as usize].clone(), n["qn"].as_str().unwrap().to_string())
+        })
+        .collect()
+}
+
+#[test]
+fn trace_follows_link_edges_across_repositories() {
+    let f = linked_fixture();
+    let e = f.engine();
+    // Callers of a library function include the consumer's caller, in its
+    // own snapshot.
+    let args = json!({"qualified_name": "payments.charge.charge_card", "direction": "callers"});
+    let v = call(&e, "trace", args.clone());
+    // The snapshots the answer touched, in selection order.
+    assert_eq!(repos_of(&v), [BILLING, PAYMENTS], "{v}");
+    assert_eq!(v["results"]["s"], 1, "the root's snapshot: {v}");
+    let names = trace_names(&v);
+    assert!(names.contains(&(BILLING.to_string(), "pkg.service.InvoiceService.issue".to_string())), "{v}");
+    let edge = &v["results"]["edges"][0];
+    assert_eq!(
+        (edge[2].as_str(), edge[4].as_str(), edge[5].as_u64()),
+        (Some("CALLS"), Some("import_resolved"), Some(10))
+    );
+    // The call site is in the consumer, in the caller's own file (no path).
+    assert_eq!(edge.as_array().unwrap().len(), 6, "{v}");
+    let txt = e.respond("trace", args.clone()).unwrap().text;
+    assert!(txt.contains("1 [0] in d1 Method InvoiceService.issue  pkg/service.py"), "{txt}");
+    let verbose = call(
+        &e,
+        "trace",
+        json!({"qualified_name": "payments.charge.charge_card", "direction": "callers", "format": "verbose"}),
+    );
+    assert_eq!(verbose["edges"][0]["call_site"]["path"], "pkg/service.py");
+    // Callees of the consumer reach into the library.
+    let v =
+        call(&e, "trace", json!({"qualified_name": "InvoiceService.issue", "direction": "callees", "repo": BILLING}));
+    assert!(trace_names(&v).contains(&(PAYMENTS.to_string(), "payments.charge.charge_card".to_string())), "{v}");
+
+    // Link edges are returned only when both ends are visible.
+    let only_payments = f.engine().with_visibility(Visibility::Repos([PAYMENTS.to_string()].into_iter().collect()));
+    let v = call(&only_payments, "trace", args);
+    assert_eq!(repos_of(&v), [PAYMENTS], "{v}");
+    assert_eq!(v["results"]["nodes"].as_array().unwrap().len(), 1, "the root alone: {v}");
+    let only_billing = f.engine().with_visibility(Visibility::Repos([BILLING.to_string()].into_iter().collect()));
+    let v = call(&only_billing, "trace", json!({"qualified_name": "InvoiceService.issue", "direction": "callees"}));
+    assert!(!v.to_string().contains("acme/payments"), "{v}");
+
+    // `list_repositories` names packages and visible dependencies.
+    let v = call(&e, "list_repositories", json!({}));
+    let item = |repo: &str| v["results"].as_array().unwrap().iter().find(|r| r["repo"] == repo).unwrap().clone();
+    assert_eq!(item(BILLING)["depends_on"], json!([PAYMENTS]));
+    assert_eq!(item(PAYMENTS)["packages"], json!(["payments"]));
+    let txt = e.respond("list_repositories", json!({})).unwrap().text;
+    assert!(txt.contains("depends on github.com/acme/payments"), "{txt}");
+    let v = call(&only_billing, "list_repositories", json!({}));
+    assert!(v["results"][0].get("depends_on").is_none(), "{v}");
+}
+
+#[test]
+fn routing_ranks_repositories_and_weighs_symbols() {
+    let f = linked_fixture();
+    let e = f.engine();
+    // `list_repositories` with a query: best repository first, scores in 0–1.
+    let v = call(&e, "list_repositories", json!({"query": "charge the card through the payments gateway"}));
+    let items = v["results"].as_array().unwrap();
+    assert_eq!(items[0]["repo"], PAYMENTS, "{v}");
+    assert_eq!(items[0]["score"], 1.0);
+    assert!(items.iter().all(|r| r["score"].as_f64().is_some_and(|s| (0.0..=1.0).contains(&s))), "{v}");
+    let txt = e.respond("list_repositories", json!({"query": "printLabel order address"})).unwrap().text;
+    assert!(
+        txt.lines().nth(3).is_some_and(|l| l.contains(SHIPPING)) || txt.contains(&format!("] {SHIPPING}")),
+        "{txt}"
+    );
+    // Without a query the order is by id and there are no scores.
+    let v = call(&e, "list_repositories", json!({}));
+    assert!(v["results"][0].get("score").is_none());
+
+    // Routing reorders the symbol ranking toward the routed repository;
+    // `off` gives the plain organization ranking.
+    let q = json!({"query": "refund payment gateway charge", "scores": true, "limit": 50});
+    let routed = ranking(&call(&e, "search_symbols", q.clone()));
+    let plain = ranking(&call(
+        &f.engine().with_routing(RouteParams { mode: RouteMode::Off, ..RouteParams::default() }),
+        "search_symbols",
+        q.clone(),
+    ));
+    assert_eq!(routed[0].0, PAYMENTS, "{routed:?}");
+    let as_set = |r: &[(String, String, f64)]| r.iter().map(|x| (x.0.clone(), x.1.clone())).collect::<BTreeSet<_>>();
+    assert_eq!(as_set(&routed), as_set(&plain), "a prior reorders, it never drops");
+    // `top` searches only the best repositories.
+    let top = RouteParams { mode: RouteMode::Top, top: 1, ..RouteParams::default() };
+    let r = ranking(&call(&f.engine().with_routing(top), "search_symbols", q));
+    assert!(!r.is_empty() && r.iter().all(|x| x.0 == PAYMENTS), "{r:?}");
 }

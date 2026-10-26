@@ -740,7 +740,53 @@ organization-layer time `org_ms` that every `index --org` step reports
 (adding one repository) and, after the 21, of re-indexing the repository
 with the most symbol documents (its part replaced), each over that
 repository's own index time (floor ≤ 2×, target ≤ 1×). An arm not run keeps
-its published numbers (marked carried).
+its published numbers (marked carried). Since RFC 0006 phase 2 the native
+answer is weighed by repository routing and the organization-layer times
+include routing profiles, package registries and link sets.
+
+**Routing calibration** (RFC 0004 §7.7; `uv run python -m rueca_bench.org
+calibrate [ROUTE ...] [--force]`, not part of `run`). Repository routing is
+tuned on the calibration split only: every calibration S1 instance (35) is
+asked of an organization made of the 7 calibration repositories (each at
+its first calibration instance's base commit) plus the gated organization's
+21 repositories as distractors — their documents only, none of their
+instances is asked — under each routing setting (`RUECA_ORG_ROUTE`:
+`off`, `prior,alpha=…,mu=…,eps=…`, `top,top=…,ratio=…`, CORI constants,
+profile field weights, `stats=local`), and of each instance's repository
+alone (`repo`, no `--org`) in the same store. Scored like the
+multi-repository scenario (File Acc@5, other-repository share of the top 10,
+tokens per correct answer, organization over single). The store is kept
+between runs (`.cache/org/calib-store`), so a sweep costs ≈ 30 s per
+setting; raw output `.cache/runs/org/calibration-rueca.json`. The chosen
+default (prior, α 2, μ 0.5, ε 0.25, CORI 50 / 150) and the sweep are in
+[RFC 0006 §9.2](../docs/rfcs/0006-org-graph.md).
+
+**Cross-repository edges** (RFC 0006 §8, `crossrepo.py`, part of `--suite
+org`). Consumers pinned with the libraries they depend on (`crossrepo.GROUPS`):
+Flask 3.1.3 with Click 8.1.8 and Jinja 3.1.6; Laravel (the S1 organization
+commit) with Carbon (its S1 commit), Monolog 3.9.0 and league/commonmark
+2.8.3; Apache Dubbo and Apollo (S1 commits) with Gson 2.15.0. Each group is
+indexed as one organization (`rueca index --org`) and its link layer listed
+with `rueca links --org --json`. Gold, labelled from the consumer's source
+by an independent labeler (Python `ast`; PHP and Java regular expressions
+over `use` / `import` statements, the library's PSR-4 map or package
+directories): **imports** — (consumer file, library file) of every import
+of a library module or class (Python: the module's file, plus `m.x` when it
+is a submodule; PHP: top-level `use` of a library class; Java: single-type
+and static imports; on-demand imports are directories and left out);
+**uses** — (consumer file, library symbol) for every library class or
+function imported by name and used outside the import lines, Python
+attribute chains through an imported library module (following the
+library's re-exports), and PHP fully qualified library class names. A
+non-`IMPORTS` edge observed in the consumer is correct when its target is a
+used symbol, a member of it or of one of its library ancestors (bases,
+PHP traits and interfaces), or a library ancestor of a consumer class the
+file names (`Illuminate\Support\Carbon extends Carbon\Carbon`); a gold
+use is found when one of the file's edges hits it that way. Precision =
+correct / predicted, recall = found / gold, pooled; precision is a lower
+bound (a method of an object a library call returned is invisible to the
+labeler). RFC 0006 §8: floor ≥ 90 / 75, target ≥ 97 / 90. Raw output
+`.cache/runs/org/crossrepo-rueca.json`.
 
 **Multi-ref.** `[multiref] instance` (psf__requests-2317): the repository at
 the base commit and at a fix commit (base + the instance's gold patch,

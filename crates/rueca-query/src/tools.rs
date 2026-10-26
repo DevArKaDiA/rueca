@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rueca_model::{EdgeKind, FileId, Label, NodeId, SymbolIdParts};
-use rueca_segment::org::OrgScope;
+use rueca_segment::org::{LinkDir, OrgScope, RouteMode};
 use rueca_segment::{ContentMatch, ContentQuery, EdgeRef, Segment, SymbolQuery};
 
 use crate::args::{
@@ -16,7 +16,7 @@ use crate::args::{
 use crate::text::{join_window, split_lines, window};
 use crate::types::*;
 use crate::view::{Lookup, Selector, View, innermost_at_line, is_container};
-use crate::{Engine, Response, compact};
+use crate::{Engine, OrgCtx, Response, compact};
 
 fn parse_labels(labels: Option<&[String]>) -> anyhow::Result<Vec<Label>> {
     let mut out = Vec::new();
@@ -178,12 +178,39 @@ impl Engine {
         // scored with summed statistics.
         let mut ranked: Vec<(usize, NodeId, f64)> = match &sel.org {
             Some(org) => {
-                let selected: Vec<(usize, &Segment)> =
+                let mut selected: Vec<(usize, &Segment)> =
                     views.iter().filter_map(|v| v.org_repo.map(|i| (i, v.seg.as_ref()))).collect();
                 let view_of: HashMap<usize, usize> =
                     views.iter().enumerate().filter_map(|(vi, v)| v.org_repo.map(|i| (i, vi))).collect();
+                // Repository routing (RFC 0006 phase 2): the query also
+                // scores the repositories; their relevance weighs (or, in
+                // `top` mode, narrows) the symbol ranking.
+                let mut boost: HashMap<usize, f32> = HashMap::new();
+                if selected.len() > 1 && self.route.mode != RouteMode::Off {
+                    let routes = org.index.route(&base.text, &org.visible, &self.route)?;
+                    match self.route.mode {
+                        RouteMode::Prior => {
+                            boost = routes.iter().map(|r| (r.repo, self.route.prior(r.score))).collect();
+                        }
+                        RouteMode::Top => {
+                            let keep: HashSet<usize> = routes
+                                .iter()
+                                .filter(|r| r.score >= self.route.ratio)
+                                .take(self.route.top.max(1))
+                                .map(|r| r.repo)
+                                .collect();
+                            selected.retain(|(i, _)| keep.contains(i));
+                        }
+                        RouteMode::Off => {}
+                    }
+                }
                 org.index
-                    .search(&base, &OrgScope { visible: &org.visible, selected: &selected })?
+                    .search_with(
+                        &base,
+                        &OrgScope { visible: &org.visible, selected: &selected },
+                        &boost,
+                        self.route.local_stats && self.route.mode != RouteMode::Off,
+                    )?
                     .into_iter()
                     .filter_map(|h| view_of.get(&h.repo).map(|&vi| (vi, h.node, f32_to_f64(h.score))))
                     .collect()
@@ -431,47 +458,48 @@ impl Engine {
         }
         let labels = parse_labels(a.labels.as_deref())?;
         let include_tests = a.include_tests.unwrap_or(kinds.contains(&EdgeKind::Tests));
-        let views = self.scope(&a.common, parts.as_ref())?;
-        let (vi, found, _) = resolve_symbol(&views, &sel, parts.as_ref())?;
-        let view = &views[vi];
-        let root = found.node;
+        let selection = self.select(&a.common, parts.as_ref())?;
+        let org = selection.org;
+        let mut views = selection.views;
+        let (root_view, found, _) = resolve_symbol(&views, &sel, parts.as_ref())?;
+        let root = (root_view, found.node);
         let filter = NeighbourFilter { labels: &labels, include_tests };
         let dirs: &[Dir] = match a.direction.unwrap_or(DirectionArg::Both) {
             DirectionArg::Callers => &[Dir::Callers],
             DirectionArg::Callees => &[Dir::Callees],
             DirectionArg::Both => &[Dir::Callers, Dir::Callees],
         };
-        let out = bfs(view, root, dirs, &kinds, depth, min_conf, offset + limit, &filter);
+        let walk = TraceWalk { dirs, kinds: &kinds, depth, min_conf, limit: offset + limit, filter: &filter };
+        let out = self.bfs(&mut views, org.as_ref(), root, &walk)?;
 
-        let mut nodes: Vec<(u32, Dir, String, NodeId)> =
-            out.nodes.iter().map(|&(d, dir, n)| (d, dir, view.node(n).qualified_name.clone(), n)).collect();
+        let qn = |k: Key| views[k.0].node(k.1).qualified_name.clone();
+        let mut nodes: Vec<(u32, Dir, String, Key)> = out.nodes.iter().map(|&(d, dir, k)| (d, dir, qn(k), k)).collect();
         nodes.sort();
-        let mut edges: Vec<(EdgeSortKey, rueca_model::EdgeMeta)> = out
-            .edges
-            .into_iter()
-            .map(|((src, dst, kind), meta)| {
-                let key =
-                    (view.node(src).qualified_name.clone(), src, view.node(dst).qualified_name.clone(), dst, kind);
-                (key, meta)
-            })
-            .collect();
+        let mut edges: Vec<(EdgeSortKey, (rueca_model::EdgeMeta, usize))> =
+            out.edges.into_iter().map(|((src, dst, kind), meta)| ((qn(src), src, qn(dst), dst, kind), meta)).collect();
         edges.sort_by(|a, b| a.0.cmp(&b.0));
         let result = TraceResult {
-            root: view.brief(root),
+            root_view,
+            root: views[root_view].brief(root.1),
             nodes: nodes
                 .into_iter()
-                .map(|(d, dir, _, n)| TraceNode { brief: view.brief(n), depth: d, direction: dir.as_str().to_string() })
+                .map(|(d, dir, _, (vi, n))| TraceNode {
+                    brief: views[vi].brief(n),
+                    depth: d,
+                    direction: dir.as_str().to_string(),
+                    view: vi,
+                })
                 .collect(),
             edges: edges
                 .into_iter()
-                .map(|((_, src, _, dst, kind), meta)| TraceEdge {
-                    src: view.symbol_id(src),
-                    dst: view.symbol_id(dst),
+                .map(|((_, src, _, dst, kind), (meta, ev))| TraceEdge {
+                    src: views[src.0].symbol_id(src.1),
+                    dst: views[dst.0].symbol_id(dst.1),
                     kind: kind.as_str().to_string(),
                     confidence: f32_to_f64(meta.confidence),
                     strategy: meta.strategy.as_str().to_string(),
                     call_site: meta.evidence.and_then(|(f, span)| {
-                        let file = view.seg.files().get(f as usize)?;
+                        let file = views[ev].seg.files().get(f as usize)?;
                         Some(CallSite { path: file.path.clone(), line: span.start_line + 1 })
                     }),
                 })
@@ -482,7 +510,136 @@ impl Engine {
         if verbose_fmt {
             return verbose(&result);
         }
-        Ok(compact::trace(&view.snap, &result, offset, budget(&a.common)))
+        let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
+        Ok(compact::trace(&snaps, &result, offset, budget(&a.common)))
+    }
+
+    /// The view of organization repository `repo` (index into the
+    /// generation), opened and appended to `views` when not selected yet.
+    fn view_of_repo(&self, views: &mut Vec<View>, org: &OrgCtx, repo: usize) -> anyhow::Result<usize> {
+        if let Some(i) = views.iter().position(|v| v.org_repo == Some(repo)) {
+            return Ok(i);
+        }
+        let g = org
+            .index
+            .generation()
+            .repos
+            .get(repo)
+            .ok_or_else(|| anyhow::anyhow!("organization repository #{repo} is out of range"))?;
+        let store = rueca_segment::Store::open(&self.store_dir)?;
+        let seg = self.open_cached(&store, &g.segment_id)?;
+        let entry = rueca_segment::CatalogEntry {
+            root: g.root.clone(),
+            repo: g.repo.clone(),
+            segment_id: g.segment_id.clone(),
+            indexed_at: g.snapshot.indexed_at,
+        };
+        let mut v = View::new(seg, entry);
+        v.org_repo = Some(repo);
+        views.push(v);
+        Ok(views.len() - 1)
+    }
+
+    /// Edges of `key` of kind `kind` in direction `dir`: the snapshot's own
+    /// edges, then (organization mode) its cross-repository link edges whose
+    /// other end is visible, opening that repository's view when needed.
+    /// Each item: (other end, metadata, view whose files the evidence names),
+    /// ordered by the other end's qualified name, then key.
+    fn neighbours(
+        &self,
+        views: &mut Vec<View>,
+        org: Option<&OrgCtx>,
+        key: Key,
+        dir: Dir,
+        kind: EdgeKind,
+    ) -> anyhow::Result<Vec<(Key, rueca_model::EdgeMeta, usize)>> {
+        let (vi, n) = key;
+        let local = match dir {
+            Dir::Callers => views[vi].seg.in_edges(n, Some(kind)),
+            Dir::Callees => views[vi].seg.out_edges(n, Some(kind)),
+        };
+        let mut out: Vec<(Key, rueca_model::EdgeMeta, usize)> =
+            local.into_iter().map(|e| ((vi, e.other), e.meta, vi)).collect();
+        if let (Some(org), Some(repo)) = (org, views[vi].org_repo) {
+            let ld = match dir {
+                Dir::Callers => LinkDir::In,
+                Dir::Callees => LinkDir::Out,
+            };
+            for e in org.index.link_edges(repo, n, ld, Some(kind), &org.visible)? {
+                let other = self.view_of_repo(views, org, e.repo)?;
+                let ev = self.view_of_repo(views, org, e.evidence_repo)?;
+                out.push(((other, e.node), e.meta, ev));
+            }
+        }
+        out.sort_by_cached_key(|(k, _, _)| (views[k.0].node(k.1).qualified_name.clone(), *k));
+        Ok(out)
+    }
+
+    /// Breadth-first traversal from `root`, level by level, callers before
+    /// callees. Each node is visited once per direction; `walk.limit` bounds
+    /// the number of discovered nodes (all directions together). Neighbours
+    /// rejected by the filter are neither reported nor expanded, and their
+    /// edges are dropped. In organization mode the walk follows link edges
+    /// into other repositories (RFC 0006 §6).
+    fn bfs(
+        &self,
+        views: &mut Vec<View>,
+        org: Option<&OrgCtx>,
+        root: Key,
+        walk: &TraceWalk<'_>,
+    ) -> anyhow::Result<BfsOut> {
+        let mut out =
+            BfsOut { nodes: Vec::new(), edges: BTreeMap::new(), truncated: false, tests_excluded: HashSet::new() };
+        let mut visited: HashMap<Dir, HashSet<Key>> = walk.dirs.iter().map(|&d| (d, HashSet::from([root]))).collect();
+        let mut frontier: HashMap<Dir, Vec<Key>> = walk.dirs.iter().map(|&d| (d, vec![root])).collect();
+        for level in 1..=walk.depth {
+            for &dir in walk.dirs {
+                let mut current = std::mem::take(frontier.get_mut(&dir).expect("dir"));
+                current.sort_by_cached_key(|&k| (views[k.0].node(k.1).qualified_name.clone(), k));
+                let mut next = Vec::new();
+                for k in current {
+                    for &kind in walk.kinds {
+                        for (other, meta, ev) in self.neighbours(views, org, k, dir, kind)? {
+                            if meta.confidence < walk.min_conf {
+                                continue;
+                            }
+                            if other != root
+                                && let Err(is_test) = walk.filter.check(&views[other.0], other.1)
+                            {
+                                if is_test {
+                                    out.tests_excluded.insert(other);
+                                }
+                                continue;
+                            }
+                            let seen = visited[&dir].contains(&other);
+                            if !seen {
+                                if out.nodes.len() >= walk.limit {
+                                    out.truncated = true;
+                                    continue;
+                                }
+                                visited.get_mut(&dir).expect("dir").insert(other);
+                                next.push(other);
+                                out.nodes.push((level, dir, other));
+                            }
+                            let key = match dir {
+                                Dir::Callers => (other, k, kind),
+                                Dir::Callees => (k, other, kind),
+                            };
+                            out.edges
+                                .entry(key)
+                                .and_modify(|m| {
+                                    if meta.confidence > m.0.confidence {
+                                        *m = (meta, ev);
+                                    }
+                                })
+                                .or_insert((meta, ev));
+                        }
+                    }
+                }
+                frontier.insert(dir, next);
+            }
+        }
+        Ok(out)
     }
 
     pub(crate) fn get_file_outline(&self, a: GetFileOutlineArgs) -> anyhow::Result<Response> {
@@ -530,6 +687,25 @@ impl Engine {
                 }
             }
             let symbols = seg.nodes().iter().filter(|n| !is_container(n.label)).count() as u32;
+            let (mut packages, mut depends_on) = (Vec::new(), Vec::new());
+            if let (Some(org), Some(i)) = (&sel.org, v.org_repo) {
+                if let Some(p) = org.index.profile(i) {
+                    packages = p.deps.packages.iter().map(|p| p.name.clone()).collect();
+                    packages.sort();
+                    packages.dedup();
+                }
+                if let Some(l) = &org.index.generation().repos[i].links {
+                    // Only dependencies the caller may see are named.
+                    depends_on = l
+                        .deps
+                        .iter()
+                        .filter(|d| {
+                            org.index.generation().repo_index(&d.repo).is_some_and(|j| org.visible.contains(&j))
+                        })
+                        .map(|d| d.repo.clone())
+                        .collect();
+                }
+            }
             repos.push((
                 vi,
                 RepositorySummary {
@@ -542,10 +718,24 @@ impl Engine {
                     files: seg.files().len() as u32,
                     symbols,
                     edges: seg.meta().edge_count,
+                    packages,
+                    depends_on,
+                    score: None,
                 },
             ));
         }
         repos.sort_by(|a, b| a.1.repo.cmp(&b.1.repo));
+        // `query`: the organization's repository routing, best first.
+        if let (Some(q), Some(org)) = (a.query.as_deref().filter(|q| !q.trim().is_empty()), &sel.org) {
+            let routes = org.index.route(q, &org.visible, &self.route)?;
+            let score: HashMap<usize, f32> = routes.iter().map(|r| (r.repo, r.score)).collect();
+            for (vi, r) in &mut repos {
+                r.score = views[*vi].org_repo.and_then(|i| score.get(&i)).map(|&s| compact::sig3(f32_to_f64(s)));
+            }
+            repos.sort_by(|a, b| {
+                b.1.score.unwrap_or(0.0).total_cmp(&a.1.score.unwrap_or(0.0)).then(a.1.repo.cmp(&b.1.repo))
+            });
+        }
         if a.common.verbose() {
             return verbose(&ListRepositoriesResult {
                 org: self.org.clone(),
@@ -557,9 +747,12 @@ impl Engine {
     }
 }
 
+/// A node of a trace: (view index, node).
+type Key = (usize, NodeId);
+
 /// Edge order in `trace` results: (src qualified name, src, dst qualified
 /// name, dst, kind).
-type EdgeSortKey = (String, NodeId, String, NodeId, EdgeKind);
+type EdgeSortKey = (String, Key, String, Key, EdgeKind);
 
 /// Traversal direction of one BFS. `Callers` sorts before `Callees`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -577,14 +770,25 @@ impl Dir {
     }
 }
 
+/// What a `trace` walk follows.
+struct TraceWalk<'a> {
+    dirs: &'a [Dir],
+    kinds: &'a [EdgeKind],
+    depth: u32,
+    min_conf: f32,
+    limit: usize,
+    filter: &'a NeighbourFilter<'a>,
+}
+
 pub(crate) struct BfsOut {
     /// (depth, direction, node), in discovery order.
-    pub nodes: Vec<(u32, Dir, NodeId)>,
-    /// (src, dst, kind) → strongest edge metadata.
-    pub edges: BTreeMap<(NodeId, NodeId, EdgeKind), rueca_model::EdgeMeta>,
+    pub nodes: Vec<(u32, Dir, Key)>,
+    /// (src, dst, kind) → strongest edge metadata and the view its evidence
+    /// file belongs to.
+    pub edges: BTreeMap<(Key, Key, EdgeKind), (rueca_model::EdgeMeta, usize)>,
     pub truncated: bool,
     /// Test neighbours skipped by the filter.
-    pub tests_excluded: HashSet<NodeId>,
+    pub tests_excluded: HashSet<Key>,
 }
 
 /// Which neighbours `trace` reports and traverses (the root is never filtered).
@@ -607,80 +811,6 @@ impl NeighbourFilter<'_> {
         }
         Ok(())
     }
-}
-
-/// Breadth-first traversal from `root`, level by level, callers before
-/// callees. Each node is visited once per direction; `limit` bounds the
-/// number of discovered nodes (all directions together). Neighbours rejected
-/// by `filter` are neither reported nor expanded, and their edges are dropped.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn bfs(
-    view: &View,
-    root: NodeId,
-    dirs: &[Dir],
-    kinds: &[EdgeKind],
-    depth: u32,
-    min_conf: f32,
-    limit: usize,
-    filter: &NeighbourFilter<'_>,
-) -> BfsOut {
-    let mut out =
-        BfsOut { nodes: Vec::new(), edges: BTreeMap::new(), truncated: false, tests_excluded: HashSet::new() };
-    let mut visited: HashMap<Dir, HashSet<NodeId>> = dirs.iter().map(|&d| (d, HashSet::from([root]))).collect();
-    let mut frontier: HashMap<Dir, Vec<NodeId>> = dirs.iter().map(|&d| (d, vec![root])).collect();
-    for level in 1..=depth {
-        for &dir in dirs {
-            let mut current = std::mem::take(frontier.get_mut(&dir).expect("dir"));
-            current.sort_by_cached_key(|&n| (view.node(n).qualified_name.clone(), n));
-            let mut next = Vec::new();
-            for n in current {
-                for &kind in kinds {
-                    let mut edges = match dir {
-                        Dir::Callers => view.seg.in_edges(n, Some(kind)),
-                        Dir::Callees => view.seg.out_edges(n, Some(kind)),
-                    };
-                    edges.sort_by_cached_key(|e| (view.node(e.other).qualified_name.clone(), e.other));
-                    for e in edges {
-                        if e.meta.confidence < min_conf {
-                            continue;
-                        }
-                        if e.other != root
-                            && let Err(is_test) = filter.check(view, e.other)
-                        {
-                            if is_test {
-                                out.tests_excluded.insert(e.other);
-                            }
-                            continue;
-                        }
-                        let seen = visited[&dir].contains(&e.other);
-                        if !seen {
-                            if out.nodes.len() >= limit {
-                                out.truncated = true;
-                                continue;
-                            }
-                            visited.get_mut(&dir).expect("dir").insert(e.other);
-                            next.push(e.other);
-                            out.nodes.push((level, dir, e.other));
-                        }
-                        let key = match dir {
-                            Dir::Callers => (e.other, n, kind),
-                            Dir::Callees => (n, e.other, kind),
-                        };
-                        out.edges
-                            .entry(key)
-                            .and_modify(|m| {
-                                if e.meta.confidence > m.confidence {
-                                    *m = e.meta;
-                                }
-                            })
-                            .or_insert(e.meta);
-                    }
-                }
-            }
-            frontier.insert(dir, next);
-        }
-    }
-    out
 }
 
 /// Nests `symbols` by `DEFINES` parent (when the parent is in the same file)

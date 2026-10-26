@@ -25,6 +25,7 @@ from collections import Counter, defaultdict
 
 from . import data as data_mod
 from . import health as health_mod
+from . import crossrepo as crossrepo_mod
 from . import org as org_mod
 from .arms import ARM_NAMES, make_arm
 from .arms.base import is_callable_label, line_match, same_def
@@ -1639,6 +1640,56 @@ def _render_org_rfc0006(L: list[str], mr: dict) -> None:
     L.append("")
 
 
+def _render_crossrepo(L: list[str], xr: dict) -> None:
+    """RFC 0006 §8: cross-repository edges (packages), precision / recall on
+    labelled pairs (`crossrepo.py`)."""
+    L.append("### Cross-repository edges (packages)")
+    L.append("")
+    if not xr:
+        L.append("Not run (`rueca-bench run --suite org`).")
+        L.append("")
+        return
+    if xr.get("status") != "ok":
+        L.append(f"Failed: {xr.get('error')}")
+        L.append("")
+        return
+    L.append(
+        "Consumers pinned with the libraries they depend on, each group one organization (`rueca index --org`), its link layer listed with "
+        "`rueca links --org`. Gold labelled from the consumer's source by an independent labeler (`crossrepo.py`): *imports* = (consumer file, "
+        "library file) of every import of a library module or class; *uses* = (consumer file, library symbol) imported by name and used, or "
+        "reached through an imported library module. A non-`IMPORTS` edge is correct when it targets a used symbol, a member of it or of one of its "
+        "library ancestors; precision is a lower bound (targets the labeler cannot see count as errors)."
+        + (" Carried from the published results." if xr.get("carried") else "")
+    )
+    L.append("")
+    L.append("| Consumer → library | Imports P | Imports R | Uses P | Uses R | Edges |")
+    L.append("|---|---:|---:|---:|---:|---:|")
+
+    def pr(c: dict) -> tuple[str, str]:
+        p = c["correct"] / c["predicted"] if c["predicted"] else None
+        r = c["found"] / c["gold"] if c["gold"] else None
+        return (f"{_f(p)} ({c['correct']}/{c['predicted']})", f"{_f(r)} ({c['found']}/{c['gold']})")
+
+    for g in xr.get("groups", []):
+        if g.get("status") != "ok":
+            L.append(f"| {g.get('consumer')} | {g.get('status')}: {str(g.get('error'))[:120]} | | | | |")
+            continue
+        for lib in g["libraries"]:
+            ip, ir = pr(lib["score"]["imports"])
+            up, ur = pr(lib["score"]["uses"])
+            n = lib["score"]["imports"]["predicted"] + lib["score"]["uses"]["predicted"]
+            L.append(f"| {g['consumer']} → {lib['repo']} ({g['language']}) | {ip} | {ir} | {up} | {ur} | {n} |")
+    sm = xr.get("summary") or {}
+    if sm:
+        ip, ir = pr(sm["imports"])
+        up, ur = pr(sm["uses"])
+        ap, ar = pr(sm["all"])
+        L.append(f"| **all** | {ip} | {ir} | {up} | {ur} | {sm['all']['predicted']} |")
+        L.append("")
+        L.append(f"RFC 0006 §8 cross-repository edges (packages), all kinds pooled: precision {ap}, recall {ar} (floor ≥ 90 / 75, target ≥ 97 / 90).")
+    L.append("")
+
+
 def _render_org(L: list[str], orgs: dict) -> None:
     mr = orgs.get("multirepo") or {}
     L.append("## Org scenarios (RFC 0005 §5–§6, §8)")
@@ -1677,6 +1728,7 @@ def _render_org(L: list[str], orgs: dict) -> None:
                 )
         L.append("")
         _render_org_rfc0006(L, mr)
+    _render_crossrepo(L, orgs.get("crossrepo") or {})
     mf = orgs.get("multiref") or {}
     L.append("### Multi-ref (one repository at two commits)")
     L.append("")
@@ -1795,9 +1847,9 @@ def report() -> None:
     data = data_mod.score(published["data"])
     health = health_mod.score()
     eff = score_efficiency(s1, s3)
-    orgs = {"multirepo": org_mod.score_multirepo(s1), "multiref": org_mod.score_multiref()}
+    orgs = {"multirepo": org_mod.score_multirepo(s1), "multiref": org_mod.score_multiref(), "crossrepo": crossrepo_mod.score_crossrepo()}
     published_eff = published.get("efficiency") or {}
-    for k in ("multirepo", "multiref"):
+    for k in ("multirepo", "multiref", "crossrepo"):
         if not orgs[k] or not orgs[k].get("arms", orgs[k].get("status")):
             if published_eff.get("org", {}).get(k):
                 orgs[k] = dict(published_eff["org"][k], carried=True)

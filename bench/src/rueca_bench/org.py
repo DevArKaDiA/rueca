@@ -678,5 +678,154 @@ def score_multiref() -> dict:
 
 
 def run_all(arm_names: list[str], force: bool = False) -> None:
+    from .crossrepo import run_crossrepo
+
     run_multirepo(arm_names, force)
     run_multiref(arm_names, force)
+    run_crossrepo(arm_names, force)
+
+
+# --- routing calibration (RFC 0004 §7.7) ---------------------------------------------------
+
+CALIBRATION_ROUTES = [
+    "off",
+    "prior,alpha=0.5",
+    "prior,alpha=1",
+    "prior,alpha=2",
+    "prior,alpha=3",
+    "prior,alpha=2,mu=0",
+    "prior,alpha=2,mu=1",
+    "prior,alpha=2,mu=0.25",
+    "prior,alpha=2,mu=0.75",
+    "prior,alpha=2,eps=0.1",
+    "prior,alpha=2,eps=0.5",
+    "top,top=1",
+    "top,top=2,ratio=0.5",
+    "top,top=3,ratio=0.3",
+]
+
+
+def calibration_instances() -> list[dict]:
+    """Every S1 instance of the calibration repositories (`split =
+    "calibration"`)."""
+    man = load_manifest()
+    cal = {r["repo"] for r in man["s1"]["repos"] if r.get("split") == "calibration"}
+    return [i for i in s1_instances() if i["repo"] in cal]
+
+
+def run_calibration(routes: list[str] | None = None, force: bool = False) -> dict:
+    """Tunes repository routing on the calibration split only (never on the
+    gated instances). The organization: every calibration repository at its
+    first calibration instance's base commit, plus the gated organization's
+    21 repositories as distractors (their documents only; none of their
+    instances is asked). Every calibration instance's keyword query is asked
+    of the organization (`--org`, no `repo`) under each routing setting
+    (`RUECA_ORG_ROUTE`), and of its own repository alone (`repo`, no
+    `--org`: the repository's own statistics). Scored like the multi-repository
+    scenario: File Acc@5 with repository-qualified paths, tokens of the top-10
+    answer, and the organization / single ratio of each.
+    Raw output: .cache/runs/org/calibration-rueca.json."""
+    import os
+
+    arm = make_arm("rueca")
+    if not arm.available()[0]:
+        raise SystemExit("RUECA_BIN is not set")
+    cal = calibration_instances()
+    first: dict[str, dict] = {}
+    for inst in cal:
+        first.setdefault(inst["repo"], inst)
+    members = list(first.values()) + [i for i in org_instances() if i["repo"] not in first]
+    store = CACHE / "org" / "calib-store"
+    org_file = CACHE / "org" / "calib-org.toml"
+    state_path = CACHE / "org" / "calib-index.json"
+    if force:
+        shutil.rmtree(store, ignore_errors=True)
+        state_path.unlink(missing_ok=True)
+    store.mkdir(parents=True, exist_ok=True)
+    state = read_json(state_path) if state_path.exists() else {"roots": [], "index": {}}
+    roots = [Path(r) for r in state["roots"]]
+    for inst in members:
+        repo = inst["repo"]
+        if state["index"].get(repo, {}).get("ok"):
+            continue
+        root = add_worktree(repo, inst["base_commit"], f"calib-{repo}")
+        try:
+            if root not in roots:
+                roots.append(root)
+            write_org_file(org_file, roots, name="calib")
+            state["index"][repo] = _org_index(arm, org_file, root, store)
+            log(f"calibration org: {repo} {state['index'][repo].get('org_ms')} ms org layer")
+        finally:
+            remove_worktree(repo, root)
+        state["roots"] = [str(r) for r in roots]
+        write_json(state_path, state)
+    rids = {repo: v.get("repo_id") for repo, v in state["index"].items()}
+    golds = {inst["id"]: s1_gold(inst) for inst in cal}
+    out: dict = {"instances": [i["id"] for i in cal], "members": [m["repo"] for m in members], "single": {}, "routes": {}}
+    for inst in cal:
+        q = queries_for(inst)["kw"]
+        rid = rids.get(inst["repo"])
+        data, _, err, _ = arm.call("search_symbols", {"query": q, "limit": ORG_LIMIT, "repo": rid}, None, store)
+        items = [] if err else [[inst["repo"], h.get("path"), h.get("name"), h.get("start_line"), h.get("label")] for h in flat_results(data)]
+        eff = arm.search_eff(None, q, EFF_LIMIT, root=None, store=store, repo=rid)
+        out["single"][inst["id"]] = {"acc": _acc(items[:50], inst["repo"], golds[inst["id"]]), "eff": _eff(eff)}
+    saved = os.environ.get("RUECA_ORG_ROUTE")
+    try:
+        for route in routes or CALIBRATION_ROUTES:
+            os.environ["RUECA_ORG_ROUTE"] = route
+            rows = {}
+            for inst in cal:
+                q = queries_for(inst)["kw"]
+                data, _, err, _ = arm.call("search_symbols", {"query": q, "limit": ORG_LIMIT}, None, store, org=org_file)
+                items = [] if err else _items(flat_results(data))[:50]
+                eff = arm.search_eff(None, q, EFF_LIMIT, root=None, store=store, org=org_file)
+                rows[inst["id"]] = {"acc": _acc(items, inst["repo"], golds[inst["id"]]), "eff": _eff(eff)}
+            out["routes"][route] = rows
+            log(f"calibration {route}: {_calibration_summary(out, route)}")
+    finally:
+        if saved is None:
+            os.environ.pop("RUECA_ORG_ROUTE", None)
+        else:
+            os.environ["RUECA_ORG_ROUTE"] = saved
+    out["summary"] = {r: _calibration_summary(out, r) for r in out["routes"]}
+    write_json(run_path("calibration", "rueca"), out)
+    return out
+
+
+def _calibration_summary(out: dict, route: str) -> dict:
+    insts = {i["id"]: i for i in calibration_instances()}
+    rows = out["routes"][route]
+    n = len(rows)
+    fa = sum(r["acc"]["file_acc@5"] for r in rows.values()) / n if n else None
+    sfa = sum(out["single"][i]["acc"]["file_acc@5"] for i in rows) / n if n else None
+    found = tok = sfound = stok = 0
+    for iid, r in rows.items():
+        gold = read_json(CACHE / "gold" / "s1" / f"{safe_name(iid)}.json")
+        fh, _ = eff_hit(r["eff"], insts[iid]["repo"], gold)
+        sfh, _ = eff_hit(out["single"][iid]["eff"], insts[iid]["repo"], gold)
+        found += bool(fh)
+        sfound += bool(sfh)
+        tok += r["eff"].get("tokens") or 0
+        stok += out["single"][iid]["eff"].get("tokens") or 0
+    other = [r["acc"]["other_repo_top10"] for r in rows.values() if r["acc"]["other_repo_top10"] is not None]
+    tpc = tok / found if found else None
+    stpc = stok / sfound if sfound else None
+    return {
+        "n": n,
+        "file_acc@5": fa,
+        "single_file_acc@5": sfa,
+        "ratio": fa / sfa if fa is not None and sfa else None,
+        "other_repo_top10": sum(other) / len(other) if other else None,
+        "tokens_per_correct": tpc,
+        "single_tokens_per_correct": stpc,
+        "tokens_ratio": tpc / stpc if tpc and stpc else None,
+    }
+
+
+if __name__ == "__main__":  # pragma: no cover - manual calibration entry point
+    import sys
+
+    if len(sys.argv) >= 2 and sys.argv[1] == "calibrate":
+        routes = [a for a in sys.argv[2:] if a != "--force"]
+        res = run_calibration(routes or None, force="--force" in sys.argv)
+        print(json.dumps(res["summary"], indent=1))

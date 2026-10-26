@@ -261,6 +261,10 @@ pub struct GetFileOutlineArgs {
 /// Arguments of `list_repositories`.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ListRepositoriesArgs {
+    /// Rank the repositories for this text (an issue, a feature, names): the organization's
+    /// repository routing (names, packages, README, central symbols, path vocabulary and where
+    /// the query's terms occur), best first with a `score` in 0–1. Organization mode only.
+    pub query: Option<String>,
     #[serde(flatten)]
     pub common: CommonArgs,
 }

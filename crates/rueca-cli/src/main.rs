@@ -107,6 +107,14 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
     /// List indexed roots with repo, commit, node/edge/file counts and age,
     /// and the organizations of the store.
     Status,
+    /// List the cross-repository edges of an organization (--org): the link
+    /// layer of RFC 0006 (imports of packages published by another
+    /// repository, and the calls, inheritance and references through them).
+    Links {
+        /// Only edges leaving this repository (id).
+        #[arg(long, value_name = "ID")]
+        repo: Option<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -123,6 +131,10 @@ fn main() -> ExitCode {
         }
         Command::Mcp { no_auto_index } => cmd_mcp(&store, cli.root, cli.org.as_deref(), !no_auto_index),
         Command::Status => cmd_status(&store, cli.json, cli.pretty),
+        Command::Links { repo } => match cli.org.as_deref() {
+            Some(org) => cmd_links(&store, org, repo.as_deref(), cli.json, cli.pretty),
+            None => Err(anyhow::anyhow!("`links` needs --org <file|name>")),
+        },
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -377,6 +389,70 @@ fn cmd_mcp(store: &Path, root: Option<PathBuf>, org: Option<&str>, auto_index: b
         auto_index: auto_index && explicit,
         ..rueca_mcp::ServerOptions::default()
     })
+}
+
+fn cmd_links(store: &Path, org: &str, only: Option<&str>, json: bool, pretty: bool) -> anyhow::Result<()> {
+    let (name, _) = org_arg(org)?;
+    let idx = rueca_segment::org::OrgIndex::open(store, &name)?;
+    let st = Store::open(store)?;
+    let g = idx.generation();
+    let all: Vec<usize> = (0..g.repos.len()).collect();
+    let mut segs = Vec::with_capacity(g.repos.len());
+    for r in &g.repos {
+        segs.push(st.open_segment(&r.segment_id)?);
+    }
+    if let Some(r) = only
+        && g.repo_index(r).is_none()
+    {
+        anyhow::bail!("repository `{r}` is not in organization `{name}`");
+    }
+    let path_of =
+        |seg: &rueca_segment::Segment, n: u32| -> Option<String> { seg.node(n).file.map(|f| seg.file(f).path.clone()) };
+    let mut edges = Vec::new();
+    for (i, seg) in segs.iter().enumerate() {
+        if only.is_some_and(|r| g.repos[i].repo != r) {
+            continue;
+        }
+        for n in 0..seg.nodes().len() as u32 {
+            for e in idx.link_edges(i, n, rueca_segment::org::LinkDir::Out, None, &all)? {
+                let dst = &segs[e.repo];
+                edges.push(json!({
+                    "consumer": g.repos[e.evidence_repo].repo,
+                    "src_repo": g.repos[i].repo,
+                    "src": seg.node(n).qualified_name,
+                    "src_label": seg.node(n).label.as_str(),
+                    "src_path": path_of(seg, n),
+                    "dst_repo": g.repos[e.repo].repo,
+                    "dst": dst.node(e.node).qualified_name,
+                    "dst_label": dst.node(e.node).label.as_str(),
+                    "dst_path": path_of(dst, e.node),
+                    "kind": e.kind.as_str(),
+                    "strategy": e.meta.strategy.as_str(),
+                    "confidence": e.meta.confidence,
+                    "path": e.meta.evidence.map(|(f, _)| segs[e.evidence_repo].file(f).path.clone()),
+                    "line": e.meta.evidence.map(|(_, s)| s.start_line + 1),
+                }));
+            }
+        }
+    }
+    if json {
+        println!("{}", render(&json!({"org": name, "generation": g.generation, "edges": edges}), pretty));
+        return Ok(());
+    }
+    for e in &edges {
+        println!(
+            "{} {}  →  {} {}  {} {} {}",
+            e["src_repo"].as_str().unwrap_or_default(),
+            e["src"].as_str().unwrap_or_default(),
+            e["dst_repo"].as_str().unwrap_or_default(),
+            e["dst"].as_str().unwrap_or_default(),
+            e["kind"].as_str().unwrap_or_default(),
+            e["strategy"].as_str().unwrap_or_default(),
+            e["confidence"]
+        );
+    }
+    println!("{} cross-repository edges in organization `{name}` (generation {})", edges.len(), g.generation);
+    Ok(())
 }
 
 fn cmd_status(store: &Path, json: bool, pretty: bool) -> anyhow::Result<()> {

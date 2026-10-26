@@ -1,6 +1,6 @@
 # RFC 0006 — The organization graph
 
-- Status: Draft; phase 1 (§9) is implemented
+- Status: Draft; phases 1 and 2 (§9) are implemented
 - Created: 2026-10-26
 - Depends on: RFC 0001 (§8 storage, §10 org linker, §11 query engine,
   §13 permissions), RFC 0005 (responses, `repo` / `ref`)
@@ -276,6 +276,117 @@ answers that span several repositories cost more header lines. Repository
 routing signals (open question 1) are the next lever; the link layer
 (phase 2) does not change localization.
 
+### 9.2 Phase 2 — implemented
+
+Repository routing (open question 1) and the link layer for packages
+(§3.3.1) landed in `rueca-segment` (`org::route`, `org::link`),
+`rueca-index` (`link`: the `PackageLinker`), `rueca-query` (routing in
+`search_symbols`, `list_repositories` `query`, `trace` across
+repositories) and the CLI (`rueca links --org`). Choices and deviations:
+
+- **Routing is a prior, two signals.** Every repository of a generation
+  has a profile (`profiles/<segment>.json`): repository and package
+  names, manifest descriptions and the README head, the 64 most referenced
+  symbols and the 64 most frequent path components, plus its package
+  registry entries. A query scores the visible repositories by (a) CORI
+  over the organization index — the documents of each repository holding
+  each query term are a dictionary lookup in its tantivy segment, so the
+  term-distribution signal needs no extra index — and (b) BM25 over the
+  profiles; both are min-max normalized and averaged (`mu` 0.5), then
+  divided by the best. Each symbol score is multiplied inside the top-k by
+  `((0.25 + r) / 1.25)²`. A prior keeps a strong match in another
+  repository reachable; the two-stage alternative (`top`: only the best
+  repositories) and per-repository statistics (`stats=local`) were
+  evaluated and not kept. Profiles are documents of the generation, not
+  documents of the symbol index: the per-repository documents are tokenized
+  once per opened generation (≈ 28 repositories: milliseconds) instead of
+  being added to the tantivy index, so the repositories' segments stay
+  copied unchanged (§9.1).
+- **Tuned on the calibration split only** (RFC 0004 §7.7): the 35
+  calibration S1 instances asked of an organization of the 7 calibration
+  repositories plus the gated organization's 21 repositories as
+  distractors (their documents only), against each instance's repository
+  searched alone in the same store (`bench/README.md`, *Org scenarios*):
+
+  | Routing | File Acc@5 org / single | Other repositories in the top 10 | Tokens per correct answer, org / single |
+  |---|---|---|---|
+  | off (phase 1) | 45.7 / 71.4 (0.64×) | 34.6% | 1.69× |
+  | prior α 0.5 / 1 / **2** / 3 | 0.84× / 0.88× / **0.92×** / 0.88× | 15.4% / 11.1% / **9.1%** / 8.3% | 1.29× / 1.27× / **1.25×** / 1.24× |
+  | prior α 2, document only / terms only | 0.84× / 0.88× | 13.4% / 13.7% | 1.32× / 1.26× |
+  | top 1 / top 2 | 0.88× / 0.92× | 11.4% / 14.0% | 1.20× / 1.27× |
+  | prior α 2, per-repository statistics | 0.88× | 10.9% | 1.27× |
+
+  CORI's constants (50 / 150, binary presence, 500 / 1500), the field
+  weights and `eps` moved nothing beyond one instance; the defaults stay.
+- **Package registry** from manifests (`package.json`, `pyproject.toml` /
+  `setup.cfg` / `setup.py` with the distribution's top-level import
+  packages, `go.mod`, `composer.json` PSR-4 / PSR-0, `pom.xml`, Gradle
+  settings, and C / C++ `include/` directories). A repository's imports
+  that its own pack cannot resolve are recorded as keys (`npm:vue`,
+  `py:click.core`, `go:…`, `java:<package>`, `php:<name>`, `c:<include>`);
+  a repository depends on another when an import key continues one of the
+  other's package keys, or when its manifests require one of its packages
+  by name (PHP code needs no import to use a class).
+- **Resolution by joint resolve.** Instead of a second resolver, the
+  consumer and its dependencies are resolved together by the normal one,
+  the dependencies' files mounted under a private prefix and every pack
+  wrapped so that a dependency keeps its own module names and import
+  resolution (its project: workspaces, `exports`, source roots, `go.mod`,
+  PSR-4), and a consumer import nobody resolved inside its own repository
+  is resolved by the publishing repository's pack against that
+  repository's project. The whole ladder then applies across repositories
+  (imported bindings, re-exports, typed receivers, inherited members,
+  PHP's fully qualified names, includes), so link edges carry the
+  strategy, confidence and evidence they would have inside one
+  repository. Kept: edges between a consumer node and a dependency node,
+  of every kind but `CONTAINS` / `DEFINES` — `DECORATES` points into the
+  consumer (a library decorator on its function) — never through the
+  name-matching rungs, never into a dependency's tests or into a name the
+  consumer defines itself (Carbon ships `Illuminate\…` test stubs that
+  would otherwise capture Laravel's own classes). Nodes are mapped back to
+  the repositories' own segments by (label, qualified name, path).
+- **Versioned with the generation, recomputed for reverse dependencies.**
+  A consumer's link set is one file named by its segment, its
+  dependencies' segments and the linker version; the generation records
+  what each set was computed against, so an update recomputes the
+  consumers whose own segment, one of whose dependencies or whose
+  dependency set changed, and nothing else (tested: re-indexing a library
+  re-links its one consumer, re-indexing an unrelated repository links
+  nothing).
+- **Query side.** `trace` walks link edges in both directions and opens
+  the other repository's snapshot on demand; nodes carry their snapshot
+  `s`. Link edges are filtered by visibility at both ends (`OrgIndex::link_edges`).
+  `get_symbol` counts stay per repository.
+- **Open question 2** (two repositories publishing one name) is handled
+  only by order: a consumer's import is tried against every dependency
+  publishing a matching key, first match wins; lockfiles are not read.
+
+Measured (bench organization suite, `bench/README.md`):
+
+| Metric | Phase 2 | Phase 1 | Floor | Target |
+|---|---|---|---|---|
+| File Acc@5, organization scope vs the right repository alone, calibration split (35 instances, 28 repositories) | 65.7% vs 71.4% (0.92×) | 45.7% (0.64×) | ≥ 0.85× | ≥ 0.95× |
+| File Acc@5, organization scope vs the right repository alone, gated (21 instances, 21 repositories) | 42.9% vs 61.9% (0.69×) | 47.6% (0.77×) | ≥ 0.85× | ≥ 0.95× |
+| Other repositories' share of the top 10, gated | 15.7% | 36.7% | — | — |
+| Tokens per correct answer, organization scope (top 10), gated | 782 vs 529 (1.48×) | 886 (1.67×) | reported | ≤ 1.2× |
+| Cross-repository edges (packages), precision / recall on 7 labelled pairs (Python, PHP, Java) | 99.7 / 95.3 (imports 100 / 100, uses 99.7 / 91.4) | — | ≥ 90 / 75 | ≥ 97 / 90 |
+| Incremental update: re-index micropython of 21 (profiles, routing, links included) | 499 ms vs 3,616 ms (0.14×) | 0.05× | ≤ 2× | ≤ 1× |
+| Organization layer per added repository (21 steps) | median 206 ms, max 1,413 ms (0.26× / 0.48×) | 0.10× / 0.40× | ≤ 2× | ≤ 1× |
+
+Routing moves the calibration split past the floor but not the gated set:
+of its three phase-1 misses, `fmtlib/fmt` and `coder/code-server` are now
+routed to the right repository and still miss because the right file
+ranks lower under organization-wide statistics than alone; `jqlang/jq`
+is not routed — its distinctive terms (`NO_COLOR`, `isatty`) occur in a
+handful of symbols of `src/main.c`, while other repositories hold more of
+the query's generic words (`terminal`, `color`, `support`); and
+`micropython/micropython` (a number-formatting question that
+`fmtlib/fmt` matches better) is lost. The gated set is 21 instances (one is 4.8 points); the
+next levers are per-repository ranking within a routed repository
+without losing comparable scores (a score transplant: the organization
+score distribution, the repository's own order) and a larger calibration
+split to tune it on.
+
 ## 10. Amendments
 
 - **RFC 0001 §10** — the org linker becomes the contract producer of the
@@ -298,9 +409,11 @@ routing signals (open question 1) are the next lever; the link layer
 
 ## 12. Open questions
 
-1. Repository routing signals (README, package names, ownership) as extra
+1. ~~Repository routing signals (README, package names, ownership) as extra
    fields of a per-repository document in the organization index, so a query
-   can also rank repositories?
+   can also rank repositories?~~ Done in phase 2 (§9.2): a profile per
+   repository plus the term distribution of the organization index, used as
+   a prior; ownership is not a signal yet.
 2. Package registry conflicts: two repositories publishing the same name
    (forks, monorepo vs split) — prefer the one the consumer's lockfile pins?
 3. Size limits: one tantivy index for thousands of repositories (expected

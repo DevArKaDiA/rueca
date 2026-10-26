@@ -53,17 +53,33 @@
 //! (score desc, repository order, node id). Priors and path globs come from
 //! the repositories' opened [`Segment`]s.
 //!
+//! # Routing and the link layer (RFC 0006 phase 2)
+//!
+//! Every repository entry also names a **profile**
+//! (`profiles/<store segment>.json`, [`RepoProfile`]): the repository's
+//! routing document and its package registry entries. [`OrgIndex::route`]
+//! scores the visible repositories for a query ([`route`]) and
+//! [`OrgIndex::search_with`] weighs the symbol ranking with it. With an
+//! [`OrgLinker`] ([`update_org_with`]), each repository also gets a **link
+//! set** (`links/…`, [`link`]): its cross-repository edges into the
+//! repositories publishing the packages it imports, recomputed only when
+//! the repository, one of its dependencies or its dependency set changes.
+//! [`OrgIndex::link_edges`] serves them.
+//!
 //! Single writer per store, as for the rest of the store.
+
+pub mod link;
+pub mod route;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use rueca_model::{NodeId, SnapshotInfo};
+use rueca_model::{EdgeKind, NodeId, SnapshotInfo};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tantivy::directory::error::{DeleteError, LockError, OpenReadError, OpenWriteError};
@@ -79,6 +95,11 @@ use crate::symbols::{self, PriorsBySegment, SubsetStats, TANTIVY_PREFIX};
 use crate::tokenizer::{CODE_TOKENIZER, CodeTokenizer};
 use crate::{FORMAT_VERSION, Result, Segment, SegmentError, SegmentMeta, Store, SymbolQuery};
 
+pub use link::{
+    LinkDir, LinkEdge, LinkInput, LinkRef, LinkTable, NoLinker, OrgDep, OrgLinker, OrgLinks, Package, RepoDeps,
+};
+pub use route::{PROFILE_FORMAT, RepoProfile, RepoRoute, RouteMode, RouteParams};
+
 /// Version of the generation file format.
 pub const ORG_FORMAT: u32 = 1;
 
@@ -86,6 +107,7 @@ const ORGS_DIR: &str = "orgs";
 const POINTER_FILE: &str = "org.json";
 const GENERATIONS_DIR: &str = "generations";
 const INDEX_DIR: &str = "index";
+const PROFILES_DIR: &str = "profiles";
 const META_FILE: &str = "meta.json";
 
 /// One repository of a generation.
@@ -110,6 +132,14 @@ pub struct OrgRepo {
     pub index_bytes: u64,
     /// Generation in which this entry was (re)built.
     pub since_generation: u64,
+    /// Routing profile file under `profiles/` ([`RepoProfile`]); absent in
+    /// generations written before RFC 0006 phase 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// Cross-repository edges of this repository into its dependencies;
+    /// absent when it depends on no repository of the organization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub links: Option<OrgLinks>,
 }
 
 /// An immutable generation of an organization (`generations/<n>.json`).
@@ -124,6 +154,10 @@ pub struct OrgGeneration {
     pub repos: Vec<OrgRepo>,
     /// tantivy `meta.json` without its segments: index settings and schema.
     pub tantivy: Value,
+    /// Version of the [`OrgLinker`] that produced profiles and links (0:
+    /// none).
+    #[serde(default)]
+    pub linker: u32,
 }
 
 impl OrgGeneration {
@@ -164,6 +198,17 @@ pub struct OrgUpdate {
     pub missing: Vec<String>,
     /// Bytes of tantivy segment files copied into the organization index.
     pub bytes_copied: u64,
+    /// Repositories whose profile (routing document, packages) was computed.
+    pub profiled: Vec<String>,
+    /// Repositories whose link set was (re)computed, with their edge counts.
+    pub linked: Vec<(String, u32)>,
+    /// Link edges in the published generation.
+    pub link_edges: u64,
+    /// Repositories whose linking failed (they have no links).
+    pub link_errors: Vec<String>,
+    /// Milliseconds spent on profiles and on links.
+    pub profile_ms: u64,
+    pub link_ms: u64,
     pub duration_ms: u64,
 }
 
@@ -284,18 +329,33 @@ fn tantivy_template() -> Result<Value> {
 /// (re)added, others removed, and a new generation is published with an
 /// atomic pointer swap. Nothing is published when nothing changed. Members
 /// without a segment in the store are reported in `missing` and left out.
-/// Two members with the same repository id are an error.
+/// Two members with the same repository id are an error. Profiles are
+/// computed without packages and no links are built ([`NoLinker`]); see
+/// [`update_org_with`].
 pub fn update_org(store: &Store, name: &str, members: &[OrgMember]) -> Result<OrgUpdate> {
+    update_org_with(store, name, members, &NoLinker)
+}
+
+/// [`update_org`] with a linker: every new or re-indexed repository is
+/// analyzed (packages, unresolved imports, required packages) into its
+/// profile, then each repository whose dependency set, own segment or
+/// dependencies' segments changed gets its link set recomputed (the
+/// reverse dependencies of a changed repository included). A failing link
+/// computation is reported in `link_errors` and leaves that repository
+/// without links; it never fails the update.
+pub fn update_org_with(store: &Store, name: &str, members: &[OrgMember], linker: &dyn OrgLinker) -> Result<OrgUpdate> {
     validate_name(name)?;
     let started = Instant::now();
     ensure_dirs(&store.dir)?;
     let dir = org_dir(&store.dir, name);
-    fs::create_dir_all(dir.join(GENERATIONS_DIR))?;
-    fs::create_dir_all(dir.join(INDEX_DIR))?;
+    for d in [GENERATIONS_DIR, INDEX_DIR, PROFILES_DIR, link::LINKS_DIR] {
+        fs::create_dir_all(dir.join(d))?;
+    }
     let tmp = store.dir.join("tmp");
     let prev = current_generation(&store.dir, name)?;
     let catalog = store.entries()?;
     let template = tantivy_template()?;
+    let version = linker.version();
     let next = prev.as_ref().map_or(1, |g| g.generation + 1);
     let mut update = OrgUpdate { name: name.to_string(), ..OrgUpdate::default() };
     let mut repos: Vec<OrgRepo> = Vec::new();
@@ -348,10 +408,113 @@ pub fn update_org(store: &Store, name: &str, members: &[OrgMember]) -> Result<Or
             w[0].repo, w[0].root, w[1].root
         )));
     }
+
+    // Profiles: kept when present for the same segment, profile format and
+    // linker version; computed otherwise.
+    let t = Instant::now();
+    let mut segments: HashMap<String, Arc<Segment>> = HashMap::new();
+    let mut open = |id: &str| -> Result<Arc<Segment>> {
+        if let Some(s) = segments.get(id) {
+            return Ok(s.clone());
+        }
+        let s = Arc::new(store.open_segment(id)?);
+        segments.insert(id.to_string(), s.clone());
+        Ok(s)
+    };
+    let mut profiles: Vec<RepoProfile> = Vec::with_capacity(repos.len());
+    for r in &mut repos {
+        let file = profile_file_name(&r.segment_id);
+        let current = read_profile(&dir, &file).filter(|p| p.format == PROFILE_FORMAT && p.linker == version);
+        let profile = match current {
+            Some(p) => p,
+            None => {
+                let seg = open(&r.segment_id)?;
+                let deps = linker.analyze(store, &seg).unwrap_or_else(|e| {
+                    update.link_errors.push(format!("{}: analysis: {e}", r.repo));
+                    RepoDeps::default()
+                });
+                let p = RepoProfile::build(&seg, deps, version);
+                let bytes = serde_json::to_vec(&p).map_err(|e| SegmentError::Other(e.to_string()))?;
+                atomic_write(&dir.join(PROFILES_DIR).join(&file), &tmp, &bytes)?;
+                update.profiled.push(r.repo.clone());
+                p
+            }
+        };
+        r.profile = Some(file);
+        profiles.push(profile);
+    }
+    update.profile_ms = t.elapsed().as_millis() as u64;
+
+    // Links: per consumer, the repositories publishing what it imports.
+    let t = Instant::now();
+    let prev_linker = prev.as_ref().map_or(0, |g| g.linker);
+    let mut wants: Vec<Vec<usize>> = Vec::with_capacity(repos.len());
+    for (i, p) in profiles.iter().enumerate() {
+        let deps: Vec<usize> = if version == 0 {
+            Vec::new()
+        } else {
+            (0..repos.len()).filter(|&j| j != i && p.deps.depends_on(&profiles[j].deps.packages)).collect()
+        };
+        wants.push(deps);
+    }
+    for i in 0..repos.len() {
+        let deps: Vec<OrgDep> = wants[i]
+            .iter()
+            .map(|&j| OrgDep { repo: repos[j].repo.clone(), segment_id: repos[j].segment_id.clone() })
+            .collect();
+        if deps.is_empty() {
+            repos[i].links = None;
+            continue;
+        }
+        let prev_links = prev.as_ref().and_then(|g| g.repos.iter().find(|x| x.root == repos[i].root)).and_then(|x| {
+            (x.segment_id == repos[i].segment_id && prev_linker == version).then_some(x.links.clone()).flatten()
+        });
+        if let Some(l) = prev_links
+            && l.deps == deps
+            && l.file.as_ref().is_none_or(|f| dir.join(link::LINKS_DIR).join(f).exists())
+        {
+            update.link_edges += u64::from(l.edges);
+            repos[i].links = Some(l);
+            continue;
+        }
+        let file = link::link_file_name(&repos[i].segment_id, &deps, version);
+        let consumer_seg = open(&repos[i].segment_id)?;
+        let mut dep_segs = Vec::with_capacity(deps.len());
+        for &j in &wants[i] {
+            dep_segs.push(open(&repos[j].segment_id)?);
+        }
+        let consumer = LinkInput { repo: &repos[i], segment: &consumer_seg, deps: &profiles[i].deps };
+        let inputs: Vec<LinkInput<'_>> = wants[i]
+            .iter()
+            .zip(&dep_segs)
+            .map(|(&j, s)| LinkInput { repo: &repos[j], segment: s, deps: &profiles[j].deps })
+            .collect();
+        let links = match linker.link(store, &consumer, &inputs) {
+            Ok(edges) => {
+                let n = edges.len() as u32;
+                let file = if edges.is_empty() {
+                    None
+                } else {
+                    link::write_links(&dir, &tmp, &file, &edges)?;
+                    Some(file)
+                };
+                update.linked.push((repos[i].repo.clone(), n));
+                OrgLinks { file, deps, edges: n, error: None }
+            }
+            Err(e) => {
+                update.link_errors.push(format!("{}: {e}", repos[i].repo));
+                OrgLinks { file: None, deps, edges: 0, error: Some(e.to_string()) }
+            }
+        };
+        update.link_edges += u64::from(links.edges);
+        repos[i].links = Some(links);
+    }
+    update.link_ms = t.elapsed().as_millis() as u64;
+
     update.repos = repos.len();
     let changed = match &prev {
         None => true,
-        Some(g) => g.repos != repos || g.tantivy != template,
+        Some(g) => g.repos != repos || g.tantivy != template || g.linker != version,
     };
     if !changed {
         update.generation = prev.map_or(0, |g| g.generation);
@@ -365,6 +528,7 @@ pub fn update_org(store: &Store, name: &str, members: &[OrgMember]) -> Result<Or
         created_at: now(),
         repos,
         tantivy: template,
+        linker: version,
     };
     let bytes = serde_json::to_vec_pretty(&generation).map_err(|e| SegmentError::Other(e.to_string()))?;
     atomic_write(&generation_path(&dir, next), &tmp, &bytes)?;
@@ -376,6 +540,15 @@ pub fn update_org(store: &Store, name: &str, members: &[OrgMember]) -> Result<Or
     update.published = true;
     update.duration_ms = started.elapsed().as_millis() as u64;
     Ok(update)
+}
+
+fn profile_file_name(segment_id: &str) -> String {
+    format!("{segment_id}.json")
+}
+
+fn read_profile(dir: &Path, file: &str) -> Option<RepoProfile> {
+    let bytes = fs::read(dir.join(PROFILES_DIR).join(file)).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// Copies the tantivy segment of store segment `segment_id` into the
@@ -443,6 +616,8 @@ fn extract_repo(
         docs,
         index_bytes,
         since_generation: generation,
+        profile: None,
+        links: None,
     })
 }
 
@@ -472,6 +647,21 @@ fn collect_garbage(store: &Store, dir: &Path, current: u64) {
             let stem = name.split('.').next().unwrap_or_default();
             if !live.contains(stem) {
                 let _ = fs::remove_file(ent.path());
+            }
+        }
+    }
+    // Profiles and link sets no kept generation names.
+    let named: HashSet<&str> = kept
+        .iter()
+        .flat_map(|g| g.repos.iter())
+        .flat_map(|r| r.profile.as_deref().into_iter().chain(r.links.as_ref().and_then(|l| l.file.as_deref())))
+        .collect();
+    for sub in [PROFILES_DIR, link::LINKS_DIR] {
+        if let Ok(rd) = fs::read_dir(dir.join(sub)) {
+            for ent in rd.flatten() {
+                if !named.contains(ent.file_name().to_string_lossy().as_ref()) {
+                    let _ = fs::remove_file(ent.path());
+                }
             }
         }
     }
@@ -574,10 +764,16 @@ pub struct OrgHit {
 /// generation number.
 pub struct OrgIndex {
     generation: OrgGeneration,
+    dir: PathBuf,
     reader: IndexReader,
     fields: symbols::Fields,
     /// tantivy segment of each repository (`None`: empty graph).
     segments: Vec<Option<SegmentId>>,
+    /// Routing profile of each repository (`None`: not computed).
+    profiles: Vec<Option<RepoProfile>>,
+    docs: route::RepoDocs,
+    /// The link table, loaded on first use.
+    links: OnceLock<std::result::Result<Arc<LinkTable>, String>>,
 }
 
 impl OrgIndex {
@@ -637,7 +833,98 @@ impl OrgIndex {
                 return Err(corrupt(format!("organization index: documents of {} disagree", generation.repos[i].repo)));
             }
         }
-        Ok(OrgIndex { generation, reader, fields, segments })
+        let profiles: Vec<Option<RepoProfile>> =
+            generation.repos.iter().map(|r| r.profile.as_deref().and_then(|f| read_profile(&dir, f))).collect();
+        let docs = route::RepoDocs::build(&profiles);
+        Ok(OrgIndex { generation, dir, reader, fields, segments, profiles, docs, links: OnceLock::new() })
+    }
+
+    /// The routing profile of repository `repo` (index into the
+    /// generation's repositories), if computed.
+    pub fn profile(&self, repo: usize) -> Option<&RepoProfile> {
+        self.profiles.get(repo).and_then(Option::as_ref)
+    }
+
+    /// The link table of this generation (read on first use).
+    pub fn links(&self) -> Result<Arc<LinkTable>> {
+        self.links
+            .get_or_init(|| LinkTable::load(&self.dir, &self.generation.repos).map(Arc::new).map_err(|e| e.to_string()))
+            .clone()
+            .map_err(SegmentError::Other)
+    }
+
+    /// Link edges at node `node` of repository `repo` whose other end is a
+    /// repository in `visible` (RFC 0006 §5: a link edge is returned only
+    /// when both ends are visible), in direction `dir`, optionally of one
+    /// kind.
+    pub fn link_edges(
+        &self,
+        repo: usize,
+        node: NodeId,
+        dir: LinkDir,
+        kind: Option<EdgeKind>,
+        visible: &[usize],
+    ) -> Result<Vec<LinkRef>> {
+        if !visible.contains(&repo) {
+            return Ok(Vec::new());
+        }
+        let table = self.links()?;
+        Ok(table.edges(repo, node, dir, kind).into_iter().filter(|e| visible.contains(&e.repo)).collect())
+    }
+
+    /// The relevance of every visible repository for `text` (see
+    /// [`route`]), best first (ties by repository order). With fewer than
+    /// two visible repositories, or a query without terms, every repository
+    /// gets 1.
+    pub fn route(&self, text: &str, visible: &[usize], params: &RouteParams) -> Result<Vec<RepoRoute>> {
+        let mut vis: Vec<usize> = visible.iter().copied().filter(|&i| i < self.generation.repos.len()).collect();
+        vis.sort_unstable();
+        vis.dedup();
+        let terms = route::query_terms(text);
+        if vis.len() < 2 || terms.is_empty() {
+            return Ok(vis.into_iter().map(|repo| RepoRoute { repo, score: 1.0, terms: 1.0, doc: 1.0 }).collect());
+        }
+        // Term distribution over the symbol index: documents of each
+        // repository holding each term in its name, source or path.
+        let searcher = self.reader.searcher();
+        let readers: HashMap<SegmentId, &tantivy::SegmentReader> =
+            searcher.segment_readers().iter().map(|sr| (sr.segment_id(), sr)).collect();
+        let fields = symbols::routing_fields(&self.fields);
+        let mut df = vec![vec![0u64; vis.len()]; terms.len()];
+        let mut cw = vec![0u64; vis.len()];
+        for (j, &r) in vis.iter().enumerate() {
+            let Some(sr) = self.segments[r].and_then(|sid| readers.get(&sid).copied()) else { continue };
+            cw[j] = u64::from(sr.max_doc());
+            for &field in &fields {
+                let inv = sr.inverted_index(field).map_err(|e| SegmentError::Other(format!("tantivy: {e}")))?;
+                for (k, t) in terms.iter().enumerate() {
+                    let n = inv
+                        .doc_freq(&tantivy::Term::from_field_text(field, t))
+                        .map_err(|e| SegmentError::Other(format!("tantivy: {e}")))?;
+                    df[k][j] = df[k][j].max(u64::from(n));
+                }
+            }
+        }
+        let by_terms = route::normalize(&route::cori(&df, &cw, params.cori_k, params.cori_c));
+        let by_doc = route::normalize(&self.docs.scores(&terms, &vis, &params.fields));
+        let mut out: Vec<RepoRoute> = vis
+            .iter()
+            .enumerate()
+            .map(|(j, &repo)| RepoRoute {
+                repo,
+                score: (1.0 - params.mu) * by_terms[j] + params.mu * by_doc[j],
+                terms: by_terms[j],
+                doc: by_doc[j],
+            })
+            .collect();
+        let best = out.iter().map(|r| r.score).fold(0f32, f32::max);
+        if best > 0.0 {
+            for r in &mut out {
+                r.score /= best;
+            }
+        }
+        out.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.repo.cmp(&b.repo)));
+        Ok(out)
     }
 
     pub fn generation(&self) -> &OrgGeneration {
@@ -649,6 +936,22 @@ impl OrgIndex {
     /// pages the merged ranking. Ordered by score descending, then
     /// repository order, then node id.
     pub fn search(&self, query: &SymbolQuery, scope: &OrgScope<'_>) -> Result<Vec<OrgHit>> {
+        self.search_with(query, scope, &HashMap::new(), false)
+    }
+
+    /// [`OrgIndex::search`] with every score of repository `i` multiplied by
+    /// `boost[i]` (missing: 1) inside the top-k: the routing prior
+    /// ([`RouteParams::prior`] of [`OrgIndex::route`]). With `local_stats`,
+    /// each repository is scored with its own BM25 statistics (as if
+    /// searched alone; [`RouteParams::local_stats`]) and the rankings are
+    /// merged by score.
+    pub fn search_with(
+        &self,
+        query: &SymbolQuery,
+        scope: &OrgScope<'_>,
+        boost: &HashMap<usize, f32>,
+        local_stats: bool,
+    ) -> Result<Vec<OrgHit>> {
         let limit = symbols::effective_limit(query);
         let glob = query.path_glob.as_deref().map(symbols::compile_glob).transpose()?;
         let visible: HashSet<SegmentId> =
@@ -686,7 +989,24 @@ impl OrgIndex {
             })
         };
         let want = query.offset.saturating_add(limit);
-        let hits = symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(priors), want, &keep)?;
+        let seg_boost: HashMap<SegmentId, f32> =
+            boost.iter().filter_map(|(&i, &b)| self.segments.get(i).copied().flatten().map(|sid| (sid, b))).collect();
+        let hits = if local_stats {
+            let mut all = Vec::new();
+            for (sid, p) in priors {
+                let own = HashSet::from([sid]);
+                let stats = SubsetStats { searcher: &searcher, segments: &own };
+                let one: PriorsBySegment = HashMap::from([(sid, p)]);
+                all.extend(symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(one), &seg_boost, want, &keep)?);
+            }
+            all.sort_by(|a, b| {
+                b.score.total_cmp(&a.score).then(a.segment_ord.cmp(&b.segment_ord)).then(a.doc.cmp(&b.doc))
+            });
+            all.truncate(want);
+            all
+        } else {
+            symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(priors), &seg_boost, want, &keep)?
+        };
         Ok(hits
             .into_iter()
             .skip(query.offset)

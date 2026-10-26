@@ -155,7 +155,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::BTreeSet;
 
 use rueca_model::SymbolIdParts;
-use rueca_segment::org::OrgIndex;
+use rueca_segment::org::{OrgIndex, RouteParams};
 use rueca_segment::{CatalogEntry, Segment, Store};
 use serde_json::Value;
 
@@ -317,6 +317,8 @@ pub struct Engine {
     /// Organization served (organization mode, RFC 0006).
     pub org: Option<String>,
     visibility: Visibility,
+    /// How a query's repository relevance weighs organization rankings.
+    route: RouteParams,
     segments: Mutex<HashMap<String, Arc<Segment>>>,
     /// The last opened generation of the organization index.
     org_index: Mutex<Option<Arc<OrgIndex>>>,
@@ -344,6 +346,7 @@ impl Engine {
             default_root,
             org: None,
             visibility: Visibility::All,
+            route: RouteParams::from_env(),
             segments: Mutex::new(HashMap::new()),
             org_index: Mutex::new(None),
         })
@@ -367,6 +370,17 @@ impl Engine {
 
     pub fn visibility(&self) -> &Visibility {
         &self.visibility
+    }
+
+    /// Sets the repository routing parameters (default:
+    /// [`RouteParams::from_env`]).
+    pub fn with_routing(mut self, route: RouteParams) -> Engine {
+        self.route = route;
+        self
+    }
+
+    pub fn routing(&self) -> &RouteParams {
+        &self.route
     }
 
     /// Runs tool `name` with JSON `args` and returns the JSON result described

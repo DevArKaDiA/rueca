@@ -2,7 +2,8 @@
 //! organization and its repositories; [`index_org`] indexes each repository
 //! with the unchanged repository pipeline ([`crate::index_worktree`]) and
 //! then builds or updates the organization layer
-//! ([`rueca_segment::org::update_org`]).
+//! ([`rueca_segment::org::update_org_with`] with the [`PackageLinker`]:
+//! routing profiles, package registries and cross-repository edges).
 //!
 //! ```toml
 //! name = "acme"
@@ -34,6 +35,7 @@ use rueca_segment::org::{self, OrgMember, OrgUpdate};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
+use crate::link::PackageLinker;
 use crate::{IndexOptions, IndexReport, index_worktree, normalize_remote};
 
 #[derive(Debug, Deserialize)]
@@ -246,7 +248,11 @@ pub fn index_org(opts: &OrgIndexOptions) -> anyhow::Result<OrgIndexReport> {
     let repos_ms = started.elapsed().as_millis() as u64;
     let t = Instant::now();
     let store = Store::open(&opts.store)?;
-    let update = org::update_org(&store, &cfg.name, &cfg.members(&opts.store))?;
+    let linker = PackageLinker::new(&opts.store);
+    let update = org::update_org_with(&store, &cfg.name, &cfg.members(&opts.store), &linker)?;
+    for e in &update.link_errors {
+        warn!(org = %cfg.name, "linking: {e}");
+    }
     let org_ms = t.elapsed().as_millis() as u64;
     if !update.missing.is_empty() {
         warn!(org = %cfg.name, missing = ?update.missing, "repositories not indexed yet are left out");
@@ -276,7 +282,7 @@ pub fn update_orgs_containing(store_dir: &Path, root: &Path) -> anyhow::Result<V
         }
         let members: Vec<OrgMember> =
             g.repos.iter().map(|r| OrgMember { root: r.root.clone(), url: r.url.clone() }).collect();
-        out.push(org::update_org(&store, &g.name, &members)?);
+        out.push(org::update_org_with(&store, &g.name, &members, &PackageLinker::new(store_dir))?);
     }
     Ok(out)
 }
