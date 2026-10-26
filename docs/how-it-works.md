@@ -230,7 +230,15 @@ What packs deliberately do and don't do:
   `private cache = new Cache()`, TS parameter properties,
   `this.x = new T()`; Python `self.x = Foo()`, class-body annotations), and
   so do module-level bindings used in functions
-  (`const app = new Hono(); … app.get()`). The call is then reported with
+  (`const app = new Hono(); … app.get()`). TS/JS also types a name by the
+  bound of its type parameter (`d: D` with `D extends Dog`), the element
+  of an annotated array for an array-method callback parameter and a
+  `for … of` variable (`xs: T[]; xs.map((x) => x.m())`), and a call of a
+  module-level function or of a method of the file's classes by its
+  declared return type (`b.map(f).get()`, `Registry.create().m()`); a
+  function whose every `return` is an object literal types its result as
+  itself, its object-literal methods being its members
+  (`const c = makeCounter(); c.next()`). The call is then reported with
   the receiver `$type:T`. Types are file-local: a callback parameter typed
   only by context (`app.use((c, next) => …)`) or a value returned by a
   function of another file stays untyped. PHP does the same from its own
@@ -512,7 +520,14 @@ and a constructor — a Java or C++ method named like its class — is reached
 by calls only: a type named like an enclosing class or its superclass is
 that type, never its constructor. An ECMAScript function that owns
 methods (`View.prototype.render = function render() {}`) counts as a type
-for `this` and `$type:View` receivers.
+for `this` and `$type:View` receivers, and so does a function or variable
+owning object-literal methods (`const api = { get() {} }`,
+`return { next() {} }`, `export default { start() {} }`, which the pack
+records as a `default` variable): `api.get()`, also through an import,
+finds the member, and a bare call inside such a method never finds a
+sibling method by local scope. A name bound to a whole module
+(`const Queue = require("./queue")`) that is called, constructed or used
+as a type is the module's default export (`module.exports = Queue`).
 
 Rungs and rules that the RFC 0003 packs opt into (Python, ECMAScript, PHP
 and Markdown resolve exactly as above; Terraform uses directory scope; Go

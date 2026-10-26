@@ -33,6 +33,9 @@
 //! | `namespace N {}` / `module N {}` / `declare module "m" {}` | `Module` | inner declarations are qualified by it (`N.helper`); everything inside `declare module "m"` is exported |
 //! | other module-level `const` | `Constant` if `UPPER_CASE`, else `Variable` | `let` / `var` → `Variable`; destructuring gives one per name |
 //! | methods / function-valued pairs of a module-level object literal (`export const api = { get() {} }`) | `Method` children of the variable | |
+//! | methods / function-valued pairs of any other object literal (`return { next: () => … }`, `register({ setup() {} })`) | `Method` children of the enclosing definition; top-level `Function`s outside any (`module.exports = { start() {} }`, exported) | |
+//! | `export default { … }` | `Variable` named `default`, the object's methods its `Method` children | |
+//! | function assigned to a name or member inside a function (`desc.value = function () {}`, `this.onTick = () => {}`, `handler = () => {}`) | `Function` child of the enclosing definition, named like the name / property | outside any definition the CommonJS and prototype rules below apply first |
 //! | CommonJS `module.exports = function f`, `exports.x = function`, `X.prototype.y = function`, `X.y = function` | `Function`, or `Method` of a module-level `X` | |
 //! | named function expression anywhere else: call arguments (`defineGetter(req, "query", function query() {})`, `app.use(function handler() {})`), `return function timing() {}`, operands | `Function` child of the enclosing definition | span = the function expression; doc = JSDoc before it or before the statement holding it. Anonymous ones are not definitions |
 //! | `describe` / `it` / `test` (also `context`, `suite`, `specify`, `fit`, `xit`, `.each`, `.only`, `.skip`, `.todo`) with a string first argument and a function argument | `Test` | `is_test`; qualified name = describe chain joined by ` > ` (dots in titles become `_`); references inside get the test as `enclosing` |
@@ -58,8 +61,15 @@
 //! - `Call`: `f()`, `a.b.c()`, `a?.b()` → name = last identifier, receiver =
 //!   object text (≤ 200 chars). Calls whose root is a global builtin
 //!   (`console.log`, `Promise.all`, `JSON.parse`) are skipped unless the name
-//!   is shadowed locally. Capitalized JSX tags (`<Button/>`, `<Foo.Bar/>`)
-//!   are `Call`s too.
+//!   is shadowed locally or bound at module level by a project import
+//!   (relative or aliased specifier) or a function / class declaration
+//!   (`import { fetch } from "./http"`). A bare call or `new` of a local
+//!   binding (`run(fn) { fn() }`) is kept only when a definition of that name
+//!   is nested in the enclosing definitions (`const step = () => …; step()`;
+//!   a function assigned to a plain name does not count). `super(…)` is a
+//!   `Call` of `constructor` with receiver `super`; `exports.f()` /
+//!   `module.exports.f()` are bare calls of `f`. Capitalized JSX tags
+//!   (`<Button/>`, `<Foo.Bar/>`) are `Call`s too.
 //! - **Typed receivers** (`types.rs`): `x.m()` gets the receiver `$type:T`
 //!   when the file says `x` is a `T` — a parameter or variable annotation
 //!   (`c: Context`, `let x: Foo`, `x?: Foo | undefined`, generic arguments
@@ -68,11 +78,21 @@
 //!   too: `const app = new Hono()`); `this.f.m()` / `this.#f.m()` when
 //!   field `f` of the enclosing class is annotated, initialized with
 //!   `new T()`, a TS parameter property, or only assigned `new T()`;
-//!   `(new T()).m()`, `new T().m()`, `(v as T).m()`. A name with
-//!   conflicting or unknown assignments, destructured, a `catch` / `for`
-//!   target, or typed by a type parameter, an array or a union of several
-//!   types stays untyped; `this` inside a non-arrow function is not the
-//!   class instance.
+//!   `(new T()).m()`, `new T().m()`, `(v as T).m()`. A type parameter
+//!   stands for its bound (`d: D` with `D extends Dog`); the first
+//!   unannotated parameter of a callback passed to an array method
+//!   (`xs.map((x) => …)`, `forEach`, `filter`, `find`, …) and a `for (const
+//!   x of xs)` variable are the element type of an annotated array
+//!   (`xs: T[]`, `Array<T>`); a call of a module-level function or of a
+//!   method of the file's classes is its declared return type
+//!   (`make().m()`, `Box.create().get()`, `b.map(f).get()`, `this` → the
+//!   class), and a function without one whose every `return` is an object
+//!   literal types its result as itself (`const c = makeCounter();
+//!   c.next()` → `$type:makeCounter`, whose object-literal methods are its
+//!   members). A name with conflicting or unknown assignments,
+//!   destructured, a `catch` or other `for` target, or typed by an unbounded type
+//!   parameter, an array or a union of several types stays untyped;
+//!   `this` inside a non-arrow function is not the class instance.
 //! - Builtins come in two lists (`builtins.rs`): ECMAScript / TypeScript /
 //!   Node / test globals that are never emitted, and web-platform and runtime
 //!   globals that projects may also define (`Request`, `Response`,
@@ -125,7 +145,7 @@
 //! | `export { a as b } from "m"` | `a` as `b` | | `reexport` |
 //! | `export * from "m"` | `*` | | `reexport` |
 //! | `export * as ns from "m"` | | `ns` | `reexport` |
-//! | `export default x` / `module.exports = x` (`x` an identifier) | `x` as `default` | | `reexport`, module = `./<own file name>` |
+//! | `export default x` / `module.exports = x` (`x` an identifier), `export default function x` / `class x`, `module.exports = function x` / `class x` | `x` as `default` | | `reexport`, module = `./<own file name>` |
 //! | `export { a as b }` (no `from`, `a` ≠ `b`) | `a` as `b` | | `reexport`, module = `./<own file name>` |
 //! | `const x = require("m")` / `await import("m")` | | `x` | |
 //! | `const { a, b: c } = require("m")` | `a`, `b` as `c` | | |
@@ -207,8 +227,10 @@ impl LanguagePack for TypeScriptPack {
 
     fn extractor_version(&self) -> u32 {
         // 3: env var / config key reads (RFC 0003 §7.2); 4: `$type:`
-        // receivers from declarations and assignments.
-        4
+        // receivers from declarations and assignments; 5: object-literal
+        // methods and assigned functions as definitions, `super(…)`,
+        // bounds / elements / return types for receivers, local callees.
+        5
     }
 
     fn extract(

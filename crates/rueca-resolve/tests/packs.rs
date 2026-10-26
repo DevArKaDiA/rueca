@@ -386,3 +386,86 @@ fn typescript_self_reexports_bind_default_and_renamed_imports() {
     let f = g.file("src/user.ts");
     assert!(!out.graph.edges.iter().any(|e| e.src == f && e.dst == f));
 }
+
+/// CommonJS and object-literal patterns of the TS/JS micro-benchmark: a
+/// required module that is a class or a function (its default export), the
+/// methods of `module.exports = { … }` and of `export default { … }`, the
+/// methods of a returned object literal typed through the factory, and
+/// `super(…)` to the nearest explicit constructor.
+#[test]
+fn typescript_modules_as_values_and_object_literal_methods() {
+    let out = build(&[
+        ("lib/queue.js", "class Queue {\n  constructor() {}\n  push(x) { return x; }\n}\nmodule.exports = Queue;\n"),
+        ("lib/log.js", "module.exports = function log(m) {\n  return m;\n};\n"),
+        (
+            "lib/service.js",
+            "function helper(f) { return f; }\nmodule.exports = {\n  start() { return helper(true); },\n  stop: () => helper(false),\n};\n",
+        ),
+        (
+            "lib/worker.js",
+            "const Queue = require('./queue');\nconst log = require('./log');\nconst service = require('./service');\nfunction run(items) {\n  const q = new Queue();\n  q.push(1);\n  log('x');\n  service.stop();\n  return service.start();\n}\nmodule.exports = { run };\n",
+        ),
+        (
+            "src/app.ts",
+            "export default {\n  start(): string { return this.stop(); },\n  stop(): string { return 'bye'; },\n};\n",
+        ),
+        (
+            "src/counter.ts",
+            "export function makeCounter() {\n  const step = () => 1;\n  return {\n    next: () => step(),\n    peek() { return 0; },\n  };\n}\nexport function use(): number {\n  const c = makeCounter();\n  return c.next() + c.peek();\n}\n",
+        ),
+        (
+            "src/main.ts",
+            "import app from './app';\nexport function session(): string {\n  return app.start() + app.stop();\n}\n",
+        ),
+        (
+            "src/model.ts",
+            "export class Model {\n  constructor(readonly id: string) {}\n}\nexport class User extends Model {\n  constructor(id: string) {\n    super(id);\n  }\n}\n",
+        ),
+    ]);
+    let g = G(&out.graph);
+    use EdgeKind::Calls;
+    let run = g.id("lib/worker.js", "run");
+    assert_eq!(g.edge(run, g.id("lib/queue.js", "Queue"), Calls), (Strategy::ImportResolved, 0.9));
+    assert_eq!(g.edge(run, g.id("lib/queue.js", "Queue.constructor"), Calls).0, Strategy::ImportResolved);
+    assert_eq!(g.edge(run, g.id("lib/queue.js", "Queue.push"), Calls).0, Strategy::TypeResolved);
+    assert_eq!(g.edge(run, g.id("lib/log.js", "log"), Calls).0, Strategy::ImportResolved);
+    assert_eq!(g.edge(run, g.id("lib/service.js", "start"), Calls).0, Strategy::ImportResolved);
+    assert_eq!(g.edge(run, g.id("lib/service.js", "stop"), Calls).0, Strategy::ImportResolved);
+    let helper = g.id("lib/service.js", "helper");
+    assert_eq!(g.edge(g.id("lib/service.js", "start"), helper, Calls).0, Strategy::SameModule);
+
+    let session = g.id("src/main.ts", "session");
+    let start = g.id("src/app.ts", "default.start");
+    let stop = g.id("src/app.ts", "default.stop");
+    assert_eq!(g.edge(session, start, Calls), (Strategy::ImportResolved, 0.85));
+    assert_eq!(g.edge(session, stop, Calls).0, Strategy::ImportResolved);
+    // `this` in an object-literal method is the object.
+    assert_eq!(g.edge(start, stop, Calls).0, Strategy::TypeResolved);
+
+    let use_ = g.id("src/counter.ts", "use");
+    let next = g.id("src/counter.ts", "makeCounter.next");
+    assert_eq!(g.edge(use_, next, Calls).0, Strategy::TypeResolved);
+    assert_eq!(g.edge(use_, g.id("src/counter.ts", "makeCounter.peek"), Calls).0, Strategy::TypeResolved);
+    assert_eq!(g.edge(next, g.id("src/counter.ts", "makeCounter.step"), Calls).0, Strategy::SameModule);
+
+    let user_ctor = g.id("src/model.ts", "User.constructor");
+    assert_eq!(g.edge(user_ctor, g.id("src/model.ts", "Model.constructor"), Calls).0, Strategy::TypeResolved);
+}
+
+/// Object-literal methods are properties, not names in scope: a bare call
+/// inside one goes to the imported function of that name.
+#[test]
+fn typescript_object_literal_methods_are_not_in_scope() {
+    let out = build(&[
+        ("src/http.ts", "export function request(url: string): string {\n  return url;\n}\n"),
+        (
+            "src/api.ts",
+            "import { request } from './http';\nexport function createApi() {\n  return {\n    request(url: string) { return request(url); },\n  };\n}\n",
+        ),
+    ]);
+    let g = G(&out.graph);
+    let method = g.id("src/api.ts", "createApi.request");
+    let target = g.id("src/http.ts", "request");
+    assert_eq!(g.edge(method, target, EdgeKind::Calls).0, Strategy::ImportResolved);
+    assert!(!out.graph.edges.iter().any(|e| e.src == method && e.dst == method && e.kind == EdgeKind::Calls));
+}

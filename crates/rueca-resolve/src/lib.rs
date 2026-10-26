@@ -69,15 +69,16 @@
 //!
 //! | # | Strategy | When | Edge strategy | Confidence |
 //! |---|---|---|---|---|
-//! | 1 | Local scope | no receiver; name defined by an enclosing function (walking `parent`) | `SameModule` | 0.95 |
+//! | 1 | Local scope | no receiver; name defined by an enclosing function (walking `parent`; ECMAScript `Method`s — object-literal and prototype members — are properties, never in scope) | `SameModule` | 0.95 |
 //! | 2 | Self receiver | receiver ∈ `pack.self_receivers()`: member of the enclosing class | `TypeResolved` | 0.90 |
 //! | 2 | Self receiver, inherited | …found in a resolved base class (depth-first, left-to-right, depth ≤ 10) | `TypeResolved` | 0.85 |
 //! | 2 | `super` receiver | `super()` / `super`: member of a base class | `TypeResolved` | 0.85 |
 //! | 3 | Imported binding | no receiver; name bound by an import | `ImportResolved` | 0.95 |
+//! | 3 | Imported module as a value | ECMAScript `Call` / `New` / `Type` of a name bound to a whole module (`const log = require("./log"); log()`): the module's default export | `ImportResolved` | 0.90 |
 //! | 3 | Imported module | receiver is (a dotted path through) an imported project module | `ImportResolved` | 0.90 |
-//! | 3 | Imported class | receiver is an imported class (static member) | `ImportResolved` | 0.85 |
+//! | 3 | Imported class | receiver is an imported class (static member), or an ECMAScript definition owning methods (`import app from "./app"; app.start()`) | `ImportResolved` | 0.85 |
 //! | 4 | Same module | no receiver; top-level definition of the same file | `SameModule` | 0.90 |
-//! | 4 | Same-module class | receiver is a top-level class of the same file | `SameModule` | 0.85 |
+//! | 4 | Same-module class | receiver is a top-level class (or ECMAScript definition owning methods) of the same file | `SameModule` | 0.85 |
 //! | 5 | Typed receiver | receiver `$type:T`: `T` resolves as an exact global qualified type name, else like a `Type` reference through the ladder; the member through its bases (see *RFC 0003 hooks*) | `TypeResolved` | 0.85 |
 //! | 6 | Unique name | no receiver; exactly one compatible non-test definition with that name in the same language family, not a builtin | `UniqueName` | 0.60 |
 //! | 6 | Unique method | call with an unknown receiver; exactly one compatible method with that name, name ≥ 4 chars, not a builtin and not a common builtin-type method (`update`, `keys`, `then`, `forEach`, …) | `Heuristic` | 0.50 |
@@ -113,8 +114,10 @@
 //! the whole hierarchy before the next. A constructor is a callable named
 //! like the type that declares it (Java, C/C++), so it is reached by calls
 //! only: a type name equal to an enclosing class or its superclass is the
-//! type. An ECMAScript `Function` that owns methods (prototype assignments)
-//! is a type for `this` and for `$type:` receivers.
+//! type. An ECMAScript `Function`, `Variable` or `Constant` that owns
+//! methods (prototype assignments, object-literal methods: `const api = {
+//! get() {} }`, `return { next() {} }`, `export default { start() {} }`) is
+//! a type for `this`, for `$type:` receivers and for receivers naming it.
 //!
 //! # PHP
 //!
@@ -1889,10 +1892,14 @@ impl<'a> Resolver<'a> {
     /// Strategy 1: a name defined by an enclosing function.
     fn local_scope(&self, f: FileId, scope: Option<LocalDefId>, name: &str) -> Option<NodeId> {
         let defs = self.defs(f);
+        // ECMAScript methods of an object literal or a constructor function
+        // are properties, never names in scope.
+        let ecma = self.families[f as usize] == Some(LanguageFamily::EcmaScript);
         let mut cur = scope;
         while let Some(a) = cur {
             if !defs[a as usize].label.is_type()
                 && let Some(&c) = self.child_by_name[f as usize].get(&(a, name))
+                && !(ecma && defs[c as usize].label == Label::Method)
             {
                 return Some(self.node_of(f, c));
             }
@@ -1915,13 +1922,16 @@ impl<'a> Resolver<'a> {
         None
     }
 
-    /// An ECMAScript function used as a class: it owns methods
+    /// An ECMAScript function or variable used as a class: it owns methods
     /// (`View.prototype.render = function render() {}` makes `render` a
-    /// method of `View`), so `this` inside it and its methods, and a
-    /// receiver typed `View` (`new View()`), find those members.
+    /// method of `View`; `const api = { get() {} }` and `return { next() {} }`
+    /// make `get` / `next` methods of `api` / of the function), so `this`
+    /// inside it and its methods, a receiver typed `View` (`new View()`,
+    /// `$type:makeCounter`) and a receiver naming it (`api.get()`, also
+    /// imported) find those members.
     pub(crate) fn is_constructor_function(&self, n: NodeId) -> bool {
         let node = &self.nodes[n as usize];
-        node.label == Label::Function
+        matches!(node.label, Label::Function | Label::Variable | Label::Constant)
             && node.language.map(Language::family) == Some(LanguageFamily::EcmaScript)
             && self.members.get(&n).is_some_and(|m| {
                 m.values().any(|s| s.callable.is_some_and(|c| self.nodes[c as usize].label == Label::Method))
@@ -1976,6 +1986,18 @@ impl<'a> Resolver<'a> {
             // 3. Imported binding.
             match self.envs[f as usize].get(name) {
                 Some(Some(Target::Symbol(n))) => return Outcome::Hit(*n, Strategy::ImportResolved, 0.95),
+                // ECMAScript: calling, constructing or typing by a module
+                // binding (`const log = require("./log"); log()`) is its
+                // default export (`module.exports = …`).
+                Some(Some(Target::Module(m)))
+                    if self.families[f as usize] == Some(LanguageFamily::EcmaScript)
+                        && matches!(item.kind, RefKind::Call | RefKind::New | RefKind::Type) =>
+                {
+                    return match self.lookup_in_module(*m, "default", &mut Vec::new()) {
+                        Some(Target::Symbol(n)) => Outcome::Hit(n, Strategy::ImportResolved, 0.9),
+                        _ => Outcome::External,
+                    };
+                }
                 Some(Some(_)) => return Outcome::External,
                 Some(None) | None => {}
             }
@@ -2025,7 +2047,9 @@ impl<'a> Resolver<'a> {
                         Some(_) => return Outcome::External,
                         None => {}
                     },
-                    Some(Target::Symbol(c)) if self.nodes[c as usize].label.is_type() => {
+                    Some(Target::Symbol(c))
+                        if self.nodes[c as usize].label.is_type() || self.is_constructor_function(c) =>
+                    {
                         if let Some((n, _)) = self.find_member(c, name, Want::of(item.kind)) {
                             return Outcome::Hit(n, Strategy::ImportResolved, 0.85);
                         }
@@ -2041,10 +2065,11 @@ impl<'a> Resolver<'a> {
                         // `console.log`, `Math.max`, `str.join`: a builtin object.
                         return Outcome::External;
                     }
+                    let owner = |c: NodeId| self.nodes[c as usize].label.is_type() || self.is_constructor_function(c);
                     if let Some(c) = local
-                        && self.nodes[c as usize].label.is_type()
+                        && owner(c)
                         && let Some(Target::Symbol(c)) = self.walk(f, Target::Symbol(c), &segs[1..])
-                        && self.nodes[c as usize].label.is_type()
+                        && owner(c)
                         && let Some((n, _)) = self.find_member(c, name, Want::of(item.kind))
                     {
                         return Outcome::Hit(n, Strategy::SameModule, 0.85);
