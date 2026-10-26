@@ -42,6 +42,91 @@ Measured: organization File Acc@5 47.6% vs 61.9% on the right repository
 alone (0.77×, floor 0.85×; rank fusion gave 9.5%); tokens per correct
 answer 1.67× single-repository. Repository routing is the next lever.
 
+## 2026-10-26 — C/C++: test heads as blocks, errors searched inside, the remaining C++ precision gap is the gold's
+
+Toward the last C++ floors of [RFC 0004](rfcs/0004-quality-and-benchmark.md)
+(`rueca-lang-cpp` extractor version 4; crate docs, `repair.rs` and
+[how-it-works](how-it-works.md) have the details):
+
+- **Catch2 / doctest heads are blocks before parsing.** `TEST_CASE("t",
+  "[x]") {` at declaration level becomes `if       ("t", "[x]") {`, as C
+  test heads already did; the template variants' type lists are blanked.
+  The C++ grammar's recovery from a head without `;` (counted as benign
+  before) was unstable: a head on its own lines, a type list or a later
+  construct could turn the whole file into one error (nlohmann/json's
+  `unit-iterators2.cpp`: 280 error nodes from line 1).
+- **An error over several lines is searched inside.** The repair rounds
+  took such an ERROR node as one site, where no targeted rule applies; its
+  inner errors are now sites too, and a `;` missing after a block is looked
+  for in the block's head. Thirteen same-length repairs are new (unnamed
+  pointer parameters with a default, `new T *[n]`, declarations and
+  dangling operators as macro arguments, trailing macros after template-ids
+  and before initializer lists, `__declspec` with a calling convention,
+  qualified explicit instantiations, member pointer types as template
+  arguments, declaration macros without `;`, …).
+- **Dead code for both grammars**: Objective-C (`__OBJC__`) and C++/CLI
+  (`_MANAGED`, `__cplusplus_cli`) branches, and every branch after one
+  known to be taken whatever the target (the `#else` of `#ifndef
+  __OBJC__`).
+- **Fewer wrong edges from C++ syntax**: `T x(a, b);` with names as
+  arguments (the most vexing parse: the grammar reads a function
+  declaration) is a variable and a construction, so `x.m()` is typed;
+  `using std::get;` in a block makes `get` local there (fmt's `for_each`
+  no longer calls `compile.h`'s `get`); a known class argument never picks
+  a pointer overload (`Load(stream)` with a `std::stringstream` is not
+  `Load(const char*)`).
+- **Measured** (this branch's base → after, same bench): C++ files with
+  parse errors, gated 5.0 → 0.5% (47 → 5 of 946: Catch2 11 → 1, fmt at
+  the S1 commit 9 → 2, nlohmann/json 19 → 2, simdjson 4 → 0, fmt 12.1.0
+  1 → 0, yaml-cpp 3 → 0; raw 7.0 → 3.2%); callers / callees recall 85.3 /
+  82.8 → 85.5 / 83.6, callers precision 95.3 → 95.4, callees precision
+  89.0 → 89.0, definition found 98.9, micro callee F1 98.8 (outputs
+  identical); C files with parse errors 1.3 → 1.1% (micropython 27 → 21
+  files), C S3 and micro outputs identical. File Acc@5 81.6 → 78.9: one
+  Catch2 instance (1609) where `Misc.tests.cpp`, now parsed, takes rank 5
+  from `include/catch.hpp`.
+- **C++ callees precision stays below 90, and the gap is the gold's.**
+  Every false positive was classified against the scip-clang index itself
+  (`.cache/scip/fmt.scip`, `yaml-cpp.scip`): the SCIP symbols of the
+  predicted callable's definition against those of the gold neighbours and
+  the references inside the caller. Of 631 false positives over the 1,019
+  questions with an answer (macro precision 89.0):
+  - **262 (3.6 points) share their SCIP symbol with a gold neighbour.**
+    scip-clang gives same-signature overloads and function template
+    specializations one symbol, and the gold binds it to one definition
+    (the first bound), so the others are indistinguishable from it in the
+    gold yet count as wrong. fmt's three SFINAE `copy(InputIt, InputIt,
+    OutputIt)` (`base.h` 2083 / 2095 / 2108) are all
+    `fmt/v12/detail/copy(5151da2f42c51758).`, bound to 2083 (60 false
+    positives); `num_bits()` (430) and its explicit specializations
+    `num_bits<int128_opt>` … `num_bits<uint128_fallback>` (434–436) are all
+    `num_bits(b126dc7c1de90089).`, bound to 436, so the correct edge from
+    `num_bits<unsigned short>()` to the primary template is a false
+    positive (11); the two-argument `write(OutputIt, T)` overloads
+    (`format.h` 3503 / 3570 / 3599 / …) share `write(131888e4bbdcf483).`
+    (125 of the `write` false positives). Excluding these undecidable edges
+    the precision is 92.2 (92.6 counting them as matches).
+  - **25 (0.5 points)**: scip-clang records the reference inside the
+    caller, but the bench's tree-sitter call-site filter (only
+    `call_expression.function` and `new_expression.type`) drops it:
+    constructions by declaration (`Token token(Token::DIRECTIVE,
+    INPUT.mark());`, `Parser parser(input);`), where scip-clang puts the
+    constructor on the variable name.
+  - **48 (1.3 points)**: constructions in template code the gold cannot
+    see — scip-clang references the class inside the caller but no
+    constructor of it (`basic_memory_buffer<Char> buffer;` in a function
+    template, a dependent construction clang leaves unresolved).
+  - **296 (5.6 points)** remain: mostly overload sets called with
+    template-dependent arguments (fmt's `write` / `count_digits` where only
+    the instantiation knows the type; the gold lists whatever clang's
+    unresolved lookup kept), bodies of `#ifdef _WIN32` branches the gold
+    (built on macOS / Linux) never compiles (`os.cc`), and real limits:
+    const / non-const overloads are not told apart by the receiver's
+    constness (yaml-cpp `Node::begin()` → `node::begin() const`), and
+    argument types do not follow calls into other files
+    (`Write(SecondaryTag("binary"))`).
+  The bench gold is unchanged; C++ stays `preview` on this one floor.
+
 ## 2026-10-26 — Organization graph on top of repository graphs
 
 [RFC 0006](rfcs/0006-org-graph.md): the graph of one repository and ref stays

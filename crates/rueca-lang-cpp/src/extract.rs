@@ -43,15 +43,25 @@ const GTEST_MACROS: &[&str] = &["TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED
 /// GoogleTest-style macros.
 pub(crate) const C_TEST_MACROS: &[&str] = &["TEST", "TEST_F", "IGNORE_TEST", "TEST_SETUP", "TEST_TEAR_DOWN"];
 
-/// Catch2 / doctest macros: `TEST_CASE("title", "[tags]") {}`.
-const CATCH_MACROS: &[&str] = &[
+/// Catch2 / doctest macros: `TEST_CASE("title", "[tags]") {}` (sorted).
+pub(crate) const CATCH_MACROS: &[&str] = &[
     "CATCH_SCENARIO",
+    "CATCH_SCENARIO_METHOD",
+    "CATCH_TEMPLATE_LIST_TEST_CASE",
+    "CATCH_TEMPLATE_PRODUCT_TEST_CASE",
+    "CATCH_TEMPLATE_TEST_CASE",
+    "CATCH_TEMPLATE_TEST_CASE_METHOD",
     "CATCH_TEST_CASE",
     "CATCH_TEST_CASE_METHOD",
     "SCENARIO",
+    "SCENARIO_METHOD",
     "TEMPLATE_LIST_TEST_CASE",
+    "TEMPLATE_LIST_TEST_CASE_METHOD",
     "TEMPLATE_PRODUCT_TEST_CASE",
+    "TEMPLATE_PRODUCT_TEST_CASE_METHOD",
     "TEMPLATE_TEST_CASE",
+    "TEMPLATE_TEST_CASE_METHOD",
+    "TEMPLATE_TEST_CASE_METHOD_SIG",
     "TEMPLATE_TEST_CASE_SIG",
     "TEST_CASE",
     "TEST_CASE_FIXTURE",
@@ -775,7 +785,7 @@ impl<'s, 't> Extractor<'s, 't> {
             "alias_declaration" => self.alias(node, outer, ctx, public),
             "preproc_def" | "preproc_function_def" => self.macro_def(node, ctx),
             "declaration_list" | "ERROR" => self.scope(node, ctx, depth, access),
-            "if_statement" if ctx.class.is_none() && self.c_test(node, ctx) => {}
+            "if_statement" if ctx.class.is_none() && (self.c_test(node, ctx) || self.catch_if_test(node, ctx)) => {}
             "static_assert_declaration" | "expression_statement" | "compound_statement" | "if_statement" => {
                 let cx = self.plain_cx(ctx);
                 self.job(node, ctx.parent, cx, Mode::Body);
@@ -1027,7 +1037,9 @@ impl<'s, 't> Extractor<'s, 't> {
 
     /// Catch2 / doctest: `TEST_CASE("title", "[tags]")` followed by a block
     /// parses as an expression statement (missing `;`) and a compound
-    /// statement. Returns whether `head` + `body` were consumed.
+    /// statement. Returns whether `head` + `body` were consumed. The
+    /// preprocessor rewrites the heads it finds to `if` (`catch_if_test`);
+    /// this is the fallback for the others.
     fn catch_test(&mut self, head: Node<'t>, body: Node<'t>, ctx: &Ctx) -> bool {
         if head.kind() != "expression_statement" || body.kind() != "compound_statement" {
             return false;
@@ -1043,6 +1055,58 @@ impl<'s, 't> Extractor<'s, 't> {
             return false;
         }
         let args = call.child_by_field_name("arguments").map(named_kids).unwrap_or_default();
+        if !self.catch_def(&macro_name, &args, head, body, signature(head, None, self.src), ctx) {
+            return false;
+        }
+        // The MISSING `;` the grammar inserts after the head.
+        let mut cursor = head.walk();
+        self.benign_errors += head.children(&mut cursor).filter(|c| c.is_missing()).count() as u32;
+        true
+    }
+
+    /// Catch2 / doctest head rewritten to `if       ("title", "[tags]") {`
+    /// by the preprocessor (`preprocess.rs`); the macro name is read from
+    /// the original text.
+    fn catch_if_test(&mut self, node: Node<'t>, ctx: &Ctx) -> bool {
+        let at = node.start_byte();
+        let original = &self.src[at..node.end_byte().min(at + 48)];
+        let Some(macro_name) = CATCH_MACROS.iter().find(|m| {
+            original.starts_with(m.as_bytes())
+                && original.get(m.len()).is_some_and(|c| *c == b'(' || c.is_ascii_whitespace())
+        }) else {
+            return false;
+        };
+        let (Some(cond), Some(body)) = (node.child_by_field_name("condition"), node.child_by_field_name("consequence"))
+        else {
+            return false;
+        };
+        if body.kind() != "compound_statement" {
+            return false;
+        }
+        // The arguments: the condition's comma expression, flattened.
+        let mut args = Vec::new();
+        let mut stack: Vec<Node<'t>> = named_kids(cond).into_iter().rev().collect();
+        while let Some(n) = stack.pop() {
+            if n.kind() == "comma_expression" {
+                stack.extend(named_kids(n).into_iter().rev());
+            } else if n.kind() != "comment" {
+                args.push(n);
+            }
+        }
+        self.catch_def(macro_name, &args, node, body, signature(node, Some(body), self.src), ctx)
+    }
+
+    /// The `Test` definition of a Catch2 / doctest head (`outer` .. `body`)
+    /// and the job of its body.
+    fn catch_def(
+        &mut self,
+        macro_name: &str,
+        args: &[Node<'t>],
+        outer: Node<'t>,
+        body: Node<'t>,
+        signature: Option<String>,
+        ctx: &Ctx,
+    ) -> bool {
         // `TEST_CASE("title")`, doctest `TEST_CASE("title" * doctest::skip())`.
         let literal = |a: Node<'t>| match a.kind() {
             "string_literal" => Some(a),
@@ -1057,7 +1121,7 @@ impl<'s, 't> Extractor<'s, 't> {
             .unwrap_or_default();
         let fixture = match args.first() {
             Some(a)
-                if a.kind() == "identifier" && (macro_name.ends_with("METHOD") || macro_name.ends_with("FIXTURE")) =>
+                if a.kind() == "identifier" && (macro_name.contains("METHOD") || macro_name.ends_with("FIXTURE")) =>
             {
                 Some(self.t(*a))
             }
@@ -1067,18 +1131,15 @@ impl<'s, 't> Extractor<'s, 't> {
             Some(f) => format!("{}::{title}", join_qn(&ctx.ns, f)),
             None => title.clone(),
         };
-        // The MISSING `;` the grammar inserts after the head.
-        let mut cursor = head.walk();
-        self.benign_errors += head.children(&mut cursor).filter(|c| c.is_missing()).count() as u32;
         let id = self.push(NewDef {
             label: Label::Test,
             name: title,
             qn,
             parent: None,
-            outer: head,
+            outer,
             node: body,
             name_node: Some(title_node),
-            signature: signature(head, None, self.src),
+            signature,
             exported: false,
             is_test: true,
             is_declaration: false,
@@ -1899,7 +1960,9 @@ impl<'s, 't> Extractor<'s, 't> {
                     _ => None,
                 };
             }
-            "identifier" => {
+            // A local (also a "parameter type" of `T x(a);`, see
+            // `vexing_construction`).
+            "identifier" | "type_identifier" => {
                 let pos = a.start_byte() as u32;
                 let b = self.locals.lookup(&self.t(a), pos)?;
                 let arg = b.arg.clone()?;
@@ -1971,6 +2034,9 @@ impl<'s, 't> Extractor<'s, 't> {
                 }
             }
             "function_declarator" => {
+                if self.vexing_construction(d, ty, enc, cx) {
+                    return;
+                }
                 if let Some(p) = d.child_by_field_name("parameters") {
                     self.visit(p, enc, cx, depth + 1);
                 }
@@ -2024,6 +2090,42 @@ impl<'s, 't> Extractor<'s, 't> {
     /// `Foo f(1)` / `Foo f{1}` / `Foo{1}`: a `Call` of the class (the
     /// resolver adds the constructor named like it).
     #[inline(never)]
+    /// `std::stringstream stream(input);` in a block: the grammar reads a
+    /// function declaration whose "parameter types" are the arguments. When
+    /// the declared name is a local (`cpp-locals.scm`) and every parameter
+    /// is a bare name that is a local in scope, it is a construction: a
+    /// call of the type with those arguments (their declared types for
+    /// overload choice).
+    fn vexing_construction(&mut self, d: Node<'t>, ty: Option<Node<'t>>, enc: Option<LocalDefId>, cx: usize) -> bool {
+        let (Some(t), Some(name), Some(params)) =
+            (ty, d.child_by_field_name("declarator"), d.child_by_field_name("parameters"))
+        else {
+            return false;
+        };
+        if !self.cpp || name.kind() != "identifier" || !self.is_local(name) {
+            return false;
+        }
+        let mut args = Vec::new();
+        for p in named_kids(params) {
+            let bare = p.kind() == "parameter_declaration" && p.child_by_field_name("declarator").is_none();
+            match p
+                .child_by_field_name("type")
+                .filter(|t| bare && t.kind() == "type_identifier" && named_kids(p).len() == 1)
+            {
+                Some(n) if self.is_local(n) => args.push(n),
+                _ => return false,
+            }
+        }
+        if args.is_empty() {
+            return false;
+        }
+        let types: Vec<Option<String>> = args.iter().map(|a| self.arg_type(*a)).collect();
+        self.call_args = types.iter().any(Option::is_some).then_some(types);
+        self.constructor_ref(t, Some(args.len() as u32), enc, cx);
+        self.call_args = None;
+        true
+    }
+
     fn constructor_call(&mut self, ty: Node<'t>, args: Node<'t>, enc: Option<LocalDefId>, cx: usize) {
         let arity = self.arity(Some(args));
         self.call_args = self.arg_types(Some(args));

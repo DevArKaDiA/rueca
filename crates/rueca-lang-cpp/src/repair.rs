@@ -31,7 +31,7 @@
 //! | explicit instantiation | `extern template auto f<char>(…) -> R;`, `template class A<int>;` | `extern` / `template` blanked |
 //! | `throw` as an argument | `EXPECT_THROW(throw E(1), X)` | `throw` blanked |
 //! | keyword argument | `TEST(suite, enum) {` | `TEST(suite, _num) {` (the name is read from the original) |
-//! | `decltype(a, b)` | a comma expression in `decltype` | the comma becomes `\|` |
+//! | `decltype(a, b)` | a comma expression in `decltype` (`->`, `<<`, braces inside) | the comma becomes `\|` |
 //! | pointer default argument | `typename P = const T*>` | `typename P =       T >` |
 //! | deleted declaration | `template <…> void f(T) = delete;` | `= delete` blanked |
 //! | member pointers | `v.*(&G::c)`, `p->*m`, `int (T::*)()`, `A<&T::m>` | `+`, `int (   *)()`, `&` blanked |
@@ -49,7 +49,20 @@
 //! | macro in a `using` | `using testing::GMOCK_FLAG(verbose);` | the name, `(` and `)` blanked |
 //! | unnamed pointer template parameter | `template <typename R, R* = nullptr>` | the `*` blanked |
 //! | lower-case specifier before an operator | `really_inline ~stream();`, `really_inline bool operator!=(…)` | blanked |
-//! | qualified type argument | `CHECK_THROWS_AS(f(), json::error const&)` | the `&` / `*` blanked |
+//! | qualified type argument | `CHECK_THROWS_AS(f(), json::error const&)`, `CHECK(f(std::vector<int>({1})), E&)` | the `&` / `*` (and a trailing `const`) blanked |
+//! | unnamed pointer parameter with a default | `typename E<T>::type* = 0`, `const void* /*hint*/ = 0` in a parameter list | `*_= 0` (a name in the space) |
+//! | array of pointers after `new` | `new char *[n]`, `new (std::nothrow) void *[n]` | the `*` blanked |
+//! | declaration as a macro argument | `EXPECT_THROW(string s = f(), E)` | the type blanked |
+//! | argument ending in an operator | `BENCHMARK_CAPTURE(f, a / -, x)` | the operator blanked |
+//! | trailing macro after a template-id or qualifier, or before `:` | `int d<int128_t>() FMT_NOEXCEPT {`, `f() final FMT_OVERRIDE;`, `S(…) FMT_NOEXCEPT : a() {}` | blanked |
+//! | calling convention with `__declspec` | `__declspec(dllimport) int __stdcall f();` | both blanked |
+//! | qualified explicit instantiation | `template struct detail::data<void>;` | blanked up to the `;` |
+//! | member pointer type argument | `StringMaker<R C::*>` | `C::` blanked |
+//! | declaration macro without `;` | `NLOHMANN_JSON_SERIALIZE_ENUM(T, { … })` before the next declaration | blanked |
+//! | statement macro with non-expression arguments | `FMT_MSC_WARNING(suppress : 6102)` + newline | `;` and spaces |
+//! | `if`-like macro before `else` | `CHECKED_IF(flag)` + newline + `return true;` + `else` | `if` |
+//! | macro between a name and its arguments | `FMT_POSIX_CALL(fileno FMT_ARGS(file_))` | the macro blanked |
+//! | specifier before a constructor | `really_inline S(…) NOEXCEPT : a(x) {}` | the specifier and the attribute macro blanked |
 
 use crate::mask::{Kind, Tok, matching_paren};
 
@@ -309,6 +322,36 @@ pub(crate) fn repair(src: &[u8], toks: &[Tok], site: Site) -> Option<Vec<Edit>> 
     for x in (start..k.saturating_sub(2)).rev().take(64) {
         push(&mut cands, x);
     }
+    // A long statement: its first token (a macro head) anyway, also when
+    // the error follows its closing `)` (`MACRO(T, { … })` + newline).
+    push(&mut cands, start);
+    if k > 0 && toks[k - 1].kind == Kind::Punct(b')') {
+        push(&mut cands, cx.statement_start(k));
+    }
+    // A `;` missing right after a block (`MACRO T(…) : a(x) { }` read as a
+    // declaration with a brace initializer): the culprit is in the head
+    // of that block.
+    if k > 0 && toks[k - 1].kind == Kind::Punct(b'}') && site.start == site.end {
+        let mut depth = 0i32;
+        for p in (k.saturating_sub(512)..k).rev() {
+            match toks[p].kind {
+                Kind::Punct(b'}') => depth += 1,
+                Kind::Punct(b'{') => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if p > 0 {
+                            let head = cx.statement_start(p - 1);
+                            for x in (head..p).rev().take(64) {
+                                push(&mut cands, x);
+                            }
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     // The head of the enclosing block (`FMT_TRY {` reported inside it).
     let mut depth = 0i32;
     for p in (k.saturating_sub(512)..k.min(n)).rev() {
@@ -328,7 +371,10 @@ pub(crate) fn repair(src: &[u8], toks: &[Tok], site: Site) -> Option<Vec<Edit>> 
     // Local rewrites first, on the tokens at and inside the error; then
     // statement-level ones, nearest candidate first.
     type Rule = fn(&Cx<'_>, usize, Site) -> Option<Vec<Edit>>;
-    let local: [Rule; 30] = [
+    let local: [Rule; 33] = [
+        new_pointer_array,
+        declaration_argument,
+        dangling_operator,
         specifier_before_operator,
         empty_argument,
         asm_label,
@@ -395,10 +441,11 @@ fn type_argument(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
     if !site.in_body {
         return None;
     }
-    // The innermost `(` before `i` at depth 0.
-    let mut depth = 0i32;
+    // The innermost `(` before `i` at depth 0 (brace initializers in the
+    // arguments are skipped: `f(std::vector<int>({1}), json::error&)`).
+    let (mut depth, mut braces) = (0i32, 0i32);
     let mut open = None;
-    for p in (i.saturating_sub(64)..=i.min(cx.toks.len() - 1)).rev() {
+    for p in (i.saturating_sub(128)..=i.min(cx.toks.len() - 1)).rev() {
         match cx.toks[p].kind {
             Kind::Punct(b')') if p != i => depth += 1,
             Kind::Punct(b'(') => {
@@ -408,6 +455,8 @@ fn type_argument(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
                 }
                 depth -= 1;
             }
+            Kind::Punct(b'}') if depth > 0 => braces += 1,
+            Kind::Punct(b'{') if braces > 0 => braces -= 1,
             Kind::Punct(b';' | b'{' | b'}') | Kind::Directive => return None,
             _ => {}
         }
@@ -442,7 +491,7 @@ fn type_argument(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
             let tagged = core.len() == 2 && (cx.is(a, "struct") || cx.is(a, "union") || cx.is(a, "enum"));
             if !core.is_empty() && (keywords || tagged) {
                 edits.push(Edit { start: cx.toks[a].start, end: cx.toks[b - 1].end, with: b"0" });
-            } else if stars > 0 && {
+            } else if stars > 0 {
                 let mut c = core.clone();
                 while c.start < c.end && cx.word_in(c.start, &["const", "volatile", "struct", "union", "enum"]) {
                     c.start += 1;
@@ -450,9 +499,10 @@ fn type_argument(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
                 while c.end > c.start && cx.word_in(c.end - 1, &["const", "volatile"]) {
                     c.end -= 1;
                 }
-                qualified_name(cx, c)
-            } {
-                edits.push(Edit::blank(cx.toks[b - stars].start, cx.toks[b - 1].end));
+                // `json::error const&`: the trailing qualifier goes too.
+                if qualified_name(cx, c.clone()) {
+                    edits.push(Edit::blank(cx.toks[c.end.min(b - stars)].start, cx.toks[b - 1].end));
+                }
             }
         }
         a = b + 1;
@@ -543,6 +593,17 @@ fn member_pointers(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
         {
             return Some(vec![Edit::blank(cx.toks[k + 1].start, cx.toks[k + 3].end)]);
         }
+        // `S<R C::*>`: a member pointer type as a template argument.
+        if cx.name(k)
+            && k > 0
+            && cx.name(k - 1)
+            && cx.punct(k + 1, b':')
+            && cx.punct(k + 2, b':')
+            && cx.punct(k + 3, b'*')
+            && (cx.punct(k + 4, b'>') || cx.punct(k + 4, b','))
+        {
+            return Some(vec![Edit::blank(cx.toks[k].start, cx.toks[k + 2].end)]);
+        }
         // `<…, &T::m>`.
         if cx.punct(k, b'&')
             && k > 0
@@ -568,21 +629,30 @@ fn dangling_assign(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
 }
 
 /// `decltype(a, b)` (a comma expression the grammar does not take there):
-/// the comma becomes `|`.
+/// the comma becomes `|`. `->` and `<<` in the operands are operators, not
+/// brackets.
 fn decltype_comma(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
     if !cx.punct(i, b',') {
         return None;
     }
+    let adjacent = |a: usize, b: usize| cx.toks[a].end == cx.toks[b].start;
     let mut depth = 0i32;
-    for p in (i.saturating_sub(64)..i).rev() {
+    let mut p = i;
+    let floor = i.saturating_sub(128);
+    while p > floor {
+        p -= 1;
         match cx.toks[p].kind {
-            Kind::Punct(b')' | b'>' | b']') => depth += 1,
-            Kind::Punct(b'(' | b'<' | b'[') if depth > 0 => depth -= 1,
+            // `->`.
+            Kind::Punct(b'>') if p > 0 && cx.punct(p - 1, b'-') && adjacent(p - 1, p) => p -= 1,
+            // `<<`.
+            Kind::Punct(b'<') if p > 0 && cx.punct(p - 1, b'<') && adjacent(p - 1, p) => p -= 1,
+            Kind::Punct(b')' | b'>' | b']' | b'}') => depth += 1,
+            Kind::Punct(b'(' | b'<' | b'[' | b'{') if depth > 0 => depth -= 1,
             Kind::Punct(b'(') => {
                 return (p > 0 && cx.is(p - 1, "decltype"))
                     .then(|| vec![Edit { start: cx.toks[i].start, end: cx.toks[i].end, with: b"|" }]);
             }
-            Kind::Punct(b'<' | b'[' | b';' | b'{' | b'}') => return None,
+            Kind::Punct(b'<' | b'[' | b';' | b'{') => return None,
             _ => {}
         }
     }
@@ -706,13 +776,96 @@ fn brace_default(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
     Some(vec![Edit { start: a, end: a + 1, with: b"(" }, Edit { start: b - 1, end: b, with: b")" }])
 }
 
+/// `new char *[n]`, `new (std::nothrow) void *[n]`: an array of pointers,
+/// which the grammar does not take after `new`; the `*` goes.
+fn new_pointer_array(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
+    if !site.in_body {
+        return None;
+    }
+    let star = (i.saturating_sub(2)..=i + 1)
+        .find(|&k| cx.punct(k, b'*') && (cx.punct(k + 1, b'[') || cx.punct(k + 1, b'*')))?;
+    let mut last = star;
+    while cx.punct(last + 1, b'*') {
+        last += 1;
+    }
+    if !cx.punct(last + 1, b'[') {
+        return None;
+    }
+    // Back over the type (names, `::`, template arguments) and a placement.
+    let mut k = star;
+    let mut depth = 0i32;
+    while k > 0 && k + 32 > star {
+        k -= 1;
+        match cx.toks[k].kind {
+            Kind::Punct(b'>' | b')') => depth += 1,
+            Kind::Punct(b'<' | b'(') if depth > 0 => depth -= 1,
+            Kind::Ident if depth == 0 && cx.is(k, "new") => {
+                return Some(vec![Edit::blank(cx.toks[star].start, cx.toks[last].end)]);
+            }
+            Kind::Ident | Kind::Punct(b':' | b',') => {}
+            _ if depth > 0 => {}
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// `EXPECT_THROW(string s = format(…), E)`: a declaration as a macro
+/// argument; the type goes, leaving an assignment.
+fn declaration_argument(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
+    if !site.in_body {
+        return None;
+    }
+    for k in i.saturating_sub(4)..=(i + 1).min(cx.toks.len().saturating_sub(1)) {
+        if k == 0 || !(cx.punct(k - 1, b'(') || cx.punct(k - 1, b',')) || !cx.name(k) {
+            continue;
+        }
+        // `T name =`, `ns::T name =`.
+        let mut e = k;
+        while cx.punct(e + 1, b':') && cx.punct(e + 2, b':') && cx.name(e + 3) {
+            e += 3;
+        }
+        if cx.name(e + 1) && cx.punct(e + 2, b'=') && !cx.punct(e + 3, b'=') {
+            return Some(vec![Edit::blank(cx.toks[k].start, cx.toks[e].end)]);
+        }
+    }
+    None
+}
+
+/// `BENCHMARK_CAPTURE(f, name / -, …)`: an argument ending in a binary
+/// operator (a token-pasted label); the operator goes.
+fn dangling_operator(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
+    let op = |k: usize| {
+        cx.toks
+            .get(k)
+            .is_some_and(|t| matches!(t.kind, Kind::Punct(b'+' | b'-' | b'/' | b'%' | b'|' | b'^' | b'=' | b'!')))
+    };
+    for k in i.saturating_sub(3)..=(i + 3).min(cx.toks.len().saturating_sub(1)) {
+        if k == 0 || !op(k) || !matches!(cx.toks[k - 1].kind, Kind::Ident | Kind::Punct(b'0' | b')')) {
+            continue;
+        }
+        let mut e = k;
+        while op(e + 1) && e < k + 2 {
+            e += 1;
+        }
+        let both = |a: u8| cx.punct(k, a) && cx.punct(e, a) && e == k + 1;
+        if both(b'+') || both(b'-') {
+            continue;
+        }
+        if cx.punct(e + 1, b',') || cx.punct(e + 1, b')') {
+            return Some(vec![Edit::blank(cx.toks[k].start, cx.toks[e].end)]);
+        }
+    }
+    None
+}
+
 /// `typename` where an expression stands (`f(typename T::x(), 0)`).
 fn typename_expr(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
     if !cx.is(i, "typename") || i == 0 {
         return None;
     }
     let p = &cx.toks[i - 1];
-    let expr = matches!(p.kind, Kind::Punct(b'(' | b',' | b'=' | b'!' | b'?' | b'+' | b'-' | b'|' | b'&'))
+    let expr = matches!(p.kind, Kind::Punct(b'(' | b'[' | b',' | b'=' | b'!' | b'?' | b'+' | b'-' | b'|' | b'&'))
         || cx.is(i - 1, "return");
     expr.then(|| vec![Edit::blank(cx.toks[i].start, cx.toks[i].end)])
 }
@@ -724,8 +877,23 @@ fn attribute(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
         return None;
     }
     let close = matching_paren(cx.toks, i + 1)?;
-    Some(vec![Edit::blank(cx.toks[i].start, cx.toks[close].end)])
+    let mut edits = vec![Edit::blank(cx.toks[i].start, cx.toks[close].end)];
+    // A calling convention later in the same head (`__declspec(dllimport)
+    // int __stdcall f();`) goes with it: one alone does not parse either.
+    for k in close + 1..(close + 8).min(cx.toks.len()) {
+        if cx.punct(k, b'(') || cx.punct(k, b';') {
+            break;
+        }
+        if cx.word_in(k, CALLING_CONVENTIONS) {
+            edits.push(Edit::blank(cx.toks[k].start, cx.toks[k].end));
+        }
+    }
+    Some(edits)
 }
+
+/// Microsoft calling conventions.
+const CALLING_CONVENTIONS: &[&str] =
+    &["APIENTRY", "CALLBACK", "WINAPI", "__cdecl", "__fastcall", "__stdcall", "__thiscall", "__vectorcall"];
 
 /// `( MACRO * name )` in a declarator: a calling convention.
 fn calling_convention(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
@@ -738,16 +906,32 @@ fn calling_convention(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
 /// `f(params) MACRO(args);` / `(*f)(params) MACRO;`: an attribute macro
 /// after a declarator.
 fn trailing_macro(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
-    if site.in_body || i == 0 || !cx.punct(i - 1, b')') || !cx.name(i) {
+    const QUALIFIERS: &[&str] = &["override", "final", "const", "noexcept"];
+    if site.in_body || i == 0 || !cx.name(i) {
         return None;
     }
     if cx.word_in(i, &["override", "final", "const", "noexcept", "throw", "try", "requires"]) {
         return None;
     }
+    // After the parameters' `)`, also past `const` / `final` / `override`
+    // (`void grow(size_t) final FMT_OVERRIDE;`).
+    let mut close = i - 1;
+    while close > 0 && cx.word_in(close, QUALIFIERS) {
+        close -= 1;
+    }
+    if !cx.punct(close, b')') || (close + 1 < i && !cx.macro_like(i)) {
+        return None;
+    }
     let end = if cx.punct(i + 1, b'(') { matching_paren(cx.toks, i + 1)? } else { i };
     let next = cx.toks.get(end + 1)?;
-    let ok = matches!(next.kind, Kind::Punct(b';' | b'{' | b'=' | b',')) || cx.is(end + 1, "const");
-    // The `)` closes a parameter list: a name or `)` before its `(`.
+    // `;`, a body, a default / pure specifier, the next declarator, a
+    // member initializer list (`text_style(…) FMT_NOEXCEPT : a(), b() {}`).
+    let init_list = cx.punct(end + 1, b':') && !cx.punct(end + 2, b':');
+    let ok =
+        matches!(next.kind, Kind::Punct(b';' | b'{' | b'=' | b',')) || cx.word_in(end + 1, QUALIFIERS) || init_list;
+    let i = close + 1;
+    // The `)` closes a parameter list: a name, `)` or template arguments
+    // (`digits10<int128_t>() FMT_NOEXCEPT {`) before its `(`.
     let open = (0..i - 1).rev().try_fold(0i32, |d, p| match cx.toks[p].kind {
         Kind::Punct(b')') => Ok(d + 1),
         Kind::Punct(b'(') if d == 0 => Err(Some(p)),
@@ -756,10 +940,11 @@ fn trailing_macro(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
         _ => Ok(d),
     });
     let declarator = match open {
-        Err(Some(o)) => o > 0 && (cx.name(o - 1) || cx.punct(o - 1, b')')),
+        Err(Some(o)) => o > 0 && (cx.name(o - 1) || cx.punct(o - 1, b')') || cx.punct(o - 1, b'>')),
         _ => false,
     };
-    (ok && declarator).then(|| vec![Edit::blank(cx.toks[i].start, cx.toks[end].end)])
+    let first = (i..=end).find(|&k| !cx.word_in(k, QUALIFIERS)).unwrap_or(i);
+    (ok && declarator).then(|| vec![Edit::blank(cx.toks[first].start, cx.toks[end].end)])
 }
 
 /// Whether the arguments of the call whose `(` is at `open` read as
@@ -778,7 +963,8 @@ fn block_call(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
     if !site.in_body || !cx.name(i) || !cx.punct(i + 1, b'(') || !cx.starts_statement(i) {
         return None;
     }
-    let close = matching_paren(cx.toks, i + 1)?;
+    // Brace initializers in the arguments (`CHECKED_IF(v == std::vector<int>{1, 2}) {`).
+    let close = matching_paren_braced(cx, i + 1)?;
     if !cx.punct(close + 1, b'{') {
         return None;
     }
@@ -799,7 +985,25 @@ fn guard_call(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
     let close = matching_paren(cx.toks, i + 1)?;
     let next = cx.toks.get(close + 1)?;
     let same_line = next.line == cx.toks[close].line;
-    if !same_line || !cx.name(close + 1) || !expression_args(cx, i + 1, close) {
+    // On the next line too when an `else` follows the statement
+    // (`CHECKED_IF(flag)` + newline + `return true;` + `else`).
+    let before_else = || {
+        let mut depth = 0i32;
+        for k in close + 1..(close + 64).min(cx.toks.len()) {
+            match cx.toks[k].kind {
+                Kind::Punct(b'(' | b'[' | b'{') => depth += 1,
+                Kind::Punct(b')' | b']' | b'}') => depth -= 1,
+                Kind::Punct(b';') if depth == 0 => return cx.is(k + 1, "else"),
+                _ => {}
+            }
+            if depth < 0 {
+                return false;
+            }
+        }
+        false
+    };
+    let guarded = cx.name(close + 1) || cx.word_in(close + 1, &["return", "throw", "break", "continue"]);
+    if !(same_line || before_else()) || !guarded || !expression_args(cx, i + 1, close) {
         return None;
     }
     Some(vec![Edit { start: cx.toks[i].start, end: cx.toks[i].end, with: b"if" }])
@@ -847,8 +1051,14 @@ fn declaration_macro_call(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>
     } else {
         return None;
     };
-    let close = matching_paren(cx.toks, i + 1)?;
-    cx.punct(close + 1, b';').then(|| vec![Edit::blank(cx.toks[head].start, cx.toks[close].end)])
+    let close = matching_paren_braced(cx, i + 1)?;
+    // Also without `;` when the next declaration starts on a later line
+    // (`NLOHMANN_JSON_SERIALIZE_ENUM(T, { … })`).
+    let next = cx.toks.get(close + 1);
+    let alone = next.is_none_or(|n| {
+        n.line > cx.toks[close].line && matches!(n.kind, Kind::Ident | Kind::Directive | Kind::Punct(b'}'))
+    });
+    (cx.punct(close + 1, b';') || alone).then(|| vec![Edit::blank(cx.toks[head].start, cx.toks[close].end)])
 }
 
 /// Attribute macros around a declaration (`__ALIGN_BEGIN static uint8_t
@@ -926,20 +1136,35 @@ fn subscripted_call(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
     (at > 0 && matches!(cx.src[at - 1], b' ' | b'\t')).then(|| vec![Edit { start: at - 1, end: at, with: b"*" }])
 }
 
-/// `template <typename R, R* = nullptr>`: an unnamed pointer parameter
-/// with a default loses its `*` (`R = nullptr`).
+/// An unnamed pointer parameter with a default: in a template head
+/// (`template <typename R, R* = nullptr>`) the `*` goes (`R = nullptr`); in
+/// a function's parameters (`typename enable_if<C>::type* = 0`, `const
+/// void* /*hint*/ = 0`), which the grammar takes only with a declarator, the
+/// space after the `*` becomes a name (`T*_= 0`).
 fn unnamed_pointer_parameter(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
-    let star = (i.saturating_sub(3)..=i + 1)
-        .find(|&k| cx.punct(k, b'*') && cx.punct(k + 1, b'=') && !cx.punct(k + 2, b'=') && k > 0 && cx.name(k - 1))?;
-    // Inside a template head: an unclosed `<` after `template` before it.
+    let star = (i.saturating_sub(3)..=i + 1).find(|&k| {
+        cx.punct(k, b'*')
+            && cx.punct(k + 1, b'=')
+            && !cx.punct(k + 2, b'=')
+            && k > 0
+            && (cx.name(k - 1) || cx.punct(k - 1, b'>') || cx.word_in(k - 1, TYPE_WORDS))
+    })?;
+    // Inside a template head (an unclosed `<` after `template`) or a
+    // parameter list (an unclosed `(`) before it.
     let mut depth = 0i32;
     for p in (star.saturating_sub(128)..star).rev() {
         match cx.toks[p].kind {
-            Kind::Punct(b'>') => depth += 1,
-            Kind::Punct(b'<') if depth > 0 => depth -= 1,
+            Kind::Punct(b'>' | b')') => depth += 1,
+            Kind::Punct(b'<' | b'(') if depth > 0 => depth -= 1,
             Kind::Punct(b'<') => {
                 return (p > 0 && cx.is(p - 1, "template"))
                     .then(|| vec![Edit::blank(cx.toks[star].start, cx.toks[star].end)]);
+            }
+            Kind::Punct(b'(') => {
+                let x = cx.toks[star].end;
+                let declarator = p > 0 && (cx.name(p - 1) || cx.punct(p - 1, b'>'));
+                return (declarator && matches!(cx.src.get(x), Some(b' ' | b'\t')))
+                    .then(|| vec![Edit { start: x, end: x + 1, with: b"_" }]);
             }
             Kind::Punct(b';' | b'{' | b'}') => return None,
             _ => {}
@@ -1139,8 +1364,22 @@ fn extern_template(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
     if cx.is(e, "extern") && cx.is(e + 1, "template") && !cx.punct(e + 2, b'<') {
         return Some(vec![Edit::blank(cx.toks[e].start, cx.toks[e].end)]);
     }
-    let class = cx.is(e, "template") && (cx.is(e + 1, "class") || cx.is(e + 1, "struct")) && cx.punct(e + 3, b'<');
-    class.then(|| vec![Edit::blank(cx.toks[e].start, cx.toks[e].end)])
+    let tagged = cx.is(e, "template") && (cx.is(e + 1, "class") || cx.is(e + 1, "struct"));
+    if tagged && cx.punct(e + 3, b'<') {
+        return Some(vec![Edit::blank(cx.toks[e].start, cx.toks[e].end)]);
+    }
+    // `template struct detail::basic_data<void>;`: an explicit
+    // instantiation of a qualified name (no forward declaration reads it)
+    // defines nothing and goes, up to its `;`.
+    let mut k = e + 2;
+    while tagged && cx.name(k) && cx.punct(k + 1, b':') && cx.punct(k + 2, b':') {
+        k += 3;
+    }
+    if tagged && k > e + 2 && cx.name(k) && cx.punct(k + 1, b'<') {
+        let semi = (k + 2..(k + 64).min(cx.toks.len())).find(|&x| cx.punct(x, b';'))?;
+        return Some(vec![Edit::blank(cx.toks[e].start, cx.toks[semi - 1].end)]);
+    }
+    None
 }
 
 /// `M(throw E(…), T)`: a throw expression as a macro argument loses its
@@ -1189,7 +1428,12 @@ fn statement_call(cx: &Cx<'_>, i: usize, site: Site) -> Option<Vec<Edit>> {
     if !starts_statement {
         return None;
     }
-    if let Some(at) = cx.space_after(close) {
+    // Arguments that are no expressions (`FMT_MSC_WARNING(suppress : 6102)`,
+    // a lone `:`) go with the call.
+    let colon = (i + 2..close).any(|k| {
+        cx.punct(k, b':') && !cx.punct(k + 1, b':') && !cx.punct(k - 1, b':') && !(i + 2..k).any(|q| cx.punct(q, b'?'))
+    });
+    if !colon && let Some(at) = cx.space_after(close) {
         return Some(vec![Edit { start: at, end: at + 1, with: b";" }]);
     }
     Some(vec![Edit { start: cx.toks[i].start, end: cx.toks[close].end, with: b";" }])
@@ -1332,7 +1576,17 @@ fn specifiers(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
         }
         cx.punct(e, b':') && cx.punct(e + 1, b':')
     };
-    let before: Vec<usize> = idents[..idents.len() - 1].to_vec();
+    // The declarator's qualifier (`Type document::parser::name(`) is part
+    // of the name, not a qualified type.
+    let mut qualifier_start = name;
+    while qualifier_start >= 3
+        && cx.punct(qualifier_start - 1, b':')
+        && cx.punct(qualifier_start - 2, b':')
+        && cx.name(qualifier_start - 3)
+    {
+        qualifier_start -= 3;
+    }
+    let before: Vec<usize> = idents[..idents.len() - 1].iter().copied().filter(|&x| x < qualifier_start).collect();
     let has_type_word = before.iter().any(|&x| cx.word_in(x, TYPE_WORDS));
     let explicit = before.iter().any(|&x| cx.is(x, "explicit"));
     // Tags: `struct X` names a type.
@@ -1347,14 +1601,23 @@ fn specifiers(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
     let attribute_like = |x: usize| cx.text(x).starts_with(b"__") || cx.macro_like(x);
     // `MACRO Name(params) : init(…)`: only a constructor takes a member
     // initializer list, so it has no return type.
+    // Attribute macros between the parameters and the `:`
+    // (`FMT_CONSTEXPR text_style(…) FMT_NOEXCEPT : a() {}`) go too.
+    let mut trailing: Vec<usize> = Vec::new();
     let constructor = cx.punct(k, b'(')
-        && matching_paren(cx.toks, k).is_some_and(|c| {
+        && matching_paren_braced(cx, k).is_some_and(|c| {
             let mut e = c + 1;
-            while cx.word_in(e, &["noexcept", "const", "override"]) {
+            while cx.word_in(e, &["noexcept", "const", "override"]) || cx.macro_like(e) {
+                if cx.macro_like(e) {
+                    trailing.push(e);
+                }
                 e += 1;
             }
             cx.punct(e, b':') && !cx.punct(e + 1, b':')
         });
+    if !constructor {
+        trailing.clear();
+    }
     let blank: Vec<usize> = if has_type_word || !tag_names.is_empty() || explicit || constructor || chained_type {
         // `int CJSON_CDECL main`, `const void __unused *p` with a keyword
         // type, `explicit FMT_CONSTEXPR name(…)`, `MACRO ns::T f()`: no
@@ -1366,10 +1629,11 @@ fn specifiers(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
         let ty = candidates.iter().rev().find(|&&x| !attribute_like(x)).or(candidates.last()).copied();
         candidates.into_iter().filter(|&x| Some(x) != ty).collect()
     };
-    let blank: Vec<usize> = blank.into_iter().filter(|&x| x != name).collect();
+    let mut blank: Vec<usize> = blank.into_iter().filter(|&x| x != name).collect();
     if blank.is_empty() {
         return None;
     }
+    blank.extend(trailing);
     Some(
         blank
             .into_iter()
@@ -1400,7 +1664,10 @@ fn adjacent_operands(cx: &Cx<'_>, i: usize, _: Site) -> Option<Vec<Edit>> {
     let in_expr = (i > 0 && cx.toks[i - 1].kind == Kind::Literal)
         || cx.toks.get(i + 1).is_some_and(|t| t.kind == Kind::Literal)
         || (i > 0 && cx.punct(i - 1, b'(') && next_operand)
-        || (i > 0 && cx.punct(i - 1, b',') && next_operand);
+        || (i > 0 && cx.punct(i - 1, b',') && next_operand)
+        // `FMT_POSIX_CALL(fileno FMT_ARGS(file_))`: a macro between a name
+        // and its argument list inside parentheses.
+        || (prev_operand && cx.punct(i + 1, b'(') && i >= 2 && cx.punct(i - 2, b'('));
     ((prev_operand || next_operand) && in_expr).then(|| vec![Edit::blank(cx.toks[i].start, cx.toks[i].end)])
 }
 
@@ -1467,7 +1734,7 @@ mod tests {
             fix("really_inline simd8<T> operator|(T o) const;", "simd8", false),
             "              simd8<T> operator|(T o) const;"
         );
-        assert_eq!(fix("CHECK_AS(s >> j, json::error const&);", "&", true), "CHECK_AS(s >> j, json::error const );");
+        assert_eq!(fix("CHECK_AS(s >> j, json::error const&);", "&", true), "CHECK_AS(s >> j, json::error       );");
         assert_eq!(fix("CHECK_AS(f({1, 2}), json::error&);", "&", true), "CHECK_AS(f({1, 2}), json::error );");
         assert_eq!(fix("using testing::GMOCK_FLAG(verbose);", "GMOCK", false), "using testing::           verbose ;");
         assert_eq!(fix("  X(;);", ";", true), "  X( );");
@@ -1614,6 +1881,62 @@ mod tests {
         assert_eq!(
             fix("class A {\npublic slots:\n  void s();\n};", "slots", false),
             "class A {\npublic      :\n  void s();\n};"
+        );
+    }
+
+    #[test]
+    fn library_and_test_shapes() {
+        // An unnamed pointer parameter with a default gets a name.
+        assert_eq!(
+            fix("void f(const T&, typename E<T>::type* = 0) {}", "= 0", false),
+            "void f(const T&, typename E<T>::type*_= 0) {}"
+        );
+        assert_eq!(fix("void f(const void* /*h*/ = 0) {}", "= 0", false), "void f(const void*_/*h*/ = 0) {}");
+        // `->` and `<<` inside `decltype(a, b)`.
+        assert_eq!(fix("auto f() -> decltype(p->g(), int());", ",", false), "auto f() -> decltype(p->g()| int());");
+        assert_eq!(fix("auto f() -> decltype(s << v, T());", ",", false), "auto f() -> decltype(s << v| T());");
+        // An array of pointers after `new`.
+        assert_eq!(fix("  p = new char *[n];", "*", true), "  p = new char  [n];");
+        assert_eq!(fix("  r(new (std::nothrow) void *[n]);", "*", true), "  r(new (std::nothrow) void  [n]);");
+        // A declaration as a macro argument.
+        assert_eq!(
+            fix("  EXPECT_THROW(string s = format(\"{}\"), E);", "s =", true),
+            "  EXPECT_THROW(       s = format(\"{}\"), E);"
+        );
+        // An argument ending in an operator.
+        assert_eq!(fix("B(Dump, a / -, 1);", "-", false), "B(Dump, a    , 1);");
+        // A trailing macro after a template-id declarator, a qualifier,
+        // or before a member initializer list.
+        assert_eq!(
+            fix("template <> int d<int128_t>() FMT_NOEXCEPT { return 38; }", "FMT", false),
+            "template <> int d<int128_t>()              { return 38; }"
+        );
+        assert_eq!(fix("void grow(size_t) final FMT_OVERRIDE;", "FMT", false), "void grow(size_t) final             ;");
+        // A calling convention with `__declspec`.
+        assert_eq!(
+            fix("__declspec(dllimport) int __stdcall f();", "__declspec", false),
+            "                      int           f();"
+        );
+        // A qualified explicit instantiation.
+        assert_eq!(fix("template struct d::data<void>;", "template", false), format!("{};", " ".repeat(29)));
+        // A member pointer type as a template argument.
+        assert_eq!(fix("struct S<R C::*> {};", "C::", false), "struct S<R    *> {};");
+        // A declaration macro without `;` before the next declaration.
+        assert_eq!(fix("ENUM_MAP(T, {\n {a, 1}\n})\nint x;", "ENUM", false), "             \n       \n  \nint x;");
+        // A statement macro whose arguments are no expression.
+        assert_eq!(fix("  W(suppress : 6102)\n  return 1;", "W(", true), format!("  ;{}\n  return 1;", " ".repeat(17)));
+        // An `if`-like macro on its own line before `else`.
+        assert_eq!(
+            fix("  CHECKED_IF(flag)\n    return true;\n  else\n    return false;", "CHECKED", true),
+            "  if        (flag)\n    return true;\n  else\n    return false;"
+        );
+        // A macro between a function name and its arguments.
+        assert_eq!(fix("  n = CALL(fileno ARGS(f));", "ARGS", true), "  n = CALL(fileno     (f));");
+        // A lower-case specifier before a constructor with an attribute
+        // macro before its initializer list.
+        assert_eq!(
+            fix("  really_inline S(int a) NOEXCEPT : a_(a) {}", "really", false),
+            "                S(int a)          : a_(a) {}"
         );
     }
 }

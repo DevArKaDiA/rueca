@@ -274,12 +274,14 @@ What packs deliberately do and don't do:
   group keeps all its branches when the grammar can take them together and
   otherwise collapses to one branch, as a preprocessor with one
   configuration would (a function header written once per branch, a group
-  inside an expression); and at each remaining parse error a targeted
-  repair is tried (`va_arg(ap, char*)`, a loop macro before a block, a
-  statement macro without `;`, an unknown specifier macro such as
-  `static redisAtomic size_t n`, …), kept only when the file's error count
-  drops (`rueca-lang-cpp` crate docs, *Macros and conditional
-  compilation*). A namespace macro (`FMT_BEGIN_NAMESPACE` …
+  inside an expression), with Objective-C and C++/CLI branches dropped
+  (no grammar parses them); test heads become blocks (`TEST(Suite, Name) {`
+  in C, Catch2 / doctest `TEST_CASE("title") {` in C++, as `if (…)`); and
+  at each remaining parse error a targeted repair is tried (`va_arg(ap,
+  char*)`, a loop macro before a block, a statement macro without `;`, an
+  unknown specifier macro such as `static redisAtomic size_t n`, …), kept
+  only when the file's error count drops (`rueca-lang-cpp` crate docs,
+  *Macros and conditional compilation*). A namespace macro (`FMT_BEGIN_NAMESPACE` …
   `FMT_END_NAMESPACE`) leaves the segment `${FMT_BEGIN_NAMESPACE}` in the
   qualified names inside, which the resolver expands from the macro's
   definition anywhere in the snapshot (`fmt::v12::format_to`). Receivers
@@ -557,7 +559,7 @@ overrides and includes):
 | typed receiver (strategy 5) | receiver text `$type:T` | `T` resolves like a type reference (or as an exact qualified name), the member through its bases (also for Python, ECMAScript and PHP, whose packs type receivers from declarations and assignments) | `type_resolved` 0.85 |
 | normalized self | receiver `$self` in `self_receivers` | the enclosing type, or the type named by the method's qualified-name prefix (Go) | `type_resolved` 0.90 |
 | declarations | `Definition::is_declaration` | a C/C++ prototype or in-class declaration is replaced by its unique body; in the same file the two are one node with the body's span | as the rung |
-| overloads | `overloads` | `parse(String)` / `parse(Reader)` chosen by the call's argument count, then by the static argument types the pack reports (`value$args:long`): overloads that cannot accept a known argument (a primitive that does not widen, a non-`String` for `String`) are dropped, and of the rest the one whose parameter types equal the arguments', else the one whose primitive parameters are the narrowest, wins; else all remaining linked | as the rung, × 0.8 when several; C/C++ arity comes from the signature (default arguments optional), a C++ set spans files and only overloads visible through includes are candidates |
+| overloads | `overloads` | `parse(String)` / `parse(Reader)` chosen by the call's argument count, then by the static argument types the pack reports (`value$args:long`): overloads that cannot accept a known argument (a primitive that does not widen, a non-`String` for `String`) are dropped (also a C/C++ class for a pointer parameter), and of the rest the one whose parameter types equal the arguments', else the one whose primitive parameters are the narrowest, wins; else all remaining linked | as the rung, × 0.8 when several; C/C++ arity comes from the signature (default arguments optional), a C++ set spans files and only overloads visible through includes are candidates |
 | overrides | `overrides` | `OVERRIDES` from a method to the same-named method of each base, paired by signature: same parameter count (overload suffix, else the signature's parameter list) and, among several, the same parameter types ; between C/C++ bodies when they exist | `type_resolved` 0.90 |
 | includes | C/C++ family | `#include` is a transitive star import | as rung 3 |
 | macro expansion | C/C++ family | a definition that uses a macro (a `CALLS` or `REFERENCES` edge to a `#define`) also calls what the macro's body calls, through nested macros (depth ≤ 8); a macro defined once per `#if` branch expands as its first non-release (`NDEBUG`) definition | the use's strategy, product of both edges × 0.95 |
@@ -1091,9 +1093,9 @@ Known gaps behind low-confidence or missing edges, in rough order of impact:
   invisible (only the calls in a macro's body are passed on to its users),
   `#if` groups the grammar can take keep all their branches, and files the
   grammars still cannot fully parse lose the definitions and references
-  inside the broken region (about 3% of the C and 7% of the C++ files of
-  the benchmark corpus, vendored GoogleTest, Objective-C headers and
-  code that is not C — `qstrdefs.h` — included). Conditions are not
+  inside the broken region (about 3% of the C and 0.5% of the C++ files of
+  the benchmark corpus, 3.4% of the C++ files with vendored GoogleTest,
+  amalgamations and Objective-C headers included). Conditions are not
   evaluated with the project's `-D` flags. Overloads are chosen by
   argument count and by the types of literal, cast and local-variable
   arguments; overloads that differ only by template constraints are all

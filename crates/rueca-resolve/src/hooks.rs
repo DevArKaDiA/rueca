@@ -1303,9 +1303,9 @@ const PRIMITIVES: &[&str] = &["byte", "short", "char", "int", "long", "float", "
 /// Whether an argument of static type `arg` can be passed to a parameter
 /// of type `param` (both normalized). `false` only when it certainly
 /// cannot: a primitive that does not widen to the parameter, a primitive
-/// for `String` or the reverse, or a class other than `String` for
-/// `String` (which is final). Class to class is always possible: the
-/// subtype relation is not known.
+/// for `String` or the reverse, a class other than `String` for `String`
+/// (which is final). Class to class is always possible: the subtype
+/// relation is not known.
 fn may_accept(param: &str, arg: &str) -> bool {
     let param = param.strip_suffix("...").unwrap_or(param);
     if param == arg {
@@ -1349,10 +1349,16 @@ pub(crate) fn overload_by_types(typed: &[(NodeId, Vec<String>)], args: &[&str]) 
             None => params.last().filter(|p| p.ends_with("...")).cloned(),
         }
     };
+    // Only C/C++ types end in `*`: a known class argument never converts to
+    // a pointer parameter (`std::stringstream` for `const char*`).
+    let class_for_pointer = |p: &str, a: &str| {
+        p.trim_end_matches("...").ends_with('*') && !a.ends_with('*') && !a.ends_with("[]") && !PRIMITIVES.contains(&a)
+    };
     let accepts = |params: &[String]| {
         (0..args.len()).all(|i| match (known(i), param(params, i)) {
             (Some(a), Some(p)) => {
-                may_accept(&p, a) || may_accept(p.strip_suffix("...").unwrap_or(&p), a.trim_end_matches("[]"))
+                !class_for_pointer(&p, a)
+                    && (may_accept(&p, a) || may_accept(p.strip_suffix("...").unwrap_or(&p), a.trim_end_matches("[]")))
             }
             _ => true,
         })
@@ -1624,6 +1630,12 @@ mod tests {
         assert_eq!(overload_by_types(&set(&[&["int"], &["long"]]), &["String"]), vec![0, 1]);
         assert!(may_accept("Object", "int") && may_accept("long", "char") && !may_accept("char", "int"));
         assert!(!may_accept("String", "StringBuilder") && may_accept("CharSequence", "String"));
+        // C++ Load(const std::string&) / (const char*) / (std::istream&) with
+        // a `std::stringstream`: never the pointer; a pointer or an `int`
+        // (`0`) may still be one.
+        let load = set(&[&["string"], &["char*"], &["istream"]]);
+        assert_eq!(overload_by_types(&load, &["stringstream"]), vec![0, 2]);
+        assert_eq!(overload_by_types(&set(&[&["Node*"], &["Node"]]), &["int"]), vec![0, 1]);
     }
 
     #[test]

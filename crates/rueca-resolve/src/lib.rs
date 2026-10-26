@@ -194,7 +194,8 @@
 //!   pack writes into the name (`value$args:long,?`,
 //!   `rueca_extract::with_arg_types`): overloads that cannot accept a known
 //!   argument type are dropped (a primitive that does not widen, a
-//!   non-`String` class for `String`; class to class is always possible),
+//!   non-`String` class for `String`, a C/C++ class for a pointer; class to
+//!   class is always possible),
 //!   then the one whose parameter types equal the known argument types, else
 //!   the one whose parameters pass to every other's (the narrowest
 //!   primitives), wins. One candidate keeps the confidence; several are all

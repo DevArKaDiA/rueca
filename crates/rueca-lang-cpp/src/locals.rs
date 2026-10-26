@@ -9,8 +9,10 @@
 //!   pointer, a read of a local), and a template's `T` is never reported as
 //!   a project type.
 //! - **What type does it declare?** `Foo* p`, `const Foo& f`, `Foo f(1)`,
-//!   `auto f = new Foo` / `std::make_unique<Foo>()` give `Foo`, which the
-//!   pack reports as a typed receiver `$type:Foo` for `p->m()` / `f.m()`.
+//!   `Foo f(a)` (with a name as argument the grammar reads a function
+//!   declaration), `auto f = new Foo` / `std::make_unique<Foo>()` give
+//!   `Foo`, which the pack reports as a typed receiver `$type:Foo` for
+//!   `p->m()` / `f.m()`.
 //!
 //! The query marks scopes (`@local.scope`) and bindings
 //! (`@local.definition.<kind>`); this module runs it once per file with a
@@ -255,6 +257,12 @@ fn binding_type(ident: Node<'_>, source: &[u8]) -> (Option<String>, Option<Strin
     let Some(mut cur) = ident.parent() else { return (None, None) };
     for _ in 0..16 {
         let kind = cur.kind();
+        // `T x(a, b);` read as a function declaration (`cpp-locals.scm`).
+        if kind == "function_declarator" && cur.parent().is_some_and(|p| p.kind() == "declaration") {
+            let Some(p) = cur.parent() else { return (None, None) };
+            cur = p;
+            continue;
+        }
         if DECLARATOR_WRAPPERS.contains(&kind) {
             match kind {
                 "init_declarator" => init = cur.child_by_field_name("value"),
@@ -423,6 +431,8 @@ void g(T& ref, int opt = 1, Ts... rest) {
     int arr[2];
     int plain;
     for (int j = 0; j < 2; j++) {}
+    Foo built(plain);
+    using std::swap;
 }
 template <typename T> concept C = requires(T a) { a.f(); };
 "#;
@@ -465,8 +475,9 @@ template <typename T> concept C = requires(T a) { a.f(); };
             for required in REQUIRED_CAPTURES {
                 assert!(names.contains(required), "capture @{required} missing ({language})");
             }
+            // `@_name` captures only feed predicates (`#any-of?`).
             for (name, role) in names.iter().zip(&lq.roles) {
-                assert_ne!(*role, Role::Ignore, "capture @{name} has no role");
+                assert!(name.starts_with('_') || *role != Role::Ignore, "capture @{name} has no role");
             }
         }
         assert!(locals_query(Language::Cpp).unwrap().query.capture_names().contains(&"local.definition.type"));
@@ -512,6 +523,12 @@ template <typename T> concept C = requires(T a) { a.f(); };
         assert_eq!(ty("q").as_deref(), Some("Baz"));
         assert_eq!(ty("u").as_deref(), Some("Qux"));
         assert_eq!(ty("local").as_deref(), Some("Foo"));
+        // `T x(name);` (read as a function declaration) and `using std::x;`.
+        let vexing = "void f(const std::string& in) {\n  std::stringstream s(in);\n  using std::get;\n  s.str(); get<0>(t);\n}\n";
+        let (_, lv) = table(vexing, Language::Cpp);
+        let at_use = at(vexing, "s.str");
+        assert_eq!(lv.lookup("s", at_use).and_then(|b| b.ty.clone()).as_deref(), Some("std::stringstream"));
+        assert!(lv.lookup("get", at_use).is_some());
         assert!(l.lookup("n", use_pos).is_some_and(|b| b.ty.is_none() && b.kind == DefKind::Parameter));
         // File-level variables are not locals.
         assert!(l.lookup("g", use_pos).is_none());

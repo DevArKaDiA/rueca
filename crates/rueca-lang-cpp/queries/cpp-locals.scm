@@ -21,8 +21,11 @@
 ;   them; class- and namespace-level names are not locals), and the
 ;   `@local.reference` captures with their Neovim-only `#set!` predicates.
 ; - Rueca additions: the `for_range_loop` scope (`for (auto& x : xs)`),
-;   structured bindings (`auto [a, b] = …`), and the defaulted and variadic
-;   template type parameters (`typename T = int`, `typename... Ts`).
+;   structured bindings (`auto [a, b] = …`), the defaulted and variadic
+;   template type parameters (`typename T = int`, `typename... Ts`), a
+;   variable constructed from names in a block (`T x(a, b);`, which the
+;   grammar reads as a function declaration), and a name brought into a
+;   block from `std` (`using std::get;`).
 
 ; ---------------------------------------------------------------------------
 ; Scopes
@@ -69,3 +72,19 @@
 
 (variadic_type_parameter_declaration
   (type_identifier) @local.definition.type)
+
+; Rueca: `T x(a, b);` in a block, read by the grammar as a function
+; declaration when the arguments are names (the most vexing parse).
+(compound_statement
+  (declaration
+    declarator: (function_declarator
+      declarator: (identifier) @local.definition.var)))
+
+; Rueca: `using std::get;` in a block: `get` there is the standard
+; library's, never a project reference.
+(compound_statement
+  (using_declaration
+    (qualified_identifier
+      scope: (namespace_identifier) @_scope
+      name: (identifier) @local.definition.var))
+  (#any-of? @_scope "std" "__gnu_cxx"))

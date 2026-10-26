@@ -305,6 +305,24 @@ fn tests_googletest_and_catch2() {
 }
 
 #[test]
+fn catch2_heads_are_blocks() {
+    // Heads become `if (…)` blocks before parsing: on their own lines,
+    // with a type list, with a fixture, nested sections.
+    let src = "namespace n {\nTEST_CASE\n(\n  \"multi line\",\n  \"[t]\"\n)\n{\n  REQUIRE(f() == 1);\n}\nTEMPLATE_TEST_CASE(\"typed\", \"[t]\", int, float) {\n  g<TestType>();\n}\nTEST_CASE_METHOD(Fix, \"method\") { h(); }\nSCENARIO(\"story\", \"[bdd]\") {\n  GIVEN(\"x\") {\n    k();\n  }\n}\nTEST_CASE() { a(); }\n}\n";
+    let f = facts(src);
+    assert_eq!(f.parse_errors, 0, "{:?}", qns(&f));
+    for (qn, call) in [("multi line", "f"), ("typed", "g"), ("n::Fix::method", "h"), ("story", "k")] {
+        let d = def(&f, qn);
+        assert_eq!((d.label, d.is_test), (Label::Test, true), "{qn}");
+        assert!(has_ref(&f, RefKind::Call, call, None, Some(qn)), "{call} in {qn}: {:?}", refs(&f));
+    }
+    assert_eq!(def(&f, "multi line").signature.as_deref(), Some("TEST_CASE ( \"multi line\", \"[t]\" )"));
+    assert_eq!(def(&f, "typed").span.start_line, 9);
+    // No type of the template list is a reference.
+    assert!(!refs(&f).iter().any(|r| r.1 == "float"));
+}
+
+#[test]
 fn calls_receivers_and_arity() {
     let src = "struct Repo { void save(int); Repo* next; };\nstruct Svc {\n  Repo repo_;\n  Repo* ptr_;\n  void run(Repo& r, Repo* p) {\n    r.save(1);\n    p->save(2);\n    repo_.save(3);\n    this->ptr_->save(4);\n    ptr_->next->save(5);\n    tick();\n    this->tick();\n    Repo local;\n    local.save(6);\n    auto made = new Repo();\n    made->save(7);\n    unknown.save(8);\n    make().save(9);\n    ns::util(1, 2);\n    Repo::create();\n    std::move(r);\n    (*p).save(10);\n  }\n  void tick();\n};\n";
     let f = facts(src);
