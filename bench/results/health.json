@@ -10,7 +10,10 @@
    "ok": true,
    "files_extracted": 37,
    "files_partial": 0,
-   "duration_ms": 283
+   "duration_ms": 319,
+   "raw_files_extracted": 37,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-flask",
@@ -22,7 +25,10 @@
    "ok": true,
    "files_extracted": 83,
    "files_partial": 0,
-   "duration_ms": 292
+   "duration_ms": 308,
+   "raw_files_extracted": 83,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-jinja",
@@ -34,7 +40,10 @@
    "ok": true,
    "files_extracted": 60,
    "files_partial": 0,
-   "duration_ms": 323
+   "duration_ms": 307,
+   "raw_files_extracted": 60,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-click",
@@ -46,7 +55,10 @@
    "ok": true,
    "files_extracted": 70,
    "files_partial": 0,
-   "duration_ms": 321
+   "duration_ms": 289,
+   "raw_files_extracted": 70,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-hono",
@@ -58,7 +70,10 @@
    "ok": true,
    "files_extracted": 450,
    "files_partial": 8,
-   "duration_ms": 1140
+   "duration_ms": 1261,
+   "raw_files_extracted": 450,
+   "raw_files_partial": 8,
+   "excluded": {}
   },
   {
    "name": "s3-zod",
@@ -70,7 +85,10 @@
    "ok": true,
    "files_extracted": 169,
    "files_partial": 0,
-   "duration_ms": 402
+   "duration_ms": 489,
+   "raw_files_extracted": 169,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-express",
@@ -82,7 +100,10 @@
    "ok": true,
    "files_extracted": 141,
    "files_partial": 0,
-   "duration_ms": 382
+   "duration_ms": 535,
+   "raw_files_extracted": 141,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-monolog",
@@ -94,7 +115,10 @@
    "ok": true,
    "files_extracted": 217,
    "files_partial": 0,
-   "duration_ms": 567
+   "duration_ms": 631,
+   "raw_files_extracted": 217,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-commonmark",
@@ -106,7 +130,10 @@
    "ok": true,
    "files_extracted": 486,
    "files_partial": 0,
-   "duration_ms": 1234
+   "duration_ms": 1149,
+   "raw_files_extracted": 486,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-gin",
@@ -118,7 +145,10 @@
    "ok": true,
    "files_extracted": 95,
    "files_partial": 0,
-   "duration_ms": 300
+   "duration_ms": 342,
+   "raw_files_extracted": 95,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-cli",
@@ -130,7 +160,10 @@
    "ok": true,
    "files_extracted": 66,
    "files_partial": 0,
-   "duration_ms": 287
+   "duration_ms": 307,
+   "raw_files_extracted": 66,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-goawk",
@@ -142,7 +175,10 @@
    "ok": true,
    "files_extracted": 39,
    "files_partial": 0,
-   "duration_ms": 231
+   "duration_ms": 262,
+   "raw_files_extracted": 39,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-gson",
@@ -154,7 +190,10 @@
    "ok": true,
    "files_extracted": 264,
    "files_partial": 0,
-   "duration_ms": 779
+   "duration_ms": 700,
+   "raw_files_extracted": 264,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-javapoet",
@@ -166,7 +205,10 @@
    "ok": true,
    "files_extracted": 39,
    "files_partial": 0,
-   "duration_ms": 267
+   "duration_ms": 239,
+   "raw_files_extracted": 39,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-fmt",
@@ -176,9 +218,14 @@
    "source": "s3",
    "split": "gated",
    "ok": true,
-   "files_extracted": 70,
-   "files_partial": 4,
-   "duration_ms": 635
+   "files_extracted": 66,
+   "files_partial": 1,
+   "duration_ms": 387,
+   "raw_files_extracted": 70,
+   "raw_files_partial": 4,
+   "excluded": {
+    "gtest copy": 4
+   }
   },
   {
    "name": "s3-yaml-cpp",
@@ -188,9 +235,14 @@
    "source": "s3",
    "split": "gated",
    "ok": true,
-   "files_extracted": 259,
-   "files_partial": 30,
-   "duration_ms": 909
+   "files_extracted": 111,
+   "files_partial": 3,
+   "duration_ms": 416,
+   "raw_files_extracted": 259,
+   "raw_files_partial": 21,
+   "excluded": {
+    "gtest copy": 148
+   }
   },
   {
    "name": "s3-cJSON",
@@ -202,7 +254,10 @@
    "ok": true,
    "files_extracted": 99,
    "files_partial": 0,
-   "duration_ms": 320
+   "duration_ms": 335,
+   "raw_files_extracted": 99,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-lua",
@@ -213,8 +268,11 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 68,
-   "files_partial": 10,
-   "duration_ms": 300
+   "files_partial": 1,
+   "duration_ms": 343,
+   "raw_files_extracted": 68,
+   "raw_files_partial": 1,
+   "excluded": {}
   },
   {
    "name": "s1-psf__requests",
@@ -226,7 +284,10 @@
    "ok": true,
    "files_extracted": 83,
    "files_partial": 0,
-   "duration_ms": 338
+   "duration_ms": 309,
+   "raw_files_extracted": 83,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-pallets__flask",
@@ -238,7 +299,10 @@
    "ok": true,
    "files_extracted": 80,
    "files_partial": 0,
-   "duration_ms": 302
+   "duration_ms": 297,
+   "raw_files_extracted": 80,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-pylint-dev__pylint",
@@ -250,7 +314,10 @@
    "ok": true,
    "files_extracted": 1923,
    "files_partial": 6,
-   "duration_ms": 1613
+   "duration_ms": 1695,
+   "raw_files_extracted": 1923,
+   "raw_files_partial": 6,
+   "excluded": {}
   },
   {
    "name": "s1-pytest-dev__pytest",
@@ -262,7 +329,10 @@
    "ok": true,
    "files_extracted": 222,
    "files_partial": 0,
-   "duration_ms": 640
+   "duration_ms": 562,
+   "raw_files_extracted": 222,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-sphinx-doc__sphinx",
@@ -274,7 +344,10 @@
    "ok": true,
    "files_extracted": 530,
    "files_partial": 0,
-   "duration_ms": 1372
+   "duration_ms": 1467,
+   "raw_files_extracted": 530,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-pallets__click",
@@ -286,7 +359,10 @@
    "ok": true,
    "files_extracted": 63,
    "files_partial": 0,
-   "duration_ms": 270
+   "duration_ms": 292,
+   "raw_files_extracted": 63,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-tailwindlabs__tailwindcss",
@@ -298,7 +374,10 @@
    "ok": true,
    "files_extracted": 102,
    "files_partial": 0,
-   "duration_ms": 265
+   "duration_ms": 247,
+   "raw_files_extracted": 102,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-coder__code-server",
@@ -310,7 +389,10 @@
    "ok": true,
    "files_extracted": 71,
    "files_partial": 0,
-   "duration_ms": 254
+   "duration_ms": 319,
+   "raw_files_extracted": 71,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-vuejs__core",
@@ -322,7 +404,10 @@
    "ok": true,
    "files_extracted": 510,
    "files_partial": 2,
-   "duration_ms": 1091
+   "duration_ms": 1239,
+   "raw_files_extracted": 510,
+   "raw_files_partial": 2,
+   "excluded": {}
   },
   {
    "name": "s1-preactjs__preact",
@@ -334,7 +419,10 @@
    "ok": true,
    "files_extracted": 241,
    "files_partial": 18,
-   "duration_ms": 570
+   "duration_ms": 538,
+   "raw_files_extracted": 241,
+   "raw_files_partial": 18,
+   "excluded": {}
   },
   {
    "name": "s1-axios__axios",
@@ -346,7 +434,10 @@
    "ok": true,
    "files_extracted": 139,
    "files_partial": 0,
-   "duration_ms": 393
+   "duration_ms": 381,
+   "raw_files_extracted": 139,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-yargs__yargs",
@@ -358,7 +449,10 @@
    "ok": true,
    "files_extracted": 86,
    "files_partial": 0,
-   "duration_ms": 334
+   "duration_ms": 302,
+   "raw_files_extracted": 86,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-briannesbitt__carbon",
@@ -370,7 +464,10 @@
    "ok": true,
    "files_extracted": 1992,
    "files_partial": 0,
-   "duration_ms": 2128
+   "duration_ms": 2100,
+   "raw_files_extracted": 1992,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-php-cs-fixer__php-cs-fixer",
@@ -382,7 +479,10 @@
    "ok": true,
    "files_extracted": 1212,
    "files_partial": 2,
-   "duration_ms": 1967
+   "duration_ms": 2054,
+   "raw_files_extracted": 1212,
+   "raw_files_partial": 2,
+   "excluded": {}
   },
   {
    "name": "s1-laravel__framework",
@@ -394,7 +494,12 @@
    "ok": true,
    "files_extracted": 2363,
    "files_partial": 1,
-   "duration_ms": 2651
+   "duration_ms": 2688,
+   "raw_files_extracted": 2363,
+   "raw_files_partial": 1,
+   "excluded": {
+    "vendored": 9
+   }
   },
   {
    "name": "s1-phpoffice__phpspreadsheet",
@@ -406,7 +511,10 @@
    "ok": true,
    "files_extracted": 2269,
    "files_partial": 2,
-   "duration_ms": 2076
+   "duration_ms": 2388,
+   "raw_files_extracted": 2269,
+   "raw_files_partial": 2,
+   "excluded": {}
   },
   {
    "name": "s1-twigphp__Twig",
@@ -418,7 +526,10 @@
    "ok": true,
    "files_extracted": 360,
    "files_partial": 0,
-   "duration_ms": 605
+   "duration_ms": 669,
+   "raw_files_extracted": 360,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-Seldaek__monolog",
@@ -430,7 +541,10 @@
    "ok": true,
    "files_extracted": 214,
    "files_partial": 0,
-   "duration_ms": 424
+   "duration_ms": 462,
+   "raw_files_extracted": 214,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-thephpleague__commonmark",
@@ -442,7 +556,10 @@
    "ok": true,
    "files_extracted": 471,
    "files_partial": 0,
-   "duration_ms": 850
+   "duration_ms": 1308,
+   "raw_files_extracted": 471,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-JsonMapper__JsonMapper",
@@ -454,7 +571,10 @@
    "ok": true,
    "files_extracted": 150,
    "files_partial": 1,
-   "duration_ms": 344
+   "duration_ms": 351,
+   "raw_files_extracted": 150,
+   "raw_files_partial": 1,
+   "excluded": {}
   },
   {
    "name": "s1-caddyserver__caddy",
@@ -466,7 +586,10 @@
    "ok": true,
    "files_extracted": 240,
    "files_partial": 0,
-   "duration_ms": 499
+   "duration_ms": 841,
+   "raw_files_extracted": 240,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-gin-gonic__gin",
@@ -478,7 +601,10 @@
    "ok": true,
    "files_extracted": 84,
    "files_partial": 0,
-   "duration_ms": 312
+   "duration_ms": 300,
+   "raw_files_extracted": 84,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-prometheus__prometheus",
@@ -490,7 +616,10 @@
    "ok": true,
    "files_extracted": 394,
    "files_partial": 0,
-   "duration_ms": 1111
+   "duration_ms": 1129,
+   "raw_files_extracted": 394,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-gohugoio__hugo",
@@ -500,9 +629,14 @@
    "source": "s1",
    "split": "gated",
    "ok": true,
-   "files_extracted": 793,
+   "files_extracted": 791,
    "files_partial": 0,
-   "duration_ms": 1783
+   "duration_ms": 1618,
+   "raw_files_extracted": 793,
+   "raw_files_partial": 0,
+   "excluded": {
+    "vendored": 2
+   }
   },
   {
    "name": "s1-hashicorp__terraform",
@@ -514,7 +648,10 @@
    "ok": true,
    "files_extracted": 1601,
    "files_partial": 0,
-   "duration_ms": 2511
+   "duration_ms": 2469,
+   "raw_files_extracted": 1601,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-benhoyt__goawk",
@@ -526,7 +663,10 @@
    "ok": true,
    "files_extracted": 37,
    "files_partial": 0,
-   "duration_ms": 223
+   "duration_ms": 226,
+   "raw_files_extracted": 37,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-google__gson",
@@ -538,7 +678,10 @@
    "ok": true,
    "files_extracted": 218,
    "files_partial": 0,
-   "duration_ms": 550
+   "duration_ms": 628,
+   "raw_files_extracted": 218,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-projectlombok__lombok",
@@ -548,9 +691,14 @@
    "source": "s1",
    "split": "gated",
    "ok": true,
-   "files_extracted": 1680,
+   "files_extracted": 1679,
    "files_partial": 90,
-   "duration_ms": 1963
+   "duration_ms": 2100,
+   "raw_files_extracted": 1680,
+   "raw_files_partial": 90,
+   "excluded": {
+    "vendored": 1
+   }
   },
   {
    "name": "s1-apache__dubbo",
@@ -562,7 +710,10 @@
    "ok": true,
    "files_extracted": 3118,
    "files_partial": 0,
-   "duration_ms": 3270
+   "duration_ms": 3751,
+   "raw_files_extracted": 3118,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-apache__rocketmq",
@@ -574,7 +725,10 @@
    "ok": true,
    "files_extracted": 1615,
    "files_partial": 0,
-   "duration_ms": 2501
+   "duration_ms": 2631,
+   "raw_files_extracted": 1615,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-apolloconfig__apollo",
@@ -586,7 +740,10 @@
    "ok": true,
    "files_extracted": 809,
    "files_partial": 0,
-   "duration_ms": 1786
+   "duration_ms": 1836,
+   "raw_files_extracted": 809,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-decorators-squad__eo-yaml",
@@ -598,7 +755,10 @@
    "ok": true,
    "files_extracted": 81,
    "files_partial": 0,
-   "duration_ms": 263
+   "duration_ms": 264,
+   "raw_files_extracted": 81,
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s1-redis__redis",
@@ -608,9 +768,14 @@
    "source": "s1",
    "split": "gated",
    "ok": true,
-   "files_extracted": 552,
-   "files_partial": 35,
-   "duration_ms": 1384
+   "files_extracted": 196,
+   "files_partial": 2,
+   "duration_ms": 796,
+   "raw_files_extracted": 552,
+   "raw_files_partial": 25,
+   "excluded": {
+    "vendored": 356
+   }
   },
   {
    "name": "s1-jqlang__jq",
@@ -622,7 +787,10 @@
    "ok": true,
    "files_extracted": 73,
    "files_partial": 1,
-   "duration_ms": 354
+   "duration_ms": 348,
+   "raw_files_extracted": 73,
+   "raw_files_partial": 1,
+   "excluded": {}
   },
   {
    "name": "s1-micropython__micropython",
@@ -632,9 +800,15 @@
    "source": "s1",
    "split": "gated",
    "ok": true,
-   "files_extracted": 2062,
-   "files_partial": 344,
-   "duration_ms": 3289
+   "files_extracted": 1775,
+   "files_partial": 27,
+   "duration_ms": 2675,
+   "raw_files_extracted": 2062,
+   "raw_files_partial": 56,
+   "excluded": {
+    "not the language (qstr list)": 10,
+    "vendored": 277
+   }
   },
   {
    "name": "s1-valkey-io__valkey",
@@ -644,9 +818,14 @@
    "source": "s1",
    "split": "gated",
    "ok": true,
-   "files_extracted": 722,
-   "files_partial": 40,
-   "duration_ms": 2102
+   "files_extracted": 244,
+   "files_partial": 1,
+   "duration_ms": 975,
+   "raw_files_extracted": 722,
+   "raw_files_partial": 29,
+   "excluded": {
+    "vendored": 478
+   }
   },
   {
    "name": "s1-nanomsg__nng",
@@ -658,7 +837,10 @@
    "ok": true,
    "files_extracted": 287,
    "files_partial": 64,
-   "duration_ms": 895
+   "duration_ms": 626,
+   "raw_files_extracted": 287,
+   "raw_files_partial": 64,
+   "excluded": {}
   },
   {
    "name": "s1-fmtlib__fmt",
@@ -668,9 +850,14 @@
    "source": "s1",
    "split": "gated",
    "ok": true,
-   "files_extracted": 60,
-   "files_partial": 15,
-   "duration_ms": 543
+   "files_extracted": 56,
+   "files_partial": 9,
+   "duration_ms": 324,
+   "raw_files_extracted": 60,
+   "raw_files_partial": 12,
+   "excluded": {
+    "gtest copy": 4
+   }
   },
   {
    "name": "s1-nlohmann__json",
@@ -680,9 +867,15 @@
    "source": "s1",
    "split": "gated",
    "ok": true,
-   "files_extracted": 465,
-   "files_partial": 54,
-   "duration_ms": 1163
+   "files_extracted": 365,
+   "files_partial": 19,
+   "duration_ms": 735,
+   "raw_files_extracted": 465,
+   "raw_files_partial": 23,
+   "excluded": {
+    "vendored": 97,
+    "amalgamation": 3
+   }
   },
   {
    "name": "s1-catchorg__Catch2",
@@ -692,9 +885,16 @@
    "source": "s1",
    "split": "gated",
    "ok": true,
-   "files_extracted": 245,
-   "files_partial": 21,
-   "duration_ms": 762
+   "files_extracted": 234,
+   "files_partial": 11,
+   "duration_ms": 546,
+   "raw_files_extracted": 245,
+   "raw_files_partial": 19,
+   "excluded": {
+    "vendored": 2,
+    "not the language (Objective-C)": 5,
+    "amalgamation": 4
+   }
   },
   {
    "name": "s1-simdjson__simdjson",
@@ -704,9 +904,15 @@
    "source": "s1",
    "split": "gated",
    "ok": true,
-   "files_extracted": 120,
-   "files_partial": 14,
-   "duration_ms": 454
+   "files_extracted": 114,
+   "files_partial": 4,
+   "duration_ms": 434,
+   "raw_files_extracted": 120,
+   "raw_files_partial": 6,
+   "excluded": {
+    "vendored": 3,
+    "amalgamation": 3
+   }
   },
   {
    "name": "s1-randombit__botan",
@@ -717,8 +923,11 @@
    "split": "calibration",
    "ok": true,
    "files_extracted": 1185,
-   "files_partial": 59,
-   "duration_ms": 2288
+   "files_partial": 55,
+   "duration_ms": 2372,
+   "raw_files_extracted": 1185,
+   "raw_files_partial": 55,
+   "excluded": {}
   }
  ]
 }

@@ -1,5 +1,5 @@
 {
- "date": "2026-10-25 21:58 UTC",
+ "date": "2026-10-26 04:49 UTC",
  "machine": {
   "platform": "macOS-26.4.1-arm64-arm-64bit",
   "machine": "arm64",
@@ -20,7 +20,7 @@
   },
   "cbm": {
    "available": true,
-   "reason": "",
+   "reason": "/Users/juanro/Documents/githings/rueca-wt/bench5/bench/.cache/bin/codebase-memory-mcp missing (run `rueca-bench setup`)",
    "version": "codebase-memory-mcp 0.12.0",
    "recorded_versions": [
     "codebase-memory-mcp 0.12.0"
@@ -28,10 +28,10 @@
   },
   "rueca": {
    "available": true,
-   "reason": "RUECA_BIN not set",
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)",
+   "reason": "",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
    "recorded_versions": [
-    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
    ]
   }
  },
@@ -44,7 +44,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
    ]
   },
   "java": {
@@ -55,7 +55,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
    ]
   },
   "ts/js": {
@@ -66,7 +66,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
    ]
   },
   "go": {
@@ -77,7 +77,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
    ]
   },
   "cpp": {
@@ -88,7 +88,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
    ]
   },
   "c": {
@@ -99,7 +99,7 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
    ]
   },
   "python": {
@@ -110,11 +110,11 @@
     "codebase-memory-mcp 0.12.0"
    ],
    "rueca": [
-    "rueca 0.1.0-alpha.1 (binary sha256 ee5ed53b153b)"
+    "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
    ]
   }
  },
- "manifest_sha256": "ac037ba719d0f8c3f9dcb90a04912655c4f59951fc531b6c29271c8ee7d15f6a",
+ "manifest_sha256": "c61dca3ae903432b48cbbcbc3dc139cbd9791ca5cf8eb33ad3bab886f7d5d8b7",
  "manifest_tools": {
   "cbm": {
    "name": "codebase-memory-mcp",
@@ -210,8 +210,8 @@
   "rueca": {
    "name": "rueca",
    "binary": "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)",
-   "contract": "docs/tools.md (alpha)",
-   "results": "main @ 6df4324 (binary sha256 80e72f05793aeabc40e1affa5e718fbbae0955779d82c81cbcbdc012852e397a)"
+   "contract": "docs/tools.md (RFC 0005; the alpha contract is still understood, arms/rueca.py)",
+   "results": "feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886)"
   }
  },
  "carried_groups": [
@@ -223,9 +223,9 @@
   "python",
   "ts/js"
  ],
- "carried": "cbm:c (30 instances), cbm:cpp (38 instances), cbm:go (41 instances), cbm:java (40 instances), cbm:php (40 instances), cbm:python (40 instances), cbm:ts/js (41 instances), grep:c (30 instances), grep:cpp (38 instances), grep:go (41 instances), grep:java (40 instances), grep:php (40 instances), grep:python (40 instances), grep:ts/js (41 instances)",
+ "carried": "grep:c (35 instances), grep:cpp (43 instances), grep:go (46 instances), grep:java (45 instances), grep:php (45 instances), grep:python (45 instances), grep:ts/js (46 instances), S3 grep:cJSON, S3 grep:cli, S3 grep:click, S3 grep:commonmark, S3 grep:cpp-micro, S3 grep:ecma-micro, S3 grep:express, S3 grep:flask, S3 grep:fmt, S3 grep:gin, S3 grep:go-micro, S3 grep:goawk, S3 grep:gson, S3 grep:hono, S3 grep:java-micro, S3 grep:javapoet, S3 grep:jinja, S3 grep:lua, S3 grep:monolog, S3 grep:php-micro, S3 grep:pycg, S3 grep:python-micro, S3 grep:requests, S3 grep:yaml-cpp, S3 grep:zod",
  "carried_from": {
-  "date": "2026-10-25 20:52 UTC",
+  "date": "2026-10-26 04:47 UTC",
   "machine": {
    "platform": "macOS-26.4.1-arm64-arm-64bit",
    "machine": "arm64",

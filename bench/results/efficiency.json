@@ -1,0 +1,1472 @@
+{
+ "tokens_per_correct_answer": {
+  "python": {
+   "trace": {
+    "rueca": {
+     "n": 745,
+     "true_edges": 2056,
+     "per_true_edge": 57.32149805447471,
+     "tokens_median": 108.0,
+     "ci": [
+      54.78200440045687,
+      60.39877770695562
+     ]
+    },
+    "cbm": {
+     "n": 745,
+     "true_edges": 1974,
+     "per_true_edge": 48.5339412360689,
+     "tokens_median": 114.0,
+     "ci": [
+      44.82980154659513,
+      52.662581393495046
+     ]
+    }
+   },
+   "search": {
+    "rueca": {
+     "n": 40,
+     "hit_rate": 0.75,
+     "to_first_hit": 203.33333333333334,
+     "to_first_hit_ci": [
+      134.52867647058824,
+      307.4024999999999
+     ],
+     "per_hit": 128.13725490196077,
+     "per_hit_ci": [
+      100.74899193548387,
+      175.29512162162158
+     ],
+     "func_hit_rate": 0.55,
+     "func_to_first_hit": 382.72727272727275,
+     "func_per_hit": 522.8,
+     "tokens_median": 313.5,
+     "formats": [
+      "text"
+     ],
+     "approx": 0
+    },
+    "cbm": {
+     "n": 40,
+     "hit_rate": 0.5,
+     "to_first_hit": 622.7,
+     "to_first_hit_ci": [
+      384.26057692307694,
+      1061.725
+     ],
+     "per_hit": 389.8958333333333,
+     "per_hit_ci": [
+      255.04153502093644,
+      688.3669642857142
+     ],
+     "func_hit_rate": 0.25,
+     "func_to_first_hit": 1545.4,
+     "func_per_hit": 1871.5,
+     "tokens_median": 470.5,
+     "formats": [
+      "tree"
+     ],
+     "approx": 0
+    }
+   },
+   "lookup": {
+    "rueca": {
+     "n": 150,
+     "found": 144,
+     "per_found": 353.61805555555554
+    },
+    "cbm": {
+     "n": 150,
+     "found": 142,
+     "per_found": 199.46478873239437
+    }
+   },
+   "raw": {
+    "trace": {
+     "n": 745,
+     "rueca_median": 373,
+     "cbm_median": 173,
+     "rueca_mean": 490.48590604026845,
+     "cbm_mean": 184.48322147651007,
+     "agent_n": 745,
+     "agent_rueca_median": 108,
+     "agent_cbm_median": 114
+    },
+    "search": {
+     "n": 150,
+     "rueca_median": 958.0,
+     "cbm_median": 123.0,
+     "rueca_mean": 956.3333333333334,
+     "cbm_mean": 218.98,
+     "agent_n": 150,
+     "agent_rueca_median": 335.0,
+     "agent_cbm_median": 108.0
+    }
+   }
+  },
+  "ts/js": {
+   "trace": {
+    "rueca": {
+     "n": 728,
+     "true_edges": 1736,
+     "per_true_edge": 65.42857142857143,
+     "tokens_median": 108.0,
+     "ci": [
+      59.53776082695321,
+      74.84048828399328
+     ]
+    },
+    "cbm": {
+     "n": 728,
+     "true_edges": 1574,
+     "per_true_edge": 53.9853875476493,
+     "tokens_median": 108.0,
+     "ci": [
+      50.523444783358755,
+      57.669190790415726
+     ]
+    }
+   },
+   "search": {
+    "rueca": {
+     "n": 41,
+     "hit_rate": 0.6097560975609756,
+     "to_first_hit": 304.0,
+     "to_first_hit_ci": [
+      204.44865591397848,
+      476.9604605263156
+     ],
+     "per_hit": 219.42592592592592,
+     "per_hit_ci": [
+      159.89011014439097,
+      334.0290362731152
+     ],
+     "func_hit_rate": 0.24390243902439024,
+     "func_to_first_hit": 1056.0,
+     "func_per_hit": 1077.1818181818182,
+     "tokens_median": 286.0,
+     "formats": [
+      "text"
+     ],
+     "approx": 0
+    },
+    "cbm": {
+     "n": 41,
+     "hit_rate": 0.43902439024390244,
+     "to_first_hit": 715.1111111111111,
+     "to_first_hit_ci": [
+      441.70729166666666,
+      1245.75625
+     ],
+     "per_hit": 364.40816326530614,
+     "per_hit_ci": [
+      233.86001955903274,
+      678.322222222222
+     ],
+     "func_hit_rate": 0.24390243902439024,
+     "func_to_first_hit": 1514.3,
+     "func_per_hit": 1623.2727272727273,
+     "tokens_median": 431.0,
+     "formats": [
+      "tree"
+     ],
+     "approx": 0
+    }
+   },
+   "lookup": {
+    "rueca": {
+     "n": 100,
+     "found": 89,
+     "per_found": 364.5056179775281
+    },
+    "cbm": {
+     "n": 100,
+     "found": 89,
+     "per_found": 213.75280898876406
+    }
+   },
+   "raw": {
+    "trace": {
+     "n": 728,
+     "rueca_median": 379.5,
+     "cbm_median": 166.0,
+     "rueca_mean": 498.08104395604397,
+     "cbm_mean": 172.5260989010989,
+     "agent_n": 728,
+     "agent_rueca_median": 108.0,
+     "agent_cbm_median": 108.0
+    },
+    "search": {
+     "n": 100,
+     "rueca_median": 961.0,
+     "cbm_median": 128.0,
+     "rueca_mean": 969.09,
+     "cbm_mean": 222.17,
+     "agent_n": 100,
+     "agent_rueca_median": 315.0,
+     "agent_cbm_median": 113.0
+    }
+   }
+  },
+  "php": {
+   "trace": {
+    "rueca": {
+     "n": 1196,
+     "true_edges": 3699,
+     "per_true_edge": 71.80400108137334,
+     "tokens_median": 147.5,
+     "ci": [
+      69.59595531431663,
+      74.3846915574222
+     ]
+    },
+    "cbm": {
+     "n": 1196,
+     "true_edges": 3070,
+     "per_true_edge": 56.46221498371335,
+     "tokens_median": 118.5,
+     "ci": [
+      53.49444934704125,
+      59.78606500492307
+     ]
+    }
+   },
+   "search": {
+    "rueca": {
+     "n": 40,
+     "hit_rate": 0.625,
+     "to_first_hit": 363.0,
+     "to_first_hit_ci": [
+      233.53333333333333,
+      582.2718567251461
+     ],
+     "per_hit": 194.575,
+     "per_hit_ci": [
+      137.82675636480823,
+      304.7273529411765
+     ],
+     "func_hit_rate": 0.325,
+     "func_to_first_hit": 942.9230769230769,
+     "func_per_hit": 707.5454545454545,
+     "tokens_median": 368.5,
+     "formats": [
+      "text"
+     ],
+     "approx": 0
+    },
+    "cbm": {
+     "n": 40,
+     "hit_rate": 0.45,
+     "to_first_hit": 803.0555555555555,
+     "to_first_hit_ci": [
+      480.14975000000004,
+      1440.920673076923
+     ],
+     "per_hit": 349.7049180327869,
+     "per_hit_ci": [
+      237.0326504010695,
+      606.8482983193275
+     ],
+     "func_hit_rate": 0.225,
+     "func_to_first_hit": 2010.7777777777778,
+     "func_per_hit": 1254.8235294117646,
+     "tokens_median": 528.0,
+     "formats": [
+      "tree"
+     ],
+     "approx": 0
+    }
+   },
+   "lookup": {
+    "rueca": {
+     "n": 100,
+     "found": 73,
+     "per_found": 546.013698630137
+    },
+    "cbm": {
+     "n": 100,
+     "found": 78,
+     "per_found": 328.12820512820514
+    }
+   },
+   "raw": {
+    "trace": {
+     "n": 1196,
+     "rueca_median": 445.0,
+     "cbm_median": 173.0,
+     "rueca_mean": 627.064381270903,
+     "cbm_mean": 202.9648829431438,
+     "agent_n": 1196,
+     "agent_rueca_median": 147.5,
+     "agent_cbm_median": 118.5
+    },
+    "search": {
+     "n": 100,
+     "rueca_median": 1134.0,
+     "cbm_median": 206.5,
+     "rueca_mean": 1156.76,
+     "cbm_mean": 290.74,
+     "agent_n": 100,
+     "agent_rueca_median": 400.0,
+     "agent_cbm_median": 177.5
+    }
+   }
+  },
+  "go": {
+   "trace": {
+    "rueca": {
+     "n": 538,
+     "true_edges": 1490,
+     "per_true_edge": 47.939597315436245,
+     "tokens_median": 98.0,
+     "ci": [
+      45.91357213964117,
+      50.13874939208248
+     ]
+    },
+    "cbm": {
+     "n": 538,
+     "true_edges": 1249,
+     "per_true_edge": 44.99359487590072,
+     "tokens_median": 93.0,
+     "ci": [
+      41.00211777007404,
+      49.52024200867033
+     ]
+    }
+   },
+   "search": {
+    "rueca": {
+     "n": 41,
+     "hit_rate": 0.4878048780487805,
+     "to_first_hit": 471.15,
+     "to_first_hit_ci": [
+      299.26826923076925,
+      799.4357142857142
+     ],
+     "per_hit": 257.54545454545456,
+     "per_hit_ci": [
+      183.46019736842106,
+      415.5615196078431
+     ],
+     "func_hit_rate": 0.2926829268292683,
+     "func_to_first_hit": 953.8333333333334,
+     "func_per_hit": 1180.4166666666667,
+     "tokens_median": 340.0,
+     "formats": [
+      "text"
+     ],
+     "approx": 0
+    },
+    "cbm": {
+     "n": 41,
+     "hit_rate": 0.4634146341463415,
+     "to_first_hit": 639.1052631578947,
+     "to_first_hit_ci": [
+      390.077,
+      1106.6173076923076
+     ],
+     "per_hit": 394.22222222222223,
+     "per_hit_ci": [
+      272.87395833333335,
+      656.6132605820105
+     ],
+     "func_hit_rate": 0.14634146341463414,
+     "func_to_first_hit": 2635.5,
+     "func_per_hit": 2534.285714285714,
+     "tokens_median": 433.0,
+     "formats": [
+      "tree"
+     ],
+     "approx": 0
+    }
+   },
+   "lookup": {
+    "rueca": {
+     "n": 100,
+     "found": 92,
+     "per_found": 301.69565217391306
+    },
+    "cbm": {
+     "n": 100,
+     "found": 88,
+     "per_found": 164.2840909090909
+    }
+   },
+   "raw": {
+    "trace": {
+     "n": 538,
+     "rueca_median": 367.0,
+     "cbm_median": 151.0,
+     "rueca_mean": 447.09293680297395,
+     "cbm_mean": 157.23605947955392,
+     "agent_n": 538,
+     "agent_rueca_median": 98.0,
+     "agent_cbm_median": 93.0
+    },
+    "search": {
+     "n": 100,
+     "rueca_median": 905.5,
+     "cbm_median": 102.0,
+     "rueca_mean": 903.87,
+     "cbm_mean": 172.38,
+     "agent_n": 100,
+     "agent_rueca_median": 276.5,
+     "agent_cbm_median": 87.0
+    }
+   }
+  },
+  "java": {
+   "trace": {
+    "rueca": {
+     "n": 796,
+     "true_edges": 2951,
+     "per_true_edge": 67.74076584208743,
+     "tokens_median": 176.0,
+     "ci": [
+      65.51398009213453,
+      70.21301234939752
+     ]
+    },
+    "cbm": {
+     "n": 796,
+     "true_edges": 1923,
+     "per_true_edge": 75.73790951638065,
+     "tokens_median": 153.5,
+     "ci": [
+      70.5955771331928,
+      81.32550643386422
+     ]
+    }
+   },
+   "search": {
+    "rueca": {
+     "n": 40,
+     "hit_rate": 0.7,
+     "to_first_hit": 322.25,
+     "to_first_hit_ci": [
+      220.12421875,
+      482.7445158102766
+     ],
+     "per_hit": 146.4056603773585,
+     "per_hit_ci": [
+      108.96334219858156,
+      211.65243243243236
+     ],
+     "func_hit_rate": 0.45,
+     "func_to_first_hit": 619.3333333333334,
+     "func_per_hit": 596.8846153846154,
+     "tokens_median": 385.0,
+     "formats": [
+      "text"
+     ],
+     "approx": 0
+    },
+    "cbm": {
+     "n": 40,
+     "hit_rate": 0.45,
+     "to_first_hit": 933.1666666666666,
+     "to_first_hit_ci": [
+      576.658,
+      1633.8374999999999
+     ],
+     "per_hit": 333.04,
+     "per_hit_ci": [
+      227.73882904652686,
+      575.3988372093023
+     ],
+     "func_hit_rate": 0.325,
+     "func_to_first_hit": 1469.7692307692307,
+     "func_per_hit": 1189.4285714285713,
+     "tokens_median": 611.5,
+     "formats": [
+      "tree"
+     ],
+     "approx": 0
+    }
+   },
+   "lookup": {
+    "rueca": {
+     "n": 100,
+     "found": 88,
+     "per_found": 378.10227272727275
+    },
+    "cbm": {
+     "n": 100,
+     "found": 70,
+     "per_found": 420.64285714285717
+    }
+   },
+   "raw": {
+    "trace": {
+     "n": 796,
+     "rueca_median": 518.5,
+     "cbm_median": 215.0,
+     "rueca_mean": 685.5201005025126,
+     "cbm_mean": 242.6143216080402,
+     "agent_n": 796,
+     "agent_rueca_median": 176.0,
+     "agent_cbm_median": 153.5
+    },
+    "search": {
+     "n": 100,
+     "rueca_median": 1036.5,
+     "cbm_median": 279.5,
+     "rueca_mean": 1032.86,
+     "cbm_mean": 334.13,
+     "agent_n": 100,
+     "agent_rueca_median": 330.0,
+     "agent_cbm_median": 244.0
+    }
+   }
+  },
+  "c": {
+   "trace": {
+    "rueca": {
+     "n": 1206,
+     "true_edges": 6651,
+     "per_true_edge": 52.249887235002255,
+     "tokens_median": 220.5,
+     "ci": [
+      50.77322755586951,
+      53.93784128950457
+     ]
+    },
+    "cbm": {
+     "n": 1206,
+     "true_edges": 5681,
+     "per_true_edge": 29.852666784016897,
+     "tokens_median": 129.5,
+     "ci": [
+      28.86273956817079,
+      30.906383705879037
+     ]
+    }
+   },
+   "search": {
+    "rueca": {
+     "n": 30,
+     "hit_rate": 0.7333333333333333,
+     "to_first_hit": 248.3181818181818,
+     "to_first_hit_ci": [
+      164.34583333333333,
+      378.05729166666663
+     ],
+     "per_hit": 141.30985915492957,
+     "per_hit_ci": [
+      103.77239190116678,
+      206.18366326530608
+     ],
+     "func_hit_rate": 0.23333333333333334,
+     "func_to_first_hit": 1273.2857142857142,
+     "func_per_hit": 1114.7777777777778,
+     "tokens_median": 330.5,
+     "formats": [
+      "text"
+     ],
+     "approx": 0
+    },
+    "cbm": {
+     "n": 30,
+     "hit_rate": 0.7,
+     "to_first_hit": 333.42857142857144,
+     "to_first_hit_ci": [
+      212.959,
+      530.3906249999998
+     ],
+     "per_hit": 304.92857142857144,
+     "per_hit_ci": [
+      216.08167372881357,
+      481.0076923076922
+     ],
+     "func_hit_rate": 0.16666666666666666,
+     "func_to_first_hit": 2196.6,
+     "func_per_hit": 1829.5714285714287,
+     "tokens_median": 425.0,
+     "formats": [
+      "tree"
+     ],
+     "approx": 0
+    }
+   },
+   "lookup": {
+    "rueca": {
+     "n": 100,
+     "found": 99,
+     "per_found": 293.54545454545456
+    },
+    "cbm": {
+     "n": 100,
+     "found": 99,
+     "per_found": 113.05050505050505
+    }
+   },
+   "raw": {
+    "trace": {
+     "n": 1206,
+     "rueca_median": 638.0,
+     "cbm_median": 180.0,
+     "rueca_mean": 794.257048092869,
+     "cbm_mean": 192.57048092868988,
+     "agent_n": 1206,
+     "agent_rueca_median": 220.5,
+     "agent_cbm_median": 129.5
+    },
+    "search": {
+     "n": 100,
+     "rueca_median": 857.0,
+     "cbm_median": 82.0,
+     "rueca_mean": 791.03,
+     "cbm_mean": 130.18,
+     "agent_n": 100,
+     "agent_rueca_median": 308.0,
+     "agent_cbm_median": 73.0
+    }
+   }
+  },
+  "cpp": {
+   "trace": {
+    "rueca": {
+     "n": 879,
+     "true_edges": 3543,
+     "per_true_edge": 64.15184871577759,
+     "tokens_median": 184.0,
+     "ci": [
+      62.27588768606225,
+      66.21811418170363
+     ]
+    },
+    "cbm": {
+     "n": 879,
+     "true_edges": 2164,
+     "per_true_edge": 60.36829944547135,
+     "tokens_median": 133.0,
+     "ci": [
+      56.58735473484087,
+      64.56505295950156
+     ]
+    }
+   },
+   "search": {
+    "rueca": {
+     "n": 38,
+     "hit_rate": 0.6578947368421053,
+     "to_first_hit": 307.76,
+     "to_first_hit_ci": [
+      194.12669930875575,
+      492.17249999999996
+     ],
+     "per_hit": 106.3006993006993,
+     "per_hit_ci": [
+      82.79442149367833,
+      149.2174705822682
+     ],
+     "func_hit_rate": 0.21052631578947367,
+     "func_to_first_hit": 1660.5,
+     "func_per_hit": 844.5,
+     "tokens_median": 395.0,
+     "formats": [
+      "text"
+     ],
+     "approx": 0
+    },
+    "cbm": {
+     "n": 38,
+     "hit_rate": 0.7105263157894737,
+     "to_first_hit": 347.74074074074076,
+     "to_first_hit_ci": [
+      224.0617439516129,
+      545.105357142857
+     ],
+     "per_hit": 180.96116504854368,
+     "per_hit_ci": [
+      139.44462744869404,
+      248.56255405405403
+     ],
+     "func_hit_rate": 0.23684210526315788,
+     "func_to_first_hit": 1743.6666666666667,
+     "func_per_hit": 1331.357142857143,
+     "tokens_median": 489.5,
+     "formats": [
+      "tree"
+     ],
+     "approx": 0
+    }
+   },
+   "lookup": {
+    "rueca": {
+     "n": 100,
+     "found": 92,
+     "per_found": 402.35869565217394
+    },
+    "cbm": {
+     "n": 100,
+     "found": 69,
+     "per_found": 335.5072463768116
+    }
+   },
+   "raw": {
+    "trace": {
+     "n": 879,
+     "rueca_median": 531,
+     "cbm_median": 189,
+     "rueca_mean": 702.3572241183163,
+     "cbm_mean": 205.19453924914677,
+     "agent_n": 879,
+     "agent_rueca_median": 184,
+     "agent_cbm_median": 133
+    },
+    "search": {
+     "n": 100,
+     "rueca_median": 1015.0,
+     "cbm_median": 167.5,
+     "rueca_mean": 1032.31,
+     "cbm_mean": 263.93,
+     "agent_n": 100,
+     "agent_rueca_median": 350.5,
+     "agent_cbm_median": 146.5
+    }
+   }
+  }
+ },
+ "org": {
+  "multirepo": {
+   "instances": 21,
+   "repos": [
+    "apache/dubbo",
+    "briannesbitt/carbon",
+    "caddyserver/caddy",
+    "catchorg/Catch2",
+    "coder/code-server",
+    "fmtlib/fmt",
+    "gin-gonic/gin",
+    "google/gson",
+    "jqlang/jq",
+    "laravel/framework",
+    "micropython/micropython",
+    "nlohmann/json",
+    "pallets/flask",
+    "php-cs-fixer/php-cs-fixer",
+    "projectlombok/lombok",
+    "prometheus/prometheus",
+    "psf/requests",
+    "pylint-dev/pylint",
+    "redis/redis",
+    "tailwindlabs/tailwindcss",
+    "vuejs/core"
+   ],
+   "arms": {
+    "rueca": {
+     "status": "ok",
+     "modes": {
+      "native": {
+       "status": "ok",
+       "n": 21,
+       "file_acc@5": 0.09523809523809523,
+       "single_file_acc@5": 0.6190476190476191,
+       "func_acc@10": 0.09523809523809523,
+       "single_func_acc@10": 0.47619047619047616,
+       "n_func": 21,
+       "other_repo_top10": 0.9428571428571428,
+       "tokens_median": 831,
+       "single_tokens_median": 337,
+       "rows": [
+        {
+         "id": "psf__requests-2317",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 830,
+         "single_tokens": 264
+        },
+        {
+         "id": "pallets__flask-5063",
+         "file_acc@5": 0.0,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 851,
+         "single_tokens": 478
+        },
+        {
+         "id": "pylint-dev__pylint-7114",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 832,
+         "single_tokens": 443
+        },
+        {
+         "id": "tailwindlabs__tailwindcss-553",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 827,
+         "single_tokens": 239
+        },
+        {
+         "id": "coder__code-server-4923",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 845,
+         "single_tokens": 316
+        },
+        {
+         "id": "vuejs__core-11899",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 764,
+         "single_tokens": 295
+        },
+        {
+         "id": "briannesbitt__carbon-3103",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 881,
+         "single_tokens": 289
+        },
+        {
+         "id": "php-cs-fixer__php-cs-fixer-7875",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 783,
+         "single_tokens": 467
+        },
+        {
+         "id": "laravel__framework-52451",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 800,
+         "single_tokens": 430
+        },
+        {
+         "id": "caddyserver__caddy-5761",
+         "file_acc@5": 1.0,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 860,
+         "single_tokens": 313
+        },
+        {
+         "id": "gin-gonic__gin-2755",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 813,
+         "single_tokens": 284
+        },
+        {
+         "id": "prometheus__prometheus-10633",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 861,
+         "single_tokens": 373
+        },
+        {
+         "id": "google__gson-1703",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 809,
+         "single_tokens": 305
+        },
+        {
+         "id": "projectlombok__lombok-3326",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 767,
+         "single_tokens": 377
+        },
+        {
+         "id": "apache__dubbo-11255",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 853,
+         "single_tokens": 450
+        },
+        {
+         "id": "redis__redis-10068",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 859,
+         "single_tokens": 400
+        },
+        {
+         "id": "jqlang__jq-2728",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 782,
+         "single_tokens": 257
+        },
+        {
+         "id": "micropython__micropython-15898",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 855,
+         "single_tokens": 403
+        },
+        {
+         "id": "fmtlib__fmt-2317",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 836,
+         "single_tokens": 275
+        },
+        {
+         "id": "nlohmann__json-4536",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 831,
+         "single_tokens": 417
+        },
+        {
+         "id": "catchorg__Catch2-1608",
+         "file_acc@5": 1.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 789,
+         "single_tokens": 337
+        }
+       ]
+      },
+      "per_repo": {
+       "status": "ok",
+       "n": 21,
+       "file_acc@5": 0.23809523809523808,
+       "single_file_acc@5": 0.6190476190476191,
+       "func_acc@10": 0.14285714285714285,
+       "single_func_acc@10": 0.47619047619047616,
+       "n_func": 21,
+       "other_repo_top10": 0.9190476190476191,
+       "tokens_median": 7189,
+       "single_tokens_median": 337,
+       "rows": [
+        {
+         "id": "psf__requests-2317",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 7189,
+         "single_tokens": 264
+        },
+        {
+         "id": "pallets__flask-5063",
+         "file_acc@5": 1.0,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 7203,
+         "single_tokens": 478
+        },
+        {
+         "id": "pylint-dev__pylint-7114",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 6996,
+         "single_tokens": 443
+        },
+        {
+         "id": "tailwindlabs__tailwindcss-553",
+         "file_acc@5": 1.0,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 7846,
+         "single_tokens": 239
+        },
+        {
+         "id": "coder__code-server-4923",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 7472,
+         "single_tokens": 316
+        },
+        {
+         "id": "vuejs__core-11899",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 6537,
+         "single_tokens": 295
+        },
+        {
+         "id": "briannesbitt__carbon-3103",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 7288,
+         "single_tokens": 289
+        },
+        {
+         "id": "php-cs-fixer__php-cs-fixer-7875",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 6734,
+         "single_tokens": 467
+        },
+        {
+         "id": "laravel__framework-52451",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 6770,
+         "single_tokens": 430
+        },
+        {
+         "id": "caddyserver__caddy-5761",
+         "file_acc@5": 1.0,
+         "func_acc@10": 1.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 7441,
+         "single_tokens": 313
+        },
+        {
+         "id": "gin-gonic__gin-2755",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 7024,
+         "single_tokens": 284
+        },
+        {
+         "id": "prometheus__prometheus-10633",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 7129,
+         "single_tokens": 373
+        },
+        {
+         "id": "google__gson-1703",
+         "file_acc@5": 1.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 7359,
+         "single_tokens": 305
+        },
+        {
+         "id": "projectlombok__lombok-3326",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 6839,
+         "single_tokens": 377
+        },
+        {
+         "id": "apache__dubbo-11255",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 7366,
+         "single_tokens": 450
+        },
+        {
+         "id": "redis__redis-10068",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 7394,
+         "single_tokens": 400
+        },
+        {
+         "id": "jqlang__jq-2728",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 6896,
+         "single_tokens": 257
+        },
+        {
+         "id": "micropython__micropython-15898",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 7310,
+         "single_tokens": 403
+        },
+        {
+         "id": "fmtlib__fmt-2317",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 7409,
+         "single_tokens": 275
+        },
+        {
+         "id": "nlohmann__json-4536",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 7122,
+         "single_tokens": 417
+        },
+        {
+         "id": "catchorg__Catch2-1608",
+         "file_acc@5": 1.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 7051,
+         "single_tokens": 337
+        }
+       ]
+      }
+     },
+     "index_seconds": 23.338089626049623,
+     "version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)"
+    },
+    "cbm": {
+     "status": "ok",
+     "modes": {
+      "per_repo": {
+       "status": "ok",
+       "n": 21,
+       "file_acc@5": 0.09523809523809523,
+       "single_file_acc@5": 0.6190476190476191,
+       "func_acc@10": 0.0,
+       "single_func_acc@10": 0.2857142857142857,
+       "n_func": 21,
+       "other_repo_top10": 0.9285714285714286,
+       "tokens_median": 8659,
+       "single_tokens_median": 450,
+       "rows": [
+        {
+         "id": "psf__requests-2317",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8707,
+         "single_tokens": 368
+        },
+        {
+         "id": "pallets__flask-5063",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 8740,
+         "single_tokens": 437
+        },
+        {
+         "id": "pylint-dev__pylint-7114",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8633,
+         "single_tokens": 523
+        },
+        {
+         "id": "tailwindlabs__tailwindcss-553",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 9175,
+         "single_tokens": 450
+        },
+        {
+         "id": "coder__code-server-4923",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 8667,
+         "single_tokens": 406
+        },
+        {
+         "id": "vuejs__core-11899",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 9103,
+         "single_tokens": 530
+        },
+        {
+         "id": "briannesbitt__carbon-3103",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8545,
+         "single_tokens": 531
+        },
+        {
+         "id": "php-cs-fixer__php-cs-fixer-7875",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8149,
+         "single_tokens": 673
+        },
+        {
+         "id": "laravel__framework-52451",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8624,
+         "single_tokens": 240
+        },
+        {
+         "id": "caddyserver__caddy-5761",
+         "file_acc@5": 1.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 9007,
+         "single_tokens": 448
+        },
+        {
+         "id": "gin-gonic__gin-2755",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8529,
+         "single_tokens": 361
+        },
+        {
+         "id": "prometheus__prometheus-10633",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8726,
+         "single_tokens": 399
+        },
+        {
+         "id": "google__gson-1703",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 1.0,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8138,
+         "single_tokens": 540
+        },
+        {
+         "id": "projectlombok__lombok-3326",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8271,
+         "single_tokens": 562
+        },
+        {
+         "id": "apache__dubbo-11255",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 0.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8807,
+         "single_tokens": 729
+        },
+        {
+         "id": "redis__redis-10068",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8508,
+         "single_tokens": 389
+        },
+        {
+         "id": "jqlang__jq-2728",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8659,
+         "single_tokens": 330
+        },
+        {
+         "id": "micropython__micropython-15898",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 8975,
+         "single_tokens": 466
+        },
+        {
+         "id": "fmtlib__fmt-2317",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 0.0,
+         "tokens": 8615,
+         "single_tokens": 415
+        },
+        {
+         "id": "nlohmann__json-4536",
+         "file_acc@5": 0.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 8954,
+         "single_tokens": 540
+        },
+        {
+         "id": "catchorg__Catch2-1608",
+         "file_acc@5": 1.0,
+         "func_acc@10": 0.0,
+         "other_repo_top10": 0.9,
+         "single_file_acc@5": 1.0,
+         "single_func_acc@10": 1.0,
+         "tokens": 8564,
+         "single_tokens": 491
+        }
+       ]
+      }
+     },
+     "index_seconds": 43.27044066807139,
+     "version": "codebase-memory-mcp 0.12.0"
+    }
+   }
+  },
+  "multiref": {
+   "instance": "psf__requests-2317",
+   "repo": "psf/requests",
+   "base_commit": "091991be0da19de9108dbe5e3752917fea3d7fdc",
+   "fix_commit": "fa64e474afe13cc81f38981852b431c9b0d13802",
+   "gold": {
+    "classes": {
+     "same_in_changed_file": 24,
+     "changed": 1
+    },
+    "changed_files": [
+     "requests/sessions.py"
+    ],
+    "unchanged_files": 81
+   },
+   "queries": 21,
+   "single_tokens_sum": 10660,
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
+   "status": "pending",
+   "reason": "local catalog holds one snapshot per root (RFC 0005 \u00a79)",
+   "errors": [
+    "rc=2: invalid argument `ref` for `search_symbols`: invalid type: sequence, expected a string"
+   ]
+  }
+ }
+}
