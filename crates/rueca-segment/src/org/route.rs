@@ -259,18 +259,28 @@ pub struct RouteParams {
     pub ratio: f32,
     /// BM25 weights of the profile fields: name, about, symbols, paths.
     pub fields: [f32; 4],
+    /// CORI term-frequency constants: `T = df / (df + k + c · cw / avg_cw)`
+    /// (Callan et al.: 50 and 150).
+    pub cori_k: f32,
+    pub cori_c: f32,
+    /// Score each repository with its own BM25 statistics (its ranking is
+    /// then the one it has alone) instead of organization-wide ones.
+    pub local_stats: bool,
 }
 
 impl Default for RouteParams {
     fn default() -> RouteParams {
         RouteParams {
             mode: RouteMode::Prior,
-            alpha: 1.0,
+            alpha: 2.0,
             eps: 0.25,
             mu: 0.5,
             top: 3,
             ratio: 0.5,
             fields: [3.0, 1.0, 1.0, 0.5],
+            cori_k: 50.0,
+            cori_c: 150.0,
+            local_stats: false,
         }
     }
 }
@@ -302,6 +312,15 @@ impl RouteParams {
                 "about" => p.fields[1] = f()?,
                 "symbols" => p.fields[2] = f()?,
                 "paths" => p.fields[3] = f()?,
+                "cori_k" => p.cori_k = f()?,
+                "cori_c" => p.cori_c = f()?,
+                "stats" => {
+                    p.local_stats = match v.trim() {
+                        "local" => true,
+                        "org" => false,
+                        other => return Err(format!("`stats` is `org` or `local`, got `{other}`")),
+                    }
+                }
                 other => return Err(format!("unknown routing parameter `{other}`")),
             }
         }
@@ -397,7 +416,7 @@ impl RepoDocs {
 
 /// CORI belief of each repository for `terms`, from `df[term][repo]` (the
 /// repository's documents holding the term) and `cw[repo]` (its documents).
-pub(crate) fn cori(df: &[Vec<u64>], cw: &[u64]) -> Vec<f32> {
+pub(crate) fn cori(df: &[Vec<u64>], cw: &[u64], k: f32, c_len: f32) -> Vec<f32> {
     let c = cw.len();
     let mut out = vec![0f32; c];
     if c == 0 {
@@ -414,7 +433,7 @@ pub(crate) fn cori(df: &[Vec<u64>], cw: &[u64]) -> Vec<f32> {
         let i = ((c as f32 + 0.5) / cf as f32).ln() / (c as f32 + 1.0).ln();
         for (r, &d) in row.iter().enumerate() {
             let d = d as f32;
-            let t = if d > 0.0 { d / (d + 50.0 + 150.0 * cw[r] as f32 / avg.max(1.0)) } else { 0.0 };
+            let t = if d > 0.0 { d / (d + k + c_len * cw[r] as f32 / avg.max(1.0)) } else { 0.0 };
             out[r] += 0.4 + 0.6 * t * i;
         }
     }
@@ -474,7 +493,7 @@ mod tests {
     fn cori_prefers_rare_terms_held_together() {
         // Term 0 is everywhere, term 1 only in repository 2.
         let df = vec![vec![10, 10, 10], vec![0, 0, 3]];
-        let s = cori(&df, &[100, 100, 100]);
+        let s = cori(&df, &[100, 100, 100], 50.0, 150.0);
         assert!(s[2] > s[0] && (s[0] - s[1]).abs() < 1e-6, "{s:?}");
         assert_eq!(normalize(&[1.0, 3.0, 2.0]), vec![0.0, 1.0, 0.5]);
         assert_eq!(normalize(&[2.0, 2.0]), vec![0.0, 0.0]);

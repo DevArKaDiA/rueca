@@ -22,6 +22,9 @@ use crate::types::*;
 /// Default of `budget_tokens`.
 pub const DEFAULT_BUDGET_TOKENS: usize = 2000;
 
+/// Packages listed per repository by `list_repositories` (compact).
+const MAX_PACKAGES: usize = 8;
+
 /// Approximate tokens of `text`: `ceil(bytes / 4)`.
 pub fn count_tokens(text: &str) -> usize {
     text.len().div_ceil(4)
@@ -467,7 +470,12 @@ pub(crate) fn list_repositories(
                 put(&mut m, "symbols", r.symbols);
                 put(&mut m, "edges", r.edges);
                 if !r.packages.is_empty() {
-                    put(&mut m, "packages", json!(r.packages));
+                    // A monorepo publishes many packages: the first few,
+                    // then a count (`format: verbose` lists them all).
+                    put(&mut m, "packages", json!(r.packages.iter().take(MAX_PACKAGES).collect::<Vec<_>>()));
+                    if r.packages.len() > MAX_PACKAGES {
+                        put(&mut m, "packages_more", r.packages.len() - MAX_PACKAGES);
+                    }
                 }
                 if !r.depends_on.is_empty() {
                     put(&mut m, "depends_on", json!(r.depends_on));
@@ -796,6 +804,9 @@ fn text_repositories(out: &mut String, r: &Value, multi: bool) {
             |k: &str| -> Vec<&str> { item[k].as_array().into_iter().flatten().filter_map(Value::as_str).collect() };
         if !list("packages").is_empty() {
             let _ = write!(out, "  packages {}", list("packages").join(", "));
+            if let Some(more) = item.get("packages_more") {
+                let _ = write!(out, " (+{more})");
+            }
         }
         if !list("depends_on").is_empty() {
             let _ = write!(out, "  depends on {}", list("depends_on").join(", "));

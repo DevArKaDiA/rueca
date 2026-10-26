@@ -905,7 +905,7 @@ impl OrgIndex {
                 }
             }
         }
-        let by_terms = route::normalize(&route::cori(&df, &cw));
+        let by_terms = route::normalize(&route::cori(&df, &cw, params.cori_k, params.cori_c));
         let by_doc = route::normalize(&self.docs.scores(&terms, &vis, &params.fields));
         let mut out: Vec<RepoRoute> = vis
             .iter()
@@ -936,17 +936,21 @@ impl OrgIndex {
     /// pages the merged ranking. Ordered by score descending, then
     /// repository order, then node id.
     pub fn search(&self, query: &SymbolQuery, scope: &OrgScope<'_>) -> Result<Vec<OrgHit>> {
-        self.search_with(query, scope, &HashMap::new())
+        self.search_with(query, scope, &HashMap::new(), false)
     }
 
     /// [`OrgIndex::search`] with every score of repository `i` multiplied by
     /// `boost[i]` (missing: 1) inside the top-k: the routing prior
-    /// ([`RouteParams::prior`] of [`OrgIndex::route`]).
+    /// ([`RouteParams::prior`] of [`OrgIndex::route`]). With `local_stats`,
+    /// each repository is scored with its own BM25 statistics (as if
+    /// searched alone; [`RouteParams::local_stats`]) and the rankings are
+    /// merged by score.
     pub fn search_with(
         &self,
         query: &SymbolQuery,
         scope: &OrgScope<'_>,
         boost: &HashMap<usize, f32>,
+        local_stats: bool,
     ) -> Result<Vec<OrgHit>> {
         let limit = symbols::effective_limit(query);
         let glob = query.path_glob.as_deref().map(symbols::compile_glob).transpose()?;
@@ -987,7 +991,22 @@ impl OrgIndex {
         let want = query.offset.saturating_add(limit);
         let seg_boost: HashMap<SegmentId, f32> =
             boost.iter().filter_map(|(&i, &b)| self.segments.get(i).copied().flatten().map(|sid| (sid, b))).collect();
-        let hits = symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(priors), &seg_boost, want, &keep)?;
+        let hits = if local_stats {
+            let mut all = Vec::new();
+            for (sid, p) in priors {
+                let own = HashSet::from([sid]);
+                let stats = SubsetStats { searcher: &searcher, segments: &own };
+                let one: PriorsBySegment = HashMap::from([(sid, p)]);
+                all.extend(symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(one), &seg_boost, want, &keep)?);
+            }
+            all.sort_by(|a, b| {
+                b.score.total_cmp(&a.score).then(a.segment_ord.cmp(&b.segment_ord)).then(a.doc.cmp(&b.doc))
+            });
+            all.truncate(want);
+            all
+        } else {
+            symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(priors), &seg_boost, want, &keep)?
+        };
         Ok(hits
             .into_iter()
             .skip(query.offset)

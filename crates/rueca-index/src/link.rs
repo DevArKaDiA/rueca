@@ -49,14 +49,18 @@
 //!
 //! The strategy ladder then binds names through those imports as it does
 //! inside one repository, so the edges carry the strategy, confidence and
-//! evidence they would have there. Kept: edges from a consumer node to a
-//! dependency node, of every kind but `CONTAINS` / `DEFINES`, except the
+//! evidence they would have there. Kept: edges between a consumer node and
+//! a dependency node (consumer → dependency, and dependency → consumer for
+//! `DECORATES`: a library decorator on a consumer definition), of every
+//! kind but `CONTAINS` / `DEFINES`, except the
 //! name-matching rungs (`unique_name`, `heuristic`), which have no import
-//! behind them across repositories. Nodes are mapped back to the
+//! behind them across repositories, and edges into a dependency's tests or
+//! into a dependency definition the consumer defines itself (same label and
+//! qualified name: a stub or a vendored copy — the consumer's own wins). Nodes are mapped back to the
 //! repositories' own segments by (label, qualified name, path); a folder
 //! import of a dependency's root package maps to its `Repository` node.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -655,6 +659,21 @@ fn crossing_edges(
 ) -> Vec<LinkEdge> {
     let own_index = node_index(consumer);
     let dep_index: Vec<HashMap<NodeKey<'_>, NodeId>> = deps.iter().map(|d| node_index(d.segment)).collect();
+    // Names the consumer defines itself: a dependency's definition with the
+    // same label and qualified name (a test stub, a vendored copy) never
+    // stands for it.
+    let own_names: HashSet<(Label, &str)> = consumer
+        .nodes()
+        .iter()
+        .filter(|n| !matches!(n.label, Label::Repository | Label::Folder | Label::File))
+        .map(|n| (n.label, n.qualified_name.as_str()))
+        .collect();
+    let usable = |k: usize, d: NodeId| -> bool {
+        let seg = deps[k].segment;
+        let n = seg.node(d);
+        let test_file = n.file.is_some_and(|f| rueca_segment::is_test_path(&seg.file(f).path));
+        !(n.is_test || test_file || own_names.contains(&(n.label, n.qualified_name.as_str())))
+    };
     // Side of a joint node: None = consumer, Some(k) = mount k; and its id.
     let locate = |n: NodeId| -> Option<(Option<usize>, NodeId)> {
         let node = graph.nodes.get(n as usize)?;
@@ -682,15 +701,22 @@ fn crossing_edges(
             }
         }
     };
-    let mut best: BTreeMap<(NodeId, u32, NodeId, EdgeKind), LinkEdge> = BTreeMap::new();
+    let mut best: BTreeMap<(NodeId, u32, NodeId, EdgeKind, bool), LinkEdge> = BTreeMap::new();
     for e in &graph.edges {
         if matches!(e.kind, EdgeKind::Contains | EdgeKind::Defines)
             || matches!(e.meta.strategy, Strategy::UniqueName | Strategy::Heuristic)
         {
             continue;
         }
-        let Some((None, src)) = locate(e.src) else { continue };
-        let Some((Some(k), dst)) = locate(e.dst) else { continue };
+        // Consumer → dependency, or (DECORATES) dependency → consumer.
+        let (src, k, dst, reversed) = match (locate(e.src), locate(e.dst)) {
+            (Some((None, s)), Some((Some(k), d))) => (s, k, d, false),
+            (Some((Some(k), d)), Some((None, s))) => (s, k, d, true),
+            _ => continue,
+        };
+        if !usable(k, dst) {
+            continue;
+        }
         let mut meta = e.meta;
         meta.evidence = meta.evidence.and_then(|(f, span)| {
             let path = graph.files.get(f as usize)?.path.as_str();
@@ -699,8 +725,8 @@ fn crossing_edges(
             }
             consumer.file_by_path(path).map(|fid| (fid, span))
         });
-        let edge = LinkEdge { src, dep: k as u32, dst, kind: e.kind, meta };
-        best.entry((src, k as u32, dst, e.kind))
+        let edge = LinkEdge { src, dep: k as u32, dst, kind: e.kind, meta, reversed };
+        best.entry((src, k as u32, dst, e.kind, reversed))
             .and_modify(|x| {
                 if meta.confidence > x.meta.confidence {
                     *x = edge;

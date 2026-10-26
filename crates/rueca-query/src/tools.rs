@@ -205,7 +205,12 @@ impl Engine {
                     }
                 }
                 org.index
-                    .search_with(&base, &OrgScope { visible: &org.visible, selected: &selected }, &boost)?
+                    .search_with(
+                        &base,
+                        &OrgScope { visible: &org.visible, selected: &selected },
+                        &boost,
+                        self.route.local_stats && self.route.mode != RouteMode::Off,
+                    )?
                     .into_iter()
                     .filter_map(|h| view_of.get(&h.repo).map(|&vi| (vi, h.node, f32_to_f64(h.score))))
                     .collect()

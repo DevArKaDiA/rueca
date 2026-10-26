@@ -131,8 +131,11 @@ pub struct OrgLinks {
     pub error: Option<String>,
 }
 
-/// A cross-repository edge from a consumer node to a node of one of its
-/// dependencies. `meta.evidence` names a file of the consumer.
+/// A cross-repository edge between a consumer node and a node of one of its
+/// dependencies, observed in the consumer (`meta.evidence` names a file of
+/// the consumer). Most edges leave the consumer (`IMPORTS`, `CALLS`,
+/// `INHERITS`, …); a few kinds point into it (`DECORATES`: a library's
+/// decorator decorates the consumer's definition), marked `reversed`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LinkEdge {
     /// Node of the consumer's segment.
@@ -143,6 +146,8 @@ pub struct LinkEdge {
     pub dst: NodeId,
     pub kind: EdgeKind,
     pub meta: EdgeMeta,
+    /// The edge goes from `dst` (dependency) to `src` (consumer).
+    pub reversed: bool,
 }
 
 /// One side of a link computation: a repository of the generation being
@@ -255,16 +260,18 @@ impl LinkTable {
                 .collect();
             for e in read_links(dir, file)? {
                 let Some(Some(di)) = deps.get(e.dep as usize).copied() else { continue };
-                t.out.entry((ci, e.src)).or_default().push(LinkRef {
-                    repo: di,
-                    node: e.dst,
+                let ((from, fnode), (to, tnode)) =
+                    if e.reversed { ((di, e.dst), (ci, e.src)) } else { ((ci, e.src), (di, e.dst)) };
+                t.out.entry((from, fnode)).or_default().push(LinkRef {
+                    repo: to,
+                    node: tnode,
                     kind: e.kind,
                     meta: e.meta,
                     evidence_repo: ci,
                 });
-                t.inc.entry((di, e.dst)).or_default().push(LinkRef {
-                    repo: ci,
-                    node: e.src,
+                t.inc.entry((to, tnode)).or_default().push(LinkRef {
+                    repo: from,
+                    node: fnode,
                     kind: e.kind,
                     meta: e.meta,
                     evidence_repo: ci,

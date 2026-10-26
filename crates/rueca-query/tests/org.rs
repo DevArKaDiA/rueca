@@ -336,7 +336,7 @@ impl OrgLinker for FakeLinker {
         let file = consumer.segment.file_by_path("pkg/service.py").unwrap();
         let meta =
             EdgeMeta { confidence: 0.95, strategy: Strategy::ImportResolved, evidence: Some((file, line_span(PY, 9))) };
-        Ok(vec![LinkEdge { src, dep: 0, dst, kind: EdgeKind::Calls, meta }])
+        Ok(vec![LinkEdge { src, dep: 0, dst, kind: EdgeKind::Calls, meta, reversed: false }])
     }
 }
 
