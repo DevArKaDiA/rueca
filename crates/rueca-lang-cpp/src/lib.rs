@@ -101,7 +101,7 @@
 //! | `#define NAME value` | `Constant` | top level, global name; valueless include guards skipped |
 //! | `#define NAME(args) body` | `Function` | signature = the whole definition, continuation lines joined |
 //! | `TEST`, `TEST_F`, `TEST_P`, `TYPED_TEST`, `TYPED_TEST_P` | `Test`, `is_test` | references in the body belong to the test |
-//! | `TEST_CASE`, `TEST_CASE_METHOD`, `SCENARIO`, `TEMPLATE_TEST_CASE`, `TEST_CASE_FIXTURE` | `Test`, `is_test` | the grammar's missing `;` after the head is not counted as a parse error |
+//! | `TEST_CASE`, `TEST_CASE_METHOD`, `SCENARIO`, `TEMPLATE_TEST_CASE`, `TEST_CASE_FIXTURE` | `Test`, `is_test` | the head is parsed as `if (…)` (*Macros*); where that rewrite does not apply, the grammar's missing `;` after the head is not counted as a parse error |
 //!
 //! Namespaces are not definitions (they only qualify names), forward
 //! declarations (`class Foo;`) and local classes / lambdas inside function
@@ -139,7 +139,9 @@
 //! - `Call`: `f()` → `f`; `obj.m()` / `p->m()` → `m` with receiver
 //!   `$type:T` when the declared type of `obj` is known in the file (a
 //!   parameter, local, field of the enclosing class, or namespace-level
-//!   variable declared `T`, `T*`, `const T&`, `T x(…)`, `auto x = new T` /
+//!   variable declared `T`, `T*`, `const T&`, `T x(…)` (also `T x(a, b)`
+//!   with names as arguments, which the grammar reads as a function
+//!   declaration), `auto x = new T` /
 //!   `std::make_unique<T>()`; also `this->field.m()` and `a.b.m()` through
 //!   fields of classes of the file, and the return type of a callable of
 //!   the file: `Conn::open()->close()`, `make().m()`, `a.get().m()`),
@@ -186,7 +188,11 @@
 //! - `New`: `new T(…)` → `T` with its arity; a nested class `new
 //!   Outer::Inner` → `Inner` with receiver `$type:Outer`.
 //! - Constructions: `T x(…)`, `T x{…}` and `T{…}` are `Call`s of `T` (the
-//!   resolver adds the constructor, a member named like the class).
+//!   resolver adds the constructor, a member named like the class), also
+//!   `std::stringstream s(input);` whose arguments are locals (the most
+//!   vexing parse: the grammar reads a function declaration; the locals
+//!   query binds `s`). A name brought into a block from `std` (`using
+//!   std::get;`) is local there, never a project reference.
 //! - `Throw`: `throw E(…)` / `throw E{…}` → `E` (also a call).
 //! - `Type`: types of parameters, returns, fields, variables, casts,
 //!   `sizeof`, template arguments and base clauses; a qualified type gives
@@ -238,7 +244,9 @@
 //!    with all its branches when every branch is balanced, ends at a
 //!    statement boundary and the group stands where the grammar takes one;
 //!    branches dead whatever the target (`#if 0`, `#ifdef __cplusplus` in
-//!    C) are blanked. Otherwise the group **collapses** to one branch — the
+//!    C, Objective-C `__OBJC__` and C++/CLI `_MANAGED` / `__cplusplus_cli`
+//!    code, which neither grammar parses, and every branch after one known
+//!    to be taken: the `#else` of `#ifndef __OBJC__`) are blanked. Otherwise the group **collapses** to one branch — the
 //!    first whose condition is not known to be false, evaluated in
 //!    three-valued logic with `__cplusplus` per language, GCC / Clang
 //!    defined and Windows undefined — as a preprocessor with one
@@ -246,9 +254,14 @@
 //!    group inside an expression, an initializer list or an `if` without
 //!    braces. `#include` / `#define` lines inside initializer lists, enum
 //!    bodies or after an `=` (X-macro tables) are blanked. C test heads
-//!    before a block (`TEST(Group, Name) {`) become `if  (Group, Name)`,
-//!    and operators called by name in C++ expressions (`a.operator+(b)`)
-//!    become identifiers (`a.operator_(b)`), both read back from the
+//!    before a block (`TEST(Group, Name) {`) become `if  (Group, Name)`, and
+//!    so do C++ Catch2 / doctest heads at declaration level
+//!    (`TEST_CASE("title", "[tags]") {` → `if       ("title", "[tags]")`,
+//!    also on their own lines; the type lists of the template variants are
+//!    blanked), since the C++ grammar's recovery from a head without `;`
+//!    is unstable (one later construct can turn the whole file into one
+//!    error); operators called by name in C++ expressions (`a.operator+(b)`)
+//!    become identifiers (`a.operator_(b)`), all read back from the
 //!    original text.
 //! 3. **Error-driven repair** (`repair.rs`): the file is parsed and, at
 //!    each parse error, a targeted rewrite is tried — a type as a call
@@ -268,12 +281,20 @@
 //!    arguments, attribute macros around a declaration, `asm` macros and
 //!    labels, a subscripted macro call first in a block
 //!    (`MP_STATE_PORT(h)[i] = c;`), `using ns::MACRO(name);`, unnamed
-//!    pointer template parameters with a default (the table in
-//!    `repair.rs`) — or the `#if` group next
-//!    to the error collapses (keeping the branch with the error). A round
-//!    is kept only when the error count drops (each site is retried alone
-//!    when a whole round does not help), at most six rounds and 32 parses
-//!    per file.
+//!    pointer parameters with a default (`typename E<T>::type* = 0` gets a
+//!    name), `new T *[n]`, declarations and dangling operators as macro
+//!    arguments (`EXPECT_THROW(string s = f(), E)`, `BENCHMARK_CAPTURE(f,
+//!    a / -, …)`), declaration macros without `;`
+//!    (`NLOHMANN_JSON_SERIALIZE_ENUM(T, {…})`), a lower-case specifier
+//!    before a constructor (`really_inline S(…) : a(x) {}`), member pointer
+//!    types as template arguments (the table in `repair.rs`) — or the `#if`
+//!    group next to the error collapses (keeping the branch with the
+//!    error). An error spanning several lines (the grammar gave up on a
+//!    region, up to the whole file) is searched inside for the errors that
+//!    caused it; a `;` missing after a block is looked for in the block's
+//!    head. A round is kept only when the error count drops (each site is
+//!    retried alone when a whole round does not help), at most six rounds
+//!    and 32 parses per file.
 //!
 //! Collapses make one configuration per file: a macro a collapse assumed
 //! defined (or not) stays so for the groups after it. A goto label right
@@ -297,8 +318,11 @@
 //! (`redismodule.h`), fmt 37.1 → 5.7% (1.5% without the vendored
 //! GoogleTest / gMock). On the benchmark corpus (RFC 0004 health, gated
 //! repositories): C 12.0 → 3.1% (micropython 16.7 → 2.7%, Lua 14.7 →
-//! 1.5%), C++ 11.3 → 7.0% (nlohmann/json 11.6 → 4.9%, simdjson 11.7 →
-//! 5.0%; most of the rest is vendored GoogleTest and Objective-C).
+//! 1.5%), C++ 11.3 → 7.0% → 0.5% gated (vendored, copied and
+//! misdetected files out; 5.0% before this round: Catch2 4.7 → 0.4%,
+//! nlohmann/json 5.2 → 0.5%, simdjson 3.5 → 0.0%, fmt 16.1 → 3.6% at the
+//! old S1 commit, 1.5 → 0.0% at 12.1.0, yaml-cpp 2.7 → 0.0%; raw 7.0 →
+//! 3.4%).
 //!
 //! # Deviations and limitations
 //!
@@ -379,7 +403,7 @@ impl LanguagePack for CppPack {
         &[Language::Cpp, Language::C]
     }
     fn extractor_version(&self) -> u32 {
-        3
+        4
     }
     fn extract(
         &self,

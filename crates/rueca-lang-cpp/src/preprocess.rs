@@ -81,12 +81,17 @@ fn error_sites(tree: &Tree) -> Vec<Site> {
     let mut cursor = tree.walk();
     loop {
         let node = cursor.node();
+        // An ERROR over several lines (the grammar gave up on a whole
+        // region, up to the file) is no place for a targeted repair: the
+        // errors inside it are.
+        let wide = node.is_error() && node.end_position().row > node.start_position().row + 2;
         if node.is_error() || node.is_missing() {
             out.push(Site { start: node.start_byte(), end: node.end_byte(), in_body: in_body(node) });
             if out.len() >= MAX_SITES {
                 return out;
             }
-        } else if node.has_error() && cursor.goto_first_child() {
+        }
+        if (wide || !(node.is_error() || node.is_missing())) && node.has_error() && cursor.goto_first_child() {
             continue;
         }
         loop {
@@ -211,6 +216,73 @@ fn c_test_heads(text: &[u8]) -> Vec<Edit> {
     out
 }
 
+/// C++ Catch2 / doctest test heads before a block (`TEST_CASE("title",
+/// "[tags]")` + `{`) at declaration level become `if       ("title",
+/// "[tags]")`, as C test heads do: the C++ grammar reads such a head as a
+/// call missing its `;`, and that recovery is unstable (a head on its own
+/// lines, a type list or a later construct can turn the whole file into
+/// one error). The type lists of the template variants (`, int, float)`,
+/// `, (std::vector, Foo), (int, float))`) are blanked, since types are not
+/// expressions. The extractor reads the macro name from the original text.
+fn catch_test_heads(text: &[u8]) -> Vec<Edit> {
+    let toks = mask::lex_literals(text);
+    let levels = mask::declaration_levels(&toks, text);
+    let mut out = Vec::new();
+    for (i, t) in toks.iter().enumerate() {
+        let word = &text[t.start..t.end];
+        if t.kind != mask::Kind::Ident
+            || !levels[i]
+            || !crate::extract::CATCH_MACROS.iter().any(|m| m.as_bytes() == word)
+        {
+            continue;
+        }
+        let boundary =
+            i == 0 || matches!(toks[i - 1].kind, mask::Kind::Directive | mask::Kind::Punct(b';' | b'}' | b'{'));
+        let open = toks.get(i + 1).is_some_and(|n| n.kind == mask::Kind::Punct(b'('));
+        if !boundary || !open {
+            continue;
+        }
+        let Some(close) = mask::matching_paren(&toks, i + 1) else { continue };
+        // `TEST_CASE()` (an anonymous test) stays: `if ()` is no statement.
+        if close == i + 2 || !toks.get(close + 1).is_some_and(|n| n.kind == mask::Kind::Punct(b'{')) {
+            continue;
+        }
+        out.push(Edit { start: t.start, end: t.end, with: b"if" });
+        if !word.windows(8).any(|w| w == b"TEMPLATE") {
+            continue;
+        }
+        // Arguments at depth 0: keep the leading fixture name and string
+        // literals, blank from the comma before the first other one.
+        let mut depth = 0i32;
+        let mut args: Vec<(usize, usize)> = Vec::new();
+        let mut a = i + 2;
+        for (k, tok) in toks.iter().enumerate().take(close).skip(i + 2) {
+            match tok.kind {
+                mask::Kind::Punct(b'(' | b'[' | b'{') => depth += 1,
+                mask::Kind::Punct(b')' | b']' | b'}') => depth -= 1,
+                mask::Kind::Punct(b',') if depth == 0 => {
+                    args.push((a, k));
+                    a = k + 1;
+                }
+                _ => {}
+            }
+        }
+        args.push((a, close));
+        for (index, &(a, b)) in args.iter().enumerate() {
+            let arg = &toks[a..b];
+            let literal = !arg.is_empty() && arg.iter().all(|x| x.kind == mask::Kind::Literal);
+            let fixture = index == 0 && arg.len() == 1 && arg[0].kind == mask::Kind::Ident;
+            if !literal && !fixture {
+                if index > 0 && b > a {
+                    out.push(Edit { start: toks[a - 1].start, end: toks[close - 1].end, with: b"" });
+                }
+                break;
+            }
+        }
+    }
+    out
+}
+
 /// The text the grammar parses and its tree (module docs).
 pub(crate) fn prepare(source: &[u8], language: Language, budget: &Budget) -> Result<(Vec<u8>, Tree), ExtractError> {
     let grammar = grammar(language)?;
@@ -226,8 +298,9 @@ pub(crate) fn prepare(source: &[u8], language: Language, budget: &Budget) -> Res
         let heads = c_test_heads(&text);
         apply(&mut text, &heads);
     } else {
-        let calls = operator_calls(&text);
-        apply(&mut text, &calls);
+        let mut edits = operator_calls(&text);
+        edits.extend(catch_test_heads(&text));
+        apply(&mut text, &edits);
     }
     let mut tree = rueca_extract::parse(&grammar, &text, budget)?;
     let mut errors = count_errors(&tree);

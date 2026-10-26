@@ -22,9 +22,10 @@
 //!
 //! Conditions are evaluated in three-valued logic over `defined`, `!`,
 //! `&&`, `||`, parentheses and integer literals, with a small fixed define
-//! set ([`known`]): `__cplusplus` per language, GCC / Clang defined,
-//! Windows targets (`_WIN32`, `_MSC_VER`, …) undefined; every other name is
-//! unknown. Project `-D` flags are not used: extraction sees one file.
+//! set ([`known`]): `__cplusplus` per language, Objective-C (`__OBJC__`)
+//! and C++/CLI (`__cplusplus_cli`, `_MANAGED`) undefined (the grammars parse
+//! neither), GCC / Clang defined, Windows targets (`_WIN32`, `_MSC_VER`, …)
+//! undefined; every other name is unknown. Project `-D` flags are not used: extraction sees one file.
 //!
 //! The same group table serves the error-driven repair (`preprocess.rs`):
 //! a group next to a parse error is collapsed even when it looked
@@ -142,6 +143,11 @@ fn known(name: &[u8], assume: Assume) -> Option<bool> {
     match name {
         b"__cplusplus" => Some(assume.language == Language::Cpp),
         b"__STDC__" => Some(true),
+        // Other languages the grammars do not parse: Objective-C(++) and
+        // C++/CLI code is dead for both.
+        b"__OBJC__" | b"__OBJC2__" | b"__cplusplus_cli" | b"__cplusplus_winrt" | b"_MANAGED" | b"__CLR_VER" => {
+            Some(false)
+        }
         b"__GNUC__" | b"__clang__" if assume.target => Some(true),
         b"_WIN32" | b"_WIN64" | b"WIN32" | b"_WINDOWS" | b"_MSC_VER" | b"__MINGW32__" | b"__MINGW64__"
         | b"__CYGWIN__" | b"_MSC_FULL_VER"
@@ -369,6 +375,9 @@ fn single_macro(line: &[u8]) -> Option<(Vec<u8>, bool)> {
 pub(crate) fn groups(toks: &[Tok], src: &[u8], language: Language) -> Vec<Group> {
     let mut out: Vec<Group> = Vec::new();
     let mut stack: Vec<usize> = Vec::new();
+    // Per group: an earlier branch is known taken whatever the target
+    // (`#ifndef __OBJC__` … `#else`), so the later ones are dead.
+    let mut taken: Vec<bool> = Vec::new();
     for (i, t) in toks.iter().enumerate() {
         if t.kind != Kind::Directive {
             continue;
@@ -377,20 +386,24 @@ pub(crate) fn groups(toks: &[Tok], src: &[u8], language: Language) -> Vec<Group>
         match directive_kind(line) {
             Some("if") => {
                 stack.push(out.len());
+                let neutral = condition(line, Assume { language, target: false });
+                taken.push(neutral == Tri::True);
                 out.push(Group {
                     branches: vec![i],
                     end: toks.len(),
                     truth: vec![condition(line, Assume { language, target: true })],
-                    dead: vec![condition(line, Assume { language, target: false }) == Tri::False],
+                    dead: vec![neutral == Tri::False],
                     on: vec![single_macro(line)],
                 });
             }
             Some("elif" | "else") => {
                 if let Some(&g) = stack.last() {
+                    let neutral = condition(line, Assume { language, target: false });
                     out[g].branches.push(i);
                     out[g].truth.push(condition(line, Assume { language, target: true }));
-                    out[g].dead.push(condition(line, Assume { language, target: false }) == Tri::False);
+                    out[g].dead.push(neutral == Tri::False || taken[g]);
                     out[g].on.push(single_macro(line));
+                    taken[g] |= neutral == Tri::True;
                 }
             }
             Some("endif") => {
@@ -757,6 +770,12 @@ mod tests {
         // repository).
         let src = "#if 0\nint a;\n#else\nint b;\n#endif\n#ifdef _WIN32\nint w;\n#endif\n";
         assert_eq!(blanked(src, Language::C), "#if 0|#else|int b;|#endif|#ifdef _WIN32|int w;|#endif");
+        // Objective-C and C++/CLI branches are dead, so is every branch
+        // after one known to be taken.
+        let src = "#ifndef __OBJC__\nint a;\n#else\n[pool drain];\n#endif\n#if defined(_MANAGED)\nT^ r;\n#endif\n";
+        assert_eq!(blanked(src, Language::Cpp), "#ifndef __OBJC__|int a;|#else|#endif|#if defined(_MANAGED)|#endif");
+        let src = "#ifdef __cplusplus\nint a;\n#elif X\nint b;\n#else\nint c;\n#endif\n";
+        assert_eq!(blanked(src, Language::Cpp), "#ifdef __cplusplus|int a;|#elif X|#else|#endif");
         // Enumerators may end without a comma.
         let src = "enum E {\n  A,\n#ifdef X\n  B,\n#endif\n  C\n};\n";
         assert_eq!(blanked(src, Language::C), "enum E {|  A,|#ifdef X|  B,|#endif|  C|};");

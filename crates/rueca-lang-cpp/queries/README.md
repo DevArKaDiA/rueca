@@ -10,7 +10,7 @@ repository root carries the attributions.
 | File | Upstream | Commit | License | Use |
 |---|---|---|---|---|
 | `c-locals.scm` | [nvim-treesitter `runtime/queries/c/locals.scm`](https://github.com/nvim-treesitter/nvim-treesitter/blob/29212d826054bb2948fa9d3a99eca9bf6a050eb2/runtime/queries/c/locals.scm) | `29212d826054bb2948fa9d3a99eca9bf6a050eb2` | Apache-2.0 | Block scopes, parameter and variable bindings (C, and the base of C++) |
-| `cpp-locals.scm` | [nvim-treesitter `runtime/queries/cpp/locals.scm`](https://github.com/nvim-treesitter/nvim-treesitter/blob/29212d826054bb2948fa9d3a99eca9bf6a050eb2/runtime/queries/cpp/locals.scm) (`; inherits: c`) | `29212d826054bb2948fa9d3a99eca9bf6a050eb2` | Apache-2.0 | C++ additions: template type parameters, lambdas, `try` / `catch`, range `for`, structured bindings |
+| `cpp-locals.scm` | [nvim-treesitter `runtime/queries/cpp/locals.scm`](https://github.com/nvim-treesitter/nvim-treesitter/blob/29212d826054bb2948fa9d3a99eca9bf6a050eb2/runtime/queries/cpp/locals.scm) (`; inherits: c`) | `29212d826054bb2948fa9d3a99eca9bf6a050eb2` | Apache-2.0 | C++ additions: template type parameters, lambdas, `try` / `catch`, range `for`, structured bindings; Rueca's `T x(a, b);` read as a function declaration in a block, and `using std::get;` in a block |
 
 Sources considered and not used:
 
