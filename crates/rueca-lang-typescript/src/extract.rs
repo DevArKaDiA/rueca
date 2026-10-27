@@ -138,6 +138,38 @@ fn enclosing_class(n: Node<'_>) -> Option<usize> {
     None
 }
 
+/// A variable declarator being turned into definitions: `d` is the
+/// `variable_declarator`, `name_node` its name, `outer` the node whose extent
+/// is the definition span and `kind` the declaration keyword (`const`, `let`,
+/// `var`).
+#[derive(Clone, Copy)]
+struct VarDecl<'t, 'k> {
+    d: Node<'t>,
+    name_node: Node<'t>,
+    outer: Node<'t>,
+    kind: &'k str,
+    exported: bool,
+}
+
+/// Names bound by one import or re-export statement: value names, type-only
+/// names and the namespace alias.
+#[derive(Default)]
+struct ImportNames {
+    values: Vec<ImportedName>,
+    types: Vec<ImportedName>,
+    alias: Option<String>,
+}
+
+impl ImportNames {
+    fn add(&mut self, item: ImportedName, is_type: bool) {
+        if is_type {
+            self.types.push(item);
+        } else {
+            self.values.push(item);
+        }
+    }
+}
+
 /// What [`Extractor::walk`] does after [`Extractor::visit`].
 enum Next<'t> {
     Done,
@@ -202,53 +234,62 @@ pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], path: &str, max_depth: us
 fn module_bindings(root: Node<'_>, src: &[u8]) -> HashSet<String> {
     let mut out = HashSet::new();
     let text = |n: Node<'_>| text_of(n, src).into_owned();
-    let project = |spec: Option<Node<'_>>| {
-        spec.is_some_and(|s| {
-            let t = text(s);
-            let t = t.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-            t.starts_with('.') || t.starts_with('/') || t.starts_with("@/") || t.starts_with("~/") || t.starts_with('#')
-        })
-    };
     for st in named_children(root) {
         let st = if st.kind() == "export_statement" { field(st, "declaration").unwrap_or(st) } else { st };
         match st.kind() {
-            "import_statement" if project(field(st, "source")) => {
-                for clause in named_children(st).into_iter().filter(|c| c.kind() == "import_clause") {
-                    for c in named_children(clause) {
-                        match c.kind() {
-                            "identifier" => {
-                                out.insert(text(c));
-                            }
-                            "namespace_import" => out.extend(c.named_child(0).map(text)),
-                            "named_imports" => {
-                                for spec in named_children(c) {
-                                    out.extend(field(spec, "alias").or_else(|| field(spec, "name")).map(text));
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
+            "import_statement" if is_project_specifier(field(st, "source"), src) => import_bindings(st, src, &mut out),
             "function_declaration" | "generator_function_declaration" | "class_declaration" => {
                 out.extend(field(st, "name").map(text));
             }
             "lexical_declaration" | "variable_declaration" => {
-                for d in named_children(st) {
-                    let is_require = field(d, "value").map(unwrap_value).is_some_and(|v| {
-                        v.kind() == "call_expression"
-                            && field(v, "function").is_some_and(|f| matches!(text(f).as_str(), "require" | "import"))
-                            && project(field(v, "arguments").and_then(|a| a.named_child(0)))
-                    });
-                    if is_require && let Some(n) = field(d, "name").filter(|n| n.kind() == "identifier") {
-                        out.insert(text(n));
-                    }
-                }
+                out.extend(named_children(st).into_iter().filter_map(|d| project_require_binding(d, src)));
             }
             _ => {}
         }
     }
     out
+}
+
+/// A relative or aliased module specifier (`./x`, `/x`, `@/x`, `~/x`, `#x`).
+fn is_project_specifier(spec: Option<Node<'_>>, src: &[u8]) -> bool {
+    spec.is_some_and(|s| {
+        let t = text_of(s, src);
+        let t = t.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+        t.starts_with('.') || t.starts_with('/') || t.starts_with("@/") || t.starts_with("~/") || t.starts_with('#')
+    })
+}
+
+/// Local names bound by the clauses of an `import` statement.
+fn import_bindings(st: Node<'_>, src: &[u8], out: &mut HashSet<String>) {
+    let text = |n: Node<'_>| text_of(n, src).into_owned();
+    let clauses = named_children(st).into_iter().filter(|c| c.kind() == "import_clause");
+    for c in clauses.flat_map(named_children) {
+        match c.kind() {
+            "identifier" => {
+                out.insert(text(c));
+            }
+            "namespace_import" => out.extend(c.named_child(0).map(text)),
+            "named_imports" => {
+                for spec in named_children(c) {
+                    out.extend(field(spec, "alias").or_else(|| field(spec, "name")).map(text));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `x` of a declarator `x = require("./x")` / `x = import("./x")` with a
+/// project specifier.
+fn project_require_binding(d: Node<'_>, src: &[u8]) -> Option<String> {
+    let v = field(d, "value").map(unwrap_value)?;
+    let is_require = v.kind() == "call_expression"
+        && field(v, "function").is_some_and(|f| matches!(text_of(f, src).as_ref(), "require" | "import"))
+        && is_project_specifier(field(v, "arguments").and_then(|a| a.named_child(0)), src);
+    if !is_require {
+        return None;
+    }
+    field(d, "name").filter(|n| n.kind() == "identifier").map(|n| text_of(n, src).into_owned())
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +326,60 @@ fn span_from(start: Node<'_>, end: Node<'_>) -> Span {
         end_line: e.end_line,
         end_col: e.end_col,
     }
+}
+
+/// Flattens `a = b = c = value` into its targets and the final value;
+/// `None` when an assignment lacks a side or the chain is too long.
+fn assignment_chain(a: Node<'_>) -> Option<(Vec<Node<'_>>, Node<'_>)> {
+    let mut lefts = Vec::new();
+    let mut cur = a;
+    for _ in 0..16 {
+        let (Some(l), Some(r)) = (field(cur, "left"), field(cur, "right")) else { return None };
+        lefts.push(l);
+        if r.kind() != "assignment_expression" {
+            return Some((lefts, r));
+        }
+        cur = r;
+    }
+    None
+}
+
+/// The clauses of the `class_heritage` children of a class.
+fn heritage_clauses(n: Node<'_>) -> Vec<Node<'_>> {
+    named_children(n).into_iter().filter(|ch| ch.kind() == "class_heritage").flat_map(named_children).collect()
+}
+
+/// The `extends` expressions and the `implements` types of a class.
+fn heritage_nodes<'t>(n: Node<'t>) -> (Vec<Node<'t>>, Vec<Node<'t>>) {
+    let mut extends = Vec::new();
+    let mut implements = Vec::new();
+    for h in heritage_clauses(n) {
+        match h.kind() {
+            "extends_clause" => extends.extend(value_children(h)),
+            "implements_clause" => implements.extend(named_children(h)),
+            "comment" => {}
+            // JavaScript: `class_heritage` holds the expression directly.
+            _ => extends.push(h),
+        }
+    }
+    (extends, implements)
+}
+
+/// The children of `n` in its `value` field.
+fn value_children(n: Node<'_>) -> Vec<Node<'_>> {
+    let mut c = n.walk();
+    n.children(&mut c)
+        .enumerate()
+        .filter(|(i, _)| n.field_name_for_child(*i as u32) == Some("value"))
+        .map(|(_, v)| v)
+        .collect()
+}
+
+/// Node kinds that are whole statements inside a parse-error region.
+fn is_statement_kind(k: &str) -> bool {
+    k.ends_with("_statement")
+        || k.ends_with("_declaration")
+        || matches!(k, "internal_module" | "module" | "ambient_declaration")
 }
 
 fn is_function_value(n: Node<'_>) -> bool {
@@ -545,16 +640,29 @@ impl<'s> Extractor<'s> {
     fn push_type_params(&mut self, n: Node<'_>) -> usize {
         let mark = self.type_params.len();
         if let Some(tp) = field(n, "type_parameters") {
-            for p in named_children(tp) {
-                if p.kind() == "type_parameter"
-                    && let Some(name) = field(p, "name")
-                {
-                    let t = self.text(name);
-                    self.type_params.push(t);
-                }
-            }
+            self.push_type_parameter_names(tp);
         }
         mark
+    }
+
+    /// Pushes the names of the `type_parameter` children of `tp`.
+    fn push_type_parameter_names(&mut self, tp: Node<'_>) {
+        for p in named_children(tp) {
+            if p.kind() == "type_parameter"
+                && let Some(name) = field(p, "name")
+            {
+                let t = self.text(name);
+                self.type_params.push(t);
+            }
+        }
+    }
+
+    /// Pushes the text of `name` (if any) as a type parameter.
+    fn push_type_param(&mut self, name: Option<Node<'_>>) {
+        if let Some(name) = name {
+            let t = self.text(name);
+            self.type_params.push(t);
+        }
     }
 
     // -- walking --------------------------------------------------------------
@@ -664,41 +772,14 @@ impl<'s> Extractor<'s> {
             return;
         }
         let base = self.type_params.len();
-        let mut owner = ctx;
-        if !nested {
-            // The declaration the region continues, right before it.
-            let mut prev = n.prev_named_sibling();
-            while let Some(p) = prev.filter(|p| p.kind() == "comment") {
-                prev = p.prev_named_sibling();
-            }
-            if let Some(p) = prev {
-                owner = self.fragment_owner(p, ctx);
-            }
-        }
+        let mut owner = if nested { ctx } else { self.region_owner(n, ctx) };
         for c in named_children(n) {
             let k = c.kind();
             if k == "comment" {
                 continue;
             }
-            let statement = k.ends_with("_statement")
-                || k.ends_with("_declaration")
-                || matches!(k, "internal_module" | "module" | "ambient_declaration");
-            if !statement {
-                match k {
-                    "ERROR" => self.error_region(c, owner, depth + 1, true),
-                    "type_parameters" => {
-                        for p in named_children(c) {
-                            if p.kind() == "type_parameter"
-                                && let Some(name) = field(p, "name")
-                            {
-                                let t = self.text(name);
-                                self.type_params.push(t);
-                            }
-                        }
-                        self.walk(c, owner, depth + 1);
-                    }
-                    _ => self.walk(c, owner, depth + 1),
-                }
+            if !is_statement_kind(k) {
+                self.error_fragment(c, owner, depth);
                 continue;
             }
             self.type_params.truncate(base);
@@ -707,6 +788,31 @@ impl<'s> Extractor<'s> {
         }
         if !nested {
             self.type_params.truncate(base);
+        }
+    }
+
+    /// The context of the declaration a top-level error region continues
+    /// (the statement right before it, comments skipped).
+    fn region_owner(&mut self, n: Node<'_>, ctx: Ctx) -> Ctx {
+        let mut prev = n.prev_named_sibling();
+        while let Some(p) = prev.filter(|p| p.kind() == "comment") {
+            prev = p.prev_named_sibling();
+        }
+        match prev {
+            Some(p) => self.fragment_owner(p, ctx),
+            None => ctx,
+        }
+    }
+
+    /// One non-statement child `c` of an error region, attributed to `owner`.
+    fn error_fragment(&mut self, c: Node<'_>, owner: Ctx, depth: usize) {
+        match c.kind() {
+            "ERROR" => self.error_region(c, owner, depth + 1, true),
+            "type_parameters" => {
+                self.push_type_parameter_names(c);
+                self.walk(c, owner, depth + 1);
+            }
+            _ => self.walk(c, owner, depth + 1),
         }
     }
 
@@ -785,42 +891,15 @@ impl<'s> Extractor<'s> {
                 Next::Done
             }
             "new_expression" => {
-                if let Some(c) = field(n, "constructor")
-                    && !self.builtin_root(c)
-                    && let Some((name, recv)) = self.callee_parts(c)
-                {
-                    if recv.is_none() && self.is_local(&name) {
-                        self.local_calls.push(self.refs.len());
-                    }
-                    self.push_ref(RefKind::New, name, recv, ctx.parent, span_of(n));
-                }
+                self.new_ref(n, ctx);
                 Next::Children
             }
             "throw_statement" => {
-                if let Some(e) = n.named_child(0)
-                    && e.kind() == "new_expression"
-                    && let Some(c) = field(e, "constructor")
-                    && !self.builtin_root(c)
-                    && let Some((name, recv)) = self.callee_parts(c)
-                {
-                    self.push_ref(RefKind::Throw, name, recv, ctx.parent, span_of(e));
-                }
+                self.throw_ref(n, ctx);
                 Next::Children
             }
             "jsx_opening_element" | "jsx_self_closing_element" => {
-                if let Some(tag) = field(n, "name") {
-                    let parts = match tag.kind() {
-                        "identifier" => {
-                            let t = self.text(tag);
-                            if t.starts_with(|c: char| c.is_ascii_uppercase()) { Some((t, None)) } else { None }
-                        }
-                        "member_expression" | "nested_identifier" => self.callee_parts(tag),
-                        _ => None,
-                    };
-                    if let Some((name, recv)) = parts {
-                        self.push_ref(RefKind::Call, name, recv, ctx.parent, span_of(n));
-                    }
-                }
+                self.jsx_ref(n, ctx);
                 Next::Children
             }
             "type_identifier" | "nested_type_identifier" => {
@@ -834,17 +913,11 @@ impl<'s> Extractor<'s> {
                 field(n, "type_arguments").map_or(Next::Done, Next::Child)
             }
             "mapped_type_clause" => {
-                if let Some(name) = field(n, "name") {
-                    let t = self.text(name);
-                    self.type_params.push(t);
-                }
+                self.push_type_param(field(n, "name"));
                 Next::Children
             }
             "infer_type" => {
-                if let Some(name) = n.named_child(0) {
-                    let t = self.text(name);
-                    self.type_params.push(t);
-                }
+                self.push_type_param(n.named_child(0));
                 Next::Done
             }
             "arguments" | "array" => {
@@ -854,29 +927,16 @@ impl<'s> Extractor<'s> {
                 Next::Children
             }
             "return_statement" | "spread_element" | "jsx_expression" => {
-                if let Some(e) = n.named_child(0) {
-                    self.read(e, ctx, depth);
-                }
+                self.read_opt(n.named_child(0), ctx, depth);
                 Next::Children
             }
             "assignment_expression" | "augmented_assignment_expression" => {
-                if let Some(l) = field(n, "left")
-                    && l.kind() == "member_expression"
-                    && field(l, "object").is_some_and(|o| o.kind() == "this")
-                    && let Some(p) = field(l, "property")
-                {
-                    let name = self.text(p);
-                    self.push_ref(RefKind::Write, name, Some("this".into()), ctx.parent, span_of(l));
-                }
-                if let Some(r) = field(n, "right") {
-                    self.read(r, ctx, depth);
-                }
+                self.this_write(n, ctx);
+                self.read_opt(field(n, "right"), ctx, depth);
                 Next::Children
             }
             "pair" => {
-                if let Some(v) = field(n, "value") {
-                    self.read(v, ctx, depth);
-                }
+                self.read_opt(field(n, "value"), ctx, depth);
                 Next::Children
             }
             "shorthand_property_identifier" => {
@@ -890,6 +950,60 @@ impl<'s> Extractor<'s> {
             // `type_parameter`: the name is a binding, not a reference (the
             // `name` field is skipped by `walk_children`).
             _ => Next::Children,
+        }
+    }
+
+    /// `new C(…)`: a `New` reference to `C` unless it is a builtin.
+    fn new_ref(&mut self, n: Node<'_>, ctx: Ctx) {
+        let Some(c) = field(n, "constructor") else { return };
+        if self.builtin_root(c) {
+            return;
+        }
+        let Some((name, recv)) = self.callee_parts(c) else { return };
+        if recv.is_none() && self.is_local(&name) {
+            self.local_calls.push(self.refs.len());
+        }
+        self.push_ref(RefKind::New, name, recv, ctx.parent, span_of(n));
+    }
+
+    /// `throw new E(…)`: a `Throw` reference to `E` unless it is a builtin.
+    fn throw_ref(&mut self, n: Node<'_>, ctx: Ctx) {
+        if let Some(e) = n.named_child(0)
+            && e.kind() == "new_expression"
+            && let Some(c) = field(e, "constructor")
+            && !self.builtin_root(c)
+            && let Some((name, recv)) = self.callee_parts(c)
+        {
+            self.push_ref(RefKind::Throw, name, recv, ctx.parent, span_of(e));
+        }
+    }
+
+    /// `<Component …>` / `<ns.Component …>`: a `Call` of the component
+    /// (lowercase tags are intrinsic elements).
+    fn jsx_ref(&mut self, n: Node<'_>, ctx: Ctx) {
+        let Some(tag) = field(n, "name") else { return };
+        let parts = match tag.kind() {
+            "identifier" => {
+                let t = self.text(tag);
+                if t.starts_with(|c: char| c.is_ascii_uppercase()) { Some((t, None)) } else { None }
+            }
+            "member_expression" | "nested_identifier" => self.callee_parts(tag),
+            _ => None,
+        };
+        if let Some((name, recv)) = parts {
+            self.push_ref(RefKind::Call, name, recv, ctx.parent, span_of(n));
+        }
+    }
+
+    /// `this.x = …` / `this.x += …`: a `Write` of `x` on `this`.
+    fn this_write(&mut self, n: Node<'_>, ctx: Ctx) {
+        if let Some(l) = field(n, "left")
+            && l.kind() == "member_expression"
+            && field(l, "object").is_some_and(|o| o.kind() == "this")
+            && let Some(p) = field(l, "property")
+        {
+            let name = self.text(p);
+            self.push_ref(RefKind::Write, name, Some("this".into()), ctx.parent, span_of(l));
         }
     }
 
@@ -1225,13 +1339,9 @@ impl<'s> Extractor<'s> {
             return self.class_members(n, None, ctx, depth);
         };
         let inner = Ctx { parent: Some(id), top: false, ambient: false };
-        for d in export_decorators {
-            self.walk(*d, inner, depth + 1);
-        }
-        for d in children(n) {
-            if d.kind() == "decorator" {
-                self.walk(d, inner, depth + 1);
-            }
+        let own_decorators = children(n).into_iter().filter(|d| d.kind() == "decorator");
+        for d in export_decorators.iter().copied().chain(own_decorators) {
+            self.walk(d, inner, depth + 1);
         }
         let mark = self.push_type_params(n);
         if let Some(tp) = field(n, "type_parameters") {
@@ -1245,23 +1355,24 @@ impl<'s> Extractor<'s> {
                 self.walk(*e, inner, depth + 1);
             }
         }
-        for ch in named_children(n) {
-            if ch.kind() == "class_heritage" {
-                for h in named_children(ch) {
-                    match h.kind() {
-                        "extends_clause" => {
-                            if let Some(ta) = field(h, "type_arguments") {
-                                self.walk(ta, inner, depth + 2);
-                            }
-                        }
-                        "implements_clause" => self.walk(h, inner, depth + 2),
-                        _ => {}
-                    }
-                }
-            }
-        }
+        self.heritage_type_refs(n, inner, depth);
         self.class_members(n, Some(id), inner, depth);
         self.type_params.truncate(mark);
+    }
+
+    /// Type arguments of `extends` and the `implements` clauses of a class.
+    fn heritage_type_refs(&mut self, n: Node<'_>, inner: Ctx, depth: usize) {
+        for h in heritage_clauses(n) {
+            match h.kind() {
+                "extends_clause" => {
+                    if let Some(ta) = field(h, "type_arguments") {
+                        self.walk(ta, inner, depth + 2);
+                    }
+                }
+                "implements_clause" => self.walk(h, inner, depth + 2),
+                _ => {}
+            }
+        }
     }
 
     /// Creates the `Class` definition; returns its id and the `extends`
@@ -1276,18 +1387,7 @@ impl<'s> Extractor<'s> {
         ctx: Ctx,
         exported: bool,
     ) -> Option<(u32, Vec<Node<'t>>)> {
-        let own_name = field(n, "name");
-        let (name, name_span) = match (name_override, own_name) {
-            (Some(o), _) => o,
-            (None, Some(nn)) => (self.text(nn), span_of(nn)),
-            (None, None) => {
-                if n.kind() == "class" && outer.id() == n.id() {
-                    return None;
-                }
-                let kw = children(n).into_iter().find(|c| c.kind() == "class").unwrap_or(n);
-                ("default".to_string(), span_of(kw))
-            }
-        };
+        let (name, name_span) = self.class_name(n, outer, name_override)?;
         let own_decorators: Vec<Node<'_>> = children(n).into_iter().filter(|c| c.kind() == "decorator").collect();
         let mut nd = NewDef::new(Label::Class, name, span_of(outer), name_span);
         nd.signature = self.until_body(n);
@@ -1296,28 +1396,7 @@ impl<'s> Extractor<'s> {
         for d in export_decorators.iter().chain(own_decorators.iter()) {
             nd.decorators.push(self.decorator_text(*d));
         }
-        let mut extends_nodes = Vec::new();
-        let mut implements_nodes = Vec::new();
-        for ch in named_children(n) {
-            if ch.kind() == "class_heritage" {
-                for h in named_children(ch) {
-                    match h.kind() {
-                        "extends_clause" => {
-                            let mut c = h.walk();
-                            for (i, v) in h.children(&mut c).enumerate() {
-                                if h.field_name_for_child(i as u32) == Some("value") {
-                                    extends_nodes.push(v);
-                                }
-                            }
-                        }
-                        "implements_clause" => implements_nodes.extend(named_children(h)),
-                        "comment" => {}
-                        // JavaScript: `class_heritage` holds the expression directly.
-                        _ => extends_nodes.push(h),
-                    }
-                }
-            }
-        }
+        let (extends_nodes, implements_nodes) = heritage_nodes(n);
         for e in &extends_nodes {
             nd.bases.push(self.collapsed(*e, MAX_RECEIVER));
         }
@@ -1325,6 +1404,28 @@ impl<'s> Extractor<'s> {
             nd.implements.push(self.type_base_text(*t));
         }
         Some((self.add_def(nd, ctx.parent), extends_nodes))
+    }
+
+    /// Name and name span of a class: `name_override`, its own name, or
+    /// `default` (`export default class {}`); `None` for an anonymous class
+    /// expression.
+    fn class_name(
+        &self,
+        n: Node<'_>,
+        outer: Node<'_>,
+        name_override: Option<(String, Span)>,
+    ) -> Option<(String, Span)> {
+        if let Some(o) = name_override {
+            return Some(o);
+        }
+        if let Some(nn) = field(n, "name") {
+            return Some((self.text(nn), span_of(nn)));
+        }
+        if n.kind() == "class" && outer.id() == n.id() {
+            return None;
+        }
+        let kw = children(n).into_iter().find(|c| c.kind() == "class").unwrap_or(n);
+        Some(("default".to_string(), span_of(kw)))
     }
 
     /// Class body members. `class_id` is `None` for anonymous class expressions.
@@ -1516,31 +1617,12 @@ impl<'s> Extractor<'s> {
             return;
         }
 
-        let ident = name_node.kind() == "identifier";
-        if ident && let Some(v) = inner_value {
-            if is_function_value(v) {
-                let mut nd = NewDef::new(Label::Function, self.text(name_node), span_of(outer), span_of(name_node));
-                nd.signature = self.var_fn_signature(kind, d, v);
-                nd.doc = self.doc_before(outer);
-                nd.exported = exported;
-                let id = self.add_def(nd, ctx.parent);
-                if let Some(t) = field(d, "type") {
-                    self.walk(t, Ctx { parent: Some(id), ..ctx }, depth + 1);
-                }
-                return self.function_body(v, Some(id), ctx, depth);
-            }
-            if v.kind() == "class" {
-                let name = (self.text(name_node), span_of(name_node));
-                return self.class(v, outer, &[], Some(name), ctx, depth, exported);
-            }
-            if v.kind() == "call_expression" && self.is_function_wrapper(v) {
-                let mut nd = NewDef::new(Label::Function, self.text(name_node), span_of(outer), span_of(name_node));
-                nd.signature = self.header(d.start_byte(), d.end_byte(), &[], 80).map(|s| format!("{kind} {s}"));
-                nd.doc = self.doc_before(outer);
-                nd.exported = exported;
-                let id = self.add_def(nd, ctx.parent);
-                return self.walk(v, Ctx { parent: Some(id), ..ctx }, depth + 1);
-            }
+        let decl = VarDecl { d, name_node, outer, kind, exported };
+        if name_node.kind() == "identifier"
+            && let Some(v) = inner_value
+            && self.named_value(decl, v, ctx, depth)
+        {
+            return;
         }
 
         if !ctx.top {
@@ -1554,8 +1636,46 @@ impl<'s> Extractor<'s> {
             }
             return;
         }
+        self.module_variable(decl, value, ctx, depth);
+    }
 
-        // Module-level variables become definitions.
+    /// `name = <function>`, `name = class {}`, `name = forwardRef(...)`: the
+    /// definition the value makes. Returns false for other values.
+    fn named_value(&mut self, decl: VarDecl<'_, '_>, v: Node<'_>, ctx: Ctx, depth: usize) -> bool {
+        let VarDecl { d, name_node, outer, kind, exported } = decl;
+        if is_function_value(v) {
+            let mut nd = NewDef::new(Label::Function, self.text(name_node), span_of(outer), span_of(name_node));
+            nd.signature = self.var_fn_signature(kind, d, v);
+            nd.doc = self.doc_before(outer);
+            nd.exported = exported;
+            let id = self.add_def(nd, ctx.parent);
+            if let Some(t) = field(d, "type") {
+                self.walk(t, Ctx { parent: Some(id), ..ctx }, depth + 1);
+            }
+            self.function_body(v, Some(id), ctx, depth);
+            return true;
+        }
+        if v.kind() == "class" {
+            let name = (self.text(name_node), span_of(name_node));
+            self.class(v, outer, &[], Some(name), ctx, depth, exported);
+            return true;
+        }
+        if v.kind() == "call_expression" && self.is_function_wrapper(v) {
+            let mut nd = NewDef::new(Label::Function, self.text(name_node), span_of(outer), span_of(name_node));
+            nd.signature = self.header(d.start_byte(), d.end_byte(), &[], 80).map(|s| format!("{kind} {s}"));
+            nd.doc = self.doc_before(outer);
+            nd.exported = exported;
+            let id = self.add_def(nd, ctx.parent);
+            self.walk(v, Ctx { parent: Some(id), ..ctx }, depth + 1);
+            return true;
+        }
+        false
+    }
+
+    /// Module-level variables become definitions (one per bound name).
+    fn module_variable(&mut self, decl: VarDecl<'_, '_>, value: Option<Node<'_>>, ctx: Ctx, depth: usize) {
+        let VarDecl { d, name_node, outer, kind, exported } = decl;
+        let ident = name_node.kind() == "identifier";
         let exported = exported || value.is_some_and(|v| self.assigns_module_exports(v));
         let mut names: Vec<Node<'_>> = Vec::new();
         if ident {
@@ -1583,23 +1703,37 @@ impl<'s> Extractor<'s> {
             self.walk(t, vctx, depth + 1);
         }
         let Some(v) = value else { return };
+        let owner = if ident { first_id } else { None };
+        self.module_variable_value(v, owner, vctx, depth + 1);
+    }
+
+    /// The value of a module-level variable: an object literal assigned to a
+    /// plain name owns its methods (`owner`); other values are read and walked.
+    fn module_variable_value(&mut self, v: Node<'_>, owner: Option<u32>, vctx: Ctx, depth: usize) {
         let iv = unwrap_value(v);
-        if ident
-            && iv.kind() == "object"
-            && let Some(owner) = first_id
-        {
-            self.object_members(iv, Some(owner), vctx, depth + 1);
-            // Wrappers like `as const` / `satisfies T` still carry type refs.
-            if iv.id() != v.id() {
-                for ch in named_children(v) {
-                    if ch.id() != iv.id() {
-                        self.walk(ch, vctx, depth + 1);
-                    }
-                }
+        match owner {
+            Some(owner) if iv.kind() == "object" => {
+                self.object_members(iv, Some(owner), vctx, depth);
+                // Wrappers like `as const` / `satisfies T` still carry type refs.
+                self.walk_wrappers(v, iv, vctx, depth);
             }
-        } else {
-            self.read(v, vctx, depth + 1);
-            self.walk(v, vctx, depth + 1);
+            _ => {
+                self.read(v, vctx, depth);
+                self.walk(v, vctx, depth);
+            }
+        }
+    }
+
+    /// Walks the children of `value` other than `inner`, the value it wraps
+    /// (`x as const`, `x satisfies T`); nothing when `value` is not a wrapper.
+    fn walk_wrappers(&mut self, value: Node<'_>, inner: Node<'_>, ctx: Ctx, depth: usize) {
+        if inner.id() == value.id() {
+            return;
+        }
+        for ch in named_children(value) {
+            if ch.id() != inner.id() {
+                self.walk(ch, ctx, depth);
+            }
         }
     }
 
@@ -1662,45 +1796,57 @@ impl<'s> Extractor<'s> {
         if depth >= self.max_depth {
             return;
         }
-        let exported = owner.is_some_and(|o| self.defs[o as usize].exported);
-        let label = if owner.is_some() { Label::Method } else { Label::Function };
         for m in named_children(obj) {
             match m.kind() {
-                "method_definition" => {
-                    let Some(name_node) = field(m, "name") else { continue };
-                    let name = self.member_name(name_node);
-                    if (has_token(m, "get") || has_token(m, "set")) && !self.accessors.insert((owner, name.clone())) {
-                        self.function_body(m, owner, ctx, depth);
-                        continue;
-                    }
-                    let mut nd = NewDef::new(label, name, span_of(m), span_of(name_node));
-                    nd.signature = self.fn_signature(m);
-                    nd.doc = self.doc_before(m);
-                    nd.exported = exported;
-                    let id = self.add_def(nd, owner);
-                    self.function_body(m, Some(id), ctx, depth);
-                }
-                "pair" => {
-                    let (Some(k), Some(v)) = (field(m, "key"), field(m, "value")) else { continue };
-                    let fv = unwrap_value(v);
-                    if is_function_value(fv) {
-                        let mut nd = NewDef::new(label, self.member_name(k), span_of(m), span_of(k));
-                        let head = self.header(m.start_byte(), v.start_byte(), &[], MAX_SIGNATURE);
-                        nd.signature = match (head, self.fn_signature(fv)) {
-                            (Some(h), Some(t)) => Some(truncate_chars(format!("{h} {t}"), MAX_SIGNATURE)),
-                            (h, t) => h.or(t),
-                        };
-                        nd.doc = self.doc_before(m);
-                        nd.exported = exported;
-                        let id = self.add_def(nd, owner);
-                        self.function_body(fv, Some(id), ctx, depth);
-                    } else {
-                        self.walk(m, ctx, depth + 1);
-                    }
-                }
+                "method_definition" => self.object_method(m, owner, ctx, depth),
+                "pair" => self.object_pair(m, owner, ctx, depth),
                 _ => self.walk(m, ctx, depth + 1),
             }
         }
+    }
+
+    /// Label and exported flag of the members of an object literal owned by
+    /// `owner` (see [`Extractor::object_members`]).
+    fn object_member_kind(&self, owner: Option<u32>) -> (Label, bool) {
+        let exported = owner.is_some_and(|o| self.defs[o as usize].exported);
+        let label = if owner.is_some() { Label::Method } else { Label::Function };
+        (label, exported)
+    }
+
+    /// `{ m() {} }` in an object literal.
+    fn object_method(&mut self, m: Node<'_>, owner: Option<u32>, ctx: Ctx, depth: usize) {
+        let Some(name_node) = field(m, "name") else { return };
+        let name = self.member_name(name_node);
+        if (has_token(m, "get") || has_token(m, "set")) && !self.accessors.insert((owner, name.clone())) {
+            return self.function_body(m, owner, ctx, depth);
+        }
+        let (label, exported) = self.object_member_kind(owner);
+        let mut nd = NewDef::new(label, name, span_of(m), span_of(name_node));
+        nd.signature = self.fn_signature(m);
+        nd.doc = self.doc_before(m);
+        nd.exported = exported;
+        let id = self.add_def(nd, owner);
+        self.function_body(m, Some(id), ctx, depth);
+    }
+
+    /// `{ k: v }` in an object literal: a definition when `v` is a function.
+    fn object_pair(&mut self, m: Node<'_>, owner: Option<u32>, ctx: Ctx, depth: usize) {
+        let (Some(k), Some(v)) = (field(m, "key"), field(m, "value")) else { return };
+        let fv = unwrap_value(v);
+        if !is_function_value(fv) {
+            return self.walk(m, ctx, depth + 1);
+        }
+        let (label, exported) = self.object_member_kind(owner);
+        let mut nd = NewDef::new(label, self.member_name(k), span_of(m), span_of(k));
+        let head = self.header(m.start_byte(), v.start_byte(), &[], MAX_SIGNATURE);
+        nd.signature = match (head, self.fn_signature(fv)) {
+            (Some(h), Some(t)) => Some(truncate_chars(format!("{h} {t}"), MAX_SIGNATURE)),
+            (h, t) => h.or(t),
+        };
+        nd.doc = self.doc_before(m);
+        nd.exported = exported;
+        let id = self.add_def(nd, owner);
+        self.function_body(fv, Some(id), ctx, depth);
     }
 
     /// `module.exports = ...` / `exports = module.exports = ...` anywhere in an
@@ -1731,99 +1877,109 @@ impl<'s> Extractor<'s> {
     /// `X.prototype.y = function`, `X.y = function`. Returns false when the
     /// statement is not one of these (the caller walks it normally).
     fn top_assignment(&mut self, a: Node<'_>, ctx: Ctx, depth: usize) -> bool {
-        // Flatten `a = b = c = value`.
-        let mut lefts = Vec::new();
-        let mut cur = a;
-        let mut value = None;
-        for _ in 0..16 {
-            let (Some(l), Some(r)) = (field(cur, "left"), field(cur, "right")) else { return false };
-            lefts.push(l);
-            if r.kind() == "assignment_expression" {
-                cur = r;
-            } else {
-                value = Some(r);
-                break;
-            }
-        }
-        let Some(value) = value else { return false };
+        let Some((lefts, value)) = assignment_chain(a) else { return false };
         let v = unwrap_value(value);
         let lefts_text: Vec<String> = lefts.iter().map(|l| self.text(*l)).collect();
-        let to_module = lefts_text.iter().any(|t| t == "module.exports" || t == "exports");
-
-        if to_module {
-            match v.kind() {
-                "identifier" => {
-                    let t = self.text(v);
-                    self.export_names.insert(t.clone());
-                    if lefts_text.iter().any(|t| t == "module.exports") {
-                        // `import x from "./this"` binds `module.exports` (ESM interop).
-                        self.self_reexport(t, "default".into(), span_of(a));
-                    }
-                    return false;
-                }
-                "object" => {
-                    for m in named_children(v) {
-                        match m.kind() {
-                            "shorthand_property_identifier" => {
-                                let t = self.text(m);
-                                self.export_names.insert(t);
-                            }
-                            "pair" => {
-                                if let Some(pv) = field(m, "value")
-                                    && pv.kind() == "identifier"
-                                {
-                                    let t = self.text(pv);
-                                    self.export_names.insert(t);
-                                } else if let (Some(k), Some(pv)) = (field(m, "key"), field(m, "value"))
-                                    && is_function_value(unwrap_value(pv))
-                                {
-                                    // `{ stop: () => {} }`: the top-level function `stop`.
-                                    let t = self.member_name(k);
-                                    self.export_names.insert(t);
-                                }
-                            }
-                            "method_definition" => {
-                                if let Some(k) = field(m, "name") {
-                                    let t = self.member_name(k);
-                                    self.export_names.insert(t);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    return false;
-                }
-                k if is_function_value(v) || k == "class" => {
-                    let name_node = field(v, "name");
-                    let (name, name_span) = match name_node {
-                        Some(nn) => (self.text(nn), span_of(nn)),
-                        None => ("default".to_string(), span_of(lefts[0])),
-                    };
-                    if name != "default" && lefts_text.iter().any(|t| t == "module.exports") {
-                        // `require("./this")` / `import x from "./this"` bind it.
-                        self.self_reexport(name.clone(), "default".into(), span_of(a));
-                    }
-                    if k == "class" {
-                        self.class(v, a, &[], Some((name, name_span)), ctx, depth, true);
-                    } else {
-                        let mut nd = NewDef::new(Label::Function, name, span_of(a), name_span);
-                        nd.signature = self.fn_signature(v);
-                        nd.doc = a.parent().and_then(|p| self.doc_before(p));
-                        nd.exported = true;
-                        let id = self.add_def(nd, ctx.parent);
-                        self.function_body(v, Some(id), ctx, depth);
-                    }
-                    return true;
-                }
-                _ => return false,
-            }
+        if lefts_text.iter().any(|t| t == "module.exports" || t == "exports") {
+            let to_module_exports = lefts_text.iter().any(|t| t == "module.exports");
+            return self.module_exports_assignment(a, lefts[0], to_module_exports, v, ctx, depth);
         }
-
         // `exports.x = ...`, `module.exports.x = ...`, `X.prototype.y = ...`, `X.y = ...`
-        if lefts.len() != 1 {
-            return false;
+        match lefts.as_slice() {
+            [l] => self.member_assignment(a, *l, v, ctx, depth),
+            _ => false,
         }
-        let l = lefts[0];
+    }
+
+    /// `module.exports = v` / `exports = v` (`first_left` is the leftmost
+    /// target; `to_module_exports` when one target is `module.exports`).
+    fn module_exports_assignment(
+        &mut self,
+        a: Node<'_>,
+        first_left: Node<'_>,
+        to_module_exports: bool,
+        v: Node<'_>,
+        ctx: Ctx,
+        depth: usize,
+    ) -> bool {
+        match v.kind() {
+            "identifier" => {
+                let t = self.text(v);
+                self.export_names.insert(t.clone());
+                if to_module_exports {
+                    // `import x from "./this"` binds `module.exports` (ESM interop).
+                    self.self_reexport(t, "default".into(), span_of(a));
+                }
+                false
+            }
+            "object" => {
+                for m in named_children(v) {
+                    if let Some(t) = self.exported_member_name(m) {
+                        self.export_names.insert(t);
+                    }
+                }
+                false
+            }
+            k if is_function_value(v) || k == "class" => {
+                self.module_exports_definition(a, first_left, to_module_exports, v, ctx, depth);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The top-level name a member of `module.exports = { ... }` exports:
+    /// `{ a }`, `{ k: a }`, `{ stop: () => {} }`, `{ start() {} }`.
+    fn exported_member_name(&self, m: Node<'_>) -> Option<String> {
+        match m.kind() {
+            "shorthand_property_identifier" => Some(self.text(m)),
+            "pair" => {
+                let pv = field(m, "value")?;
+                if pv.kind() == "identifier" {
+                    return Some(self.text(pv));
+                }
+                // `{ stop: () => {} }`: the top-level function `stop`.
+                let k = field(m, "key")?;
+                is_function_value(unwrap_value(pv)).then(|| self.member_name(k))
+            }
+            "method_definition" => field(m, "name").map(|k| self.member_name(k)),
+            _ => None,
+        }
+    }
+
+    /// `module.exports = function f() {}` / `module.exports = class C {}`:
+    /// an exported definition named like the value (else `default`).
+    fn module_exports_definition(
+        &mut self,
+        a: Node<'_>,
+        first_left: Node<'_>,
+        to_module_exports: bool,
+        v: Node<'_>,
+        ctx: Ctx,
+        depth: usize,
+    ) {
+        let (name, name_span) = match field(v, "name") {
+            Some(nn) => (self.text(nn), span_of(nn)),
+            None => ("default".to_string(), span_of(first_left)),
+        };
+        if name != "default" && to_module_exports {
+            // `require("./this")` / `import x from "./this"` bind it.
+            self.self_reexport(name.clone(), "default".into(), span_of(a));
+        }
+        if v.kind() == "class" {
+            return self.class(v, a, &[], Some((name, name_span)), ctx, depth, true);
+        }
+        let mut nd = NewDef::new(Label::Function, name, span_of(a), name_span);
+        nd.signature = self.fn_signature(v);
+        nd.doc = a.parent().and_then(|p| self.doc_before(p));
+        nd.exported = true;
+        let id = self.add_def(nd, ctx.parent);
+        self.function_body(v, Some(id), ctx, depth);
+    }
+
+    /// `exports.x = ...`, `module.exports.x = ...`, `X.prototype.y = function`,
+    /// `X.y = function` (`l` is the single assignment target).
+    fn member_assignment(&mut self, a: Node<'_>, l: Node<'_>, v: Node<'_>, ctx: Ctx, depth: usize) -> bool {
         if l.kind() != "member_expression" {
             return false;
         }
@@ -1832,47 +1988,22 @@ impl<'s> Extractor<'s> {
             return false;
         }
         let obj_text = self.text(obj);
-        let name = self.text(prop);
-        let doc = a.parent().and_then(|p| self.doc_before(p));
-        let stmt_span = a.parent().map_or(span_of(a), span_of);
         if obj_text == "exports" || obj_text == "module.exports" {
-            if is_function_value(v) {
-                let mut nd = NewDef::new(Label::Function, name, stmt_span, span_of(prop));
-                nd.signature = self.fn_signature(v).map(|t| format!("{} = {}", self.text(l), t));
-                nd.doc = doc;
-                nd.exported = true;
-                let id = self.add_def(nd, ctx.parent);
-                self.function_body(v, Some(id), ctx, depth);
-                return true;
-            }
-            if v.kind() == "identifier" {
-                let t = self.text(v);
-                self.export_names.insert(t);
-            }
-            return false;
+            return self.exports_member_assignment(a, l, prop, v, ctx, depth);
         }
         if !is_function_value(v) {
             return false;
         }
-        // `X.prototype.y` → owner X; `X.y` → owner X.
-        let owner_text = match obj.kind() {
-            "identifier" => obj_text.clone(),
-            "member_expression"
-                if field(obj, "property").is_some_and(|p| self.text(p) == "prototype")
-                    && field(obj, "object").is_some_and(|o| o.kind() == "identifier") =>
-            {
-                field(obj, "object").map(|o| self.text(o)).unwrap_or_default()
-            }
-            _ => return false,
-        };
+        let Some(owner_text) = self.assigned_member_owner(obj, obj_text) else { return false };
         let owner = self.top_level.get(&owner_text).copied().filter(|_| ctx.parent.is_none());
-        let (label, qualified_parent, display_name) = match owner {
-            Some(o) => (Label::Method, Some(o), name),
-            None => (Label::Function, ctx.parent, name),
+        let (label, qualified_parent) = match owner {
+            Some(o) => (Label::Method, Some(o)),
+            None => (Label::Function, ctx.parent),
         };
-        let mut nd = NewDef::new(label, display_name, stmt_span, span_of(prop));
+        let stmt_span = a.parent().map_or(span_of(a), span_of);
+        let mut nd = NewDef::new(label, self.text(prop), stmt_span, span_of(prop));
         nd.signature = self.fn_signature(v).map(|t| format!("{} = {}", self.collapsed(l, MAX_SIGNATURE), t));
-        nd.doc = doc;
+        nd.doc = a.parent().and_then(|p| self.doc_before(p));
         nd.exported = owner.is_some_and(|o| self.defs[o as usize].exported || self.export_names.contains(&owner_text));
         let id = self.add_def(nd, qualified_parent);
         if owner.is_none() {
@@ -1882,6 +2013,50 @@ impl<'s> Extractor<'s> {
         }
         self.function_body(v, Some(id), ctx, depth);
         true
+    }
+
+    /// `exports.x = ...` / `module.exports.x = ...`: an exported function
+    /// when the value is one; an indirectly exported name when it is an
+    /// identifier.
+    fn exports_member_assignment(
+        &mut self,
+        a: Node<'_>,
+        l: Node<'_>,
+        prop: Node<'_>,
+        v: Node<'_>,
+        ctx: Ctx,
+        depth: usize,
+    ) -> bool {
+        if !is_function_value(v) {
+            if v.kind() == "identifier" {
+                let t = self.text(v);
+                self.export_names.insert(t);
+            }
+            return false;
+        }
+        let stmt_span = a.parent().map_or(span_of(a), span_of);
+        let mut nd = NewDef::new(Label::Function, self.text(prop), stmt_span, span_of(prop));
+        nd.signature = self.fn_signature(v).map(|t| format!("{} = {}", self.text(l), t));
+        nd.doc = a.parent().and_then(|p| self.doc_before(p));
+        nd.exported = true;
+        let id = self.add_def(nd, ctx.parent);
+        self.function_body(v, Some(id), ctx, depth);
+        true
+    }
+
+    /// The owner name of an assigned member: `X` for `X.prototype.y` and
+    /// `X.y`; `None` for other targets.
+    fn assigned_member_owner(&self, obj: Node<'_>, obj_text: String) -> Option<String> {
+        match obj.kind() {
+            "identifier" => Some(obj_text),
+            "member_expression"
+                if field(obj, "property").is_some_and(|p| self.text(p) == "prototype")
+                    && field(obj, "object").is_some_and(|o| o.kind() == "identifier") =>
+            {
+                Some(field(obj, "object").map(|o| self.text(o)).unwrap_or_default())
+            }
+            _ => None,
+        }
     }
 
     // -- imports & exports ------------------------------------------------------
@@ -1930,201 +2105,209 @@ impl<'s> Extractor<'s> {
         let span = span_of(n);
         let stmt_type = has_token(n, "type") || has_token(n, "typeof");
         let mut module = field(n, "source").and_then(|s| self.string_value(s));
-        let mut value_names = Vec::new();
-        let mut type_names = Vec::new();
-        let mut alias = None;
+        let mut names = ImportNames::default();
         for ch in named_children(n) {
             match ch.kind() {
-                "import_clause" => {
-                    for c in named_children(ch) {
-                        match c.kind() {
-                            "identifier" => {
-                                value_names.push(ImportedName { name: "default".into(), alias: Some(self.text(c)) })
-                            }
-                            "namespace_import" => alias = c.named_child(0).map(|i| self.text(i)),
-                            "named_imports" => {
-                                for spec in named_children(c) {
-                                    if spec.kind() != "import_specifier" {
-                                        continue;
-                                    }
-                                    let Some(nm) = field(spec, "name") else { continue };
-                                    let name = self.member_name(nm);
-                                    let al = field(spec, "alias").map(|a| self.text(a)).filter(|a| *a != name);
-                                    let item = ImportedName { name, alias: al };
-                                    if has_token(spec, "type") || has_token(spec, "typeof") {
-                                        type_names.push(item);
-                                    } else {
-                                        value_names.push(item);
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+                "import_clause" => self.import_clause(ch, &mut names),
                 "import_require_clause" => {
                     module = field(ch, "source").and_then(|s| self.string_value(s));
-                    alias = ch.named_child(0).filter(|c| c.kind() == "identifier").map(|i| self.text(i));
+                    names.alias = ch.named_child(0).filter(|c| c.kind() == "identifier").map(|i| self.text(i));
                 }
                 _ => {}
             }
         }
         let Some(module) = module else { return };
+        self.emit_import(module, names, stmt_type, false, span);
+    }
+
+    /// The default, namespace and named bindings of an `import_clause`.
+    fn import_clause(&self, clause: Node<'_>, names: &mut ImportNames) {
+        for c in named_children(clause) {
+            match c.kind() {
+                "identifier" => names.values.push(ImportedName { name: "default".into(), alias: Some(self.text(c)) }),
+                "namespace_import" => names.alias = c.named_child(0).map(|i| self.text(i)),
+                "named_imports" => self.import_specifiers(c, names),
+                _ => {}
+            }
+        }
+    }
+
+    /// `{ a, b as c, type T }` of an import.
+    fn import_specifiers(&self, named: Node<'_>, names: &mut ImportNames) {
+        for spec in named_children(named) {
+            if spec.kind() != "import_specifier" {
+                continue;
+            }
+            let Some(nm) = field(spec, "name") else { continue };
+            let name = self.member_name(nm);
+            let al = field(spec, "alias").map(|a| self.text(a)).filter(|a| *a != name);
+            let is_type = has_token(spec, "type") || has_token(spec, "typeof");
+            names.add(ImportedName { name, alias: al }, is_type);
+        }
+    }
+
+    /// Pushes the import facts of one `import` / re-export statement: one
+    /// type-only import when the whole statement is (`import type ...`) or
+    /// when only type names are bound, else the value import followed by the
+    /// type-only names.
+    fn emit_import(&mut self, module: String, names: ImportNames, stmt_type: bool, reexport: bool, span: Span) {
+        let ImportNames { values: mut value_names, types: mut type_names, alias } = names;
         if stmt_type {
             value_names.append(&mut type_names);
-            return self.push_import(module, value_names, alias, true, false, span);
+            return self.push_import(module, value_names, alias, true, reexport, span);
         }
-        let all_types = value_names.is_empty() && alias.is_none() && !type_names.is_empty();
-        if all_types {
-            return self.push_import(module, type_names, None, true, false, span);
+        if value_names.is_empty() && alias.is_none() && !type_names.is_empty() {
+            return self.push_import(module, type_names, None, true, reexport, span);
         }
-        self.push_import(module.clone(), value_names, alias, false, false, span);
+        self.push_import(module.clone(), value_names, alias, false, reexport, span);
         if !type_names.is_empty() {
-            self.push_import(module, type_names, None, true, false, span);
+            self.push_import(module, type_names, None, true, reexport, span);
         }
     }
 
     fn export_statement(&mut self, n: Node<'_>, ctx: Ctx, depth: usize) {
-        let decorators: Vec<Node<'_>> = children(n).into_iter().filter(|c| c.kind() == "decorator").collect();
         if let Some(source) = field(n, "source") {
-            let Some(module) = self.string_value(source) else { return };
-            let span = span_of(n);
-            let stmt_type = has_token(n, "type");
-            let mut value_names = Vec::new();
-            let mut type_names = Vec::new();
-            let mut alias = None;
-            let mut star = has_token(n, "*");
-            for ch in named_children(n) {
-                match ch.kind() {
-                    "export_clause" => {
-                        for spec in named_children(ch) {
-                            if spec.kind() != "export_specifier" {
-                                continue;
-                            }
-                            let Some(nm) = field(spec, "name") else { continue };
-                            let name = self.member_name(nm);
-                            let al = field(spec, "alias").map(|a| self.member_name(a)).filter(|a| *a != name);
-                            let item = ImportedName { name, alias: al };
-                            if has_token(spec, "type") {
-                                type_names.push(item);
-                            } else {
-                                value_names.push(item);
-                            }
-                        }
-                    }
-                    "namespace_export" => {
-                        star = false;
-                        alias = named_children(ch).into_iter().last().map(|i| self.member_name(i));
-                    }
-                    _ => {}
-                }
-            }
-            if star {
-                value_names.push(ImportedName { name: "*".into(), alias: None });
-            }
-            if stmt_type {
-                value_names.append(&mut type_names);
-                return self.push_import(module, value_names, alias, true, true, span);
-            }
-            if value_names.is_empty() && alias.is_none() && !type_names.is_empty() {
-                return self.push_import(module, type_names, None, true, true, span);
-            }
-            self.push_import(module.clone(), value_names, alias, false, true, span);
-            if !type_names.is_empty() {
-                self.push_import(module, type_names, None, true, true, span);
-            }
-            return;
+            return self.export_from(n, source);
         }
         if let Some(decl) = field(n, "declaration") {
-            // `export default function load() {}` / `export default class C {}`.
-            if has_token(n, "default")
-                && matches!(
-                    decl.kind(),
-                    "function_declaration"
-                        | "generator_function_declaration"
-                        | "class_declaration"
-                        | "abstract_class_declaration"
-                )
-                && let Some(nn) = field(decl, "name")
-            {
+            return self.export_declaration(n, decl, ctx, depth);
+        }
+        if let Some(value) = field(n, "value") {
+            return self.export_default(n, value, ctx, depth);
+        }
+        self.export_clause_names(n, ctx, depth);
+    }
+
+    /// Decorators written before `export` (`@d export class C {}`).
+    fn export_decorators<'t>(n: Node<'t>) -> Vec<Node<'t>> {
+        children(n).into_iter().filter(|c| c.kind() == "decorator").collect()
+    }
+
+    /// `export { a, b as c } from "m"` / `export * from "m"` /
+    /// `export * as ns from "m"`: a re-export import.
+    fn export_from(&mut self, n: Node<'_>, source: Node<'_>) {
+        let Some(module) = self.string_value(source) else { return };
+        let span = span_of(n);
+        let stmt_type = has_token(n, "type");
+        let mut names = ImportNames::default();
+        let mut star = has_token(n, "*");
+        for ch in named_children(n) {
+            match ch.kind() {
+                "export_clause" => self.export_specifiers(ch, &mut names),
+                "namespace_export" => {
+                    star = false;
+                    names.alias = named_children(ch).into_iter().last().map(|i| self.member_name(i));
+                }
+                _ => {}
+            }
+        }
+        if star {
+            names.values.push(ImportedName { name: "*".into(), alias: None });
+        }
+        self.emit_import(module, names, stmt_type, true, span);
+    }
+
+    /// `{ a, b as c, type T }` of a re-export.
+    fn export_specifiers(&self, clause: Node<'_>, names: &mut ImportNames) {
+        for spec in named_children(clause) {
+            if spec.kind() != "export_specifier" {
+                continue;
+            }
+            let Some(nm) = field(spec, "name") else { continue };
+            let name = self.member_name(nm);
+            let al = field(spec, "alias").map(|a| self.member_name(a)).filter(|a| *a != name);
+            names.add(ImportedName { name, alias: al }, has_token(spec, "type"));
+        }
+    }
+
+    /// `export <declaration>` / `export default function load() {}` /
+    /// `export default class C {}`.
+    fn export_declaration(&mut self, n: Node<'_>, decl: Node<'_>, ctx: Ctx, depth: usize) {
+        if has_token(n, "default")
+            && matches!(
+                decl.kind(),
+                "function_declaration"
+                    | "generator_function_declaration"
+                    | "class_declaration"
+                    | "abstract_class_declaration"
+            )
+            && let Some(nn) = field(decl, "name")
+        {
+            let t = self.text(nn);
+            self.self_reexport(t, "default".into(), span_of(n));
+        }
+        let decorators = Self::export_decorators(n);
+        self.declaration(decl, n, &decorators, ctx, depth + 1, true)
+    }
+
+    /// `export default <value>`.
+    fn export_default(&mut self, n: Node<'_>, value: Node<'_>, ctx: Ctx, depth: usize) {
+        let v = unwrap_value(value);
+        if is_function_value(v) {
+            return self.export_default_function(n, v, ctx, depth);
+        }
+        if v.kind() == "class" {
+            if let Some(nn) = field(v, "name") {
                 let t = self.text(nn);
                 self.self_reexport(t, "default".into(), span_of(n));
             }
-            return self.declaration(decl, n, &decorators, ctx, depth + 1, true);
+            let decorators = Self::export_decorators(n);
+            return self.class(v, n, &decorators, None, ctx, depth + 1, true);
         }
-        if let Some(value) = field(n, "value") {
-            let v = unwrap_value(value);
-            if is_function_value(v) {
-                let name_node = field(v, "name");
-                let (name, name_span) = match name_node {
-                    Some(nn) => (self.text(nn), span_of(nn)),
-                    None => {
-                        let kw = children(n).into_iter().find(|c| c.kind() == "default").unwrap_or(v);
-                        ("default".to_string(), span_of(kw))
-                    }
-                };
-                if name != "default" {
-                    self.self_reexport(name.clone(), "default".into(), span_of(n));
-                }
-                let mut nd = NewDef::new(Label::Function, name, span_of(n), name_span);
-                nd.signature = self.fn_signature(v);
-                nd.doc = self.doc_before(n);
-                nd.exported = true;
-                let id = self.add_def(nd, ctx.parent);
-                return self.function_body(v, Some(id), ctx, depth + 1);
-            }
-            if v.kind() == "class" {
-                if let Some(nn) = field(v, "name") {
-                    let t = self.text(nn);
-                    self.self_reexport(t, "default".into(), span_of(n));
-                }
-                return self.class(v, n, &decorators, None, ctx, depth + 1, true);
-            }
-            if v.kind() == "object" && ctx.parent.is_none() {
-                // `export default { start() {} }`: a `default` variable owning
-                // the methods, so `import app from "./app"; app.start()` resolves.
+        if v.kind() == "object" && ctx.parent.is_none() {
+            return self.export_default_object(n, value, v, depth);
+        }
+        if v.kind() == "identifier" {
+            let t = self.text(v);
+            self.export_names.insert(t.clone());
+            self.self_reexport(t, "default".into(), span_of(n));
+            return;
+        }
+        self.read(value, ctx, depth + 1);
+        self.walk(value, ctx, depth + 1)
+    }
+
+    /// `export default function [name]() {}` / `export default () => {}`.
+    fn export_default_function(&mut self, n: Node<'_>, v: Node<'_>, ctx: Ctx, depth: usize) {
+        let (name, name_span) = match field(v, "name") {
+            Some(nn) => (self.text(nn), span_of(nn)),
+            None => {
                 let kw = children(n).into_iter().find(|c| c.kind() == "default").unwrap_or(v);
-                let mut nd = NewDef::new(Label::Variable, "default".into(), span_of(n), span_of(kw));
-                nd.doc = self.doc_before(n);
-                nd.exported = true;
-                let id = self.add_def(nd, None);
-                let inner = Ctx { parent: Some(id), top: false, ambient: false };
-                if v.id() != value.id() {
-                    for ch in named_children(value) {
-                        if ch.id() != v.id() {
-                            self.walk(ch, inner, depth + 1);
-                        }
-                    }
-                }
-                return self.object_members(v, Some(id), inner, depth + 1);
+                ("default".to_string(), span_of(kw))
             }
-            if v.kind() == "identifier" {
-                let t = self.text(v);
-                self.export_names.insert(t.clone());
-                self.self_reexport(t, "default".into(), span_of(n));
-                return;
-            }
-            self.read(value, ctx, depth + 1);
-            return self.walk(value, ctx, depth + 1);
+        };
+        if name != "default" {
+            self.self_reexport(name.clone(), "default".into(), span_of(n));
         }
+        let mut nd = NewDef::new(Label::Function, name, span_of(n), name_span);
+        nd.signature = self.fn_signature(v);
+        nd.doc = self.doc_before(n);
+        nd.exported = true;
+        let id = self.add_def(nd, ctx.parent);
+        self.function_body(v, Some(id), ctx, depth + 1)
+    }
+
+    /// `export default { start() {} }`: a `default` variable owning the
+    /// methods, so `import app from "./app"; app.start()` resolves.
+    fn export_default_object(&mut self, n: Node<'_>, value: Node<'_>, v: Node<'_>, depth: usize) {
+        let kw = children(n).into_iter().find(|c| c.kind() == "default").unwrap_or(v);
+        let mut nd = NewDef::new(Label::Variable, "default".into(), span_of(n), span_of(kw));
+        nd.doc = self.doc_before(n);
+        nd.exported = true;
+        let id = self.add_def(nd, None);
+        let inner = Ctx { parent: Some(id), top: false, ambient: false };
+        self.walk_wrappers(value, v, inner, depth + 1);
+        self.object_members(v, Some(id), inner, depth + 1)
+    }
+
+    /// `export { a, b as c }` / `export = Foo` without `from`.
+    fn export_clause_names(&mut self, n: Node<'_>, ctx: Ctx, depth: usize) {
         let mut handled = false;
         for ch in named_children(n) {
             match ch.kind() {
                 "export_clause" => {
                     handled = true;
-                    for spec in named_children(ch) {
-                        if spec.kind() == "export_specifier"
-                            && let Some(nm) = field(spec, "name")
-                        {
-                            let t = self.text(nm);
-                            self.export_names.insert(t.clone());
-                            if let Some(alias) = field(spec, "alias").map(|a| self.member_name(a))
-                                && alias != t
-                            {
-                                self.self_reexport(t, alias, span_of(n));
-                            }
-                        }
-                    }
+                    self.local_export_specifiers(n, ch);
                 }
                 // `export = Foo`
                 "identifier" => {
@@ -2140,24 +2323,29 @@ impl<'s> Extractor<'s> {
         }
     }
 
+    /// `{ a, b as c }` of `export { ... }` (statement `n`): indirect exports,
+    /// renamed ones also as self re-exports.
+    fn local_export_specifiers(&mut self, n: Node<'_>, clause: Node<'_>) {
+        for spec in named_children(clause) {
+            if spec.kind() != "export_specifier" {
+                continue;
+            }
+            let Some(nm) = field(spec, "name") else { continue };
+            let t = self.text(nm);
+            self.export_names.insert(t.clone());
+            if let Some(alias) = field(spec, "alias").map(|a| self.member_name(a))
+                && alias != t
+            {
+                self.self_reexport(t, alias, span_of(n));
+            }
+        }
+    }
+
     /// `x = require("m")`, `{ a } = require("m")`, `x = require("m").y`,
     /// `x = await import("m")`. Returns true if `value` was such an import.
     fn bound_import(&mut self, pattern: Node<'_>, value: Node<'_>, decl: Node<'_>) -> bool {
-        let mut v = value;
-        if v.kind() == "await_expression"
-            && let Some(inner) = v.named_child(0)
-        {
-            v = unwrap_value(inner);
-        }
-        let mut member: Option<String> = None;
-        if v.kind() == "member_expression"
-            && let (Some(o), Some(p)) = (field(v, "object"), field(v, "property"))
-            && o.kind() == "call_expression"
-        {
-            member = Some(self.text(p));
-            v = o;
-        }
-        let Some(module) = self.import_call_module(v) else { return false };
+        let (call, member) = self.import_call_target(value);
+        let Some(module) = self.import_call_module(call) else { return false };
         let span = span_of(decl);
         match (pattern.kind(), member) {
             ("identifier", Some(m)) => {
@@ -2170,38 +2358,48 @@ impl<'s> Extractor<'s> {
                 self.push_import(module, Vec::new(), Some(local), false, false, span);
             }
             ("object_pattern", None) => {
-                let mut names = Vec::new();
-                for p in named_children(pattern) {
-                    match p.kind() {
-                        "shorthand_property_identifier_pattern" => {
-                            names.push(ImportedName { name: self.text(p), alias: None })
-                        }
-                        "pair_pattern" => {
-                            if let (Some(k), Some(val)) = (field(p, "key"), field(p, "value")) {
-                                let name = self.member_name(k);
-                                let target = if val.kind() == "assignment_pattern" {
-                                    field(val, "left").unwrap_or(val)
-                                } else {
-                                    val
-                                };
-                                let local = self.text(target);
-                                let alias = if local == name { None } else { Some(local) };
-                                names.push(ImportedName { name, alias });
-                            }
-                        }
-                        "object_assignment_pattern" => {
-                            if let Some(l) = field(p, "left") {
-                                names.push(ImportedName { name: self.text(l), alias: None });
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                let names = named_children(pattern).into_iter().filter_map(|p| self.pattern_import_name(p)).collect();
                 self.push_import(module, names, None, false, false, span);
             }
             _ => self.push_import(module, Vec::new(), None, false, false, span),
         }
         true
+    }
+
+    /// The call a bound value imports through and the member it takes:
+    /// `await import("m")` → the `import` call; `require("m").y` → the call
+    /// and `y`.
+    fn import_call_target<'t>(&self, value: Node<'t>) -> (Node<'t>, Option<String>) {
+        let mut v = value;
+        if v.kind() == "await_expression"
+            && let Some(inner) = v.named_child(0)
+        {
+            v = unwrap_value(inner);
+        }
+        if v.kind() == "member_expression"
+            && let (Some(o), Some(p)) = (field(v, "object"), field(v, "property"))
+            && o.kind() == "call_expression"
+        {
+            return (o, Some(self.text(p)));
+        }
+        (v, None)
+    }
+
+    /// One property of `{ a, b: c, d = 1 } = require("m")`.
+    fn pattern_import_name(&self, p: Node<'_>) -> Option<ImportedName> {
+        match p.kind() {
+            "shorthand_property_identifier_pattern" => Some(ImportedName { name: self.text(p), alias: None }),
+            "pair_pattern" => {
+                let (k, val) = (field(p, "key")?, field(p, "value")?);
+                let name = self.member_name(k);
+                let target = if val.kind() == "assignment_pattern" { field(val, "left").unwrap_or(val) } else { val };
+                let local = self.text(target);
+                let alias = if local == name { None } else { Some(local) };
+                Some(ImportedName { name, alias })
+            }
+            "object_assignment_pattern" => field(p, "left").map(|l| ImportedName { name: self.text(l), alias: None }),
+            _ => None,
+        }
     }
 
     /// Module specifier of `require("m")` / `import("m")`.
@@ -2403,29 +2601,32 @@ impl<'s> Extractor<'s> {
             "new_expression" => self.constructed_type(obj),
             // `make().m()`, `C.create().m()`, `x.map(f).get()`: the declared
             // return type of a function or method of the file (`types.rs`).
-            "call_expression" => {
-                let f = field(obj, "function")?;
-                match f.kind() {
-                    "identifier" => {
-                        let name = self.text(f);
-                        if self.is_local(&name) {
-                            return None;
-                        }
-                        self.types.function_return(&name).map(str::to_string)
-                    }
-                    "member_expression" => {
-                        let o = field(f, "object")?;
-                        let method = self.text(field(f, "property")?);
-                        let ot = self.text(o);
-                        let class = if o.kind() == "identifier" && !self.is_local(&ot) && self.types.is_class(&ot) {
-                            ot
-                        } else {
-                            self.receiver_type(o, depth + 1)?
-                        };
-                        self.types.method_return(&class, &method).map(str::to_string)
-                    }
-                    _ => None,
+            "call_expression" => self.call_return_type(obj, depth),
+            _ => None,
+        }
+    }
+
+    /// The declared return type of the function or method a call invokes.
+    fn call_return_type(&self, call: Node<'_>, depth: usize) -> Option<String> {
+        let f = field(call, "function")?;
+        match f.kind() {
+            "identifier" => {
+                let name = self.text(f);
+                if self.is_local(&name) {
+                    return None;
                 }
+                self.types.function_return(&name).map(str::to_string)
+            }
+            "member_expression" => {
+                let o = field(f, "object")?;
+                let method = self.text(field(f, "property")?);
+                let ot = self.text(o);
+                let class = if o.kind() == "identifier" && !self.is_local(&ot) && self.types.is_class(&ot) {
+                    ot
+                } else {
+                    self.receiver_type(o, depth + 1)?
+                };
+                self.types.method_return(&class, &method).map(str::to_string)
             }
             _ => None,
         }
@@ -2543,74 +2744,71 @@ impl<'s> Extractor<'s> {
                 }
                 self.read_name(name, None, ctx, span_of(e));
             }
-            "member_expression" => {
-                // Only plain chains: `a.b.c`, `this.x`, `a?.b`.
-                let mut cur = e;
-                let mut ok = false;
-                for _ in 0..64 {
-                    match cur.kind() {
-                        "member_expression" => {
-                            if !field(cur, "property").is_some_and(|p| {
-                                matches!(p.kind(), "property_identifier" | "private_property_identifier")
-                            }) {
-                                break;
-                            }
-                            match field(cur, "object") {
-                                Some(o) => cur = o,
-                                None => break,
-                            }
-                        }
-                        "non_null_expression" => match cur.named_child(0) {
-                            Some(o) => cur = o,
-                            None => break,
-                        },
-                        "this" => {
-                            ok = true;
-                            break;
-                        }
-                        "identifier" => {
-                            let root = self.text(cur);
-                            ok = !self.is_local(&root) && !is_builtin(&root);
-                            break;
-                        }
-                        _ => break,
-                    }
-                }
-                if !ok {
-                    return;
-                }
-                let (Some(obj), Some(prop)) = (field(e, "object"), field(e, "property")) else { return };
-                let name = self.text(prop);
-                let recv = self.collapsed(obj, MAX_RECEIVER);
-                self.read_name(name, Some(recv), ctx, span_of(e));
-            }
+            "member_expression" => self.read_member(e, ctx),
             "parenthesized_expression"
             | "await_expression"
             | "non_null_expression"
             | "as_expression"
             | "satisfies_expression"
-            | "spread_element" => {
-                if let Some(c) = e.named_child(0) {
-                    self.read(c, ctx, depth + 1);
-                }
-            }
+            | "spread_element" => self.read_opt(e.named_child(0), ctx, depth + 1),
             "ternary_expression" => {
-                if let Some(c) = field(e, "consequence") {
-                    self.read(c, ctx, depth + 1);
-                }
-                if let Some(c) = field(e, "alternative") {
-                    self.read(c, ctx, depth + 1);
-                }
+                self.read_opt(field(e, "consequence"), ctx, depth + 1);
+                self.read_opt(field(e, "alternative"), ctx, depth + 1);
             }
             "binary_expression" => {
-                if let Some(c) = field(e, "left") {
-                    self.read(c, ctx, depth + 1);
-                }
-                if let Some(c) = field(e, "right") {
-                    self.read(c, ctx, depth + 1);
-                }
+                self.read_opt(field(e, "left"), ctx, depth + 1);
+                self.read_opt(field(e, "right"), ctx, depth + 1);
             }
             _ => {}
         }
+    }
+
+    /// [`Extractor::read`] of an optional node.
+    fn read_opt(&mut self, e: Option<Node<'_>>, ctx: Ctx, depth: usize) {
+        if let Some(e) = e {
+            self.read(e, ctx, depth);
+        }
+    }
+
+    /// `Read` of `a.b.c` / `this.x` / `a?.b`: only plain chains rooted at
+    /// `this` or a non-local, non-builtin name.
+    fn read_member(&mut self, e: Node<'_>, ctx: Ctx) {
+        if !self.plain_chain(e) {
+            return;
+        }
+        let (Some(obj), Some(prop)) = (field(e, "object"), field(e, "property")) else { return };
+        let name = self.text(prop);
+        let recv = self.collapsed(obj, MAX_RECEIVER);
+        self.read_name(name, Some(recv), ctx, span_of(e));
+    }
+
+    /// Whether `e` is a chain of plain property accesses (and `!`) rooted at
+    /// `this` or at a name that is neither local nor builtin.
+    fn plain_chain(&self, e: Node<'_>) -> bool {
+        let mut cur = e;
+        for _ in 0..64 {
+            let next = match cur.kind() {
+                "member_expression" => {
+                    let plain = field(cur, "property")
+                        .is_some_and(|p| matches!(p.kind(), "property_identifier" | "private_property_identifier"));
+                    if !plain {
+                        return false;
+                    }
+                    field(cur, "object")
+                }
+                "non_null_expression" => cur.named_child(0),
+                "this" => return true,
+                "identifier" => {
+                    let root = self.text(cur);
+                    return !self.is_local(&root) && !is_builtin(&root);
+                }
+                _ => return false,
+            };
+            match next {
+                Some(o) => cur = o,
+                None => return false,
+            }
+        }
+        false
     }
 }

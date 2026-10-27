@@ -175,6 +175,21 @@ impl std::ops::Deref for VirtualFs {
     }
 }
 
+/// The package name declared by a workspace `package.json` (outside
+/// `node_modules`); `None` for other files and invalid names.
+fn workspace_package_name(path: &str, text: &str) -> Option<String> {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    if name != "package.json" || in_node_modules(path) {
+        return None;
+    }
+    let json = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    let pkg = json.get("name").and_then(|n| n.as_str())?;
+    if pkg.is_empty() || split_package(pkg).is_none_or(|(n, sub)| n != pkg || !sub.is_empty()) {
+        return None;
+    }
+    Some(pkg.to_string())
+}
+
 impl VirtualFs {
     pub(crate) fn new_for(project: &ProjectFiles) -> VirtualFs {
         VirtualFs(Arc::new(FsData::new_for(project)))
@@ -191,45 +206,48 @@ impl FsData {
         for (path, text) in &project.configs {
             fs.contents.insert(path.clone(), text.clone());
         }
-        // jsconfig.json doubles as tsconfig.json when there is none: a
-        // synthesized tsconfig extends it and turns on `allowJs` (implied by
-        // jsconfig; without it oxc_resolver does not apply the config to
-        // `.js` files).
+        fs.synthesize_tsconfigs(project);
+        fs.add_workspace_packages(project);
+        fs
+    }
+
+    /// jsconfig.json doubles as tsconfig.json when there is none: a
+    /// synthesized tsconfig extends it and turns on `allowJs` (implied by
+    /// jsconfig; without it oxc_resolver does not apply the config to `.js`
+    /// files).
+    fn synthesize_tsconfigs(&mut self, project: &ProjectFiles) {
         for path in project.configs.keys() {
             let name = path.rsplit('/').next().unwrap_or(path);
-            if name == "jsconfig.json" {
-                let ts = join(parent_dir(path), "tsconfig.json");
-                if !fs.files.contains(&ts) {
-                    let text = r#"{"extends":"./jsconfig.json","compilerOptions":{"allowJs":true}}"#;
-                    fs.contents.insert(ts.clone(), text.to_string());
-                    fs.add_file(&ts);
-                    fs.synthesized.insert(ts);
-                }
+            if name != "jsconfig.json" {
+                continue;
+            }
+            let ts = join(parent_dir(path), "tsconfig.json");
+            if !self.files.contains(&ts) {
+                let text = r#"{"extends":"./jsconfig.json","compilerOptions":{"allowJs":true}}"#;
+                self.contents.insert(ts.clone(), text.to_string());
+                self.add_file(&ts);
+                self.synthesized.insert(ts);
             }
         }
-        // Workspace packages, first directory (in path order) wins a name.
+    }
+
+    /// Workspace packages, first directory (in path order) wins a name; they
+    /// are mounted under `node_modules`.
+    fn add_workspace_packages(&mut self, project: &ProjectFiles) {
         for (path, text) in &project.configs {
-            let name = path.rsplit('/').next().unwrap_or(path);
-            if name != "package.json" || in_node_modules(path) {
-                continue;
+            if let Some(pkg) = workspace_package_name(path, text) {
+                self.packages.entry(pkg).or_insert_with(|| parent_dir(path).to_string());
             }
-            let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else { continue };
-            let Some(pkg) = json.get("name").and_then(|n| n.as_str()) else { continue };
-            if pkg.is_empty() || split_package(pkg).is_none_or(|(n, sub)| n != pkg || !sub.is_empty()) {
-                continue;
-            }
-            fs.packages.entry(pkg.to_string()).or_insert_with(|| parent_dir(path).to_string());
         }
-        if !fs.packages.is_empty() {
-            fs.dirs.insert("node_modules".into());
-            let scopes: Vec<String> = fs
+        if !self.packages.is_empty() {
+            self.dirs.insert("node_modules".into());
+            let scopes: Vec<String> = self
                 .packages
                 .keys()
                 .filter_map(|n| n.split_once('/').map(|(s, _)| format!("node_modules/{s}")))
                 .collect();
-            fs.dirs.extend(scopes);
+            self.dirs.extend(scopes);
         }
-        fs
     }
 
     fn add_file(&mut self, path: &str) {

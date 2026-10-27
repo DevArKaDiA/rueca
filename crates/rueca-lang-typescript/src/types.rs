@@ -189,6 +189,79 @@ struct Builder<'s> {
 /// Bound on nodes visited by the return-type pass.
 const MAX_RETURN_SCAN: usize = 200_000;
 
+/// A step of [`Builder::walk`].
+enum Task<'t> {
+    Visit(Node<'t>, Option<usize>, usize),
+    Leave { owner: bool, mark: usize },
+}
+
+/// Schedules the children of `n` in document order; the parameters of an
+/// owner contribute only their default values (which may still contain
+/// functions and assignments).
+fn push_child_visits<'t>(tasks: &mut Vec<Task<'t>>, n: Node<'t>, owner: bool, class: Option<usize>, depth: usize) {
+    let params = if owner { n.child_by_field_name("parameters") } else { None };
+    for c in named_children(n).into_iter().rev() {
+        if Some(c) == params {
+            let defaults = named_children(c).into_iter().rev().filter_map(|p| p.child_by_field_name("value"));
+            tasks.extend(defaults.map(|v| Task::Visit(v, class, depth + 2)));
+            continue;
+        }
+        tasks.push(Task::Visit(c, class, depth + 1));
+    }
+}
+
+/// Whether `v` is an object literal (through parentheses, `as` and
+/// `satisfies`).
+fn is_object_value(mut v: Node<'_>) -> bool {
+    for _ in 0..8 {
+        match v.kind() {
+            "parenthesized_expression" | "as_expression" | "satisfies_expression" => match v.named_child(0) {
+                Some(i) => v = i,
+                None => return false,
+            },
+            k => return k == "object",
+        }
+    }
+    false
+}
+
+/// Whether every `return` in `body` (not in nested functions or classes)
+/// yields an object literal; at least one must.
+fn block_returns_object(body: Node<'_>) -> bool {
+    let mut stack = vec![body];
+    let mut seen = 0usize;
+    let mut any = false;
+    while let Some(n) = stack.pop() {
+        seen += 1;
+        if seen > 10_000 {
+            return false;
+        }
+        for c in named_children(n) {
+            match c.kind() {
+                "return_statement" => match c.named_child(0) {
+                    Some(v) if is_object_value(v) => any = true,
+                    _ => return false,
+                },
+                k if OWNERS.contains(&k) || CLASSES.contains(&k) => {}
+                _ => stack.push(c),
+            }
+        }
+    }
+    any
+}
+
+/// Whether a declaration is at module level (only `export` and variable
+/// declarations between it and the program).
+fn is_module_level(n: Node<'_>) -> bool {
+    let mut p = n.parent();
+    while let Some(q) =
+        p.filter(|q| matches!(q.kind(), "export_statement" | "lexical_declaration" | "variable_declaration"))
+    {
+        p = q.parent();
+    }
+    p.is_some_and(|q| q.kind() == "program")
+}
+
 fn named_children<'t>(n: Node<'t>) -> Vec<Node<'t>> {
     let mut c = n.walk();
     n.named_children(&mut c).collect()
@@ -364,41 +437,10 @@ impl Builder<'_> {
     /// yields an object literal; at least one must.
     fn returns_object(&self, f: Node<'_>) -> bool {
         let Some(body) = f.child_by_field_name("body") else { return false };
-        let is_object = |mut v: Node<'_>| {
-            for _ in 0..8 {
-                match v.kind() {
-                    "parenthesized_expression" | "as_expression" | "satisfies_expression" => match v.named_child(0) {
-                        Some(i) => v = i,
-                        None => return false,
-                    },
-                    k => return k == "object",
-                }
-            }
-            false
-        };
         if body.kind() != "statement_block" {
-            return is_object(body);
+            return is_object_value(body);
         }
-        let mut stack = vec![body];
-        let mut seen = 0usize;
-        let mut any = false;
-        while let Some(n) = stack.pop() {
-            seen += 1;
-            if seen > 10_000 {
-                return false;
-            }
-            for c in named_children(n) {
-                match c.kind() {
-                    "return_statement" => match c.named_child(0) {
-                        Some(v) if is_object(v) => any = true,
-                        _ => return false,
-                    },
-                    k if OWNERS.contains(&k) || CLASSES.contains(&k) => {}
-                    _ => stack.push(c),
-                }
-            }
-        }
-        any
+        block_returns_object(body)
     }
 
     /// First pass: return types of module-level functions and of class
@@ -411,53 +453,54 @@ impl Builder<'_> {
             if seen > MAX_RETURN_SCAN || depth > self.max_depth {
                 break;
             }
-            let module_level = || {
-                let mut p = n.parent();
-                while let Some(q) = p
-                    .filter(|q| matches!(q.kind(), "export_statement" | "lexical_declaration" | "variable_declaration"))
-                {
-                    p = q.parent();
-                }
-                p.is_some_and(|q| q.kind() == "program")
-            };
-            match n.kind() {
-                "function_declaration" | "generator_function_declaration" if module_level() => {
-                    if let Some(name) = n.child_by_field_name("name") {
-                        self.function_returns(self.text(name), n);
-                    }
-                }
-                "variable_declarator" if module_level() => {
-                    if let (Some(name), Some(v)) = (n.child_by_field_name("name"), n.child_by_field_name("value"))
-                        && name.kind() == "identifier"
-                        && matches!(v.kind(), "arrow_function" | "function_expression" | "function")
-                    {
-                        self.function_returns(self.text(name), v);
-                    }
-                }
-                "class_declaration" | "abstract_class_declaration" => {
-                    if let (Some(name), Some(body)) = (n.child_by_field_name("name"), n.child_by_field_name("body")) {
-                        let class = self.text(name);
-                        self.table.classes.insert(class.clone());
-                        let mark = self.push_type_params(n);
-                        for m in named_children(body) {
-                            if m.kind() != "method_definition" {
-                                continue;
-                            }
-                            let Some(mn) = m.child_by_field_name("name") else { continue };
-                            if let Some(t) = self.return_type(m, Some(&class)) {
-                                let key = (class.clone(), self.text(mn));
-                                self.table.methods.entry(key).or_insert(t);
-                            }
-                        }
-                        self.type_params.truncate(mark);
-                    }
-                }
-                _ => {}
-            }
+            self.record_returns(n);
             for c in named_children(n) {
                 stack.push((c, depth + 1));
             }
         }
+    }
+
+    /// The return types `n` declares: a module-level function, a function
+    /// assigned to a module-level variable, or the methods of a class.
+    fn record_returns(&mut self, n: Node<'_>) {
+        match n.kind() {
+            "function_declaration" | "generator_function_declaration" if is_module_level(n) => {
+                if let Some(name) = n.child_by_field_name("name") {
+                    self.function_returns(self.text(name), n);
+                }
+            }
+            "variable_declarator" if is_module_level(n) => {
+                if let (Some(name), Some(v)) = (n.child_by_field_name("name"), n.child_by_field_name("value"))
+                    && name.kind() == "identifier"
+                    && matches!(v.kind(), "arrow_function" | "function_expression" | "function")
+                {
+                    self.function_returns(self.text(name), v);
+                }
+            }
+            "class_declaration" | "abstract_class_declaration" => self.class_returns(n),
+            _ => {}
+        }
+    }
+
+    /// Records class `n` and the declared return types of its methods.
+    fn class_returns(&mut self, n: Node<'_>) {
+        let (Some(name), Some(body)) = (n.child_by_field_name("name"), n.child_by_field_name("body")) else {
+            return;
+        };
+        let class = self.text(name);
+        self.table.classes.insert(class.clone());
+        let mark = self.push_type_params(n);
+        for m in named_children(body) {
+            if m.kind() != "method_definition" {
+                continue;
+            }
+            let Some(mn) = m.child_by_field_name("name") else { continue };
+            if let Some(t) = self.return_type(m, Some(&class)) {
+                let key = (class.clone(), self.text(mn));
+                self.table.methods.entry(key).or_insert(t);
+            }
+        }
+        self.type_params.truncate(mark);
     }
 
     fn function_returns(&mut self, name: String, f: Node<'_>) {
@@ -573,42 +616,28 @@ impl Builder<'_> {
 
     /// Iterative pre-order walk (deep trees must not exhaust the stack).
     fn walk(&mut self, root: Node<'_>, class: Option<usize>, depth: usize) {
-        enum Task<'t> {
-            Visit(Node<'t>, Option<usize>, usize),
-            Leave { owner: bool, mark: usize },
-        }
         let mut tasks = vec![Task::Visit(root, class, depth)];
         while let Some(task) = tasks.pop() {
             match task {
-                Task::Leave { owner, mark } => {
-                    if owner {
-                        self.owners.pop();
-                    }
-                    self.type_params.truncate(mark);
-                }
+                Task::Leave { owner, mark } => self.leave(owner, mark),
                 Task::Visit(n, class, depth) => {
                     if depth > self.max_depth {
                         continue;
                     }
                     let (owner, mark, class) = self.enter(n, class);
                     tasks.push(Task::Leave { owner, mark });
-                    let params = if owner { n.child_by_field_name("parameters") } else { None };
-                    let children: Vec<Node<'_>> = named_children(n);
-                    for c in children.into_iter().rev() {
-                        if Some(c) == params {
-                            // Default values may still contain functions and assignments.
-                            for p in named_children(c).into_iter().rev() {
-                                if let Some(v) = p.child_by_field_name("value") {
-                                    tasks.push(Task::Visit(v, class, depth + 2));
-                                }
-                            }
-                            continue;
-                        }
-                        tasks.push(Task::Visit(c, class, depth + 1));
-                    }
+                    push_child_visits(&mut tasks, n, owner, class, depth);
                 }
             }
         }
+    }
+
+    /// Undoes [`Builder::enter`]: pops the owner and the type parameters.
+    fn leave(&mut self, owner: bool, mark: usize) {
+        if owner {
+            self.owners.pop();
+        }
+        self.type_params.truncate(mark);
     }
 
     /// Records the facts of one node; returns whether it is an owner (pushed
@@ -637,85 +666,15 @@ impl Builder<'_> {
                     self.var(o, t, Fact::UntypedBinding);
                 }
             }
-            "variable_declarator" => {
-                if let Some(name) = n.child_by_field_name("name") {
-                    if name.kind() == "identifier" {
-                        let t = self.text(name);
-                        let annotation = n.child_by_field_name("type");
-                        let o = self.owner();
-                        self.element(o, &t, annotation);
-                        let declared = annotation.and_then(|ty| self.type_name(ty));
-                        let fact = match declared {
-                            Some(d) => Fact::Declared(d),
-                            None => match n.child_by_field_name("value").and_then(|v| self.value_type(v)) {
-                                Some(i) => Fact::Inferred(i),
-                                None => Fact::UntypedBinding,
-                            },
-                        };
-                        let o = self.owner();
-                        self.var(o, t, fact);
-                    } else {
-                        self.untyped_pattern(name, 0);
-                    }
-                }
-            }
-            "public_field_definition" | "field_definition" => {
-                let name = n.child_by_field_name("name").or_else(|| n.child_by_field_name("property"));
-                if let (Some(name), Some(c)) = (name, class) {
-                    let t = self.text(name);
-                    if let Some(d) = n.child_by_field_name("type").and_then(|ty| self.type_name(ty)) {
-                        self.field(c, t, Fact::Declared(d));
-                    } else if let Some(v) = n.child_by_field_name("value") {
-                        let fact = self.value_type(v).map_or(Fact::UntypedAssignment, Fact::Inferred);
-                        self.field(c, t, fact);
-                    }
-                }
-            }
+            "variable_declarator" => self.variable_declarator(n),
+            "public_field_definition" | "field_definition" => self.field_definition(n, class),
             "catch_clause" => {
                 if let Some(p) = n.child_by_field_name("parameter") {
                     self.untyped_pattern(p, 0);
                 }
             }
-            "for_in_statement" => {
-                if let Some(l) = n.child_by_field_name("left") {
-                    let declares = {
-                        let mut cur = n.walk();
-                        n.children(&mut cur).any(|c| matches!(c.kind(), "const" | "let" | "var"))
-                    };
-                    // `for (const x of xs)` with `xs: T[]`: `x` is a `T`.
-                    let element = n
-                        .child_by_field_name("right")
-                        .filter(|r| r.kind() == "identifier" && l.kind() == "identifier")
-                        .filter(|_| {
-                            let mut cur = n.walk();
-                            n.children(&mut cur).any(|c| c.kind() == "of")
-                        })
-                        .and_then(|r| self.element_of(&self.text(r)));
-                    if declares && let Some(e) = element {
-                        let (o, t) = (self.owner(), self.text(l));
-                        self.var(o, t, Fact::Declared(e));
-                    } else if declares {
-                        self.untyped_pattern(l, 0);
-                    } else if l.kind() == "identifier" {
-                        self.assignment(l, None, class, false);
-                    }
-                }
-            }
-            "import_clause" | "import_specifier" | "namespace_import" => {
-                // Imports bind module-level names.
-                for c in named_children(n) {
-                    if c.kind() == "identifier" {
-                        let t = self.text(c);
-                        self.var(self.owners[0], t, Fact::UntypedBinding);
-                    }
-                }
-                if n.kind() == "import_specifier"
-                    && let Some(a) = n.child_by_field_name("alias").or_else(|| n.child_by_field_name("name"))
-                {
-                    let t = self.text(a);
-                    self.var(self.owners[0], t, Fact::UntypedBinding);
-                }
-            }
+            "for_in_statement" => self.for_in(n, class),
+            "import_clause" | "import_specifier" | "namespace_import" => self.import_bindings(n),
             "assignment_expression" => {
                 if let Some(l) = n.child_by_field_name("left") {
                     let r = n.child_by_field_name("right");
@@ -731,23 +690,109 @@ impl Builder<'_> {
             _ => {}
         }
         if owner {
-            self.owners.push(n.id());
-            let mut hint = self.callbacks.remove(&n.id());
-            // Parameters belong to the function.
-            if let Some(ps) = n.child_by_field_name("parameters") {
-                for p in named_children(ps) {
-                    let c = if kind == "method_definition" { class } else { None };
-                    self.parameter(p, c, hint.take());
-                }
-            }
-            if let Some(p) = n.child_by_field_name("parameter") {
-                match hint.take() {
-                    Some(h) if p.kind() == "identifier" => self.parameter(p, None, Some(h)),
-                    _ => self.untyped_pattern(p, 0),
-                }
-            }
+            self.enter_owner(n, class);
         }
         (owner, mark, class)
+    }
+
+    /// `x: T = v` / `x = new T()` / `{ a, b } = v`.
+    fn variable_declarator(&mut self, n: Node<'_>) {
+        let Some(name) = n.child_by_field_name("name") else { return };
+        if name.kind() != "identifier" {
+            return self.untyped_pattern(name, 0);
+        }
+        let t = self.text(name);
+        let annotation = n.child_by_field_name("type");
+        let o = self.owner();
+        self.element(o, &t, annotation);
+        let declared = annotation.and_then(|ty| self.type_name(ty));
+        let fact = match declared {
+            Some(d) => Fact::Declared(d),
+            None => match n.child_by_field_name("value").and_then(|v| self.value_type(v)) {
+                Some(i) => Fact::Inferred(i),
+                None => Fact::UntypedBinding,
+            },
+        };
+        let o = self.owner();
+        self.var(o, t, fact);
+    }
+
+    /// A class field: declared with its annotation, else inferred from its
+    /// initializer.
+    fn field_definition(&mut self, n: Node<'_>, class: Option<usize>) {
+        let name = n.child_by_field_name("name").or_else(|| n.child_by_field_name("property"));
+        let (Some(name), Some(c)) = (name, class) else { return };
+        let t = self.text(name);
+        if let Some(d) = n.child_by_field_name("type").and_then(|ty| self.type_name(ty)) {
+            self.field(c, t, Fact::Declared(d));
+        } else if let Some(v) = n.child_by_field_name("value") {
+            let fact = self.value_type(v).map_or(Fact::UntypedAssignment, Fact::Inferred);
+            self.field(c, t, fact);
+        }
+    }
+
+    /// `for (const x of xs)` / `for (x in o)`: the loop variable.
+    fn for_in(&mut self, n: Node<'_>, class: Option<usize>) {
+        let Some(l) = n.child_by_field_name("left") else { return };
+        let declares = {
+            let mut cur = n.walk();
+            n.children(&mut cur).any(|c| matches!(c.kind(), "const" | "let" | "var"))
+        };
+        let element = self.for_of_element(n, l);
+        if declares && let Some(e) = element {
+            let (o, t) = (self.owner(), self.text(l));
+            self.var(o, t, Fact::Declared(e));
+        } else if declares {
+            self.untyped_pattern(l, 0);
+        } else if l.kind() == "identifier" {
+            self.assignment(l, None, class, false);
+        }
+    }
+
+    /// `for (const x of xs)` with `xs: T[]`: `x` is a `T`.
+    fn for_of_element(&self, n: Node<'_>, l: Node<'_>) -> Option<String> {
+        n.child_by_field_name("right")
+            .filter(|r| r.kind() == "identifier" && l.kind() == "identifier")
+            .filter(|_| {
+                let mut cur = n.walk();
+                n.children(&mut cur).any(|c| c.kind() == "of")
+            })
+            .and_then(|r| self.element_of(&self.text(r)))
+    }
+
+    /// Imports bind module-level names.
+    fn import_bindings(&mut self, n: Node<'_>) {
+        for c in named_children(n) {
+            if c.kind() == "identifier" {
+                let t = self.text(c);
+                self.var(self.owners[0], t, Fact::UntypedBinding);
+            }
+        }
+        if n.kind() == "import_specifier"
+            && let Some(a) = n.child_by_field_name("alias").or_else(|| n.child_by_field_name("name"))
+        {
+            let t = self.text(a);
+            self.var(self.owners[0], t, Fact::UntypedBinding);
+        }
+    }
+
+    /// Pushes owner `n` and records its parameters (they belong to the
+    /// function).
+    fn enter_owner(&mut self, n: Node<'_>, class: Option<usize>) {
+        self.owners.push(n.id());
+        let mut hint = self.callbacks.remove(&n.id());
+        if let Some(ps) = n.child_by_field_name("parameters") {
+            let c = if n.kind() == "method_definition" { class } else { None };
+            for p in named_children(ps) {
+                self.parameter(p, c, hint.take());
+            }
+        }
+        if let Some(p) = n.child_by_field_name("parameter") {
+            match hint.take() {
+                Some(h) if p.kind() == "identifier" => self.parameter(p, None, Some(h)),
+                _ => self.untyped_pattern(p, 0),
+            }
+        }
     }
 
     /// `xs.map((x) => …)` with `xs` an array of `T`: the callback's first
