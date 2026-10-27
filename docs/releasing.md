@@ -48,7 +48,7 @@ gh variable set RELEASE_ENABLED --body true --repo DevArKaDiA/rueca
 ```
 
 The next push to `main` then publishes the current version
-(`0.1.0-alpha.1`) if it is not on crates.io yet.
+(`0.1.0-alpha.2`) if it is not on crates.io yet.
 
 ## Cutting a release
 
