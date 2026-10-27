@@ -421,7 +421,10 @@ def sample_functions(graph: dict, n: int, seed: int, min_lines: int) -> list[str
     rng = random.Random(seed)
     keys = sorted(buckets)
     for k in keys:
-        rng.shuffle(buckets[k])
+        # Seeded on purpose: the sample must be reproducible run to run; it
+        # picks benchmark functions and has no security role, hence the waiver
+        # of python:S2245 (pseudorandom generator in a security context).
+        rng.shuffle(buckets[k])  # NOSONAR
     out: list[str] = []
     while len(out) < n and any(buckets[k] for k in keys):
         for k in keys:

@@ -17,6 +17,7 @@ says which entries were carried.
 from __future__ import annotations
 
 import datetime as dt
+import math
 import platform
 import statistics
 import subprocess
@@ -1089,7 +1090,7 @@ def _target_txt(m: dict) -> str:
         return f"≤ {int(t['cbm_ratio'] * 100)}% of cbm"
     unit = m.get("unit")
     v = _num(t, unit) if unit else _pct(t)
-    if not unit and t == 1.0:
+    if not unit and math.isclose(t, 1.0):
         return v
     return ("≤ " if m.get("better") == "lower" else "≥ ") + v
 
