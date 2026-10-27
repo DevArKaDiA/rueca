@@ -307,8 +307,7 @@ pub(crate) fn build(
     time_budget: Duration,
 ) -> Result<Locals, ExtractError> {
     let lq = locals_query(language)?;
-    let mut scopes: Vec<ScopeInfo> = Vec::new();
-    let mut points: Vec<Point> = Vec::new();
+    let mut found = Captured::default();
 
     let deadline = Instant::now() + time_budget;
     let mut timed_out = false;
@@ -325,54 +324,66 @@ pub(crate) fn build(
     {
         let options = QueryCursorOptions::new().progress_callback(&mut progress);
         let mut matches = cursor.matches_with_options(&lq.query, tree.root_node(), source, options);
-        let mut seen_scopes = std::collections::HashSet::new();
         while let Some(m) = matches.next() {
             for cap in m.captures() {
-                let node = cap.node;
-                match lq.roles.get(cap.index as usize).copied().unwrap_or(Role::Ignore) {
-                    Role::Scope => {
-                        if seen_scopes.insert(node.id()) {
-                            scopes.push(ScopeInfo {
-                                start: node.start_byte() as u32,
-                                end: node.end_byte() as u32,
-                                parent: None,
-                                bindings: HashMap::new(),
-                            });
-                        }
-                    }
-                    Role::Def(kind) => {
-                        let name = text(node, source).into_owned();
-                        let (ty, arg) = if kind == DefKind::Type { (None, None) } else { binding_type(node, source) };
-                        points.push(Point::Def {
-                            pos: node.start_byte() as u32,
-                            name,
-                            binding: Binding { pos: node.start_byte() as u32, kind, ty, arg },
-                        });
-                    }
-                    Role::Ignore => {}
-                }
+                let role = lq.roles.get(cap.index as usize).copied().unwrap_or(Role::Ignore);
+                found.add(role, cap.node, source);
             }
         }
     }
     let incomplete = timed_out || cursor.did_exceed_match_limit();
 
+    let Captured { mut scopes, mut points, .. } = found;
     scopes.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
     scopes.dedup_by(|b, a| a.start == b.start && a.end == b.end);
     points.sort_by_key(|Point::Def { pos, .. }| *pos);
+    nest(&mut scopes, points);
+    Ok(Locals { scopes, incomplete })
+}
 
-    // Sweep: nest scopes and put each binding in its innermost scope.
+/// What the locals query captured: scopes (once per node) and bindings.
+#[derive(Default)]
+struct Captured {
+    scopes: Vec<ScopeInfo>,
+    points: Vec<Point>,
+    seen_scopes: std::collections::HashSet<usize>,
+}
+
+impl Captured {
+    fn add(&mut self, role: Role, node: Node<'_>, source: &[u8]) {
+        match role {
+            Role::Scope => {
+                if self.seen_scopes.insert(node.id()) {
+                    self.scopes.push(ScopeInfo {
+                        start: node.start_byte() as u32,
+                        end: node.end_byte() as u32,
+                        parent: None,
+                        bindings: HashMap::new(),
+                    });
+                }
+            }
+            Role::Def(kind) => {
+                let name = text(node, source).into_owned();
+                let (ty, arg) = if kind == DefKind::Type { (None, None) } else { binding_type(node, source) };
+                self.points.push(Point::Def {
+                    pos: node.start_byte() as u32,
+                    name,
+                    binding: Binding { pos: node.start_byte() as u32, kind, ty, arg },
+                });
+            }
+            Role::Ignore => {}
+        }
+    }
+}
+
+/// Sweep over the sorted `scopes` and `points`: nests the scopes and puts
+/// each binding in its innermost scope.
+fn nest(scopes: &mut [ScopeInfo], points: Vec<Point>) {
     let mut stack: Vec<usize> = Vec::new();
     let mut next = 0;
     for point in points {
         let Point::Def { pos, name, binding } = point;
-        while next < scopes.len() && scopes[next].start <= pos {
-            while stack.last().is_some_and(|&t| scopes[t].end <= scopes[next].start) {
-                stack.pop();
-            }
-            scopes[next].parent = stack.last().copied();
-            stack.push(next);
-            next += 1;
-        }
+        next = enter_scopes(scopes, &mut stack, next, pos);
         while stack.last().is_some_and(|&t| scopes[t].end <= pos) {
             stack.pop();
         }
@@ -380,7 +391,13 @@ pub(crate) fn build(
         let Some(&inner) = stack.last() else { continue };
         scopes[inner].bindings.entry(name).or_default().push(binding);
     }
-    while next < scopes.len() {
+    enter_scopes(scopes, &mut stack, next, u32::MAX);
+}
+
+/// Enters the scopes from `next` that start at or before `until`, setting
+/// their parents; returns the first scope not entered.
+fn enter_scopes(scopes: &mut [ScopeInfo], stack: &mut Vec<usize>, mut next: usize, until: u32) -> usize {
+    while next < scopes.len() && scopes[next].start <= until {
         while stack.last().is_some_and(|&t| scopes[t].end <= scopes[next].start) {
             stack.pop();
         }
@@ -388,7 +405,7 @@ pub(crate) fn build(
         stack.push(next);
         next += 1;
     }
-    Ok(Locals { scopes, incomplete })
+    next
 }
 
 #[cfg(test)]

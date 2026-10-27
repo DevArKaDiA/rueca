@@ -179,21 +179,26 @@ fn cond_tokens(text: &[u8]) -> Vec<&[u8]> {
             break;
         } else if text[i..].starts_with(b"/*") {
             i = text[i + 2..].windows(2).position(|w| w == b"*/").map_or(text.len(), |p| i + 2 + p + 2);
-        } else if c.is_ascii_alphanumeric() || c == b'_' {
-            let s = i;
-            while i < text.len() && (text[i].is_ascii_alphanumeric() || matches!(text[i], b'_' | b'\'' | b'.')) {
-                i += 1;
-            }
-            out.push(&text[s..i]);
-        } else if text[i..].starts_with(b"&&") || text[i..].starts_with(b"||") {
-            out.push(&text[i..i + 2]);
-            i += 2;
         } else {
-            out.push(&text[i..i + 1]);
-            i += 1;
+            let end = cond_token_end(text, i);
+            out.push(&text[i..end]);
+            i = end;
         }
     }
     out
+}
+
+/// The end of the condition token at `i`: a word or number, `&&` / `||`,
+/// or one byte.
+fn cond_token_end(text: &[u8], i: usize) -> usize {
+    let c = text[i];
+    if c.is_ascii_alphanumeric() || c == b'_' {
+        return i + text[i..]
+            .iter()
+            .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'\'' | b'.'))
+            .count();
+    }
+    if text[i..].starts_with(b"&&") || text[i..].starts_with(b"||") { i + 2 } else { i + 1 }
 }
 
 /// Three-valued evaluation of a condition's tokens.
@@ -255,62 +260,17 @@ impl<'a> Eval<'a> {
                 self.at += 1;
                 self.unary().not()
             }
-            Some(b"(") => {
-                self.at += 1;
-                let v = self.or();
-                if self.peek() == Some(b")") {
-                    self.at += 1;
-                }
-                v
-            }
-            Some(b"defined") => {
-                self.at += 1;
-                let paren = self.peek() == Some(b"(");
-                if paren {
-                    self.at += 1;
-                }
-                let v = match self.peek() {
-                    Some(n) => {
-                        self.at += 1;
-                        defined(n, self.assume)
-                    }
-                    None => Tri::Unknown,
-                };
-                if paren && self.peek() == Some(b")") {
-                    self.at += 1;
-                }
-                v
-            }
+            Some(b"(") => self.parenthesized(),
+            Some(b"defined") => self.defined_operator(),
             Some(w) if w[0].is_ascii_digit() => {
                 self.at += 1;
-                let digits: Vec<u8> = w.iter().copied().take_while(|c| c.is_ascii_digit()).collect();
-                if digits.is_empty()
-                    || w.len() != digits.len()
-                        && !w.iter().skip(digits.len()).all(|c| matches!(c, b'u' | b'U' | b'l' | b'L'))
-                {
-                    Tri::Unknown
-                } else if digits.iter().all(|c| *c == b'0') {
-                    Tri::False
-                } else {
-                    Tri::True
-                }
+                number_truth(w)
             }
             Some(w) if w[0].is_ascii_alphabetic() || w[0] == b'_' => {
                 self.at += 1;
                 // A function-like test (`__has_include(<x>)`): unknown.
                 if self.peek() == Some(b"(") {
-                    let mut depth = 0;
-                    while let Some(t) = self.peek() {
-                        self.at += 1;
-                        if t == b"(" {
-                            depth += 1;
-                        } else if t == b")" {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                    }
+                    self.skip_parens();
                     Tri::Unknown
                 } else {
                     defined(w, self.assume)
@@ -323,6 +283,67 @@ impl<'a> Eval<'a> {
         };
         self.depth -= 1;
         v
+    }
+
+    /// `( … )`, the `(` next.
+    fn parenthesized(&mut self) -> Tri {
+        self.at += 1;
+        let v = self.or();
+        if self.peek() == Some(b")") {
+            self.at += 1;
+        }
+        v
+    }
+
+    /// `defined X` / `defined(X)`, `defined` next.
+    fn defined_operator(&mut self) -> Tri {
+        self.at += 1;
+        let paren = self.peek() == Some(b"(");
+        if paren {
+            self.at += 1;
+        }
+        let v = match self.peek() {
+            Some(n) => {
+                self.at += 1;
+                defined(n, self.assume)
+            }
+            None => Tri::Unknown,
+        };
+        if paren && self.peek() == Some(b")") {
+            self.at += 1;
+        }
+        v
+    }
+
+    /// Skips a parenthesized argument list, the `(` next.
+    fn skip_parens(&mut self) {
+        let mut depth = 0;
+        while let Some(t) = self.peek() {
+            self.at += 1;
+            match t {
+                b"(" => depth += 1,
+                b")" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Truth of an integer literal (`0`, `1L`); unknown for anything else.
+fn number_truth(w: &[u8]) -> Tri {
+    let digits = w.iter().take_while(|c| c.is_ascii_digit()).count();
+    let suffix_ok = w[digits..].iter().all(|c| matches!(c, b'u' | b'U' | b'l' | b'L'));
+    if digits == 0 || !suffix_ok {
+        Tri::Unknown
+    } else if w[..digits].iter().all(|c| *c == b'0') {
+        Tri::False
+    } else {
+        Tri::True
     }
 }
 
@@ -439,7 +460,6 @@ struct Context {
 fn contexts(toks: &[Tok], src: &[u8]) -> Vec<Option<Context>> {
     let mut stack: Vec<Option<Brace>> = Vec::new(); // None = paren / bracket
     let mut out = Vec::with_capacity(toks.len());
-    let text = |t: &Tok| &src[t.start..t.end];
     for (i, t) in toks.iter().enumerate() {
         if t.kind == Kind::Directive {
             out.push(Some(Context {
@@ -456,27 +476,7 @@ fn contexts(toks: &[Tok], src: &[u8]) -> Vec<Option<Context>> {
                     stack.pop();
                 }
             }
-            Kind::Punct(b'{') => {
-                let prev = toks[..i].iter().rev().find(|p| p.kind != Kind::Directive);
-                let init = prev.is_some_and(|p| {
-                    matches!(p.kind, Kind::Punct(b'=' | b',' | b'{' | b'('))
-                        || (p.kind == Kind::Ident && text(p) == b"return")
-                });
-                let is_enum = !init
-                    && toks[..i]
-                        .iter()
-                        .rev()
-                        .take(16)
-                        .take_while(|p| matches!(p.kind, Kind::Ident | Kind::Punct(b':')))
-                        .any(|p| text(p) == b"enum");
-                stack.push(Some(if init {
-                    Brace::Init
-                } else if is_enum {
-                    Brace::Enum
-                } else {
-                    Brace::Other
-                }));
-            }
+            Kind::Punct(b'{') => stack.push(Some(brace_kind(toks, i, src))),
             Kind::Punct(b'}') => {
                 // Close any parentheses left open inside the block.
                 while stack.last().is_some_and(|b| b.is_none()) {
@@ -488,6 +488,25 @@ fn contexts(toks: &[Tok], src: &[u8]) -> Vec<Option<Context>> {
         }
     }
     out
+}
+
+/// What the `{` at token `i` opens.
+fn brace_kind(toks: &[Tok], i: usize, src: &[u8]) -> Brace {
+    let text = |t: &Tok| &src[t.start..t.end];
+    let prev = toks[..i].iter().rev().find(|p| p.kind != Kind::Directive);
+    let init = prev.is_some_and(|p| {
+        matches!(p.kind, Kind::Punct(b'=' | b',' | b'{' | b'(')) || (p.kind == Kind::Ident && text(p) == b"return")
+    });
+    if init {
+        return Brace::Init;
+    }
+    let is_enum = toks[..i]
+        .iter()
+        .rev()
+        .take(16)
+        .take_while(|p| matches!(p.kind, Kind::Ident | Kind::Punct(b':')))
+        .any(|p| text(p) == b"enum");
+    if is_enum { Brace::Enum } else { Brace::Other }
 }
 
 /// The pre-parse decisions: byte ranges to blank (collapsed groups and
@@ -506,40 +525,60 @@ fn balances(groups: &[Group], toks: &[Tok]) -> Vec<Vec<[i32; 4]>> {
     // Innermost groups first: a group starts after its parent.
     let mut order: Vec<usize> = (0..groups.len()).collect();
     order.sort_by_key(|&g| std::cmp::Reverse(groups[g].branches[0]));
-    let starts: std::collections::HashMap<usize, usize> =
-        groups.iter().enumerate().map(|(g, group)| (group.branches[0], g)).collect();
+    let starts: HashMap<usize, usize> = groups.iter().enumerate().map(|(g, group)| (group.branches[0], g)).collect();
     for g in order {
         for k in 0..groups[g].branches.len() {
-            let (a, b) = groups[g].body(k);
-            let mut bal = [0i32; 4];
-            let mut i = a;
-            while i < b {
-                // A nested group: add its first branch, skip the rest.
-                if let Some(&n) = starts.get(&i).filter(|&&n| n != g) {
-                    for (x, y) in bal.iter_mut().zip(out[n][0]) {
-                        *x += y;
-                    }
-                    i = groups[n].end + 1;
-                    continue;
-                }
-                match toks[i].kind {
-                    Kind::Punct(b'{') => bal[0] += 1,
-                    Kind::Punct(b'}') => bal[0] -= 1,
-                    Kind::Punct(b'(') => bal[1] += 1,
-                    Kind::Punct(b')') => bal[1] -= 1,
-                    Kind::Punct(b'[') => bal[2] += 1,
-                    Kind::Punct(b']') => bal[2] -= 1,
-                    _ => {}
-                }
-                if bal[..3].iter().any(|x| *x < 0) {
-                    bal[3] = 1;
-                }
-                i += 1;
-            }
+            let bal = branch_balance(groups, toks, &starts, &out, (g, k));
             out[g][k] = bal;
         }
     }
     out
+}
+
+/// The [`balances`] entry of branch `k` of group `g`, nested groups'
+/// first branches (in `done`) already computed.
+fn branch_balance(
+    groups: &[Group],
+    toks: &[Tok],
+    starts: &HashMap<usize, usize>,
+    done: &[Vec<[i32; 4]>],
+    (g, k): (usize, usize),
+) -> [i32; 4] {
+    let (a, b) = groups[g].body(k);
+    let mut bal = [0i32; 4];
+    let mut i = a;
+    while i < b {
+        // A nested group: add its first branch, skip the rest.
+        if let Some(&n) = starts.get(&i).filter(|&&n| n != g) {
+            for (x, y) in bal.iter_mut().zip(done[n][0]) {
+                *x += y;
+            }
+            i = groups[n].end + 1;
+            continue;
+        }
+        if let Some((slot, delta)) = bracket_delta(toks[i].kind) {
+            bal[slot] += delta;
+        }
+        if bal[..3].iter().any(|x| *x < 0) {
+            bal[3] = 1;
+        }
+        i += 1;
+    }
+    bal
+}
+
+/// The balance slot a bracket token counts in (0: braces, 1: parentheses,
+/// 2: brackets) and its sign.
+fn bracket_delta(kind: Kind) -> Option<(usize, i32)> {
+    match kind {
+        Kind::Punct(b'{') => Some((0, 1)),
+        Kind::Punct(b'}') => Some((0, -1)),
+        Kind::Punct(b'(') => Some((1, 1)),
+        Kind::Punct(b')') => Some((1, -1)),
+        Kind::Punct(b'[') => Some((2, 1)),
+        Kind::Punct(b']') => Some((2, -1)),
+        _ => None,
+    }
 }
 
 /// Pre-parse plan for every group (module docs).
@@ -557,102 +596,135 @@ pub(crate) fn plan(groups: &[Group], toks: &[Tok], src: &[u8]) -> Plan {
         if dead.iter().any(|&(a, b)| first >= a && first < b) {
             continue;
         }
-        let c = ctx[first].as_ref();
-        let brace = c.and_then(|c| c.brace);
-        let in_enum = brace == Some(Brace::Enum);
-        let boundary = |t: Option<&Tok>| match t {
-            None => true,
-            Some(t) => {
-                matches!(t.kind, Kind::Punct(b';' | b'{' | b'}' | b':'))
-                    || (in_enum && matches!(t.kind, Kind::Punct(b',')))
-            }
-        };
-        let prev = toks[..first].iter().rev().find(|t| t.kind != Kind::Directive);
-        let unbalanced = bal[g].iter().any(|b| *b != [0; 4]);
-        let misplaced = c.is_some_and(|c| c.in_parens) || brace == Some(Brace::Init) || !boundary(prev);
-        let unfinished = (0..group.branches.len()).any(|k| {
-            let (a, b) = group.body(k);
-            let last = toks[a..b].iter().rev().find(|t| t.kind != Kind::Directive);
-            last.is_some_and(|t| {
-                !(matches!(t.kind, Kind::Punct(b';' | b'}' | b':'))
-                    || (in_enum && matches!(t.kind, Kind::Punct(b',' | b'0') | Kind::Ident)))
-            })
-        });
-        if unbalanced || misplaced || unfinished {
-            let keep = group.chosen_with(&assumed);
-            if let Some((name, want)) = keep.and_then(|k| group.on[k].clone()) {
-                assumed.entry(name).or_insert(want);
-            }
-            blanks.extend(group.collapse(toks, keep));
-            collapsed[g] = true;
-            for k in 0..group.branches.len() {
-                if Some(k) != keep {
-                    dead.push(group.body(k));
-                }
-            }
+        if !must_collapse(group, &bal[g], toks, ctx[first].as_ref()) {
+            blank_dead_branches(group, toks, &mut blanks, &mut dead);
             continue;
         }
-        for k in 0..group.branches.len() {
-            if group.dead[k] {
-                let (a, b) = group.body(k);
-                if a < b {
-                    blanks.push((toks[a].start, toks[b - 1].end));
-                    dead.push((a, b));
-                }
-            }
+        let keep = group.chosen_with(&assumed);
+        if let Some((name, want)) = keep.and_then(|k| group.on[k].clone()) {
+            assumed.entry(name).or_insert(want);
         }
+        blanks.extend(group.collapse(toks, keep));
+        collapsed[g] = true;
+        dead.extend((0..group.branches.len()).filter(|&k| Some(k) != keep).map(|k| group.body(k)));
     }
-    // `#include` / `#define` lines inside an initializer list, an enum body
-    // or parentheses (X-macro tables): the grammars take none there, and
-    // nothing in them is extracted (includes are read lexically).
-    for (i, t) in toks.iter().enumerate() {
-        let Some(c) = ctx[i].as_ref() else { continue };
-        // Also after an `=` (`static const char s[] =` + `#include "x.inc"`).
-        let prev = toks[..i].iter().rev().find(|t| t.kind != Kind::Directive);
-        let after_operator = prev.is_some_and(|p| matches!(p.kind, Kind::Punct(b'=' | b',' | b'(')));
-        let misplaced = c.in_parens || after_operator || matches!(c.brace, Some(Brace::Init | Brace::Enum));
-        if misplaced && t.kind == Kind::Directive && directive_kind(&src[t.start..t.end]).is_none() {
-            blanks.push((t.start, t.end));
-        }
-        // A goto label right before a directive (`ovfl:` + `#ifdef X`): a
-        // label needs a statement, which a directive is not to the grammar.
-        // Labels carry nothing to extract; `goto ovfl;` stays valid.
-        if t.kind == Kind::Directive && i >= 2 && c.brace == Some(Brace::Other) && !c.in_parens {
-            let (l, colon) = (&toks[i - 2], &toks[i - 1]);
-            let before = i.checked_sub(3).map(|k| &toks[k]);
-            let label = l.kind == Kind::Ident
-                && colon.kind == Kind::Punct(b':')
-                && !matches!(&src[l.start..l.end], b"default" | b"public" | b"private" | b"protected")
-                && before.is_none_or(|b| matches!(b.kind, Kind::Punct(b';' | b'{' | b'}') | Kind::Directive));
-            if label {
-                blanks.push((l.start, colon.end));
-            }
-        }
+    blanks.extend(stray_directive_blanks(toks, src, &ctx));
+    blanks.extend(prose_blanks(groups, toks));
+    Plan { blanks, collapsed }
+}
+
+/// Blanks around directives the grammars reject where they sit (see
+/// [`misplaced_directive`] and [`label_before_directive`]), in token order;
+/// `ctx` holds the [`contexts`] of `toks`.
+fn stray_directive_blanks(toks: &[Tok], src: &[u8], ctx: &[Option<Context>]) -> Vec<(usize, usize)> {
+    let mut blanks = Vec::new();
+    for (i, c) in ctx.iter().enumerate() {
+        let Some(c) = c.as_ref() else { continue };
+        blanks.extend(misplaced_directive(toks, src, i, c));
+        blanks.extend(label_before_directive(toks, src, i, c));
     }
-    // A branch that is prose, not code (`#if A + B != 1` / `Exactly one of
-    // A, B should be defined.` / `#endif`, a deliberate compile error): a
-    // line of five or more words (and commas) ending with `.`.
+    blanks
+}
+
+/// Blanks for the branches that are prose, not code (`#if A + B != 1` /
+/// `Exactly one of A, B should be defined.` / `#endif`, a deliberate
+/// compile error).
+fn prose_blanks(groups: &[Group], toks: &[Tok]) -> Vec<(usize, usize)> {
+    let mut blanks = Vec::new();
     for group in groups {
         for k in 0..group.branches.len() {
             let (a, b) = group.body(k);
-            let mut prose = false;
-            let mut i = a;
-            while i < b && !prose {
-                let line = toks[i].line;
-                let end = (i..b).find(|&j| toks[j].line != line).unwrap_or(b);
-                let words = (i..end).filter(|&j| toks[j].kind == Kind::Ident).count();
-                let shape = end > i
-                    && toks[end - 1].kind == Kind::Punct(b'.')
-                    && (i..end - 1).all(|j| matches!(toks[j].kind, Kind::Ident | Kind::Punct(b',')));
-                prose = shape && words >= 5;
-                i = end;
-            }
-            if prose && a < b {
+            if a < b && is_prose(toks, a, b) {
                 blanks.push((toks[a].start, toks[b - 1].end));
             }
         }
     }
-    Plan { blanks, collapsed }
+    blanks
+}
+
+/// Whether a group must collapse to one branch before parsing: a branch
+/// is unbalanced or does not end a statement, or the group sits where a
+/// directive cannot (in parentheses, an initializer list, mid-statement).
+/// `bal` is the group's [`balances`], `c` the context of its `#if`.
+fn must_collapse(group: &Group, bal: &[[i32; 4]], toks: &[Tok], c: Option<&Context>) -> bool {
+    let first = group.branches[0];
+    let brace = c.and_then(|c| c.brace);
+    let in_enum = brace == Some(Brace::Enum);
+    let prev = toks[..first].iter().rev().find(|t| t.kind != Kind::Directive);
+    let boundary = prev.is_none_or(|t| {
+        matches!(t.kind, Kind::Punct(b';' | b'{' | b'}' | b':')) || (in_enum && matches!(t.kind, Kind::Punct(b',')))
+    });
+    let unbalanced = bal.iter().any(|b| *b != [0; 4]);
+    let misplaced = c.is_some_and(|c| c.in_parens) || brace == Some(Brace::Init) || !boundary;
+    let unfinished = (0..group.branches.len()).any(|k| {
+        let (a, b) = group.body(k);
+        let last = toks[a..b].iter().rev().find(|t| t.kind != Kind::Directive);
+        last.is_some_and(|t| {
+            !(matches!(t.kind, Kind::Punct(b';' | b'}' | b':'))
+                || (in_enum && matches!(t.kind, Kind::Punct(b',' | b'0') | Kind::Ident)))
+        })
+    });
+    unbalanced || misplaced || unfinished
+}
+
+/// Blanks the branches of `group` known dead whatever the target.
+fn blank_dead_branches(group: &Group, toks: &[Tok], blanks: &mut Vec<(usize, usize)>, dead: &mut Vec<(usize, usize)>) {
+    for k in (0..group.branches.len()).filter(|&k| group.dead[k]) {
+        let (a, b) = group.body(k);
+        if a < b {
+            blanks.push((toks[a].start, toks[b - 1].end));
+            dead.push((a, b));
+        }
+    }
+}
+
+/// An `#include` / `#define` line (token `i`, context `c`) inside an
+/// initializer list, an enum body or parentheses (X-macro tables), also
+/// after an `=` (`static const char s[] =` + `#include "x.inc"`): the
+/// grammars take none there, and nothing in them is extracted (includes
+/// are read lexically).
+fn misplaced_directive(toks: &[Tok], src: &[u8], i: usize, c: &Context) -> Option<(usize, usize)> {
+    let t = &toks[i];
+    let prev = toks[..i].iter().rev().find(|t| t.kind != Kind::Directive);
+    let after_operator = prev.is_some_and(|p| matches!(p.kind, Kind::Punct(b'=' | b',' | b'(')));
+    let misplaced = c.in_parens || after_operator || matches!(c.brace, Some(Brace::Init | Brace::Enum));
+    (misplaced && t.kind == Kind::Directive && directive_kind(&src[t.start..t.end]).is_none())
+        .then_some((t.start, t.end))
+}
+
+/// A goto label right before the directive at token `i` (`ovfl:` +
+/// `#ifdef X`): a label needs a statement, which a directive is not to
+/// the grammar. Labels carry nothing to extract; `goto ovfl;` stays valid.
+fn label_before_directive(toks: &[Tok], src: &[u8], i: usize, c: &Context) -> Option<(usize, usize)> {
+    if toks[i].kind != Kind::Directive || i < 2 || c.brace != Some(Brace::Other) || c.in_parens {
+        return None;
+    }
+    let (l, colon) = (&toks[i - 2], &toks[i - 1]);
+    let before = i.checked_sub(3).map(|k| &toks[k]);
+    let label = l.kind == Kind::Ident
+        && colon.kind == Kind::Punct(b':')
+        && !matches!(&src[l.start..l.end], b"default" | b"public" | b"private" | b"protected")
+        && before.is_none_or(|b| matches!(b.kind, Kind::Punct(b';' | b'{' | b'}') | Kind::Directive));
+    label.then_some((l.start, colon.end))
+}
+
+/// Whether tokens `a..b` hold a line of prose: five or more words (and
+/// commas) ending with `.`.
+fn is_prose(toks: &[Tok], a: usize, b: usize) -> bool {
+    let mut i = a;
+    while i < b {
+        let line = toks[i].line;
+        let end = (i..b).find(|&j| toks[j].line != line).unwrap_or(b);
+        let words = (i..end).filter(|&j| toks[j].kind == Kind::Ident).count();
+        let shape = end > i
+            && toks[end - 1].kind == Kind::Punct(b'.')
+            && (i..end - 1).all(|j| matches!(toks[j].kind, Kind::Ident | Kind::Punct(b',')));
+        if shape && words >= 5 {
+            return true;
+        }
+        i = end;
+    }
+    false
 }
 
 /// Error-driven collapse: the innermost group not yet collapsed that

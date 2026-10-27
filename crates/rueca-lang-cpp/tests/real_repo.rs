@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use rueca_extract::{Budget, LanguagePack, ProjectFiles};
 use rueca_lang_cpp::CppPack;
-use rueca_model::{Language, RefKind};
+use rueca_model::{FileFacts, Language, RefKind};
 
 const SKIP_DIRS: &[&str] = &["third_party", "vendor", "build", "node_modules"];
 
@@ -68,66 +68,27 @@ fn extract_real_repository() {
     let pack = CppPack::default();
     let budget = Budget::default();
     let show_errors = std::env::var_os("RUECA_CPP_SHOW_ERRORS").is_some();
-    let (mut defs, mut decls, mut refs, mut calls, mut typed, mut tests, mut macros) = (0, 0, 0, 0, 0, 0, 0);
-    let (mut errors, mut lines, mut bytes) = (0usize, 0usize, 0usize);
-    let (mut includes, mut includes_resolved, mut system, mut system_resolved) = (0, 0, 0, 0);
+    let mut totals = Totals::default();
     let mut errored: Vec<(String, u32)> = Vec::new();
     let mut failures = Vec::new();
     let start = Instant::now();
     for path in &files {
         let source = std::fs::read(path).unwrap();
-        bytes += source.len();
+        totals.bytes += source.len();
         let p = rel(path);
         let language = Language::header_language(&p, has_cpp).unwrap();
         match pack.extract(&p, language, &source, &budget) {
             Ok(f) => {
-                defs += f.definitions.len();
-                decls += f.definitions.iter().filter(|d| d.is_declaration).count();
-                tests += f.definitions.iter().filter(|d| d.is_test).count();
-                macros += f
-                    .definitions
-                    .iter()
-                    .filter(|d| d.signature.as_deref().is_some_and(|s| s.starts_with("#define")))
-                    .count();
-                refs += f.references.len();
-                calls += f.references.iter().filter(|r| matches!(r.kind, RefKind::Call | RefKind::New)).count();
-                typed += f
-                    .references
-                    .iter()
-                    .filter(|r| r.receiver.as_deref().is_some_and(|x| x.starts_with("$type:")))
-                    .count();
-                lines += f.line_count as usize;
+                totals.add_facts(&f);
                 if f.parse_errors > 0 {
-                    errors += 1;
+                    totals.errors += 1;
                     errored.push((p.clone(), f.parse_errors));
                     if show_errors {
-                        for at in rueca_lang_cpp::parse_error_offsets(&source, language).unwrap() {
-                            let line = source[..at].iter().filter(|b| **b == b'\n').count() + 1;
-                            let text =
-                                String::from_utf8_lossy(&source).lines().nth(line - 1).unwrap_or("").trim().to_string();
-                            eprintln!("ERR {p}:{line}: {}", text.chars().take(140).collect::<String>());
-                        }
+                        print_parse_errors(&p, &source, language);
                     }
                 }
-                for d in &f.definitions {
-                    assert!(d.span.contains(&d.name_span), "{p}: {}", d.qualified_name);
-                    if let Some(parent) = d.parent {
-                        assert!((parent as usize) < f.definitions.len(), "{p}: {}", d.qualified_name);
-                    }
-                }
-                for r in &f.references {
-                    assert!(r.enclosing.is_none_or(|e| (e as usize) < f.definitions.len()), "{p}: {}", r.name);
-                }
-                for i in &f.imports {
-                    let resolved = pack.resolve_import(&p, i, &project).is_some();
-                    if i.module.starts_with('<') {
-                        system += 1;
-                        system_resolved += usize::from(resolved);
-                    } else {
-                        includes += 1;
-                        includes_resolved += usize::from(resolved);
-                    }
-                }
+                check_invariants(&p, &f);
+                totals.add_imports(&pack, &p, &f, &project);
                 assert_eq!(pack.extract(&p, language, &source, &budget).unwrap(), f, "{p}: nondeterministic");
             }
             Err(e) => failures.push(format!("{p}: {e}")),
@@ -135,6 +96,22 @@ fn extract_real_repository() {
     }
     let elapsed = start.elapsed();
     errored.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let Totals {
+        defs,
+        decls,
+        refs,
+        calls,
+        typed,
+        tests,
+        macros,
+        errors,
+        lines,
+        bytes,
+        includes,
+        includes_resolved,
+        system,
+        system_resolved,
+    } = totals;
     eprintln!(
         "files={} (c++ headers: {has_cpp}) lines={lines} bytes={bytes} defs={defs} declarations={decls} macros={macros} \
          tests={tests} refs={refs} calls={calls} typed_receivers={typed} \
@@ -147,4 +124,76 @@ fn extract_real_repository() {
     );
     eprintln!("parse errors (worst 15): {:#?}", &errored[..errored.len().min(15)]);
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The counts the smoke test prints.
+#[derive(Default)]
+struct Totals {
+    defs: usize,
+    decls: usize,
+    refs: usize,
+    calls: usize,
+    typed: usize,
+    tests: usize,
+    macros: usize,
+    errors: usize,
+    lines: usize,
+    bytes: usize,
+    includes: usize,
+    includes_resolved: usize,
+    system: usize,
+    system_resolved: usize,
+}
+
+impl Totals {
+    /// Counts the definitions and references of one file.
+    fn add_facts(&mut self, f: &FileFacts) {
+        self.defs += f.definitions.len();
+        self.decls += f.definitions.iter().filter(|d| d.is_declaration).count();
+        self.tests += f.definitions.iter().filter(|d| d.is_test).count();
+        self.macros +=
+            f.definitions.iter().filter(|d| d.signature.as_deref().is_some_and(|s| s.starts_with("#define"))).count();
+        self.refs += f.references.len();
+        self.calls += f.references.iter().filter(|r| matches!(r.kind, RefKind::Call | RefKind::New)).count();
+        self.typed +=
+            f.references.iter().filter(|r| r.receiver.as_deref().is_some_and(|x| x.starts_with("$type:"))).count();
+        self.lines += f.line_count as usize;
+    }
+
+    /// Counts the includes of file `p` and how many resolve.
+    fn add_imports(&mut self, pack: &CppPack, p: &str, f: &FileFacts, project: &ProjectFiles) {
+        for i in &f.imports {
+            let resolved = pack.resolve_import(p, i, project).is_some();
+            if i.module.starts_with('<') {
+                self.system += 1;
+                self.system_resolved += usize::from(resolved);
+            } else {
+                self.includes += 1;
+                self.includes_resolved += usize::from(resolved);
+            }
+        }
+    }
+}
+
+/// Prints every remaining parse error of file `p` (`ERR path:line: source line`).
+fn print_parse_errors(p: &str, source: &[u8], language: Language) {
+    for at in rueca_lang_cpp::parse_error_offsets(source, language).unwrap() {
+        let line = source[..at].iter().filter(|b| **b == b'\n').count() + 1;
+        let text = String::from_utf8_lossy(source).lines().nth(line - 1).unwrap_or("").trim().to_string();
+        eprintln!("ERR {p}:{line}: {}", text.chars().take(140).collect::<String>());
+    }
+}
+
+/// The extractor's invariants on the facts of file `p`: names inside their
+/// definitions, parents and enclosing definitions in range.
+fn check_invariants(p: &str, f: &FileFacts) {
+    for d in &f.definitions {
+        assert!(d.span.contains(&d.name_span), "{p}: {}", d.qualified_name);
+        if let Some(parent) = d.parent {
+            assert!((parent as usize) < f.definitions.len(), "{p}: {}", d.qualified_name);
+        }
+    }
+    for r in &f.references {
+        assert!(r.enclosing.is_none_or(|e| (e as usize) < f.definitions.len()), "{p}: {}", r.name);
+    }
 }

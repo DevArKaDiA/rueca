@@ -88,79 +88,78 @@ fn tokens(b: &[u8]) -> Vec<(T, usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < b.len() {
-        let c = b[i];
-        match c {
-            b'/' if b.get(i + 1) == Some(&b'*') => {
-                i += 2;
-                while i < b.len() && !(b[i] == b'*' && b.get(i + 1) == Some(&b'/')) {
-                    i += 1;
-                }
-                i += 2;
-            }
-            b'/' if b.get(i + 1) == Some(&b'/') => {
-                while i < b.len() && b[i] != b'\n' {
-                    i += 1;
-                }
-            }
-            b'"' | b'\'' => {
-                i += 1;
-                while i < b.len() && b[i] != c && b[i] != b'\n' {
-                    i += if b[i] == b'\\' { 2 } else { 1 };
-                }
-                i += 1;
-                out.push((T::Other, i, i));
-            }
-            _ if c.is_ascii_alphabetic() || c == b'_' => {
-                let s = i;
-                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
-                    i += 1;
-                }
-                out.push((T::Ident, s, i));
-            }
-            _ if c.is_ascii_digit() => {
-                // Numbers, with suffixes and exponents (`1e-3f`, `0x1p3`).
-                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.') {
-                    i += 1;
-                }
-                out.push((T::Other, i, i));
-            }
-            b':' if b.get(i + 1) == Some(&b':') => {
-                out.push((T::Scope, i, i + 2));
-                i += 2;
-            }
-            b'-' if b.get(i + 1) == Some(&b'>') => {
-                out.push((T::Member, i, i + 2));
-                i += 2;
-            }
-            b'.' => {
-                out.push((T::Member, i, i + 1));
-                i += 1;
-            }
-            b'#' => {
-                let s = i;
-                i += if b.get(i + 1) == Some(&b'#') { 2 } else { 1 };
-                out.push((T::Hash, s, i));
-            }
-            b'(' => {
-                out.push((T::Open, i, i + 1));
-                i += 1;
-            }
-            b')' => {
-                out.push((T::Close, i, i + 1));
-                i += 1;
-            }
-            b',' => {
-                out.push((T::Comma, i, i + 1));
-                i += 1;
-            }
-            _ if c.is_ascii_whitespace() || c == b'\\' => i += 1,
-            _ => {
-                out.push((T::Other, i, i + 1));
-                i += 1;
-            }
-        }
+        let (tok, next) = token_at(b, i);
+        out.extend(tok);
+        i = next;
     }
     out
+}
+
+/// The token at `i` of a macro body (`None` for a comment, whitespace or
+/// a continuation) and where the next one starts. A literal or a number
+/// is an empty [`T::Other`] at its end.
+fn token_at(b: &[u8], i: usize) -> (Option<(T, usize, usize)>, usize) {
+    let c = b[i];
+    match (c, b.get(i + 1)) {
+        (b'/', Some(b'*')) => (None, block_comment_end(b, i)),
+        (b'/', Some(b'/')) => (None, run_end(b, i, |x| x != b'\n')),
+        (b'"' | b'\'', _) => {
+            let end = literal_end(b, i);
+            (Some((T::Other, end, end)), end)
+        }
+        _ if c.is_ascii_alphabetic() || c == b'_' => {
+            let end = run_end(b, i, |x| x.is_ascii_alphanumeric() || x == b'_');
+            (Some((T::Ident, i, end)), end)
+        }
+        // Numbers, with suffixes and exponents (`1e-3f`, `0x1p3`).
+        _ if c.is_ascii_digit() => {
+            let end = run_end(b, i, |x| x.is_ascii_alphanumeric() || x == b'_' || x == b'.');
+            (Some((T::Other, end, end)), end)
+        }
+        (b':', Some(b':')) => (Some((T::Scope, i, i + 2)), i + 2),
+        (b'-', Some(b'>')) => (Some((T::Member, i, i + 2)), i + 2),
+        (b'#', Some(b'#')) => (Some((T::Hash, i, i + 2)), i + 2),
+        _ if c.is_ascii_whitespace() || c == b'\\' => (None, i + 1),
+        _ => (Some((single_token(c), i, i + 1)), i + 1),
+    }
+}
+
+/// The kind of a one-byte token.
+fn single_token(c: u8) -> T {
+    match c {
+        b'.' => T::Member,
+        b'#' => T::Hash,
+        b'(' => T::Open,
+        b')' => T::Close,
+        b',' => T::Comma,
+        _ => T::Other,
+    }
+}
+
+/// The end of the run of bytes from `i` that satisfy `keep`.
+fn run_end(b: &[u8], i: usize, keep: impl Fn(u8) -> bool) -> usize {
+    i + b[i..].iter().take_while(|x| keep(**x)).count()
+}
+
+/// The index after the block comment opening at `i` (may pass the end of
+/// an unterminated one).
+fn block_comment_end(b: &[u8], mut i: usize) -> usize {
+    i += 2;
+    while i < b.len() && !(b[i] == b'*' && b.get(i + 1) == Some(&b'/')) {
+        i += 1;
+    }
+    i + 2
+}
+
+/// The index after the string or character literal opening at `i` (at
+/// the end of the line for an unterminated one).
+fn literal_end(b: &[u8], mut i: usize) -> usize {
+    let quote = b[i];
+    i += 1;
+    while i < b.len() && b[i] != quote && b[i] != b'\n' {
+        i += if b[i] == b'\\' { 2 } else { 1 };
+    }
+    i + 1
 }
 
 /// Calls in `body` (the replacement list of a macro whose parameters are
@@ -171,26 +170,15 @@ pub(crate) fn body_calls(body: &[u8], params: &[String]) -> Vec<BodyCall> {
     let mut out = Vec::new();
     let mut k = 0;
     while k < toks.len() && out.len() < MAX_CALLS {
-        // The start of a name chain: `a`, `::a`, `a::b::c`.
         let start = k;
-        let global = toks[k].0 == T::Scope && toks.get(k + 1).is_some_and(|t| t.0 == T::Ident);
-        let mut j = if global { k + 1 } else { k };
-        if toks[j].0 != T::Ident {
+        let Some((global, segs)) = name_chain(&toks, k) else {
             k += 1;
             continue;
-        }
-        let mut segs = vec![j];
-        while toks.get(j + 1).is_some_and(|t| t.0 == T::Scope) && toks.get(j + 2).is_some_and(|t| t.0 == T::Ident) {
-            j += 2;
-            segs.push(j);
-        }
+        };
+        let j = segs[segs.len() - 1];
         let next = j + 1;
         k = next;
-        if toks.get(next).is_none_or(|t| t.0 != T::Open) {
-            continue;
-        }
-        let prev = start.checked_sub(1).map(|p| toks[p].0);
-        if matches!(prev, Some(T::Member | T::Hash)) || toks.get(next + 1).is_some_and(|t| t.0 == T::Hash) {
+        if !called(&toks, start, next) {
             continue;
         }
         let name = word(j);
@@ -202,22 +190,6 @@ pub(crate) fn body_calls(body: &[u8], params: &[String]) -> Vec<BodyCall> {
         {
             continue;
         }
-        // Arguments: top-level commas up to the matching `)`.
-        let (mut depth, mut commas, mut any) = (0i32, 0u32, false);
-        for t in &toks[next..] {
-            match t.0 {
-                T::Open => depth += 1,
-                T::Close => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                T::Comma if depth == 1 => commas += 1,
-                _ if depth >= 1 => any = true,
-                _ => {}
-            }
-        }
         let qualifier = segs[..segs.len() - 1].iter().map(|&s| word(s)).collect::<Vec<_>>().join("::");
         out.push(BodyCall {
             start: toks[j].1,
@@ -225,10 +197,58 @@ pub(crate) fn body_calls(body: &[u8], params: &[String]) -> Vec<BodyCall> {
             name: name.to_string(),
             qualifier,
             global,
-            arity: if any || commas > 0 { commas + 1 } else { 0 },
+            arity: arity(&toks[next..]),
         });
     }
     out
+}
+
+/// The name chain starting at token `k` (`a`, `::a`, `a::b::c`): whether
+/// it is global and the indexes of its names.
+fn name_chain(toks: &[(T, usize, usize)], k: usize) -> Option<(bool, Vec<usize>)> {
+    let global = toks[k].0 == T::Scope && toks.get(k + 1).is_some_and(|t| t.0 == T::Ident);
+    let mut j = if global { k + 1 } else { k };
+    if toks[j].0 != T::Ident {
+        return None;
+    }
+    let mut segs = vec![j];
+    while toks.get(j + 1).is_some_and(|t| t.0 == T::Scope) && toks.get(j + 2).is_some_and(|t| t.0 == T::Ident) {
+        j += 2;
+        segs.push(j);
+    }
+    Some((global, segs))
+}
+
+/// Whether the name chain `start..next` is called: followed by `(`, and
+/// not a member call (`x.f(`, `p->f(`) or a stringized or pasted token
+/// (`#x`, `a ## b(`).
+fn called(toks: &[(T, usize, usize)], start: usize, next: usize) -> bool {
+    if toks.get(next).is_none_or(|t| t.0 != T::Open) {
+        return false;
+    }
+    let prev = start.checked_sub(1).map(|p| toks[p].0);
+    !matches!(prev, Some(T::Member | T::Hash)) && toks.get(next + 1).is_none_or(|t| t.0 != T::Hash)
+}
+
+/// Number of top-level arguments of the call whose `(` starts `toks`
+/// (commas up to the matching `)`).
+fn arity(toks: &[(T, usize, usize)]) -> u32 {
+    let (mut depth, mut commas, mut any) = (0i32, 0u32, false);
+    for t in toks {
+        match t.0 {
+            T::Open => depth += 1,
+            T::Close => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            T::Comma if depth == 1 => commas += 1,
+            _ if depth >= 1 => any = true,
+            _ => {}
+        }
+    }
+    if any || commas > 0 { commas + 1 } else { 0 }
 }
 
 #[cfg(test)]

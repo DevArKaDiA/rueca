@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 
-use rueca_extract::tree_sitter::Node;
+use rueca_extract::tree_sitter::{Node, TreeCursor};
 
 /// Longest signature kept, in characters.
 pub(crate) const MAX_SIGNATURE: usize = 200;
@@ -91,13 +91,36 @@ fn comment_ranges(node: Node<'_>, limit: usize, out: &mut Vec<(usize, usize)>) {
         if descend && n.kind() != "comment" && cursor.goto_first_child() {
             continue;
         }
-        loop {
-            if cursor.node().start_byte() < limit && cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() || cursor.node().id() == node.id() {
-                return;
-            }
+        if !next_before(&mut cursor, node, limit) {
+            return;
+        }
+    }
+}
+
+/// Moves `cursor` to the next sibling of its node, or of its nearest
+/// ancestor below `root`, when the node it leaves starts before `limit`;
+/// `false` when there is none.
+fn next_before(cursor: &mut TreeCursor<'_>, root: Node<'_>, limit: usize) -> bool {
+    loop {
+        if cursor.node().start_byte() < limit && cursor.goto_next_sibling() {
+            return true;
+        }
+        if !cursor.goto_parent() || cursor.node().id() == root.id() {
+            return false;
+        }
+    }
+}
+
+/// Moves `cursor` to the next sibling of its node or of the nearest
+/// ancestor that has one (the next node in document order after the
+/// node's subtree); `false` past the last node.
+pub(crate) fn next_in_preorder(cursor: &mut TreeCursor<'_>) -> bool {
+    loop {
+        if cursor.goto_next_sibling() {
+            return true;
+        }
+        if !cursor.goto_parent() {
+            return false;
         }
     }
 }
@@ -133,7 +156,22 @@ pub(crate) fn signature(node: Node<'_>, until: Option<Node<'_>>, source: &[u8]) 
 /// `//!`, `//`, `/** */`, `/*! */` and `/* */` markers and leading `*`
 /// stripped, at most [`MAX_DOC`] characters.
 pub(crate) fn doc_of(node: Node<'_>, source: &[u8]) -> Option<String> {
-    let mut comments: Vec<Node<'_>> = Vec::new();
+    let comments = doc_comments(node, source);
+    if comments.is_empty() {
+        return None;
+    }
+    let mut lines = Vec::new();
+    for c in comments.into_iter().rev() {
+        comment_lines(&text(c, source), &mut lines);
+    }
+    let doc = lines.join("\n").trim().to_string();
+    (!doc.is_empty()).then(|| truncate(doc, MAX_DOC))
+}
+
+/// The comments right before `node`, nearest first: no blank line in
+/// between, not a member doc (`///<`) and not trailing code.
+fn doc_comments<'t>(node: Node<'t>, source: &[u8]) -> Vec<Node<'t>> {
+    let mut comments = Vec::new();
     let mut next_row = node.start_position().row;
     let mut cur = node;
     while let Some(p) = cur.prev_sibling() {
@@ -144,44 +182,40 @@ pub(crate) fn doc_of(node: Node<'_>, source: &[u8]) -> Option<String> {
         if t.starts_with("///<") || t.starts_with("//!<") || t.starts_with("/**<") || t.starts_with("/*!<") {
             break;
         }
-        // A trailing comment of the previous line's code belongs to it (a
-        // preprocessor line ends after its newline: column 0 of the next).
-        if let Some(pp) = p.prev_sibling()
-            && pp.kind() != "comment"
-        {
-            let end = pp.end_position();
-            let end_row = if end.column == 0 && end.row > pp.start_position().row { end.row - 1 } else { end.row };
-            if end_row == p.start_position().row {
-                break;
-            }
+        if trails_code(p) {
+            break;
         }
         comments.push(p);
         next_row = p.start_position().row;
         cur = p;
     }
-    if comments.is_empty() {
-        return None;
+    comments
+}
+
+/// Whether comment `p` trails the code of its line, which it belongs to
+/// (a preprocessor line ends after its newline: column 0 of the next).
+fn trails_code(p: Node<'_>) -> bool {
+    let Some(pp) = p.prev_sibling().filter(|pp| pp.kind() != "comment") else { return false };
+    let end = pp.end_position();
+    let end_row = if end.column == 0 && end.row > pp.start_position().row { end.row - 1 } else { end.row };
+    end_row == p.start_position().row
+}
+
+/// Appends the lines of comment `t`, markers and leading `*` stripped.
+fn comment_lines(t: &str, lines: &mut Vec<String>) {
+    if let Some(rest) = t.strip_prefix("//") {
+        let rest = rest.strip_prefix(['/', '!']).unwrap_or(rest);
+        lines.push(rest.strip_prefix(' ').unwrap_or(rest).trim_end().to_string());
+        return;
     }
-    comments.reverse();
-    let mut lines = Vec::new();
-    for c in comments {
-        let t = text(c, source);
-        if let Some(rest) = t.strip_prefix("//") {
-            let rest = rest.strip_prefix(['/', '!']).unwrap_or(rest);
-            lines.push(rest.strip_prefix(' ').unwrap_or(rest).trim_end().to_string());
-        } else {
-            let body = t.strip_prefix("/*").unwrap_or(&t);
-            let body = body.strip_suffix("*/").unwrap_or(body);
-            let body = body.strip_prefix(['*', '!']).unwrap_or(body);
-            for line in body.lines() {
-                let l = line.trim();
-                let l = l.strip_prefix('*').unwrap_or(l);
-                lines.push(l.strip_prefix(' ').unwrap_or(l).trim_end().to_string());
-            }
-        }
+    let body = t.strip_prefix("/*").unwrap_or(t);
+    let body = body.strip_suffix("*/").unwrap_or(body);
+    let body = body.strip_prefix(['*', '!']).unwrap_or(body);
+    for line in body.lines() {
+        let l = line.trim();
+        let l = l.strip_prefix('*').unwrap_or(l);
+        lines.push(l.strip_prefix(' ').unwrap_or(l).trim_end().to_string());
     }
-    let doc = lines.join("\n").trim().to_string();
-    (!doc.is_empty()).then(|| truncate(doc, MAX_DOC))
 }
 
 /// The identifier a declarator binds (`*name`, `&name`, `name[4]`,

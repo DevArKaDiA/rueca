@@ -10,15 +10,23 @@ fn main() {
         while i < src.len() {
             if src[i] != masked[i] {
                 let start = i;
-                while i < src.len()
-                    && (src[i] != masked[i] || (masked[i] == b' ' && i + 1 < src.len() && src[i + 1] != masked[i + 1]))
-                {
-                    i += 1;
-                }
+                i = rewrite_end(&src, &masked, start);
                 let line = src[..start].iter().filter(|b| **b == b'\n').count() + 1;
                 println!("{path}:{line}: {}", String::from_utf8_lossy(&src[start..i]).replace('\n', "\\n"));
             }
             i += 1;
         }
     }
+}
+
+/// The end of the rewritten range starting at `start` (a blank between two
+/// rewritten bytes joins them).
+fn rewrite_end(src: &[u8], masked: &[u8], start: usize) -> usize {
+    let mut i = start;
+    while i < src.len()
+        && (src[i] != masked[i] || (masked[i] == b' ' && i + 1 < src.len() && src[i + 1] != masked[i + 1]))
+    {
+        i += 1;
+    }
+    i
 }
