@@ -74,130 +74,18 @@ pub fn extract(source: &[u8], budget: &Budget) -> Result<FileFacts, ExtractError
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_GFM;
-    let mut headings: Vec<Heading> = Vec::new();
-    let mut links: Vec<(String, Range<usize>)> = Vec::new();
-    let mut seen_links: HashSet<String> = HashSet::new();
-    let mut add_link = |dest: &str, range: Range<usize>, links: &mut Vec<(String, Range<usize>)>| {
-        let dest = dest.trim();
-        if links.len() >= MAX_LINKS || !crate::links::is_local(dest) || seen_links.contains(dest) {
-            return;
-        }
-        seen_links.insert(dest.to_string());
-        links.push((dest.to_string(), range));
-    };
-
-    // Block containers (block quotes, list items, footnotes): headings and
-    // paragraphs inside them do not structure the document.
-    let mut depth = 0usize;
-    let mut in_heading: Option<Heading> = None;
-    let mut heading_image_depth = 0usize;
-    let mut para: Option<Para> = None;
+    let mut collector = Collector::default();
     for (n, (event, range)) in Parser::new_ext(body, options).into_offset_iter().enumerate() {
         if n % DEADLINE_EVERY == 0 && Instant::now() > deadline {
             return Err(ExtractError::Timeout);
         }
-        let range = range.start + base..range.end + base;
-        if let Some(h) = in_heading.as_mut() {
-            match &event {
-                Event::End(TagEnd::Heading(_)) => {}
-                _ => {
-                    let r = h.inline.get_or_insert(range.clone());
-                    r.start = r.start.min(range.start);
-                    r.end = r.end.max(range.end);
-                }
-            }
-        }
-        match event {
-            Event::Start(Tag::Heading { level, .. }) if depth == 0 && in_heading.is_none() => {
-                para = None;
-                in_heading = Some(Heading {
-                    level: level as usize,
-                    range,
-                    text: String::new(),
-                    alt: String::new(),
-                    inline: None,
-                    doc: None,
-                });
-                heading_image_depth = 0;
-            }
-            Event::End(TagEnd::Heading(_)) if in_heading.is_some() => {
-                if let Some(h) = in_heading.take()
-                    && headings.len() < MAX_SECTIONS
-                {
-                    headings.push(h);
-                }
-            }
-            Event::Start(Tag::BlockQuote(_) | Tag::Item | Tag::FootnoteDefinition(_)) => depth += 1,
-            Event::End(TagEnd::BlockQuote(_) | TagEnd::Item | TagEnd::FootnoteDefinition) => {
-                depth = depth.saturating_sub(1)
-            }
-            Event::Start(Tag::Paragraph) if depth == 0 && in_heading.is_none() => {
-                // Only the first qualifying paragraph of the latest heading.
-                if headings.last().is_some_and(|h| h.doc.is_none()) {
-                    para = Some(Para { text: String::new(), image_depth: 0 });
-                }
-            }
-            Event::End(TagEnd::Paragraph) => {
-                if let Some(p) = para.take() {
-                    let doc = collapse_ws(&p.text);
-                    if !doc.is_empty()
-                        && let Some(h) = headings.last_mut()
-                    {
-                        h.doc = Some(truncate_chars(&doc, MAX_DOC_CHARS));
-                    }
-                }
-            }
-            Event::Start(Tag::Link { link_type, dest_url, .. }) => {
-                if keeps(link_type) {
-                    add_link(&dest_url, range, &mut links);
-                }
-            }
-            Event::Start(Tag::Image { link_type, dest_url, .. }) => {
-                if keeps(link_type) {
-                    add_link(&dest_url, range, &mut links);
-                }
-                if in_heading.is_some() {
-                    heading_image_depth += 1;
-                }
-                if let Some(p) = para.as_mut() {
-                    p.image_depth += 1;
-                }
-            }
-            Event::End(TagEnd::Image) => {
-                if in_heading.is_some() {
-                    heading_image_depth = heading_image_depth.saturating_sub(1);
-                }
-                if let Some(p) = para.as_mut() {
-                    p.image_depth = p.image_depth.saturating_sub(1);
-                }
-            }
-            Event::Text(t) | Event::Code(t) => {
-                if let Some(h) = in_heading.as_mut() {
-                    if heading_image_depth > 0 { h.alt.push_str(&t) } else { h.text.push_str(&t) }
-                } else if let Some(p) = para.as_mut()
-                    && p.image_depth == 0
-                {
-                    p.text.push_str(&t);
-                }
-            }
-            Event::SoftBreak | Event::HardBreak => {
-                if let Some(h) = in_heading.as_mut() {
-                    h.text.push(' ');
-                } else if let Some(p) = para.as_mut() {
-                    p.text.push(' ');
-                }
-            }
-            Event::Html(html) | Event::InlineHtml(html) => {
-                for dest in crate::links::html_link_targets(&html) {
-                    add_link(dest, range.clone(), &mut links);
-                }
-            }
-            _ => {}
-        }
+        collector.event(event, range.start + base..range.end + base);
     }
+    let Collector { headings, links, .. } = collector;
 
     let definitions = sections(text, &lines, &headings);
     let imports = links
+        .list
         .into_iter()
         .map(|(module, range)| Import {
             module,
@@ -222,6 +110,155 @@ pub fn extract(source: &[u8], budget: &Budget) -> Result<FileFacts, ExtractError
 /// autolinks are always URLs; wiki links are not enabled).
 fn keeps(link_type: LinkType) -> bool {
     !matches!(link_type, LinkType::Autolink | LinkType::Email | LinkType::WikiLink { .. })
+}
+
+/// Distinct local link destinations, in document order.
+#[derive(Default)]
+struct Links {
+    list: Vec<(String, Range<usize>)>,
+    seen: HashSet<String>,
+}
+
+impl Links {
+    fn add(&mut self, dest: &str, range: Range<usize>) {
+        let dest = dest.trim();
+        if self.list.len() >= MAX_LINKS || !crate::links::is_local(dest) || self.seen.contains(dest) {
+            return;
+        }
+        self.seen.insert(dest.to_string());
+        self.list.push((dest.to_string(), range));
+    }
+}
+
+/// State of the single pass over the parser events.
+#[derive(Default)]
+struct Collector {
+    headings: Vec<Heading>,
+    links: Links,
+    /// Block containers (block quotes, list items, footnotes) open around
+    /// the current event: headings and paragraphs inside them do not
+    /// structure the document.
+    depth: usize,
+    in_heading: Option<Heading>,
+    heading_image_depth: usize,
+    para: Option<Para>,
+}
+
+impl Collector {
+    fn event(&mut self, event: Event<'_>, range: Range<usize>) {
+        if !matches!(event, Event::End(TagEnd::Heading(_)))
+            && let Some(h) = self.in_heading.as_mut()
+        {
+            let r = h.inline.get_or_insert(range.clone());
+            r.start = r.start.min(range.start);
+            r.end = r.end.max(range.end);
+        }
+        match event {
+            Event::Start(tag) => self.start(tag, range),
+            Event::End(tag) => self.end(tag),
+            Event::Text(t) | Event::Code(t) => self.text(&t),
+            Event::SoftBreak | Event::HardBreak => self.space(),
+            Event::Html(html) | Event::InlineHtml(html) => {
+                for dest in crate::links::html_link_targets(&html) {
+                    self.links.add(dest, range.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether the current position is at the top level, outside a heading.
+    fn at_top_level(&self) -> bool {
+        self.depth == 0 && self.in_heading.is_none()
+    }
+
+    fn start(&mut self, tag: Tag<'_>, range: Range<usize>) {
+        match tag {
+            Tag::Heading { level, .. } if self.at_top_level() => {
+                self.para = None;
+                self.in_heading = Some(Heading {
+                    level: level as usize,
+                    range,
+                    text: String::new(),
+                    alt: String::new(),
+                    inline: None,
+                    doc: None,
+                });
+                self.heading_image_depth = 0;
+            }
+            Tag::BlockQuote(_) | Tag::Item | Tag::FootnoteDefinition(_) => self.depth += 1,
+            // Only the first qualifying paragraph of the latest heading.
+            Tag::Paragraph if self.at_top_level() && self.headings.last().is_some_and(|h| h.doc.is_none()) => {
+                self.para = Some(Para { text: String::new(), image_depth: 0 });
+            }
+            Tag::Link { link_type, dest_url, .. } if keeps(link_type) => self.links.add(&dest_url, range),
+            Tag::Image { link_type, dest_url, .. } => {
+                if keeps(link_type) {
+                    self.links.add(&dest_url, range);
+                }
+                if self.in_heading.is_some() {
+                    self.heading_image_depth += 1;
+                }
+                if let Some(p) = self.para.as_mut() {
+                    p.image_depth += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn end(&mut self, tag: TagEnd) {
+        match tag {
+            TagEnd::Heading(_) => {
+                if let Some(h) = self.in_heading.take()
+                    && self.headings.len() < MAX_SECTIONS
+                {
+                    self.headings.push(h);
+                }
+            }
+            TagEnd::BlockQuote(_) | TagEnd::Item | TagEnd::FootnoteDefinition => {
+                self.depth = self.depth.saturating_sub(1)
+            }
+            TagEnd::Paragraph => self.end_paragraph(),
+            TagEnd::Image => {
+                if self.in_heading.is_some() {
+                    self.heading_image_depth = self.heading_image_depth.saturating_sub(1);
+                }
+                if let Some(p) = self.para.as_mut() {
+                    p.image_depth = p.image_depth.saturating_sub(1);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn end_paragraph(&mut self) {
+        let Some(p) = self.para.take() else { return };
+        let doc = collapse_ws(&p.text);
+        if !doc.is_empty()
+            && let Some(h) = self.headings.last_mut()
+        {
+            h.doc = Some(truncate_chars(&doc, MAX_DOC_CHARS));
+        }
+    }
+
+    fn text(&mut self, t: &str) {
+        if let Some(h) = self.in_heading.as_mut() {
+            if self.heading_image_depth > 0 { h.alt.push_str(t) } else { h.text.push_str(t) }
+        } else if let Some(p) = self.para.as_mut()
+            && p.image_depth == 0
+        {
+            p.text.push_str(t);
+        }
+    }
+
+    fn space(&mut self) {
+        if let Some(h) = self.in_heading.as_mut() {
+            h.text.push(' ');
+        } else if let Some(p) = self.para.as_mut() {
+            p.text.push(' ');
+        }
+    }
 }
 
 /// Builds `Section` definitions from the heading list.

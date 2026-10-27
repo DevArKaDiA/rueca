@@ -1032,6 +1032,66 @@ fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<String>) {
     }
 }
 
+/// Extraction totals of one real repository (see [`real_repo`]).
+#[derive(Default)]
+struct ExtractStats {
+    files: usize,
+    bytes: usize,
+    defs: usize,
+    refs: usize,
+    imports: usize,
+    error_files: Vec<String>,
+    all_imports: Vec<(String, Import)>,
+}
+
+impl ExtractStats {
+    fn add(&mut self, p: &str, len: usize, result: Result<FileFacts, ExtractError>) {
+        let f = match result {
+            Ok(f) => f,
+            Err(e) => return self.error_files.push(format!("{p}: {e}")),
+        };
+        self.files += 1;
+        self.bytes += len;
+        self.defs += f.definitions.len();
+        self.refs += f.references.len();
+        self.imports += f.imports.len();
+        if f.parse_errors > 0 {
+            self.error_files.push(format!("{p} ({})", f.parse_errors));
+        }
+        self.all_imports.extend(f.imports.into_iter().map(|i| (p.to_string(), i)));
+    }
+}
+
+/// Import resolution totals of one real repository (see [`real_repo`]).
+#[derive(Default)]
+struct ResolveStats {
+    rel_total: usize,
+    rel_ok: usize,
+    bare_total: usize,
+    bare_ok: usize,
+    unresolved_rel: Vec<String>,
+    unresolved_bare: BTreeMap<String, usize>,
+    resolved_bare: BTreeMap<String, usize>,
+}
+
+impl ResolveStats {
+    fn add(&mut self, from: &str, imp: &Import, resolved: bool) {
+        if imp.module.starts_with('.') {
+            self.rel_total += 1;
+            if resolved {
+                self.rel_ok += 1;
+            } else if self.unresolved_rel.len() < 15 {
+                self.unresolved_rel.push(format!("{from} -> {}", imp.module));
+            }
+            return;
+        }
+        self.bare_total += 1;
+        self.bare_ok += usize::from(resolved);
+        let pkg = crate::resolve::split_package(&imp.module).map_or(imp.module.clone(), |(p, _)| p.to_string());
+        *if resolved { &mut self.resolved_bare } else { &mut self.unresolved_bare }.entry(pkg).or_default() += 1;
+    }
+}
+
 fn real_repo(root: &std::path::Path) {
     use std::time::Instant;
     let mut paths = Vec::new();
@@ -1045,11 +1105,7 @@ fn real_repo(root: &std::path::Path) {
         }
     }
     let project = ProjectFiles { paths: paths.iter().cloned().collect(), configs };
-    let mut files = 0usize;
-    let mut bytes = 0usize;
-    let (mut defs, mut nrefs, mut imports) = (0usize, 0usize, 0usize);
-    let mut error_files = Vec::new();
-    let mut all_imports = Vec::new();
+    let mut ex = ExtractStats::default();
     let t0 = Instant::now();
     for p in &paths {
         let Some(lang) = rueca_model::Language::from_path(p) else { continue };
@@ -1057,45 +1113,19 @@ fn real_repo(root: &std::path::Path) {
             continue;
         }
         let src = std::fs::read(root.join(p)).unwrap();
-        match TypeScriptPack.extract(p, lang, &src, &Budget::default()) {
-            Ok(f) => {
-                files += 1;
-                bytes += src.len();
-                defs += f.definitions.len();
-                nrefs += f.references.len();
-                imports += f.imports.len();
-                if f.parse_errors > 0 {
-                    error_files.push(format!("{p} ({})", f.parse_errors));
-                }
-                all_imports.extend(f.imports.into_iter().map(|i| (p.clone(), i)));
-            }
-            Err(e) => error_files.push(format!("{p}: {e}")),
-        }
+        ex.add(p, src.len(), TypeScriptPack.extract(p, lang, &src, &Budget::default()));
     }
     let extract_time = t0.elapsed();
     let t1 = Instant::now();
-    let (mut rel_total, mut rel_ok, mut bare_total, mut bare_ok) = (0usize, 0usize, 0usize, 0usize);
-    let mut unresolved_rel = Vec::new();
-    let mut unresolved_bare: BTreeMap<String, usize> = BTreeMap::new();
-    let mut resolved_bare: BTreeMap<String, usize> = BTreeMap::new();
-    for (from, imp) in &all_imports {
+    let mut rs = ResolveStats::default();
+    for (from, imp) in &ex.all_imports {
         let r = TypeScriptPack.resolve_import(from, imp, &project);
-        if imp.module.starts_with('.') {
-            rel_total += 1;
-            if r.is_some() {
-                rel_ok += 1;
-            } else if unresolved_rel.len() < 15 {
-                unresolved_rel.push(format!("{from} -> {}", imp.module));
-            }
-        } else {
-            bare_total += 1;
-            bare_ok += usize::from(r.is_some());
-            let pkg = crate::resolve::split_package(&imp.module).map_or(imp.module.clone(), |(p, _)| p.to_string());
-            *if r.is_some() { &mut resolved_bare } else { &mut unresolved_bare }.entry(pkg).or_default() += 1;
-        }
+        rs.add(from, imp, r.is_some());
     }
     let resolve_time = t1.elapsed();
     let pct = |a: usize, b: usize| if b == 0 { 100.0 } else { 100.0 * a as f64 / b as f64 };
+    let ExtractStats { files, bytes, defs, refs: nrefs, imports, error_files, all_imports } = ex;
+    let ResolveStats { rel_total, rel_ok, bare_total, bare_ok, unresolved_rel, unresolved_bare, resolved_bare } = rs;
     println!("== {}", root.display());
     println!("files {files} ({:.1} MB), definitions {defs}, references {nrefs}, imports {imports}", bytes as f64 / 1e6);
     println!(

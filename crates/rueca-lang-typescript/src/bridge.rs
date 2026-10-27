@@ -72,51 +72,10 @@ impl EnvApi {
         let mut c = root.walk();
         for stmt in root.named_children(&mut c) {
             match stmt.kind() {
-                "import_statement" => {
-                    let from_config =
-                        field(stmt, "source").and_then(|s| string_literal(s, src)).as_deref() == Some("config");
-                    if !from_config {
-                        continue;
-                    }
-                    let mut stack = vec![stmt];
-                    while let Some(n) = stack.pop() {
-                        match n.kind() {
-                            "import_clause" => {
-                                let mut cc = n.walk();
-                                for ch in n.named_children(&mut cc) {
-                                    if ch.kind() == "identifier" {
-                                        api.config.insert(text_of(ch, src).into_owned());
-                                    } else {
-                                        stack.push(ch);
-                                    }
-                                }
-                            }
-                            "namespace_import" => {
-                                let mut cc = n.walk();
-                                for ch in n.named_children(&mut cc) {
-                                    if ch.kind() == "identifier" {
-                                        api.config.insert(text_of(ch, src).into_owned());
-                                    }
-                                }
-                            }
-                            _ => {
-                                let mut cc = n.walk();
-                                stack.extend(n.named_children(&mut cc));
-                            }
-                        }
-                    }
-                }
+                "import_statement" => api.config_import(stmt, src),
                 "lexical_declaration" | "variable_declaration" => {
                     let mut cc = stmt.walk();
-                    for d in stmt.named_children(&mut cc) {
-                        let (Some(name), Some(value)) = (field(d, "name"), field(d, "value")) else { continue };
-                        let is_require = value.kind() == "call_expression"
-                            && field(value, "function").is_some_and(|f| text_of(f, src) == "require")
-                            && first_arg(value).and_then(|a| string_literal(a, src)).as_deref() == Some("config");
-                        if is_require && name.kind() == "identifier" {
-                            api.config.insert(text_of(name, src).into_owned());
-                        }
-                    }
+                    api.config.extend(stmt.named_children(&mut cc).filter_map(|d| config_require(d, src)));
                 }
                 _ => {}
             }
@@ -124,72 +83,131 @@ impl EnvApi {
         api
     }
 
+    /// The local names an `import ... from "config"` binds.
+    fn config_import(&mut self, stmt: Node<'_>, src: &[u8]) {
+        let from_config = field(stmt, "source").and_then(|s| string_literal(s, src)).as_deref() == Some("config");
+        if !from_config {
+            return;
+        }
+        let mut stack = vec![stmt];
+        while let Some(n) = stack.pop() {
+            let mut cc = n.walk();
+            match n.kind() {
+                "import_clause" => {
+                    for ch in n.named_children(&mut cc) {
+                        if ch.kind() == "identifier" {
+                            self.config.insert(text_of(ch, src).into_owned());
+                        } else {
+                            stack.push(ch);
+                        }
+                    }
+                }
+                "namespace_import" => {
+                    let names = n.named_children(&mut cc).filter(|ch| ch.kind() == "identifier");
+                    self.config.extend(names.map(|ch| text_of(ch, src).into_owned()));
+                }
+                _ => stack.extend(n.named_children(&mut cc)),
+            }
+        }
+    }
+
     /// Bridge facts for a `member_expression`, `subscript_expression` or
     /// `call_expression`. `is_local(name)` tells whether a root identifier
     /// is a local binding.
     pub(crate) fn facts(&self, n: Node<'_>, src: &[u8], is_local: impl Fn(&str) -> bool) -> Vec<Fact> {
-        let env = |kind: RefKind, name: String| -> Vec<Fact> { vec![(kind, name, None)] };
-        let root_ok = |root: &str| root == "import" || !is_local(root);
         match n.kind() {
-            "member_expression" => {
-                let (Some(obj), Some(prop)) = (field(n, "object"), field(n, "property")) else { return Vec::new() };
-                if let Some(root) = env_object(obj, src) {
-                    if prop.kind() != "property_identifier" || !root_ok(root) || is_write_target(n) {
-                        return Vec::new();
-                    }
-                    return env(RefKind::EnvVar, text_of(prop, src).into_owned());
-                }
-                // `const { A, B: b } = process.env`
-                if let Some(root) = env_object(n, src)
-                    && root_ok(root)
-                    && let Some(d) = n.parent().filter(|p| p.kind() == "variable_declarator")
-                    && field(d, "value").is_some_and(|v| v.id() == n.id())
-                    && let Some(pattern) = field(d, "name").filter(|p| p.kind() == "object_pattern")
-                {
-                    let mut out = Vec::new();
-                    let mut c = pattern.walk();
-                    for p in pattern.named_children(&mut c) {
-                        let key = match p.kind() {
-                            "shorthand_property_identifier_pattern" => Some(p),
-                            "pair_pattern" => field(p, "key").filter(|k| k.kind() == "property_identifier"),
-                            "object_assignment_pattern" => {
-                                field(p, "left").filter(|k| k.kind() == "shorthand_property_identifier_pattern")
-                            }
-                            _ => None,
-                        };
-                        if let Some(k) = key {
-                            out.push((RefKind::EnvVar, text_of(k, src).into_owned(), None));
-                        }
-                    }
-                    return out;
-                }
-                Vec::new()
-            }
+            "member_expression" => member_facts(n, src, &is_local),
             "subscript_expression" => {
                 let (Some(obj), Some(index)) = (field(n, "object"), field(n, "index")) else { return Vec::new() };
                 match (env_object(obj, src), string_literal(index, src)) {
-                    (Some(root), Some(name)) if root_ok(root) && !is_write_target(n) => env(RefKind::EnvVar, name),
+                    (Some(root), Some(name)) if root_ok(root, &is_local) && !is_write_target(n) => env_var(name),
                     _ => Vec::new(),
                 }
             }
-            "call_expression" => {
-                let Some(callee) = field(n, "function") else { return Vec::new() };
-                let Some(arg) = first_arg(n).and_then(|a| string_literal(a, src)) else { return Vec::new() };
-                if callee.byte_range().len() <= 40 && compact(callee, src) == "Deno.env.get" && !is_local("Deno") {
-                    return env(RefKind::EnvVar, arg);
-                }
-                if callee.kind() == "member_expression"
-                    && let (Some(obj), Some(prop)) = (field(callee, "object"), field(callee, "property"))
-                    && obj.kind() == "identifier"
-                    && self.config.contains(text_of(obj, src).as_ref())
-                    && matches!(text_of(prop, src).as_ref(), "get" | "has")
-                {
-                    return vec![(RefKind::ConfigKey, arg, Some("node-config".into()))];
-                }
-                Vec::new()
-            }
+            "call_expression" => self.call_facts(n, src, &is_local),
             _ => Vec::new(),
         }
+    }
+
+    /// `Deno.env.get("X")` and `config.get("a.b")` / `config.has("a.b")`.
+    fn call_facts(&self, n: Node<'_>, src: &[u8], is_local: &impl Fn(&str) -> bool) -> Vec<Fact> {
+        let Some(callee) = field(n, "function") else { return Vec::new() };
+        let Some(arg) = first_arg(n).and_then(|a| string_literal(a, src)) else { return Vec::new() };
+        if callee.byte_range().len() <= 40 && compact(callee, src) == "Deno.env.get" && !is_local("Deno") {
+            return env_var(arg);
+        }
+        if callee.kind() == "member_expression"
+            && let (Some(obj), Some(prop)) = (field(callee, "object"), field(callee, "property"))
+            && obj.kind() == "identifier"
+            && self.config.contains(text_of(obj, src).as_ref())
+            && matches!(text_of(prop, src).as_ref(), "get" | "has")
+        {
+            return vec![(RefKind::ConfigKey, arg, Some("node-config".into()))];
+        }
+        Vec::new()
+    }
+}
+
+/// `x` of a declarator `x = require("config")`.
+fn config_require(d: Node<'_>, src: &[u8]) -> Option<String> {
+    let (name, value) = (field(d, "name")?, field(d, "value")?);
+    let is_require = value.kind() == "call_expression"
+        && field(value, "function").is_some_and(|f| text_of(f, src) == "require")
+        && first_arg(value).and_then(|a| string_literal(a, src)).as_deref() == Some("config");
+    (is_require && name.kind() == "identifier").then(|| text_of(name, src).into_owned())
+}
+
+fn env_var(name: String) -> Vec<Fact> {
+    vec![(RefKind::EnvVar, name, None)]
+}
+
+/// Whether an env object root is usable: `import.meta` always, `process`
+/// unless it is a local binding.
+fn root_ok(root: &str, is_local: &impl Fn(&str) -> bool) -> bool {
+    root == "import" || !is_local(root)
+}
+
+/// `process.env.X` (a read), or `process.env` itself when destructured.
+fn member_facts(n: Node<'_>, src: &[u8], is_local: &impl Fn(&str) -> bool) -> Vec<Fact> {
+    let (Some(obj), Some(prop)) = (field(n, "object"), field(n, "property")) else { return Vec::new() };
+    if let Some(root) = env_object(obj, src) {
+        if prop.kind() != "property_identifier" || !root_ok(root, is_local) || is_write_target(n) {
+            return Vec::new();
+        }
+        return env_var(text_of(prop, src).into_owned());
+    }
+    // `const { A, B: b } = process.env`
+    let Some(pattern) = env_destructuring(n, src, is_local) else { return Vec::new() };
+    let mut c = pattern.walk();
+    pattern
+        .named_children(&mut c)
+        .filter_map(destructured_key)
+        .map(|k| (RefKind::EnvVar, text_of(k, src).into_owned(), None))
+        .collect()
+}
+
+/// The object pattern of `const { ... } = process.env` when `n` is the env
+/// object being destructured.
+fn env_destructuring<'t>(n: Node<'t>, src: &[u8], is_local: &impl Fn(&str) -> bool) -> Option<Node<'t>> {
+    let root = env_object(n, src)?;
+    if !root_ok(root, is_local) {
+        return None;
+    }
+    let d = n.parent().filter(|p| p.kind() == "variable_declarator")?;
+    if !field(d, "value").is_some_and(|v| v.id() == n.id()) {
+        return None;
+    }
+    field(d, "name").filter(|p| p.kind() == "object_pattern")
+}
+
+/// The env var key of one property of an object pattern (`A`, `B: b`,
+/// `C = "x"`).
+fn destructured_key(p: Node<'_>) -> Option<Node<'_>> {
+    match p.kind() {
+        "shorthand_property_identifier_pattern" => Some(p),
+        "pair_pattern" => field(p, "key").filter(|k| k.kind() == "property_identifier"),
+        "object_assignment_pattern" => field(p, "left").filter(|k| k.kind() == "shorthand_property_identifier_pattern"),
+        _ => None,
     }
 }
 

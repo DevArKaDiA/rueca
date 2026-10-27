@@ -33,44 +33,15 @@ pub fn html_link_targets(html: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        let name_len = if bytes[i..].len() >= 4 && bytes[i..i + 4].eq_ignore_ascii_case(b"href") {
-            4
-        } else if bytes[i..].len() >= 3 && bytes[i..i + 3].eq_ignore_ascii_case(b"src") {
-            3
-        } else {
+        let Some(name_len) = link_attribute_len(&bytes[i..]) else {
             i += 1;
             continue;
         };
-        // Attribute names start after whitespace (`<img src=…`), never
-        // inside another name (`data-src`, `srcset`).
-        let boundary_before = i > 0 && bytes[i - 1].is_ascii_whitespace();
-        let mut j = i + name_len;
-        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-            j += 1;
-        }
-        if !boundary_before || j >= bytes.len() || bytes[j] != b'=' {
+        let Some(equals) = attribute_equals(bytes, i, name_len) else {
             i += name_len;
             continue;
-        }
-        j += 1;
-        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-            j += 1;
-        }
-        let (start, end) = match bytes.get(j) {
-            Some(&q @ (b'"' | b'\'')) => {
-                let start = j + 1;
-                match bytes[start..].iter().position(|&b| b == q) {
-                    Some(len) => (start, start + len),
-                    None => break,
-                }
-            }
-            Some(_) => {
-                let len =
-                    bytes[j..].iter().position(|&b| b.is_ascii_whitespace() || b == b'>').unwrap_or(bytes.len() - j);
-                (j, j + len)
-            }
-            None => break,
         };
+        let Some((start, end)) = attribute_value(bytes, skip_whitespace(bytes, equals + 1)) else { break };
         // Quotes and whitespace are ASCII, so these are char boundaries.
         if let Some(v) = html.get(start..end)
             && !v.is_empty()
@@ -80,6 +51,49 @@ pub fn html_link_targets(html: &str) -> Vec<&str> {
         i = end.max(i + 1);
     }
     out
+}
+
+/// Length of a `href` / `src` name (any case) at the start of `rest`.
+fn link_attribute_len(rest: &[u8]) -> Option<usize> {
+    if rest.len() >= 4 && rest[..4].eq_ignore_ascii_case(b"href") {
+        Some(4)
+    } else if rest.len() >= 3 && rest[..3].eq_ignore_ascii_case(b"src") {
+        Some(3)
+    } else {
+        None
+    }
+}
+
+/// Position of the `=` after the attribute name at `bytes[i..i + name_len]`.
+/// Attribute names start after whitespace (`<img src=…`), never inside
+/// another name (`data-src`, `srcset`).
+fn attribute_equals(bytes: &[u8], i: usize, name_len: usize) -> Option<usize> {
+    let boundary_before = i > 0 && bytes[i - 1].is_ascii_whitespace();
+    let j = skip_whitespace(bytes, i + name_len);
+    (boundary_before && bytes.get(j) == Some(&b'=')).then_some(j)
+}
+
+fn skip_whitespace(bytes: &[u8], mut j: usize) -> usize {
+    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    j
+}
+
+/// Byte range of the attribute value starting at `j` (quoted or bare);
+/// `None` at the end of input or for an unterminated quote.
+fn attribute_value(bytes: &[u8], j: usize) -> Option<(usize, usize)> {
+    match bytes.get(j) {
+        Some(&q @ (b'"' | b'\'')) => {
+            let start = j + 1;
+            bytes[start..].iter().position(|&b| b == q).map(|len| (start, start + len))
+        }
+        Some(_) => {
+            let len = bytes[j..].iter().position(|&b| b.is_ascii_whitespace() || b == b'>').unwrap_or(bytes.len() - j);
+            Some((j, j + len))
+        }
+        None => None,
+    }
 }
 
 /// Maps a link destination written in `from_path` to a repository file.

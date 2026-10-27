@@ -145,22 +145,9 @@ fn named_children<'t>(node: Node<'t>) -> Vec<Node<'t>> {
 fn module_all(root: Node<'_>, source: &[u8]) -> Option<HashSet<String>> {
     let mut all: Option<HashSet<String>> = None;
     let mut invalid = false;
-    for stmt in named_children(root) {
-        if stmt.kind() != "expression_statement" {
-            continue;
-        }
-        for expr in named_children(stmt) {
-            let augmented = match expr.kind() {
-                "assignment" => false,
-                "augmented_assignment" => true,
-                _ => continue,
-            };
-            let Some(left) = expr.child_by_field_name("left") else { continue };
-            if left.kind() != "identifier" || text_of(left, source) != "__all__" {
-                continue;
-            }
-            let Some(right) = expr.child_by_field_name("right") else { continue };
-            let strings = literal_strings(right, source);
+    let statements = named_children(root).into_iter().filter(|s| s.kind() == "expression_statement");
+    for stmt in statements {
+        for (augmented, strings) in named_children(stmt).into_iter().filter_map(|e| all_assignment(e, source)) {
             match (strings, augmented) {
                 (Some(s), false) => all = Some(s),
                 (Some(s), true) => {
@@ -173,6 +160,22 @@ fn module_all(root: Node<'_>, source: &[u8]) -> Option<HashSet<String>> {
         }
     }
     if invalid { None } else { all }
+}
+
+/// `__all__ = …` / `__all__ += …`: whether it is augmented, and the literal
+/// strings assigned (`None` when the value is not a literal list / tuple).
+fn all_assignment(expr: Node<'_>, source: &[u8]) -> Option<(bool, Option<HashSet<String>>)> {
+    let augmented = match expr.kind() {
+        "assignment" => false,
+        "augmented_assignment" => true,
+        _ => return None,
+    };
+    let left = expr.child_by_field_name("left")?;
+    if left.kind() != "identifier" || text_of(left, source) != "__all__" {
+        return None;
+    }
+    let right = expr.child_by_field_name("right")?;
+    Some((augmented, literal_strings(right, source)))
 }
 
 fn literal_strings(node: Node<'_>, source: &[u8]) -> Option<HashSet<String>> {
@@ -190,6 +193,14 @@ fn literal_strings(node: Node<'_>, source: &[u8]) -> Option<HashSet<String>> {
         };
     }
     Some(out)
+}
+
+/// `a.b.C` → (`Some("a.b")`, `"C"`); `C` → (`None`, `"C"`).
+fn split_dotted(text: &str) -> (Option<String>, String) {
+    match text.rsplit_once('.') {
+        Some((r, n)) => (Some(r.to_string()), n.to_string()),
+        None => (None, text.to_string()),
+    }
 }
 
 impl<'s> Extractor<'s> {
@@ -491,41 +502,49 @@ impl<'s> Extractor<'s> {
             self.push_ref(RefKind::EnvVar, var, None, span_of(node));
         }
         if let Some(func) = node.child_by_field_name("function") {
-            match func.kind() {
-                "identifier" => {
-                    let name = self.text(func);
-                    self.push_ref(RefKind::Call, name, None, span_of(func));
-                }
-                "attribute" => {
-                    let obj = func.child_by_field_name("object");
-                    let attr = func.child_by_field_name("attribute");
-                    if let (Some(obj), Some(attr)) = (obj, attr) {
-                        let name = self.text(attr);
-                        let receiver = match self.receiver_type(obj) {
-                            Some(t) => type_receiver(&t),
-                            None => self.receiver_text(obj),
-                        };
-                        self.push_ref(RefKind::Call, name, Some(receiver), span_of(func));
-                        match chain(obj) {
-                            // `self.repo.save()` also reads field `repo`.
-                            Some((idents, innermost)) if idents.len() >= 2 => {
-                                let root = self.text(idents[0]);
-                                if SELF_RECEIVERS.contains(&root.as_str()) {
-                                    let field = self.text(idents[1]);
-                                    self.push_ref(RefKind::Read, field, Some(root), span_of(innermost));
-                                }
-                            }
-                            Some(_) => {}
-                            None => self.visit(obj, depth + 1),
-                        }
-                    } else {
-                        self.visit(func, depth + 1);
-                    }
-                }
-                _ => self.visit(func, depth + 1),
-            }
+            self.visit_callee(func, depth);
         }
         self.visit_field(node, "arguments", depth);
+    }
+
+    fn visit_callee(&mut self, func: Node<'_>, depth: usize) {
+        match func.kind() {
+            "identifier" => {
+                let name = self.text(func);
+                self.push_ref(RefKind::Call, name, None, span_of(func));
+            }
+            "attribute" => {
+                let obj = func.child_by_field_name("object");
+                let attr = func.child_by_field_name("attribute");
+                match (obj, attr) {
+                    (Some(obj), Some(attr)) => self.visit_method_call(func, obj, attr, depth),
+                    _ => self.visit(func, depth + 1),
+                }
+            }
+            _ => self.visit(func, depth + 1),
+        }
+    }
+
+    /// `obj.attr(…)`: a `Call` reference with the receiver's type or text.
+    fn visit_method_call(&mut self, func: Node<'_>, obj: Node<'_>, attr: Node<'_>, depth: usize) {
+        let name = self.text(attr);
+        let receiver = match self.receiver_type(obj) {
+            Some(t) => type_receiver(&t),
+            None => self.receiver_text(obj),
+        };
+        self.push_ref(RefKind::Call, name, Some(receiver), span_of(func));
+        match chain(obj) {
+            // `self.repo.save()` also reads field `repo`.
+            Some((idents, innermost)) if idents.len() >= 2 => {
+                let root = self.text(idents[0]);
+                if SELF_RECEIVERS.contains(&root.as_str()) {
+                    let field = self.text(idents[1]);
+                    self.push_ref(RefKind::Read, field, Some(root), span_of(innermost));
+                }
+            }
+            Some(_) => {}
+            None => self.visit(obj, depth + 1),
+        }
     }
 
     fn visit_string(&mut self, node: Node<'_>, depth: usize) {
@@ -621,12 +640,7 @@ impl<'s> Extractor<'s> {
             return;
         }
         match node.kind() {
-            "identifier" => {
-                let name = self.text(node);
-                if !is_builtin_name(&name) && !self.locals.is_type_parameter(node) {
-                    self.push_ref_enc(RefKind::Type, name, None, span_of(node), enc);
-                }
-            }
+            "identifier" => self.type_identifier(node, enc),
             "attribute" => match chain(node) {
                 Some((idents, _)) => {
                     let (name, receiver) = self.chain_name(&idents);
@@ -634,35 +648,8 @@ impl<'s> Extractor<'s> {
                 }
                 None => self.with_enclosing(enc, |this| this.visit(node, depth)),
             },
-            "member_type" => {
-                let text = one_line(node, node.start_byte(), node.end_byte(), self.source).replace(' ', "");
-                if is_dotted_identifier(&text) {
-                    let (receiver, name) = match text.rsplit_once('.') {
-                        Some((r, n)) => (Some(r.to_string()), n.to_string()),
-                        None => (None, text.clone()),
-                    };
-                    self.push_ref_enc(RefKind::Type, name, receiver, span_of(node), enc);
-                } else {
-                    for child in named_children(node) {
-                        self.visit_type(child, enc, depth + 1);
-                    }
-                }
-            }
-            "string" => {
-                let raw = self.text(node);
-                if let Some(value) = string_literal_value(&raw) {
-                    let value = value.trim();
-                    if is_dotted_identifier(value) {
-                        let (receiver, name) = match value.rsplit_once('.') {
-                            Some((r, n)) => (Some(r.to_string()), n.to_string()),
-                            None => (None, value.to_string()),
-                        };
-                        if receiver.is_some() || !is_builtin_name(&name) {
-                            self.push_ref_enc(RefKind::Type, name, receiver, span_of(node), enc);
-                        }
-                    }
-                }
-            }
+            "member_type" => self.type_member(node, enc, depth),
+            "string" => self.type_forward_reference(node, enc),
             "call" | "lambda" => self.with_enclosing(enc, |this| this.visit(node, depth)),
             "none"
             | "ellipsis"
@@ -673,11 +660,45 @@ impl<'s> Extractor<'s> {
             | "comment"
             | "keyword_argument"
             | "concatenated_string" => {}
-            _ => {
-                for child in named_children(node) {
-                    self.visit_type(child, enc, depth + 1);
-                }
-            }
+            _ => self.visit_type_children(node, enc, depth),
+        }
+    }
+
+    fn visit_type_children(&mut self, node: Node<'_>, enc: Option<LocalDefId>, depth: usize) {
+        for child in named_children(node) {
+            self.visit_type(child, enc, depth + 1);
+        }
+    }
+
+    fn type_identifier(&mut self, node: Node<'_>, enc: Option<LocalDefId>) {
+        let name = self.text(node);
+        if !is_builtin_name(&name) && !self.locals.is_type_parameter(node) {
+            self.push_ref_enc(RefKind::Type, name, None, span_of(node), enc);
+        }
+    }
+
+    /// `a.b.C` written as a `member_type`; anything else is walked.
+    fn type_member(&mut self, node: Node<'_>, enc: Option<LocalDefId>, depth: usize) {
+        let text = one_line(node, node.start_byte(), node.end_byte(), self.source).replace(' ', "");
+        if is_dotted_identifier(&text) {
+            let (receiver, name) = split_dotted(&text);
+            self.push_ref_enc(RefKind::Type, name, receiver, span_of(node), enc);
+        } else {
+            self.visit_type_children(node, enc, depth);
+        }
+    }
+
+    /// A simple string forward reference (`"Foo"`, `"mod.Foo"`).
+    fn type_forward_reference(&mut self, node: Node<'_>, enc: Option<LocalDefId>) {
+        let raw = self.text(node);
+        let Some(value) = string_literal_value(&raw) else { return };
+        let value = value.trim();
+        if !is_dotted_identifier(value) {
+            return;
+        }
+        let (receiver, name) = split_dotted(value);
+        if receiver.is_some() || !is_builtin_name(&name) {
+            self.push_ref_enc(RefKind::Type, name, receiver, span_of(node), enc);
         }
     }
 
@@ -760,26 +781,30 @@ impl<'s> Extractor<'s> {
     fn visit_decorators(&mut self, decorators: &[Node<'_>], def_idx: LocalDefId, depth: usize) {
         self.with_enclosing(Some(def_idx), |this| {
             for dec in decorators {
-                let Some(expr) = named_children(*dec).into_iter().find(|c| c.kind() != "comment") else { continue };
-                let (callee, args) = if expr.kind() == "call" {
-                    (expr.child_by_field_name("function"), expr.child_by_field_name("arguments"))
-                } else {
-                    (Some(expr), None)
-                };
-                if let Some(callee) = callee {
-                    match chain(callee) {
-                        Some((idents, _)) => {
-                            let (name, receiver) = this.chain_name(&idents);
-                            this.push_ref(RefKind::Decorator, name, receiver, span_of(expr));
-                        }
-                        None => this.visit(callee, depth + 2),
-                    }
-                }
-                if let Some(args) = args {
-                    this.visit(args, depth + 2);
-                }
+                this.visit_decorator(*dec, depth);
             }
         });
+    }
+
+    fn visit_decorator(&mut self, dec: Node<'_>, depth: usize) {
+        let Some(expr) = named_children(dec).into_iter().find(|c| c.kind() != "comment") else { return };
+        let (callee, args) = if expr.kind() == "call" {
+            (expr.child_by_field_name("function"), expr.child_by_field_name("arguments"))
+        } else {
+            (Some(expr), None)
+        };
+        if let Some(callee) = callee {
+            match chain(callee) {
+                Some((idents, _)) => {
+                    let (name, receiver) = self.chain_name(&idents);
+                    self.push_ref(RefKind::Decorator, name, receiver, span_of(expr));
+                }
+                None => self.visit(callee, depth + 2),
+            }
+        }
+        if let Some(args) = args {
+            self.visit(args, depth + 2);
+        }
     }
 
     fn visit_function(&mut self, def: Node<'_>, outer: Node<'_>, decorators: &[Node<'_>], depth: usize) {
@@ -790,9 +815,7 @@ impl<'s> Extractor<'s> {
         let name = self.text(name_node);
         let (scope_kind, parent) = (self.scope_kind(), self.scopes.last().and_then(|s| s.def));
         let in_class = scope_kind == ScopeKind::Class;
-        let in_test_class =
-            in_class && parent.and_then(|p| self.defs.get(p as usize)).is_some_and(|p| p.name.starts_with("Test"));
-        let is_test = name == "test" || name.starts_with("test_") || (in_test_class && name.starts_with("test"));
+        let is_test = self.is_test_function(&name, in_class, parent);
         let decorator_texts = decorators.iter().map(|d| self.decorator_text(*d)).collect();
         let idx = self.push_def(Definition {
             label: if in_class { Label::Method } else { Label::Function },
@@ -819,21 +842,7 @@ impl<'s> Extractor<'s> {
         self.scopes.push(Scope { kind: ScopeKind::Function, def: Some(idx), self_name, init_class, node: def.id() });
         if let Some(p) = params {
             for param in named_children(p) {
-                match param.kind() {
-                    "typed_parameter" => {
-                        if let Some(t) = param.child_by_field_name("type") {
-                            self.visit_type(t, Some(idx), depth + 2);
-                        }
-                    }
-                    "typed_default_parameter" => {
-                        if let Some(t) = param.child_by_field_name("type") {
-                            self.visit_type(t, Some(idx), depth + 2);
-                        }
-                        self.visit_field(param, "value", depth + 1);
-                    }
-                    "default_parameter" => self.visit_field(param, "value", depth + 1),
-                    _ => {}
-                }
+                self.visit_parameter(param, idx, depth);
             }
         }
         if let Some(rt) = def.child_by_field_name("return_type") {
@@ -843,6 +852,32 @@ impl<'s> Extractor<'s> {
             self.visit_children(b, depth + 1);
         }
         self.scopes.pop();
+    }
+
+    /// `test`, `test_*`, or `test*` methods of a `Test*` class.
+    fn is_test_function(&self, name: &str, in_class: bool, parent: Option<LocalDefId>) -> bool {
+        let in_test_class =
+            in_class && parent.and_then(|p| self.defs.get(p as usize)).is_some_and(|p| p.name.starts_with("Test"));
+        name == "test" || name.starts_with("test_") || (in_test_class && name.starts_with("test"))
+    }
+
+    /// Annotations and default values of one parameter of function `idx`.
+    fn visit_parameter(&mut self, param: Node<'_>, idx: LocalDefId, depth: usize) {
+        match param.kind() {
+            "typed_parameter" => {
+                if let Some(t) = param.child_by_field_name("type") {
+                    self.visit_type(t, Some(idx), depth + 2);
+                }
+            }
+            "typed_default_parameter" => {
+                if let Some(t) = param.child_by_field_name("type") {
+                    self.visit_type(t, Some(idx), depth + 2);
+                }
+                self.visit_field(param, "value", depth + 1);
+            }
+            "default_parameter" => self.visit_field(param, "value", depth + 1),
+            _ => {}
+        }
     }
 
     fn visit_class(&mut self, def: Node<'_>, outer: Node<'_>, decorators: &[Node<'_>], depth: usize) {

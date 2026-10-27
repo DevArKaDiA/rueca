@@ -224,47 +224,15 @@ impl Locals {
     }
 
     fn resolve(&self, scope: usize, pos: u32, name: &str) -> Resolution {
-        let scopes = &self.scopes;
-        let mut s = scope;
-        // Header references (defaults, annotations, bases) are evaluated in
-        // the enclosing scope but see the definition's own type parameters.
-        if pos < scopes[s].body_start && scopes[s].kind != ScopeKind::Module {
-            if scopes[s].names.get(name).is_some_and(|b| b & TYPE_PARAM_BIT != 0) {
-                return Resolution::TypeParameter;
-            }
-            match scopes[s].parent {
-                Some(p) => s = p,
-                None => return Resolution::NotLocal,
-            }
-        }
+        let mut s = match self.lookup_start(scope, pos, name) {
+            Ok(s) => s,
+            Err(resolution) => return resolution,
+        };
         let mut innermost = true;
         for _ in 0..=self.max_hops {
-            let sc = &scopes[s];
-            if sc.globals.contains(name) {
-                return self.module_resolution(name);
-            }
-            if !sc.nonlocals.contains(name)
-                && let Some(&bits) = sc.names.get(name)
-            {
-                match sc.kind {
-                    ScopeKind::Module => {
-                        return if bits & MODULE_LOCAL != 0 { Resolution::Local } else { Resolution::NotLocal };
-                    }
-                    ScopeKind::Class if !innermost => {
-                        if bits & TYPE_PARAM_BIT != 0 {
-                            return Resolution::TypeParameter;
-                        }
-                    }
-                    _ => {
-                        return if bits & TYPE_PARAM_BIT != 0 {
-                            Resolution::TypeParameter
-                        } else if bits & !IMPORT_BIT != 0 {
-                            Resolution::Local
-                        } else {
-                            Resolution::NotLocal
-                        };
-                    }
-                }
+            let sc = &self.scopes[s];
+            if let Some(resolution) = self.resolve_in(sc, name, innermost) {
+                return resolution;
             }
             innermost = false;
             match sc.parent {
@@ -273,6 +241,44 @@ impl Locals {
             }
         }
         Resolution::NotLocal
+    }
+
+    /// The scope where the lookup of a reference at `pos` starts. Header
+    /// references (defaults, annotations, bases) are evaluated in the
+    /// enclosing scope but see the definition's own type parameters; `Err`
+    /// is the resolution when the lookup ends there.
+    fn lookup_start(&self, scope: usize, pos: u32, name: &str) -> Result<usize, Resolution> {
+        let sc = &self.scopes[scope];
+        if pos >= sc.body_start || sc.kind == ScopeKind::Module {
+            return Ok(scope);
+        }
+        if sc.names.get(name).is_some_and(|b| b & TYPE_PARAM_BIT != 0) {
+            return Err(Resolution::TypeParameter);
+        }
+        sc.parent.ok_or(Resolution::NotLocal)
+    }
+
+    /// The resolution of `name` in one scope of the walk; `None` to keep
+    /// walking outwards.
+    fn resolve_in(&self, sc: &ScopeInfo, name: &str, innermost: bool) -> Option<Resolution> {
+        if sc.globals.contains(name) {
+            return Some(self.module_resolution(name));
+        }
+        if sc.nonlocals.contains(name) {
+            return None;
+        }
+        let bits = *sc.names.get(name)?;
+        match sc.kind {
+            ScopeKind::Module => Some(if bits & MODULE_LOCAL != 0 { Resolution::Local } else { Resolution::NotLocal }),
+            ScopeKind::Class if !innermost => (bits & TYPE_PARAM_BIT != 0).then_some(Resolution::TypeParameter),
+            _ => Some(if bits & TYPE_PARAM_BIT != 0 {
+                Resolution::TypeParameter
+            } else if bits & !IMPORT_BIT != 0 {
+                Resolution::Local
+            } else {
+                Resolution::NotLocal
+            }),
+        }
     }
 
     /// Resolution of a `global` name: the module scope's bindings only.
@@ -324,8 +330,7 @@ pub(crate) fn build(
     max_hops: usize,
 ) -> Result<Locals, ExtractError> {
     let lq = locals_query()?;
-    let mut scopes: Vec<ScopeInfo> = Vec::new();
-    let mut points: Vec<Point> = Vec::new();
+    let mut captures = Captures::default();
 
     let deadline = Instant::now() + time_budget;
     let mut timed_out = false;
@@ -339,116 +344,160 @@ pub(crate) fn build(
     };
     let mut cursor = QueryCursor::new();
     cursor.set_match_limit(MATCH_LIMIT);
-    let text = |n: Node<'_>| String::from_utf8_lossy(&source[n.start_byte()..n.end_byte()]).into_owned();
     {
         let options = QueryCursorOptions::new().progress_callback(&mut progress);
         let mut matches = cursor.matches_with_options(&lq.query, tree.root_node(), source, options);
-        let mut seen_scopes = HashSet::new();
-        let mut ids = Vec::new();
         while let Some(m) = matches.next() {
             for cap in m.captures() {
-                let node = cap.node;
-                match lq.roles.get(cap.index as usize).copied().unwrap_or(Role::Ignore) {
-                    Role::Scope => {
-                        if seen_scopes.insert(node.id()) {
-                            let body_start =
-                                node.child_by_field_name("body").map(|b| b.start_byte()).unwrap_or(node.start_byte())
-                                    as u32;
-                            scopes.push(ScopeInfo {
-                                start: node.start_byte() as u32,
-                                end: node.end_byte() as u32,
-                                body_start,
-                                node_id: node.id(),
-                                kind: scope_kind(node),
-                                parent: None,
-                                names: HashMap::new(),
-                                globals: HashSet::new(),
-                                nonlocals: HashSet::new(),
-                            });
-                        }
-                    }
-                    Role::Def(kind) => {
-                        ids.clear();
-                        bound_identifiers(node, &mut ids);
-                        let owner = match kind {
-                            DefKind::Function | DefKind::Type => node.parent().map(|p| p.id()),
-                            _ => None,
-                        };
-                        for id in &ids {
-                            points.push(Point {
-                                pos: id.start_byte() as u32,
-                                name: text(*id),
-                                kind: PointKind::Def { kind, owner },
-                            });
-                        }
-                    }
-                    Role::Global | Role::Nonlocal | Role::Reference if node.kind() == "identifier" => {
-                        let kind = match lq.roles[cap.index as usize] {
-                            Role::Global => PointKind::Global,
-                            Role::Nonlocal => PointKind::Nonlocal,
-                            _ => PointKind::Reference,
-                        };
-                        points.push(Point { pos: node.start_byte() as u32, name: text(node), kind });
-                    }
-                    _ => {}
-                }
+                let role = lq.roles.get(cap.index as usize).copied().unwrap_or(Role::Ignore);
+                captures.add(role, cap.node, source);
             }
         }
     }
     let incomplete = timed_out || cursor.did_exceed_match_limit();
+    let Captures { mut scopes, mut points, .. } = captures;
 
     // Scopes nest properly; order outer-first for the sweep.
     scopes.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)).then(a.kind.cmp(&b.kind)));
     // Stable sort keeps capture order among points at the same position.
     points.sort_by_key(|p| p.pos);
 
-    // Sweep: attach every point to its innermost scope, linking scope parents.
+    let refs = sweep(&mut scopes, points);
+
+    let module = scopes.iter().position(|sc| sc.kind == ScopeKind::Module);
+    Ok(Locals { scopes, module, refs, max_hops, incomplete })
+}
+
+/// Scopes and binding / reference points gathered from the query captures.
+#[derive(Default)]
+struct Captures<'t> {
+    scopes: Vec<ScopeInfo>,
+    points: Vec<Point>,
+    seen_scopes: HashSet<usize>,
+    /// Scratch buffer for the identifiers bound by one capture.
+    ids: Vec<Node<'t>>,
+}
+
+impl<'t> Captures<'t> {
+    fn add(&mut self, role: Role, node: Node<'t>, source: &[u8]) {
+        match role {
+            Role::Scope => {
+                if self.seen_scopes.insert(node.id()) {
+                    self.scopes.push(scope_info(node));
+                }
+            }
+            Role::Def(kind) => self.definition(kind, node, source),
+            Role::Global | Role::Nonlocal | Role::Reference if node.kind() == "identifier" => {
+                let kind = match role {
+                    Role::Global => PointKind::Global,
+                    Role::Nonlocal => PointKind::Nonlocal,
+                    _ => PointKind::Reference,
+                };
+                self.points.push(Point { pos: node.start_byte() as u32, name: node_text(node, source), kind });
+            }
+            _ => {}
+        }
+    }
+
+    fn definition(&mut self, kind: DefKind, node: Node<'t>, source: &[u8]) {
+        self.ids.clear();
+        bound_identifiers(node, &mut self.ids);
+        let owner = match kind {
+            DefKind::Function | DefKind::Type => node.parent().map(|p| p.id()),
+            _ => None,
+        };
+        for id in &self.ids {
+            self.points.push(Point {
+                pos: id.start_byte() as u32,
+                name: node_text(*id, source),
+                kind: PointKind::Def { kind, owner },
+            });
+        }
+    }
+}
+
+fn node_text(n: Node<'_>, source: &[u8]) -> String {
+    String::from_utf8_lossy(&source[n.start_byte()..n.end_byte()]).into_owned()
+}
+
+fn scope_info(node: Node<'_>) -> ScopeInfo {
+    let body_start = node.child_by_field_name("body").map(|b| b.start_byte()).unwrap_or(node.start_byte()) as u32;
+    ScopeInfo {
+        start: node.start_byte() as u32,
+        end: node.end_byte() as u32,
+        body_start,
+        node_id: node.id(),
+        kind: scope_kind(node),
+        parent: None,
+        names: HashMap::new(),
+        globals: HashSet::new(),
+        nonlocals: HashSet::new(),
+    }
+}
+
+/// Sweep: attaches every point to its innermost scope, linking scope
+/// parents; returns the reference table.
+fn sweep(scopes: &mut [ScopeInfo], points: Vec<Point>) -> HashMap<u32, (usize, String)> {
     let mut stack: Vec<usize> = Vec::new();
     let mut next = 0;
     let mut refs: HashMap<u32, (usize, String)> = HashMap::new();
     for point in points {
         while next < scopes.len() && scopes[next].start <= point.pos {
-            while stack.last().is_some_and(|&t| scopes[t].end <= scopes[next].start) {
-                stack.pop();
-            }
+            pop_ended(scopes, &mut stack, scopes[next].start);
             scopes[next].parent = stack.last().copied();
             stack.push(next);
             next += 1;
         }
-        while stack.last().is_some_and(|&t| scopes[t].end <= point.pos) {
-            stack.pop();
-        }
+        pop_ended(scopes, &mut stack, point.pos);
         let Some(&inner) = stack.last() else { continue };
-        match point.kind {
-            PointKind::Def { kind, owner } => {
-                let mut s = inner;
-                if owner == Some(scopes[s].node_id) {
-                    s = scopes[s].parent.unwrap_or(s);
-                }
-                if kind == DefKind::Walrus {
-                    while scopes[s].kind == ScopeKind::Comprehension {
-                        match scopes[s].parent {
-                            Some(p) => s = p,
-                            None => break,
-                        }
-                    }
-                }
-                *scopes[s].names.entry(point.name).or_default() |= kind.bit();
-            }
-            PointKind::Global => {
-                scopes[inner].globals.insert(point.name);
-            }
-            PointKind::Nonlocal => {
-                scopes[inner].nonlocals.insert(point.name);
-            }
-            PointKind::Reference => {
-                refs.entry(point.pos).or_insert((inner, point.name));
+        attach(scopes, inner, point, &mut refs);
+    }
+    refs
+}
+
+/// Pops the open scopes that end at or before `pos`.
+fn pop_ended(scopes: &[ScopeInfo], stack: &mut Vec<usize>, pos: u32) {
+    while stack.last().is_some_and(|&t| scopes[t].end <= pos) {
+        stack.pop();
+    }
+}
+
+/// Records `point` in its innermost scope `inner` (or, for definitions,
+/// the scope the name binds in).
+fn attach(scopes: &mut [ScopeInfo], inner: usize, point: Point, refs: &mut HashMap<u32, (usize, String)>) {
+    match point.kind {
+        PointKind::Def { kind, owner } => {
+            let s = binding_scope(scopes, inner, kind, owner);
+            *scopes[s].names.entry(point.name).or_default() |= kind.bit();
+        }
+        PointKind::Global => {
+            scopes[inner].globals.insert(point.name);
+        }
+        PointKind::Nonlocal => {
+            scopes[inner].nonlocals.insert(point.name);
+        }
+        PointKind::Reference => {
+            refs.entry(point.pos).or_insert((inner, point.name));
+        }
+    }
+}
+
+/// The scope a definition binds in: a function / class name binds outside
+/// its own scope, a walrus target outside comprehensions.
+fn binding_scope(scopes: &[ScopeInfo], inner: usize, kind: DefKind, owner: Option<usize>) -> usize {
+    let mut s = inner;
+    if owner == Some(scopes[s].node_id) {
+        s = scopes[s].parent.unwrap_or(s);
+    }
+    if kind == DefKind::Walrus {
+        while scopes[s].kind == ScopeKind::Comprehension {
+            match scopes[s].parent {
+                Some(p) => s = p,
+                None => break,
             }
         }
     }
-
-    let module = scopes.iter().position(|sc| sc.kind == ScopeKind::Module);
-    Ok(Locals { scopes, module, refs, max_hops, incomplete })
+    s
 }
 
 #[derive(Debug, PartialEq, Eq)]

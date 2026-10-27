@@ -26,51 +26,8 @@ impl EnvApi {
         let mut stack = vec![(root, 0usize)];
         while let Some((n, depth)) = stack.pop() {
             match n.kind() {
-                "import_statement" => {
-                    let mut c = n.walk();
-                    for name in n.children_by_field_name("name", &mut c) {
-                        match name.kind() {
-                            "dotted_name" if text_of(name, src) == "os" => {
-                                api.os.insert("os".into());
-                            }
-                            "aliased_import" => {
-                                let module = name.child_by_field_name("name").map(|m| text_of(m, src));
-                                let alias = name.child_by_field_name("alias").map(|a| text_of(a, src).into_owned());
-                                if module.as_deref() == Some("os")
-                                    && let Some(a) = alias
-                                {
-                                    api.os.insert(a);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                "import_from_statement" => {
-                    let module = n.child_by_field_name("module_name").map(|m| text_of(m, src));
-                    if module.as_deref() == Some("os") {
-                        let mut c = n.walk();
-                        for name in n.children_by_field_name("name", &mut c) {
-                            let (orig, local) = match name.kind() {
-                                "dotted_name" => (text_of(name, src).into_owned(), text_of(name, src).into_owned()),
-                                "aliased_import" => {
-                                    let o = name.child_by_field_name("name").map(|m| text_of(m, src).into_owned());
-                                    let a = name.child_by_field_name("alias").map(|m| text_of(m, src).into_owned());
-                                    match (o, a) {
-                                        (Some(o), Some(a)) => (o, a),
-                                        _ => continue,
-                                    }
-                                }
-                                _ => continue,
-                            };
-                            match orig.as_str() {
-                                "environ" => api.environ.insert(local),
-                                "getenv" => api.getenv.insert(local),
-                                _ => false,
-                            };
-                        }
-                    }
-                }
+                "import_statement" => api.scan_import(n, src),
+                "import_from_statement" => api.scan_import_from(n, src),
                 _ if depth < 64 => {
                     let mut c = n.walk();
                     stack.extend(n.named_children(&mut c).map(|ch| (ch, depth + 1)));
@@ -79,6 +36,43 @@ impl EnvApi {
             }
         }
         api
+    }
+
+    /// `import os` / `import os as o`.
+    fn scan_import(&mut self, n: Node<'_>, src: &[u8]) {
+        let mut c = n.walk();
+        for name in n.children_by_field_name("name", &mut c) {
+            match name.kind() {
+                "dotted_name" if text_of(name, src) == "os" => {
+                    self.os.insert("os".into());
+                }
+                "aliased_import" => {
+                    if let Some((module, alias)) = aliased_import(name, src)
+                        && module == "os"
+                    {
+                        self.os.insert(alias);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// `from os import environ, getenv as g`.
+    fn scan_import_from(&mut self, n: Node<'_>, src: &[u8]) {
+        let module = n.child_by_field_name("module_name").map(|m| text_of(m, src));
+        if module.as_deref() != Some("os") {
+            return;
+        }
+        let mut c = n.walk();
+        for name in n.children_by_field_name("name", &mut c) {
+            let Some((orig, local)) = imported_name(name, src) else { continue };
+            match orig.as_str() {
+                "environ" => self.environ.insert(local),
+                "getenv" => self.getenv.insert(local),
+                _ => false,
+            };
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -141,6 +135,22 @@ impl EnvApi {
             }
         }
         string_literal(node.child_by_field_name("subscript")?, src)
+    }
+}
+
+/// `(name, alias)` of an `aliased_import` node, when both are present.
+fn aliased_import(node: Node<'_>, src: &[u8]) -> Option<(String, String)> {
+    let name = node.child_by_field_name("name")?;
+    let alias = node.child_by_field_name("alias")?;
+    Some((text_of(name, src).into_owned(), text_of(alias, src).into_owned()))
+}
+
+/// `(imported name, local name)` of a `from … import` name node.
+fn imported_name(node: Node<'_>, src: &[u8]) -> Option<(String, String)> {
+    match node.kind() {
+        "dotted_name" => Some((text_of(node, src).into_owned(), text_of(node, src).into_owned())),
+        "aliased_import" => aliased_import(node, src),
+        _ => None,
     }
 }
 
