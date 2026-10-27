@@ -30,7 +30,8 @@ from collections import defaultdict
 from pathlib import Path
 
 from .common import BENCH_DIR, BIN_DIR, CACHE, load_manifest, log, pinned_asset, run, sha256_file
-from .scip import fid, in_scope
+from .match import UnionFind
+from .scip import add_class_stats, fid, in_scope
 from .treesitter import extract_functions
 
 EXT_DIR = BENCH_DIR / "phpstan"
@@ -131,10 +132,13 @@ def _rel(container_path: str | None, prefix: str) -> str | None:
     return container_path[len(prefix) :]
 
 
-def edges_from_calls(calls: dict, prefix: str, callables_by_file: dict[str, list[dict]], scope) -> tuple[dict, dict, dict]:
+def edges_from_calls(calls: dict, prefix: str, callables_by_file: dict[str, list[dict]], scope, same_target: UnionFind | None = None) -> tuple[dict, dict, dict]:
     """Map PHPStan call records onto tree-sitter callables (module doc, steps
     2-3). `prefix` is the container path of the analysed root + "/"; `scope`
-    decides which repository-relative paths are in scope."""
+    decides which repository-relative paths are in scope. A target that maps
+    to several callables (same-named functions declared conditionally in one
+    file, same-named methods within the line tolerance) keeps the first and,
+    with `same_target`, puts them in one equivalence class."""
     stats: dict[str, int] = defaultdict(int)
     callers: dict[str, set[str]] = defaultdict(set)
     callees: dict[str, set[str]] = defaultdict(set)
@@ -153,6 +157,11 @@ def edges_from_calls(calls: dict, prefix: str, callables_by_file: dict[str, list
             stats["targets_unmapped"] += 1
             return None
         f = min(cands, key=lambda f: f["start"])
+        if len(cands) > 1:
+            stats["targets_ambiguous"] += 1
+            if same_target is not None:
+                for o in cands:
+                    same_target.union(fid(rel, f), fid(rel, o))
         return fid(rel, f)
 
     for _file, records in sorted(calls.items()):
@@ -203,12 +212,16 @@ def phpstan_call_graph(root: Path, include: list[str], name: str) -> dict:
     calls: dict = {}
     for t in targets:
         calls.update(raw[t])
-    callers, callees, stats = edges_from_calls(calls, CONTAINER_SRC + "/", by_file, lambda rel: in_scope(rel, include))
+    same_target = UnionFind()
+    callers, callees, stats = edges_from_calls(calls, CONTAINER_SRC + "/", by_file, lambda rel: in_scope(rel, include), same_target)
     stats["edges"] = sum(len(v) for v in callees.values())
     stats["files_in_scope"] = len(by_file)
-    return {
+    graph = {
         "callables": callables,
         "callers": {k: sorted(v) for k, v in callers.items()},
         "callees": {k: sorted(v) for k, v in callees.items()},
+        "classes": same_target.groups(),
         "stats": stats,
     }
+    add_class_stats(graph)
+    return graph

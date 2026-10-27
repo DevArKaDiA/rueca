@@ -31,7 +31,7 @@ from typing import Any
 
 from ..common import CACHE, count_tokens, run, safe_name, sha256_file
 from ..efficiency import json_prefix_tokens, text_prefix_tokens
-from .base import Arm, CallResult, Handle, is_callable_label, line_match
+from .base import Arm, CallResult, Handle, is_callable_label, line_distance, line_match
 
 # Scoring calls must never be cut by the RFC 0005 token budget.
 SCORING_BUDGET = 10_000_000
@@ -132,7 +132,9 @@ def trace_neighbours(data: dict, ref: Any) -> tuple[dict[str, list[dict]], dict]
     """Depth-1 callers / callees of a `trace` answer (either contract), each
     with the best confidence of the edges linking it to the root. A node's
     direction comes from the node (`direction` / `dir`) when given, else from
-    the edges that link it to the root."""
+    the edges that link it to the root. A self-edge (recursion) lists the
+    root as its own caller and callee: `trace` never repeats the root among
+    `nodes`, only its `edges` say it."""
     g = trace_graph(data)
     root_id = g["root"] or ref
     conf: dict[tuple[str, Any], float] = {}
@@ -160,6 +162,12 @@ def trace_neighbours(data: dict, ref: Any) -> tuple[dict[str, list[dict]], dict]
             b = _brief(n)
             b["confidence"] = conf.get((d, n["id"]))
             out[d].append(b)
+    root = g["nodes"].get(root_id)
+    if root is not None and ("callers", root_id) in conf:
+        for d in ("callers", "callees"):
+            b = _brief(root)
+            b["confidence"] = conf[(d, root_id)]
+            out[d].append(b)
     return out, {"truncated": data.get("truncated")}
 
 
@@ -171,8 +179,10 @@ def trace_graph(data: dict) -> dict:
     raw_nodes = data.get("nodes") or []
     nodes = [norm_symbol(n, None, snaps.get(n.get("s"))) for n in raw_nodes]
     root = data.get("root")
+    root_node = None
     if isinstance(root, dict):
-        root_id = norm_symbol(root).get("id")
+        root_node = norm_symbol(root, None, snaps.get(root.get("s")))
+        root_id = root_node.get("id")
     elif isinstance(root, int) and 0 <= root < len(nodes):
         root_id = nodes[root]["id"]
     else:
@@ -193,6 +203,8 @@ def trace_graph(data: dict) -> dict:
             edges.append({"src": src, "dst": dst, "kind": e[2] if len(e) > 2 else None, "confidence": e[3] if len(e) > 3 else None, "strategy": e[4] if len(e) > 4 else None, "call_site": {"path": path, "line": line} if line is not None else None})
         else:
             edges.append({**e, "src": key_of(e.get("src")), "dst": key_of(e.get("dst"))})
+    if root_node is not None:
+        by_id.setdefault(root_id, root_node)
     return {"root": root_id, "nodes": by_id, "node_list": nodes, "edges": edges}
 
 
@@ -382,10 +394,10 @@ class RuecaArm(Arm):
         data, secs, err = self._query(h, "get_symbol", {"name": func["name"], "path": func["path"]})
         if not err and isinstance(data, dict):
             cands = [data.get("symbol") or {}] + list(data.get("candidates") or [])
-            for c in cands:
-                c = norm_symbol(c, func["path"]) if c else None
-                if c and c.get("path") == func["path"] and c.get("name") == func["name"] and line_match(c.get("start_line"), func):
-                    return CallResult(True, secs, hits=[_brief(c)], extra={"ref": c.get("id")})
+            ok = [n for n in (norm_symbol(c, func["path"]) for c in cands if c) if n.get("path") == func["path"] and n.get("name") == func["name"] and line_match(n.get("start_line"), func)]
+            if ok:
+                c = min(ok, key=lambda n: line_distance(n.get("start_line"), func))
+                return CallResult(True, secs, hits=[_brief(c)], extra={"ref": c.get("id")})
         outlines = h.state.setdefault("outlines", {})
         if func["path"] not in outlines:
             odata, osecs, oerr = self._query(h, "get_file_outline", {"path": func["path"]})
@@ -400,9 +412,10 @@ class RuecaArm(Arm):
             if not oerr and isinstance(odata, dict):
                 walk(odata.get("symbols") or [])
             outlines[func["path"]] = flat
-        for c in outlines[func["path"]]:
-            if c.get("name") == func["name"] and is_callable_label(c.get("label")) and line_match(c.get("start_line"), func):
-                return CallResult(True, secs, hits=[_brief(dict(c, path=func["path"]))], extra={"ref": c.get("id")})
+        ok = [c for c in outlines[func["path"]] if c.get("name") == func["name"] and is_callable_label(c.get("label")) and line_match(c.get("start_line"), func)]
+        if ok:
+            c = min(ok, key=lambda n: line_distance(n.get("start_line"), func))
+            return CallResult(True, secs, hits=[_brief(dict(c, path=func["path"]))], extra={"ref": c.get("id")})
         return CallResult(False, secs, error=err or "no candidate or outline symbol matched path+name+line")
 
     def neighbors(self, h: Handle, ref: Any) -> CallResult:

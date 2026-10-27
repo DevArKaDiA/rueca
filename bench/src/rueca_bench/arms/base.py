@@ -104,5 +104,15 @@ def line_match(hit_line: int | None, func: dict, tol: int = 2) -> bool:
     return any(a is not None and abs(hit_line - a) <= tol for a in anchors)
 
 
+def line_distance(hit_line: int | None, func: dict) -> int:
+    """Lines between an arm's start line and the nearest anchor of a gold
+    def (name line, declaration start, decorator start): when several arm
+    symbols are within the tolerance (neighbouring overloads), the nearest
+    is the definition."""
+    if hit_line is None:
+        return 0
+    return min((abs(hit_line - a) for a in (func.get("def_line"), func.get("start"), func.get("outer_start")) if a is not None), default=1 << 30)
+
+
 def same_def(hit: dict, func: dict, tol: int = 2) -> bool:
     return hit.get("path") == func.get("path") and hit.get("name") == func.get("name") and line_match(hit.get("start_line"), func, tol)

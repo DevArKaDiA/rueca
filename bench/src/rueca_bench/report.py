@@ -28,7 +28,8 @@ from . import health as health_mod
 from . import crossrepo as crossrepo_mod
 from . import org as org_mod
 from .arms import ARM_NAMES, make_arm
-from .arms.base import is_callable_label, line_match, same_def
+from .arms.base import is_callable_label, same_def
+from .match import CallableIndex, class_map, class_members
 from .efficiency import search_aggregate, search_row, trace_aggregate
 from .common import (
     DOCS_DIR,
@@ -57,7 +58,7 @@ from .stats import bootstrap_mean, bootstrap_pooled_f1, bootstrap_ratio, paired_
 VARIANTS = ("kw", "raw")
 OVERALL = "overall"
 CTX_KS = (5, 10)
-S3_SCHEMA = 3
+S3_SCHEMA = 4
 DIRS = ("callers", "callees")
 
 
@@ -114,7 +115,7 @@ def common_groups(rows_by_arm: dict[str, set[str]]) -> list[str]:
 
 def load_published() -> dict:
     out = {}
-    for name in ("meta", "s1", "s3", "data", "efficiency"):
+    for name in ("meta", "s1", "s3", "data", "efficiency", "health"):
         p = RESULTS_DIR / f"{name}.json"
         out[name] = read_json(p) if p.exists() else {}
     return out
@@ -407,38 +408,48 @@ def score_s1(published: dict | None = None) -> dict:
 #
 # One row per question (compact, committed in bench/results/s3.json):
 #   f   question (gold callable id)          ok  definition found (0/1)
-#   cr / ce        callers / callees at every confidence: [n_pred, matched_pred, n_gold, matched_gold]
+#   cr / ce        callers / callees at every confidence, class-aware (the
+#                  gated numbers): [n_pred, matched_pred, n_gold, matched_gold]
 #   cr@ / ce@      the same with edges of confidence < min_confidence dropped
+#   crs / ces      strict (no equivalence classes), every confidence — diagnostic
 #   lk  lookup rank (0 = not in the top 10; absent = not in the lookup sample)
 #   s   seconds of every tool call;  x  out-of-universe predictions dropped
 #   t / lt     tokens of the JSON neighbours / lookup answer (alpha metric, diagnostic)
 #   ta / lta   tokens an agent reads for the same answer (RFC 0005 §8: text content)
+#
+# Matching (match.py): every hit is assigned to at most one gold callable
+# (path + bare name + line ±2, the arm's qualified name preferred, nearest
+# line); predictions and gold neighbours are compared as sets of callables.
+# Class-aware: a callee is replaced by its equivalence class (callables one
+# SCIP symbol binds to), and a callers question on a class member is asked
+# of the whole class (gold and the arm's answers for every member, united).
 
 
-def _universe(graph: dict) -> dict[tuple, list[dict]]:
-    idx: dict[tuple, list[dict]] = defaultdict(list)
-    for f in graph["callables"].values():
-        idx[(f["path"], f["name"])].append(f)
-    return idx
+def _count(pred: set, gold: set) -> list[int]:
+    hit = len(pred & gold)
+    return [len(pred), hit, len(gold), hit]
 
 
-def _in_universe(h: dict, idx: dict) -> bool:
-    return any(line_match(h.get("start_line"), f) for f in idx.get((h.get("path"), h.get("name")), []))
-
-
-def _count(preds: list[dict], gold: list[dict]) -> list[int]:
-    uniq = {(h.get("path"), h.get("name"), h.get("start_line")): h for h in preds}
-    ps = list(uniq.values())
-    mp = sum(1 for h in ps if any(h.get("path") == g["path"] and h.get("name") == g["name"] and line_match(h.get("start_line"), g) for g in gold))
-    mg = sum(1 for g in gold if any(h.get("path") == g["path"] and h.get("name") == g["name"] and line_match(h.get("start_line"), g) for h in ps))
-    return [len(ps), mp, len(gold), mg]
+def _resolved(hits: list[dict], idx: CallableIndex, meta: dict) -> tuple[list[tuple[str, float | None]], int]:
+    """(callable id, confidence) of the in-scope callable hits that resolve
+    to a gold callable, and how many in-scope callable hits did not."""
+    scoped = [h for h in hits if prediction_in_scope(h.get("path"), meta) and is_callable_label(h.get("label"))]
+    out = []
+    for h in scoped:
+        k = idx.resolve(h)
+        if k is not None:
+            out.append((k, h.get("confidence")))
+    return out, len(scoped) - len(out)
 
 
 def score_answers(answers: list[dict], graph: dict, meta: dict, cut: float) -> list[dict]:
-    idx = _universe(graph)
+    idx = CallableIndex(graph["callables"])
+    cmap = class_map(graph)
+    cmem = class_members(graph)
     rows = []
     for a in answers:
-        row: dict = {"f": a["fid"], "ok": int(bool((a.get("resolve") or {}).get("ok"))), "s": [], "x": 0}
+        q = a["fid"]
+        row: dict = {"f": q, "ok": int(bool((a.get("resolve") or {}).get("ok"))), "s": [], "x": 0}
         if (a.get("resolve") or {}).get("seconds") is not None:
             row["s"].append(round(a["resolve"]["seconds"], 4))
         nb = a.get("neighbors") or {}
@@ -453,21 +464,34 @@ def score_answers(answers: list[dict], graph: dict, meta: dict, cut: float) -> l
                 row["ta"] = nb["tokens"]
         elif nb.get("tokens") is not None:
             row["t"] = nb["tokens"]
+        keep = lambda c: c is None or c >= cut
         for d, short in (("callers", "cr"), ("callees", "ce")):
-            gold = [graph["callables"][x] for x in gold_neighbours(graph, a["fid"], d)]
-            hits = nb.get(d, []) if nb.get("ok") else []
-            scoped = [h for h in hits if prediction_in_scope(h.get("path"), meta) and is_callable_label(h.get("label"))]
-            preds = [h for h in scoped if _in_universe(h, idx)]
-            row["x"] += len(scoped) - len(preds)
-            row[short] = _count(preds, gold)
-            row[short + "@"] = _count([h for h in preds if h.get("confidence") is None or h["confidence"] >= cut], gold)
+            gold = set(gold_neighbours(graph, q, d))
+            preds, dropped = _resolved(nb.get(d, []) if nb.get("ok") else [], idx, meta)
+            row["x"] += dropped
+            row[short + "s"] = _count({k for k, _ in preds}, gold)
+            if d == "callees":
+                cls = lambda k: cmap.get(k, k)
+                gold_c = {cls(k) for k in gold}
+                pred_c = {cls(k) for k, _ in preds}
+                pred_c_conf = {cls(k) for k, c in preds if keep(c)}
+            else:
+                # the class is asked through the members the gold binds
+                # references to (the strict callers questions), so a class
+                # enters the callers population once, as in the strict row
+                members = cmem.get(q, [q]) if gold else [q]
+                gold_c = {k for m in members for k in gold_neighbours(graph, m, d)}
+                for m in (a.get("members") or []) if gold else []:
+                    preds += _resolved(m.get("callers", []), idx, meta)[0]
+                pred_c = {k for k, _ in preds}
+                pred_c_conf = {k for k, c in preds if keep(c)}
+            row[short] = _count(pred_c, gold_c)
+            row[short + "@"] = _count(pred_c_conf, gold_c)
         if "lookup" in a:
             lk = a["lookup"]
             hits = lk.get("hits", []) if lk.get("ok") else []
             hits = [h for h in hits if prediction_in_scope(h.get("path"), meta) and is_callable_label(h.get("label"))]
-            f = graph["callables"][a["fid"]]
-            rank = next((i + 1 for i, h in enumerate(hits) if h.get("path") == f["path"] and h.get("name") == f["name"] and line_match(h.get("start_line"), f)), 0)
-            row["lk"] = rank
+            row["lk"] = next((i + 1 for i, h in enumerate(hits) if idx.resolve(h) == q), 0)
             if lk.get("seconds") is not None:
                 row["s"].append(round(lk["seconds"], 4))
             if lk.get("tokens_json") is not None:
@@ -492,8 +516,10 @@ def agg_s3(rows: list[dict], label: str, micro: bool = False) -> dict:
     found = sum(r["ok"] for r in rows)
     out: dict = {"n": n, "definition_found": found / n, "ci": {"definition_found": _wil(found, n)}, "out_of_universe": sum(r.get("x", 0) for r in rows)}
     for d, short in (("callers", "cr"), ("callees", "ce")):
-        for suffix in ("", "@"):
-            key = d + ("@conf" if suffix else "")
+        for suffix, variant in (("", ""), ("@", "@conf"), ("s", "@strict")):
+            key = d + variant
+            if any(short + suffix not in r for r in rows):
+                continue
             qs = [r[short + suffix] for r in rows if r[short + suffix][2] > 0]
             prec = [mp / np_ for np_, mp, _, _ in qs if np_ > 0]
             rec = [mg / ng for _, _, ng, mg in qs]
@@ -503,6 +529,8 @@ def agg_s3(rows: list[dict], label: str, micro: bool = False) -> dict:
                 r_ = mg / ng
                 f1s.append(2 * p * r_ / (p + r_) if p + r_ else 0.0)
             all_ = [r[short + suffix] for r in rows]
+            if suffix == "s" and not qs:
+                continue
             mp_s = sum(x[1] for x in all_)
             np_s = sum(x[0] for x in all_)
             mg_s = sum(x[3] for x in all_)
@@ -871,9 +899,8 @@ def _metric_values(key: str, fam_label: str, s1: dict, s3: dict, health: dict, e
             out["paired"]["ci"] = list(out["paired"]["ci"])
     elif key.startswith(("callers_", "callees_")):
         d, _, m = key.partition("_")
-        conf = m.endswith("@conf")
-        m = m.replace("@conf", "")
-        dk = d + ("@conf" if conf else "")
+        m, _, variant = m.partition("@")
+        dk = d + (f"@{variant}" if variant else "")
         r = g3("rueca").get(dk) or {}
         c = g3("cbm").get(dk) or {}
         out = {"value": r.get(m), "ci": (r.get("ci") or {}).get(m), "n": r.get("n"), "cbm": c.get(m)}
@@ -1240,6 +1267,9 @@ def _s3_cells(t: dict | None) -> list[str] | None:
     for d in DIRS:
         x = t.get(d + "@conf") or {}
         out += [f"{_f(x.get('precision'))} / {_f(x.get('recall'))}"]
+    for d in DIRS:
+        x = t.get(d + "@strict") or {}
+        out += [f"{_f(x.get('precision'))} / {_f(x.get('recall'))}"]
     ce = t.get("callees") or {}
     out += [f"{_f(ce.get('micro_precision'))} / {_f(ce.get('micro_recall'))}", _ci(t.get("lookup_acc@1"), t["ci"].get("lookup_acc@1")), _f(t.get("lookup_acc@10")), _f(t.get("query_s_median"), False), str(t.get("out_of_universe", 0))]
     return out
@@ -1247,7 +1277,7 @@ def _s3_cells(t: dict | None) -> list[str] | None:
 
 S3_HEAD = (
     "| Set / arm | questions | definition found | callers n | callers P | callers R | callers F1 | callees n | callees P | callees R | callees F1 "
-    "| callers P / R, conf ≥ 0.6 | callees P / R, conf ≥ 0.6 | callees micro P / R | lookup Acc@1 | lookup Acc@10 | query s (median) | dropped (not callable) |"
+    "| callers P / R, conf ≥ 0.6 | callees P / R, conf ≥ 0.6 | callers P / R, strict | callees P / R, strict | callees micro P / R | lookup Acc@1 | lookup Acc@10 | query s (median) | dropped (not callable) |"
 )
 
 
@@ -1409,18 +1439,28 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict,
         "the symbol lookup keeps a stratified sample per set. Micro-benchmarks: every callable of every snippet."
     )
     L.append("")
-    L.append("| Gold set | Language | Split | Commit | Gold | Callables | Gold call edges | Questions (callers / callees) | Lookup sample |")
-    L.append("|---|---|---|---|---|---:|---:|---|---:|")
+    L.append("| Gold set | Language | Split | Commit | Gold | Callables | Gold call edges | Equivalence classes (callables) | Edges to a class | Questions (callers / callees) | Lookup sample |")
+    L.append("|---|---|---|---|---|---:|---:|---:|---:|---|---:|")
     for name, gi in s3["gold"].items():
         if gi.get("missing"):
-            L.append(f"| {gi.get('repo') or gi.get('title') or name} | {gi.get('language', '')} | {gi.get('split', '')} | | gold missing | | | | |")
+            L.append(f"| {gi.get('repo') or gi.get('title') or name} | {gi.get('language', '')} | {gi.get('split', '')} | | gold missing | | | | | | |")
         elif gi.get("micro"):
-            L.append(f"| {gi['title']} | {gi['language']} | {gi.get('split', 'gated')} | `bench/{gi.get('source') or ''}` {('`' + gi['commit'][:10] + '`') if gi.get('commit') else ''} | hand-written | {gi['functions']} | {gi['edges']} | {gi['functions']} ({gi['snippets']} snippets) | — |")
+            L.append(f"| {gi['title']} | {gi['language']} | {gi.get('split', 'gated')} | `bench/{gi.get('source') or ''}` {('`' + gi['commit'][:10] + '`') if gi.get('commit') else ''} | hand-written | {gi['functions']} | {gi['edges']} | — | — | {gi['functions']} ({gi['snippets']} snippets) | — |")
         else:
+            st = gi.get("stats") or {}
             L.append(
                 f"| {gi['repo']} {gi.get('tag') or ''} | {gi['language']} | {gi.get('split', 'gated')} | `{gi['commit'][:10]}` | {gi['indexer']} | {gi['callables']} | {gi['edges']} | "
+                f"{st.get('classes', 0)} ({st.get('class_members', 0)}) | {st.get('class_edges', 0)} | "
                 f"{gi.get('questions_callers', '—')} / {gi.get('questions_callees', '—')} | {gi.get('lookup_sample', '—')} |"
             )
+    L.append("")
+    L.append(
+        "Equivalence classes: callables the gold cannot tell apart — several definitions bound to one SCIP symbol (scip-clang's same-signature "
+        "overloads, function template specializations, `#if` alternatives; C `static` functions of one name), an alternative definition the "
+        "indexer did not compile, or a PHPStan target that maps to several callables. Scores are class-aware: a predicted callee in a class "
+        "matches a gold edge to the class, counted once per question, and a callers question on a class member is asked of the whole class. "
+        "The *strict* columns score without classes (diagnostic)."
+    )
     L.append("")
     for gi in s3["gold"].values():
         for k, label in (("phpstan_agreement", "PHPStan extractor"), ("crosscheck", None)):
@@ -1845,7 +1885,7 @@ def report() -> None:
     log("report: scoring S3")
     s3 = score_s3(published["s3"])
     data = data_mod.score(published["data"])
-    health = health_mod.score()
+    health = health_mod.score(published["health"])
     eff = score_efficiency(s1, s3)
     orgs = {"multirepo": org_mod.score_multirepo(s1), "multiref": org_mod.score_multiref(), "crossrepo": crossrepo_mod.score_crossrepo()}
     published_eff = published.get("efficiency") or {}
@@ -1876,7 +1916,11 @@ def report() -> None:
         if a in carried_arms and pub_arms.get(a):
             vers = sorted(set(st["recorded_versions"]) | set(pub_arms[a].get("recorded_versions", [])))
             st.update(recorded_versions=vers, version="; ".join(vers) if vers else st["version"], available=st["available"] or bool(vers))
-    carried_txt = ", ".join(sorted(f"{k} ({n} instances)" for k, n in s1.get("carried", {}).items()) + sorted(f"S3 {k}" for k in s3.get("carried", [])))
+    carried_txt = ", ".join(
+        sorted(f"{k} ({n} instances)" for k, n in s1.get("carried", {}).items())
+        + sorted(f"S3 {k}" for k in s3.get("carried", []))
+        + ([f"health ({health['carried']} repositories)"] if health.get("carried") else [])
+    )
     meta = {
         "date": card["generated"],
         "machine": machine_info(),

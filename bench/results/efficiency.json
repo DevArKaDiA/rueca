@@ -4,22 +4,22 @@
    "trace": {
     "rueca": {
      "n": 745,
-     "true_edges": 2056,
-     "per_true_edge": 57.32149805447471,
+     "true_edges": 2076,
+     "per_true_edge": 56.76926782273603,
      "tokens_median": 108.0,
      "ci": [
-      54.78200440045687,
-      60.39877770695562
+      54.302892113644134,
+      59.80447902699845
      ]
     },
     "cbm": {
      "n": 745,
-     "true_edges": 1974,
-     "per_true_edge": 48.5339412360689,
+     "true_edges": 1978,
+     "per_true_edge": 48.43579373104146,
      "tokens_median": 114.0,
      "ci": [
-      44.82980154659513,
-      52.662581393495046
+      44.743405610918416,
+      52.570397712303844
      ]
     }
    },
@@ -107,23 +107,23 @@
   "ts/js": {
    "trace": {
     "rueca": {
-     "n": 728,
-     "true_edges": 1736,
-     "per_true_edge": 65.42857142857143,
+     "n": 730,
+     "true_edges": 1778,
+     "per_true_edge": 64.08942632170978,
      "tokens_median": 108.0,
      "ci": [
-      59.53776082695321,
-      74.84048828399328
+      58.41545087912088,
+      73.19891827553721
      ]
     },
     "cbm": {
-     "n": 728,
+     "n": 730,
      "true_edges": 1574,
-     "per_true_edge": 53.9853875476493,
+     "per_true_edge": 54.12198221092757,
      "tokens_median": 108.0,
      "ci": [
-      50.523444783358755,
-      57.669190790415726
+      50.63602781946318,
+      57.814132134883444
      ]
     }
    },
@@ -182,17 +182,17 @@
     "cbm": {
      "n": 100,
      "found": 89,
-     "per_found": 213.75280898876406
+     "per_found": 213.73033707865167
     }
    },
    "raw": {
     "trace": {
-     "n": 728,
+     "n": 730,
      "rueca_median": 379.5,
      "cbm_median": 166.0,
-     "rueca_mean": 498.08104395604397,
-     "cbm_mean": 172.5260989010989,
-     "agent_n": 728,
+     "rueca_mean": 498.64246575342463,
+     "cbm_mean": 172.4945205479452,
+     "agent_n": 730,
      "agent_rueca_median": 108.0,
      "agent_cbm_median": 108.0
     },
@@ -201,7 +201,7 @@
      "rueca_median": 961.0,
      "cbm_median": 128.0,
      "rueca_mean": 969.09,
-     "cbm_mean": 222.17,
+     "cbm_mean": 222.15,
      "agent_n": 100,
      "agent_rueca_median": 315.0,
      "agent_cbm_median": 113.0
@@ -212,12 +212,12 @@
    "trace": {
     "rueca": {
      "n": 1196,
-     "true_edges": 3699,
-     "per_true_edge": 71.80400108137334,
+     "true_edges": 3713,
+     "per_true_edge": 71.53326151360086,
      "tokens_median": 147.5,
      "ci": [
-      69.59595531431663,
-      74.3846915574222
+      69.34611066017315,
+      74.09323543287697
      ]
     },
     "cbm": {
@@ -285,8 +285,8 @@
     },
     "cbm": {
      "n": 100,
-     "found": 78,
-     "per_found": 328.12820512820514
+     "found": 77,
+     "per_found": 331.15584415584414
     }
    },
    "raw": {
@@ -305,7 +305,7 @@
      "rueca_median": 1134.0,
      "cbm_median": 206.5,
      "rueca_mean": 1156.76,
-     "cbm_mean": 290.74,
+     "cbm_mean": 289.79,
      "agent_n": 100,
      "agent_rueca_median": 400.0,
      "agent_cbm_median": 177.5
@@ -315,23 +315,23 @@
   "go": {
    "trace": {
     "rueca": {
-     "n": 538,
-     "true_edges": 1490,
-     "per_true_edge": 47.939597315436245,
+     "n": 539,
+     "true_edges": 1520,
+     "per_true_edge": 47.02105263157895,
      "tokens_median": 98.0,
      "ci": [
-      45.91357213964117,
-      50.13874939208248
+      45.08005599538459,
+      49.11955372328126
      ]
     },
     "cbm": {
-     "n": 538,
+     "n": 539,
      "true_edges": 1249,
-     "per_true_edge": 44.99359487590072,
+     "per_true_edge": 45.04883907125701,
      "tokens_median": 93.0,
      "ci": [
-      41.00211777007404,
-      49.52024200867033
+      41.04883110957329,
+      49.49868124436429
      ]
     }
    },
@@ -390,26 +390,26 @@
     "cbm": {
      "n": 100,
      "found": 88,
-     "per_found": 164.2840909090909
+     "per_found": 164.27272727272728
     }
    },
    "raw": {
     "trace": {
-     "n": 538,
-     "rueca_median": 367.0,
-     "cbm_median": 151.0,
-     "rueca_mean": 447.09293680297395,
-     "cbm_mean": 157.23605947955392,
-     "agent_n": 538,
-     "agent_rueca_median": 98.0,
-     "agent_cbm_median": 93.0
+     "n": 539,
+     "rueca_median": 367,
+     "cbm_median": 151,
+     "rueca_mean": 446.64935064935065,
+     "cbm_mean": 157.0890538033395,
+     "agent_n": 539,
+     "agent_rueca_median": 98,
+     "agent_cbm_median": 93
     },
     "search": {
      "n": 100,
      "rueca_median": 905.5,
      "cbm_median": 102.0,
      "rueca_mean": 903.87,
-     "cbm_mean": 172.38,
+     "cbm_mean": 172.37,
      "agent_n": 100,
      "agent_rueca_median": 276.5,
      "agent_cbm_median": 87.0
@@ -419,23 +419,23 @@
   "java": {
    "trace": {
     "rueca": {
-     "n": 796,
-     "true_edges": 2951,
-     "per_true_edge": 67.74076584208743,
+     "n": 797,
+     "true_edges": 2999,
+     "per_true_edge": 66.67989329776591,
      "tokens_median": 176.0,
      "ci": [
-      65.51398009213453,
-      70.21301234939752
+      64.44755261573354,
+      69.1684255715607
      ]
     },
     "cbm": {
-     "n": 796,
+     "n": 797,
      "true_edges": 1923,
-     "per_true_edge": 75.73790951638065,
-     "tokens_median": 153.5,
+     "per_true_edge": 75.79355174206968,
+     "tokens_median": 153.0,
      "ci": [
-      70.5955771331928,
-      81.32550643386422
+      70.65757574912944,
+      81.34144987929638
      ]
     }
    },
@@ -494,26 +494,26 @@
     "cbm": {
      "n": 100,
      "found": 70,
-     "per_found": 420.64285714285717
+     "per_found": 419.75714285714287
     }
    },
    "raw": {
     "trace": {
-     "n": 796,
-     "rueca_median": 518.5,
-     "cbm_median": 215.0,
-     "rueca_mean": 685.5201005025126,
-     "cbm_mean": 242.6143216080402,
-     "agent_n": 796,
-     "agent_rueca_median": 176.0,
-     "agent_cbm_median": 153.5
+     "n": 797,
+     "rueca_median": 518,
+     "cbm_median": 215,
+     "rueca_mean": 684.9498117942284,
+     "cbm_mean": 242.51191969887077,
+     "agent_n": 797,
+     "agent_rueca_median": 176,
+     "agent_cbm_median": 153
     },
     "search": {
      "n": 100,
      "rueca_median": 1036.5,
      "cbm_median": 279.5,
      "rueca_mean": 1032.86,
-     "cbm_mean": 334.13,
+     "cbm_mean": 333.5,
      "agent_n": 100,
      "agent_rueca_median": 330.0,
      "agent_cbm_median": 244.0
@@ -523,23 +523,23 @@
   "c": {
    "trace": {
     "rueca": {
-     "n": 1206,
-     "true_edges": 6651,
-     "per_true_edge": 52.249887235002255,
-     "tokens_median": 220.5,
+     "n": 1204,
+     "true_edges": 6696,
+     "per_true_edge": 51.87589605734767,
+     "tokens_median": 221.0,
      "ci": [
-      50.77322755586951,
-      53.93784128950457
+      50.43814109848485,
+      53.5351903211097
      ]
     },
     "cbm": {
-     "n": 1206,
-     "true_edges": 5681,
-     "per_true_edge": 29.852666784016897,
-     "tokens_median": 129.5,
+     "n": 1204,
+     "true_edges": 5696,
+     "per_true_edge": 29.740168539325843,
+     "tokens_median": 130.0,
      "ci": [
-      28.86273956817079,
-      30.906383705879037
+      28.780923179985315,
+      30.7528287463731
      ]
     }
    },
@@ -591,35 +591,35 @@
    },
    "lookup": {
     "rueca": {
-     "n": 100,
-     "found": 99,
-     "per_found": 293.54545454545456
+     "n": 82,
+     "found": 81,
+     "per_found": 281.39506172839504
     },
     "cbm": {
-     "n": 100,
-     "found": 99,
-     "per_found": 113.05050505050505
+     "n": 82,
+     "found": 81,
+     "per_found": 105.79012345679013
     }
    },
    "raw": {
     "trace": {
-     "n": 1206,
+     "n": 1204,
      "rueca_median": 638.0,
      "cbm_median": 180.0,
-     "rueca_mean": 794.257048092869,
-     "cbm_mean": 192.57048092868988,
-     "agent_n": 1206,
-     "agent_rueca_median": 220.5,
-     "agent_cbm_median": 129.5
+     "rueca_mean": 795.0747508305648,
+     "cbm_mean": 192.6486710963455,
+     "agent_n": 1204,
+     "agent_rueca_median": 221.0,
+     "agent_cbm_median": 130.0
     },
     "search": {
-     "n": 100,
-     "rueca_median": 857.0,
+     "n": 82,
+     "rueca_median": 841.0,
      "cbm_median": 82.0,
-     "rueca_mean": 791.03,
-     "cbm_mean": 130.18,
-     "agent_n": 100,
-     "agent_rueca_median": 308.0,
+     "rueca_mean": 764.5365853658536,
+     "cbm_mean": 121.29268292682927,
+     "agent_n": 82,
+     "agent_rueca_median": 291.5,
      "agent_cbm_median": 73.0
     }
    }
@@ -627,23 +627,23 @@
   "cpp": {
    "trace": {
     "rueca": {
-     "n": 879,
-     "true_edges": 3543,
-     "per_true_edge": 64.15184871577759,
-     "tokens_median": 184.0,
+     "n": 888,
+     "true_edges": 3630,
+     "per_true_edge": 63.32451790633609,
+     "tokens_median": 184.5,
      "ci": [
-      62.27588768606225,
-      66.21811418170363
+      61.54164857016055,
+      65.28369383333857
      ]
     },
     "cbm": {
-     "n": 879,
-     "true_edges": 2164,
-     "per_true_edge": 60.36829944547135,
-     "tokens_median": 133.0,
+     "n": 888,
+     "true_edges": 2169,
+     "per_true_edge": 60.570769940064544,
+     "tokens_median": 132.0,
      "ci": [
-      56.58735473484087,
-      64.56505295950156
+      56.59401235664045,
+      64.90971445394095
      ]
     }
    },
@@ -651,19 +651,19 @@
     "rueca": {
      "n": 38,
      "hit_rate": 0.6578947368421053,
-     "to_first_hit": 307.76,
+     "to_first_hit": 307.68,
      "to_first_hit_ci": [
-      194.12669930875575,
-      492.17249999999996
+      194.03562788018434,
+      492.1158333333332
      ],
-     "per_hit": 106.3006993006993,
+     "per_hit": 106.13286713286713,
      "per_hit_ci": [
-      82.79442149367833,
-      149.2174705822682
+      82.6089032558419,
+      149.13061597938142
      ],
      "func_hit_rate": 0.21052631578947367,
-     "func_to_first_hit": 1660.5,
-     "func_per_hit": 844.5,
+     "func_to_first_hit": 1657.5,
+     "func_per_hit": 843.1666666666666,
      "tokens_median": 395.0,
      "formats": [
       "text"
@@ -695,36 +695,36 @@
    },
    "lookup": {
     "rueca": {
-     "n": 100,
-     "found": 92,
-     "per_found": 402.35869565217394
+     "n": 52,
+     "found": 50,
+     "per_found": 356.88
     },
     "cbm": {
-     "n": 100,
-     "found": 69,
-     "per_found": 335.5072463768116
+     "n": 52,
+     "found": 40,
+     "per_found": 263.225
     }
    },
    "raw": {
     "trace": {
-     "n": 879,
-     "rueca_median": 531,
-     "cbm_median": 189,
-     "rueca_mean": 702.3572241183163,
-     "cbm_mean": 205.19453924914677,
-     "agent_n": 879,
-     "agent_rueca_median": 184,
-     "agent_cbm_median": 133
+     "n": 888,
+     "rueca_median": 533.5,
+     "cbm_median": 188.0,
+     "rueca_mean": 703.1666666666666,
+     "cbm_mean": 204.4966216216216,
+     "agent_n": 888,
+     "agent_rueca_median": 184.5,
+     "agent_cbm_median": 132.0
     },
     "search": {
-     "n": 100,
-     "rueca_median": 1015.0,
-     "cbm_median": 167.5,
-     "rueca_mean": 1032.31,
-     "cbm_mean": 263.93,
-     "agent_n": 100,
-     "agent_rueca_median": 350.5,
-     "agent_cbm_median": 146.5
+     "n": 52,
+     "rueca_median": 989.5,
+     "cbm_median": 126.5,
+     "rueca_mean": 998.2115384615385,
+     "cbm_mean": 231.55769230769232,
+     "agent_n": 52,
+     "agent_rueca_median": 340.0,
+     "agent_cbm_median": 111.0
     }
    }
   }
@@ -1082,7 +1082,7 @@
        "single_func_acc@10": 0.47619047619047616,
        "n_func": 21,
        "other_repo_top10": 0.9190476190476191,
-       "tokens_median": 7189,
+       "tokens_median": 7156,
        "single_tokens_median": 337,
        "file_acc@5_ratio": 0.3846153846153846,
        "tokens_per_correct": null,
@@ -1112,7 +1112,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 7203,
+         "tokens": 7156,
          "single_tokens": 478,
          "fh": null,
          "pf": null,
@@ -1140,7 +1140,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 7846,
+         "tokens": 7842,
          "single_tokens": 239,
          "fh": null,
          "pf": null,
@@ -1196,7 +1196,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 6734,
+         "tokens": 6737,
          "single_tokens": 467,
          "fh": null,
          "pf": null,
@@ -1210,7 +1210,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 6770,
+         "tokens": 6773,
          "single_tokens": 430,
          "fh": null,
          "pf": null,
@@ -1238,7 +1238,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 7024,
+         "tokens": 7034,
          "single_tokens": 284,
          "fh": null,
          "pf": null,
@@ -1280,7 +1280,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 6839,
+         "tokens": 6828,
          "single_tokens": 377,
          "fh": null,
          "pf": null,
@@ -1388,28 +1388,28 @@
        ]
       }
      },
-     "index_seconds": 34.208977043104824,
-     "version": "rueca 0.1.0-alpha.1 (binary sha256 f4a33507702d, rfc0005 contract)",
+     "index_seconds": 29.660063835035544,
+     "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)",
      "org_layer": {
       "steps": 21,
-      "org_ms_median": 206.0,
-      "org_ms_max": 1413,
-      "repo_ms_median": 987.0,
-      "ratio_median": 0.25894736842105265,
-      "ratio_max": 0.47601476014760147,
+      "org_ms_median": 139.0,
+      "org_ms_max": 1310,
+      "repo_ms_median": 762.0,
+      "ratio_median": 0.2802197802197802,
+      "ratio_max": 0.4723618090452261,
       "replace": {
        "repo": "micropython/micropython",
-       "docs": 95353,
-       "repo_ms": 3616,
-       "first_repo_ms": 4663,
-       "org_ms": 499,
+       "docs": 95342,
+       "repo_ms": 2534,
+       "first_repo_ms": 4494,
+       "org_ms": 378,
        "org_repos": 21,
        "replaced": [
         "github.com/micropython/micropython"
        ],
-       "bytes_copied": 14715980,
-       "ratio": 0.13799778761061948,
-       "ratio_first": 0.1070126527986275
+       "bytes_copied": 14716983,
+       "ratio": 0.14917127071823205,
+       "ratio_first": 0.08411214953271028
       }
      }
     },
@@ -1664,7 +1664,7 @@
    },
    "queries": 21,
    "single_tokens_sum": 10660,
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 f4a33507702d, rfc0005 contract)",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)",
    "status": "pending",
    "reason": "local catalog holds one snapshot per root (RFC 0005 \u00a79)",
    "errors": [
@@ -1705,8 +1705,8 @@
      "commit": "22d924701a6ae2e4cd01e9a15bbaf3946094af65",
      "language": "python",
      "status": "ok",
-     "org_ms": 410,
-     "link_ms": 66,
+     "org_ms": 276,
+     "link_ms": 56,
      "edges": 182,
      "libraries": [
       {
@@ -1804,8 +1804,8 @@
      "commit": "b8ca298a5475497d01b194ed5688441454d8ee34",
      "language": "php",
      "status": "ok",
-     "org_ms": 1780,
-     "link_ms": 845,
+     "org_ms": 1392,
+     "link_ms": 661,
      "edges": 856,
      "libraries": [
       {
@@ -2060,8 +2060,8 @@
      "commit": "d8e6dfa42a22e9c21697ad37709abec7ae33895b",
      "language": "java",
      "status": "ok",
-     "org_ms": 1505,
-     "link_ms": 961,
+     "org_ms": 1368,
+     "link_ms": 907,
      "edges": 58,
      "libraries": [
       {
@@ -2107,8 +2107,8 @@
      "commit": "63c16c117a869426f2cbbfdaa099de449789fd18",
      "language": "java",
      "status": "ok",
-     "org_ms": 590,
-     "link_ms": 201,
+     "org_ms": 437,
+     "link_ms": 181,
      "edges": 820,
      "libraries": [
       {
@@ -2154,7 +2154,7 @@
      ]
     }
    ],
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 f4a33507702d, rfc0005 contract)"
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)"
   }
  }
 }

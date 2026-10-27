@@ -153,13 +153,21 @@ def run(languages: set[str] | None = None, force: bool = False, only: list[str] 
             prune_clone(t["repo"])
 
 
-def score() -> dict:
+def score(published: dict | None = None) -> dict:
     """Per family label: pooled files with parse errors over extracted files
-    (gated repositories), throughput, and per-repository rows."""
+    (gated repositories), throughput, and per-repository rows. A target
+    with no local run keeps its published row (same commit), like the other
+    suites' additive results; `carried` counts them."""
+    pub = {r["name"]: r for r in (published or {}).get("rows", []) if r.get("name")}
     rows = []
+    carried = 0
     for t in targets():
         p = run_path(t["name"])
         if not p.exists():
+            old = pub.get(t["name"])
+            if old is not None and old.get("commit") == t["commit"]:
+                rows.append({**old, **t, "carried": True})
+                carried += 1
             continue
         rec = read_json(p)
         if not rec.get("ok"):
@@ -177,4 +185,4 @@ def score() -> dict:
                 "excluded": rec.get("excluded") or {},
             }
         )
-    return {"rows": rows}
+    return {"rows": rows, "carried": carried}

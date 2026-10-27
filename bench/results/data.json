@@ -130,8 +130,8 @@
     "carried": true
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
-    "index_seconds": 0.40329674998065457,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)",
+    "index_seconds": 0.41262458299752325,
     "keys": {
      "yaml": {
       "keys": 2582,
@@ -312,8 +312,8 @@
     "carried": true
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
-    "index_seconds": 0.27179291599895805,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)",
+    "index_seconds": 0.281289333011955,
     "keys": {
      "yaml": {
       "keys": 266,
@@ -424,8 +424,8 @@
     "carried": true
    },
    "rueca": {
-    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 82f22ebb90ab, rfc0005 contract, feat/rfc0005-contract@692adb5)",
-    "index_seconds": 0.2673747499939054,
+    "arm_version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)",
+    "index_seconds": 0.2722730829846114,
     "keys": {
      "yaml": {
       "keys": 143,

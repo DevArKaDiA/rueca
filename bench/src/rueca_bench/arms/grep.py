@@ -88,9 +88,10 @@ class GrepArm(Arm):
 
     def resolve(self, h: Handle, func: dict) -> CallResult:
         t0 = time.perf_counter()
-        for fid, f in h.state["funcs"].items():
-            if f["path"] == func["path"] and f["name"] == func["name"] and abs(f["start_line"] - func["start"]) <= 2:
-                return CallResult(True, time.perf_counter() - t0, hits=[f], extra={"ref": fid})
+        ok = [(abs(f["start_line"] - func["start"]), fid, f) for fid, f in h.state["funcs"].items() if f["path"] == func["path"] and f["name"] == func["name"] and abs(f["start_line"] - func["start"]) <= 2]
+        if ok:
+            _, fid, f = min(ok, key=lambda x: x[0])
+            return CallResult(True, time.perf_counter() - t0, hits=[f], extra={"ref": fid})
         return CallResult(False, time.perf_counter() - t0, error="not found")
 
     def _called(self, h: Handle) -> dict[str, set[str]]:
@@ -112,13 +113,14 @@ class GrepArm(Arm):
     def neighbors(self, h: Handle, ref) -> CallResult:
         """Textual heuristic: callees = defined functions whose name is
         followed by `(` in the body; callers = functions whose body has
-        `name(`."""
+        `name(` (a body naming its own function is recursion: the function
+        is its own caller and callee)."""
         t0 = time.perf_counter()
         st = h.state
         called = self._called(h)
         me = st["funcs"][ref]
-        callees = {fid: st["funcs"][fid] for name in called[ref] for fid in st["by_name"].get(name, []) if fid != ref}
-        callers = {fid: st["funcs"][fid] for fid, names in called.items() if fid != ref and me["name"] in names}
+        callees = {fid: st["funcs"][fid] for name in called[ref] for fid in st["by_name"].get(name, [])}
+        callers = {fid: st["funcs"][fid] for fid, names in called.items() if me["name"] in names}
         return CallResult(True, time.perf_counter() - t0, extra={"callers": list(callers.values()), "callees": list(callees.values()), "tokens": None})
 
     def lookup(self, h: Handle, name: str, limit: int = 10) -> CallResult:

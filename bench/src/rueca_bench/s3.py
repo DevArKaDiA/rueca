@@ -27,6 +27,7 @@ from .arms.base import Arm, Handle
 from .common import BENCH_DIR, CACHE, GOLD_DIR, RUNS_DIR, SCIP_DIR, WORK_DIR, is_code_file, lang_family, load_manifest, log, read_json, safe_name, write_json
 from .common import run as sh
 from .corpus import add_worktree, prune_clone, remove_worktree, worktree
+from .match import class_map, class_members
 from .phpstan import docker_available, edges_from_calls, phpstan_call_graph, run_phpstan, version_string
 from .scip import derive_call_graph, fid, in_scope, questions, read_index, sample_functions
 from .tools import fetch_tool, tool_available, tool_spec
@@ -196,6 +197,7 @@ def build_phpstan_gold(spec: dict, force: bool = False) -> dict:
         "callables": graph["callables"],
         "callers": graph["callers"],
         "callees": graph["callees"],
+        "classes": graph.get("classes", []),
         "sample": sample,
     }
     write_json(gp, gold)
@@ -244,6 +246,7 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
         "callables": graph["callables"],
         "callers": graph["callers"],
         "callees": graph["callees"],
+        "classes": graph.get("classes", []),
         "sample": sample,
     }
     write_json(gp, gold)
@@ -466,8 +469,9 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     (manifest `crosscheck = "scip_go" | "scip_clang"`): each snippet is
     copied to a scratch directory, indexed, and its call edges derived exactly
     like the repository gold (scip.derive_call_graph); edge-level agreement
-    with the key is reported. Nothing is written into the snippet trees the
-    arms index."""
+    with the key is reported, callees compared by the SCIP gold's
+    equivalence classes. Nothing is written into the snippet trees the arms
+    index."""
     tool = spec["crosscheck"]
     npm = "npm" in tool_spec(tool)
     ok, why = (shutil.which("npx") is not None, "npx not on PATH") if npm else tool_available(tool)
@@ -505,8 +509,11 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
             failed.append(sname)
             continue
         graph = derive_call_graph(root, read_index(out), [""], lang)
-        got = {(a, b) for a, bs in graph["callees"].items() for b in bs}
-        want = {(a, b) for a, bs in g["callees"].items() for b in bs}
+        # class-aware, like the repository scoring: a callee SCIP cannot tell
+        # from another (one symbol, two definitions) is its class
+        cls = class_map(graph)
+        got = {(a, cls.get(b, b)) for a, bs in graph["callees"].items() for b in bs}
+        want = {(a, cls.get(b, b)) for a, bs in g["callees"].items() for b in bs}
         tp += len(got & want)
         fp += len(got - want)
         fn += len(want - got)
@@ -586,15 +593,33 @@ def ensure_pycg_tree() -> None:
 
 def _brief(h: dict) -> dict:
     out = {k: h.get(k) for k in ("path", "name", "label", "start_line", "end_line")}
+    if h.get("qualified_name"):
+        out["qualified_name"] = h["qualified_name"]
     if h.get("confidence") is not None:
         out["confidence"] = h["confidence"]
     return out
 
 
+def _neighbours(arm: Arm, h: Handle, ref) -> dict:
+    n = arm.neighbors(h, ref)
+    return {
+        "ok": n.ok,
+        "seconds": n.seconds,
+        "error": n.error,
+        "tokens": n.extra.get("tokens"),
+        "tokens_json": n.extra.get("tokens_json"),
+        "callers": [_brief(x) for x in n.extra.get("callers", [])],
+        "callees": [_brief(x) for x in n.extra.get("callees", [])],
+    }
+
+
 def _ask(arm: Arm, h: Handle, graph: dict, qs: list[str], lookup: set[str]) -> list[dict]:
     """Per question: resolve the definition, then one depth-1 neighbours
     answer (callers and callees), plus a symbol lookup by bare name for the
-    stratified lookup sample."""
+    stratified lookup sample. A question in an equivalence class also gets
+    the callers of the class's other members (`members`: class-aware
+    callers are the union; strict scoring ignores them)."""
+    members = class_members(graph)
     out = []
     for q in qs:
         func = graph["callables"][q]
@@ -602,16 +627,14 @@ def _ask(arm: Arm, h: Handle, graph: dict, qs: list[str], lookup: set[str]) -> l
         r = arm.resolve(h, func)
         rec["resolve"] = {"ok": r.ok, "seconds": r.seconds, "error": r.error}
         if r.ok:
-            n = arm.neighbors(h, r.extra.get("ref"))
-            rec["neighbors"] = {
-                "ok": n.ok,
-                "seconds": n.seconds,
-                "error": n.error,
-                "tokens": n.extra.get("tokens"),
-                "tokens_json": n.extra.get("tokens_json"),
-                "callers": [_brief(x) for x in n.extra.get("callers", [])],
-                "callees": [_brief(x) for x in n.extra.get("callees", [])],
-            }
+            rec["neighbors"] = _neighbours(arm, h, r.extra.get("ref"))
+        others = [m for m in members.get(q, []) if m != q]
+        if others:
+            rec["members"] = []
+            for m in others:
+                mr = arm.resolve(h, graph["callables"][m])
+                nb = _neighbours(arm, h, mr.extra.get("ref")) if mr.ok else None
+                rec["members"].append({"fid": m, "ok": mr.ok, "callers": nb["callers"] if nb and nb["ok"] else []})
         if q in lookup:
             lk = arm.lookup(h, func["name"], 10)
             rec["lookup"] = {"ok": lk.ok, "seconds": lk.seconds, "error": lk.error, "tokens": lk.extra.get("tokens"), "tokens_json": lk.extra.get("tokens_json"), "hits": [_brief(x) for x in lk.hits]}
