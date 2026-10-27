@@ -44,9 +44,10 @@ def parse_patch(patch: str) -> list[FilePatch]:
             cur = FilePatch(None, None)
             files.append(cur)
             in_hunk = False
-            m = re.match(r"diff --git a/(.*) b/(.*)$", raw)
-            if m:
-                cur.old_path, cur.new_path = m.group(1), m.group(2)
+            # "diff --git a/OLD b/NEW", split on the last " b/"
+            old, sep, new = raw.removeprefix("diff --git a/").rpartition(" b/")
+            if raw.startswith("diff --git a/") and sep:
+                cur.old_path, cur.new_path = old, new
             continue
         if cur is None:
             continue

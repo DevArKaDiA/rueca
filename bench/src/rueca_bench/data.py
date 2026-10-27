@@ -272,8 +272,24 @@ def yaml_keys(text: str) -> list[dict]:
     return keys
 
 
-_TOML_HEADER = re.compile(r"^\s*(\[\[?)\s*([^\]]+?)\s*\]\]?\s*(#.*)?$")
+_TOML_HEADER = re.compile(r"^\s*(\[\[?)([^\]]*)\]\]?\s*(#.*)?$")
 _TOML_KEY = re.compile(r"""^\s*((?:[A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*"|'[^']*')(?:\s*\.\s*(?:[A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*"|'[^']*'))*)\s*=""")
+
+
+def _toml_header(raw: str) -> tuple[str, str] | None:
+    r"""`[table]` / `[[array]]` line → (bracket, name), as
+    `^\s*(\[\[?)\s*([^\]]+?)\s*\]\]?\s*(#.*)?$` read it (without its
+    overlapping quantifiers): the name is stripped but never empty — all
+    blanks keep the last one, `[[]` is `[` with name `[`, `[]` is no header."""
+    h = _TOML_HEADER.match(raw)
+    if not h:
+        return None
+    bracket, name = h.group(1), h.group(2)
+    if not name:
+        if bracket == "[":
+            return None
+        bracket, name = "[", "["
+    return bracket, name.strip() or name[-1]
 
 
 def _toml_split(dotted: str) -> list[str]:
@@ -298,10 +314,10 @@ def toml_keys(text: str) -> list[dict]:
         if depth > 0:
             depth += raw.count("[") - raw.count("]")
             continue
-        h = _TOML_HEADER.match(raw)
+        h = _toml_header(raw)
         if h and not _TOML_KEY.match(raw):
-            parts = _toml_split(h.group(2))
-            if h.group(1) == "[[":
+            parts = _toml_split(h[1])
+            if h[0] == "[[":
                 n = counters.get(tuple(parts), -1) + 1
                 counters[tuple(parts)] = n
                 table = [*parts, n]

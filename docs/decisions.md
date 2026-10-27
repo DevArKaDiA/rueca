@@ -17,6 +17,27 @@ edges; 2 true recursions through an untyped argument (javapoet
 — telling them apart needs the argument's type (the return type of the
 call that builds it), which the packs do not report.
 
+## 2026-10-27 — Quality gate: ephemeral SonarQube Community, for merges and releases
+
+Static analysis gates both merging to `main` (required `SonarQube` check) and
+publishing (the release job needs it). It runs on a SonarQube Community
+server started as a service container in the job and thrown away after it,
+configured by `scripts/sonar-gate.sh` through the Web API. Rejected:
+SonarCloud / a hosted SonarQube, which need an account and a token secret
+(and secrets are not available to PRs from forks, where the gate matters
+most), and keeping a server running, which is infrastructure to maintain for
+a volunteer project. Consequences of the ephemeral server: no history and no
+"new code" period, so the gate applies to the overall code and asks for
+zero issues rather than "no new issues"; findings are waived per line with
+`NOSONAR` and a reason, never by loosening the profile. The server and
+scanner images are pinned by digest so the rule set changes only in a PR.
+Rust gets every rule the analyzer has, cognitive complexity at 15 per
+function. When introduced the gate failed only on that rule (204
+functions), fixed by the follow-up refactor PRs; Python (bench) passed after
+small fixes (private runtime directory, linear-time parsers, `math.isclose`,
+a waived seeded PRNG). A cold run (server start, configuration, scan,
+report) takes about a minute locally.
+
 ## 2026-10-26 — Repository routing as a prior; package links by joint resolution
 
 RFC 0006 phase 2. A query in organization mode also ranks the

@@ -40,11 +40,15 @@ def cbm_binary() -> Path:
 def cbm_runtime_dir() -> Path:
     """CBM_RUNTIME_DIR holds the daemon's unix socket; sun_path is limited to
     104 bytes on macOS, so a deep cache path falls back to a short,
-    cache-specific directory under /tmp."""
+    cache-specific directory in a private, per-user base: $XDG_RUNTIME_DIR
+    (Linux, mode 0700) or ~/.cache — never a shared, world-writable /tmp,
+    where another user could create the predictable name first. CbmArm
+    creates it with mode 0700."""
     d = CACHE / "cbm-run"
     if len(str(d)) <= 52:
         return d
-    return Path("/tmp") / f"rueca-bench-cbm-{hashlib.sha256(str(CACHE).encode()).hexdigest()[:10]}"
+    base = Path(os.environ.get("XDG_RUNTIME_DIR") or Path.home() / ".cache")
+    return base / "rueca-bench" / f"cbm-{hashlib.sha256(str(CACHE).encode()).hexdigest()[:10]}"
 
 
 _DAEMON_LOCK = threading.Lock()

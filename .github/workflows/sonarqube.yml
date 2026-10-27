@@ -1,0 +1,48 @@
+name: SonarQube
+
+# Quality gate on a disposable SonarQube Community server: a service container
+# that lives for this job only. No SonarCloud account, no token, no secret —
+# scripts/sonar-gate.sh sets the admin password of the fresh server, creates
+# the `rueca-strict` profiles and gate, scans, writes the summary and fails
+# the job when the gate fails. Every line is "new" on a fresh server, so the
+# gate applies to the overall code.
+#
+# - merge gate: the `SonarQube` check is required on `main` (ruleset);
+# - release gate: release-plz.yml calls this workflow before publishing.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A newer push to a PR cancels its older analysis; main and releases never.
+    concurrency:
+      group: sonarqube-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    services:
+      sonarqube:
+        # sonarqube:community 26.10.0.133078 (multi-arch index digest).
+        image: sonarqube:community@sha256:aa0d41212704d1ed35f7ae3b49886b39f639590baf8020cdb191c2a2eb8f9eae
+        env:
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+        ports:
+          - 9000:9000
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Quality gate
+        env:
+          SONAR_HOST_URL: http://localhost:9000
+        run: sh scripts/sonar-gate.sh

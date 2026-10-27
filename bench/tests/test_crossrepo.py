@@ -3,7 +3,7 @@ precision / recall scorer."""
 
 from pathlib import Path
 
-from rueca_bench.crossrepo import PhpLib, PyLib, _php_uses, label_php, label_python, score_group, summarize
+from rueca_bench.crossrepo import PhpLib, PyLib, _php_decls, _php_trait_uses, _php_uses, label_php, label_python, score_group, summarize
 
 
 def write(root: Path, rel: str, text: str) -> None:
@@ -67,3 +67,32 @@ def test_score_group_precision_recall_and_reversed_edges():
     assert s["uses"] == {"predicted": 3, "gold": 2, "correct": 2, "found": 2}
     total = summarize([{"status": "ok", "libraries": [{"score": s}]}])
     assert total["all"]["precision"] == 3 / 4 and total["all"]["recall"] == 1.0
+
+
+# The PHP statement scanners replaced one-regex forms with nested / overlapping
+# quantifiers (super-linear backtracking); the expectations below are what
+# those regexes matched on the same text, quirks included.
+PHP = (
+    "<?php\nnamespace App;\n\nuse Foo\\Bar;\nuse  function strlen;\nuse function strlen;\nuse const X;\n"
+    "use A\\B as C, D;\n\nabstract\nfinal class Pay extends Base implements I, J\n{\n    use T1, T2;\n  use T3;\n"
+    "    $x->use T4;\n    $o = new class Anon {};\n}\n$y = \"class Fake {\";\nenum Suit: string {}\nreadonly classy Z {}\n"
+)
+
+
+def test_php_declarations_first_on_their_line_after_modifiers():
+    decls = [(d.kind, d.name, d.header, PHP[d.end - 1]) for d in _php_decls(PHP)]
+    # modifiers may sit on the previous line; `new class`, a string and `classy` are not declarations
+    assert decls == [("class", "Pay", " extends Base implements I, J\n", "{"), ("enum", "Suit", ": string ", "{")]
+    assert [d.end for d in _php_decls(PHP)] == [164, 277]
+
+
+def test_php_top_level_uses_skip_functions_and_constants():
+    aliases, lines = _php_uses(PHP)
+    # `use  function` (two spaces) was accepted by the former lookahead; kept as is
+    assert aliases == {"Bar": "Foo\\Bar", "function strlen": "function strlen", "C": "A\\B", "D": "D"}
+    assert lines == {4, 5, 8}
+
+
+def test_php_trait_uses_first_on_their_line():
+    body = PHP[PHP.index("{") + 1 :]
+    assert _php_trait_uses(body) == ["T1", "T2", "T3"], "`$x->use T4;` is not a statement"

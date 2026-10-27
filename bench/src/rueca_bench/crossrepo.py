@@ -49,7 +49,9 @@ import json
 import re
 import shutil
 import traceback
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 from .arms import make_arm
 from .common import CACHE, log, read_json, run, write_json
@@ -313,18 +315,88 @@ def label_python(consumer: Path, libs: list[tuple[str, PyLib]]) -> tuple[set, se
 # --- PHP -----------------------------------------------------------------------------------
 
 _PHP_NS = re.compile(r"^\s*namespace\s+([\w\\]+)\s*[;{]", re.M)
-_PHP_USE = re.compile(r"^use\s+(?!function\b|const\b)([^;]+);", re.M)
-_PHP_DECL = re.compile(r"^\s*(?:(?:abstract|final|readonly)\s+)*(class|interface|trait|enum)\s+(\w+)([^{]*)\{", re.M)
 _PHP_FQN = re.compile(r"\\?\b([A-Z]\w*(?:\\[A-Z]\w*)+)\b")
+# Statements are found in two steps, a pattern anchored on the keyword and a
+# check of what precedes it on its line, so that no pattern has nested or
+# overlapping quantifiers (linear time). The matches are the same as those of
+# the one-regex forms quoted in each docstring.
+_PHP_USE = re.compile(r"^use(\s[^;]*);", re.M)
+_PHP_USE_SKIP = re.compile(r"(?:function|const)\b")
+_PHP_DECL = re.compile(r"\b(class|interface|trait|enum)\s+(\w+)")
+_PHP_MODIFIERS = frozenset({"abstract", "final", "readonly"})
+_PHP_TRAIT_USE = re.compile(r"\buse\s([\w\\,\s]+);")
+
+
+class _PhpDecl(NamedTuple):
+    """`kind name header {`: `start` is the keyword's offset, `end` follows the `{`."""
+
+    kind: str
+    name: str
+    header: str
+    start: int
+    end: int
+
+
+def _line_prefix(text: str, pos: int) -> str:
+    return text[text.rfind("\n", 0, pos) + 1 : pos]
+
+
+def _search_all(pattern: re.Pattern[str], text: str, accept: Callable[[re.Match[str]], bool]) -> Iterator[re.Match[str]]:
+    """`pattern.finditer(text)` keeping the matches `accept` takes; a rejected
+    match does not consume its text (the search resumes one character on)."""
+    pos = 0
+    while m := pattern.search(text, pos):
+        if accept(m):
+            yield m
+            pos = m.end()
+        else:
+            pos = m.start() + 1
+
+
+def _php_decls(text: str) -> Iterator[_PhpDecl]:
+    r"""Class-like declarations, as `^\s*(?:(?:abstract|final|readonly)\s+)*
+    (class|interface|trait|enum)\s+(\w+)([^{]*)\{` (multiline) found them:
+    the keyword preceded on its line only by whitespace and modifiers."""
+    pos = 0
+    while m := _PHP_DECL.search(text, pos):
+        brace = text.find("{", m.end())
+        if brace < 0:
+            return
+        if set(_line_prefix(text, m.start()).split()) <= _PHP_MODIFIERS:
+            yield _PhpDecl(m.group(1), m.group(2), text[m.end() : brace], m.start(), brace + 1)
+            pos = brace + 1
+        else:
+            pos = m.start() + 1
+
+
+def _php_class_use(m: re.Match[str]) -> bool:
+    r"""A top-level `use` of classes, as `^use\s+(?!function\b|const\b)([^;]+);`
+    accepted it: not `use function` / `use const` — unless two or more
+    whitespace characters follow `use`, where that lookahead passed by
+    backtracking onto the last one."""
+    rest = m.group(1)
+    tail = rest.lstrip()
+    if len(rest) - len(tail) >= 2:
+        return True
+    return bool(tail) and not _PHP_USE_SKIP.match(tail)
+
+
+def _php_trait_uses(body: str) -> list[str]:
+    r"""Names in the `use A, B;` statements (traits) of a class body, as
+    `^\s*use\s+([\w\\,\s]+);` (multiline) found them: `use` first on its line."""
+    out: list[str] = []
+    for m in _search_all(_PHP_TRAIT_USE, body, lambda m: not _line_prefix(body, m.start()).strip()):
+        out.extend(x.strip() for x in m.group(1).split(",") if x.strip())
+    return out
 
 
 def _php_uses(text: str) -> tuple[dict[str, str], set[int]]:
     """alias → FQN of top-level class `use` statements, and their line numbers."""
-    first = _PHP_DECL.search(text)
-    head = text[: first.start()] if first else text
+    first = next(_php_decls(text), None)
+    head = text[: first.start] if first else text
     out: dict[str, str] = {}
     lines: set[int] = set()
-    for m in _PHP_USE.finditer(head):
+    for m in _search_all(_PHP_USE, head, _php_class_use):
         lines.add(head.count("\n", 0, m.start()) + 1)
         body = " ".join(m.group(1).split())
         if "{" in body:
@@ -334,7 +406,8 @@ def _php_uses(text: str) -> tuple[dict[str, str], set[int]]:
         else:
             items = [x.strip() for x in body.split(",")]
         for it in items:
-            parts = re.split(r"\s+as\s+", it.strip().lstrip("\\"), flags=re.I)
+            # `body` is whitespace-normalized: single spaces around `as`
+            parts = re.split(r" as ", it.strip().lstrip("\\"), flags=re.I)
             fqn = parts[0].strip()
             alias = parts[1].strip() if len(parts) > 1 else fqn.rsplit("\\", 1)[-1]
             out[alias] = fqn
@@ -364,19 +437,17 @@ class PhpLib:
             m = _PHP_NS.search(text)
             ns = m.group(1) if m else ""
             uses, _ = _php_uses(text)
-            for d in _PHP_DECL.finditer(text):
-                fqn = f"{ns}\\{d.group(2)}" if ns else d.group(2)
+            for d in _php_decls(text):
+                fqn = f"{ns}\\{d.name}" if ns else d.name
                 if not self._autoloaded(fqn, rel):
                     continue
                 self.classes[fqn] = rel
                 parents = set()
                 for kw in ("extends", "implements"):
-                    mm = re.search(rf"\b{kw}\s+([\w\\,\s]+)", d.group(3))
+                    mm = re.search(rf"\b{kw}\s+([\w\\,\s]+)", d.header)
                     if mm:
                         parents |= {_php_resolve(x.strip(), ns, uses) for x in mm.group(1).split(",") if x.strip()}
-                body = text[d.end() : d.end() + 4000]
-                for tm in re.finditer(r"^\s*use\s+([\w\\,\s]+);", body, re.M):
-                    parents |= {_php_resolve(x.strip(), ns, uses) for x in tm.group(1).split(",") if x.strip()}
+                parents |= {_php_resolve(x, ns, uses) for x in _php_trait_uses(text[d.end : d.end + 4000])}
                 self.parents[fqn] = parents
 
     def _autoloaded(self, fqn: str, rel: str) -> bool:
@@ -409,15 +480,14 @@ def label_php(consumer: Path, libs: list[tuple[str, PhpLib]]) -> tuple[set, set,
         m = _PHP_NS.search(text)
         ns = m.group(1) if m else ""
         file_uses, _ = _php_uses(text)
-        for d in _PHP_DECL.finditer(text):
+        for d in _php_decls(text):
             parents = set()
             for kw in ("extends", "implements"):
-                mm = re.search(rf"\b{kw}\s+([\w\\,\s]+)", d.group(3))
+                mm = re.search(rf"\b{kw}\s+([\w\\,\s]+)", d.header)
                 if mm:
                     parents |= {_php_resolve(x.strip(), ns, file_uses) for x in mm.group(1).split(",") if x.strip()}
-            for tm in re.finditer(r"^\s*use\s+([\w\\,\s]+);", text[d.end() : d.end() + 4000], re.M):
-                parents |= {_php_resolve(x.strip(), ns, file_uses) for x in tm.group(1).split(",") if x.strip()}
-            cparents[f"{ns}\\{d.group(2)}" if ns else d.group(2)] = parents
+            parents |= {_php_resolve(x, ns, file_uses) for x in _php_trait_uses(text[d.end : d.end + 4000])}
+            cparents[f"{ns}\\{d.name}" if ns else d.name] = parents
         aliases, use_lines = _php_uses(text)
         body = "\n".join(line for i, line in enumerate(text.splitlines(), 1) if i not in use_lines)
         for lname, lib in libs:
