@@ -277,6 +277,42 @@ fn is_record_component(def: Node<'_>) -> bool {
         .is_some_and(|owner| owner.kind() == "record_declaration")
 }
 
+/// The binding a `@local.definition` capture introduces: identifiers only,
+/// record components excluded.
+fn def_binding(node: Node<'_>, source: &[u8]) -> Option<Binding> {
+    if node.kind() != "identifier" || is_record_component(node) {
+        return None;
+    }
+    Some(Binding {
+        name: text(node, source).to_string(),
+        pos: node.start_byte() as u32,
+        class: binding_class(node, source),
+        ty: binding_type(node, source),
+    })
+}
+
+/// The scope table of `(start, end)` scope ranges: sorted, deduplicated and
+/// linked to their innermost enclosing scope.
+fn scope_table(mut scopes: Vec<(u32, u32)>) -> Vec<ScopeInfo> {
+    // Outer scopes first on equal starts, so parents precede children.
+    scopes.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    scopes.dedup();
+    let mut table: Vec<ScopeInfo> = Vec::with_capacity(scopes.len());
+    let mut stack: Vec<usize> = Vec::new();
+    for (start, end) in scopes {
+        while let Some(&top) = stack.last() {
+            if table[top].end >= end && table[top].start <= start {
+                break;
+            }
+            stack.pop();
+        }
+        let parent = stack.last().copied();
+        table.push(ScopeInfo { start, end, parent, bindings: Vec::new() });
+        stack.push(table.len() - 1);
+    }
+    table
+}
+
 /// Runs the locals query over `tree` and builds the scope table.
 pub(crate) fn build(tree: &Tree, source: &[u8], max_time: Duration) -> Result<Locals, ExtractError> {
     let lq = locals_query()?;
@@ -301,41 +337,14 @@ pub(crate) fn build(tree: &Tree, source: &[u8], max_time: Duration) -> Result<Lo
             for c in m.captures() {
                 match lq.roles[c.index as usize] {
                     Role::Scope => scopes.push((c.node.start_byte() as u32, c.node.end_byte() as u32)),
-                    Role::Def => {
-                        if c.node.kind() != "identifier" || is_record_component(c.node) {
-                            continue;
-                        }
-                        defs.push(Binding {
-                            name: text(c.node, source).to_string(),
-                            pos: c.node.start_byte() as u32,
-                            class: binding_class(c.node, source),
-                            ty: binding_type(c.node, source),
-                        });
-                    }
+                    Role::Def => defs.extend(def_binding(c.node, source)),
                     Role::Ignore => {}
                 }
             }
         }
     }
     let incomplete = cursor.did_exceed_match_limit() || timed_out;
-
-    // Outer scopes first on equal starts, so parents precede children.
-    scopes.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
-    scopes.dedup();
-    let mut table: Vec<ScopeInfo> = Vec::with_capacity(scopes.len());
-    let mut stack: Vec<usize> = Vec::new();
-    for (start, end) in scopes {
-        while let Some(&top) = stack.last() {
-            if table[top].end >= end && table[top].start <= start {
-                break;
-            }
-            stack.pop();
-        }
-        let parent = stack.last().copied();
-        table.push(ScopeInfo { start, end, parent, bindings: Vec::new() });
-        stack.push(table.len() - 1);
-    }
-    let mut locals = Locals { scopes: table, incomplete };
+    let mut locals = Locals { scopes: scope_table(scopes), incomplete };
     defs.sort_by_key(|d| d.pos);
     for d in defs {
         if let Some(s) = locals.innermost(d.pos) {

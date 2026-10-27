@@ -128,65 +128,86 @@ pub(crate) struct Layout {
 impl Layout {
     pub(crate) fn build(project: &ProjectFiles) -> Layout {
         let mut layout = Layout::default();
+        layout.index_java_files(project);
+        for (path, text) in project.configs.iter().filter(|(p, _)| is_build_file(p)) {
+            layout.add_build_file(project, path, text);
+        }
+        layout
+    }
+
+    /// Java files by name, their directories by last segment, and the
+    /// conventional `src/<set>/java` source roots.
+    fn index_java_files(&mut self, project: &ProjectFiles) {
         let mut java_dirs = BTreeSet::new();
         for p in project.paths.iter().filter(|p| p.ends_with(".java")) {
             let name = p.rsplit('/').next().unwrap_or(p);
-            layout.by_file_name.entry(name.to_string()).or_default().push(p.clone());
+            self.by_file_name.entry(name.to_string()).or_default().push(p.clone());
             java_dirs.insert(parent_dir(p).to_string());
         }
         for d in &java_dirs {
             let last = d.rsplit('/').next().unwrap_or(d);
-            layout.dirs_by_name.entry(last.to_string()).or_default().push(d.clone());
+            self.dirs_by_name.entry(last.to_string()).or_default().push(d.clone());
             // Convention: the leftmost `src/<set>/java`.
             let segs: Vec<&str> = d.split('/').collect();
             if let Some(i) = (0..segs.len().saturating_sub(2)).find(|&i| segs[i] == "src" && segs[i + 2] == "java") {
-                layout.roots.insert(segs[..=i + 2].join("/"));
+                self.roots.insert(segs[..=i + 2].join("/"));
             }
         }
-        for (path, text) in project.configs.iter().filter(|(p, _)| is_build_file(p)) {
-            let dir = parent_dir(path);
-            let name = path.rsplit('/').next().unwrap_or(path);
-            if !name.starts_with("settings.") {
-                layout.modules.insert(dir.to_string());
+    }
+
+    /// The module, source roots and submodules a build file declares.
+    fn add_build_file(&mut self, project: &ProjectFiles, path: &str, text: &str) {
+        let dir = parent_dir(path);
+        let name = path.rsplit('/').next().unwrap_or(path);
+        if !name.starts_with("settings.") {
+            self.modules.insert(dir.to_string());
+        }
+        if name == "pom.xml" {
+            self.add_pom(project, dir, text);
+        } else if name.starts_with("build.gradle") {
+            for line in text.lines().filter(|l| l.contains("srcDir")) {
+                for q in quoted(line) {
+                    self.add_root(project, dir, q);
+                }
             }
-            let add_root = |rel: &str, layout: &mut Layout| {
-                if let Some(r) = join(dir, strip_basedir(rel.trim()))
-                    && project.is_dir(&r)
-                {
-                    layout.roots.insert(r);
-                }
-            };
-            if name == "pom.xml" {
-                let xml = strip_xml_comments(text);
-                for tag in ["sourceDirectory", "testSourceDirectory"] {
-                    for v in xml_values(&xml, tag) {
-                        add_root(v, &mut layout);
-                    }
-                }
-                for m in xml_values(&xml, "module") {
-                    if let Some(d) = join(dir, m) {
-                        layout.modules.insert(d);
-                    }
-                }
-            } else if name.starts_with("build.gradle") {
-                for line in text.lines().filter(|l| l.contains("srcDir")) {
-                    for q in quoted(line) {
-                        add_root(q, &mut layout);
-                    }
-                }
-            } else {
-                // settings.gradle(.kts): include ':a', ':b:c' / include("a")
-                for line in text.lines().map(str::trim).filter(|l| l.starts_with("include")) {
-                    for q in quoted(line) {
-                        let m = q.trim_start_matches(':').replace(':', "/");
-                        if let Some(d) = join(dir, &m) {
-                            layout.modules.insert(d);
-                        }
-                    }
+        } else {
+            // settings.gradle(.kts): include ':a', ':b:c' / include("a")
+            for line in text.lines().map(str::trim).filter(|l| l.starts_with("include")) {
+                for q in quoted(line) {
+                    let m = q.trim_start_matches(':').replace(':', "/");
+                    self.add_module(dir, &m);
                 }
             }
         }
-        layout
+    }
+
+    /// Maven `pom.xml`: source directories and `<module>`s.
+    fn add_pom(&mut self, project: &ProjectFiles, dir: &str, text: &str) {
+        let xml = strip_xml_comments(text);
+        for tag in ["sourceDirectory", "testSourceDirectory"] {
+            for v in xml_values(&xml, tag) {
+                self.add_root(project, dir, v);
+            }
+        }
+        for m in xml_values(&xml, "module") {
+            self.add_module(dir, m);
+        }
+    }
+
+    /// A source root `rel` (relative to the build file's `dir`), when it is a directory.
+    fn add_root(&mut self, project: &ProjectFiles, dir: &str, rel: &str) {
+        if let Some(r) = join(dir, strip_basedir(rel.trim()))
+            && project.is_dir(&r)
+        {
+            self.roots.insert(r);
+        }
+    }
+
+    /// A module directory `rel` (relative to the build file's `dir`).
+    fn add_module(&mut self, dir: &str, rel: &str) {
+        if let Some(d) = join(dir, rel) {
+            self.modules.insert(d);
+        }
     }
 
     /// Longest source root containing `path`.
