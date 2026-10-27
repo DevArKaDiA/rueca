@@ -18,5 +18,6 @@ tree-sitter-cpp = "0.23"
 serde_json.workspace = true
 
 [dev-dependencies]
-rueca-resolve.workspace = true
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-resolve = { path = "../rueca-resolve" }
 serde_json.workspace = true

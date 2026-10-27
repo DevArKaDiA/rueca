@@ -16,4 +16,5 @@ tree-sitter.workspace = true
 tree-sitter-java = "0.23.5"
 
 [dev-dependencies]
-rueca-resolve.workspace = true
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-resolve = { path = "../rueca-resolve" }

@@ -16,7 +16,11 @@ tracing.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
-rueca-lang-python.workspace = true
-rueca-lang-typescript.workspace = true
-rueca-lang-php.workspace = true
-rueca-lang-go.workspace = true
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-lang-python = { path = "../rueca-lang-python" }
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-lang-typescript = { path = "../rueca-lang-typescript" }
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-lang-php = { path = "../rueca-lang-php" }
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-lang-go = { path = "../rueca-lang-go" }
