@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use rueca_extract::{Budget, LanguagePack, ProjectFiles};
 use rueca_lang_markdown::MarkdownPack;
-use rueca_model::Language;
+use rueca_model::{FileFacts, Language};
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -32,6 +32,31 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+/// Per-file section counts.
+struct SectionCounts {
+    with_doc: usize,
+    disambiguated: usize,
+    nested: usize,
+}
+
+/// Asserts the section invariants of one file (unique qualified names, the
+/// name inside the span, children inside their parent) and counts them.
+fn check_sections(p: &str, f: &FileFacts) -> SectionCounts {
+    let mut counts = SectionCounts { with_doc: 0, disambiguated: 0, nested: 0 };
+    let mut qns = HashSet::new();
+    for d in &f.definitions {
+        assert!(qns.insert(d.qualified_name.as_str()), "{p}: duplicate {}", d.qualified_name);
+        assert!(d.span.contains(&d.name_span), "{p}: {}", d.qualified_name);
+        counts.with_doc += usize::from(d.doc.is_some());
+        counts.disambiguated += usize::from(d.qualified_name.ends_with(')') && d.qualified_name.contains(" ("));
+        if let Some(parent) = d.parent {
+            counts.nested += 1;
+            assert!(f.definitions[parent as usize].span.contains(&d.span), "{p}: {}", d.qualified_name);
+        }
+    }
+    counts
 }
 
 #[test]
@@ -76,17 +101,10 @@ fn extract_real_repository() {
         lines += f.line_count as usize;
         partial += usize::from(f.parse_errors > 0);
         sections += f.definitions.len();
-        let mut qns = HashSet::new();
-        for d in &f.definitions {
-            assert!(qns.insert(d.qualified_name.as_str()), "{p}: duplicate {}", d.qualified_name);
-            assert!(d.span.contains(&d.name_span), "{p}: {}", d.qualified_name);
-            with_doc += usize::from(d.doc.is_some());
-            dups += usize::from(d.qualified_name.ends_with(')') && d.qualified_name.contains(" ("));
-            if let Some(parent) = d.parent {
-                nested += 1;
-                assert!(f.definitions[parent as usize].span.contains(&d.span), "{p}: {}", d.qualified_name);
-            }
-        }
+        let counts = check_sections(&p, &f);
+        with_doc += counts.with_doc;
+        dups += counts.disambiguated;
+        nested += counts.nested;
         for i in &f.imports {
             links += 1;
             if pack.resolve_import(&p, i, &project).is_some() {
