@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0-alpha.1](https://github.com/DevArKaDiA/rueca/releases/tag/v0.1.0-alpha.1) - 2026-10-27
+## [0.1.0-alpha.2](https://github.com/DevArKaDiA/rueca/releases/tag/v0.1.0-alpha.2) - 2026-10-27
+
+First public release (`0.1.0-alpha.1` was never published). Every language is
+`stable` against the quality floors of RFC 0004; merges and releases are gated
+by SonarQube.
 
 ### Added
 
@@ -46,24 +50,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - rename project from Telar to Rueca
 - workspace skeleton, data model, extraction contract, alpha tool contract
 
-First public alpha: local mode.
-
-### Added
-
-- `rueca` binary with `index`, `query`, `mcp` and `status` commands.
-- MCP server over stdio (protocol versions 2024-11-05 through 2026-07-28)
-  with six tools: `search_symbols`, `search_code`, `get_symbol`,
-  `get_snippet`, `trace`, `get_file_outline`.
-- Python and TypeScript / TSX / JavaScript extraction with tree-sitter and
-  vendored locals queries; TS/JS module resolution with `oxc_resolver`
-  (tsconfig paths, workspace packages).
-- Cross-file resolution with per-edge strategy and confidence.
-- Segment format: CSR adjacency, embedded tantivy symbol index, trigram
-  content index, zstd content packs; content-addressed facts cache.
-- Benchmark harness against codebase-memory-mcp v0.12.0 and a BM25 baseline
-  (`bench/`), with published alpha results.
-- Project logo and brand assets (`assets/logo/`).
-- Automated releases: release-plz (versions, changelog, crates.io, tag) and
-  cargo-dist (binaries, installer, GitHub release).
-
-[Unreleased]: https://github.com/DevArKaDiA/rueca/commits/main
+[Unreleased]: https://github.com/DevArKaDiA/rueca/compare/v0.1.0-alpha.2...HEAD

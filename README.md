@@ -20,7 +20,8 @@ tree into the context window.
 *Rueca* is Spanish for spinning wheel: it spins raw source into the thread an
 agent can follow.
 
-> **Status: alpha (`0.1.0-alpha.1`).** Local mode only, Python,
+> **Status: alpha (`0.1.0-alpha.2`).** Local mode (one repository, or an
+> organization of local repositories with `--org`); Python,
 > TypeScript/JavaScript, PHP, Go, Java, C and C++, plus Markdown and
 > structured configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
@@ -77,13 +78,13 @@ Prebuilt binaries (macOS and Linux, x86_64 and arm64):
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/DevArKaDiA/rueca/releases/download/v0.1.0-alpha.1/rueca-installer.sh | sh
+  https://github.com/DevArKaDiA/rueca/releases/download/v0.1.0-alpha.2/rueca-installer.sh | sh
 ```
 
 With Cargo (Rust 1.90+):
 
 ```sh
-cargo install rueca@0.1.0-alpha.1 --locked
+cargo install rueca@0.1.0-alpha.2 --locked
 ```
 
 From source:
