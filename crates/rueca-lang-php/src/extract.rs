@@ -277,6 +277,49 @@ impl<'s> Extractor<'s> {
         }
     }
 
+    fn visit_property_hook(&mut self, node: Node<'_>, depth: usize) {
+        if let Some(list) = node.child_by_field_name("attributes") {
+            self.visit_attributes(list, None, depth);
+        }
+        if let Some(params) = node.child_by_field_name("parameters") {
+            self.visit_parameters(params, depth + 1);
+        }
+        self.visit_field(node, "body", depth);
+    }
+
+    fn visit_augmented_assignment(&mut self, node: Node<'_>, depth: usize) {
+        if let Some(left) = node.child_by_field_name("left") {
+            self.visit_target(left, depth);
+        }
+        self.visit_field(node, "right", depth);
+    }
+
+    /// `$_ENV['X']` / `$_SERVER['X']` read an env var; every subscript is
+    /// then walked as usual.
+    fn visit_subscript(&mut self, node: Node<'_>, depth: usize) {
+        if let Some(var) = crate::bridge::subscript(node, self.source) {
+            self.push_ref(RefKind::EnvVar, var, None, span_of(node));
+        }
+        self.visit_children(node, depth)
+    }
+
+    fn visit_catch(&mut self, node: Node<'_>, depth: usize) {
+        if let Some(t) = node.child_by_field_name("type") {
+            self.visit_type(t, depth + 1);
+        }
+        self.visit_field(node, "body", depth);
+    }
+
+    /// An argument's value, without its named-argument label.
+    fn visit_argument(&mut self, node: Node<'_>, depth: usize) {
+        let label = node.child_by_field_name("name");
+        for child in named_children(node) {
+            if Some(child) != label {
+                self.visit(child, depth + 1);
+            }
+        }
+    }
+
     fn visit(&mut self, node: Node<'_>, depth: usize) {
         if depth > self.max_depth {
             return;
@@ -293,15 +336,7 @@ impl<'s> Extractor<'s> {
             "method_declaration" => self.visit_method(node, depth),
             "property_declaration" => self.visit_property(node, depth),
             "enum_case" => self.visit_enum_case(node, depth),
-            "property_hook" => {
-                if let Some(list) = node.child_by_field_name("attributes") {
-                    self.visit_attributes(list, None, depth);
-                }
-                if let Some(params) = node.child_by_field_name("parameters") {
-                    self.visit_parameters(params, depth + 1);
-                }
-                self.visit_field(node, "body", depth);
-            }
+            "property_hook" => self.visit_property_hook(node, depth),
             "function_call_expression" => self.visit_call(node, depth),
             "member_call_expression" | "nullsafe_member_call_expression" => self.visit_member_call(node, depth),
             "scoped_call_expression" => self.visit_scoped_call(node, depth),
@@ -312,44 +347,22 @@ impl<'s> Extractor<'s> {
                 self.visit_member_access(node, RefKind::Read, depth)
             }
             "assignment_expression" | "reference_assignment_expression" => self.visit_assignment(node, depth),
-            "augmented_assignment_expression" => {
-                if let Some(left) = node.child_by_field_name("left") {
-                    self.visit_target(left, depth);
-                }
-                self.visit_field(node, "right", depth);
-            }
+            "augmented_assignment_expression" => self.visit_augmented_assignment(node, depth),
             "update_expression" => {
                 for child in named_children(node) {
                     self.visit_target(child, depth);
                 }
             }
-            "subscript_expression" => {
-                if let Some(var) = crate::bridge::subscript(node, self.source) {
-                    self.push_ref(RefKind::EnvVar, var, None, span_of(node));
-                }
-                self.visit_children(node, depth)
-            }
+            "subscript_expression" => self.visit_subscript(node, depth),
             "binary_expression" => self.visit_binary(node, depth),
             "throw_expression" => self.visit_throw(node, depth),
-            "catch_clause" => {
-                if let Some(t) = node.child_by_field_name("type") {
-                    self.visit_type(t, depth + 1);
-                }
-                self.visit_field(node, "body", depth);
-            }
+            "catch_clause" => self.visit_catch(node, depth),
             "anonymous_function" | "arrow_function" => self.visit_closure(node, depth),
             "include_expression" | "include_once_expression" | "require_expression" | "require_once_expression" => {
                 self.visit_include(node, depth)
             }
             "name" | "qualified_name" | "relative_name" => self.constant_ref(node),
-            "argument" => {
-                let label = node.child_by_field_name("name");
-                for child in named_children(node) {
-                    if Some(child) != label {
-                        self.visit(child, depth + 1);
-                    }
-                }
-            }
+            "argument" => self.visit_argument(node, depth),
             "attribute_list" => self.visit_attributes(node, None, depth),
             "text"
             | "text_interpolation"
@@ -629,18 +642,22 @@ impl<'s> Extractor<'s> {
         let enc = decorated.or(self.enc);
         self.with_enclosing(enc, |this| {
             for attr in attrs {
-                if let Some(name) = named_children(*attr).into_iter().find(|c| is_name_node(*c)) {
-                    let kind = if decorated.is_some() { RefKind::Decorator } else { RefKind::Type };
-                    let written = this.name_text(name);
-                    if let Some(fqn) = this.ctx.class_fqn(&written) {
-                        this.push_resolved(kind, &Resolved::Exact(fqn), span_of(*attr));
-                    }
-                }
-                if let Some(args) = attr.child_by_field_name("parameters") {
-                    this.visit(args, depth + 2);
-                }
+                this.visit_attribute(*attr, decorated, depth);
             }
         });
+    }
+
+    fn visit_attribute(&mut self, attr: Node<'_>, decorated: Option<LocalDefId>, depth: usize) {
+        if let Some(name) = named_children(attr).into_iter().find(|c| is_name_node(*c)) {
+            let kind = if decorated.is_some() { RefKind::Decorator } else { RefKind::Type };
+            let written = self.name_text(name);
+            if let Some(fqn) = self.ctx.class_fqn(&written) {
+                self.push_resolved(kind, &Resolved::Exact(fqn), span_of(attr));
+            }
+        }
+        if let Some(args) = attr.child_by_field_name("parameters") {
+            self.visit(args, depth + 2);
+        }
     }
 
     /// `Type` references for every class in a type (`?A`, `A|B`, `A&B`,
@@ -742,54 +759,64 @@ impl<'s> Extractor<'s> {
     /// and promoted constructor parameters.
     fn property_types(&self, members: &[Node<'_>]) -> HashMap<String, String> {
         let mut out = HashMap::new();
-        let add = |out: &mut HashMap<String, String>, this: &Self, var: Node<'_>, class: Option<String>| {
-            let Some(class) = class else { return };
-            let resolved = match relative_class(&class) {
-                Some(rel) => Some(rel.to_string()),
-                None => this.ctx.class_fqn(&class),
-            };
-            if let (Some(r), Some(n)) = (resolved, var_name_text(var, this.source)) {
-                out.entry(n).or_insert(r);
-            }
-        };
         for m in members {
-            match m.kind() {
-                "property_declaration" => {
-                    let elements = named_children(*m).into_iter().filter(|c| c.kind() == "property_element");
-                    match m.child_by_field_name("type") {
-                        Some(ty) => {
-                            for el in elements {
-                                if let Some(var) = el.child_by_field_name("name") {
-                                    add(&mut out, self, var, single_class(ty, self.source));
-                                }
-                            }
-                        }
-                        // Untyped property: `/** @var Type */`.
-                        None => {
-                            let doc = docblock_of(*m, self.source);
-                            let class = doc.as_deref().and_then(|d| doc_tag_class(d, "@var", None));
-                            for el in elements {
-                                if let Some(var) = el.child_by_field_name("name") {
-                                    add(&mut out, self, var, class.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-                "method_declaration" => {
-                    let is_ctor =
-                        m.child_by_field_name("name").is_some_and(|n| self.text(n).eq_ignore_ascii_case("__construct"));
-                    let Some(params) = m.child_by_field_name("parameters").filter(|_| is_ctor) else { continue };
-                    for p in named_children(params).into_iter().filter(|c| c.kind() == "property_promotion_parameter") {
-                        if let (Some(var), Some(ty)) = (p.child_by_field_name("name"), p.child_by_field_name("type")) {
-                            add(&mut out, self, var, single_class(ty, self.source));
-                        }
-                    }
-                }
-                _ => {}
+            for (var, class) in self.member_property_classes(*m) {
+                self.add_property_type(&mut out, var, class);
             }
         }
         out
+    }
+
+    /// Records `var`'s class (resolved; the first declaration wins).
+    fn add_property_type(&self, out: &mut HashMap<String, String>, var: Node<'_>, class: Option<String>) {
+        let Some(class) = class else { return };
+        let resolved = match relative_class(&class) {
+            Some(rel) => Some(rel.to_string()),
+            None => self.ctx.class_fqn(&class),
+        };
+        if let (Some(r), Some(n)) = (resolved, var_name_text(var, self.source)) {
+            out.entry(n).or_insert(r);
+        }
+    }
+
+    /// The property variables a member declares, each with its written class.
+    fn member_property_classes<'t>(&self, m: Node<'t>) -> Vec<(Node<'t>, Option<String>)> {
+        match m.kind() {
+            "property_declaration" => self.declared_property_classes(m),
+            "method_declaration" => self.promoted_property_classes(m),
+            _ => Vec::new(),
+        }
+    }
+
+    /// `public A $a, $b;` — typed by the declaration, else by `/** @var Type */`.
+    fn declared_property_classes<'t>(&self, m: Node<'t>) -> Vec<(Node<'t>, Option<String>)> {
+        let class = match m.child_by_field_name("type") {
+            Some(ty) => single_class(ty, self.source),
+            // Untyped property: `/** @var Type */`.
+            None => {
+                let doc = docblock_of(m, self.source);
+                doc.as_deref().and_then(|d| doc_tag_class(d, "@var", None))
+            }
+        };
+        named_children(m)
+            .into_iter()
+            .filter(|c| c.kind() == "property_element")
+            .filter_map(|el| el.child_by_field_name("name"))
+            .map(|var| (var, class.clone()))
+            .collect()
+    }
+
+    /// Typed promoted constructor parameters (`__construct(private A $a)`).
+    fn promoted_property_classes<'t>(&self, m: Node<'t>) -> Vec<(Node<'t>, Option<String>)> {
+        let is_ctor = m.child_by_field_name("name").is_some_and(|n| self.text(n).eq_ignore_ascii_case("__construct"));
+        let Some(params) = m.child_by_field_name("parameters").filter(|_| is_ctor) else { return Vec::new() };
+        named_children(params)
+            .into_iter()
+            .filter(|c| c.kind() == "property_promotion_parameter")
+            .filter_map(|p| {
+                Some((p.child_by_field_name("name")?, single_class(p.child_by_field_name("type")?, self.source)))
+            })
+            .collect()
     }
 
     fn visit_member(&mut self, member: Node<'_>, depth: usize) {
@@ -1285,59 +1312,61 @@ impl<'s> Extractor<'s> {
         }
         for child in named_children(node) {
             match child.kind() {
-                "base_clause" | "class_interface_clause" => {
-                    for n in named_children(child).into_iter().filter(|c| is_name_node(*c)) {
-                        self.class_ref(RefKind::Type, n);
-                    }
-                }
+                "base_clause" | "class_interface_clause" => self.name_type_refs(child),
                 "attribute_list" => self.visit_attributes(child, None, depth),
                 "arguments" => self.visit(child, depth + 1),
                 "declaration_list" => {
                     self.anon_depth += 1;
                     let saved = self.class.take();
                     for member in named_children(child) {
-                        match member.kind() {
-                            "use_declaration" => {
-                                for n in named_children(member).into_iter().filter(|c| is_name_node(*c)) {
-                                    self.class_ref(RefKind::Type, n);
-                                }
-                            }
-                            "method_declaration" => {
-                                if let Some(list) = member.child_by_field_name("attributes") {
-                                    self.visit_attributes(list, None, depth + 1);
-                                }
-                                if let Some(params) = member.child_by_field_name("parameters") {
-                                    self.visit_parameters(params, depth + 2);
-                                }
-                                if let Some(rt) = member.child_by_field_name("return_type") {
-                                    self.visit_type(rt, depth + 2);
-                                }
-                                self.visit_field(member, "body", depth + 1);
-                            }
-                            "property_declaration" => {
-                                if let Some(t) = member.child_by_field_name("type") {
-                                    self.visit_type(t, depth + 2);
-                                }
-                                for el in named_children(member).into_iter().filter(|c| c.kind() == "property_element")
-                                {
-                                    self.visit_field(el, "default_value", depth + 2);
-                                }
-                            }
-                            "const_declaration" => {
-                                for el in named_children(member).into_iter().filter(|c| c.kind() == "const_element") {
-                                    for v in named_children(el).into_iter().skip(1) {
-                                        self.visit(v, depth + 3);
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
+                        self.visit_anonymous_member(member, depth);
                     }
                     self.class = saved;
                     self.anon_depth -= 1;
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// `Type` references for the names listed directly under `node`.
+    fn name_type_refs(&mut self, node: Node<'_>) {
+        for n in named_children(node).into_iter().filter(|c| is_name_node(*c)) {
+            self.class_ref(RefKind::Type, n);
+        }
+    }
+
+    /// A member of an anonymous class: references only, no definitions.
+    fn visit_anonymous_member(&mut self, member: Node<'_>, depth: usize) {
+        match member.kind() {
+            "use_declaration" => self.name_type_refs(member),
+            "method_declaration" => {
+                if let Some(list) = member.child_by_field_name("attributes") {
+                    self.visit_attributes(list, None, depth + 1);
+                }
+                if let Some(params) = member.child_by_field_name("parameters") {
+                    self.visit_parameters(params, depth + 2);
+                }
+                if let Some(rt) = member.child_by_field_name("return_type") {
+                    self.visit_type(rt, depth + 2);
+                }
+                self.visit_field(member, "body", depth + 1);
+            }
+            "property_declaration" => {
+                if let Some(t) = member.child_by_field_name("type") {
+                    self.visit_type(t, depth + 2);
+                }
+                for el in named_children(member).into_iter().filter(|c| c.kind() == "property_element") {
+                    self.visit_field(el, "default_value", depth + 2);
+                }
+            }
+            "const_declaration" => {
+                let elements = named_children(member).into_iter().filter(|c| c.kind() == "const_element");
+                for v in elements.flat_map(|el| named_children(el).into_iter().skip(1)) {
+                    self.visit(v, depth + 3);
+                }
+            }
+            _ => {}
         }
     }
 

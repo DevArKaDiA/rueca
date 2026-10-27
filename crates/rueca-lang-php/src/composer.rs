@@ -99,46 +99,79 @@ fn strings(v: &Value) -> Vec<&str> {
     }
 }
 
+/// The autoload rules of one `composer.json` (its `autoload` and
+/// `autoload-dev` sections); other files and unparsable JSON add none.
+fn composer_rules(path: &str, text: &str, rules: &mut Vec<Rule>) {
+    if path.rsplit('/').next() != Some("composer.json") {
+        return;
+    }
+    let Ok(json) = serde_json::from_str::<Value>(text) else { return };
+    let base = dir_of(path);
+    let depth = if base.is_empty() { 0 } else { base.split('/').count() };
+    for section in ["autoload", "autoload-dev"] {
+        if let Some(sec) = json.get(section) {
+            section_rules(sec, base, depth, rules);
+        }
+    }
+}
+
+/// The `psr-4`, `psr-0` and `classmap` rules of one autoload section.
+fn section_rules(sec: &Value, base: &str, depth: usize, rules: &mut Vec<Rule>) {
+    for (key, kind) in [("psr-4", RuleKind::Psr4), ("psr-0", RuleKind::Psr0)] {
+        let Some(Value::Object(map)) = sec.get(key) else { continue };
+        for (prefix, dirs) in map {
+            for dir in strings(dirs).into_iter().filter_map(|d| normalize(&join(base, d))) {
+                let prefix = prefix.trim_start_matches('\\').to_string();
+                rules.push(Rule { kind, prefix, dir, depth });
+            }
+        }
+    }
+    if let Some(cm) = sec.get("classmap") {
+        for dir in strings(cm).into_iter().filter_map(|d| normalize(&join(base, d))) {
+            rules.push(Rule { kind: RuleKind::Classmap, prefix: String::new(), dir, depth });
+        }
+    }
+}
+
+/// Longest prefix first, then shallower composer.json, then kind and path.
+fn rule_order(a: &Rule, b: &Rule) -> std::cmp::Ordering {
+    b.prefix
+        .len()
+        .cmp(&a.prefix.len())
+        .then(a.depth.cmp(&b.depth))
+        .then(a.kind.cmp(&b.kind))
+        .then(a.prefix.cmp(&b.prefix))
+        .then(a.dir.cmp(&b.dir))
+}
+
+/// PSR-4: the prefix is replaced by the rule's directory, `\` by `/`.
+fn psr4_file(rule: &Rule, fqn: &str, project: &ProjectFiles) -> Option<String> {
+    let rest = strip_prefix_ci(fqn, &rule.prefix)?;
+    let candidate = join(&rule.dir, &format!("{}.php", rest.replace('\\', "/")));
+    project.contains(&candidate).then_some(candidate)
+}
+
+/// PSR-0: the whole name below the rule's directory, `_` in the class name
+/// as a directory separator.
+fn psr0_file(rule: &Rule, fqn: &str, project: &ProjectFiles) -> Option<String> {
+    strip_prefix_ci(fqn, &rule.prefix)?;
+    let (ns, class) = fqn.rsplit_once('\\').unwrap_or(("", fqn));
+    let mut rel = ns.replace('\\', "/");
+    if !rel.is_empty() {
+        rel.push('/');
+    }
+    rel.push_str(&class.replace('_', "/"));
+    let candidate = join(&rule.dir, &format!("{rel}.php"));
+    project.contains(&candidate).then_some(candidate)
+}
+
 impl Autoload {
     pub(crate) fn build(project: &ProjectFiles) -> Autoload {
         let mut rules = Vec::new();
         for (path, text) in &project.configs {
-            if path.rsplit('/').next() != Some("composer.json") {
-                continue;
-            }
-            let Ok(json) = serde_json::from_str::<Value>(text) else { continue };
-            let base = dir_of(path);
-            let depth = if base.is_empty() { 0 } else { base.split('/').count() };
-            for section in ["autoload", "autoload-dev"] {
-                let Some(sec) = json.get(section) else { continue };
-                for (key, kind) in [("psr-4", RuleKind::Psr4), ("psr-0", RuleKind::Psr0)] {
-                    let Some(Value::Object(map)) = sec.get(key) else { continue };
-                    for (prefix, dirs) in map {
-                        for d in strings(dirs) {
-                            let Some(dir) = normalize(&join(base, d)) else { continue };
-                            let prefix = prefix.trim_start_matches('\\').to_string();
-                            rules.push(Rule { kind, prefix, dir, depth });
-                        }
-                    }
-                }
-                if let Some(cm) = sec.get("classmap") {
-                    for d in strings(cm) {
-                        let Some(dir) = normalize(&join(base, d)) else { continue };
-                        rules.push(Rule { kind: RuleKind::Classmap, prefix: String::new(), dir, depth });
-                    }
-                }
-            }
+            composer_rules(path, text, &mut rules);
         }
-        // Longest prefix first, then shallower composer.json, then kind and path.
-        rules.sort_by(|a, b| {
-            b.prefix
-                .len()
-                .cmp(&a.prefix.len())
-                .then(a.depth.cmp(&b.depth))
-                .then(a.kind.cmp(&b.kind))
-                .then(a.prefix.cmp(&b.prefix))
-                .then(a.dir.cmp(&b.dir))
-        });
+        rules.sort_by(rule_order);
         rules.dedup();
         let mut by_file_name: HashMap<String, Vec<String>> = HashMap::new();
         for p in &project.paths {
@@ -155,43 +188,29 @@ impl Autoload {
         if fqn.is_empty() {
             return None;
         }
-        for rule in &self.rules {
-            let found = match rule.kind {
-                RuleKind::Psr4 => {
-                    let Some(rest) = strip_prefix_ci(fqn, &rule.prefix) else { continue };
-                    let candidate = join(&rule.dir, &format!("{}.php", rest.replace('\\', "/")));
-                    project.contains(&candidate).then_some(candidate)
-                }
-                RuleKind::Psr0 => {
-                    if strip_prefix_ci(fqn, &rule.prefix).is_none() {
-                        continue;
-                    }
-                    let (ns, class) = fqn.rsplit_once('\\').unwrap_or(("", fqn));
-                    let mut rel = ns.replace('\\', "/");
-                    if !rel.is_empty() {
-                        rel.push('/');
-                    }
-                    rel.push_str(&class.replace('_', "/"));
-                    let candidate = join(&rule.dir, &format!("{rel}.php"));
-                    project.contains(&candidate).then_some(candidate)
-                }
-                RuleKind::Classmap => {
-                    let short = fqn.rsplit('\\').next().unwrap_or(fqn);
-                    let below: Vec<&String> = self
-                        .by_file_name
-                        .get(&format!("{short}.php"))
-                        .into_iter()
-                        .flatten()
-                        .filter(|p| rule.dir.is_empty() || p.starts_with(&format!("{}/", rule.dir)) || **p == rule.dir)
-                        .collect();
-                    if below.len() == 1 { Some(below[0].clone()) } else { None }
-                }
-            };
-            if found.is_some() {
-                return found;
-            }
+        self.rules.iter().find_map(|rule| self.rule_file(rule, fqn, project)).or_else(|| self.by_suffix(fqn))
+    }
+
+    /// The file one rule maps `fqn` to, if it exists.
+    fn rule_file(&self, rule: &Rule, fqn: &str, project: &ProjectFiles) -> Option<String> {
+        match rule.kind {
+            RuleKind::Psr4 => psr4_file(rule, fqn, project),
+            RuleKind::Psr0 => psr0_file(rule, fqn, project),
+            RuleKind::Classmap => self.classmap_file(rule, fqn),
         }
-        self.by_suffix(fqn)
+    }
+
+    /// Classmap: the unique `<Class>.php` below the rule's directory.
+    fn classmap_file(&self, rule: &Rule, fqn: &str) -> Option<String> {
+        let short = fqn.rsplit('\\').next().unwrap_or(fqn);
+        let below: Vec<&String> = self
+            .by_file_name
+            .get(&format!("{short}.php"))
+            .into_iter()
+            .flatten()
+            .filter(|p| rule.dir.is_empty() || p.starts_with(&format!("{}/", rule.dir)) || **p == rule.dir)
+            .collect();
+        if below.len() == 1 { Some(below[0].clone()) } else { None }
     }
 
     /// Fallback: the unique `<Class>.php` whose directories end with the

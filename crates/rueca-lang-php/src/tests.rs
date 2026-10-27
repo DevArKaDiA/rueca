@@ -1032,32 +1032,44 @@ fn random_bytes_never_panic() {
         b"<html>",
     ];
     for round in 0..400 {
-        let len = (rng.next() % 600) as usize;
-        let mut src = Vec::with_capacity(len * 4);
-        if round % 4 == 1 {
-            src.extend_from_slice(b"<?php ");
-        }
-        for _ in 0..len {
-            if round % 2 == 0 {
-                src.push(rng.next() as u8);
-            } else {
-                src.extend_from_slice(tokens[(rng.next() as usize) % tokens.len()]);
-            }
-        }
+        let src = random_source(&mut rng, round, tokens);
         let pack = PhpPack::default();
         let a = pack.extract("r.php", Language::Php, &src, &Budget::default()).unwrap();
         let b = pack.extract("r.php", Language::Php, &src, &Budget::default()).unwrap();
         assert_eq!(a, b);
-        for d in &a.definitions {
-            assert!(d.span.contains(&d.name_span) || d.parent.is_some(), "{d:?}");
-            if let Some(p) = d.parent {
-                assert!((p as usize) < a.definitions.len());
-            }
+        assert_indices_in_bounds(&a);
+    }
+}
+
+/// Random bytes (even rounds) or random tokens (odd rounds); every fourth
+/// round starts with an opening tag.
+fn random_source(rng: &mut Rng, round: i32, tokens: &[&[u8]]) -> Vec<u8> {
+    let len = (rng.next() % 600) as usize;
+    let mut src = Vec::with_capacity(len * 4);
+    if round % 4 == 1 {
+        src.extend_from_slice(b"<?php ");
+    }
+    for _ in 0..len {
+        if round % 2 == 0 {
+            src.push(rng.next() as u8);
+        } else {
+            src.extend_from_slice(tokens[(rng.next() as usize) % tokens.len()]);
         }
-        for r in &a.references {
-            if let Some(e) = r.enclosing {
-                assert!((e as usize) < a.definitions.len());
-            }
+    }
+    src
+}
+
+/// Name spans inside their definitions; parent and enclosing indices valid.
+fn assert_indices_in_bounds(facts: &rueca_model::FileFacts) {
+    for d in &facts.definitions {
+        assert!(d.span.contains(&d.name_span) || d.parent.is_some(), "{d:?}");
+        if let Some(p) = d.parent {
+            assert!((p as usize) < facts.definitions.len());
+        }
+    }
+    for r in &facts.references {
+        if let Some(e) = r.enclosing {
+            assert!((e as usize) < facts.definitions.len());
         }
     }
 }

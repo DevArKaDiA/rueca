@@ -326,14 +326,7 @@ impl<'t> Walk<'t> {
 
     fn map(&mut self, out: &mut Out<'_>, entries: &'t [Entry], owner: Option<LocalDefId>, qn: &str, depth: usize) {
         for e in entries {
-            // YAML merge keys: bases of the owning mapping.
-            if e.key == "<<" && self.merge(out, &e.value, owner) {
-                continue;
-            }
-            if e.key == "$ref"
-                && let Some(target) = e.value.as_str()
-            {
-                self.pointer(out, target, owner, &e.value.span);
+            if self.reference_entry(out, e, owner) {
                 continue;
             }
             let segs: Vec<&str> = if e.split || (self.split_dotted && e.key.contains('.')) {
@@ -345,28 +338,28 @@ impl<'t> Walk<'t> {
             if depth > MAX_DEPTH {
                 continue;
             }
-            let mut path = qn.to_string();
-            for s in &segs {
-                path = keypath::join(&path, &keypath::key_segment(s));
-            }
+            let path = segs.iter().fold(qn.to_string(), |p, s| keypath::join(&p, &keypath::key_segment(s)));
             let name = segs.last().copied().unwrap_or("").to_string();
-            let scalar = matches!(e.value.value, Value::Scalar(_) | Value::Alias(_));
-            let after = if scalar { e.value.span.end } else { e.key_span.end };
-            let def = Def {
-                label: Label::Key,
-                name,
-                qn: path.clone(),
-                parent: owner,
-                span: e.key_span.start..e.value.span.end.max(e.key_span.end),
-                name_span: e.key_span.clone(),
-                signature: Some(signature(out, &e.key, &e.value)),
-                doc: out.doc(e.key_span.start, Some(after)),
-            };
-            let Some(id) = out.def(def) else { return };
+            let Some(id) = out.def(key_def(out, e, name, path.clone(), owner)) else { return };
             self.ctx.defs.insert(e.value.addr(), id);
             self.remember_anchor(&e.value, &path);
             self.value(out, &e.value, Some(id), &path, &e.key, depth);
         }
+    }
+
+    /// YAML merge keys (`<<`, bases of the owning mapping) and `$ref`
+    /// pointers: references, not keys. False for an ordinary entry.
+    fn reference_entry(&mut self, out: &mut Out<'_>, e: &Entry, owner: Option<LocalDefId>) -> bool {
+        if e.key == "<<" && self.merge(out, &e.value, owner) {
+            return true;
+        }
+        if e.key == "$ref"
+            && let Some(target) = e.value.as_str()
+        {
+            self.pointer(out, target, owner, &e.value.span);
+            return true;
+        }
+        false
     }
 
     fn seq(
@@ -470,6 +463,22 @@ impl<'t> Walk<'t> {
                 out.reference(RefKind::DataRef, &keypath::format(&segs), Some(file), owner, span);
             }
         }
+    }
+}
+
+/// The `Key` definition of a mapping entry.
+fn key_def(out: &Out<'_>, e: &Entry, name: String, qn: String, owner: Option<LocalDefId>) -> Def {
+    let scalar = matches!(e.value.value, Value::Scalar(_) | Value::Alias(_));
+    let after = if scalar { e.value.span.end } else { e.key_span.end };
+    Def {
+        label: Label::Key,
+        name,
+        qn,
+        parent: owner,
+        span: e.key_span.start..e.value.span.end.max(e.key_span.end),
+        name_span: e.key_span.clone(),
+        signature: Some(signature(out, &e.key, &e.value)),
+        doc: out.doc(e.key_span.start, Some(after)),
     }
 }
 

@@ -109,29 +109,8 @@ impl Modules {
                 continue;
             }
             let dir = parent_dir(path);
-            for (verb, arg) in directives(text) {
-                match verb.as_str() {
-                    "module" if name == "go.mod" => {
-                        let module = unquote(&arg).to_string();
-                        if !module.is_empty() {
-                            roots.push(Root { module, dir: dir.to_string(), declared: true });
-                        }
-                    }
-                    "replace" => {
-                        // `old [v] => new [v]`; only local targets matter.
-                        let Some((old, new)) = arg.split_once("=>") else { continue };
-                        let old = unquote(old.split_whitespace().next().unwrap_or(""));
-                        let new = unquote(new.split_whitespace().next().unwrap_or(""));
-                        if old.is_empty() || !(new.starts_with("./") || new.starts_with("../")) {
-                            continue;
-                        }
-                        if let Some(target) = join(dir, new) {
-                            roots.push(Root { module: old.to_string(), dir: target, declared: false });
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            let go_mod = name == "go.mod";
+            roots.extend(directives(text).iter().filter_map(|(verb, arg)| directive_root(go_mod, dir, verb, arg)));
         }
         // Deterministic preference: declared before replaced, shallower
         // directories first (a module path declared twice, e.g. by an
@@ -244,6 +223,28 @@ impl ModulesCache {
     }
 }
 
+/// The module root a `go.mod` / `go.work` directive in `dir` declares: a
+/// `module` path (of a `go.mod`) or the local target of a `replace`.
+fn directive_root(go_mod: bool, dir: &str, verb: &str, arg: &str) -> Option<Root> {
+    match verb {
+        "module" if go_mod => {
+            let module = unquote(arg).to_string();
+            (!module.is_empty()).then(|| Root { module, dir: dir.to_string(), declared: true })
+        }
+        "replace" => {
+            // `old [v] => new [v]`; only local targets matter.
+            let (old, new) = arg.split_once("=>")?;
+            let old = unquote(old.split_whitespace().next().unwrap_or(""));
+            let new = unquote(new.split_whitespace().next().unwrap_or(""));
+            if old.is_empty() || !(new.starts_with("./") || new.starts_with("../")) {
+                return None;
+            }
+            join(dir, new).map(|target| Root { module: old.to_string(), dir: target, declared: false })
+        }
+        _ => None,
+    }
+}
+
 /// Binding name of an unaliased import by Go convention (RFC 0003 §10.2):
 /// the last path element without a `/vN` major-version element, a
 /// `gopkg.in`-style `.vN` suffix, a `go-` prefix or a `-go` / `.go`
@@ -262,25 +263,25 @@ pub(crate) fn conventional_name(path: &str) -> Option<String> {
     {
         name = stem;
     }
-    for prefix in ["go-", "go_"] {
-        if let Some(rest) = name.strip_prefix(prefix)
-            && !rest.is_empty()
-        {
-            name = rest;
-        }
-    }
-    for suffix in ["-go", ".go", "_go"] {
-        if let Some(rest) = name.strip_suffix(suffix)
-            && !rest.is_empty()
-        {
-            name = rest;
-        }
-    }
-    let name: String = name.chars().map(|c| if c == '-' || c == '.' { '_' } else { c }).collect();
+    let name: String = strip_go_affixes(name).chars().map(|c| if c == '-' || c == '.' { '_' } else { c }).collect();
     let valid = name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
         && name.chars().all(|c| c.is_alphanumeric() || c == '_')
         && !crate::builtins::is_keyword(&name);
     valid.then_some(name)
+}
+
+/// `name` without the `go-` / `go_` prefixes and the `-go` / `.go` / `_go`
+/// suffixes (each stripped once, in that order, unless nothing remains).
+fn strip_go_affixes(mut name: &str) -> &str {
+    let prefixes = ["go-", "go_"].map(|p| (p, true));
+    let suffixes = ["-go", ".go", "_go"].map(|s| (s, false));
+    for (affix, prefix) in prefixes.into_iter().chain(suffixes) {
+        let rest = if prefix { name.strip_prefix(affix) } else { name.strip_suffix(affix) };
+        if let Some(rest) = rest.filter(|r| !r.is_empty()) {
+            name = rest;
+        }
+    }
+    name
 }
 
 #[cfg(test)]

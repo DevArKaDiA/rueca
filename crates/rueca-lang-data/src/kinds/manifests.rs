@@ -12,17 +12,21 @@ fn is_local_path(s: &str) -> bool {
     !s.is_empty() && !s.contains("://") && !s.contains('*') && !s.starts_with('#')
 }
 
+/// Imports `n` when it is a string naming a local path.
+fn import_local_str(out: &mut Out<'_>, n: &Node) {
+    if let Some(s) = n.as_str().filter(|s| is_local_path(s)) {
+        out.import(s, &n.span);
+    }
+}
+
 /// `main`, `module`, `types`, `typings`, `browser` (string), `bin`
 /// (string or map), `exports` (every string leaf, conditions included) and
 /// `workspaces` without globs → imports.
 pub(crate) fn package_json(out: &mut Out<'_>, tree: &Tree) {
     let Some(doc) = tree.docs.first() else { return };
     for key in ["main", "module", "types", "typings", "browser"] {
-        if let Some(n) = doc.get(key)
-            && let Some(s) = n.as_str()
-            && is_local_path(s)
-        {
-            out.import(s, &n.span);
+        if let Some(n) = doc.get(key) {
+            import_local_str(out, n);
         }
     }
     if let Some(bin) = doc.get("bin") {
@@ -31,26 +35,27 @@ pub(crate) fn package_json(out: &mut Out<'_>, tree: &Tree) {
             _ => vec![bin],
         };
         for n in nodes {
-            if let Some(s) = n.as_str().filter(|s| is_local_path(s)) {
-                out.import(s, &n.span);
-            }
+            import_local_str(out, n);
         }
     }
     if let Some(exports) = doc.get("exports") {
-        let mut stack = vec![exports];
-        while let Some(n) = stack.pop() {
-            match &n.value {
-                Value::Scalar(s) if s.starts_with("./") && is_local_path(s) => out.import(s, &n.span),
-                Value::Map(m) => stack.extend(m.iter().rev().map(|e| &e.value)),
-                Value::Seq(items) => stack.extend(items.iter().rev()),
-                _ => {}
-            }
-        }
+        export_imports(out, exports);
     }
     let ws = doc.get("workspaces").map(|w| w.get("packages").unwrap_or(w));
     for n in ws.map(strings).unwrap_or_default() {
-        if let Some(s) = n.as_str().filter(|s| is_local_path(s)) {
-            out.import(s, &n.span);
+        import_local_str(out, n);
+    }
+}
+
+/// Every `./…` string leaf of `exports` (conditions included), in order.
+fn export_imports(out: &mut Out<'_>, exports: &Node) {
+    let mut stack = vec![exports];
+    while let Some(n) = stack.pop() {
+        match &n.value {
+            Value::Scalar(s) if s.starts_with("./") && is_local_path(s) => out.import(s, &n.span),
+            Value::Map(m) => stack.extend(m.iter().rev().map(|e| &e.value)),
+            Value::Seq(items) => stack.extend(items.iter().rev()),
+            _ => {}
         }
     }
 }

@@ -294,22 +294,7 @@ impl Locals {
             hops += 1;
             let sc = &self.scopes[s];
             if let Some(bindings) = sc.bindings.get(name) {
-                let mut agreed: Option<String> = None;
-                for b in bindings {
-                    let class = match b.kind {
-                        DefKind::Capture => self.class_in(sc.parent?, name, hops)?,
-                        DefKind::Global => return None,
-                        _ => b.class.clone()?,
-                    };
-                    match &agreed {
-                        Some(a) if !a.trim_start_matches('\\').eq_ignore_ascii_case(class.trim_start_matches('\\')) => {
-                            return None;
-                        }
-                        Some(_) => {}
-                        None => agreed = Some(class),
-                    }
-                }
-                return agreed;
+                return self.agreed_class(sc.parent, bindings, name, hops);
             }
             match sc.kind {
                 ScopeKind::Arrow => s = sc.parent?,
@@ -317,6 +302,110 @@ impl Locals {
             }
         }
     }
+
+    /// The class all `bindings` of `name` agree on (case-insensitive, leading
+    /// `\` ignored); captures look it up in the `parent` scope.
+    fn agreed_class(&self, parent: Option<usize>, bindings: &[Binding], name: &str, hops: usize) -> Option<String> {
+        let mut agreed: Option<String> = None;
+        for b in bindings {
+            let class = match b.kind {
+                DefKind::Capture => self.class_in(parent?, name, hops)?,
+                DefKind::Global => return None,
+                _ => b.class.clone()?,
+            };
+            match &agreed {
+                Some(a) if !a.trim_start_matches('\\').eq_ignore_ascii_case(class.trim_start_matches('\\')) => {
+                    return None;
+                }
+                Some(_) => {}
+                None => agreed = Some(class),
+            }
+        }
+        agreed
+    }
+}
+
+/// Scopes and binding / reference points gathered from the query captures.
+#[derive(Default)]
+struct Collector<'t> {
+    scopes: Vec<ScopeInfo>,
+    points: Vec<Point>,
+    seen_scopes: HashSet<usize>,
+    vars: Vec<Node<'t>>,
+}
+
+impl<'t> Collector<'t> {
+    fn capture(&mut self, role: Role, node: Node<'t>, source: &[u8]) {
+        match role {
+            Role::Scope => {
+                if self.seen_scopes.insert(node.id()) {
+                    self.scopes.push(ScopeInfo {
+                        start: node.start_byte() as u32,
+                        end: node.end_byte() as u32,
+                        kind: scope_kind(node),
+                        parent: None,
+                        bindings: HashMap::new(),
+                    });
+                }
+            }
+            Role::Def(kind) => self.definitions(node, kind, source),
+            Role::Reference if node.kind() == "variable_name" => {
+                self.points.push(Point::Reference { pos: node.start_byte() as u32 });
+            }
+            _ => {}
+        }
+    }
+
+    /// One `Def` point per variable the definition pattern binds.
+    fn definitions(&mut self, node: Node<'t>, kind: DefKind, source: &[u8]) {
+        self.vars.clear();
+        bound_variables(node, &mut self.vars);
+        for v in &self.vars {
+            let Some(name) = var_name(*v, source) else { continue };
+            let class = binding_class(*v, kind, source);
+            self.points.push(Point::Def { pos: v.start_byte() as u32, name, binding: Binding { kind, class } });
+        }
+    }
+}
+
+/// Opens, in order, the scopes starting at or before `pos`, setting each
+/// one's parent to the innermost open scope that still contains it.
+fn open_scopes(scopes: &mut [ScopeInfo], stack: &mut Vec<usize>, next: &mut usize, pos: u32) {
+    while *next < scopes.len() && scopes[*next].start <= pos {
+        let start = scopes[*next].start;
+        while stack.last().is_some_and(|&t| scopes[t].end <= start) {
+            stack.pop();
+        }
+        scopes[*next].parent = stack.last().copied();
+        stack.push(*next);
+        *next += 1;
+    }
+}
+
+/// Sweeps the sorted `points` over the sorted `scopes`: files each binding
+/// under its innermost scope, sets every scope's parent and returns the
+/// innermost scope of each reference.
+fn assign_scopes(scopes: &mut [ScopeInfo], points: Vec<Point>) -> HashMap<u32, usize> {
+    let mut stack: Vec<usize> = Vec::new();
+    let mut next = 0;
+    let mut refs: HashMap<u32, usize> = HashMap::new();
+    for point in points {
+        let pos = point.pos();
+        open_scopes(scopes, &mut stack, &mut next, pos);
+        while stack.last().is_some_and(|&t| scopes[t].end <= pos) {
+            stack.pop();
+        }
+        let Some(&inner) = stack.last() else { continue };
+        match point {
+            Point::Def { name, binding, .. } => scopes[inner].bindings.entry(name).or_default().push(binding),
+            Point::Reference { pos } => {
+                refs.entry(pos).or_insert(inner);
+            }
+        }
+    }
+    // Scopes after the last point still need their parents for lookups.
+    open_scopes(scopes, &mut stack, &mut next, u32::MAX);
+    refs
 }
 
 /// Runs the locals query over `tree` and builds the scope table.
@@ -328,8 +417,7 @@ pub(crate) fn build(
     max_hops: usize,
 ) -> Result<Locals, ExtractError> {
     let lq = locals_query()?;
-    let mut scopes: Vec<ScopeInfo> = Vec::new();
-    let mut points: Vec<Point> = Vec::new();
+    let mut collector = Collector::default();
 
     let deadline = Instant::now() + time_budget;
     let mut timed_out = false;
@@ -346,84 +434,22 @@ pub(crate) fn build(
     {
         let options = QueryCursorOptions::new().progress_callback(&mut progress);
         let mut matches = cursor.matches_with_options(&lq.query, tree.root_node(), source, options);
-        let mut seen_scopes = HashSet::new();
-        let mut vars = Vec::new();
         while let Some(m) = matches.next() {
             for cap in m.captures() {
-                let node = cap.node;
-                match lq.roles.get(cap.index as usize).copied().unwrap_or(Role::Ignore) {
-                    Role::Scope => {
-                        if seen_scopes.insert(node.id()) {
-                            scopes.push(ScopeInfo {
-                                start: node.start_byte() as u32,
-                                end: node.end_byte() as u32,
-                                kind: scope_kind(node),
-                                parent: None,
-                                bindings: HashMap::new(),
-                            });
-                        }
-                    }
-                    Role::Def(kind) => {
-                        vars.clear();
-                        bound_variables(node, &mut vars);
-                        for v in &vars {
-                            let Some(name) = var_name(*v, source) else { continue };
-                            let class = binding_class(*v, kind, source);
-                            points.push(Point::Def {
-                                pos: v.start_byte() as u32,
-                                name,
-                                binding: Binding { kind, class },
-                            });
-                        }
-                    }
-                    Role::Reference if node.kind() == "variable_name" => {
-                        points.push(Point::Reference { pos: node.start_byte() as u32 });
-                    }
-                    _ => {}
-                }
+                let role = lq.roles.get(cap.index as usize).copied().unwrap_or(Role::Ignore);
+                collector.capture(role, cap.node, source);
             }
         }
     }
     let incomplete = timed_out || cursor.did_exceed_match_limit();
+    let Collector { mut scopes, mut points, .. } = collector;
 
     // Scopes nest properly; order outer-first for the sweep.
     scopes.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)).then(a.kind.cmp(&b.kind)));
     // Stable sort keeps capture order among points at the same position.
     points.sort_by_key(Point::pos);
 
-    let mut stack: Vec<usize> = Vec::new();
-    let mut next = 0;
-    let mut refs: HashMap<u32, usize> = HashMap::new();
-    for point in points {
-        let pos = point.pos();
-        while next < scopes.len() && scopes[next].start <= pos {
-            while stack.last().is_some_and(|&t| scopes[t].end <= scopes[next].start) {
-                stack.pop();
-            }
-            scopes[next].parent = stack.last().copied();
-            stack.push(next);
-            next += 1;
-        }
-        while stack.last().is_some_and(|&t| scopes[t].end <= pos) {
-            stack.pop();
-        }
-        let Some(&inner) = stack.last() else { continue };
-        match point {
-            Point::Def { name, binding, .. } => scopes[inner].bindings.entry(name).or_default().push(binding),
-            Point::Reference { pos } => {
-                refs.entry(pos).or_insert(inner);
-            }
-        }
-    }
-    // Scopes after the last point still need their parents for lookups.
-    while next < scopes.len() {
-        while stack.last().is_some_and(|&t| scopes[t].end <= scopes[next].start) {
-            stack.pop();
-        }
-        scopes[next].parent = stack.last().copied();
-        stack.push(next);
-        next += 1;
-    }
+    let refs = assign_scopes(&mut scopes, points);
     Ok(Locals { scopes, refs, max_hops, incomplete })
 }
 

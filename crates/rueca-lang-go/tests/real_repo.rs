@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use rueca_extract::{Budget, LanguagePack, ProjectFiles};
 use rueca_lang_go::GoPack;
-use rueca_model::{Label, Language, RefKind};
+use rueca_model::{FileFacts, Label, Language, RefKind};
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>, configs: &mut Vec<PathBuf>, all: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -61,45 +61,15 @@ fn extract_real_repository() {
 
     let pack = GoPack::default();
     let budget = Budget::default();
-    let (mut defs, mut refs, mut calls, mut typed, mut selfs, mut errors, mut errored_files, mut lines) =
-        (0, 0, 0, 0, 0, 0, 0, 0);
-    let (mut imports, mut in_project, mut tests, mut methods, mut bridge) = (0, 0, 0, 0, 0);
+    let mut stats = Stats::default();
     let mut failures = Vec::new();
-    let mut errored = Vec::new();
     let start = Instant::now();
     for path in &files {
         let source = std::fs::read(path).unwrap();
         let p = rel(path);
         match pack.extract(&p, Language::Go, &source, &budget) {
             Ok(f) => {
-                defs += f.definitions.len();
-                refs += f.references.len();
-                calls += f.references.iter().filter(|r| matches!(r.kind, RefKind::Call | RefKind::New)).count();
-                typed += f
-                    .references
-                    .iter()
-                    .filter(|r| r.receiver.as_deref().is_some_and(|x| x.starts_with("$type:")))
-                    .count();
-                selfs += f.references.iter().filter(|r| r.receiver.as_deref() == Some("$self")).count();
-                bridge +=
-                    f.references.iter().filter(|r| matches!(r.kind, RefKind::EnvVar | RefKind::ConfigKey)).count();
-                tests += f.definitions.iter().filter(|d| d.is_test).count();
-                methods += f.definitions.iter().filter(|d| d.label == Label::Method && d.parent.is_none()).count();
-                errors += f.parse_errors as usize;
-                if f.parse_errors > 0 {
-                    errored_files += 1;
-                    if errored.len() < 5 {
-                        errored.push(p.clone());
-                    }
-                }
-                lines += f.line_count as usize;
-                for d in &f.definitions {
-                    assert!(d.span.contains(&d.name_span), "{p}: {}", d.qualified_name);
-                }
-                for i in &f.imports {
-                    imports += 1;
-                    in_project += usize::from(pack.resolve_import(&p, i, &project).is_some());
-                }
+                stats.record(&pack, &p, &f, &project);
                 // Determinism.
                 assert_eq!(pack.extract(&p, Language::Go, &source, &budget).unwrap(), f);
             }
@@ -107,6 +77,22 @@ fn extract_real_repository() {
         }
     }
     let elapsed = start.elapsed();
+    let Stats {
+        defs,
+        refs,
+        calls,
+        typed,
+        selfs,
+        errors,
+        errored_files,
+        lines,
+        imports,
+        in_project,
+        tests,
+        methods,
+        bridge,
+        errored,
+    } = stats;
     eprintln!(
         "files={} lines={lines} defs={defs} methods={methods} tests={tests} refs={refs} calls={calls} \
          typed_receivers={typed} self_receivers={selfs} bridge={bridge} go.mod/go.work={} imports={imports} \
@@ -118,4 +104,54 @@ fn extract_real_repository() {
         elapsed
     );
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Totals over the extracted files.
+#[derive(Default)]
+struct Stats {
+    defs: usize,
+    refs: usize,
+    calls: usize,
+    typed: usize,
+    selfs: usize,
+    errors: usize,
+    errored_files: usize,
+    lines: usize,
+    imports: usize,
+    in_project: usize,
+    tests: usize,
+    methods: usize,
+    bridge: usize,
+    /// The first files with parse errors.
+    errored: Vec<String>,
+}
+
+impl Stats {
+    /// Adds the counts of one extracted file and checks its invariants.
+    fn record(&mut self, pack: &GoPack, p: &str, f: &FileFacts, project: &ProjectFiles) {
+        self.defs += f.definitions.len();
+        self.refs += f.references.len();
+        self.calls += f.references.iter().filter(|r| matches!(r.kind, RefKind::Call | RefKind::New)).count();
+        self.typed +=
+            f.references.iter().filter(|r| r.receiver.as_deref().is_some_and(|x| x.starts_with("$type:"))).count();
+        self.selfs += f.references.iter().filter(|r| r.receiver.as_deref() == Some("$self")).count();
+        self.bridge += f.references.iter().filter(|r| matches!(r.kind, RefKind::EnvVar | RefKind::ConfigKey)).count();
+        self.tests += f.definitions.iter().filter(|d| d.is_test).count();
+        self.methods += f.definitions.iter().filter(|d| d.label == Label::Method && d.parent.is_none()).count();
+        self.errors += f.parse_errors as usize;
+        if f.parse_errors > 0 {
+            self.errored_files += 1;
+            if self.errored.len() < 5 {
+                self.errored.push(p.to_string());
+            }
+        }
+        self.lines += f.line_count as usize;
+        for d in &f.definitions {
+            assert!(d.span.contains(&d.name_span), "{p}: {}", d.qualified_name);
+        }
+        for i in &f.imports {
+            self.imports += 1;
+            self.in_project += usize::from(pack.resolve_import(p, i, project).is_some());
+        }
+    }
 }

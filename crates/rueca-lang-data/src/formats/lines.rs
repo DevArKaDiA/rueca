@@ -47,41 +47,54 @@ pub(crate) fn dotenv(src: &str) -> Tree {
         let rest = &line[vstart_rel..];
         let lead = rest.len() - rest.trim_start().len();
         let vstart = vstart_rel + lead;
-        let raw = &line[vstart..];
-        let (text, vend_abs) = match raw.as_bytes().first() {
-            Some(q @ (b'"' | b'\'')) => {
-                let q = *q as char;
-                match raw[1..].find(q) {
-                    Some(i) => (raw[1..1 + i].to_string(), start + vstart + i + 2),
-                    None if q == '"' => {
-                        // Multi-line double-quoted value.
-                        let mut text = raw[1..].to_string();
-                        let mut end = start + line.len();
-                        for (s2, l2) in lines.by_ref() {
-                            text.push('\n');
-                            if let Some(i) = l2.find('"') {
-                                text.push_str(&l2[..i]);
-                                end = s2 + i + 1;
-                                break;
-                            }
-                            text.push_str(l2);
-                            end = s2 + l2.len();
-                        }
-                        (text, end)
-                    }
-                    None => (raw[1..].to_string(), start + line.len()),
-                }
-            }
-            _ => {
-                let cut = raw.find(" #").or_else(|| raw.find("\t#")).unwrap_or(raw.len());
-                let v = raw[..cut].trim_end();
-                (v.to_string(), start + vstart + v.len())
-            }
-        };
+        let (text, vend_abs) = dotenv_value(line, start, vstart, &mut lines);
         let value = Node::new(Value::Scalar(text), start + vstart..vend_abs);
         entries.push(Entry { key: key.to_string(), key_span, value, split: false });
     }
     tree(src, entries)
+}
+
+/// Text and absolute end of the `.env` value starting at `vstart` in `line`
+/// (which starts at `start`); a multi-line double-quoted value consumes the
+/// following `lines`.
+fn dotenv_value<'s>(
+    line: &str,
+    start: usize,
+    vstart: usize,
+    lines: &mut impl Iterator<Item = (usize, &'s str)>,
+) -> (String, usize) {
+    let raw = &line[vstart..];
+    let Some(q @ (b'"' | b'\'')) = raw.as_bytes().first() else {
+        let cut = raw.find(" #").or_else(|| raw.find("\t#")).unwrap_or(raw.len());
+        let v = raw[..cut].trim_end();
+        return (v.to_string(), start + vstart + v.len());
+    };
+    let q = *q as char;
+    match raw[1..].find(q) {
+        Some(i) => (raw[1..1 + i].to_string(), start + vstart + i + 2),
+        None if q == '"' => multiline_value(raw[1..].to_string(), start + line.len(), lines),
+        None => (raw[1..].to_string(), start + line.len()),
+    }
+}
+
+/// The rest of a double-quoted value opened by `text`: following lines up
+/// to the closing quote (or the end of the file).
+fn multiline_value<'s>(
+    mut text: String,
+    mut end: usize,
+    lines: &mut impl Iterator<Item = (usize, &'s str)>,
+) -> (String, usize) {
+    for (s2, l2) in lines.by_ref() {
+        text.push('\n');
+        if let Some(i) = l2.find('"') {
+            text.push_str(&l2[..i]);
+            end = s2 + i + 1;
+            break;
+        }
+        text.push_str(l2);
+        end = s2 + l2.len();
+    }
+    (text, end)
 }
 
 fn tree(src: &str, entries: Vec<Entry>) -> Tree {
@@ -89,20 +102,49 @@ fn tree(src: &str, entries: Vec<Entry>) -> Tree {
     Tree { docs: vec![Node::new(Value::Map(entries), 0..end)], errors: 0 }
 }
 
+/// An INI section being read: name, header span, entries.
+type Section = (String, Range<usize>, Vec<Entry>);
+
+/// Top-level entries and the open section of an INI file.
+#[derive(Default)]
+struct Ini {
+    root: Vec<Entry>,
+    section: Option<Section>,
+}
+
+impl Ini {
+    /// Closes the open section into a top-level entry.
+    fn flush(&mut self) {
+        if let Some((name, hs, entries)) = self.section.take() {
+            let end = entries.last().map_or(hs.end, |e| e.value.span.end.max(e.key_span.end));
+            let value = Node::new(Value::Map(entries), hs.start..end);
+            self.root.push(Entry { key: name, key_span: hs, value, split: false });
+        }
+    }
+
+    /// A `[section]` header (`t`, at `indent` in the line at `start`).
+    fn header(&mut self, start: usize, indent: usize, t: &str) {
+        let Some(close) = t.rfind(']') else { return };
+        self.flush();
+        let name = t[1..close].trim().to_string();
+        let s = start + indent + 1;
+        self.section = Some((name, s..s + t[1..close].len(), Vec::new()));
+    }
+
+    /// Entries of the open section, else the top level.
+    fn target(&mut self) -> &mut Vec<Entry> {
+        match &mut self.section {
+            Some((_, _, e)) => e,
+            None => &mut self.root,
+        }
+    }
+}
+
 /// INI (`php.ini`, `setup.cfg`, `tox.ini`): `[section]` headers, `key = value`
 /// or `key: value`, `#` / `;` comment lines, indented continuation lines
 /// (Python `configparser`). Keys before the first section are top level.
 pub(crate) fn ini(src: &str) -> Tree {
-    let mut root: Vec<Entry> = Vec::new();
-    // (name, header span, entries)
-    let mut section: Option<(String, Range<usize>, Vec<Entry>)> = None;
-    let flush = |root: &mut Vec<Entry>, section: &mut Option<(String, Range<usize>, Vec<Entry>)>| {
-        if let Some((name, hs, entries)) = section.take() {
-            let end = entries.last().map_or(hs.end, |e| e.value.span.end.max(e.key_span.end));
-            let value = Node::new(Value::Map(entries), hs.start..end);
-            root.push(Entry { key: name, key_span: hs, value, split: false });
-        }
-    };
+    let mut ini = Ini::default();
     for (start, line) in physical_lines(src) {
         let t = line.trim();
         if t.is_empty() || t.starts_with('#') || t.starts_with(';') {
@@ -110,18 +152,10 @@ pub(crate) fn ini(src: &str) -> Tree {
         }
         let indent = line.len() - line.trim_start().len();
         if t.starts_with('[') {
-            if let Some(close) = t.rfind(']') {
-                flush(&mut root, &mut section);
-                let name = t[1..close].trim().to_string();
-                let s = start + indent + 1;
-                section = Some((name.clone(), s..s + t[1..close].len(), Vec::new()));
-            }
+            ini.header(start, indent, t);
             continue;
         }
-        let target = match &mut section {
-            Some((_, _, e)) => e,
-            None => &mut root,
-        };
+        let target = ini.target();
         // Continuation of the previous value.
         if indent > 0
             && let Some(last) = target.last_mut()
@@ -133,22 +167,29 @@ pub(crate) fn ini(src: &str) -> Tree {
             }
             continue;
         }
-        let sep = line.find(['=', ':']);
-        let (key_end, vstart) = match sep {
-            Some(i) => (i, i + 1),
-            None => (line.len(), line.len()),
-        };
-        let key_span = trimmed_range(start, line, indent, key_end);
-        let key = &src[key_span.clone()];
-        if key.is_empty() {
-            continue;
+        if let Some(entry) = ini_entry(src, start, line, indent) {
+            target.push(entry);
         }
-        let vspan = trimmed_range(start, line, vstart, line.len());
-        let value = Node::new(Value::Scalar(src[vspan.clone()].to_string()), vspan);
-        target.push(Entry { key: key.to_string(), key_span, value, split: false });
     }
-    flush(&mut root, &mut section);
-    tree(src, root)
+    ini.flush();
+    tree(src, ini.root)
+}
+
+/// `key = value` / `key: value` / `key` (the line at `start`); none for an
+/// empty key.
+fn ini_entry(src: &str, start: usize, line: &str, indent: usize) -> Option<Entry> {
+    let (key_end, vstart) = match line.find(['=', ':']) {
+        Some(i) => (i, i + 1),
+        None => (line.len(), line.len()),
+    };
+    let key_span = trimmed_range(start, line, indent, key_end);
+    let key = &src[key_span.clone()];
+    if key.is_empty() {
+        return None;
+    }
+    let vspan = trimmed_range(start, line, vstart, line.len());
+    let value = Node::new(Value::Scalar(src[vspan.clone()].to_string()), vspan);
+    Some(Entry { key: key.to_string(), key_span, value, split: false })
 }
 
 /// Java `.properties`: `key=value`, `key: value` or `key value`; `#` / `!`
@@ -164,31 +205,7 @@ pub(crate) fn properties(src: &str) -> Tree {
             continue;
         }
         let indent = line.len() - t.len();
-        // Key: up to the first unescaped separator.
-        let b = t.as_bytes();
-        let mut i = 0;
-        let mut key = String::new();
-        while i < b.len() {
-            match b[i] {
-                b'\\' if i + 1 < b.len() => {
-                    let c = t[i + 1..].chars().next().unwrap_or(' ');
-                    key.push(match c {
-                        't' => '\t',
-                        'n' => '\n',
-                        other => other,
-                    });
-                    i += 1 + c.len_utf8();
-                    continue;
-                }
-                b'=' | b':' | b' ' | b'\t' => break,
-                _ => {
-                    let c = t[i..].chars().next().unwrap_or(' ');
-                    key.push(c);
-                    i += c.len_utf8();
-                    continue;
-                }
-            }
-        }
+        let (key, i) = properties_key(t);
         if key.is_empty() {
             continue;
         }
@@ -198,26 +215,70 @@ pub(crate) fn properties(src: &str) -> Tree {
             rest = r.trim_start_matches([' ', '\t']);
         }
         let vstart = start + line.len() - rest.len();
-        let mut text = rest.to_string();
-        let mut vend = start + line.len();
-        let continues = |s: &str| s.bytes().rev().take_while(|&c| c == b'\\').count() % 2 == 1;
-        let mut cont = continues(rest);
-        while cont {
-            text.pop();
-            match lines.next() {
-                Some((s2, l2)) => {
-                    let l2t = l2.trim_start();
-                    text.push_str(l2t);
-                    vend = s2 + l2.len();
-                    cont = continues(l2t);
-                }
-                None => break,
-            }
-        }
+        let (text, vend) = properties_value(rest, start + line.len(), &mut lines);
         let value = Node::new(Value::Scalar(text), vstart..vend.max(vstart));
         entries.push(Entry { key, key_span, value, split: true });
     }
     tree(src, entries)
+}
+
+/// The unescaped key of a `.properties` line and the byte length it spans:
+/// up to the first unescaped separator.
+fn properties_key(t: &str) -> (String, usize) {
+    let b = t.as_bytes();
+    let mut i = 0;
+    let mut key = String::new();
+    while i < b.len() {
+        if matches!(b[i], b'=' | b':' | b' ' | b'\t') {
+            break;
+        }
+        if b[i] == b'\\' && i + 1 < b.len() {
+            let c = t[i + 1..].chars().next().unwrap_or(' ');
+            key.push(unescape_key_char(c));
+            i += 1 + c.len_utf8();
+        } else {
+            let c = t[i..].chars().next().unwrap_or(' ');
+            key.push(c);
+            i += c.len_utf8();
+        }
+    }
+    (key, i)
+}
+
+/// The character a `\c` escape in a key stands for.
+fn unescape_key_char(c: char) -> char {
+    match c {
+        't' => '\t',
+        'n' => '\n',
+        other => other,
+    }
+}
+
+/// Whether a `.properties` line continues: it ends in an odd number of
+/// backslashes.
+fn continues(s: &str) -> bool {
+    s.bytes().rev().take_while(|&c| c == b'\\').count() % 2 == 1
+}
+
+/// Text and end of a `.properties` value starting with `rest` (whose line
+/// ends at `line_end`), continuation lines joined.
+fn properties_value<'s>(
+    rest: &str,
+    line_end: usize,
+    lines: &mut impl Iterator<Item = (usize, &'s str)>,
+) -> (String, usize) {
+    let mut text = rest.to_string();
+    let mut vend = line_end;
+    let mut cont = continues(rest);
+    while cont {
+        text.pop();
+        let Some((s2, l2)) = lines.next() else { break };
+        let l2t = l2.trim_start();
+        text.push_str(l2t);
+        vend = s2 + l2.len();
+        cont = continues(l2t);
+    }
+    (text, vend)
 }
 
 #[cfg(test)]

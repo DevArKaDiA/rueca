@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use rueca_extract::{Budget, LanguagePack, ProjectFiles};
 use rueca_lang_php::{PhpPack, expected_namespace};
-use rueca_model::{Language, RefKind};
+use rueca_model::{FileFacts, Language, RefKind};
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>, configs: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -31,6 +31,72 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, configs: &mut Vec<PathBuf>) {
             out.push(path);
         } else if name == "composer.json" {
             configs.push(path);
+        }
+    }
+}
+
+/// Totals over the extracted files.
+#[derive(Default)]
+struct Stats {
+    defs: usize,
+    refs: usize,
+    calls: usize,
+    typed: usize,
+    errors: usize,
+    errored_files: usize,
+    lines: usize,
+    bytes: usize,
+    uses: usize,
+    uses_in_project: usize,
+    includes: usize,
+    includes_resolved: usize,
+    ns_checked: usize,
+    ns_agree: usize,
+    tests: usize,
+    mismatches: Vec<String>,
+}
+
+impl Stats {
+    /// Counts definitions, references and parse errors; checks name spans.
+    fn add_file(&mut self, p: &str, f: &FileFacts) {
+        self.defs += f.definitions.len();
+        self.refs += f.references.len();
+        self.calls += f.references.iter().filter(|r| matches!(r.kind, RefKind::Call | RefKind::New)).count();
+        self.typed += f.references.iter().filter(|r| r.receiver.as_deref().is_some_and(|x| x.ends_with("->"))).count();
+        self.tests += f.definitions.iter().filter(|d| d.is_test).count();
+        self.errors += f.parse_errors as usize;
+        self.errored_files += usize::from(f.parse_errors > 0);
+        self.lines += f.line_count as usize;
+        for d in &f.definitions {
+            assert!(d.span.contains(&d.name_span) || d.parent.is_some(), "{p}: {}", d.qualified_name);
+        }
+    }
+
+    /// Counts `include` / `require` paths and `use` imports, and how many resolve.
+    fn add_imports(&mut self, pack: &PhpPack, p: &str, f: &FileFacts, project: &ProjectFiles) {
+        for i in &f.imports {
+            let resolved = pack.resolve_import(p, i, project).is_some();
+            if i.module.contains('/') || i.module.contains('.') {
+                self.includes += 1;
+                self.includes_resolved += usize::from(resolved);
+            } else if i.names.is_empty() {
+                self.uses += 1;
+                self.uses_in_project += usize::from(resolved);
+            }
+        }
+    }
+
+    /// Declared namespace (from the first class-like definition) versus what
+    /// PSR-4 / PSR-0 expect for the path.
+    fn check_namespace(&mut self, p: &str, f: &FileFacts, project: &ProjectFiles) {
+        let Some(d) = f.definitions.iter().find(|d| d.label.is_type() && d.parent.is_none()) else { return };
+        let Some(expected) = expected_namespace(p, project) else { return };
+        let declared = d.qualified_name.rsplit_once('\\').map_or("", |(ns, _)| ns);
+        self.ns_checked += 1;
+        if declared.eq_ignore_ascii_case(&expected) {
+            self.ns_agree += 1;
+        } else if self.mismatches.len() < 5 {
+            self.mismatches.push(format!("{p}: declared `{declared}`, PSR expects `{expected}`"));
         }
     }
 }
@@ -57,55 +123,18 @@ fn extract_real_repository() {
 
     let pack = PhpPack::default();
     let budget = Budget::default();
-    let (mut defs, mut refs, mut calls, mut typed, mut errors, mut errored_files, mut lines, mut bytes) =
-        (0, 0, 0, 0, 0, 0, 0, 0);
-    let (mut uses, mut uses_in_project, mut includes, mut includes_resolved) = (0, 0, 0, 0);
-    let (mut ns_checked, mut ns_agree) = (0, 0);
-    let mut tests = 0;
+    let mut stats = Stats::default();
     let mut failures = Vec::new();
-    let mut mismatches = Vec::new();
     let start = Instant::now();
     for path in &files {
         let source = std::fs::read(path).unwrap();
-        bytes += source.len();
+        stats.bytes += source.len();
         let p = rel(path);
         match pack.extract(&p, Language::Php, &source, &budget) {
             Ok(f) => {
-                defs += f.definitions.len();
-                refs += f.references.len();
-                calls += f.references.iter().filter(|r| matches!(r.kind, RefKind::Call | RefKind::New)).count();
-                typed +=
-                    f.references.iter().filter(|r| r.receiver.as_deref().is_some_and(|x| x.ends_with("->"))).count();
-                tests += f.definitions.iter().filter(|d| d.is_test).count();
-                errors += f.parse_errors as usize;
-                errored_files += usize::from(f.parse_errors > 0);
-                lines += f.line_count as usize;
-                for d in &f.definitions {
-                    assert!(d.span.contains(&d.name_span) || d.parent.is_some(), "{p}: {}", d.qualified_name);
-                }
-                for i in &f.imports {
-                    let resolved = pack.resolve_import(&p, i, &project).is_some();
-                    if i.module.contains('/') || i.module.contains('.') {
-                        includes += 1;
-                        includes_resolved += usize::from(resolved);
-                    } else if i.names.is_empty() {
-                        uses += 1;
-                        uses_in_project += usize::from(resolved);
-                    }
-                }
-                // Declared namespace (from the first class-like definition)
-                // versus what PSR-4 / PSR-0 expect for the path.
-                if let Some(d) = f.definitions.iter().find(|d| d.label.is_type() && d.parent.is_none())
-                    && let Some(expected) = expected_namespace(&p, &project)
-                {
-                    let declared = d.qualified_name.rsplit_once('\\').map_or("", |(ns, _)| ns);
-                    ns_checked += 1;
-                    if declared.eq_ignore_ascii_case(&expected) {
-                        ns_agree += 1;
-                    } else if mismatches.len() < 5 {
-                        mismatches.push(format!("{p}: declared `{declared}`, PSR expects `{expected}`"));
-                    }
-                }
+                stats.add_file(&p, &f);
+                stats.add_imports(&pack, &p, &f, &project);
+                stats.check_namespace(&p, &f, &project);
                 // Determinism.
                 assert_eq!(pack.extract(&p, Language::Php, &source, &budget).unwrap(), f);
             }
@@ -113,6 +142,24 @@ fn extract_real_repository() {
         }
     }
     let elapsed = start.elapsed();
+    let Stats {
+        defs,
+        refs,
+        calls,
+        typed,
+        errors,
+        errored_files,
+        lines,
+        bytes,
+        uses,
+        uses_in_project,
+        includes,
+        includes_resolved,
+        ns_checked,
+        ns_agree,
+        tests,
+        mismatches,
+    } = stats;
     eprintln!(
         "files={} lines={lines} bytes={bytes} defs={defs} tests={tests} refs={refs} calls={calls} \
          typed_receivers={typed} composer.json={} use_imports={uses} (in project via autoload={uses_in_project}) \

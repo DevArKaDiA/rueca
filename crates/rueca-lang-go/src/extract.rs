@@ -141,17 +141,7 @@ fn doc_of(node: Node<'_>, source: &[u8]) -> Option<String> {
         if c.prev_sibling().is_some_and(|p| p.kind() != "comment" && p.end_position().row == c.start_position().row) {
             break;
         }
-        let t = text(c, source);
-        let mut block: Vec<String> = if let Some(body) = t.strip_prefix("/*") {
-            body.trim_end_matches("*/").lines().map(|l| l.trim().trim_start_matches('*').trim().to_string()).collect()
-        } else {
-            let body = t.trim_start_matches("//");
-            let directive = !body.starts_with(' ')
-                && body.split_once(':').is_some_and(|(k, _)| {
-                    !k.is_empty() && k.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
-                });
-            if directive { Vec::new() } else { vec![body.strip_prefix(' ').unwrap_or(body).trim_end().to_string()] }
-        };
+        let mut block = comment_lines(text(c, source));
         block.reverse();
         lines.extend(block);
         row = c.start_position().row;
@@ -162,58 +152,86 @@ fn doc_of(node: Node<'_>, source: &[u8]) -> Option<String> {
     (!doc.is_empty()).then(|| truncate(&doc, MAX_DOC))
 }
 
+/// The text lines of one comment, delimiters stripped; a directive line
+/// (`//go:generate`, `//nolint:…`) has none.
+fn comment_lines(t: &str) -> Vec<String> {
+    if let Some(body) = t.strip_prefix("/*") {
+        return body
+            .trim_end_matches("*/")
+            .lines()
+            .map(|l| l.trim().trim_start_matches('*').trim().to_string())
+            .collect();
+    }
+    let body = t.trim_start_matches("//");
+    let directive = !body.starts_with(' ')
+        && body
+            .split_once(':')
+            .is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()));
+    if directive { Vec::new() } else { vec![body.strip_prefix(' ').unwrap_or(body).trim_end().to_string()] }
+}
+
 /// Type of each package-level `var` and the first result type of each
 /// function declared in the file (inputs of type inference).
 fn file_types(root: Node<'_>, source: &[u8], locals: &Locals) -> FileTypes {
     let mut ft = FileTypes::default();
-    let no_tp = |_: &str| false;
-    for child in named_children(root) {
-        if child.kind() != "function_declaration" {
-            continue;
-        }
-        let (Some(name), Some(result)) = (child.child_by_field_name("name"), child.child_by_field_name("result"))
-        else {
-            continue;
-        };
-        let pos = result.start_byte() as u32;
-        let tp = |t: &str| locals.is_type_param(t, pos);
-        let first = if result.kind() == "parameter_list" {
-            named_children(result).first().and_then(|p| p.child_by_field_name("type"))
-        } else {
-            Some(result)
-        };
-        if let Some(ty) = first.and_then(|t| type_text(t, source, &tp)) {
-            ft.results.insert(text(name, source).to_string(), ty);
-        }
+    for child in named_children(root).into_iter().filter(|c| c.kind() == "function_declaration") {
+        function_result_type(child, source, locals, &mut ft);
     }
-    for child in named_children(root) {
-        if child.kind() != "var_declaration" {
-            continue;
-        }
-        let mut specs = Vec::new();
-        for c in named_children(child) {
-            match c.kind() {
-                "var_spec" => specs.push(c),
-                "var_spec_list" => specs.extend(named_children(c).into_iter().filter(|s| s.kind() == "var_spec")),
-                _ => {}
-            }
-        }
-        for spec in specs {
-            let names = children_by_field(spec, "name");
-            let values = spec.child_by_field_name("value").map(named_children).unwrap_or_default();
-            for (i, n) in names.iter().enumerate() {
-                let ty = match spec.child_by_field_name("type") {
-                    Some(t) => type_text(t, source, &no_tp),
-                    None if values.len() == names.len() => locals.expr_type(values[i], source, &ft),
-                    None => None,
-                };
-                if let Some(ty) = ty {
-                    ft.vars.insert(text(*n, source).to_string(), ty);
-                }
-            }
+    for child in named_children(root).into_iter().filter(|c| c.kind() == "var_declaration") {
+        for spec in specs_of(child, "var_spec", "var_spec_list") {
+            var_spec_types(spec, source, locals, &mut ft);
         }
     }
     ft
+}
+
+/// Records the first result type of a function declaration.
+fn function_result_type(func: Node<'_>, source: &[u8], locals: &Locals, ft: &mut FileTypes) {
+    let (Some(name), Some(result)) = (func.child_by_field_name("name"), func.child_by_field_name("result")) else {
+        return;
+    };
+    let pos = result.start_byte() as u32;
+    let tp = |t: &str| locals.is_type_param(t, pos);
+    let first = if result.kind() == "parameter_list" {
+        named_children(result).first().and_then(|p| p.child_by_field_name("type"))
+    } else {
+        Some(result)
+    };
+    if let Some(ty) = first.and_then(|t| type_text(t, source, &tp)) {
+        ft.results.insert(text(name, source).to_string(), ty);
+    }
+}
+
+/// Records the declared (or inferred) type of each name of a package-level
+/// `var` spec.
+fn var_spec_types(spec: Node<'_>, source: &[u8], locals: &Locals, ft: &mut FileTypes) {
+    let no_tp = |_: &str| false;
+    let names = children_by_field(spec, "name");
+    let values = spec.child_by_field_name("value").map(named_children).unwrap_or_default();
+    for (i, n) in names.iter().enumerate() {
+        let ty = match spec.child_by_field_name("type") {
+            Some(t) => type_text(t, source, &no_tp),
+            None if values.len() == names.len() => locals.expr_type(values[i], source, ft),
+            None => None,
+        };
+        if let Some(ty) = ty {
+            ft.vars.insert(text(*n, source).to_string(), ty);
+        }
+    }
+}
+
+/// The `spec` children of a declaration, flattening one `list` level
+/// (`var ( a = 1; b = 2 )`).
+fn specs_of<'t>(decl: Node<'t>, spec: &str, list: &str) -> Vec<Node<'t>> {
+    let mut specs = Vec::new();
+    for c in named_children(decl) {
+        if c.kind() == spec {
+            specs.push(c);
+        } else if c.kind() == list {
+            specs.extend(named_children(c).into_iter().filter(|s| s.kind() == spec));
+        }
+    }
+    specs
 }
 
 struct Extractor<'s> {
@@ -259,17 +277,7 @@ impl<'s> Extractor<'s> {
         for child in named_children(root) {
             match child.kind() {
                 "import_declaration" => {
-                    let mut specs = Vec::new();
-                    for c in named_children(child) {
-                        match c.kind() {
-                            "import_spec" => specs.push(c),
-                            "import_spec_list" => {
-                                specs.extend(named_children(c).into_iter().filter(|s| s.kind() == "import_spec"))
-                            }
-                            _ => {}
-                        }
-                    }
-                    for spec in specs {
+                    for spec in specs_of(child, "import_spec", "import_spec_list") {
                         self.import_spec(spec);
                     }
                 }
@@ -319,30 +327,36 @@ impl<'s> Extractor<'s> {
                     self.top_names.insert(self.text(n).to_string());
                 }
             }
-            "type_declaration" => {
-                for spec in named_children(decl) {
-                    let Some(n) = spec.child_by_field_name("name") else { continue };
-                    let name = self.text(n).to_string();
-                    if let Some(st) = spec.child_by_field_name("type").filter(|t| t.kind() == "struct_type") {
-                        let fields = self.struct_field_types(st);
-                        self.struct_fields.insert(name.clone(), fields);
-                    }
-                    self.top_names.insert(name);
-                }
+            "type_declaration" => self.collect_type_names(decl),
+            _ => self.collect_value_names(decl),
+        }
+    }
+
+    /// Names (and struct field types) of the specs of a `type` declaration.
+    fn collect_type_names(&mut self, decl: Node<'_>) {
+        for spec in named_children(decl) {
+            let Some(n) = spec.child_by_field_name("name") else { continue };
+            let name = self.text(n).to_string();
+            if let Some(st) = spec.child_by_field_name("type").filter(|t| t.kind() == "struct_type") {
+                let fields = self.struct_field_types(st);
+                self.struct_fields.insert(name.clone(), fields);
             }
-            _ => {
-                let mut stack = vec![decl];
-                while let Some(n) = stack.pop() {
-                    match n.kind() {
-                        "var_spec" | "const_spec" => {
-                            for name in children_by_field(n, "name") {
-                                self.top_names.insert(self.text(name).to_string());
-                            }
-                        }
-                        "var_declaration" | "const_declaration" | "var_spec_list" => stack.extend(named_children(n)),
-                        _ => {}
+            self.top_names.insert(name);
+        }
+    }
+
+    /// Names declared by a package-level `var` / `const` declaration.
+    fn collect_value_names(&mut self, decl: Node<'_>) {
+        let mut stack = vec![decl];
+        while let Some(n) = stack.pop() {
+            match n.kind() {
+                "var_spec" | "const_spec" => {
+                    for name in children_by_field(n, "name") {
+                        self.top_names.insert(self.text(name).to_string());
                     }
                 }
+                "var_declaration" | "const_declaration" | "var_spec_list" => stack.extend(named_children(n)),
+                _ => {}
             }
         }
     }
@@ -636,49 +650,58 @@ impl<'s> Extractor<'s> {
     fn interface_members(&mut self, owner: LocalDefId, owner_name: &str, it: Node<'_>) {
         for elem in named_children(it) {
             match elem.kind() {
-                "method_elem" => {
-                    let Some(n) = elem.child_by_field_name("name") else { continue };
-                    let mname = self.text(n).to_string();
-                    let qn = format!("{owner_name}.{mname}");
-                    let sig = one_line(self.text(elem), MAX_ONE_LINE);
-                    let md = self.push_def(
-                        Label::Method,
-                        &mname,
-                        qn,
-                        Some(owner),
-                        span_of(elem),
-                        span_of(n),
-                        Some(sig),
-                        doc_of(elem, self.source),
-                    );
-                    self.with_enclosing(Some(md), None, |ex| {
-                        for field in ["parameters", "result"] {
-                            if let Some(p) = elem.child_by_field_name(field) {
-                                ex.visit_type(p, 1);
-                            }
-                        }
-                    });
-                }
-                "type_elem" => {
-                    // A single named type is an embedded interface (a base);
-                    // unions and `~T` terms are constraints (references).
-                    let terms = named_children(elem);
-                    let embedded = terms.len() == 1
-                        && matches!(terms[0].kind(), "type_identifier" | "qualified_type" | "generic_type")
-                        && !self.text(elem).contains('|');
-                    let name = terms.first().map(|t| self.text(*t).to_string()).unwrap_or_default();
-                    let builtin = terms.len() == 1 && terms[0].kind() == "type_identifier" && is_predeclared(&name);
-                    if embedded && !builtin {
-                        self.defs[owner as usize].bases.push(name);
-                        if let Some(args) = generic_args(terms[0]) {
-                            self.visit_type(args, 1);
-                        }
-                    } else {
-                        self.visit_type(elem, 1);
-                    }
-                }
+                "method_elem" => self.interface_method(owner, owner_name, elem),
+                "type_elem" => self.interface_type_elem(owner, elem),
                 _ => {}
             }
+        }
+    }
+
+    /// A method of an interface: a `Method` whose signature types are
+    /// references.
+    fn interface_method(&mut self, owner: LocalDefId, owner_name: &str, elem: Node<'_>) {
+        let Some(n) = elem.child_by_field_name("name") else { return };
+        let mname = self.text(n).to_string();
+        let qn = format!("{owner_name}.{mname}");
+        let sig = one_line(self.text(elem), MAX_ONE_LINE);
+        let md = self.push_def(
+            Label::Method,
+            &mname,
+            qn,
+            Some(owner),
+            span_of(elem),
+            span_of(n),
+            Some(sig),
+            doc_of(elem, self.source),
+        );
+        self.with_enclosing(Some(md), None, |ex| ex.visit_signature_types(elem, 1));
+    }
+
+    /// The `parameters` and `result` types of a method element.
+    fn visit_signature_types(&mut self, node: Node<'_>, depth: usize) {
+        for field in ["parameters", "result"] {
+            if let Some(p) = node.child_by_field_name(field) {
+                self.visit_type(p, depth);
+            }
+        }
+    }
+
+    /// A type element of an interface: a single named type is an embedded
+    /// interface (a base); unions and `~T` terms are constraints (references).
+    fn interface_type_elem(&mut self, owner: LocalDefId, elem: Node<'_>) {
+        let terms = named_children(elem);
+        let embedded = terms.len() == 1
+            && matches!(terms[0].kind(), "type_identifier" | "qualified_type" | "generic_type")
+            && !self.text(elem).contains('|');
+        let name = terms.first().map(|t| self.text(*t).to_string()).unwrap_or_default();
+        let builtin = terms.len() == 1 && terms[0].kind() == "type_identifier" && is_predeclared(&name);
+        if !embedded || builtin {
+            self.visit_type(elem, 1);
+            return;
+        }
+        self.defs[owner as usize].bases.push(name);
+        if let Some(args) = generic_args(terms[0]) {
+            self.visit_type(args, 1);
         }
     }
 
@@ -686,14 +709,7 @@ impl<'s> Extractor<'s> {
     fn value_declaration(&mut self, node: Node<'_>) {
         let (label, keyword) =
             if node.kind() == "const_declaration" { (Label::Constant, "const") } else { (Label::Variable, "var") };
-        let mut specs = Vec::new();
-        for c in named_children(node) {
-            match c.kind() {
-                "var_spec" | "const_spec" => specs.push(c),
-                "var_spec_list" => specs.extend(named_children(c).into_iter().filter(|s| s.kind() == "var_spec")),
-                _ => {}
-            }
-        }
+        let specs = value_specs(node);
         let single = specs.len() == 1;
         for spec in specs {
             let doc = doc_of(spec, self.source).or_else(|| single.then(|| doc_of(node, self.source)).flatten());
@@ -720,14 +736,18 @@ impl<'s> Extractor<'s> {
                 );
                 first.get_or_insert(d);
             }
-            self.with_enclosing(first, None, |ex| {
-                if let Some(t) = spec.child_by_field_name("type") {
-                    ex.visit_type(t, 1);
-                }
-                if let Some(v) = spec.child_by_field_name("value") {
-                    ex.visit(v, 1);
-                }
-            });
+            self.with_enclosing(first, None, |ex| ex.visit_spec_parts(spec, 1));
+        }
+    }
+
+    /// The type (a reference) and the values (expressions) of a `var` /
+    /// `const` spec.
+    fn visit_spec_parts(&mut self, spec: Node<'_>, depth: usize) {
+        if let Some(t) = spec.child_by_field_name("type") {
+            self.visit_type(t, depth);
+        }
+        if let Some(v) = spec.child_by_field_name("value") {
+            self.visit(v, depth);
         }
     }
 
@@ -764,45 +784,19 @@ impl<'s> Extractor<'s> {
             return;
         }
         match node.kind() {
-            "type_identifier" => {
-                let name = self.text(node);
-                if !is_predeclared_type(name) && !self.is_type_param(name, node.start_byte() as u32) {
-                    self.push_ref(RefKind::Type, name, None, span_of(node), None);
-                }
-            }
-            "qualified_type" => {
-                let (Some(pkg), Some(name)) = (node.child_by_field_name("package"), node.child_by_field_name("name"))
-                else {
-                    return;
-                };
-                let pkg = self.text(pkg).to_string();
-                self.qualifiers.insert(pkg.clone());
-                let name = self.text(name);
-                self.push_ref(RefKind::Type, name, Some(pkg), span_of(node), None);
-            }
-            "parameter_declaration" | "variadic_parameter_declaration" | "type_parameter_declaration" => {
+            "type_identifier" => self.named_type_ref(node, node.start_byte() as u32, RefKind::Type),
+            "qualified_type" => self.qualified_type_ref(node, RefKind::Type),
+            "parameter_declaration"
+            | "variadic_parameter_declaration"
+            | "type_parameter_declaration"
+            | "field_declaration" => {
                 if let Some(t) = node.child_by_field_name("type") {
                     self.visit_type(t, depth + 1);
                 }
             }
-            "field_declaration" => {
-                if let Some(t) = node.child_by_field_name("type") {
-                    self.visit_type(t, depth + 1);
-                }
-            }
-            "method_elem" => {
-                for field in ["parameters", "result"] {
-                    if let Some(p) = node.child_by_field_name(field) {
-                        self.visit_type(p, depth + 1);
-                    }
-                }
-            }
+            "method_elem" => self.visit_signature_types(node, depth + 1),
             "comment" | "field_identifier" | "identifier" | "raw_string_literal" | "interpreted_string_literal" => {}
-            k if is_type_kind(k)
-                || k == "parameter_list"
-                || k == "type_parameter_list"
-                || k == "field_declaration_list" =>
-            {
+            k if is_type_container(k) => {
                 for c in named_children(node) {
                     self.visit_type(c, depth + 1);
                 }
@@ -810,6 +804,26 @@ impl<'s> Extractor<'s> {
             // Expressions inside types (array lengths).
             _ => self.visit(node, depth + 1),
         }
+    }
+
+    /// A reference of `kind` to the type named by identifier `t` (not a
+    /// predeclared type nor a type parameter in scope at `pos`).
+    fn named_type_ref(&mut self, t: Node<'_>, pos: u32, kind: RefKind) {
+        let name = self.text(t);
+        if !is_predeclared_type(name) && !self.is_type_param(name, pos) {
+            self.push_ref(kind, name, None, span_of(t), None);
+        }
+    }
+
+    /// A reference of `kind` to `pkg.Name` through the qualifier `pkg`.
+    fn qualified_type_ref(&mut self, t: Node<'_>, kind: RefKind) {
+        let (Some(pkg), Some(name)) = (t.child_by_field_name("package"), t.child_by_field_name("name")) else {
+            return;
+        };
+        let pkg = self.text(pkg).to_string();
+        self.qualifiers.insert(pkg.clone());
+        let name = self.text(name);
+        self.push_ref(kind, name, Some(pkg), span_of(t), None);
     }
 
     /// Expressions and statements.
@@ -827,19 +841,8 @@ impl<'s> Extractor<'s> {
                 let enc = self.enclosing;
                 self.with_enclosing(enc, None, |ex| ex.callable_parts(node));
             }
-            "short_var_declaration" => {
-                if let Some(r) = node.child_by_field_name("right") {
-                    self.visit(r, depth + 1);
-                }
-            }
-            "var_spec" | "const_spec" => {
-                if let Some(t) = node.child_by_field_name("type") {
-                    self.visit_type(t, depth + 1);
-                }
-                if let Some(v) = node.child_by_field_name("value") {
-                    self.visit(v, depth + 1);
-                }
-            }
+            "short_var_declaration" => self.visit_field(node, "right", depth + 1),
+            "var_spec" | "const_spec" => self.visit_spec_parts(node, depth + 1),
             "type_declaration" => {
                 // Local types: their field and underlying types are references.
                 for spec in named_children(node) {
@@ -848,16 +851,7 @@ impl<'s> Extractor<'s> {
                     }
                 }
             }
-            "assignment_statement" => {
-                if let Some(l) = node.child_by_field_name("left") {
-                    for target in named_children(l) {
-                        self.write_target(target, depth);
-                    }
-                }
-                if let Some(r) = node.child_by_field_name("right") {
-                    self.visit(r, depth + 1);
-                }
-            }
+            "assignment_statement" => self.assignment(node, true, depth),
             "inc_statement" | "dec_statement" => {
                 for target in named_children(node) {
                     self.write_target(target, depth);
@@ -868,37 +862,12 @@ impl<'s> Extractor<'s> {
                     let mut c = node.walk();
                     node.children(&mut c).any(|ch| ch.kind() == ":=")
                 };
-                if let Some(l) = node.child_by_field_name("left")
-                    && !declares
-                {
-                    for target in named_children(l) {
-                        self.write_target(target, depth);
-                    }
-                }
-                if let Some(r) = node.child_by_field_name("right") {
-                    self.visit(r, depth + 1);
-                }
+                self.assignment(node, !declares, depth);
             }
-            "type_switch_statement" => {
-                for c in named_children(node) {
-                    if node.child_by_field_name("alias").is_some_and(|a| a.id() == c.id()) {
-                        continue;
-                    }
-                    self.visit(c, depth + 1);
-                }
-            }
-            "type_case" => {
-                for t in children_by_field(node, "type") {
-                    self.visit_type(t, depth + 1);
-                }
-                for c in named_children(node).into_iter().filter(|c| c.kind() == "statement_list") {
-                    self.visit(c, depth + 1);
-                }
-            }
+            "type_switch_statement" => self.type_switch(node, depth),
+            "type_case" => self.type_case(node, depth),
             "type_assertion_expression" | "type_conversion_expression" => {
-                if let Some(op) = node.child_by_field_name("operand") {
-                    self.visit(op, depth + 1);
-                }
+                self.visit_field(node, "operand", depth + 1);
                 if let Some(t) = node.child_by_field_name("type") {
                     self.visit_type(t, depth + 1);
                 }
@@ -911,6 +880,48 @@ impl<'s> Extractor<'s> {
                     self.visit(c, depth + 1);
                 }
             }
+        }
+    }
+
+    /// Visits the `field` child of `node` (if any) as an expression.
+    fn visit_field(&mut self, node: Node<'_>, field: &str, depth: usize) {
+        if let Some(c) = node.child_by_field_name(field) {
+            self.visit(c, depth);
+        }
+    }
+
+    /// `left = right` (and range / receive clauses): the `left` targets are
+    /// writes when `writes`; `right` is visited.
+    fn assignment(&mut self, node: Node<'_>, writes: bool, depth: usize) {
+        if let Some(l) = node.child_by_field_name("left")
+            && writes
+        {
+            for target in named_children(l) {
+                self.write_target(target, depth);
+            }
+        }
+        self.visit_field(node, "right", depth + 1);
+    }
+
+    /// `switch x := v.(type)`: every child but the alias.
+    fn type_switch(&mut self, node: Node<'_>, depth: usize) {
+        let alias = node.child_by_field_name("alias").map(|a| a.id());
+        for c in named_children(node) {
+            if alias == Some(c.id()) {
+                continue;
+            }
+            self.visit(c, depth + 1);
+        }
+    }
+
+    /// `case T1, T2:` of a type switch: the types are references, the
+    /// statements visited.
+    fn type_case(&mut self, node: Node<'_>, depth: usize) {
+        for t in children_by_field(node, "type") {
+            self.visit_type(t, depth + 1);
+        }
+        for c in named_children(node).into_iter().filter(|c| c.kind() == "statement_list") {
+            self.visit(c, depth + 1);
         }
     }
 
@@ -927,38 +938,38 @@ impl<'s> Extractor<'s> {
     /// `T{…}` → `New` of the named type; element values are visited.
     fn composite_literal(&mut self, node: Node<'_>, depth: usize) {
         if let Some(ty) = node.child_by_field_name("type") {
-            let pos = ty.start_byte() as u32;
-            let named = match ty.kind() {
-                "generic_type" => ty.child_by_field_name("type").map(|t| (t, generic_args(ty))),
-                _ => Some((ty, None)),
-            };
-            match named {
-                Some((t, args)) if t.kind() == "type_identifier" => {
-                    let name = self.text(t);
-                    if !is_predeclared_type(name) && !self.is_type_param(name, pos) {
-                        self.push_ref(RefKind::New, name, None, span_of(t), None);
-                    }
-                    if let Some(a) = args {
-                        self.visit_type(a, depth + 1);
-                    }
-                }
-                Some((t, args)) if t.kind() == "qualified_type" => {
-                    if let (Some(pkg), Some(name)) = (t.child_by_field_name("package"), t.child_by_field_name("name")) {
-                        let pkg = self.text(pkg).to_string();
-                        self.qualifiers.insert(pkg.clone());
-                        let name = self.text(name);
-                        self.push_ref(RefKind::New, name, Some(pkg), span_of(t), None);
-                    }
-                    if let Some(a) = args {
-                        self.visit_type(a, depth + 1);
-                    }
-                }
-                _ => self.visit_type(ty, depth + 1),
-            }
+            self.literal_type(ty, depth);
         }
         if let Some(body) = node.child_by_field_name("body") {
             let map_literal = node.child_by_field_name("type").is_some_and(|t| t.kind() == "map_type");
             self.literal_body(body, map_literal, depth + 1);
+        }
+    }
+
+    /// The type of a composite literal: `New` of a named (possibly generic)
+    /// type, whose type arguments are references; other types are visited.
+    fn literal_type(&mut self, ty: Node<'_>, depth: usize) {
+        let pos = ty.start_byte() as u32;
+        let named = match ty.kind() {
+            "generic_type" => ty.child_by_field_name("type").map(|t| (t, generic_args(ty))),
+            _ => Some((ty, None)),
+        };
+        let args = match named {
+            Some((t, args)) if t.kind() == "type_identifier" => {
+                self.named_type_ref(t, pos, RefKind::New);
+                args
+            }
+            Some((t, args)) if t.kind() == "qualified_type" => {
+                self.qualified_type_ref(t, RefKind::New);
+                args
+            }
+            _ => {
+                self.visit_type(ty, depth + 1);
+                return;
+            }
+        };
+        if let Some(a) = args {
+            self.visit_type(a, depth + 1);
         }
     }
 
@@ -1056,25 +1067,7 @@ impl<'s> Extractor<'s> {
     /// The receiver text of a call `operand.M()` (crate docs, *Receivers*).
     fn receiver_for(&mut self, op: Node<'_>) -> String {
         if op.kind() == "identifier" {
-            let name = self.text(op);
-            return match self.locals.lookup(name, op.start_byte() as u32) {
-                Some(b) if b.receiver => SELF_RECEIVER.to_string(),
-                Some(b) => match self.ident_type(op) {
-                    Some(t) => type_receiver(&t),
-                    None if b.origin.is_some() => b.origin.clone().unwrap_or_default(),
-                    // An untyped local named like an import or a package
-                    // name must not bind to it.
-                    None if self.import_names.contains(name) || self.top_names.contains(name) => format!("({name})"),
-                    None => name.to_string(),
-                },
-                None => {
-                    self.qualifiers.insert(name.to_string());
-                    match self.ident_type(op) {
-                        Some(t) => type_receiver(&t),
-                        None => name.to_string(),
-                    }
-                }
-            };
+            return self.identifier_receiver(op);
         }
         // `NewT().M()`, `T{}.M()`, `x.(*T).M()`: the operand itself is typed.
         if let Some(t) = self.locals.expr_type(op, self.source, &self.file_types) {
@@ -1082,36 +1075,11 @@ impl<'s> Extractor<'s> {
         }
         // A chain `root.a.b()…`: follow declared field types from a typed
         // root while they are known.
-        let mut segs: Vec<Option<&str>> = Vec::new();
-        let mut root = op;
-        loop {
-            match root.kind() {
-                "selector_expression" => {
-                    let (Some(o), Some(f)) = (root.child_by_field_name("operand"), root.child_by_field_name("field"))
-                    else {
-                        break;
-                    };
-                    segs.push(Some(self.text(f)));
-                    root = o;
-                }
-                "call_expression" | "index_expression" => {
-                    let next = root.child_by_field_name("function").or_else(|| root.child_by_field_name("operand"));
-                    let Some(next) = next else { break };
-                    segs.push(None);
-                    root = next;
-                }
-                "parenthesized_expression" => match named_children(root).as_slice() {
-                    [inner] => root = *inner,
-                    _ => break,
-                },
-                _ => break,
-            }
-        }
-        segs.reverse();
+        let (root, segs) = self.receiver_chain(op);
         if segs.is_empty() {
             return self.raw_receiver(op);
         }
-        let mut ty = if root.kind() == "identifier" {
+        let ty = if root.kind() == "identifier" {
             let name = self.text(root);
             if !self.locals.is_local(root, self.source) {
                 self.qualifiers.insert(name.to_string());
@@ -1126,26 +1094,81 @@ impl<'s> Extractor<'s> {
         } else {
             self.locals.expr_type(root, self.source, &self.file_types)
         };
-        let mut i = 0;
-        while i < segs.len() {
-            let Some(t) = ty.as_deref() else { break };
+        self.follow_chain(ty, &segs).unwrap_or_else(|| self.raw_receiver(op))
+    }
+
+    /// The receiver of a call on an identifier operand.
+    fn identifier_receiver(&mut self, op: Node<'_>) -> String {
+        let name = self.text(op);
+        match self.locals.lookup(name, op.start_byte() as u32) {
+            Some(b) if b.receiver => SELF_RECEIVER.to_string(),
+            Some(b) => match self.ident_type(op) {
+                Some(t) => type_receiver(&t),
+                None if b.origin.is_some() => b.origin.clone().unwrap_or_default(),
+                // An untyped local named like an import or a package
+                // name must not bind to it.
+                None if self.import_names.contains(name) || self.top_names.contains(name) => format!("({name})"),
+                None => name.to_string(),
+            },
+            None => {
+                self.qualifiers.insert(name.to_string());
+                match self.ident_type(op) {
+                    Some(t) => type_receiver(&t),
+                    None => name.to_string(),
+                }
+            }
+        }
+    }
+
+    /// The root of a chain `root.a.b()[i]…` and its segments in source
+    /// order: `Some(field)` for a selector, `None` for a call or an index.
+    fn receiver_chain<'t>(&self, op: Node<'t>) -> (Node<'t>, Vec<Option<&'s str>>) {
+        let mut segs: Vec<Option<&'s str>> = Vec::new();
+        let mut root = op;
+        loop {
+            let (seg, next) = match root.kind() {
+                "selector_expression" => {
+                    let (Some(o), Some(f)) = (root.child_by_field_name("operand"), root.child_by_field_name("field"))
+                    else {
+                        break;
+                    };
+                    (Some(self.text(f)), o)
+                }
+                "call_expression" | "index_expression" => {
+                    let next = root.child_by_field_name("function").or_else(|| root.child_by_field_name("operand"));
+                    let Some(next) = next else { break };
+                    (None, next)
+                }
+                "parenthesized_expression" => match named_children(root).as_slice() {
+                    [inner] => {
+                        root = *inner;
+                        continue;
+                    }
+                    _ => break,
+                },
+                _ => break,
+            };
+            segs.push(seg);
+            root = next;
+        }
+        segs.reverse();
+        (root, segs)
+    }
+
+    /// The receiver after following `segs` through declared field types
+    /// from the root type `ty`; `None` when the chain cannot be typed.
+    fn follow_chain(&self, mut ty: Option<String>, segs: &[Option<&str>]) -> Option<String> {
+        for (i, seg) in segs.iter().enumerate() {
+            let t = ty.as_deref()?;
             if t.contains('.') {
                 // A package-qualified type: write the rest of the chain after
                 // it, so a chain through a third-party type is external.
                 let rest: Vec<&str> = segs[i..].iter().flatten().copied().collect();
-                return if rest.is_empty() { type_receiver(t) } else { format!("{t}.{}", rest.join(".")) };
+                return Some(if rest.is_empty() { type_receiver(t) } else { format!("{t}.{}", rest.join(".")) });
             }
-            let next = match segs[i] {
-                Some(field) => self.struct_fields.get(t).and_then(|fs| fs.get(field)).cloned(),
-                None => None,
-            };
-            ty = next;
-            i += 1;
+            ty = seg.and_then(|field| self.struct_fields.get(t).and_then(|fs| fs.get(field)).cloned());
         }
-        match ty {
-            Some(t) if i == segs.len() => type_receiver(&t),
-            _ => self.raw_receiver(op),
-        }
+        ty.map(|t| type_receiver(&t))
     }
 
     /// Declared type of an identifier use: the method receiver's type, a
@@ -1169,46 +1192,14 @@ impl<'s> Extractor<'s> {
     }
 
     fn call(&mut self, node: Node<'_>, depth: usize) {
-        let Some(mut func) = node.child_by_field_name("function") else { return };
+        let Some(func) = node.child_by_field_name("function") else { return };
         let args = node.child_by_field_name("arguments");
         let arg_nodes = args.map(named_children).unwrap_or_default();
         let arity = Some(arg_nodes.len() as u32);
         if let Some(ta) = node.child_by_field_name("type_arguments") {
             self.visit_type(ta, depth + 1);
         }
-        // `(f)(x)`, `F[int](x)` (instantiation of a non-local generic function).
-        loop {
-            match func.kind() {
-                "parenthesized_expression" => match named_children(func).as_slice() {
-                    [inner] => func = *inner,
-                    _ => break,
-                },
-                "index_expression" | "type_instantiation_expression" => {
-                    let operand = func.child_by_field_name("operand").or_else(|| named_children(func).first().copied());
-                    // Only an index that is a type makes `f[T](x)` an
-                    // instantiation; `handlers[i](c)` calls a slice element.
-                    let index_is_type = named_children(func).iter().skip(1).all(|c| {
-                        is_type_kind(c.kind()) || (c.kind() == "identifier" && is_predeclared_type(self.text(*c)))
-                    });
-                    match operand.filter(|_| index_is_type) {
-                        Some(o) if o.kind() == "identifier" && !self.locals.is_local(o, self.source) => {
-                            for c in named_children(func).into_iter().skip(1) {
-                                self.visit_type(c, depth + 1);
-                            }
-                            func = o;
-                        }
-                        Some(o) if o.kind() == "selector_expression" => {
-                            for c in named_children(func).into_iter().skip(1) {
-                                self.visit_type(c, depth + 1);
-                            }
-                            func = o;
-                        }
-                        _ => break,
-                    }
-                }
-                _ => break,
-            }
-        }
+        let func = self.callee(func, depth);
         match func.kind() {
             "identifier" => {
                 let name = self.text(func);
@@ -1216,22 +1207,7 @@ impl<'s> Extractor<'s> {
                     self.push_ref(RefKind::Call, name, None, span_of(func), arity);
                 }
                 if name == "new" || name == "make" {
-                    // The first argument is a type.
-                    if let Some(first) = arg_nodes.first() {
-                        if first.kind() == "identifier" && !self.locals.is_local(*first, self.source) {
-                            let t = self.text(*first);
-                            if !is_predeclared_type(t) && !self.is_type_param(t, first.start_byte() as u32) {
-                                self.push_ref(RefKind::Type, t, None, span_of(*first), None);
-                            }
-                        } else if first.kind() == "selector_expression" {
-                            self.selector_read(*first, depth + 1);
-                        } else {
-                            self.visit_type(*first, depth + 1);
-                        }
-                    }
-                    for a in arg_nodes.iter().skip(1) {
-                        self.visit(*a, depth + 1);
-                    }
+                    self.new_or_make_args(&arg_nodes, depth);
                     return;
                 }
             }
@@ -1240,23 +1216,95 @@ impl<'s> Extractor<'s> {
                 else {
                     return;
                 };
-                let name = self.text(field);
-                let receiver = self.receiver_for(op);
-                self.push_ref(RefKind::Call, name, Some(receiver), span_of(field), arity);
-                if op.kind() == "identifier" {
-                    if !self.locals.is_local(op, self.source) {
-                        self.bridge(self.text(op), name, &arg_nodes, node);
-                    }
-                } else if op.kind() == "selector_expression" {
-                    self.selector_read(op, depth + 1);
-                } else {
-                    self.visit(op, depth + 1);
-                }
+                self.method_call(node, op, field, &arg_nodes, arity, depth);
             }
             _ => self.visit(func, depth + 1),
         }
         for a in arg_nodes {
             self.visit(a, depth + 1);
+        }
+    }
+
+    /// The called function under parentheses and generic instantiations:
+    /// `(f)(x)`, `F[int](x)` (of a non-local generic function); the type
+    /// arguments of an instantiation are references.
+    fn callee<'t>(&mut self, mut func: Node<'t>, depth: usize) -> Node<'t> {
+        loop {
+            match func.kind() {
+                "parenthesized_expression" => match named_children(func).as_slice() {
+                    [inner] => func = *inner,
+                    _ => return func,
+                },
+                "index_expression" | "type_instantiation_expression" => {
+                    let Some(o) = self.instantiated_operand(func) else { return func };
+                    for c in named_children(func).into_iter().skip(1) {
+                        self.visit_type(c, depth + 1);
+                    }
+                    func = o;
+                }
+                _ => return func,
+            }
+        }
+    }
+
+    /// The operand of `f[T]` when it is the instantiation of a non-local
+    /// generic function (or of `pkg.F`): only an index that is a type makes
+    /// it one, `handlers[i](c)` calls a slice element.
+    fn instantiated_operand<'t>(&self, func: Node<'t>) -> Option<Node<'t>> {
+        let operand = func.child_by_field_name("operand").or_else(|| named_children(func).first().copied());
+        let index_is_type = named_children(func)
+            .iter()
+            .skip(1)
+            .all(|c| is_type_kind(c.kind()) || (c.kind() == "identifier" && is_predeclared_type(self.text(*c))));
+        operand.filter(|o| {
+            index_is_type
+                && match o.kind() {
+                    "identifier" => !self.locals.is_local(*o, self.source),
+                    "selector_expression" => true,
+                    _ => false,
+                }
+        })
+    }
+
+    /// The arguments of `new(T)` / `make(T, …)`: the first is a type, the
+    /// rest are expressions.
+    fn new_or_make_args(&mut self, arg_nodes: &[Node<'_>], depth: usize) {
+        if let Some(first) = arg_nodes.first() {
+            if first.kind() == "identifier" && !self.locals.is_local(*first, self.source) {
+                self.named_type_ref(*first, first.start_byte() as u32, RefKind::Type);
+            } else if first.kind() == "selector_expression" {
+                self.selector_read(*first, depth + 1);
+            } else {
+                self.visit_type(*first, depth + 1);
+            }
+        }
+        for a in arg_nodes.iter().skip(1) {
+            self.visit(*a, depth + 1);
+        }
+    }
+
+    /// `op.name(args)`: a `Call` through the receiver of `op`, the env /
+    /// config bridges of a package qualifier, and the operand expression.
+    fn method_call(
+        &mut self,
+        call: Node<'_>,
+        op: Node<'_>,
+        field: Node<'_>,
+        arg_nodes: &[Node<'_>],
+        arity: Option<u32>,
+        depth: usize,
+    ) {
+        let name = self.text(field);
+        let receiver = self.receiver_for(op);
+        self.push_ref(RefKind::Call, name, Some(receiver), span_of(field), arity);
+        match op.kind() {
+            "identifier" => {
+                if !self.locals.is_local(op, self.source) {
+                    self.bridge(self.text(op), name, arg_nodes, call);
+                }
+            }
+            "selector_expression" => self.selector_read(op, depth + 1),
+            _ => self.visit(op, depth + 1),
         }
     }
 
@@ -1359,6 +1407,20 @@ impl<'s> Extractor<'s> {
     }
 }
 
+/// The specs of a package-level `var` / `const` declaration, in source
+/// order (one `var ( … )` list level flattened).
+fn value_specs(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut specs = Vec::new();
+    for c in named_children(node) {
+        match c.kind() {
+            "var_spec" | "const_spec" => specs.push(c),
+            "var_spec_list" => specs.extend(named_children(c).into_iter().filter(|s| s.kind() == "var_spec")),
+            _ => {}
+        }
+    }
+    specs
+}
+
 /// Last name of an embedded type text: `*pkg.Base[T]` → `Base`.
 fn embedded_name(text: &str) -> String {
     let t = text.trim_start_matches('*');
@@ -1373,6 +1435,11 @@ fn generic_args(node: Node<'_>) -> Option<Node<'_>> {
         "pointer_type" => named_children(node).first().and_then(|n| generic_args(*n)),
         _ => None,
     }
+}
+
+/// Type nodes and the lists inside them whose children are types.
+fn is_type_container(kind: &str) -> bool {
+    is_type_kind(kind) || matches!(kind, "parameter_list" | "type_parameter_list" | "field_declaration_list")
 }
 
 fn is_type_kind(kind: &str) -> bool {

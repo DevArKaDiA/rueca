@@ -23,32 +23,35 @@ pub(crate) fn strip_type_text(t: &str) -> String {
         match c {
             '<' => depth += 1,
             '>' => depth -= 1,
-            '@' if depth == 0 => {
-                // Skip the annotation name and its arguments.
-                while chars.peek().is_some_and(|c| c.is_alphanumeric() || *c == '_' || *c == '.' || *c == '$') {
-                    chars.next();
-                }
-                if chars.peek() == Some(&'(') {
-                    let mut paren = 0i32;
-                    for c in chars.by_ref() {
-                        match c {
-                            '(' => paren += 1,
-                            ')' => {
-                                paren -= 1;
-                                if paren == 0 {
-                                    break;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
+            '@' if depth == 0 => skip_annotation(&mut chars),
             c if depth == 0 && !c.is_whitespace() => out.push(c),
             _ => {}
         }
     }
     out
+}
+
+/// Skips an annotation's name and its balanced `(…)` arguments, right after its `@`.
+fn skip_annotation(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    while chars.peek().is_some_and(|c| c.is_alphanumeric() || *c == '_' || *c == '.' || *c == '$') {
+        chars.next();
+    }
+    if chars.peek() != Some(&'(') {
+        return;
+    }
+    let mut paren = 0i32;
+    for c in chars.by_ref() {
+        match c {
+            '(' => paren += 1,
+            ')' => {
+                paren -= 1;
+                if paren == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Java primitive type names and `void` / `var`.
