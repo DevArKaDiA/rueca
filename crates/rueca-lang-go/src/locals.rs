@@ -307,34 +307,40 @@ impl Locals {
                     None => file.vars.get(name).cloned(),
                 }
             }
-            "call_expression" => {
-                let func = expr.child_by_field_name("function")?;
-                match func.kind() {
-                    "identifier" => {
-                        let name = text(func, source);
-                        if self.lookup(name, pos).is_some() {
-                            return None;
-                        }
-                        if name == "new" {
-                            let args = named_children(expr.child_by_field_name("arguments")?);
-                            return if args.len() == 1 { type_text(args[0], source, &tp) } else { None };
-                        }
-                        if let Some(t) = file.results.get(name) {
-                            return Some(t.clone());
-                        }
-                        constructed_type(name).filter(|t| !tp(t)).map(str::to_string)
-                    }
-                    "selector_expression" => {
-                        let op = func.child_by_field_name("operand")?;
-                        let field = func.child_by_field_name("field")?;
-                        if op.kind() != "identifier" || self.lookup(text(op, source), pos).is_some() {
-                            return None;
-                        }
-                        let ty = constructed_type(text(field, source))?;
-                        Some(format!("{}.{ty}", text(op, source)))
-                    }
-                    _ => None,
+            "call_expression" => self.call_type(expr, source, file),
+            _ => None,
+        }
+    }
+
+    /// Type of a call expression: `new(T)`, a function of this file with a
+    /// declared result, or a constructor `NewT()` / `pkg.NewT()`.
+    fn call_type(&self, call: Node<'_>, source: &[u8], file: &FileTypes) -> Option<String> {
+        let func = call.child_by_field_name("function")?;
+        let pos = call.start_byte() as u32;
+        match func.kind() {
+            "identifier" => {
+                let name = text(func, source);
+                if self.lookup(name, pos).is_some() {
+                    return None;
                 }
+                let tp = |t: &str| self.is_type_param(t, pos);
+                if name == "new" {
+                    let args = named_children(call.child_by_field_name("arguments")?);
+                    return if args.len() == 1 { type_text(args[0], source, &tp) } else { None };
+                }
+                if let Some(t) = file.results.get(name) {
+                    return Some(t.clone());
+                }
+                constructed_type(name).filter(|t| !tp(t)).map(str::to_string)
+            }
+            "selector_expression" => {
+                let op = func.child_by_field_name("operand")?;
+                let field = func.child_by_field_name("field")?;
+                if op.kind() != "identifier" || self.lookup(text(op, source), pos).is_some() {
+                    return None;
+                }
+                let ty = constructed_type(text(field, source))?;
+                Some(format!("{}.{ty}", text(op, source)))
             }
             _ => None,
         }
@@ -418,10 +424,13 @@ fn visibility(ident: Node<'_>, kind: DefKind, scope: (u32, u32)) -> (u32, u32, u
     (start, end, from)
 }
 
-/// Runs the locals query over `tree` and builds the table. `time_budget`
-/// bounds the query run.
-pub(crate) fn build(tree: &Tree, source: &[u8], time_budget: Duration) -> Result<Locals, ExtractError> {
-    let lq = locals_query()?;
+/// The scopes and the definitions captured by the locals query.
+type Captures<'t> = (Vec<(u32, u32, bool)>, Vec<(Node<'t>, DefKind)>);
+
+/// Runs the locals query over `tree`: the scopes (`start`, `end`, `is the
+/// file`), the definitions, and whether the run was cut (deadline or match
+/// limit).
+fn run_query<'t>(lq: &LocalsQuery, tree: &'t Tree, source: &[u8], time_budget: Duration) -> (Captures<'t>, bool) {
     let mut scopes: Vec<(u32, u32, bool)> = Vec::new();
     let mut defs: Vec<(Node<'_>, DefKind)> = Vec::new();
 
@@ -445,27 +454,74 @@ pub(crate) fn build(tree: &Tree, source: &[u8], time_budget: Duration) -> Result
             for cap in m.captures() {
                 let node = cap.node;
                 match lq.roles.get(cap.index as usize).copied().unwrap_or(Role::Ignore) {
-                    Role::Scope => {
-                        if seen.insert(node.id()) {
-                            let file = node.kind() == "source_file";
-                            scopes.push((node.start_byte() as u32, node.end_byte() as u32, file));
-                        }
+                    Role::Scope if seen.insert(node.id()) => {
+                        let file = node.kind() == "source_file";
+                        scopes.push((node.start_byte() as u32, node.end_byte() as u32, file));
                     }
                     Role::Def(kind) => defs.push((node, kind)),
-                    Role::Ignore => {}
+                    Role::Scope | Role::Ignore => {}
                 }
             }
         }
     }
     let incomplete = timed_out || cursor.did_exceed_match_limit();
+    ((scopes, defs), incomplete)
+}
 
-    // Innermost scope of a position: the containing scope with the latest
-    // start (scopes nest properly).
-    scopes.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
-    let innermost = |pos: u32| -> Option<(u32, u32, bool)> {
-        let upto = scopes.partition_point(|s| s.0 <= pos);
-        scopes[..upto].iter().rev().find(|s| pos < s.1).copied()
-    };
+/// Scope ranges sorted by start (outer first on ties); scopes nest properly.
+struct Scopes(Vec<(u32, u32, bool)>);
+
+impl Scopes {
+    fn new(mut scopes: Vec<(u32, u32, bool)>) -> Self {
+        scopes.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+        Scopes(scopes)
+    }
+
+    /// Innermost scope of a position: the containing scope with the latest
+    /// start.
+    fn innermost(&self, pos: u32) -> Option<(u32, u32, bool)> {
+        let upto = self.0.partition_point(|s| s.0 <= pos);
+        self.0[..upto].iter().rev().find(|s| pos < s.1).copied()
+    }
+}
+
+/// The scope of a definition and whether it is a method receiver; `None`
+/// for definitions that bind nothing (parameters of function types and
+/// interface methods, names outside any local scope).
+fn binding_scope(node: Node<'_>, kind: DefKind, scopes: &Scopes) -> Option<((u32, u32), bool)> {
+    if kind == DefKind::TypeParameter {
+        let decl =
+            ancestor(node, &["function_declaration", "method_declaration", "type_spec", "type_alias", "method_elem"])?;
+        return Some(((decl.start_byte() as u32, decl.end_byte() as u32), false));
+    }
+    let mut receiver = false;
+    if kind == DefKind::Parameter {
+        // Parameters of function types and interface methods bind nothing.
+        let list = node.parent().and_then(|p| p.parent());
+        let owner = list.and_then(|l| l.parent());
+        if owner.is_some_and(|o| matches!(o.kind(), "function_type" | "method_elem")) {
+            return None;
+        }
+        receiver = is_receiver_list(list, owner);
+    }
+    match scopes.innermost(node.start_byte() as u32) {
+        Some((s, e, false)) => Some(((s, e), receiver)),
+        _ => None,
+    }
+}
+
+/// Whether parameter list `list` is the receiver of method declaration `owner`.
+fn is_receiver_list(list: Option<Node<'_>>, owner: Option<Node<'_>>) -> bool {
+    let (Some(l), Some(o)) = (list, owner) else { return false };
+    o.kind() == "method_declaration" && o.child_by_field_name("receiver").is_some_and(|r| r.id() == l.id())
+}
+
+/// Runs the locals query over `tree` and builds the table. `time_budget`
+/// bounds the query run.
+pub(crate) fn build(tree: &Tree, source: &[u8], time_budget: Duration) -> Result<Locals, ExtractError> {
+    let lq = locals_query()?;
+    let ((scopes, defs), incomplete) = run_query(lq, tree, source, time_budget);
+    let scopes = Scopes::new(scopes);
 
     let mut locals = Locals { incomplete, ..Default::default() };
     let mut seen_defs = std::collections::HashSet::new();
@@ -479,39 +535,7 @@ pub(crate) fn build(tree: &Tree, source: &[u8], time_budget: Duration) -> Result
             continue;
         }
         let pos = node.start_byte() as u32;
-        let mut receiver = false;
-        let scope = match kind {
-            DefKind::TypeParameter => {
-                let decl = ancestor(
-                    node,
-                    &["function_declaration", "method_declaration", "type_spec", "type_alias", "method_elem"],
-                );
-                match decl {
-                    Some(d) => (d.start_byte() as u32, d.end_byte() as u32),
-                    None => continue,
-                }
-            }
-            _ => {
-                if kind == DefKind::Parameter {
-                    // Parameters of function types and interface methods bind nothing.
-                    let list = node.parent().and_then(|p| p.parent());
-                    let owner = list.and_then(|l| l.parent());
-                    if owner.is_some_and(|o| matches!(o.kind(), "function_type" | "method_elem")) {
-                        continue;
-                    }
-                    if let (Some(l), Some(o)) = (list, owner)
-                        && o.kind() == "method_declaration"
-                        && o.child_by_field_name("receiver").is_some_and(|r| r.id() == l.id())
-                    {
-                        receiver = true;
-                    }
-                }
-                match innermost(pos) {
-                    Some((s, e, false)) => (s, e),
-                    _ => continue,
-                }
-            }
-        };
+        let Some((scope, receiver)) = binding_scope(node, kind, &scopes) else { continue };
         let (start, end, visible_from) = visibility(node, kind, scope);
         let switch = if kind == DefKind::TypeSwitch {
             ancestor(node, &["type_switch_statement"]).map_or(0, |s| s.start_byte() as u32)
@@ -696,30 +720,37 @@ func (s Set[K]) Has(k K) bool { return false }
         let mut out = Vec::new();
         let mut cursor = tree.walk();
         loop {
-            let n = cursor.node();
-            if n.kind() == "identifier"
-                && let Some(b) = locals.lookup(text(n, src.as_bytes()), n.start_byte() as u32)
-            {
-                let line = n.start_position().row + 1;
-                let ty = if b.receiver {
-                    "$self".to_string()
-                } else {
-                    locals.type_of_use(b, n, src.as_bytes()).unwrap_or("-".into())
-                };
-                out.push(format!("{}@{line}={ty}", text(n, src.as_bytes())));
+            out.extend(typed_use(&locals, cursor.node(), src.as_bytes()));
+            if !advance(&mut cursor) {
+                out.sort();
+                out.dedup();
+                return out;
             }
-            if cursor.goto_first_child() {
-                continue;
+        }
+    }
+
+    /// `name@line=type` of an identifier use that is local.
+    fn typed_use(locals: &Locals, n: Node<'_>, source: &[u8]) -> Option<String> {
+        if n.kind() != "identifier" {
+            return None;
+        }
+        let b = locals.lookup(text(n, source), n.start_byte() as u32)?;
+        let line = n.start_position().row + 1;
+        let ty = if b.receiver { "$self".to_string() } else { locals.type_of_use(b, n, source).unwrap_or("-".into()) };
+        Some(format!("{}@{line}={ty}", text(n, source)))
+    }
+
+    /// Moves `cursor` to the next node in pre-order; false past the last.
+    fn advance(cursor: &mut rueca_extract::tree_sitter::TreeCursor<'_>) -> bool {
+        if cursor.goto_first_child() {
+            return true;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                return true;
             }
-            loop {
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    out.sort();
-                    out.dedup();
-                    return out;
-                }
+            if !cursor.goto_parent() {
+                return false;
             }
         }
     }
