@@ -99,33 +99,7 @@ pub(crate) fn doc_comment(
     if style == CommentStyle::None {
         return None;
     }
-    let mut above: Vec<String> = Vec::new();
-    let mut l = line;
-    let mut in_block = false;
-    while l > 0 && above.len() < 50 {
-        l -= 1;
-        let t = line_text(src, lines, l).trim();
-        if matches!(style, CommentStyle::Slash | CommentStyle::Hcl) {
-            // `/* … */` blocks ending on the line above.
-            if in_block || t.ends_with("*/") {
-                let open = t.starts_with("/*");
-                let body = t.trim_start_matches("/*").trim_end_matches("*/").trim().trim_start_matches('*').trim();
-                if !body.is_empty() {
-                    above.push(body.to_string());
-                }
-                in_block = !open;
-                if open {
-                    continue;
-                }
-                continue;
-            }
-        }
-        match strip_line_comment(style, t) {
-            Some(c) if !t.is_empty() => above.push(c.to_string()),
-            _ => break,
-        }
-    }
-    above.reverse();
+    let above = comments_above(src, lines, style, line);
     let mut doc = above.join("\n").trim().to_string();
     if let Some(after) = after
         && let Some(c) = trailing_comment(src, lines, style, line, after)
@@ -137,6 +111,41 @@ pub(crate) fn doc_comment(
     }
     let doc = doc.trim();
     (!doc.is_empty()).then(|| truncate(doc, MAX_DOC))
+}
+
+/// The comment lines (line comments, and `/* … */` blocks for C-like
+/// styles) directly above `line`, top first, at most about 50.
+fn comments_above(src: &str, lines: &LineIndex, style: CommentStyle, line: usize) -> Vec<String> {
+    let blocks = matches!(style, CommentStyle::Slash | CommentStyle::Hcl);
+    let mut above: Vec<String> = Vec::new();
+    let mut l = line;
+    let mut in_block = false;
+    while l > 0 && above.len() < 50 {
+        l -= 1;
+        let t = line_text(src, lines, l).trim();
+        // `/* … */` blocks ending on the line above.
+        if blocks && (in_block || t.ends_with("*/")) {
+            in_block = block_comment_line(t, &mut above);
+            continue;
+        }
+        match strip_line_comment(style, t) {
+            Some(c) if !t.is_empty() => above.push(c.to_string()),
+            _ => break,
+        }
+    }
+    above.reverse();
+    above
+}
+
+/// A line of a `/* … */` block read bottom-up: its body joins `above`.
+/// Whether the block continues above (the line does not open it).
+fn block_comment_line(t: &str, above: &mut Vec<String>) -> bool {
+    let open = t.starts_with("/*");
+    let body = t.trim_start_matches("/*").trim_end_matches("*/").trim().trim_start_matches('*').trim();
+    if !body.is_empty() {
+        above.push(body.to_string());
+    }
+    !open
 }
 
 /// A trailing comment on `line`, starting after byte `after` and outside
@@ -258,20 +267,29 @@ pub(crate) fn interpolations(text: &str) -> Vec<(String, std::ops::Range<usize>)
             i += 2;
             continue;
         }
-        let (start, braced) = if b.get(i + 1) == Some(&b'{') { (i + 2, true) } else { (i + 1, false) };
-        let mut j = start;
-        while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
-            j += 1;
-        }
-        let valid = j > start && !b[start].is_ascii_digit();
-        let closed = !braced || matches!(b.get(j), Some(b'}' | b':' | b'-' | b'?' | b'+'));
-        if valid && closed {
-            let end = if braced { text[j..].find('}').map_or(j, |k| j + k + 1) } else { j };
-            out.push((text[start..j].to_string(), i..end));
-        }
-        i = j.max(i + 1);
+        let (found, next) = interpolation_at(text, i);
+        out.extend(found);
+        i = next;
     }
     out
+}
+
+/// The `$NAME` / `${NAME…}` interpolation at the `$` at byte `i`, if valid,
+/// and the byte where scanning resumes.
+fn interpolation_at(text: &str, i: usize) -> (Option<(String, std::ops::Range<usize>)>, usize) {
+    let b = text.as_bytes();
+    let (start, braced) = if b.get(i + 1) == Some(&b'{') { (i + 2, true) } else { (i + 1, false) };
+    let mut j = start;
+    while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+        j += 1;
+    }
+    let valid = j > start && !b[start].is_ascii_digit();
+    let closed = !braced || matches!(b.get(j), Some(b'}' | b':' | b'-' | b'?' | b'+'));
+    let found = (valid && closed).then(|| {
+        let end = if braced { text[j..].find('}').map_or(j, |k| j + k + 1) } else { j };
+        (text[start..j].to_string(), i..end)
+    });
+    (found, j.max(i + 1))
 }
 
 /// Whether `name` is a plausible environment variable name.

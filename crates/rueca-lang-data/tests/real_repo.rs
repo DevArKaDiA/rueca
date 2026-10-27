@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use rueca_extract::{Budget, ExtractError, LanguagePack, ProjectFiles};
 use rueca_lang_data::DataPack;
-use rueca_model::{Label, Language, RefKind};
+use rueca_model::{FileFacts, Label, Language, RefKind};
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -53,6 +53,57 @@ struct Totals {
     imports: usize,
     imports_resolved: usize,
     partial: usize,
+}
+
+impl Totals {
+    /// Counts definitions by kind, checking spans, parents and env values.
+    fn add_definitions(&mut self, p: &str, f: &FileFacts) {
+        self.defs += f.definitions.len();
+        for d in &f.definitions {
+            assert!(
+                d.span.contains(&d.name_span) || d.name_span.start_byte == d.name_span.end_byte,
+                "{p}: {}",
+                d.qualified_name
+            );
+            if let Some(parent) = d.parent {
+                assert!((parent as usize) < f.definitions.len(), "{p}: parent of {}", d.qualified_name);
+            }
+            match d.label {
+                Label::Key => self.keys += 1,
+                Label::EnvVar => {
+                    self.env_providers += 1;
+                    self.kind_nodes += 1;
+                    let sig = d.signature.as_deref().unwrap_or("");
+                    assert!(sig.ends_with("•••") || !sig.contains(['=', ':']), "{p}: env value in {sig}");
+                }
+                _ => self.kind_nodes += 1,
+            }
+        }
+    }
+
+    fn add_references(&mut self, f: &FileFacts) {
+        for r in &f.references {
+            let kind = match r.kind {
+                RefKind::DataRef => "data_ref",
+                RefKind::EnvVar => "env_read",
+                RefKind::ConfigKey => "config_read",
+                _ => "other",
+            };
+            *self.refs.entry(kind.to_string()).or_default() += 1;
+        }
+    }
+
+    /// Counts imports and those resolving in the checkout; samples the rest.
+    fn add_imports(&mut self, p: &str, f: &FileFacts, project: &ProjectFiles, unresolved: &mut Vec<String>) {
+        for i in &f.imports {
+            self.imports += 1;
+            if rueca_lang_data::resolve_import(p, &i.module, project).is_some() {
+                self.imports_resolved += 1;
+            } else if unresolved.len() < 15 {
+                unresolved.push(format!("{p} -> {}", i.module));
+            }
+        }
+    }
 }
 
 #[test]
@@ -98,44 +149,9 @@ fn extract_real_repository() {
         tot.files += 1;
         tot.bytes += source.len();
         tot.partial += usize::from(f.parse_errors > 0);
-        tot.defs += f.definitions.len();
-        for d in &f.definitions {
-            assert!(
-                d.span.contains(&d.name_span) || d.name_span.start_byte == d.name_span.end_byte,
-                "{p}: {}",
-                d.qualified_name
-            );
-            if let Some(parent) = d.parent {
-                assert!((parent as usize) < f.definitions.len(), "{p}: parent of {}", d.qualified_name);
-            }
-            match d.label {
-                Label::Key => tot.keys += 1,
-                Label::EnvVar => {
-                    tot.env_providers += 1;
-                    tot.kind_nodes += 1;
-                    let sig = d.signature.as_deref().unwrap_or("");
-                    assert!(sig.ends_with("•••") || !sig.contains(['=', ':']), "{p}: env value in {sig}");
-                }
-                _ => tot.kind_nodes += 1,
-            }
-        }
-        for r in &f.references {
-            let kind = match r.kind {
-                RefKind::DataRef => "data_ref",
-                RefKind::EnvVar => "env_read",
-                RefKind::ConfigKey => "config_read",
-                _ => "other",
-            };
-            *tot.refs.entry(kind.to_string()).or_default() += 1;
-        }
-        for i in &f.imports {
-            tot.imports += 1;
-            if rueca_lang_data::resolve_import(&p, &i.module, &project).is_some() {
-                tot.imports_resolved += 1;
-            } else if unresolved.len() < 15 {
-                unresolved.push(format!("{p} -> {}", i.module));
-            }
-        }
+        tot.add_definitions(&p, &f);
+        tot.add_references(&f);
+        tot.add_imports(&p, &f, &project, &mut unresolved);
     }
     for (lang, t) in &per_lang {
         eprintln!("{lang}: {t:?}");

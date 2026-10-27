@@ -103,71 +103,70 @@ pub fn parse(path: &str) -> Option<Vec<Segment>> {
     let mut chars = path.char_indices().peekable();
     let mut expect_segment = true;
     while let Some(&(i, c)) = chars.peek() {
-        match c {
-            '[' => {
-                chars.next();
-                if chars.peek().map(|p| p.1) == Some('"') {
-                    let (s, _) = read_quoted(&mut chars)?;
-                    out.push(Segment::Id(s));
-                } else {
-                    let mut n = String::new();
-                    while let Some(&(_, d)) = chars.peek() {
-                        if d == ']' {
-                            break;
-                        }
-                        n.push(d);
-                        chars.next();
-                    }
-                    out.push(Segment::Index(n.parse().ok()?));
-                }
-                if chars.next()?.1 != ']' {
-                    return None;
-                }
-                expect_segment = false;
-            }
-            '.' if !expect_segment => {
-                chars.next();
-                expect_segment = true;
-            }
-            '{' if out.is_empty() && i == 0 => {
-                chars.next();
-                let mut n = String::new();
-                for (_, d) in chars.by_ref() {
-                    if d == '}' {
-                        break;
-                    }
-                    n.push(d);
-                }
-                out.push(Segment::Doc(n.parse().ok()?));
-                expect_segment = false;
-            }
-            '"' if expect_segment => {
-                let (s, _) = read_quoted(&mut chars)?;
-                out.push(Segment::Key(s));
-                expect_segment = false;
-            }
-            _ if expect_segment => {
-                let mut k = String::new();
-                while let Some(&(_, d)) = chars.peek() {
-                    if d == '.' || d == '[' {
-                        break;
-                    }
-                    k.push(d);
-                    chars.next();
-                }
-                if k.is_empty() {
-                    return None;
-                }
-                out.push(Segment::Key(k));
-                expect_segment = false;
-            }
-            _ => return None,
+        if c == '.' && !expect_segment {
+            chars.next();
+            expect_segment = true;
+            continue;
         }
+        let seg = match c {
+            '[' => bracket_segment(&mut chars)?,
+            '{' if out.is_empty() && i == 0 => doc_segment(&mut chars)?,
+            '"' if expect_segment => Segment::Key(read_quoted(&mut chars)?.0),
+            _ if expect_segment => bare_key(&mut chars)?,
+            _ => return None,
+        };
+        out.push(seg);
+        expect_segment = false;
     }
     (!expect_segment || out.is_empty()).then_some(out)
 }
 
-fn read_quoted(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> Option<(String, ())> {
+type Chars<'a> = std::iter::Peekable<std::str::CharIndices<'a>>;
+
+/// Characters up to (not including) the first one matching `stop`.
+fn take_until(chars: &mut Chars<'_>, stop: impl Fn(char) -> bool) -> String {
+    let mut s = String::new();
+    while let Some(&(_, d)) = chars.peek() {
+        if stop(d) {
+            break;
+        }
+        s.push(d);
+        chars.next();
+    }
+    s
+}
+
+/// `["id"]` or `[N]`.
+fn bracket_segment(chars: &mut Chars<'_>) -> Option<Segment> {
+    chars.next();
+    let seg = if chars.peek().map(|p| p.1) == Some('"') {
+        Segment::Id(read_quoted(chars)?.0)
+    } else {
+        Segment::Index(take_until(chars, |d| d == ']').parse().ok()?)
+    };
+    (chars.next()?.1 == ']').then_some(seg)
+}
+
+/// `{N}` (a document index, only at the start).
+fn doc_segment(chars: &mut Chars<'_>) -> Option<Segment> {
+    chars.next();
+    let mut n = String::new();
+    for (_, d) in chars.by_ref() {
+        if d == '}' {
+            break;
+        }
+        n.push(d);
+    }
+    Some(Segment::Doc(n.parse().ok()?))
+}
+
+/// An unquoted key, up to the next `.` or `[`; none when empty.
+fn bare_key(chars: &mut Chars<'_>) -> Option<Segment> {
+    let k = take_until(chars, |d| d == '.' || d == '[');
+    (!k.is_empty()).then_some(Segment::Key(k))
+}
+
+fn read_quoted(chars: &mut Chars<'_>) -> Option<(String, ())> {
     if chars.next()?.1 != '"' {
         return None;
     }

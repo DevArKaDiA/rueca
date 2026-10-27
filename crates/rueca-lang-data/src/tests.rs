@@ -654,28 +654,21 @@ fn random_and_mutated_inputs_never_panic() {
 
 /// Leaf key paths of a `serde_json` value, formatted like Rueca's.
 fn leaves_json(v: &serde_json::Value, prefix: &str, depth: usize, out: &mut Vec<String>) {
-    if let serde_json::Value::Object(m) = v {
-        {
-            for (k, v) in m {
-                if k == "$ref" {
-                    continue;
-                }
-                let p = keypath::join(prefix, &keypath::key_segment(k));
-                if depth < MAX_DEPTH {
-                    match v {
-                        serde_json::Value::Object(_) => leaves_json(v, &p, depth + 1, out),
-                        serde_json::Value::Array(items) => {
-                            out.push(p.clone());
-                            for (i, it) in items.iter().enumerate() {
-                                if it.is_object() && i < MAX_ELEMENTS {
-                                    leaves_json(it, &keypath::join(&p, &keypath::index_segment(i)), depth + 2, out);
-                                }
-                            }
-                        }
-                        _ => out.push(p),
-                    }
+    let serde_json::Value::Object(m) = v else { return };
+    if depth >= MAX_DEPTH {
+        return;
+    }
+    for (k, v) in m.iter().filter(|(k, _)| *k != "$ref") {
+        let p = keypath::join(prefix, &keypath::key_segment(k));
+        match v {
+            serde_json::Value::Object(_) => leaves_json(v, &p, depth + 1, out),
+            serde_json::Value::Array(items) => {
+                out.push(p.clone());
+                for (i, it) in items.iter().enumerate().take(MAX_ELEMENTS).filter(|(_, it)| it.is_object()) {
+                    leaves_json(it, &keypath::join(&p, &keypath::index_segment(i)), depth + 2, out);
                 }
             }
+            _ => out.push(p),
         }
     }
 }

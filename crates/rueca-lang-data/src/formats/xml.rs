@@ -95,41 +95,10 @@ fn element(out: &mut Out<'_>, kind: XmlKind, node: XNode<'_, '_>, parent: Option
         let n = seen.entry(tag).or_default();
         let index = *n;
         *n += 1;
-        let id = identity(kind, child);
-        let mut path = keypath::join(qn, &keypath::key_segment(tag));
-        let name = match (&id, counts[tag] > 1) {
-            (Some(id), _) => {
-                path = keypath::join(&path, &keypath::id_segment(id));
-                id.clone()
-            }
-            (None, true) => {
-                path = keypath::join(&path, &keypath::index_segment(index));
-                tag.to_string()
-            }
-            (None, false) => tag.to_string(),
-        };
+        let base = keypath::join(qn, &keypath::key_segment(tag));
+        let (path, name) = element_path(base, tag, identity(kind, child), counts[tag] > 1, index);
         let range = child.range();
         let name_span = range.start + 1..(range.start + 1 + child.tag_name().name().len()).min(range.end);
-        let preview = match leaf_text(child) {
-            Some(_) if text::is_secret_name(tag) => MASK.to_string(),
-            Some(t) => text::preview(t),
-            None => {
-                let attrs: Vec<String> =
-                    child.attributes().take(3).map(|a| format!("{}={}", a.name(), text::preview(a.value()))).collect();
-                let kids: Vec<&str> =
-                    child.children().filter(XNode::is_element).take(3).map(|c| c.tag_name().name()).collect();
-                if !kids.is_empty() { format!("{{{}}}", kids.join(", ")) } else { format!("{{{}}}", attrs.join(", ")) }
-            }
-        };
-        let doc = child
-            .prev_sibling()
-            .and_then(|p| {
-                if p.is_text() && p.text().is_some_and(|t| t.trim().is_empty()) { p.prev_sibling() } else { Some(p) }
-            })
-            .filter(XNode::is_comment)
-            .and_then(|c| c.text())
-            .map(|t| text::truncate(t.trim(), 500))
-            .filter(|t| !t.is_empty());
         let Some(def) = out.def(Def {
             label: Label::Key,
             name,
@@ -137,24 +106,72 @@ fn element(out: &mut Out<'_>, kind: XmlKind, node: XNode<'_, '_>, parent: Option
             parent,
             span: range.clone(),
             name_span,
-            signature: Some(format!("{tag}: {preview}")),
-            doc,
+            signature: Some(format!("{tag}: {}", preview(child, tag))),
+            doc: leading_comment(child),
         }) else {
             return;
         };
-        match (kind, tag, node.tag_name().name()) {
-            (XmlKind::Maven, "module", "modules") | (XmlKind::Maven, "relativePath", "parent") => {
-                if let Some(t) = leaf_text(child) {
-                    out.import(t, &range);
-                }
-            }
-            (XmlKind::MsBuild, "ProjectReference", _) => {
-                if let Some(inc) = child.attribute("Include") {
-                    out.import(&inc.replace('\\', "/"), &range);
-                }
-            }
-            _ => {}
-        }
+        imports(out, kind, child, node.tag_name().name());
         element(out, kind, child, Some(def), &path, depth + 1);
+    }
+}
+
+/// Key path and name of a child element under `base` (its tag's path):
+/// keyed by its identity, else indexed when the tag repeats.
+fn element_path(base: String, tag: &str, id: Option<String>, repeated: bool, index: usize) -> (String, String) {
+    match (id, repeated) {
+        (Some(id), _) => (keypath::join(&base, &keypath::id_segment(&id)), id),
+        (None, true) => (keypath::join(&base, &keypath::index_segment(index)), tag.to_string()),
+        (None, false) => (base, tag.to_string()),
+    }
+}
+
+/// Signature preview: the (masked when secret) text of a leaf, else its
+/// first child tags, else its first attributes.
+fn preview(child: XNode<'_, '_>, tag: &str) -> String {
+    match leaf_text(child) {
+        Some(_) if text::is_secret_name(tag) => MASK.to_string(),
+        Some(t) => text::preview(t),
+        None => {
+            let attrs: Vec<String> =
+                child.attributes().take(3).map(|a| format!("{}={}", a.name(), text::preview(a.value()))).collect();
+            let kids: Vec<&str> =
+                child.children().filter(XNode::is_element).take(3).map(|c| c.tag_name().name()).collect();
+            if !kids.is_empty() { format!("{{{}}}", kids.join(", ")) } else { format!("{{{}}}", attrs.join(", ")) }
+        }
+    }
+}
+
+/// The comment right before an element (blank text in between allowed).
+fn leading_comment(child: XNode<'_, '_>) -> Option<String> {
+    child
+        .prev_sibling()
+        .and_then(
+            |p| {
+                if p.is_text() && p.text().is_some_and(|t| t.trim().is_empty()) { p.prev_sibling() } else { Some(p) }
+            },
+        )
+        .filter(XNode::is_comment)
+        .and_then(|c| c.text())
+        .map(|t| text::truncate(t.trim(), 500))
+        .filter(|t| !t.is_empty())
+}
+
+/// Maven `<modules><module>` / `<parent><relativePath>` and MSBuild
+/// `<ProjectReference Include>` → imports.
+fn imports(out: &mut Out<'_>, kind: XmlKind, child: XNode<'_, '_>, parent_tag: &str) {
+    let range = child.range();
+    match (kind, child.tag_name().name(), parent_tag) {
+        (XmlKind::Maven, "module", "modules") | (XmlKind::Maven, "relativePath", "parent") => {
+            if let Some(t) = leaf_text(child) {
+                out.import(t, &range);
+            }
+        }
+        (XmlKind::MsBuild, "ProjectReference", _) => {
+            if let Some(inc) = child.attribute("Include") {
+                out.import(&inc.replace('\\', "/"), &range);
+            }
+        }
+        _ => {}
     }
 }

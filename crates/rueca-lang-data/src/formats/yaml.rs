@@ -46,113 +46,133 @@ enum Frame {
 
 pub(crate) fn parse(src: &str) -> Tree {
     let offsets = CharOffsets::new(src);
-    let mut docs: Vec<Node> = Vec::new();
-    let mut stack: Vec<Frame> = Vec::new();
-    let mut root: Option<Node> = None;
-    let mut errors = 0;
+    let mut b = Builder { src, docs: Vec::new(), stack: Vec::new(), root: None, errors: 0 };
     let mut parser = Parser::new_from_str(src);
     let mut events = 0usize;
-    let bytes = src.as_bytes();
-    let is_flow = |at: usize, open: u8| bytes.get(at) == Some(&open);
-
     loop {
         events += 1;
         if events > MAX_EVENTS {
-            errors += 1;
+            b.errors += 1;
             break;
         }
         let (ev, span) = match parser.next_event() {
             None => break,
             Some(Ok(e)) => e,
             Some(Err(_)) => {
-                errors += 1;
+                b.errors += 1;
                 break;
             }
         };
         let start = offsets.byte(span.start.index());
         let end = offsets.byte(span.end.index()).max(start);
+        if !b.event(ev, start, end) {
+            break;
+        }
+    }
+    // Unterminated input (error or event cap): keep what was built.
+    close_all(src, &mut b.stack, &mut b.root);
+    if let Some(r) = b.root.take() {
+        b.docs.push(r);
+    }
+    Tree { docs: b.docs, errors: b.errors }
+}
+
+/// The tree under construction: finished documents, open collections and
+/// the current document's root.
+struct Builder<'s> {
+    src: &'s str,
+    docs: Vec<Node>,
+    stack: Vec<Frame>,
+    root: Option<Node>,
+    errors: u32,
+}
+
+impl Builder<'_> {
+    /// Applies one event spanning `start..end` (bytes). False to stop.
+    fn event(&mut self, ev: Event<'_>, start: usize, end: usize) -> bool {
         // A finished node to attach to the frame on top of the stack.
         let node: Option<Node> = match ev {
             Event::StreamStart | Event::Nothing => None,
-            Event::StreamEnd => break,
+            Event::StreamEnd => return false,
             Event::DocumentStart(_) => {
-                root = None;
+                self.root = None;
                 None
             }
-            Event::DocumentEnd => {
-                close_all(src, &mut stack, &mut root);
-                docs.push(root.take().unwrap_or_else(|| Node::new(Value::Scalar(String::new()), start..start)));
-                if docs.len() >= MAX_DOCS {
-                    errors += 1;
-                    break;
-                }
-                None
-            }
-            Event::MappingStart(anchor, _) | Event::SequenceStart(anchor, _)
-                if matches!(stack.last(), Some(Frame::Skip { .. })) =>
-            {
-                let _ = anchor;
-                if let Some(Frame::Skip { depth, .. }) = stack.last_mut() {
-                    *depth += 1;
-                }
-                None
-            }
-            Event::MappingEnd | Event::SequenceEnd if matches!(stack.last(), Some(Frame::Skip { .. })) => {
-                let Some(Frame::Skip { depth, start: s }) = stack.last_mut() else { unreachable!() };
-                if *depth > 0 {
-                    *depth -= 1;
-                    None
-                } else {
-                    let s = *s;
-                    stack.pop();
-                    Some(Node::new(Value::Folded, s..end))
-                }
-            }
-            Event::Scalar(..) | Event::Alias(_) if matches!(stack.last(), Some(Frame::Skip { .. })) => None,
+            Event::DocumentEnd => return self.document_end(start),
+            _ if matches!(self.stack.last(), Some(Frame::Skip { .. })) => self.skipped(&ev, end),
             Event::MappingStart(anchor, _) => {
-                let complex_key = matches!(stack.last(), Some(Frame::Map { key: None, .. }));
-                if stack.len() >= BUILD_DEPTH || complex_key {
-                    stack.push(Frame::Skip { depth: 0, start });
-                } else {
-                    stack.push(Frame::Map {
-                        entries: Vec::new(),
-                        key: None,
-                        start,
-                        anchor,
-                        flow: is_flow(start, b'{'),
-                    });
-                }
+                let flow = self.is_flow(start, b'{');
+                self.open(start, Frame::Map { entries: Vec::new(), key: None, start, anchor, flow });
                 None
             }
             Event::SequenceStart(anchor, _) => {
-                let complex_key = matches!(stack.last(), Some(Frame::Map { key: None, .. }));
-                if stack.len() >= BUILD_DEPTH || complex_key {
-                    stack.push(Frame::Skip { depth: 0, start });
-                } else {
-                    stack.push(Frame::Seq { items: Vec::new(), start, anchor, flow: is_flow(start, b'[') });
-                }
+                let flow = self.is_flow(start, b'[');
+                self.open(start, Frame::Seq { items: Vec::new(), start, anchor, flow });
                 None
             }
-            Event::MappingEnd | Event::SequenceEnd => stack.pop().map(|f| close(f, end)),
+            Event::MappingEnd | Event::SequenceEnd => self.stack.pop().map(|f| close(f, end)),
             Event::Scalar(text, style, anchor, _) => {
                 let (s, e) = if style == ScalarStyle::Plain && text.is_empty() { (start, start) } else { (start, end) };
-                let e = trim_end(src, s, e);
+                let e = trim_end(self.src, s, e);
                 let mut n = Node::new(Value::Scalar(text.into_owned()), s..e);
                 n.anchor = (anchor != 0).then_some(anchor);
                 Some(n)
             }
-            Event::Alias(id) => Some(Node::new(Value::Alias(id), start..trim_end(src, start, end))),
+            Event::Alias(id) => Some(Node::new(Value::Alias(id), start..trim_end(self.src, start, end))),
         };
         if let Some(n) = node {
-            attach(src, &mut stack, &mut root, n);
+            attach(self.src, &mut self.stack, &mut self.root, n);
+        }
+        true
+    }
+
+    fn is_flow(&self, at: usize, open: u8) -> bool {
+        self.src.as_bytes().get(at) == Some(&open)
+    }
+
+    /// Ends a document. False once [`MAX_DOCS`] are read.
+    fn document_end(&mut self, start: usize) -> bool {
+        close_all(self.src, &mut self.stack, &mut self.root);
+        self.docs.push(self.root.take().unwrap_or_else(|| Node::new(Value::Scalar(String::new()), start..start)));
+        if self.docs.len() >= MAX_DOCS {
+            self.errors += 1;
+            return false;
+        }
+        true
+    }
+
+    /// Opens a collection, or a skipped one below the build depth or as a
+    /// complex key.
+    fn open(&mut self, start: usize, frame: Frame) {
+        let complex_key = matches!(self.stack.last(), Some(Frame::Map { key: None, .. }));
+        if self.stack.len() >= BUILD_DEPTH || complex_key {
+            self.stack.push(Frame::Skip { depth: 0, start });
+        } else {
+            self.stack.push(frame);
         }
     }
-    // Unterminated input (error or event cap): keep what was built.
-    close_all(src, &mut stack, &mut root);
-    if let Some(r) = root.take() {
-        docs.push(r);
+
+    /// An event inside a skipped collection: only nesting is tracked; the
+    /// collection's own end yields a folded node.
+    fn skipped(&mut self, ev: &Event<'_>, end: usize) -> Option<Node> {
+        let Some(Frame::Skip { depth, start }) = self.stack.last_mut() else { return None };
+        match ev {
+            Event::MappingStart(..) | Event::SequenceStart(..) => {
+                *depth += 1;
+                None
+            }
+            Event::MappingEnd | Event::SequenceEnd if *depth > 0 => {
+                *depth -= 1;
+                None
+            }
+            Event::MappingEnd | Event::SequenceEnd => {
+                let s = *start;
+                self.stack.pop();
+                Some(Node::new(Value::Folded, s..end))
+            }
+            _ => None,
+        }
     }
-    Tree { docs, errors }
 }
 
 /// End of a value trimmed back over trailing whitespace.

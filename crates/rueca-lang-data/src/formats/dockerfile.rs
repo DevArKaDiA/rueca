@@ -34,71 +34,109 @@ struct Instruction {
 
 /// Logical instructions of a Dockerfile.
 fn instructions(src: &str) -> Vec<Instruction> {
-    let mut escape = '\\';
-    let mut out = Vec::new();
-    let mut directives = true;
+    let mut lexer = Lexer { escape: '\\', directives: true, current: None, heredocs: Vec::new(), out: Vec::new() };
     let mut pos = 0;
-    let mut current: Option<(usize, String)> = None;
-    let mut heredocs: Vec<(String, bool)> = Vec::new();
     for raw in src.split_inclusive('\n') {
         let start = pos;
         pos += raw.len();
         let line = raw.trim_end_matches(['\n', '\r']);
-        if let Some((term, strip_tabs)) = heredocs.first() {
-            let l = if *strip_tabs { line.trim_start_matches('\t') } else { line };
-            if l == term {
-                heredocs.remove(0);
-            }
-            if let Some(last) = out.last_mut() {
-                let last: &mut Instruction = last;
-                last.range.end = start + line.len();
-            }
+        if lexer.heredoc_line(line, start) {
             continue;
         }
         let t = line.trim_start();
-        if directives {
-            let d = t.strip_prefix('#').map(str::trim);
-            match d.and_then(|d| d.split_once('=')) {
-                Some((k, v)) if !k.trim().contains(' ') => {
-                    if k.trim().eq_ignore_ascii_case("escape") && v.trim() == "`" {
-                        escape = '`';
-                    }
-                    continue;
-                }
-                _ => directives = false,
-            }
-        }
-        if t.starts_with('#') || (t.is_empty() && current.is_none()) {
+        if lexer.directives && lexer.directive(t) {
             continue;
         }
-        if t.is_empty() {
+        if t.starts_with('#') || t.is_empty() {
             continue;
         }
-        let (s, mut text) = current.take().unwrap_or((start + (line.len() - t.len()), String::new()));
-        let body = t.trim_end();
-        if let Some(stripped) = body.strip_suffix(escape) {
-            text.push_str(stripped);
-            text.push(' ');
-            current = Some((s, text));
-            continue;
-        }
-        text.push_str(body);
-        let end = start + line.trim_end().len();
-        let (kw, args) = match text.split_once(char::is_whitespace) {
-            Some((k, a)) => (k.to_ascii_uppercase(), a.trim().to_string()),
-            None => (text.to_ascii_uppercase(), String::new()),
-        };
-        heredocs.extend(heredoc_terminators(&args));
-        out.push(Instruction { keyword: kw, args, range: s..end });
-        if out.len() >= MAX_INSTRUCTIONS {
+        if lexer.instruction_line(line, t, start) {
             break;
         }
     }
-    if let Some((s, text)) = current {
-        let (kw, args) = text.split_once(char::is_whitespace).unwrap_or((text.as_str(), ""));
-        out.push(Instruction { keyword: kw.to_ascii_uppercase(), args: args.trim().to_string(), range: s..src.len() });
+    lexer.finish(src.len())
+}
+
+/// Line-by-line state of [`instructions`].
+struct Lexer {
+    /// The escape (line continuation) character.
+    escape: char,
+    /// Still in the parser-directive header.
+    directives: bool,
+    /// Start and text of an instruction continued on the next line.
+    current: Option<(usize, String)>,
+    /// Pending heredoc terminators (and whether tabs are stripped).
+    heredocs: Vec<(String, bool)>,
+    out: Vec<Instruction>,
+}
+
+impl Lexer {
+    /// A line inside a heredoc: extends the last instruction, ends the
+    /// heredoc at its terminator. False when no heredoc is open.
+    fn heredoc_line(&mut self, line: &str, start: usize) -> bool {
+        let Some((term, strip_tabs)) = self.heredocs.first() else { return false };
+        let l = if *strip_tabs { line.trim_start_matches('\t') } else { line };
+        if l == term {
+            self.heredocs.remove(0);
+        }
+        if let Some(last) = self.out.last_mut() {
+            last.range.end = start + line.len();
+        }
+        true
     }
-    out
+
+    /// A `# key=value` parser directive (`escape` is honoured); the first
+    /// other line ends the directive header.
+    fn directive(&mut self, t: &str) -> bool {
+        let d = t.strip_prefix('#').map(str::trim);
+        match d.and_then(|d| d.split_once('=')) {
+            Some((k, v)) if !k.trim().contains(' ') => {
+                if k.trim().eq_ignore_ascii_case("escape") && v.trim() == "`" {
+                    self.escape = '`';
+                }
+                true
+            }
+            _ => {
+                self.directives = false;
+                false
+            }
+        }
+    }
+
+    /// A non-empty, non-comment line (`t` is it without leading blanks):
+    /// continues or completes an instruction. True once the instruction
+    /// limit is reached.
+    fn instruction_line(&mut self, line: &str, t: &str, start: usize) -> bool {
+        let (s, mut text) = self.current.take().unwrap_or((start + (line.len() - t.len()), String::new()));
+        let body = t.trim_end();
+        if let Some(stripped) = body.strip_suffix(self.escape) {
+            text.push_str(stripped);
+            text.push(' ');
+            self.current = Some((s, text));
+            return false;
+        }
+        text.push_str(body);
+        let end = start + line.trim_end().len();
+        let (keyword, args) = split_keyword(&text);
+        self.heredocs.extend(heredoc_terminators(&args));
+        self.out.push(Instruction { keyword, args, range: s..end });
+        self.out.len() >= MAX_INSTRUCTIONS
+    }
+
+    /// The instructions, with a trailing continued one ending the file.
+    fn finish(mut self, len: usize) -> Vec<Instruction> {
+        if let Some((s, text)) = self.current.take() {
+            let (keyword, args) = split_keyword(&text);
+            self.out.push(Instruction { keyword, args, range: s..len });
+        }
+        self.out
+    }
+}
+
+/// Upper-cased keyword and trimmed arguments of an instruction's text.
+fn split_keyword(text: &str) -> (String, String) {
+    let (kw, args) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+    (kw.to_ascii_uppercase(), args.trim().to_string())
 }
 
 /// `<<EOF`, `<<-EOF`, `<<"EOF"` markers in an instruction.
@@ -132,30 +170,36 @@ fn pairs(args: &str) -> Vec<(String, String)> {
         if chars.peek().is_none() {
             break;
         }
-        let mut word = String::new();
-        let mut quote: Option<char> = None;
-        while let Some(&c) = chars.peek() {
-            match (quote, c) {
-                (None, c) if c.is_whitespace() => break,
-                (None, '"' | '\'') => quote = Some(c),
-                (Some(q), c) if c == q => quote = None,
-                (_, '\\') => {
-                    chars.next();
-                    if let Some(n) = chars.next() {
-                        word.push(n);
-                    }
-                    continue;
-                }
-                _ => word.push(c),
-            }
-            chars.next();
-        }
+        let word = shell_word(&mut chars);
         match word.split_once('=') {
             Some((k, v)) => out.push((k.to_string(), v.to_string())),
             None => out.push((word, String::new())),
         }
     }
     out
+}
+
+/// One whitespace-delimited word, quotes removed and escapes applied.
+fn shell_word(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut word = String::new();
+    let mut quote: Option<char> = None;
+    while let Some(&c) = chars.peek() {
+        match (quote, c) {
+            (None, c) if c.is_whitespace() => break,
+            (None, '"' | '\'') => quote = Some(c),
+            (Some(q), c) if c == q => quote = None,
+            (_, '\\') => {
+                chars.next();
+                if let Some(n) = chars.next() {
+                    word.push(n);
+                }
+                continue;
+            }
+            _ => word.push(c),
+        }
+        chars.next();
+    }
+    word
 }
 
 /// Value of `--name=value` flags at the start of `args`, and the rest.
@@ -183,149 +227,186 @@ struct Stage {
     end: usize,
 }
 
+impl Instruction {
+    /// Source range of `needle` after the keyword, else of the keyword.
+    fn locate(&self, src: &str, needle: &str) -> Range<usize> {
+        let hay = src.get(self.range.clone()).unwrap_or("");
+        match hay.get(self.keyword.len()..).and_then(|h| h.find(needle)) {
+            Some(i) if !needle.is_empty() => {
+                let s = self.range.start + self.keyword.len() + i;
+                s..s + needle.len()
+            }
+            _ => self.range.start..self.range.start + self.keyword.len().min(self.range.len()),
+        }
+    }
+}
+
+/// The build stages seen so far and their names (lower-cased).
+#[derive(Default)]
+struct Stages {
+    list: Vec<Stage>,
+    by_name: HashMap<String, usize>,
+}
+
+impl Stages {
+    /// Index of the stage named `name` (or numbered `name`).
+    fn find(&self, name: &str) -> Option<usize> {
+        self.by_name
+            .get(&name.to_ascii_lowercase())
+            .copied()
+            .or_else(|| name.parse::<usize>().ok().filter(|&i| i < self.list.len()))
+    }
+}
+
 pub(crate) fn extract(out: &mut Out<'_>) {
     let src = out.src;
-    let mut stages: Vec<Stage> = Vec::new();
-    let mut by_name: HashMap<String, usize> = HashMap::new();
+    let mut stages = Stages::default();
     for ins in instructions(src) {
-        let in_src = |needle: &str| -> Range<usize> {
-            let hay = src.get(ins.range.clone()).unwrap_or("");
-            match hay.get(ins.keyword.len()..).and_then(|h| h.find(needle)) {
-                Some(i) if !needle.is_empty() => {
-                    let s = ins.range.start + ins.keyword.len() + i;
-                    s..s + needle.len()
-                }
-                _ => ins.range.start..ins.range.start + ins.keyword.len().min(ins.range.len()),
-            }
-        };
         // Parser directives (`# syntax=…`) are not docs.
         let doc = out
             .doc(ins.range.start, None)
             .map(|d| d.lines().filter(|l| !is_directive(l)).collect::<Vec<_>>().join("\n"))
             .filter(|d| !d.trim().is_empty());
         if ins.keyword != "FROM"
-            && let Some(st) = stages.last_mut()
+            && let Some(st) = stages.list.last_mut()
         {
             st.end = ins.range.end;
         }
         match ins.keyword.as_str() {
             "FROM" => {
-                let (_, rest) = flags(&ins.args);
-                let words: Vec<&str> = rest.split_whitespace().collect();
-                let Some(image) = words.first().copied() else { continue };
-                let alias = match words.as_slice() {
-                    [_, as_kw, name, ..] if as_kw.eq_ignore_ascii_case("as") => Some(*name),
-                    _ => None,
-                };
-                let index = stages.len();
-                let (qn, name, name_span) = match alias {
-                    Some(a) => (keypath::key_segment(a), a.to_string(), in_src(a)),
-                    None => {
-                        let q = format!("stage{}", keypath::index_segment(index));
-                        (q.clone(), q, in_src(image))
-                    }
-                };
-                let line = text::preview(&format!("FROM {}", ins.args));
-                let Some(id) = out.def(Def {
-                    label: Label::Image,
-                    name,
-                    qn: qn.clone(),
-                    parent: None,
-                    span: ins.range.clone(),
-                    name_span,
-                    signature: Some(line),
-                    doc,
-                }) else {
+                if !from(out, &mut stages, &ins, doc) {
                     return;
-                };
-                if let Some(&base) = by_name.get(&image.to_ascii_lowercase()) {
-                    let b = stages[base].qn.clone();
-                    out.get(id).bases.push(b);
-                }
-                if let Some(a) = alias {
-                    by_name.entry(a.to_ascii_lowercase()).or_insert(index);
-                }
-                stages.push(Stage { id, qn, start: ins.range.start, end: ins.range.end });
-            }
-            "ENV" | "ARG" => {
-                let is_env = ins.keyword == "ENV";
-                let list: Vec<(String, String, bool)> =
-                    if is_env && !ins.args.split_whitespace().next().unwrap_or("").contains('=') {
-                        // Legacy `ENV KEY value with spaces`.
-                        match ins.args.split_once(char::is_whitespace) {
-                            Some((k, v)) => vec![(k.to_string(), v.trim().to_string(), true)],
-                            None => vec![(ins.args.clone(), String::new(), false)],
-                        }
-                    } else {
-                        pairs(&ins.args)
-                            .into_iter()
-                            .map(|(k, v)| {
-                                let has = ins.args.contains(&format!("{k}="));
-                                (k, v, has)
-                            })
-                            .collect()
-                    };
-                let stage = stages.last();
-                for (k, v, has_value) in list {
-                    if !text::is_env_name(&k) {
-                        continue;
-                    }
-                    let qn = match stage {
-                        Some(s) => keypath::join(&s.qn, &keypath::key_segment(&k)),
-                        None => keypath::key_segment(&k),
-                    };
-                    let (label, sig) = if is_env {
-                        (Label::EnvVar, if has_value { format!("ENV {k}={MASK}") } else { format!("ENV {k}") })
-                    } else if !has_value {
-                        (Label::Variable, format!("ARG {k}"))
-                    } else if text::is_secret_name(&k) {
-                        (Label::Variable, format!("ARG {k}={MASK}"))
-                    } else {
-                        (Label::Variable, text::preview(&format!("ARG {k}={v}")))
-                    };
-                    out.def(Def {
-                        label,
-                        name: k.clone(),
-                        qn,
-                        parent: stage.map(|s| s.id),
-                        span: ins.range.clone(),
-                        name_span: in_src(&k),
-                        signature: Some(sig),
-                        doc: doc.clone(),
-                    });
                 }
             }
-            "COPY" | "ADD" | "RUN" => {
-                let (fl, _) = flags(&ins.args);
-                let mut froms: Vec<String> = Vec::new();
-                for (k, v) in fl {
-                    match k.as_str() {
-                        "from" => froms.push(v),
-                        "mount" => {
-                            froms.extend(v.split(',').filter_map(|p| p.strip_prefix("from=")).map(str::to_string))
-                        }
-                        _ => {}
-                    }
-                }
-                let enclosing = stages.last().map(|s| s.id);
-                for f in froms {
-                    let target = by_name
-                        .get(&f.to_ascii_lowercase())
-                        .copied()
-                        .or_else(|| f.parse::<usize>().ok().filter(|&i| i < stages.len()));
-                    if let Some(t) = target {
-                        let qn = stages[t].qn.clone();
-                        let span = in_src(&f);
-                        out.reference(RefKind::DataRef, &qn, None, enclosing, &span);
-                    }
-                }
-            }
+            "ENV" | "ARG" => variables(out, stages.list.last(), &ins, doc),
+            "COPY" | "ADD" | "RUN" => stage_refs(out, &stages, &ins),
             _ => {}
         }
     }
-    for s in &stages {
+    for s in &stages.list {
         let span = out.span(&(s.start..s.end));
         out.get(s.id).span = span;
+    }
+}
+
+/// `FROM image [AS name]`: a new stage, based on an earlier one when
+/// `image` names it. False when the definition limit is reached.
+fn from(out: &mut Out<'_>, stages: &mut Stages, ins: &Instruction, doc: Option<String>) -> bool {
+    let (_, rest) = flags(&ins.args);
+    let words: Vec<&str> = rest.split_whitespace().collect();
+    let Some(image) = words.first().copied() else { return true };
+    let alias = match words.as_slice() {
+        [_, as_kw, name, ..] if as_kw.eq_ignore_ascii_case("as") => Some(*name),
+        _ => None,
+    };
+    let index = stages.list.len();
+    let (qn, name, name_span) = match alias {
+        Some(a) => (keypath::key_segment(a), a.to_string(), ins.locate(out.src, a)),
+        None => {
+            let q = format!("stage{}", keypath::index_segment(index));
+            (q.clone(), q, ins.locate(out.src, image))
+        }
+    };
+    let line = text::preview(&format!("FROM {}", ins.args));
+    let Some(id) = out.def(Def {
+        label: Label::Image,
+        name,
+        qn: qn.clone(),
+        parent: None,
+        span: ins.range.clone(),
+        name_span,
+        signature: Some(line),
+        doc,
+    }) else {
+        return false;
+    };
+    if let Some(&base) = stages.by_name.get(&image.to_ascii_lowercase()) {
+        let b = stages.list[base].qn.clone();
+        out.get(id).bases.push(b);
+    }
+    if let Some(a) = alias {
+        stages.by_name.entry(a.to_ascii_lowercase()).or_insert(index);
+    }
+    stages.list.push(Stage { id, qn, start: ins.range.start, end: ins.range.end });
+    true
+}
+
+/// `(name, value, has a value)` of the variables an `ENV` / `ARG` sets.
+fn assignments(ins: &Instruction) -> Vec<(String, String, bool)> {
+    let is_env = ins.keyword == "ENV";
+    if is_env && !ins.args.split_whitespace().next().unwrap_or("").contains('=') {
+        // Legacy `ENV KEY value with spaces`.
+        return match ins.args.split_once(char::is_whitespace) {
+            Some((k, v)) => vec![(k.to_string(), v.trim().to_string(), true)],
+            None => vec![(ins.args.clone(), String::new(), false)],
+        };
+    }
+    pairs(&ins.args)
+        .into_iter()
+        .map(|(k, v)| {
+            let has = ins.args.contains(&format!("{k}="));
+            (k, v, has)
+        })
+        .collect()
+}
+
+/// Label and signature of a variable: ENV values and secret-named ARG
+/// values are masked.
+fn variable_signature(is_env: bool, k: &str, v: &str, has_value: bool) -> (Label, String) {
+    if is_env {
+        (Label::EnvVar, if has_value { format!("ENV {k}={MASK}") } else { format!("ENV {k}") })
+    } else if !has_value {
+        (Label::Variable, format!("ARG {k}"))
+    } else if text::is_secret_name(k) {
+        (Label::Variable, format!("ARG {k}={MASK}"))
+    } else {
+        (Label::Variable, text::preview(&format!("ARG {k}={v}")))
+    }
+}
+
+/// `ENV` (env var providers) and `ARG` (variables), children of the stage.
+fn variables(out: &mut Out<'_>, stage: Option<&Stage>, ins: &Instruction, doc: Option<String>) {
+    let is_env = ins.keyword == "ENV";
+    for (k, v, has_value) in assignments(ins) {
+        if !text::is_env_name(&k) {
+            continue;
+        }
+        let qn = match stage {
+            Some(s) => keypath::join(&s.qn, &keypath::key_segment(&k)),
+            None => keypath::key_segment(&k),
+        };
+        let (label, sig) = variable_signature(is_env, &k, &v, has_value);
+        out.def(Def {
+            label,
+            name: k.clone(),
+            qn,
+            parent: stage.map(|s| s.id),
+            span: ins.range.clone(),
+            name_span: ins.locate(out.src, &k),
+            signature: Some(sig),
+            doc: doc.clone(),
+        });
+    }
+}
+
+/// `--from=<stage>` and `--mount=…,from=<stage>` → references to the stage.
+fn stage_refs(out: &mut Out<'_>, stages: &Stages, ins: &Instruction) {
+    let (fl, _) = flags(&ins.args);
+    let mut froms: Vec<String> = Vec::new();
+    for (k, v) in fl {
+        match k.as_str() {
+            "from" => froms.push(v),
+            "mount" => froms.extend(v.split(',').filter_map(|p| p.strip_prefix("from=")).map(str::to_string)),
+            _ => {}
+        }
+    }
+    let enclosing = stages.list.last().map(|s| s.id);
+    for f in froms {
+        if let Some(t) = stages.find(&f) {
+            let qn = stages.list[t].qn.clone();
+            let span = ins.locate(out.src, &f);
+            out.reference(RefKind::DataRef, &qn, None, enclosing, &span);
+        }
     }
 }
 
