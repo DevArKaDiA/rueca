@@ -8,6 +8,8 @@
 //!   constructors named like the class.
 //! - `java_like_member_slots` — a field and a method with one name, type
 //!   lookups that skip constructors, `OVERRIDES` paired by signature.
+//! - `java_like_overload_delegation` — an overload calling a sibling of its
+//!   own name links the siblings, not itself; recursion by type still does.
 //! - `cpp_like_declarations_and_includes` — `Definition::is_declaration`,
 //!   includes as transitive star imports, out-of-line bodies,
 //!   `$type:ns::Foo`.
@@ -22,7 +24,7 @@
 
 use rueca_extract::{
     Budget, ExtractError, LanguagePack, ModuleScope, ProjectFiles, Registry, member_receiver, namespace_receiver,
-    type_receiver,
+    type_receiver, with_arg_types,
 };
 use rueca_model::{
     Definition, EdgeKind, EdgeMeta, FileFacts, Import, ImportedName, Label, Language, NodeId, RefKind, Reference,
@@ -462,6 +464,59 @@ fn java_like_member_slots() {
     g.lacks("com.acme.Circle.draw", "com.acme.Shape.draw(String,int)", EdgeKind::Overrides);
     // Constructors override nothing.
     g.lacks("com.acme.Circle.Circle", "com.acme.Shape.Shape", EdgeKind::Overrides);
+}
+
+#[test]
+fn java_like_overload_delegation() {
+    use Label::*;
+    // src/com/acme/Json.java: class Json {
+    //   Object fromJson(String s, Class c) { return fromJson(s, TypeToken.get(c)); }
+    //   Object fromJson(String s, Type t) { ... }
+    //   Object fromJson(String s, TypeToken t) { return fromJson(s, t); }
+    //   String toJson(Object o) { return toJson(JsonNull.INSTANCE); }
+    //   String toJson(JsonElement e) { ... }
+    //   int depth(int n) { return depth(n - 1); }  int depth(String s) { ... } }
+    let mut f = F::default();
+    f.def(Package, "com.acme", "package", None);
+    let json = f.def(Class, "Json", "Json", None);
+    let by_class = f.def(Method, "fromJson", "Json.fromJson(String,Class)", Some(json));
+    f.def(Method, "fromJson", "Json.fromJson(String,Type)", Some(json));
+    let by_token = f.def(Method, "fromJson", "Json.fromJson(String,TypeToken)", Some(json));
+    let to_object = f.def(Method, "toJson", "Json.toJson(Object)", Some(json));
+    f.def(Method, "toJson", "Json.toJson(JsonElement)", Some(json));
+    let depth_int = f.def(Method, "depth", "Json.depth(int)", Some(json));
+    f.def(Method, "depth", "Json.depth(String)", Some(json));
+    let unknown = [Some("String".to_string()), None];
+    f.r(RefKind::Call, &with_arg_types("fromJson", &unknown), None, Some(by_class), Some(2));
+    f.r(RefKind::Call, &with_arg_types("fromJson", &unknown), None, Some(by_token), Some(2));
+    f.r(RefKind::Call, "toJson", None, Some(to_object), Some(1));
+    f.r(RefKind::Call, &with_arg_types("depth", &[Some("int".to_string())]), None, Some(depth_int), Some(1));
+    let files = vec![f.file("src/com/acme/Json.java", Language::Java)];
+
+    let mut registry = Registry::new();
+    registry.register(Box::new(FakeJava));
+    let out = run(registry, files);
+    let g = G(&out.graph);
+
+    let m = |s: &str| format!("com.acme.Json.{s}");
+    let fan = 0.9 * 0.8;
+    // The ambiguous delegation links the other overloads, never itself.
+    let by_class = m("fromJson(String,Class)");
+    g.lacks(&by_class, &by_class, EdgeKind::Calls);
+    g.has(&by_class, &m("fromJson(String,Type)"), EdgeKind::Calls, Strategy::TypeResolved, fan);
+    g.has(&by_class, &m("fromJson(String,TypeToken)"), EdgeKind::Calls, Strategy::TypeResolved, fan);
+    let by_token = m("fromJson(String,TypeToken)");
+    g.lacks(&by_token, &by_token, EdgeKind::Calls);
+    g.has(&by_token, &by_class, EdgeKind::Calls, Strategy::TypeResolved, fan);
+    // Unknown argument type, two overloads: the sibling only.
+    let to_object = m("toJson(Object)");
+    g.lacks(&to_object, &to_object, EdgeKind::Calls);
+    g.has(&to_object, &m("toJson(JsonElement)"), EdgeKind::Calls, Strategy::TypeResolved, fan);
+    // Recursion chosen by argument type keeps its self-loop (a recursion
+    // through an argument of unknown type is taken for a delegation).
+    let depth = m("depth(int)");
+    g.has(&depth, &depth, EdgeKind::Calls, Strategy::TypeResolved, 0.9);
+    g.lacks(&depth, &m("depth(String)"), EdgeKind::Calls);
 }
 
 // ---------------------------------------------------------------------------

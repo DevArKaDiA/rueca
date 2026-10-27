@@ -199,7 +199,12 @@
 //!   then the one whose parameter types equal the known argument types, else
 //!   the one whose parameters pass to every other's (the narrowest
 //!   primitives), wins. One candidate keeps the confidence; several are all
-//!   linked × 0.8; none fitting links the whole set × 0.8. Constructors of
+//!   linked × 0.8; none fitting links the whole set × 0.8. Such a fan-out
+//!   leaves out the calling overload itself when another candidate remains:
+//!   an overload calling its own name with an argument of unknown type
+//!   (`fromJson(String, Class)` → `fromJson(json, TypeToken.get(c))`)
+//!   delegates to a sibling far more often than it recurses. A recursion
+//!   chosen by arity or argument types keeps its self-loop. Constructors of
 //!   Java and C/C++ are the members named like the class. A trailing
 //!   comment in a suffix (C/C++ `get(/*const*/)`, `write(T/*#2*/)`: same
 //!   parameters, other qualifiers or constraints) is not a parameter. For
@@ -2299,8 +2304,7 @@ impl<'a> Resolver<'a> {
         *self.stats.resolved_by_strategy.entry(strategy.as_str().to_string()).or_default() += 1;
         // Declarations → their body; overloads → by arity (RFC 0003 §10).
         let target = self.prefer_body(target);
-        let args = item.arg_types.as_deref();
-        for (target, strategy, confidence) in self.expand_overloads(f, target, item.arity, args, strategy, confidence) {
+        for (target, strategy, confidence) in self.expand_overloads(f, caller, item, target, strategy, confidence) {
             let meta = EdgeMeta { confidence, strategy, evidence: Some((f, item.span)) };
             match edge_kind {
                 EdgeKind::Decorates => {
@@ -2329,9 +2333,7 @@ impl<'a> Resolver<'a> {
                         };
                         if let Some((c, _)) = ctor {
                             let c = self.prefer_body(c);
-                            for (c, s, conf) in
-                                self.expand_overloads(f, c, item.arity, args, strategy, confidence * 0.95)
-                            {
+                            for (c, s, conf) in self.expand_overloads(f, caller, item, c, strategy, confidence * 0.95) {
                                 let m = EdgeMeta { confidence: conf, strategy: s, ..meta };
                                 self.add_edge(caller, c, EdgeKind::Calls, m);
                             }

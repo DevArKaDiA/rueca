@@ -13,6 +13,13 @@ use super::*;
 /// Confidence multiplier when a reference links several overloads.
 const OVERLOAD_FANOUT: f32 = 0.8;
 
+/// The candidates of an ambiguous overload choice without `caller`, unless
+/// it is the only one: see [`Resolver::expand_overloads`].
+fn without_caller(cands: &[NodeId], caller: NodeId) -> Vec<NodeId> {
+    let others: Vec<NodeId> = cands.iter().copied().filter(|&n| n != caller).collect();
+    if others.is_empty() { cands.to_vec() } else { others }
+}
+
 /// Splits an overload suffix off a qualified name: `Parser.parse(String)` →
 /// (`Parser.parse`, `String`). `None` when the name has no suffix. A
 /// trailing comment that tells apart callables with the same parameter
@@ -729,10 +736,16 @@ impl<'a> Resolver<'a> {
     }
 
     /// Expands a resolved target to its overloads (RFC 0003 §10.1): those
-    /// whose parameter count fits `arity`, narrowed by the static argument
-    /// types when the pack reports them (`args`, see [`overload_by_types`]);
+    /// whose parameter count fits the call's arity, narrowed by the static
+    /// argument types when the pack reports them (see [`overload_by_types`]);
     /// one candidate keeps the confidence, several are all linked × 0.8,
-    /// and no fitting one links the whole set × 0.8.
+    /// and no fitting one links the whole set × 0.8. A fan-out never links
+    /// the calling overload itself (`caller`) when another candidate
+    /// remains: an overload calling its own name with arguments of unknown
+    /// type (`fromJson(String, Class)` → `fromJson(json,
+    /// TypeToken.get(c))`) delegates to a sibling far more often than it
+    /// recurses; a recursion chosen by arity or argument types keeps its
+    /// self-loop.
     /// For a C/C++ reference of file `from`, only the overloads declared in
     /// files it sees (itself and its includes, transitively) are candidates,
     /// when there are any: C++ overload resolution only considers visible
@@ -740,13 +753,14 @@ impl<'a> Resolver<'a> {
     pub(crate) fn expand_overloads(
         &self,
         from: FileId,
+        caller: NodeId,
+        item: &RefItem<'_>,
         target: NodeId,
-        arity: Option<u32>,
-        args: Option<&[&str]>,
         strategy: Strategy,
         confidence: f32,
     ) -> Vec<(NodeId, Strategy, f32)> {
         let Some(&set) = self.overload_of.get(&target) else { return vec![(target, strategy, confidence)] };
+        let (arity, args) = (item.arity, item.arg_types.as_deref());
         let all = self.overload_sets[set].as_slice();
         let visible_only: Vec<NodeId>;
         let set: &[NodeId] = if self.families[from as usize] == Some(LanguageFamily::C) {
@@ -777,10 +791,13 @@ impl<'a> Resolver<'a> {
                 chosen = overload_by_types(&typed, args);
             }
         }
+        let fan_out = |cands: &[NodeId]| {
+            without_caller(cands, caller).into_iter().map(|n| (n, strategy, confidence * OVERLOAD_FANOUT)).collect()
+        };
         match chosen.len() {
             1 => vec![(chosen[0], strategy, confidence)],
-            0 => set.iter().map(|&n| (n, strategy, confidence * OVERLOAD_FANOUT)).collect(),
-            _ => chosen.into_iter().map(|n| (n, strategy, confidence * OVERLOAD_FANOUT)).collect(),
+            0 => fan_out(set),
+            _ => fan_out(&chosen),
         }
     }
 

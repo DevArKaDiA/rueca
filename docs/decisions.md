@@ -1,5 +1,22 @@
 # Decisions log
 
+## 2026-10-27 — An ambiguous overload call never targets its caller
+
+The Java benchmark showed self-loop `CALLS` edges on overloads that
+delegate to a sibling of the same name: gson `Gson.fromJson(String,
+Class)` calls `fromJson(json, TypeToken.get(classOfT))`, javapoet
+`ArrayTypeName.of(Type)` calls `of(TypeName.get(componentType))`. The
+argument built by a call has no static type, so several overloads fit
+and the fan-out (× 0.8) linked all of them — the caller included.
+`Resolver::expand_overloads` now leaves the caller out of a fan-out when
+another candidate remains; a call whose arity or argument types pick the
+caller alone is still a recursive self-loop. Measured on gson and
+javapoet: 11 + 8 wrong self-loops go, the other overloads keep their
+edges; 2 true recursions through an untyped argument (javapoet
+`TypeName.get(Type, Map)`, `ClassName.get(Class)`) lose their self-loop
+— telling them apart needs the argument's type (the return type of the
+call that builds it), which the packs do not report.
+
 ## 2026-10-26 — Repository routing as a prior; package links by joint resolution
 
 RFC 0006 phase 2. A query in organization mode also ranks the
