@@ -34,7 +34,8 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
-use rueca_segment::Store;
+use rueca_segment::org::OrgGeneration;
+use rueca_segment::{CatalogEntry, Store};
 use serde_json::{Value, json};
 use tracing_subscriber::EnvFilter;
 
@@ -455,57 +456,58 @@ fn cmd_links(store: &Path, org: &str, only: Option<&str>, json: bool, pretty: bo
     Ok(())
 }
 
+/// The `status` row of an indexed root (its segment's counts, or the error
+/// opening it).
+fn root_row(st: &Store, e: &CatalogEntry, now: u64) -> Value {
+    let mut row = json!({
+        "root": e.root,
+        "repo": e.repo,
+        "segment_id": e.segment_id,
+        "indexed_at": e.indexed_at,
+        "age_secs": now.saturating_sub(e.indexed_at),
+    });
+    match st.open_segment(&e.segment_id) {
+        Ok(seg) => {
+            let m = seg.meta();
+            row["commit"] = json!(m.snapshot.commit);
+            row["dirty"] = json!(m.snapshot.dirty);
+            row["nodes"] = json!(m.node_count);
+            row["edges"] = json!(m.edge_count);
+            row["files"] = json!(m.file_count);
+            row["bytes"] = json!(m.bytes);
+        }
+        Err(err) => row["error"] = json!(err.to_string()),
+    }
+    row
+}
+
+/// The `status` row of an organization.
+fn org_row(g: &OrgGeneration, now: u64) -> Value {
+    json!({
+        "name": g.name,
+        "generation": g.generation,
+        "created_at": g.created_at,
+        "age_secs": now.saturating_sub(g.created_at),
+        "repos": g.repos.iter().map(|r| json!({
+            "repo": r.repo,
+            "root": r.root,
+            "url": r.url,
+            "commit": r.snapshot.commit,
+            "segment_id": r.segment_id,
+            "docs": r.docs,
+            "index_bytes": r.index_bytes,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 fn cmd_status(store: &Path, json: bool, pretty: bool) -> anyhow::Result<()> {
     let st = Store::open(store)?;
     let mut entries = st.entries()?;
     entries.sort_by(|a, b| a.root.cmp(&b.root));
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let rows: Vec<Value> = entries
-        .iter()
-        .map(|e| {
-            let mut row = json!({
-                "root": e.root,
-                "repo": e.repo,
-                "segment_id": e.segment_id,
-                "indexed_at": e.indexed_at,
-                "age_secs": now.saturating_sub(e.indexed_at),
-            });
-            match st.open_segment(&e.segment_id) {
-                Ok(seg) => {
-                    let m = seg.meta();
-                    row["commit"] = json!(m.snapshot.commit);
-                    row["dirty"] = json!(m.snapshot.dirty);
-                    row["nodes"] = json!(m.node_count);
-                    row["edges"] = json!(m.edge_count);
-                    row["files"] = json!(m.file_count);
-                    row["bytes"] = json!(m.bytes);
-                }
-                Err(err) => row["error"] = json!(err.to_string()),
-            }
-            row
-        })
-        .collect();
+    let rows: Vec<Value> = entries.iter().map(|e| root_row(&st, e, now)).collect();
     let orgs = rueca_segment::org::list_orgs(store)?;
-    let org_rows: Vec<Value> = orgs
-        .iter()
-        .map(|g| {
-            json!({
-                "name": g.name,
-                "generation": g.generation,
-                "created_at": g.created_at,
-                "age_secs": now.saturating_sub(g.created_at),
-                "repos": g.repos.iter().map(|r| json!({
-                    "repo": r.repo,
-                    "root": r.root,
-                    "url": r.url,
-                    "commit": r.snapshot.commit,
-                    "segment_id": r.segment_id,
-                    "docs": r.docs,
-                    "index_bytes": r.index_bytes,
-                })).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
+    let org_rows: Vec<Value> = orgs.iter().map(|g| org_row(g, now)).collect();
     if json {
         println!("{}", render(&json!({ "store": store, "roots": rows, "orgs": org_rows }), pretty));
         return Ok(());

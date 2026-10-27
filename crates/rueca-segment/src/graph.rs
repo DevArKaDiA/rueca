@@ -109,33 +109,46 @@ pub(crate) fn write_graph(w: &mut BundleWriter, graph: &ResolvedGraph) -> Result
 
     let metas: Vec<EdgeMetaRec> = graph.edges.iter().map(|e| EdgeMetaRec::encode(&e.meta)).collect();
     w.add_pod("edge_meta", &metas)?;
-
     for dir in ["out", "in"] {
-        let mut order: Vec<u32> = (0..e as u32).collect();
-        let key = |i: u32| {
-            let ed = &graph.edges[i as usize];
-            let (a, b) = if dir == "out" { (ed.src, ed.dst) } else { (ed.dst, ed.src) };
-            (a, ed.kind.index() as u8, b, i)
-        };
-        order.sort_unstable_by_key(|&i| key(i));
-        let mut offsets = vec![0u32; n + 1];
-        let mut targets = Vec::with_capacity(e);
-        let mut kinds = Vec::with_capacity(e);
-        for &i in &order {
-            let (a, k, b, _) = key(i);
-            offsets[a as usize + 1] += 1;
-            targets.push(b);
-            kinds.push(k);
-        }
-        for j in 0..n {
-            offsets[j + 1] += offsets[j];
-        }
-        w.add_pod(&format!("adj.{dir}.offsets"), &offsets)?;
-        w.add_pod(&format!("adj.{dir}.targets"), &targets)?;
-        w.add_pod(&format!("adj.{dir}.kinds"), &kinds)?;
-        w.add_pod(&format!("adj.{dir}.edges"), &order)?;
+        write_adjacency(w, graph, dir)?;
     }
+    write_name_orders(w, graph)?;
+    write_file_nodes(w, graph)
+}
 
+/// The `out` (by source) or `in` (by destination) adjacency: CSR offsets
+/// per node, then the neighbours, edge kinds and edge ids sorted by (node,
+/// kind, neighbour, edge).
+fn write_adjacency(w: &mut BundleWriter, graph: &ResolvedGraph, dir: &str) -> Result<()> {
+    let (n, e) = (graph.nodes.len(), graph.edges.len());
+    let mut order: Vec<u32> = (0..e as u32).collect();
+    let key = |i: u32| {
+        let ed = &graph.edges[i as usize];
+        let (a, b) = if dir == "out" { (ed.src, ed.dst) } else { (ed.dst, ed.src) };
+        (a, ed.kind.index() as u8, b, i)
+    };
+    order.sort_unstable_by_key(|&i| key(i));
+    let mut offsets = vec![0u32; n + 1];
+    let mut targets = Vec::with_capacity(e);
+    let mut kinds = Vec::with_capacity(e);
+    for &i in &order {
+        let (a, k, b, _) = key(i);
+        offsets[a as usize + 1] += 1;
+        targets.push(b);
+        kinds.push(k);
+    }
+    for j in 0..n {
+        offsets[j + 1] += offsets[j];
+    }
+    w.add_pod(&format!("adj.{dir}.offsets"), &offsets)?;
+    w.add_pod(&format!("adj.{dir}.targets"), &targets)?;
+    w.add_pod(&format!("adj.{dir}.kinds"), &kinds)?;
+    w.add_pod(&format!("adj.{dir}.edges"), &order)
+}
+
+/// Node ids sorted by qualified name and by simple name, file ids by path.
+fn write_name_orders(w: &mut BundleWriter, graph: &ResolvedGraph) -> Result<()> {
+    let n = graph.nodes.len();
     let mut by_q: Vec<u32> = (0..n as u32).collect();
     by_q.sort_by(|&a, &b| {
         graph.nodes[a as usize].qualified_name.cmp(&graph.nodes[b as usize].qualified_name).then(a.cmp(&b))
@@ -146,9 +159,11 @@ pub(crate) fn write_graph(w: &mut BundleWriter, graph: &ResolvedGraph) -> Result
     w.add_pod("names.simple", &by_n)?;
     let mut by_path: Vec<u32> = (0..graph.files.len() as u32).collect();
     by_path.sort_by(|&a, &b| graph.files[a as usize].path.cmp(&graph.files[b as usize].path).then(a.cmp(&b)));
-    w.add_pod("files.by_path", &by_path)?;
+    w.add_pod("files.by_path", &by_path)
+}
 
-    // Per-file symbol lists, sorted by (span start, node id).
+/// Per-file symbol lists, sorted by (span start, node id).
+fn write_file_nodes(w: &mut BundleWriter, graph: &ResolvedGraph) -> Result<()> {
     let mut per_file: Vec<(u32, u32, u32)> = graph
         .nodes
         .iter()

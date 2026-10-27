@@ -588,58 +588,29 @@ impl Engine {
         root: Key,
         walk: &TraceWalk<'_>,
     ) -> anyhow::Result<BfsOut> {
-        let mut out =
-            BfsOut { nodes: Vec::new(), edges: BTreeMap::new(), truncated: false, tests_excluded: HashSet::new() };
-        let mut visited: HashMap<Dir, HashSet<Key>> = walk.dirs.iter().map(|&d| (d, HashSet::from([root]))).collect();
+        let mut state = BfsState {
+            out: BfsOut { nodes: Vec::new(), edges: BTreeMap::new(), truncated: false, tests_excluded: HashSet::new() },
+            visited: walk.dirs.iter().map(|&d| (d, HashSet::from([root]))).collect(),
+            root,
+        };
         let mut frontier: HashMap<Dir, Vec<Key>> = walk.dirs.iter().map(|&d| (d, vec![root])).collect();
         for level in 1..=walk.depth {
             for &dir in walk.dirs {
                 let mut current = std::mem::take(frontier.get_mut(&dir).expect("dir"));
                 current.sort_by_cached_key(|&k| (views[k.0].node(k.1).qualified_name.clone(), k));
                 let mut next = Vec::new();
-                for k in current {
+                for from in current {
                     for &kind in walk.kinds {
-                        for (other, meta, ev) in self.neighbours(views, org, k, dir, kind)? {
-                            if meta.confidence < walk.min_conf {
-                                continue;
-                            }
-                            if other != root
-                                && let Err(is_test) = walk.filter.check(&views[other.0], other.1)
-                            {
-                                if is_test {
-                                    out.tests_excluded.insert(other);
-                                }
-                                continue;
-                            }
-                            let seen = visited[&dir].contains(&other);
-                            if !seen {
-                                if out.nodes.len() >= walk.limit {
-                                    out.truncated = true;
-                                    continue;
-                                }
-                                visited.get_mut(&dir).expect("dir").insert(other);
-                                next.push(other);
-                                out.nodes.push((level, dir, other));
-                            }
-                            let key = match dir {
-                                Dir::Callers => (other, k, kind),
-                                Dir::Callees => (k, other, kind),
-                            };
-                            out.edges
-                                .entry(key)
-                                .and_modify(|m| {
-                                    if meta.confidence > m.0.confidence {
-                                        *m = (meta, ev);
-                                    }
-                                })
-                                .or_insert((meta, ev));
+                        let hop = Hop { level, dir, from, kind };
+                        for nb in self.neighbours(views, org, from, dir, kind)? {
+                            state.visit(views, walk, hop, nb, &mut next);
                         }
                     }
                 }
                 frontier.insert(dir, next);
             }
         }
-        Ok(out)
+        Ok(state.out)
     }
 
     pub(crate) fn get_file_outline(&self, a: GetFileOutlineArgs) -> anyhow::Result<Response> {
@@ -675,54 +646,10 @@ impl Engine {
         let views = &sel.views;
         let mut repos: Vec<(usize, RepositorySummary)> = Vec::new();
         for (vi, v) in views.iter().enumerate() {
-            if let Some((_, r)) = repos.iter_mut().find(|(_, r)| r.repo == v.repo()) {
-                r.refs.push(v.snap.ref_name.clone());
-                continue;
+            match repos.iter_mut().find(|(_, r)| r.repo == v.repo()) {
+                Some((_, r)) => r.refs.push(v.snap.ref_name.clone()),
+                None => repos.push((vi, repository_summary(v, sel.org.as_ref()))),
             }
-            let seg = &v.seg;
-            let mut languages = BTreeMap::new();
-            for f in seg.files() {
-                if let Some(l) = f.language {
-                    *languages.entry(l.as_str().to_string()).or_insert(0u32) += 1;
-                }
-            }
-            let symbols = seg.nodes().iter().filter(|n| !is_container(n.label)).count() as u32;
-            let (mut packages, mut depends_on) = (Vec::new(), Vec::new());
-            if let (Some(org), Some(i)) = (&sel.org, v.org_repo) {
-                if let Some(p) = org.index.profile(i) {
-                    packages = p.deps.packages.iter().map(|p| p.name.clone()).collect();
-                    packages.sort();
-                    packages.dedup();
-                }
-                if let Some(l) = &org.index.generation().repos[i].links {
-                    // Only dependencies the caller may see are named.
-                    depends_on = l
-                        .deps
-                        .iter()
-                        .filter(|d| {
-                            org.index.generation().repo_index(&d.repo).is_some_and(|j| org.visible.contains(&j))
-                        })
-                        .map(|d| d.repo.clone())
-                        .collect();
-                }
-            }
-            repos.push((
-                vi,
-                RepositorySummary {
-                    repo: v.repo().to_string(),
-                    root: v.snap.root.clone(),
-                    default_ref: v.snap.ref_name.clone(),
-                    commit: v.snap.commit.clone(),
-                    refs: vec![v.snap.ref_name.clone()],
-                    languages,
-                    files: seg.files().len() as u32,
-                    symbols,
-                    edges: seg.meta().edge_count,
-                    packages,
-                    depends_on,
-                    score: None,
-                },
-            ));
         }
         repos.sort_by(|a, b| a.1.repo.cmp(&b.1.repo));
         // `query`: the organization's repository routing, best first.
@@ -745,6 +672,57 @@ impl Engine {
         let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
         Ok(compact::list_repositories(&snaps, &repos, self.org.as_deref(), offset, budget(&a.common)))
     }
+}
+
+/// The summary of the repository of view `v` (its own ref only).
+fn repository_summary(v: &View, org: Option<&OrgCtx>) -> RepositorySummary {
+    let seg = &v.seg;
+    let mut languages = BTreeMap::new();
+    for l in seg.files().iter().filter_map(|f| f.language) {
+        *languages.entry(l.as_str().to_string()).or_insert(0u32) += 1;
+    }
+    let symbols = seg.nodes().iter().filter(|n| !is_container(n.label)).count() as u32;
+    let (packages, depends_on) = match (org, v.org_repo) {
+        (Some(org), Some(i)) => org_dependencies(org, i),
+        _ => (Vec::new(), Vec::new()),
+    };
+    RepositorySummary {
+        repo: v.repo().to_string(),
+        root: v.snap.root.clone(),
+        default_ref: v.snap.ref_name.clone(),
+        commit: v.snap.commit.clone(),
+        refs: vec![v.snap.ref_name.clone()],
+        languages,
+        files: seg.files().len() as u32,
+        symbols,
+        edges: seg.meta().edge_count,
+        packages,
+        depends_on,
+        score: None,
+    }
+}
+
+/// The packages organization repository `i` publishes and the visible
+/// repositories it depends on.
+fn org_dependencies(org: &OrgCtx, i: usize) -> (Vec<String>, Vec<String>) {
+    let mut packages = Vec::new();
+    if let Some(p) = org.index.profile(i) {
+        packages = p.deps.packages.iter().map(|p| p.name.clone()).collect();
+        packages.sort();
+        packages.dedup();
+    }
+    let generation = org.index.generation();
+    let depends_on = match &generation.repos[i].links {
+        // Only dependencies the caller may see are named.
+        Some(l) => l
+            .deps
+            .iter()
+            .filter(|d| generation.repo_index(&d.repo).is_some_and(|j| org.visible.contains(&j)))
+            .map(|d| d.repo.clone())
+            .collect(),
+        None => Vec::new(),
+    };
+    (packages, depends_on)
 }
 
 /// A node of a trace: (view index, node).
@@ -789,6 +767,84 @@ pub(crate) struct BfsOut {
     pub truncated: bool,
     /// Test neighbours skipped by the filter.
     pub tests_excluded: HashSet<Key>,
+}
+
+/// One expansion step of a trace: from node `from`, at depth `level`, in
+/// direction `dir`, along edges of `kind`.
+#[derive(Clone, Copy)]
+struct Hop {
+    level: u32,
+    dir: Dir,
+    from: Key,
+    kind: EdgeKind,
+}
+
+/// The state of a trace traversal ([`Engine::bfs`]).
+struct BfsState {
+    out: BfsOut,
+    /// Nodes discovered per direction.
+    visited: HashMap<Dir, HashSet<Key>>,
+    root: Key,
+}
+
+impl BfsState {
+    /// A neighbour (node, edge metadata, evidence view) reached by `hop`:
+    /// reported and queued in `next` when new, its edge kept when it is
+    /// the strongest; dropped below the confidence floor, when the filter
+    /// rejects it, or when a new node would exceed the limit.
+    fn visit(
+        &mut self,
+        views: &[View],
+        walk: &TraceWalk<'_>,
+        hop: Hop,
+        nb: (Key, rueca_model::EdgeMeta, usize),
+        next: &mut Vec<Key>,
+    ) {
+        let (other, meta, ev) = nb;
+        if meta.confidence < walk.min_conf {
+            return;
+        }
+        let Some(is_new) = self.admit(views, walk, hop, other) else { return };
+        if is_new {
+            next.push(other);
+        }
+        let key = match hop.dir {
+            Dir::Callers => (other, hop.from, hop.kind),
+            Dir::Callees => (hop.from, other, hop.kind),
+        };
+        self.out
+            .edges
+            .entry(key)
+            .and_modify(|m| {
+                if meta.confidence > m.0.confidence {
+                    *m = (meta, ev);
+                }
+            })
+            .or_insert((meta, ev));
+    }
+
+    /// Whether `other` is reported: `None` when filtered out or over the
+    /// limit, else whether it was discovered now.
+    fn admit(&mut self, views: &[View], walk: &TraceWalk<'_>, hop: Hop, other: Key) -> Option<bool> {
+        if other != self.root
+            && let Err(is_test) = walk.filter.check(&views[other.0], other.1)
+        {
+            if is_test {
+                self.out.tests_excluded.insert(other);
+            }
+            return None;
+        }
+        if self.visited[&hop.dir].contains(&other) {
+            return Some(false);
+        }
+        if self.out.nodes.len() >= walk.limit {
+            self.out.truncated = true;
+            return None;
+        }
+        self.visited.get_mut(&hop.dir).expect("dir").insert(other);
+        self.out.nodes.push((hop.level, hop.dir, other));
+        Some(true)
+    }
 }
 
 /// Which neighbours `trace` reports and traverses (the root is never filtered).

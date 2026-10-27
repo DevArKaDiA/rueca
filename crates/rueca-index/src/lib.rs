@@ -348,14 +348,7 @@ fn walk(root: &Path) -> anyhow::Result<Vec<String>> {
         .parents(true)
         .require_git(false)
         .follow_links(false)
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            if e.file_type().is_some_and(|t| t.is_dir()) {
-                e.depth() == 0 || !is_excluded_dir(&name)
-            } else {
-                !is_excluded_file(&name)
-            }
-        });
+        .filter_entry(keep_entry);
     let mut out = Vec::new();
     for entry in builder.build() {
         let entry = match entry {
@@ -369,23 +362,31 @@ fn walk(root: &Path) -> anyhow::Result<Vec<String>> {
             continue;
         }
         let Ok(rel) = entry.path().strip_prefix(root) else { continue };
-        let mut parts = Vec::new();
-        let mut ok = true;
-        for c in rel.components() {
-            match c.as_os_str().to_str() {
-                Some(s) => parts.push(s),
-                None => ok = false,
-            }
+        match slash_path(rel) {
+            Some(p) => out.push(p),
+            None => warn!("walk: skipping non-UTF-8 path {}", entry.path().display()),
         }
-        if !ok || parts.is_empty() {
-            warn!("walk: skipping non-UTF-8 path {}", entry.path().display());
-            continue;
-        }
-        out.push(parts.join("/"));
     }
     out.sort();
     out.dedup();
     Ok(out)
+}
+
+/// Whether the walk enters a directory (the root always) or lists a file.
+fn keep_entry(e: &ignore::DirEntry) -> bool {
+    let name = e.file_name().to_string_lossy();
+    if e.file_type().is_some_and(|t| t.is_dir()) {
+        e.depth() == 0 || !is_excluded_dir(&name)
+    } else {
+        !is_excluded_file(&name)
+    }
+}
+
+/// A relative path with `/` separators; `None` when a component is not
+/// UTF-8 or the path is empty.
+fn slash_path(rel: &Path) -> Option<String> {
+    let parts: Vec<&str> = rel.components().map(|c| c.as_os_str().to_str()).collect::<Option<_>>()?;
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 // ---------------------------------------------------------------------------

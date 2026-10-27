@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use regex_syntax::hir::{Class, Hir, HirKind};
+use regex_syntax::hir::{Class, ClassBytes, ClassUnicode, Hir, HirKind, Repetition};
 use roaring::RoaringBitmap;
 
 use crate::{Result, SegmentError};
@@ -135,116 +135,126 @@ fn empty_string() -> Info {
 fn analyze(h: &Hir) -> Info {
     match h.kind() {
         HirKind::Empty | HirKind::Look(_) => empty_string(),
-        HirKind::Literal(lit) => {
-            if lit.0.len() > MAX_LITERAL {
-                // Keep the plan small: long literals become an AND of their trigrams.
-                Info { exact: None, req: set_plan(&std::iter::once(lower(&lit.0)).collect()) }
-            } else {
-                exact(std::iter::once(lower(&lit.0)).collect())
-            }
-        }
-        HirKind::Class(Class::Unicode(c)) => {
-            let n: u32 = c.ranges().iter().map(|r| r.end() as u32 - r.start() as u32 + 1).sum();
-            if n == 0 {
-                return Info { exact: None, req: Plan::Nothing };
-            }
-            if n > MAX_CLASS {
-                return Info { exact: None, req: Plan::All };
-            }
-            let mut set = Set::new();
-            for r in c.ranges() {
-                for cp in r.start() as u32..=r.end() as u32 {
-                    if let Some(ch) = char::from_u32(cp) {
-                        let mut buf = [0u8; 4];
-                        set.insert(lower(ch.encode_utf8(&mut buf).as_bytes()));
-                    }
-                }
-            }
-            exact(set)
-        }
-        HirKind::Class(Class::Bytes(c)) => {
-            let n: u32 = c.ranges().iter().map(|r| r.end() as u32 - r.start() as u32 + 1).sum();
-            if n == 0 {
-                return Info { exact: None, req: Plan::Nothing };
-            }
-            if n > MAX_CLASS {
-                return Info { exact: None, req: Plan::All };
-            }
-            let set =
-                c.ranges().iter().flat_map(|r| r.start()..=r.end()).map(|b| vec![b.to_ascii_lowercase()]).collect();
-            exact(set)
-        }
+        HirKind::Literal(lit) => analyze_literal(&lit.0),
+        HirKind::Class(Class::Unicode(c)) => analyze_unicode_class(c),
+        HirKind::Class(Class::Bytes(c)) => analyze_byte_class(c),
         HirKind::Capture(cap) => analyze(&cap.sub),
-        HirKind::Repetition(rep) => {
-            if rep.max == Some(0) {
-                return empty_string();
+        HirKind::Repetition(rep) => analyze_repetition(rep),
+        HirKind::Concat(children) => analyze_concat(children),
+        HirKind::Alternation(children) => analyze_alternation(children),
+    }
+}
+
+fn analyze_literal(lit: &[u8]) -> Info {
+    if lit.len() > MAX_LITERAL {
+        // Keep the plan small: long literals become an AND of their trigrams.
+        Info { exact: None, req: set_plan(&std::iter::once(lower(lit)).collect()) }
+    } else {
+        exact(std::iter::once(lower(lit)).collect())
+    }
+}
+
+/// The plan of a class too small (no member) or too large to expand, by
+/// its number of members `n`.
+fn class_limit(n: u32) -> Option<Info> {
+    if n == 0 {
+        return Some(Info { exact: None, req: Plan::Nothing });
+    }
+    (n > MAX_CLASS).then_some(Info { exact: None, req: Plan::All })
+}
+
+fn analyze_unicode_class(c: &ClassUnicode) -> Info {
+    let n: u32 = c.ranges().iter().map(|r| r.end() as u32 - r.start() as u32 + 1).sum();
+    if let Some(info) = class_limit(n) {
+        return info;
+    }
+    let mut set = Set::new();
+    for ch in c.ranges().iter().flat_map(|r| r.start() as u32..=r.end() as u32).filter_map(char::from_u32) {
+        let mut buf = [0u8; 4];
+        set.insert(lower(ch.encode_utf8(&mut buf).as_bytes()));
+    }
+    exact(set)
+}
+
+fn analyze_byte_class(c: &ClassBytes) -> Info {
+    let n: u32 = c.ranges().iter().map(|r| r.end() as u32 - r.start() as u32 + 1).sum();
+    if let Some(info) = class_limit(n) {
+        return info;
+    }
+    exact(c.ranges().iter().flat_map(|r| r.start()..=r.end()).map(|b| vec![b.to_ascii_lowercase()]).collect())
+}
+
+fn analyze_repetition(rep: &Repetition) -> Info {
+    if rep.max == Some(0) {
+        return empty_string();
+    }
+    let sub = analyze(&rep.sub);
+    if rep.min == 0 {
+        Info { exact: None, req: Plan::All }
+    } else if rep.min == 1 && rep.max == Some(1) {
+        sub
+    } else {
+        Info { exact: None, req: full(sub) }
+    }
+}
+
+fn analyze_concat(children: &[Hir]) -> Info {
+    let mut reqs = Vec::new();
+    let mut run: Option<Set> = Some(std::iter::once(Vec::new()).collect());
+    let mut whole_exact = true;
+    for c in children {
+        let ci = analyze(c);
+        reqs.push(ci.req);
+        run = match (run.take(), ci.exact) {
+            (Some(r), Some(e)) => product(&r, &e).or_else(|| {
+                reqs.push(set_plan(&r));
+                whole_exact = false;
+                Some(e)
+            }),
+            (Some(r), None) => {
+                reqs.push(set_plan(&r));
+                whole_exact = false;
+                None
             }
-            let sub = analyze(&rep.sub);
-            if rep.min == 0 {
-                Info { exact: None, req: Plan::All }
-            } else if rep.min == 1 && rep.max == Some(1) {
-                sub
-            } else {
-                Info { exact: None, req: full(sub) }
-            }
-        }
-        HirKind::Concat(children) => {
-            let mut reqs = Vec::new();
-            let mut run: Option<Set> = Some(std::iter::once(Vec::new()).collect());
-            let mut whole_exact = true;
-            for c in children {
-                let ci = analyze(c);
-                reqs.push(ci.req);
-                match (run.take(), ci.exact) {
-                    (Some(r), Some(e)) => {
-                        if r.len() * e.len() <= MAX_SET {
-                            let mut prod = Set::new();
-                            for a in &r {
-                                for b in &e {
-                                    let mut s = a.clone();
-                                    s.extend_from_slice(b);
-                                    prod.insert(s);
-                                }
-                            }
-                            run = Some(prod);
-                        } else {
-                            reqs.push(set_plan(&r));
-                            run = Some(e);
-                            whole_exact = false;
-                        }
-                    }
-                    (Some(r), None) => {
-                        reqs.push(set_plan(&r));
-                        whole_exact = false;
-                    }
-                    (None, Some(e)) => run = Some(e),
-                    (None, None) => {}
-                }
-            }
-            if whole_exact {
-                Info { exact: run, req: Plan::and(reqs) }
-            } else {
-                if let Some(r) = run {
-                    reqs.push(set_plan(&r));
-                }
-                Info { exact: None, req: Plan::and(reqs) }
-            }
-        }
-        HirKind::Alternation(children) => {
-            let infos: Vec<Info> = children.iter().map(analyze).collect();
-            let all_exact = infos.iter().all(|i| i.exact.is_some() && i.req == Plan::All);
-            if all_exact {
-                let mut union = Set::new();
-                for i in &infos {
-                    union.extend(i.exact.iter().flatten().cloned());
-                }
-                if union.len() <= MAX_SET {
-                    return exact(union);
-                }
-            }
-            Info { exact: None, req: Plan::or(infos.into_iter().map(full).collect()) }
+            (None, e) => e,
+        };
+    }
+    if whole_exact {
+        return Info { exact: run, req: Plan::and(reqs) };
+    }
+    if let Some(r) = run {
+        reqs.push(set_plan(&r));
+    }
+    Info { exact: None, req: Plan::and(reqs) }
+}
+
+/// Every concatenation of a string of `r` with one of `e`, unless there
+/// would be more than [`MAX_SET`].
+fn product(r: &Set, e: &Set) -> Option<Set> {
+    if r.len() * e.len() > MAX_SET {
+        return None;
+    }
+    let mut prod = Set::new();
+    for a in r {
+        for b in e {
+            let mut s = a.clone();
+            s.extend_from_slice(b);
+            prod.insert(s);
         }
     }
+    Some(prod)
+}
+
+fn analyze_alternation(children: &[Hir]) -> Info {
+    let infos: Vec<Info> = children.iter().map(analyze).collect();
+    let all_exact = infos.iter().all(|i| i.exact.is_some() && i.req == Plan::All);
+    if all_exact {
+        let union: Set = infos.iter().flat_map(|i| i.exact.iter().flatten().cloned()).collect();
+        if union.len() <= MAX_SET {
+            return exact(union);
+        }
+    }
+    Info { exact: None, req: Plan::or(infos.into_iter().map(full).collect()) }
 }
 
 /// Parses `pattern` (already a regex; literal callers escape first) into a plan.

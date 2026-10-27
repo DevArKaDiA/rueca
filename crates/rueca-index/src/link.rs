@@ -231,7 +231,7 @@ fn ini_value(text: &str, section: &str, key: &str) -> Option<String> {
     for line in text.lines() {
         let l = line.trim();
         if l.starts_with('[') {
-            current = l.trim_matches(|c| c == '[' || c == ']').trim().to_string();
+            current = section_name(l);
             continue;
         }
         if !section.is_empty() && current != section {
@@ -256,30 +256,30 @@ fn toml_array(text: &str, section: &str, key: &str) -> Vec<String> {
     let mut inside = false;
     for line in text.lines() {
         let l = line.trim();
-        if !inside && l.starts_with('[') && !l.contains('=') {
-            current = l.trim_matches(|c| c == '[' || c == ']').trim().to_string();
-            continue;
-        }
-        if !inside {
-            if current == section
-                && let Some((k, v)) = l.split_once('=')
-                && k.trim() == key
-                && v.trim().starts_with('[')
-            {
-                inside = true;
-                collect_quoted(v, &mut out);
-                if v.contains(']') {
-                    inside = false;
-                }
-            }
-            continue;
-        }
-        collect_quoted(l, &mut out);
-        if l.contains(']') {
-            inside = false;
+        if inside {
+            collect_quoted(l, &mut out);
+            inside = !l.contains(']');
+        } else if l.starts_with('[') && !l.contains('=') {
+            current = section_name(l);
+        } else if current == section
+            && let Some(v) = array_start(l, key)
+        {
+            collect_quoted(v, &mut out);
+            inside = !v.contains(']');
         }
     }
     out
+}
+
+/// The name of a `[section]` header line.
+fn section_name(line: &str) -> String {
+    line.trim_matches(|c| c == '[' || c == ']').trim().to_string()
+}
+
+/// The value of a `key = [...` line that opens an array.
+fn array_start<'l>(line: &'l str, key: &str) -> Option<&'l str> {
+    let (k, v) = line.split_once('=')?;
+    (k.trim() == key && v.trim().starts_with('[')).then_some(v)
 }
 
 fn collect_quoted(s: &str, out: &mut Vec<String>) {
@@ -343,15 +343,199 @@ fn json_keys(v: &serde_json::Value, field: &str) -> Vec<String> {
 
 /// Packages and required packages declared by the manifests of a project.
 /// `modules` gives each file's module name (Python packages, Java packages).
-fn manifests(project: &ProjectFiles, files: &[(String, Option<Language>, String)]) -> (Vec<Package>, Vec<String>) {
-    let mut packages = Vec::new();
-    let mut requires = BTreeSet::new();
-    let source = |f: &(String, Option<Language>, String), family: LanguageFamily| {
-        f.1.is_some_and(|l| l.family() == family) && !rueca_segment::is_test_path(&f.0) && !foreign(&f.0)
-    };
-    // Python top-level packages: modules inside a package directory.
-    let mut py_top: BTreeSet<String> = BTreeSet::new();
-    for f in files.iter().filter(|f| source(f, LanguageFamily::Python)) {
+fn manifests(project: &ProjectFiles, files: &[FileModule]) -> (Vec<Package>, Vec<String>) {
+    let mut m = Manifests::default();
+    for (path, text) in &project.configs {
+        if !foreign(path) {
+            m.read(path, text, files);
+        }
+    }
+    let Manifests { mut packages, requires, python_name } = m;
+    if let Some((dir, name)) = python_name {
+        packages.push(python_package(&python_top_packages(files), dir, name));
+    }
+    packages.extend(c_package(files));
+    for p in &mut packages {
+        p.keys.sort();
+        p.keys.dedup();
+    }
+    packages.sort_by(|a, b| (&a.eco, &a.dir, &a.name).cmp(&(&b.eco, &b.dir, &b.name)));
+    (packages, requires.into_iter().collect())
+}
+
+/// A file of a project: (path, language, module name).
+type FileModule = (String, Option<Language>, String);
+
+/// What the manifests of a project declare, read one by one.
+#[derive(Default)]
+struct Manifests {
+    packages: Vec<Package>,
+    requires: BTreeSet<String>,
+    /// The Python distribution: (directory, name) of the shallowest
+    /// manifest that names one.
+    python_name: Option<(String, String)>,
+}
+
+impl Manifests {
+    fn read(&mut self, path: &str, text: &str, files: &[FileModule]) {
+        let dir = dir_of(path).to_string();
+        match file_name(path) {
+            "package.json" => self.package_json(text, dir),
+            "composer.json" => self.composer_json(text, dir),
+            "go.mod" => self.go_mod(text, dir),
+            "pyproject.toml" | "setup.cfg" | "setup.py" if !dir.contains('/') => self.python_manifest(path, text, dir),
+            "pom.xml" => self.pom(text, &dir, files),
+            "settings.gradle" | "settings.gradle.kts" => self.gradle_settings(text, &dir, files),
+            _ => {}
+        }
+    }
+
+    fn package_json(&mut self, text: &str, dir: String) {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { return };
+        if let Some(name) = json_name(&v) {
+            self.packages.push(Package {
+                eco: "npm".into(),
+                name: name.to_string(),
+                dir,
+                keys: vec![format!("npm:{name}")],
+            });
+        }
+        for field in ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] {
+            self.requires.extend(json_keys(&v, field).into_iter().map(|d| format!("npm:{}", d.to_lowercase())));
+        }
+    }
+
+    fn composer_json(&mut self, text: &str, dir: String) {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { return };
+        if let Some(name) = json_name(&v) {
+            let keys = composer_namespaces(&v);
+            self.packages.push(Package { eco: "composer".into(), name: name.to_string(), dir, keys });
+        }
+        for field in ["require", "require-dev"] {
+            self.requires.extend(json_keys(&v, field).into_iter().map(|d| format!("composer:{}", d.to_lowercase())));
+        }
+    }
+
+    fn go_mod(&mut self, text: &str, dir: String) {
+        for line in text.lines() {
+            if let Some(m) = line.trim().strip_prefix("module ") {
+                let m = m.trim().trim_matches('"');
+                self.packages.push(Package {
+                    eco: "go".into(),
+                    name: m.to_string(),
+                    dir: dir.clone(),
+                    keys: vec![format!("go:{m}")],
+                });
+            }
+        }
+        self.requires.extend(go_requires(text));
+    }
+
+    /// `pyproject.toml` (PEP 621 / Poetry), `setup.cfg` or `setup.py` at
+    /// the root or one directory down.
+    fn python_manifest(&mut self, path: &str, text: &str, dir: String) {
+        let file = file_name(path);
+        let name = match file {
+            "pyproject.toml" => ini_value(text, "project", "name").or_else(|| ini_value(text, "tool.poetry", "name")),
+            "setup.cfg" => ini_value(text, "metadata", "name"),
+            _ => setup_py_name(text),
+        };
+        if file == "pyproject.toml" {
+            self.requires.extend(pep621_requires(text));
+        }
+        if let Some(n) = name
+            && self.python_name.as_ref().is_none_or(|(d, _)| dir.len() < d.len())
+        {
+            self.python_name = Some((dir, n));
+        }
+    }
+
+    fn pom(&mut self, text: &str, dir: &str, files: &[FileModule]) {
+        self.requires.extend(pom_dependencies(text).into_iter().map(|d| format!("maven:{}", d.to_lowercase())));
+        let parent_group = xml_tag(text, "parent").and_then(|p| xml_tag(p, "groupId")).map(str::to_string);
+        let mut own = text.to_string();
+        for tag in ["parent", "dependencies", "dependencyManagement", "build", "profiles", "reporting"] {
+            own = xml_without(&own, tag);
+        }
+        let group = xml_tag(&own, "groupId").map(str::to_string).or(parent_group);
+        if let (Some(g), Some(a)) = (group, xml_tag(&own, "artifactId")) {
+            self.packages.push(java_package(format!("{g}:{a}"), dir, files));
+        }
+    }
+
+    fn gradle_settings(&mut self, text: &str, dir: &str, files: &[FileModule]) {
+        let name = text.lines().find_map(|l| {
+            l.trim()
+                .strip_prefix("rootProject.name")
+                .map(|r| r.trim_start_matches([' ', '=']).trim_matches(['"', '\'', ' ']))
+        });
+        if let Some(n) = name.filter(|n| !n.is_empty()) {
+            self.packages.push(java_package(n.to_string(), dir, files));
+        }
+    }
+}
+
+/// A manifest's non-empty `name`.
+fn json_name(v: &serde_json::Value) -> Option<&str> {
+    v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty())
+}
+
+/// The PSR-4 and PSR-0 namespace prefixes of a `composer.json`.
+fn composer_namespaces(v: &serde_json::Value) -> Vec<String> {
+    let autoload = v.get("autoload").unwrap_or(&serde_json::Value::Null);
+    ["psr-4", "psr-0"]
+        .into_iter()
+        .flat_map(|kind| json_keys(autoload, kind))
+        .map(|ns| ns.trim_end_matches('\\').to_string())
+        .filter(|ns| !ns.is_empty())
+        .map(|ns| format!("php:{ns}"))
+        .collect()
+}
+
+/// The modules a `go.mod` requires (single lines and `require (…)` blocks).
+fn go_requires(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut in_block = false;
+    for line in text.lines() {
+        let l = line.trim();
+        if l.starts_with("require (") {
+            in_block = true;
+            continue;
+        }
+        if in_block && l.starts_with(')') {
+            in_block = false;
+            continue;
+        }
+        let spec = if in_block { Some(l) } else { l.strip_prefix("require ") };
+        if let Some(p) = spec.and_then(|s| s.split_whitespace().next()).filter(|p| !p.starts_with("//")) {
+            out.push(format!("go:{}", p.to_lowercase()));
+        }
+    }
+    out
+}
+
+/// The quoted `name=` argument of a `setup.py`.
+fn setup_py_name(text: &str) -> Option<String> {
+    let r = text.split("name=").nth(1).or_else(|| text.split("name =").nth(1))?.trim_start();
+    let q = r.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+    r[1..].split(q).next().map(str::to_string)
+}
+
+/// PEP 621 `[project] dependencies` as `pypi:` keys.
+fn pep621_requires(text: &str) -> Vec<String> {
+    toml_array(text, "project", "dependencies")
+        .iter()
+        .map(|req| requirement_name(req))
+        .filter(|n| !n.is_empty())
+        .map(|n| format!("pypi:{}", rueca_segment::org::link::normalize_package("pypi", n)))
+        .collect()
+}
+
+/// Python top-level packages: the first segment of the modules inside a
+/// package directory (not tests, documentation, tooling or private).
+fn python_top_packages(files: &[FileModule]) -> BTreeSet<String> {
+    let mut py_top = BTreeSet::new();
+    for f in files.iter().filter(|f| is_source(f, LanguageFamily::Python)) {
         let is_pkg = f.2.contains('.') || file_name(&f.0).starts_with("__init__.");
         if let Some(top) = f.2.split('.').next()
             && is_pkg
@@ -362,137 +546,30 @@ fn manifests(project: &ProjectFiles, files: &[(String, Option<Language>, String)
             py_top.insert(top.to_string());
         }
     }
-    let mut python_name: Option<(String, String)> = None;
-    for (path, text) in &project.configs {
-        if foreign(path) {
-            continue;
-        }
-        let dir = dir_of(path).to_string();
-        match file_name(path) {
-            "package.json" => {
-                let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { continue };
-                if let Some(name) = v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()) {
-                    packages.push(Package {
-                        eco: "npm".into(),
-                        name: name.to_string(),
-                        dir: dir.clone(),
-                        keys: vec![format!("npm:{name}")],
-                    });
-                }
-                for field in ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] {
-                    requires.extend(json_keys(&v, field).into_iter().map(|d| format!("npm:{}", d.to_lowercase())));
-                }
-            }
-            "composer.json" => {
-                let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { continue };
-                let mut keys = Vec::new();
-                for kind in ["psr-4", "psr-0"] {
-                    for ns in json_keys(v.get("autoload").unwrap_or(&serde_json::Value::Null), kind) {
-                        let ns = ns.trim_end_matches('\\');
-                        if !ns.is_empty() {
-                            keys.push(format!("php:{ns}"));
-                        }
-                    }
-                }
-                if let Some(name) = v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()) {
-                    packages.push(Package { eco: "composer".into(), name: name.to_string(), dir: dir.clone(), keys });
-                }
-                for field in ["require", "require-dev"] {
-                    requires.extend(json_keys(&v, field).into_iter().map(|d| format!("composer:{}", d.to_lowercase())));
-                }
-            }
-            "go.mod" => {
-                for line in text.lines() {
-                    let l = line.trim();
-                    if let Some(m) = l.strip_prefix("module ") {
-                        let m = m.trim().trim_matches('"');
-                        packages.push(Package {
-                            eco: "go".into(),
-                            name: m.to_string(),
-                            dir: dir.clone(),
-                            keys: vec![format!("go:{m}")],
-                        });
-                    }
-                }
-                let mut in_block = false;
-                for line in text.lines() {
-                    let l = line.trim();
-                    if l.starts_with("require (") {
-                        in_block = true;
-                        continue;
-                    }
-                    if in_block && l.starts_with(')') {
-                        in_block = false;
-                        continue;
-                    }
-                    let spec = if in_block { Some(l) } else { l.strip_prefix("require ") };
-                    if let Some(p) = spec.and_then(|s| s.split_whitespace().next()).filter(|p| !p.starts_with("//")) {
-                        requires.insert(format!("go:{}", p.to_lowercase()));
-                    }
-                }
-            }
-            "pyproject.toml" | "setup.cfg" | "setup.py" if dir.is_empty() || dir.matches('/').count() == 0 => {
-                let name = match file_name(path) {
-                    "pyproject.toml" => {
-                        ini_value(text, "project", "name").or_else(|| ini_value(text, "tool.poetry", "name"))
-                    }
-                    "setup.cfg" => ini_value(text, "metadata", "name"),
-                    _ => text.split("name=").nth(1).or_else(|| text.split("name =").nth(1)).and_then(|r| {
-                        let r = r.trim_start();
-                        let q = r.chars().next().filter(|c| *c == '"' || *c == '\'')?;
-                        r[1..].split(q).next().map(str::to_string)
-                    }),
-                };
-                if file_name(path) == "pyproject.toml" {
-                    for req in toml_array(text, "project", "dependencies") {
-                        let n = requirement_name(&req);
-                        if !n.is_empty() {
-                            requires.insert(format!("pypi:{}", rueca_segment::org::link::normalize_package("pypi", n)));
-                        }
-                    }
-                }
-                if let Some(n) = name
-                    && python_name.as_ref().is_none_or(|(d, _)| dir.len() < d.len())
-                {
-                    python_name = Some((dir.clone(), n));
-                }
-            }
-            "pom.xml" => {
-                requires.extend(pom_dependencies(text).into_iter().map(|d| format!("maven:{}", d.to_lowercase())));
-                let parent_group = xml_tag(text, "parent").and_then(|p| xml_tag(p, "groupId")).map(str::to_string);
-                let mut own = text.to_string();
-                for tag in ["parent", "dependencies", "dependencyManagement", "build", "profiles", "reporting"] {
-                    own = xml_without(&own, tag);
-                }
-                let group = xml_tag(&own, "groupId").map(str::to_string).or(parent_group);
-                if let (Some(g), Some(a)) = (group, xml_tag(&own, "artifactId")) {
-                    packages.push(java_package(format!("{g}:{a}"), &dir, files));
-                }
-            }
-            "settings.gradle" | "settings.gradle.kts" => {
-                let name = text.lines().find_map(|l| {
-                    let l = l.trim();
-                    l.strip_prefix("rootProject.name")
-                        .map(|r| r.trim_start_matches([' ', '=']).trim_matches(['"', '\'', ' ']))
-                });
-                if let Some(n) = name.filter(|n| !n.is_empty()) {
-                    packages.push(java_package(n.to_string(), &dir, files));
-                }
-            }
-            _ => {}
-        }
+    py_top
+}
+
+/// A non-test, non-vendored source file of `family`.
+fn is_source(f: &FileModule, family: LanguageFamily) -> bool {
+    f.1.is_some_and(|l| l.family() == family) && !rueca_segment::is_test_path(&f.0) && !foreign(&f.0)
+}
+
+/// The Python distribution `name` (in `dir`) with its import keys: its
+/// top-level packages, plus the normalized distribution name when it is
+/// not one of them.
+fn python_package(py_top: &BTreeSet<String>, dir: String, name: String) -> Package {
+    let mut keys: Vec<String> = py_top.iter().map(|t| format!("py:{t}")).collect();
+    let norm = name.to_lowercase().replace(['-', '.'], "_");
+    if keys.is_empty() || !py_top.contains(&norm) {
+        keys.push(format!("py:{norm}"));
     }
-    if let Some((dir, name)) = python_name {
-        let mut keys: Vec<String> = py_top.iter().map(|t| format!("py:{t}")).collect();
-        let norm = name.to_lowercase().replace(['-', '.'], "_");
-        if keys.is_empty() || !py_top.contains(&norm) {
-            keys.push(format!("py:{norm}"));
-        }
-        keys.sort();
-        keys.dedup();
-        packages.push(Package { eco: "pypi".into(), name, dir, keys });
-    }
-    // C / C++: what `include/` (or `single_include/`) directories expose.
+    keys.sort();
+    keys.dedup();
+    Package { eco: "pypi".into(), name, dir, keys }
+}
+
+/// C / C++: what `include/` (or `single_include/`) directories expose.
+fn c_package(files: &[FileModule]) -> Option<Package> {
     let mut c_keys: BTreeSet<String> = BTreeSet::new();
     for f in files {
         if !f.1.is_some_and(|l| l.family() == LanguageFamily::C) || foreign(&f.0) {
@@ -506,25 +583,17 @@ fn manifests(project: &ProjectFiles, files: &[(String, Option<Language>, String)
             c_keys.insert(format!("c:{}", parts[i + 1]));
         }
     }
-    if !c_keys.is_empty() {
-        packages.push(Package {
-            eco: "c".into(),
-            name: String::new(),
-            dir: String::new(),
-            keys: c_keys.into_iter().collect(),
-        });
-    }
-    for p in &mut packages {
-        p.keys.sort();
-        p.keys.dedup();
-    }
-    packages.sort_by(|a, b| (&a.eco, &a.dir, &a.name).cmp(&(&b.eco, &b.dir, &b.name)));
-    (packages, requires.into_iter().collect())
+    (!c_keys.is_empty()).then(|| Package {
+        eco: "c".into(),
+        name: String::new(),
+        dir: String::new(),
+        keys: c_keys.into_iter().collect(),
+    })
 }
 
 /// A Java build (Maven / Gradle) publishing the packages of the non-test
 /// Java files under `dir`.
-fn java_package(name: String, dir: &str, files: &[(String, Option<Language>, String)]) -> Package {
+fn java_package(name: String, dir: &str, files: &[FileModule]) -> Package {
     let keys: BTreeSet<String> = files
         .iter()
         .filter(|f| {
@@ -574,7 +643,7 @@ impl OrgLinker for PackageLinker {
     fn analyze(&self, _store: &Store, seg: &Segment) -> rueca_segment::Result<RepoDeps> {
         let registry = default_registry();
         let loaded = self.load(seg, &registry);
-        let modules: Vec<(String, Option<Language>, String)> = seg
+        let modules: Vec<FileModule> = seg
             .files()
             .iter()
             .enumerate()
@@ -657,8 +726,12 @@ fn crossing_edges(
     consumer: &Segment,
     deps: &[LinkInput<'_>],
 ) -> Vec<LinkEdge> {
-    let own_index = node_index(consumer);
-    let dep_index: Vec<HashMap<NodeKey<'_>, NodeId>> = deps.iter().map(|d| node_index(d.segment)).collect();
+    let map = JointMap {
+        graph,
+        ctx,
+        own_index: node_index(consumer),
+        dep_index: deps.iter().map(|d| node_index(d.segment)).collect(),
+    };
     // Names the consumer defines itself: a dependency's definition with the
     // same label and qualified name (a test stub, a vendored copy) never
     // stands for it.
@@ -668,39 +741,6 @@ fn crossing_edges(
         .filter(|n| !matches!(n.label, Label::Repository | Label::Folder | Label::File))
         .map(|n| (n.label, n.qualified_name.as_str()))
         .collect();
-    let usable = |k: usize, d: NodeId| -> bool {
-        let seg = deps[k].segment;
-        let n = seg.node(d);
-        let test_file = n.file.is_some_and(|f| rueca_segment::is_test_path(&seg.file(f).path));
-        !(n.is_test || test_file || own_names.contains(&(n.label, n.qualified_name.as_str())))
-    };
-    // Side of a joint node: None = consumer, Some(k) = mount k; and its id.
-    let locate = |n: NodeId| -> Option<(Option<usize>, NodeId)> {
-        let node = graph.nodes.get(n as usize)?;
-        let path = match node.file {
-            Some(f) => Some(graph.files.get(f as usize)?.path.as_str()),
-            None if node.label == Label::Folder => None,
-            None => return None,
-        };
-        let full = path.unwrap_or(node.qualified_name.as_str());
-        match ctx.mount_of(full) {
-            Some((k, rel)) => {
-                let index = &dep_index[k];
-                let qn =
-                    if matches!(node.label, Label::File | Label::Folder) { rel } else { node.qualified_name.as_str() };
-                if node.label == Label::Folder && rel.is_empty() {
-                    // The dependency's root package: its Repository node.
-                    return Some((Some(k), 0));
-                }
-                let id = index.get(&(node.label, qn, path.map(|_| rel)))?;
-                Some((Some(k), *id))
-            }
-            None => {
-                let id = own_index.get(&(node.label, node.qualified_name.as_str(), path))?;
-                Some((None, *id))
-            }
-        }
-    };
     let mut best: BTreeMap<(NodeId, u32, NodeId, EdgeKind, bool), LinkEdge> = BTreeMap::new();
     for e in &graph.edges {
         if matches!(e.kind, EdgeKind::Contains | EdgeKind::Defines)
@@ -708,13 +748,8 @@ fn crossing_edges(
         {
             continue;
         }
-        // Consumer → dependency, or (DECORATES) dependency → consumer.
-        let (src, k, dst, reversed) = match (locate(e.src), locate(e.dst)) {
-            (Some((None, s)), Some((Some(k), d))) => (s, k, d, false),
-            (Some((Some(k), d)), Some((None, s))) => (s, k, d, true),
-            _ => continue,
-        };
-        if !usable(k, dst) {
+        let Some((src, k, dst, reversed)) = map.crossing(e) else { continue };
+        if !usable_target(&deps[k], &own_names, dst) {
             continue;
         }
         let mut meta = e.meta;
@@ -726,15 +761,77 @@ fn crossing_edges(
             consumer.file_by_path(path).map(|fid| (fid, span))
         });
         let edge = LinkEdge { src, dep: k as u32, dst, kind: e.kind, meta, reversed };
-        best.entry((src, k as u32, dst, e.kind, reversed))
-            .and_modify(|x| {
-                if meta.confidence > x.meta.confidence {
-                    *x = edge;
-                }
-            })
-            .or_insert(edge);
+        keep_most_confident(&mut best, edge);
     }
     best.into_values().collect()
+}
+
+/// Keeps `edge` unless an edge with the same key and at least its
+/// confidence is kept.
+fn keep_most_confident(best: &mut BTreeMap<(NodeId, u32, NodeId, EdgeKind, bool), LinkEdge>, edge: LinkEdge) {
+    match best.entry((edge.src, edge.dep, edge.dst, edge.kind, edge.reversed)) {
+        std::collections::btree_map::Entry::Vacant(v) => {
+            v.insert(edge);
+        }
+        std::collections::btree_map::Entry::Occupied(mut o) => {
+            if edge.meta.confidence > o.get().meta.confidence {
+                o.insert(edge);
+            }
+        }
+    }
+}
+
+/// Whether a dependency node may be the target of a link: not a test, not
+/// in a test file, not named like a definition of the consumer.
+fn usable_target(dep: &LinkInput<'_>, own_names: &HashSet<(Label, &str)>, d: NodeId) -> bool {
+    let seg = dep.segment;
+    let n = seg.node(d);
+    let test_file = n.file.is_some_and(|f| rueca_segment::is_test_path(&seg.file(f).path));
+    !(n.is_test || test_file || own_names.contains(&(n.label, n.qualified_name.as_str())))
+}
+
+/// The nodes of a joint graph mapped back to the repositories' own
+/// segments.
+struct JointMap<'g> {
+    graph: &'g rueca_model::ResolvedGraph,
+    ctx: &'g LinkCtx,
+    own_index: HashMap<NodeKey<'g>, NodeId>,
+    dep_index: Vec<HashMap<NodeKey<'g>, NodeId>>,
+}
+
+impl JointMap<'_> {
+    /// Side of a joint node — `None` = consumer, `Some(k)` = mount `k` — and
+    /// its id in that side's segment.
+    fn locate(&self, n: NodeId) -> Option<(Option<usize>, NodeId)> {
+        let node = self.graph.nodes.get(n as usize)?;
+        let path = match node.file {
+            Some(f) => Some(self.graph.files.get(f as usize)?.path.as_str()),
+            None if node.label == Label::Folder => None,
+            None => return None,
+        };
+        let full = path.unwrap_or(node.qualified_name.as_str());
+        let Some((k, rel)) = self.ctx.mount_of(full) else {
+            let id = self.own_index.get(&(node.label, node.qualified_name.as_str(), path))?;
+            return Some((None, *id));
+        };
+        if node.label == Label::Folder && rel.is_empty() {
+            // The dependency's root package: its Repository node.
+            return Some((Some(k), 0));
+        }
+        let qn = if matches!(node.label, Label::File | Label::Folder) { rel } else { node.qualified_name.as_str() };
+        let id = self.dep_index[k].get(&(node.label, qn, path.map(|_| rel)))?;
+        Some((Some(k), *id))
+    }
+
+    /// A consumer → dependency edge, or (`DECORATES`) dependency →
+    /// consumer: (consumer node, mount, dependency node, reversed).
+    fn crossing(&self, e: &rueca_model::Edge) -> Option<(NodeId, usize, NodeId, bool)> {
+        match (self.locate(e.src)?, self.locate(e.dst)?) {
+            ((None, s), (Some(k), d)) => Some((s, k, d, false)),
+            ((Some(k), d), (None, s)) => Some((s, k, d, true)),
+            _ => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

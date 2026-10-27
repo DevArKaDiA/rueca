@@ -293,27 +293,11 @@ impl Inner {
             .size_limit(64 << 20)
             .build()
             .map_err(|e| SegmentError::InvalidQuery(e.to_string()))?;
-        let glob = q.path_glob.as_deref().map(symbols::compile_glob).transpose()?;
-        let index = NgramIndex {
-            keys: self.arr(&self.ng_keys),
-            offsets: self.arr(&self.ng_offsets),
-            postings: &self.bundle.map[self.ng_postings.clone()],
-        };
-        let selected = index.eval(&plan, &self.text_files)? & &self.text_files;
-        let by_path: &[u32] = self.arr(&self.files_by_path);
-        let candidates: Vec<u32> = by_path
-            .iter()
-            .copied()
-            .filter(|&f| selected.contains(f))
-            .filter(|&f| {
-                let fe = &self.files[f as usize];
-                q.language.is_none_or(|l| fe.language == Some(l)) && glob.as_ref().is_none_or(|g| g.is_match(&fe.path))
-            })
-            .collect();
+        let candidates = self.content_candidates(q, &plan)?;
         let max = if q.max_matches == 0 { DEFAULT_MAX_MATCHES } else { q.max_matches };
         let mut res = ContentSearchResult { candidate_files: candidates.len() as u32, ..Default::default() };
         let mut scanned = 0u64;
-        'files: for f in candidates {
+        for f in candidates {
             let size = self.files[f as usize].size;
             if scanned.saturating_add(size) > q.scan_budget_bytes {
                 res.truncated = true;
@@ -322,33 +306,71 @@ impl Inner {
             let content = self.content(f)?;
             scanned += content.len() as u64;
             res.files_scanned += 1;
-            let mut cursor = (0usize, 1u32); // (byte offset of a line start, its 1-based line number)
-            let mut pos = 0usize;
-            while pos <= content.len() {
-                let Some(m) = re.find_at(&content, pos) else { break };
-                if m.start() == content.len() && (content.is_empty() || content.ends_with(b"\n")) {
-                    break; // empty match after the final newline: no such line
-                }
-                let (ls, le) = line_bounds(&content, m.start());
-                if res.matches.len() >= max {
-                    res.truncated = true;
-                    break 'files;
-                }
-                let line = cursor.1 + count_newlines(&content[cursor.0..ls]);
-                cursor = (ls, line);
-                let ctx = q.context_lines as usize;
-                res.matches.push(ContentMatch {
-                    file: f,
-                    line,
-                    text: line_text(&content[ls..le]),
-                    before: lines_before(&content, ls, ctx),
-                    after: lines_after(&content, le, ctx),
-                });
-                pos = le + 1;
+            if !collect_matches(f, &content, &re, q.context_lines as usize, max, &mut res) {
+                break;
             }
         }
         Ok(res)
     }
+
+    /// Text files the n-gram plan selects, in path order, narrowed by the
+    /// query's language and path glob.
+    fn content_candidates(&self, q: &ContentQuery, plan: &ngram::Plan) -> Result<Vec<u32>> {
+        let glob = q.path_glob.as_deref().map(symbols::compile_glob).transpose()?;
+        let index = NgramIndex {
+            keys: self.arr(&self.ng_keys),
+            offsets: self.arr(&self.ng_offsets),
+            postings: &self.bundle.map[self.ng_postings.clone()],
+        };
+        let selected = index.eval(plan, &self.text_files)? & &self.text_files;
+        let by_path: &[u32] = self.arr(&self.files_by_path);
+        Ok(by_path
+            .iter()
+            .copied()
+            .filter(|&f| selected.contains(f))
+            .filter(|&f| {
+                let fe = &self.files[f as usize];
+                q.language.is_none_or(|l| fe.language == Some(l)) && glob.as_ref().is_none_or(|g| g.is_match(&fe.path))
+            })
+            .collect())
+    }
+}
+
+/// Adds the lines of file `f` that `re` matches to `res`, with `ctx`
+/// lines of context; `false` (and `res.truncated`) when `max` matches are
+/// reached.
+fn collect_matches(
+    f: u32,
+    content: &[u8],
+    re: &regex::bytes::Regex,
+    ctx: usize,
+    max: usize,
+    res: &mut ContentSearchResult,
+) -> bool {
+    let mut cursor = (0usize, 1u32); // (byte offset of a line start, its 1-based line number)
+    let mut pos = 0usize;
+    while pos <= content.len() {
+        let Some(m) = re.find_at(content, pos) else { break };
+        if m.start() == content.len() && (content.is_empty() || content.ends_with(b"\n")) {
+            break; // empty match after the final newline: no such line
+        }
+        let (ls, le) = line_bounds(content, m.start());
+        if res.matches.len() >= max {
+            res.truncated = true;
+            return false;
+        }
+        let line = cursor.1 + count_newlines(&content[cursor.0..ls]);
+        cursor = (ls, line);
+        res.matches.push(ContentMatch {
+            file: f,
+            line,
+            text: line_text(&content[ls..le]),
+            before: lines_before(content, ls, ctx),
+            after: lines_after(content, le, ctx),
+        });
+        pos = le + 1;
+    }
+    true
 }
 
 fn count_newlines(b: &[u8]) -> u32 {

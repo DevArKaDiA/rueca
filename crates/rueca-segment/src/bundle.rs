@@ -125,6 +125,50 @@ fn le_u64(b: &[u8], at: usize) -> Option<u64> {
     b.get(at..at + 8).map(|s| u64::from_le_bytes(s.try_into().unwrap()))
 }
 
+/// The component table of a footer, every component checked against its
+/// bounds and checksum.
+fn read_components(b: &[u8], footer: &[u8], footer_offset: u64) -> Result<HashMap<String, Range<usize>>> {
+    let count = le_u32(footer, 0).ok_or_else(|| corrupt("footer"))? as usize;
+    let mut at = 4usize;
+    let mut components = HashMap::with_capacity(count.min(4096));
+    for _ in 0..count {
+        let (name, off, len, hash) = footer_entry(footer, &mut at)?;
+        let end = off.checked_add(len).ok_or_else(|| corrupt("component bounds"))?;
+        if off < HEADER_LEN as u64 || end > footer_offset {
+            return Err(corrupt(format!("component {name} out of bounds")));
+        }
+        let range = off as usize..end as usize;
+        if blake3::hash(&b[range.clone()]).as_bytes() != hash {
+            return Err(corrupt(format!("checksum mismatch in component {name}")));
+        }
+        if components.insert(name.clone(), range).is_some() {
+            return Err(corrupt(format!("duplicate component {name}")));
+        }
+    }
+    if at != footer.len() {
+        return Err(corrupt("trailing bytes in footer"));
+    }
+    Ok(components)
+}
+
+/// The footer entry at `*at` — (name, offset, length, blake3 hash) — and
+/// `*at` moved past it.
+fn footer_entry<'f>(footer: &'f [u8], at: &mut usize) -> Result<(String, u64, u64, &'f [u8])> {
+    let name_len = footer
+        .get(*at..*at + 2)
+        .map(|s| u16::from_le_bytes([s[0], s[1]]) as usize)
+        .ok_or_else(|| corrupt("footer entry"))?;
+    *at += 2;
+    let name = footer.get(*at..*at + name_len).ok_or_else(|| corrupt("footer entry name"))?;
+    let name = std::str::from_utf8(name).map_err(|_| corrupt("footer entry name utf8"))?.to_string();
+    *at += name_len;
+    let off = le_u64(footer, *at).ok_or_else(|| corrupt("footer entry"))?;
+    let len = le_u64(footer, *at + 8).ok_or_else(|| corrupt("footer entry"))?;
+    let hash = footer.get(*at + 16..*at + 48).ok_or_else(|| corrupt("footer entry"))?;
+    *at += 48;
+    Ok((name, off, len, hash))
+}
+
 impl Bundle {
     /// Maps `path` and validates magic, version, footer and every component
     /// checksum. Never panics on malformed input.
@@ -177,37 +221,7 @@ impl Bundle {
         if blake3::hash(footer).as_bytes() != &b[t + 16..t + 48] {
             return Err(corrupt("footer checksum mismatch"));
         }
-        let count = le_u32(footer, 0).ok_or_else(|| corrupt("footer"))? as usize;
-        let mut at = 4usize;
-        let mut components = HashMap::with_capacity(count.min(4096));
-        for _ in 0..count {
-            let name_len = footer
-                .get(at..at + 2)
-                .map(|s| u16::from_le_bytes([s[0], s[1]]) as usize)
-                .ok_or_else(|| corrupt("footer entry"))?;
-            at += 2;
-            let name = footer.get(at..at + name_len).ok_or_else(|| corrupt("footer entry name"))?;
-            let name = std::str::from_utf8(name).map_err(|_| corrupt("footer entry name utf8"))?.to_string();
-            at += name_len;
-            let off = le_u64(footer, at).ok_or_else(|| corrupt("footer entry"))?;
-            let len = le_u64(footer, at + 8).ok_or_else(|| corrupt("footer entry"))?;
-            let hash = footer.get(at + 16..at + 48).ok_or_else(|| corrupt("footer entry"))?;
-            at += 48;
-            let end = off.checked_add(len).ok_or_else(|| corrupt("component bounds"))?;
-            if off < HEADER_LEN as u64 || end > footer_offset {
-                return Err(corrupt(format!("component {name} out of bounds")));
-            }
-            let range = off as usize..end as usize;
-            if blake3::hash(&b[range.clone()]).as_bytes() != hash {
-                return Err(corrupt(format!("checksum mismatch in component {name}")));
-            }
-            if components.insert(name.clone(), range).is_some() {
-                return Err(corrupt(format!("duplicate component {name}")));
-            }
-        }
-        if at != footer.len() {
-            return Err(corrupt("trailing bytes in footer"));
-        }
+        let components = read_components(b, footer, footer_offset)?;
         Ok(Bundle { map: SharedMmap(mmap), components })
     }
 

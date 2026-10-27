@@ -185,39 +185,42 @@ impl<'a> Resolver<'a> {
     /// Resolves a data pointer (see the `DataRef` docs in `rueca-model`).
     pub(crate) fn data_ref(&self, f: FileId, receiver: Option<&str>, path: &str) -> Outcome {
         match receiver.map(str::trim) {
-            None | Some("") => {
-                if let Some(n) = self.data_def(f, path) {
-                    return Outcome::Hit(n, Strategy::Syntactic, 1.0);
-                }
-                let found = self.module_files(f).into_iter().filter(|&o| o != f).find_map(|o| self.data_def(o, path));
-                found.map_or(Outcome::Miss, |n| Outcome::Hit(n, Strategy::SameModule, 0.95))
-            }
+            None | Some("") => self.data_ref_local(f, path),
             Some(DATA_REF_QN) => match self.nodes_by_qn().get(path).map(Vec::as_slice) {
                 Some([n]) => Outcome::Hit(*n, Strategy::ImportResolved, 0.95),
                 _ => Outcome::Miss,
             },
-            Some(DATA_REF_ANY) => {
-                let mut found = None;
-                for (i, m) in self.data_by_local.iter().enumerate() {
-                    if let Some(&n) = m.get(path) {
-                        if found.is_some() {
-                            return Outcome::Miss;
-                        }
-                        found = Some((i, n));
-                    }
-                }
-                found.map_or(Outcome::Miss, |(_, n)| Outcome::Hit(n, Strategy::UniqueName, 0.6))
+            Some(DATA_REF_ANY) => self.data_ref_any(path),
+            Some(spec) => self.data_ref_imported(f, spec, path),
+        }
+    }
+
+    /// A key path in the same file, else in another file of its package.
+    fn data_ref_local(&self, f: FileId, path: &str) -> Outcome {
+        if let Some(n) = self.data_def(f, path) {
+            return Outcome::Hit(n, Strategy::Syntactic, 1.0);
+        }
+        let found = self.module_files(f).into_iter().filter(|&o| o != f).find_map(|o| self.data_def(o, path));
+        found.map_or(Outcome::Miss, |n| Outcome::Hit(n, Strategy::SameModule, 0.95))
+    }
+
+    /// The only data file definition with key path `path`.
+    fn data_ref_any(&self, path: &str) -> Outcome {
+        let mut found = self.data_by_local.iter().filter_map(|m| m.get(path).copied());
+        match (found.next(), found.next()) {
+            (Some(n), None) => Outcome::Hit(n, Strategy::UniqueName, 0.6),
+            _ => Outcome::Miss,
+        }
+    }
+
+    /// A key path in the file `f` imports with specifier `spec`.
+    fn data_ref_imported(&self, f: FileId, spec: &str, path: &str) -> Outcome {
+        let Some(k) = self.imports(f).iter().position(|imp| imp.module == spec) else { return Outcome::Miss };
+        match self.import_targets[f as usize][k] {
+            Some(t) => {
+                self.data_def(t, path).map_or(Outcome::Miss, |n| Outcome::Hit(n, Strategy::ImportResolved, 0.95))
             }
-            Some(spec) => {
-                let k = self.imports(f).iter().position(|imp| imp.module == spec);
-                let Some(k) = k else { return Outcome::Miss };
-                match self.import_targets[f as usize][k] {
-                    Some(t) => self
-                        .data_def(t, path)
-                        .map_or(Outcome::Miss, |n| Outcome::Hit(n, Strategy::ImportResolved, 0.95)),
-                    None => Outcome::External,
-                }
-            }
+            None => Outcome::External,
         }
     }
 

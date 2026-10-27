@@ -199,7 +199,12 @@
 //!   then the one whose parameter types equal the known argument types, else
 //!   the one whose parameters pass to every other's (the narrowest
 //!   primitives), wins. One candidate keeps the confidence; several are all
-//!   linked × 0.8; none fitting links the whole set × 0.8. Constructors of
+//!   linked × 0.8; none fitting links the whole set × 0.8. Such a fan-out
+//!   leaves out the calling overload itself when another candidate remains:
+//!   an overload calling its own name with an argument of unknown type
+//!   (`fromJson(String, Class)` → `fromJson(json, TypeToken.get(c))`)
+//!   delegates to a sibling far more often than it recurses. A recursion
+//!   chosen by arity or argument types keeps its self-loop. Constructors of
 //!   Java and C/C++ are the members named like the class. A trailing
 //!   comment in a suffix (C/C++ `get(/*const*/)`, `write(T/*#2*/)`: same
 //!   parameters, other qualifiers or constraints) is not a parameter. For
@@ -329,14 +334,16 @@
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::ControlFlow;
 
 use rueca_extract::{
     DATA_REF_ANY, DATA_REF_QN, LanguagePack, MEMBER_RECEIVER_PREFIX, ModuleScope, NAMESPACE_RECEIVER_PREFIX,
     ProjectFiles, Registry, SELF_RECEIVER, TYPE_RECEIVER_PREFIX, split_arg_types,
 };
 use rueca_model::{
-    Definition, Edge, EdgeKind, EdgeMeta, FileEntry, FileFacts, FileId, Import, Label, Language, LanguageFamily,
-    LocalDefId, Node, NodeId, RefKind, Reference, ResolvedGraph, SnapshotInfo, Span, Strategy, env_var_qualified_name,
+    Definition, Edge, EdgeKind, EdgeMeta, FileEntry, FileFacts, FileId, Import, ImportedName, Label, Language,
+    LanguageFamily, LocalDefId, Node, NodeId, RefKind, Reference, ResolvedGraph, SnapshotInfo, Span, Strategy,
+    env_var_qualified_name,
 };
 
 mod bridge;
@@ -515,6 +522,28 @@ struct RefItem<'a> {
     arg_types: Option<Vec<&'a str>>,
 }
 
+/// Where the edges of one resolved reference go (see `Resolver::resolve_one`).
+struct EdgePlan {
+    outcome: Outcome,
+    /// Source of an `INHERITS` / `IMPLEMENTS` edge from a base list.
+    src: Option<NodeId>,
+    /// Destination of a `DECORATES` edge: the decorated definition.
+    dst: Option<NodeId>,
+    kind: EdgeKind,
+}
+
+/// A definition whose base and implements lists are resolved.
+struct BaseSite {
+    file: FileId,
+    class: NodeId,
+    /// Scope the bases are resolved in: the definition's parent.
+    scope: Option<LocalDefId>,
+    span: Span,
+    php: bool,
+    /// Whether implemented interfaces contribute members.
+    implements_members: bool,
+}
+
 struct Resolver<'a> {
     files: &'a [FileInput],
     project: &'a ProjectFiles,
@@ -682,6 +711,140 @@ struct PhpIndex {
     /// (their `$this` is the using class) and enums (builtin `from`,
     /// `cases`, `$value`). Missing members of these are external.
     open: HashSet<NodeId>,
+}
+
+impl PhpIndex {
+    /// Indexes a definition by fully qualified name: types and functions
+    /// (lowercased), and constants that are not class constants.
+    fn insert(&mut self, label: Label, in_type: bool, qn: &str, node: NodeId) {
+        let (map, key) = match label {
+            l if l.is_type() => (&mut self.types, qn.to_lowercase()),
+            Label::Function => (&mut self.functions, qn.to_lowercase()),
+            Label::Constant if !in_type => (&mut self.constants, qn.to_string()),
+            _ => return,
+        };
+        if let Some((root, _)) = key.split_once('\\') {
+            self.roots.insert(root.to_lowercase());
+        }
+        let v = map.entry(key).or_default();
+        if !v.contains(&node) {
+            v.push(node);
+        }
+    }
+}
+
+/// A star re-export or the module alias of a re-export: the module when
+/// its alias is `name`; unaliased, it is collected in `stars`.
+fn reexported_alias(
+    alias: Option<&str>,
+    name: &str,
+    target: Option<FileId>,
+    stars: &mut Vec<Option<FileId>>,
+) -> Option<Target> {
+    match alias {
+        Some(a) if a == name => Some(target.map_or(Target::External, Target::Module)),
+        Some(_) => None,
+        None => {
+            stars.push(target);
+            None
+        }
+    }
+}
+
+/// The local name an imported entry binds: its alias, else the name (the
+/// last segment of a member import `C.m` outside Python).
+fn bound_name(n: &ImportedName, python: bool) -> &str {
+    match (&n.alias, python) {
+        (Some(a), _) => a.as_str(),
+        (None, false) => n.name.rsplit('.').next().unwrap_or(&n.name),
+        (None, true) => n.name.as_str(),
+    }
+}
+
+/// A node without file, span or source: repository, folder or file.
+fn blank_node(label: Label, name: &str, qn: &str) -> Node {
+    Node {
+        label,
+        name: name.to_string(),
+        qualified_name: qn.to_string(),
+        file: None,
+        span: None,
+        language: None,
+        signature: None,
+        doc: None,
+        exported: false,
+        is_test: false,
+    }
+}
+
+/// The parent of each definition, without out-of-range or self parents
+/// and with malformed parent cycles broken.
+fn sanitized_parents(defs: &[Definition]) -> Vec<Option<LocalDefId>> {
+    let n = defs.len();
+    let mut parents: Vec<Option<LocalDefId>> =
+        defs.iter().enumerate().map(|(j, d)| d.parent.filter(|&p| (p as usize) < n && p as usize != j)).collect();
+    for j in 0..n {
+        if in_parent_cycle(&parents, j) {
+            parents[j] = None;
+        }
+    }
+    parents
+}
+
+/// Whether the parent chain of `j` comes back to `j` (or is longer than
+/// the definitions, which only a cycle makes it).
+fn in_parent_cycle(parents: &[Option<LocalDefId>], j: usize) -> bool {
+    let mut cur = parents[j];
+    let mut steps = 0;
+    while let Some(p) = cur {
+        steps += 1;
+        if p as usize == j || steps > parents.len() {
+            return true;
+        }
+        cur = parents[p as usize];
+    }
+    false
+}
+
+/// Children of each definition and the top-level definitions, in
+/// definition order.
+fn children_and_top(parents: &[Option<LocalDefId>]) -> (Vec<Vec<LocalDefId>>, Vec<LocalDefId>) {
+    let mut children = vec![Vec::new(); parents.len()];
+    let mut top = Vec::new();
+    for (j, p) in parents.iter().enumerate() {
+        match p {
+            Some(p) => children[*p as usize].push(j as LocalDefId),
+            None => top.push(j as LocalDefId),
+        }
+    }
+    (children, top)
+}
+
+/// First child of each definition by name.
+fn children_by_name<'d>(
+    defs: &'d [Definition],
+    children: &[Vec<LocalDefId>],
+) -> HashMap<(LocalDefId, &'d str), LocalDefId> {
+    let mut by_name = HashMap::new();
+    for (p, kids) in children.iter().enumerate() {
+        for &c in kids {
+            by_name.entry((p as LocalDefId, defs[c as usize].name.as_str())).or_insert(c);
+        }
+    }
+    by_name
+}
+
+/// Whether definition `j` is local to a function or test body.
+fn is_body_local(defs: &[Definition], parents: &[Option<LocalDefId>], j: usize) -> bool {
+    let mut cur = parents[j];
+    while let Some(p) = cur {
+        let pd = &defs[p as usize];
+        if pd.label.is_callable() || pd.is_test {
+            return true;
+        }
+        cur = parents[p as usize];
+    }
+    false
 }
 
 fn normalize_stem(s: &str) -> String {
@@ -927,22 +1090,23 @@ impl<'a> Resolver<'a> {
     // -- nodes ---------------------------------------------------------------
 
     fn build_nodes(&mut self, snapshot: &SnapshotInfo) {
-        let blank = |label, name: &str, qn: &str| Node {
-            label,
-            name: name.to_string(),
-            qualified_name: qn.to_string(),
-            file: None,
-            span: None,
-            language: None,
-            signature: None,
-            doc: None,
-            exported: false,
-            is_test: false,
-        };
         let repo_name = snapshot.repo.rsplit('/').next().unwrap_or(&snapshot.repo);
-        self.nodes.push(blank(Label::Repository, repo_name, &snapshot.repo));
+        self.nodes.push(blank_node(Label::Repository, repo_name, &snapshot.repo));
         self.repo_node = 0;
+        self.build_folder_nodes();
+        self.build_file_nodes();
+        // Nodes kept from a declaration (C/C++ `is_declaration`): a body
+        // merged into one gives it its span and signature.
+        let mut seen: HashMap<(Label, String, FileId), NodeId> = HashMap::new();
+        let mut declaration_only: HashSet<NodeId> = HashSet::new();
+        for i in 0..self.files.len() {
+            let map = self.build_definition_nodes(i as FileId, &mut seen, &mut declaration_only);
+            self.def_node.push(map);
+        }
+    }
 
+    /// One `Folder` node per directory holding a file, in path order.
+    fn build_folder_nodes(&mut self) {
         let mut folders = BTreeSet::new();
         for f in self.files {
             let mut p = parent_dir(&f.path);
@@ -955,198 +1119,185 @@ impl<'a> Resolver<'a> {
         }
         for d in folders {
             let id = self.nodes.len() as NodeId;
-            self.nodes.push(blank(Label::Folder, basename(&d), &d));
+            self.nodes.push(blank_node(Label::Folder, basename(&d), &d));
             self.folder_nodes.insert(d, id);
         }
+    }
 
+    fn build_file_nodes(&mut self) {
         for (i, f) in self.files.iter().enumerate() {
             let id = self.nodes.len() as NodeId;
-            let mut n = blank(Label::File, basename(&f.path), &f.path);
+            let mut n = blank_node(Label::File, basename(&f.path), &f.path);
             n.file = Some(i as FileId);
             n.language = f.language;
             self.nodes.push(n);
             self.file_node.push(id);
         }
+    }
 
-        let mut seen: HashMap<(Label, String, FileId), NodeId> = HashMap::new();
-        // Nodes kept from a declaration (C/C++ `is_declaration`): a body
-        // merged into one gives it its span and signature.
-        let mut declaration_only: HashSet<NodeId> = HashSet::new();
-        for (i, f) in self.files.iter().enumerate() {
-            let fid = i as FileId;
-            let defs = self.defs(fid);
-            let sep = self.families[i].map_or(":", LanguageFamily::module_separator);
-            let module = &self.module_names[i];
-            let mut map = Vec::with_capacity(defs.len());
-            for d in defs {
-                let qn = if module.is_empty() {
-                    d.qualified_name.clone()
-                } else {
-                    format!("{module}{sep}{}", d.qualified_name)
-                };
-                let key = (d.label, qn, fid);
-                if let Some(&existing) = seen.get(&key) {
-                    if !d.is_declaration && declaration_only.remove(&existing) {
-                        let n = &mut self.nodes[existing as usize];
-                        n.span = Some(d.span);
-                        n.signature = d.signature.clone();
-                        if d.doc.is_some() {
-                            n.doc = d.doc.clone();
-                        }
-                    }
-                    map.push(existing);
-                    continue;
+    /// The nodes of the definitions of `fid`, one per definition: a
+    /// definition with the label and global qualified name of an earlier
+    /// one of the same file shares its node.
+    fn build_definition_nodes(
+        &mut self,
+        fid: FileId,
+        seen: &mut HashMap<(Label, String, FileId), NodeId>,
+        declaration_only: &mut HashSet<NodeId>,
+    ) -> Vec<NodeId> {
+        let i = fid as usize;
+        let defs = self.defs(fid);
+        let sep = self.families[i].map_or(":", LanguageFamily::module_separator);
+        let module = self.module_names[i].clone();
+        let mut map = Vec::with_capacity(defs.len());
+        for d in defs {
+            let qn =
+                if module.is_empty() { d.qualified_name.clone() } else { format!("{module}{sep}{}", d.qualified_name) };
+            let key = (d.label, qn, fid);
+            if let Some(&existing) = seen.get(&key) {
+                if !d.is_declaration && declaration_only.remove(&existing) {
+                    self.merge_body(existing, d);
                 }
-                if d.is_declaration {
-                    declaration_only.insert(self.nodes.len() as NodeId);
-                }
-                let id = self.nodes.len() as NodeId;
-                self.nodes.push(Node {
-                    label: d.label,
-                    name: d.name.clone(),
-                    qualified_name: key.1.clone(),
-                    file: Some(fid),
-                    span: Some(d.span),
-                    language: f.language,
-                    signature: d.signature.clone(),
-                    doc: d.doc.clone(),
-                    exported: d.exported,
-                    is_test: d.is_test,
-                });
-                seen.insert(key, id);
-                map.push(id);
+                map.push(existing);
+                continue;
             }
-            self.def_node.push(map);
+            let id = self.nodes.len() as NodeId;
+            if d.is_declaration {
+                declaration_only.insert(id);
+            }
+            self.nodes.push(Node {
+                label: d.label,
+                name: d.name.clone(),
+                qualified_name: key.1.clone(),
+                file: Some(fid),
+                span: Some(d.span),
+                language: self.files[i].language,
+                signature: d.signature.clone(),
+                doc: d.doc.clone(),
+                exported: d.exported,
+                is_test: d.is_test,
+            });
+            seen.insert(key, id);
+            map.push(id);
+        }
+        map
+    }
+
+    /// A body merged into a declaration's node gives it its span,
+    /// signature and (when it has one) doc.
+    fn merge_body(&mut self, node: NodeId, body: &Definition) {
+        let n = &mut self.nodes[node as usize];
+        n.span = Some(body.span);
+        n.signature = body.signature.clone();
+        if body.doc.is_some() {
+            n.doc = body.doc.clone();
         }
     }
 
     fn build_tables(&mut self) {
         for i in 0..self.files.len() {
-            let fid = i as FileId;
-            let defs = self.defs(fid);
-            let n = defs.len();
-            let mut parents: Vec<Option<LocalDefId>> = defs
-                .iter()
-                .enumerate()
-                .map(|(j, d)| d.parent.filter(|&p| (p as usize) < n && p as usize != j))
-                .collect();
-            // Break malformed parent cycles.
-            for j in 0..n {
-                let mut cur = parents[j];
-                let mut steps = 0;
-                while let Some(p) = cur {
-                    steps += 1;
-                    if p as usize == j || steps > n {
-                        parents[j] = None;
-                        break;
-                    }
-                    cur = parents[p as usize];
-                }
-            }
-            let mut children = vec![Vec::new(); n];
-            let mut top = Vec::new();
-            for (j, p) in parents.iter().enumerate() {
-                match p {
-                    Some(p) => children[*p as usize].push(j as LocalDefId),
-                    None => top.push(j as LocalDefId),
-                }
-            }
-            for (j, p) in parents.iter().enumerate() {
-                if let Some(p) = p {
-                    let owner = self.def_node[i][*p as usize];
-                    let member = self.def_node[i][j];
-                    if owner != member {
-                        self.add_member(owner, &defs[j].name, member, defs[j].label);
-                    }
-                }
-            }
-            for (j, d) in defs.iter().enumerate() {
-                // Keys are reached by exact key paths only (config reads,
-                // data pointers), never by name matching.
-                if d.is_test || d.label == Label::Test || d.label.is_data_detail() {
-                    continue;
-                }
-                // Definitions local to a function or test body are only
-                // visible through the local scope chain (strategy 1).
-                let mut local = false;
-                let mut cur = parents[j];
-                while let Some(p) = cur {
-                    let pd = &defs[p as usize];
-                    if pd.label.is_callable() || pd.is_test {
-                        local = true;
-                        break;
-                    }
-                    cur = parents[p as usize];
-                }
-                if local {
-                    continue;
-                }
-                let node = self.def_node[i][j];
-                let v = self.by_name.entry(d.name.clone()).or_default();
-                if !v.contains(&node) {
-                    v.push(node);
-                }
-            }
+            let defs = self.defs(i as FileId);
+            let parents = sanitized_parents(defs);
+            let (children, top) = children_and_top(&parents);
+            self.add_parent_members(i, defs, &parents);
+            self.index_names(i, defs, &parents);
             self.with_bases.push(
-                (0..n as LocalDefId)
+                (0..defs.len() as LocalDefId)
                     .filter(|&j| !defs[j as usize].bases.is_empty() || !defs[j as usize].implements.is_empty())
                     .collect(),
             );
-            let mut by_name: HashMap<&'a str, (bool, NodeId)> = HashMap::new();
-            let package_scoped = self.package_of[i].is_some();
-            for &j in &top {
-                let d = &defs[j as usize];
-                // Package scope: `T.m` declared outside `T` (Go methods) is a
-                // member of `T`, not a module-level name.
-                if package_scoped && d.qualified_name != d.name {
-                    continue;
-                }
-                let node = self.def_node[i][j as usize];
-                match by_name.get(d.name.as_str()) {
-                    Some((true, _)) => {}
-                    Some((false, _)) if !d.exported => {}
-                    _ => {
-                        by_name.insert(d.name.as_str(), (d.exported, node));
-                    }
-                }
-            }
-            self.top_by_name.push(by_name.into_iter().map(|(k, (_, n))| (k, n)).collect());
-            let mut child_by_name = HashMap::new();
-            for (p, kids) in children.iter().enumerate() {
-                for &c in kids {
-                    child_by_name.entry((p as LocalDefId, defs[c as usize].name.as_str())).or_insert(c);
-                }
-            }
-            self.child_by_name.push(child_by_name);
+            let top_by_name = self.top_names(i, defs, &top);
+            self.top_by_name.push(top_by_name);
+            self.child_by_name.push(children_by_name(defs, &children));
             self.parents.push(parents);
             self.children.push(children);
             self.top_level.push(top);
         }
+        self.build_import_targets();
+    }
 
-        // Import targets: a project file, or a directory (`Folder` node,
-        // bound to its package when the importer is package-scoped).
-        let mut targets = Vec::with_capacity(self.files.len());
-        let mut folders = Vec::with_capacity(self.files.len());
-        for (i, f) in self.files.iter().enumerate() {
-            let fid = i as FileId;
-            let n = self.imports(fid).len();
-            let (mut t, mut d) = (vec![None; n], vec![None; n]);
-            if let Some(pack) = self.packs[i] {
-                for (k, imp) in self.imports(fid).iter().enumerate() {
-                    let Some(p) = pack.resolve_import(&f.path, imp, self.project) else { continue };
-                    if let Some(file) = self.file_id(&p) {
-                        t[k] = Some(file);
-                    } else if let Some(folder) = self.folder_node(&p) {
-                        d[k] = Some(folder);
-                        t[k] = self.package_in_dir(fid, &p, &imp.module);
-                    }
+    /// Records every definition of file `i` as a member of its parent.
+    fn add_parent_members(&mut self, i: usize, defs: &[Definition], parents: &[Option<LocalDefId>]) {
+        for (j, p) in parents.iter().enumerate() {
+            let Some(p) = p else { continue };
+            let owner = self.def_node[i][*p as usize];
+            let member = self.def_node[i][j];
+            if owner != member {
+                self.add_member(owner, &defs[j].name, member, defs[j].label);
+            }
+        }
+    }
+
+    /// Adds the definitions of file `i` that name matching may find to
+    /// `by_name`: neither tests, nor data details (keys are reached by
+    /// exact key paths only: config reads, data pointers), nor definitions
+    /// local to a function or test body (only visible through the local
+    /// scope chain, strategy 1).
+    fn index_names(&mut self, i: usize, defs: &[Definition], parents: &[Option<LocalDefId>]) {
+        for (j, d) in defs.iter().enumerate() {
+            if d.is_test || d.label == Label::Test || d.label.is_data_detail() || is_body_local(defs, parents, j) {
+                continue;
+            }
+            let node = self.def_node[i][j];
+            let v = self.by_name.entry(d.name.clone()).or_default();
+            if !v.contains(&node) {
+                v.push(node);
+            }
+        }
+    }
+
+    /// Top-level definitions of file `i` by name: the first exported one,
+    /// else the first. Package scope: `T.m` declared outside `T` (Go
+    /// methods) is a member of `T`, not a module-level name.
+    fn top_names(&self, i: usize, defs: &'a [Definition], top: &[LocalDefId]) -> HashMap<&'a str, NodeId> {
+        let mut by_name: HashMap<&'a str, (bool, NodeId)> = HashMap::new();
+        let package_scoped = self.package_of[i].is_some();
+        for &j in top {
+            let d = &defs[j as usize];
+            if package_scoped && d.qualified_name != d.name {
+                continue;
+            }
+            let node = self.def_node[i][j as usize];
+            match by_name.get(d.name.as_str()) {
+                Some((true, _)) => {}
+                Some((false, _)) if !d.exported => {}
+                _ => {
+                    by_name.insert(d.name.as_str(), (d.exported, node));
                 }
             }
+        }
+        by_name.into_iter().map(|(k, (_, n))| (k, n)).collect()
+    }
+
+    /// Import targets: a project file, or a directory (`Folder` node,
+    /// bound to its package when the importer is package-scoped).
+    fn build_import_targets(&mut self) {
+        let mut targets = Vec::with_capacity(self.files.len());
+        let mut folders = Vec::with_capacity(self.files.len());
+        for i in 0..self.files.len() {
+            let (t, d) = self.import_targets_of(i as FileId);
             targets.push(t);
             folders.push(d);
         }
         self.import_targets = targets;
         self.import_folders = folders;
+    }
+
+    /// Per import of `fid`: its target file and its `Folder` node.
+    fn import_targets_of(&self, fid: FileId) -> (Vec<Option<FileId>>, Vec<Option<NodeId>>) {
+        let imports = self.imports(fid);
+        let (mut t, mut d) = (vec![None; imports.len()], vec![None; imports.len()]);
+        let Some(pack) = self.packs[fid as usize] else { return (t, d) };
+        let path = &self.files[fid as usize].path;
+        for (k, imp) in imports.iter().enumerate() {
+            let Some(p) = pack.resolve_import(path, imp, self.project) else { continue };
+            if let Some(file) = self.file_id(&p) {
+                t[k] = Some(file);
+            } else if let Some(folder) = self.folder_node(&p) {
+                d[k] = Some(folder);
+                t[k] = self.package_in_dir(fid, &p, &imp.module);
+            }
+        }
+        (t, d)
     }
 
     fn file_id(&self, path: &str) -> Option<FileId> {
@@ -1216,22 +1367,26 @@ impl<'a> Resolver<'a> {
             for (k, imp) in self.imports(fid).iter().enumerate() {
                 let meta =
                     EdgeMeta { confidence: 1.0, strategy: Strategy::ImportResolved, evidence: Some((fid, imp.span)) };
-                if let Some(folder) = self.import_folders[i][k] {
-                    self.add_edge(fnode, folder, EdgeKind::Imports, meta);
-                } else if let Some(t) = self.import_targets[i][k] {
-                    self.add_edge(fnode, self.file_node[t as usize], EdgeKind::Imports, meta);
+                let target =
+                    self.import_folders[i][k].or_else(|| self.import_targets[i][k].map(|t| self.file_node[t as usize]));
+                if let Some(target) = target {
+                    self.add_edge(fnode, target, EdgeKind::Imports, meta);
                 }
                 if self.is_python(fid) {
-                    for n in &imp.names {
-                        if n.name == "*" {
-                            continue;
-                        }
-                        let sub = Self::join_module(&imp.module, &n.name);
-                        if let Some(t) = self.resolve_module(fid, imp.relative_level, &sub) {
-                            self.add_edge(fnode, self.file_node[t as usize], EdgeKind::Imports, meta);
-                        }
-                    }
+                    self.python_submodule_imports(fid, imp, meta);
                 }
+            }
+        }
+    }
+
+    /// Python `from m import name`: `IMPORTS` of the submodule `m.name`
+    /// when it is a project file.
+    fn python_submodule_imports(&mut self, fid: FileId, imp: &Import, meta: EdgeMeta) {
+        let fnode = self.file_node[fid as usize];
+        for n in imp.names.iter().filter(|n| n.name != "*") {
+            let sub = Self::join_module(&imp.module, &n.name);
+            if let Some(t) = self.resolve_module(fid, imp.relative_level, &sub) {
+                self.add_edge(fnode, self.file_node[t as usize], EdgeKind::Imports, meta);
             }
         }
     }
@@ -1329,76 +1484,29 @@ impl<'a> Resolver<'a> {
         via_star: bool,
         visited: &mut Vec<(FileId, String)>,
     ) -> Option<Target> {
-        let python = self.is_python(f);
         if let Some(n) = self.module_def(f, name) {
             return Some(Target::Symbol(n));
         }
         // Re-exports, in order. Explicit names first (including a module's
         // re-export of its own names, `export default x` / `export { a as b }`,
         // which beats the default-export heuristic), then star re-exports.
-        let imports = self.imports(f);
-        let mut stars = Vec::new();
-        for (k, imp) in imports.iter().enumerate() {
-            if !imp.reexport {
-                continue;
-            }
-            let target = self.import_targets[f as usize][k];
-            if imp.names.is_empty() {
-                match &imp.module_alias {
-                    Some(a) if a == name => return Some(target.map_or(Target::External, Target::Module)),
-                    Some(_) => {}
-                    None => stars.push(target),
-                }
-                continue;
-            }
-            for n in &imp.names {
-                let local = n.alias.as_deref().unwrap_or(&n.name);
-                if n.name == "*" {
-                    match &n.alias {
-                        Some(a) if a == name => return Some(target.map_or(Target::External, Target::Module)),
-                        Some(_) => {}
-                        None => stars.push(target),
-                    }
-                } else if local == name {
-                    return match target {
-                        Some(t) => self.lookup_in_module(t, &n.name, visited),
-                        None => Some(Target::External),
-                    };
-                }
-            }
-        }
+        let stars = match self.explicit_reexport(f, name, visited) {
+            ControlFlow::Break(found) => return found,
+            ControlFlow::Continue(stars) => stars,
+        };
+        let python = self.is_python(f);
         if !python
             && name == "default"
             && let Some(n) = self.default_export(f)
         {
             return Some(Target::Symbol(n));
         }
-        if name != "default" {
-            for t in stars.into_iter().flatten() {
-                if let Some(found) = self.lookup_in_module_as(t, name, true, visited)
-                    && found != Target::External
-                {
-                    return Some(found);
-                }
-            }
+        if name != "default"
+            && let Some(found) = self.star_reexport(stars, name, visited)
+        {
+            return Some(found);
         }
-        // Names bound by this module's own imports (last binding wins):
-        // Python package `__init__.py` re-exports, and ECMAScript
-        // `import { X } from "./x"; export { X }` (packs record the local
-        // export only as a flag, so an imported name that another module
-        // imports from here is taken to be exported — valid code guarantees it).
-        let mut found = None;
-        // Package imports are file-scoped (Go, Java): not re-exported.
-        let package_scoped = self.package_of[f as usize].is_some();
-        for (k, imp) in imports.iter().enumerate() {
-            if imp.reexport || via_star || package_scoped {
-                continue;
-            }
-            if let Some(b) = self.import_binding(f, k, Some(name), visited).pop() {
-                found = Some(b.1);
-            }
-        }
-        if let Some(b) = found {
+        if let Some(b) = self.own_import_binding(f, name, via_star, visited) {
             return b;
         }
         if python {
@@ -1411,6 +1519,98 @@ impl<'a> Resolver<'a> {
         None
     }
 
+    /// The re-exports of `f` that name `name` explicitly: `Break` with the
+    /// binding, else `Continue` with the targets of its star re-exports.
+    fn explicit_reexport(
+        &self,
+        f: FileId,
+        name: &str,
+        visited: &mut Vec<(FileId, String)>,
+    ) -> ControlFlow<Option<Target>, Vec<Option<FileId>>> {
+        let mut stars = Vec::new();
+        for (k, imp) in self.imports(f).iter().enumerate() {
+            if imp.reexport {
+                let target = self.import_targets[f as usize][k];
+                self.reexport_in_import(imp, target, name, &mut stars, visited)?;
+            }
+        }
+        ControlFlow::Continue(stars)
+    }
+
+    /// One re-export (`imp`, resolved to `target`) looked up for `name`;
+    /// unaliased star re-exports are collected in `stars`.
+    fn reexport_in_import(
+        &self,
+        imp: &Import,
+        target: Option<FileId>,
+        name: &str,
+        stars: &mut Vec<Option<FileId>>,
+        visited: &mut Vec<(FileId, String)>,
+    ) -> ControlFlow<Option<Target>> {
+        if imp.names.is_empty() {
+            return match reexported_alias(imp.module_alias.as_deref(), name, target, stars) {
+                Some(t) => ControlFlow::Break(Some(t)),
+                None => ControlFlow::Continue(()),
+            };
+        }
+        for n in &imp.names {
+            if n.name == "*" {
+                if let Some(t) = reexported_alias(n.alias.as_deref(), name, target, stars) {
+                    return ControlFlow::Break(Some(t));
+                }
+            } else if n.alias.as_deref().unwrap_or(&n.name) == name {
+                let found = match target {
+                    Some(t) => self.lookup_in_module(t, &n.name, visited),
+                    None => Some(Target::External),
+                };
+                return ControlFlow::Break(found);
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
+    /// `name` through the star re-exports of a module (`export * from`): the
+    /// first project binding.
+    fn star_reexport(
+        &self,
+        stars: Vec<Option<FileId>>,
+        name: &str,
+        visited: &mut Vec<(FileId, String)>,
+    ) -> Option<Target> {
+        stars
+            .into_iter()
+            .flatten()
+            .find_map(|t| self.lookup_in_module_as(t, name, true, visited).filter(|found| *found != Target::External))
+    }
+
+    /// Names bound by `f`'s own imports (last binding wins): Python package
+    /// `__init__.py` re-exports, and ECMAScript `import { X } from "./x";
+    /// export { X }` (packs record the local export only as a flag, so an
+    /// imported name that another module imports from here is taken to be
+    /// exported — valid code guarantees it). Package imports are
+    /// file-scoped (Go, Java): not re-exported.
+    fn own_import_binding(
+        &self,
+        f: FileId,
+        name: &str,
+        via_star: bool,
+        visited: &mut Vec<(FileId, String)>,
+    ) -> Option<Option<Target>> {
+        if via_star || self.package_of[f as usize].is_some() {
+            return None;
+        }
+        let mut found = None;
+        for (k, imp) in self.imports(f).iter().enumerate() {
+            if imp.reexport {
+                continue;
+            }
+            if let Some(b) = self.import_binding(f, k, Some(name), visited).pop() {
+                found = Some(b.1);
+            }
+        }
+        found
+    }
+
     /// Names bound in `f` by its `k`-th import (only `want` if given).
     fn import_binding(
         &self,
@@ -1421,129 +1621,156 @@ impl<'a> Resolver<'a> {
     ) -> Vec<(String, Option<Target>)> {
         let imp = &self.imports(f)[k];
         let target = self.import_targets[f as usize][k];
-        let python = self.is_python(f);
-        let wants = |n: &str| want.is_none_or(|w| w == n);
-        let mut out = Vec::new();
         if imp.names.is_empty() {
-            match &imp.module_alias {
-                Some(a) => {
-                    if wants(a) {
-                        out.push((a.clone(), Some(target.map_or(Target::External, Target::Module))));
-                    }
-                }
-                None if python && imp.relative_level == 0 => {
-                    let root = imp.module.split('.').next().unwrap_or("");
-                    if !root.is_empty() && wants(root) {
-                        let t = if let Some(m) = self.resolve_module(f, 0, root) {
-                            Target::Module(m)
-                        } else if target.is_some() {
-                            Target::Prefix(root.to_string())
-                        } else {
-                            Target::External
-                        };
-                        out.push((root.to_string(), Some(t)));
-                    }
-                }
-                None => {}
-            }
-            return out;
+            return self.module_binding(f, imp, target, want).into_iter().collect();
         }
+        let python = self.is_python(f);
+        let mut out = Vec::new();
         for n in &imp.names {
             if n.name == "*" {
-                if let Some(a) = &n.alias {
-                    // `import * as ns` represented as a named entry.
-                    if wants(a) {
-                        out.push((a.clone(), Some(target.map_or(Target::External, Target::Module))));
-                    }
-                    continue;
-                }
-                let Some(t) = target else { continue };
-                if !python {
-                    // Package imports (Go dot import, Java on-demand) and
-                    // C/C++ includes (transitively).
-                    if self.star_binds(f, t) {
-                        out.extend(self.star_exports(t, want));
-                    }
-                    continue;
-                }
-                // Python star import: exported top-level definitions.
-                let defs = self.defs(t);
-                for &j in &self.top_level[t as usize] {
-                    let d = &defs[j as usize];
-                    if d.exported && !d.name.starts_with('_') && wants(&d.name) {
-                        out.push((d.name.clone(), Some(Target::Symbol(self.node_of(t, j)))));
-                    }
-                }
+                out.extend(self.star_binding(f, n, target, want));
                 continue;
             }
-            // `C.m` (a member import) binds `m`.
-            let local = match (&n.alias, python) {
-                (Some(a), _) => a.as_str(),
-                (None, false) => n.name.rsplit('.').next().unwrap_or(&n.name),
-                (None, true) => n.name.as_str(),
-            };
-            if !wants(local) {
-                continue;
+            let local = bound_name(n, python);
+            if want.is_none_or(|w| w == local) {
+                out.push((local.to_string(), self.named_binding(f, imp, n, target, visited)));
             }
-            let bound = match target {
-                Some(t) => match n.name.split_once('.') {
-                    // `C.m`: a member of an imported type (Java `import static`).
-                    Some((head, rest)) if !python => match self.lookup_in_module(t, head, visited) {
-                        Some(Target::Symbol(c)) => {
-                            self.walk(f, Target::Symbol(c), &rest.split('.').collect::<Vec<_>>())
-                        }
-                        other => other,
-                    },
-                    _ => self.lookup_in_module(t, &n.name, visited),
-                },
-                None => None,
-            };
-            let bound = match bound {
-                Some(b) => Some(b),
-                None if python => {
-                    let sub = Self::join_module(&imp.module, &n.name);
-                    match self.resolve_module(f, imp.relative_level, &sub) {
-                        Some(m) => Some(Target::Module(m)),
-                        None if target.is_none() => Some(Target::External),
-                        None => None,
-                    }
-                }
-                None if target.is_none() => Some(Target::External),
-                None => None,
-            };
-            out.push((local.to_string(), bound));
         }
         out
     }
 
+    /// The name a module import without names binds: its alias, or (Python
+    /// `import a.b`) its first segment.
+    fn module_binding(
+        &self,
+        f: FileId,
+        imp: &Import,
+        target: Option<FileId>,
+        want: Option<&str>,
+    ) -> Option<(String, Option<Target>)> {
+        let wants = |n: &str| want.is_none_or(|w| w == n);
+        if let Some(a) = &imp.module_alias {
+            return wants(a).then(|| (a.clone(), Some(target.map_or(Target::External, Target::Module))));
+        }
+        if !self.is_python(f) || imp.relative_level != 0 {
+            return None;
+        }
+        let root = imp.module.split('.').next().unwrap_or("");
+        if root.is_empty() || !wants(root) {
+            return None;
+        }
+        let t = if let Some(m) = self.resolve_module(f, 0, root) {
+            Target::Module(m)
+        } else if target.is_some() {
+            Target::Prefix(root.to_string())
+        } else {
+            Target::External
+        };
+        Some((root.to_string(), Some(t)))
+    }
+
+    /// The names a `*` entry of an import binds: its alias (`import * as
+    /// ns`), the names of a package or (C/C++, transitively) an include, or
+    /// the exported top-level definitions of a Python module.
+    fn star_binding(
+        &self,
+        f: FileId,
+        n: &ImportedName,
+        target: Option<FileId>,
+        want: Option<&str>,
+    ) -> Vec<(String, Option<Target>)> {
+        let wants = |n: &str| want.is_none_or(|w| w == n);
+        if let Some(a) = &n.alias {
+            let bound = (a.clone(), Some(target.map_or(Target::External, Target::Module)));
+            return if wants(a) { vec![bound] } else { Vec::new() };
+        }
+        let Some(t) = target else { return Vec::new() };
+        if !self.is_python(f) {
+            return if self.star_binds(f, t) { self.star_exports(t, want) } else { Vec::new() };
+        }
+        let defs = self.defs(t);
+        self.top_level[t as usize]
+            .iter()
+            .filter(|&&j| {
+                let d = &defs[j as usize];
+                d.exported && !d.name.starts_with('_') && wants(&d.name)
+            })
+            .map(|&j| (defs[j as usize].name.clone(), Some(Target::Symbol(self.node_of(t, j)))))
+            .collect()
+    }
+
+    /// What a named import entry `n` of `imp` binds; `C.m` (a member import)
+    /// binds `m`.
+    fn named_binding(
+        &self,
+        f: FileId,
+        imp: &Import,
+        n: &ImportedName,
+        target: Option<FileId>,
+        visited: &mut Vec<(FileId, String)>,
+    ) -> Option<Target> {
+        let python = self.is_python(f);
+        let bound = match target {
+            Some(t) => self.imported_member(f, t, &n.name, python, visited),
+            None => None,
+        };
+        if bound.is_some() {
+            return bound;
+        }
+        if python && let Some(m) = self.resolve_module(f, imp.relative_level, &Self::join_module(&imp.module, &n.name))
+        {
+            return Some(Target::Module(m));
+        }
+        target.is_none().then_some(Target::External)
+    }
+
+    /// `name` in module `t`; `C.m` outside Python is a member of an
+    /// imported type (Java `import static`).
+    fn imported_member(
+        &self,
+        f: FileId,
+        t: FileId,
+        name: &str,
+        python: bool,
+        visited: &mut Vec<(FileId, String)>,
+    ) -> Option<Target> {
+        match name.split_once('.') {
+            Some((head, rest)) if !python => match self.lookup_in_module(t, head, visited) {
+                Some(Target::Symbol(c)) => self.walk(f, Target::Symbol(c), &rest.split('.').collect::<Vec<_>>()),
+                other => other,
+            },
+            _ => self.lookup_in_module(t, name, visited),
+        }
+    }
+
     fn build_envs(&mut self) {
-        let mut envs = Vec::with_capacity(self.files.len());
-        for i in 0..self.files.len() {
-            let fid = i as FileId;
-            let python = self.is_python(fid);
-            let mut env = Env::new();
-            // PHP names arrive fully qualified (the pack applies `use`), so
-            // PHP files have no binding environment.
-            if self.is_php(fid) {
-                envs.push(env);
+        let envs = (0..self.files.len()).map(|i| self.env_of(i as FileId)).collect();
+        self.envs = envs;
+    }
+
+    /// The names bound by the imports of `fid`. PHP names arrive fully
+    /// qualified (the pack applies `use`), so PHP files have no binding
+    /// environment.
+    fn env_of(&self, fid: FileId) -> Env {
+        let mut env = Env::new();
+        if self.is_php(fid) {
+            return env;
+        }
+        let python = self.is_python(fid);
+        for (k, imp) in self.imports(fid).iter().enumerate() {
+            if imp.reexport && !python {
                 continue;
             }
-            for (k, imp) in self.imports(fid).iter().enumerate() {
-                if imp.reexport && !python {
-                    continue;
-                }
-                let star = imp.names.iter().any(|n| n.name == "*" && n.alias.is_none());
-                for (name, t) in self.import_binding(fid, k, None, &mut Vec::new()) {
-                    if star {
-                        env.entry(name).or_insert(t);
-                    } else {
-                        env.insert(name, t);
-                    }
+            let star = imp.names.iter().any(|n| n.name == "*" && n.alias.is_none());
+            for (name, t) in self.import_binding(fid, k, None, &mut Vec::new()) {
+                if star {
+                    env.entry(name).or_insert(t);
+                } else {
+                    env.insert(name, t);
                 }
             }
-            envs.push(env);
         }
-        self.envs = envs;
+        env
     }
 
     // -- PHP -----------------------------------------------------------------
@@ -1551,34 +1778,23 @@ impl<'a> Resolver<'a> {
     fn build_php_index(&mut self) {
         let mut index = PhpIndex::default();
         for i in 0..self.files.len() {
-            let fid = i as FileId;
-            if !self.is_php(fid) {
-                continue;
-            }
-            let defs = self.defs(fid);
-            for (j, d) in defs.iter().enumerate() {
-                let node = self.def_node[i][j];
-                let qn = &self.nodes[node as usize].qualified_name;
-                let in_type = self.parents[i][j].is_some_and(|p| defs[p as usize].label.is_type());
-                if matches!(d.label, Label::Trait | Label::Enum) {
-                    index.open.insert(node);
-                }
-                let (map, key) = match d.label {
-                    l if l.is_type() => (&mut index.types, qn.to_lowercase()),
-                    Label::Function => (&mut index.functions, qn.to_lowercase()),
-                    Label::Constant if !in_type => (&mut index.constants, qn.clone()),
-                    _ => continue,
-                };
-                if let Some((root, _)) = key.split_once('\\') {
-                    index.roots.insert(root.to_lowercase());
-                }
-                let v = map.entry(key).or_default();
-                if !v.contains(&node) {
-                    v.push(node);
-                }
+            if self.is_php(i as FileId) {
+                self.index_php_file(i, &mut index);
             }
         }
         self.php = index;
+    }
+
+    fn index_php_file(&self, i: usize, index: &mut PhpIndex) {
+        let defs = self.defs(i as FileId);
+        for (j, d) in defs.iter().enumerate() {
+            let node = self.def_node[i][j];
+            if matches!(d.label, Label::Trait | Label::Enum) {
+                index.open.insert(node);
+            }
+            let in_type = self.parents[i][j].is_some_and(|p| defs[p as usize].label.is_type());
+            index.insert(d.label, in_type, &self.nodes[node as usize].qualified_name, node);
+        }
     }
 
     /// First non-test node with this fully qualified name, else the first.
@@ -1691,75 +1907,97 @@ impl<'a> Resolver<'a> {
     /// project class (magic `__call` / `__callStatic`) falls back to the
     /// unique-method heuristic.
     fn resolve_php(&self, f: FileId, item: &RefItem<'_>, scope: Option<LocalDefId>) -> Outcome {
-        let name = item.name;
-        let pack = self.packs[f as usize];
         let Some(receiver) = item.receiver.map(str::trim) else {
-            if let Some(n) = self.local_scope(f, scope, name) {
-                return Outcome::Hit(n, Strategy::SameModule, 0.95);
-            }
-            if let Some(n) = self.top_level_def(f, name) {
-                return Outcome::Hit(n, Strategy::SameModule, 0.9);
-            }
-            return self.unique_name(f, item.kind, name, false);
+            return self.php_unqualified(f, item, scope);
         };
-        let selfs: &[&str] = pack.map_or(&[], |p| p.self_receivers());
+        let selfs: &[&str] = self.packs[f as usize].map_or(&[], |p| p.self_receivers());
         if selfs.contains(&receiver) || receiver == "parent" {
-            let want = Want::of(item.kind);
-            let outcome = if receiver == "parent" {
-                self.super_member(f, scope, name, want)
-            } else {
-                self.self_member(f, scope, name, want)
-            };
-            return match outcome {
-                Outcome::Miss => self.php_member_miss(self.enclosing_type(f, scope), || Outcome::Miss),
-                hit => hit,
-            };
+            return self.php_self_member(f, item, scope, receiver == "parent");
         }
         // Namespace qualifier: a class, function or constant by name.
         if let Some(qualifier) = receiver.strip_suffix('\\') {
-            let (exact, ns) = match qualifier.strip_prefix('\\') {
-                Some(ns) => (true, ns),
-                None => (false, qualifier),
-            };
-            let fqn = if ns.is_empty() { name.to_string() } else { format!("{ns}\\{name}") };
-            if let Some(n) = self.php_symbol(item.kind, &fqn) {
-                return Outcome::Hit(n, Strategy::ImportResolved, 0.95);
-            }
-            if !exact
-                && !ns.is_empty()
-                && let Some(n) = self.php_symbol(item.kind, name)
-            {
-                return Outcome::Hit(n, Strategy::ImportResolved, 0.9);
-            }
-            if exact
-                && !matches!(item.kind, RefKind::Call | RefKind::Write)
-                && let Some((n, false)) = self.php_class(f, &fqn)
-            {
-                return Outcome::Hit(n, Strategy::ImportResolved, 0.8);
-            }
-            if pack.is_some_and(|p| p.is_builtin(name)) || self.php_in_project(&fqn) {
-                return Outcome::Miss;
-            }
-            return Outcome::External;
+            return self.php_qualified(f, item, qualifier);
         }
         // Class member: `\A\C` (static) or `\A\C->` (typed instance).
         if let Some(class) = receiver.strip_prefix('\\') {
-            let (class, instance) = match class.strip_suffix("->") {
-                Some(c) => (c, true),
-                None => (class, false),
-            };
-            return match self.php_class(f, class) {
-                Some((c, _)) => match self.find_member(c, name, Want::of(item.kind)) {
-                    Some((n, _)) if instance => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
-                    Some((n, _)) => Outcome::Hit(n, Strategy::ImportResolved, 0.85),
-                    None => self.php_member_miss(Some(c), || self.unique_name(f, item.kind, name, true)),
-                },
-                None if self.php_in_project(class) => self.unique_name(f, item.kind, name, true),
-                None => Outcome::External,
-            };
+            return self.php_class_member(f, item, class);
         }
         // Unknown receiver (`$repo`, `foo()->bar`, `class@anonymous`).
-        self.unique_name(f, item.kind, name, true)
+        self.unique_name(f, item.kind, item.name, true)
+    }
+
+    /// A PHP name without receiver: local scope, the file, unique name.
+    fn php_unqualified(&self, f: FileId, item: &RefItem<'_>, scope: Option<LocalDefId>) -> Outcome {
+        if let Some(n) = self.local_scope(f, scope, item.name) {
+            return Outcome::Hit(n, Strategy::SameModule, 0.95);
+        }
+        if let Some(n) = self.top_level_def(f, item.name) {
+            return Outcome::Hit(n, Strategy::SameModule, 0.9);
+        }
+        self.unique_name(f, item.kind, item.name, false)
+    }
+
+    /// `$this` / `self` / `static` (`parent`: a base) member.
+    fn php_self_member(&self, f: FileId, item: &RefItem<'_>, scope: Option<LocalDefId>, parent: bool) -> Outcome {
+        let want = Want::of(item.kind);
+        let outcome = if parent {
+            self.super_member(f, scope, item.name, want)
+        } else {
+            self.self_member(f, scope, item.name, want)
+        };
+        match outcome {
+            Outcome::Miss => self.php_member_miss(self.enclosing_type(f, scope), || Outcome::Miss),
+            hit => hit,
+        }
+    }
+
+    /// A name behind a namespace qualifier (`\A\B\` exact, `A\B\` with the
+    /// global fallback).
+    fn php_qualified(&self, f: FileId, item: &RefItem<'_>, qualifier: &str) -> Outcome {
+        let name = item.name;
+        let (exact, ns) = match qualifier.strip_prefix('\\') {
+            Some(ns) => (true, ns),
+            None => (false, qualifier),
+        };
+        let fqn = if ns.is_empty() { name.to_string() } else { format!("{ns}\\{name}") };
+        if let Some(n) = self.php_symbol(item.kind, &fqn) {
+            return Outcome::Hit(n, Strategy::ImportResolved, 0.95);
+        }
+        if !exact
+            && !ns.is_empty()
+            && let Some(n) = self.php_symbol(item.kind, name)
+        {
+            return Outcome::Hit(n, Strategy::ImportResolved, 0.9);
+        }
+        if exact
+            && !matches!(item.kind, RefKind::Call | RefKind::Write)
+            && let Some((n, false)) = self.php_class(f, &fqn)
+        {
+            return Outcome::Hit(n, Strategy::ImportResolved, 0.8);
+        }
+        if self.packs[f as usize].is_some_and(|p| p.is_builtin(name)) || self.php_in_project(&fqn) {
+            return Outcome::Miss;
+        }
+        Outcome::External
+    }
+
+    /// A member of class `class` (`A\C`, static; `A\C->`, a typed instance).
+    fn php_class_member(&self, f: FileId, item: &RefItem<'_>, class: &str) -> Outcome {
+        let (class, instance) = match class.strip_suffix("->") {
+            Some(c) => (c, true),
+            None => (class, false),
+        };
+        let Some((c, _)) = self.php_class(f, class) else {
+            if self.php_in_project(class) {
+                return self.unique_name(f, item.kind, item.name, true);
+            }
+            return Outcome::External;
+        };
+        match self.find_member(c, item.name, Want::of(item.kind)) {
+            Some((n, _)) if instance => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+            Some((n, _)) => Outcome::Hit(n, Strategy::ImportResolved, 0.85),
+            None => self.php_member_miss(Some(c), || self.unique_name(f, item.kind, item.name, true)),
+        }
     }
 
     // -- members and bases ---------------------------------------------------
@@ -1838,76 +2076,95 @@ impl<'a> Resolver<'a> {
     fn resolve_bases(&mut self) {
         for i in 0..self.files.len() {
             let fid = i as FileId;
-            let defs = self.defs(fid);
-            for (j, d) in defs.iter().enumerate() {
+            for (j, d) in self.defs(fid).iter().enumerate() {
                 if d.bases.is_empty() && d.implements.is_empty() {
                     continue;
                 }
-                let class = self.node_of(fid, j as LocalDefId);
-                let scope = self.parents[i][j];
-                let lists = [(EdgeKind::Inherits, &d.bases), (EdgeKind::Implements, &d.implements)];
-                let php = self.is_php(fid);
-                let family = self.families[i];
-                if family == Some(LanguageFamily::Data) {
-                    for text in &d.bases {
-                        if let Outcome::Hit(target, strategy, confidence) = self.data_base(fid, text)
-                            && target != class
-                        {
-                            let meta = EdgeMeta { confidence, strategy, evidence: Some((fid, d.name_span)) };
-                            self.add_edge(class, target, EdgeKind::Inherits, meta);
-                        }
-                    }
-                    continue;
+                if self.families[i] == Some(LanguageFamily::Data) {
+                    self.data_bases(fid, j as LocalDefId, d);
+                } else {
+                    self.code_bases(fid, j as LocalDefId, d);
                 }
-                // Implemented interfaces contribute members (default
-                // methods, constants) in PHP and the RFC 0003 languages.
-                let implements_members =
-                    php || !matches!(family, Some(LanguageFamily::Python | LanguageFamily::EcmaScript) | None);
-                for (kind, list) in lists {
-                    for text in list.iter() {
-                        let split = if php { split_php_name(text) } else { split_base(text) };
-                        let Some((receiver, name)) = split else {
-                            if !php && !text.contains('=') {
-                                self.open_types.insert(class);
-                            }
-                            continue;
-                        };
-                        let item = RefItem {
-                            kind: RefKind::Type,
-                            name,
-                            receiver,
-                            enclosing: scope,
-                            span: d.name_span,
-                            decorated: None,
-                            arity: None,
-                            arg_types: None,
-                        };
-                        let outcome = self.resolve_item(fid, &item, scope);
-                        if !matches!(outcome, Outcome::Hit(..)) {
-                            // A parent, trait or interface outside the project.
-                            if php {
-                                self.php.open.insert(class);
-                            } else {
-                                self.open_types.insert(class);
-                            }
-                        }
-                        if let Outcome::Hit(target, strategy, confidence) = outcome {
-                            let target = self.prefer_body(target);
-                            if target == class {
-                                continue;
-                            }
-                            let meta = EdgeMeta { confidence, strategy, evidence: Some((fid, d.name_span)) };
-                            self.add_edge(class, target, kind, meta);
-                            // PHP: interface constants are members of implementing classes.
-                            if kind == EdgeKind::Inherits || implements_members {
-                                let v = self.bases.entry(class).or_default();
-                                if !v.contains(&target) {
-                                    v.push(target);
-                                }
-                            }
-                        }
-                    }
-                }
+            }
+        }
+    }
+
+    /// `INHERITS` of a data definition (a key path it extends).
+    fn data_bases(&mut self, fid: FileId, j: LocalDefId, d: &Definition) {
+        let class = self.node_of(fid, j);
+        for text in &d.bases {
+            if let Outcome::Hit(target, strategy, confidence) = self.data_base(fid, text)
+                && target != class
+            {
+                let meta = EdgeMeta { confidence, strategy, evidence: Some((fid, d.name_span)) };
+                self.add_edge(class, target, EdgeKind::Inherits, meta);
+            }
+        }
+    }
+
+    /// The base and implements lists of a code definition, resolved as
+    /// `Type` references in the definition's outer scope.
+    fn code_bases(&mut self, fid: FileId, j: LocalDefId, d: &Definition) {
+        let php = self.is_php(fid);
+        // Implemented interfaces contribute members (default methods,
+        // constants) in PHP and the RFC 0003 languages.
+        let family = self.families[fid as usize];
+        let implements_members =
+            php || !matches!(family, Some(LanguageFamily::Python | LanguageFamily::EcmaScript) | None);
+        let site = BaseSite {
+            file: fid,
+            class: self.node_of(fid, j),
+            scope: self.parents[fid as usize][j as usize],
+            span: d.name_span,
+            php,
+            implements_members,
+        };
+        for (kind, list) in [(EdgeKind::Inherits, &d.bases), (EdgeKind::Implements, &d.implements)] {
+            for text in list {
+                self.resolve_base(&site, kind, text);
+            }
+        }
+    }
+
+    /// One entry of a base (`kind` `INHERITS`) or implements list.
+    fn resolve_base(&mut self, site: &BaseSite, kind: EdgeKind, text: &str) {
+        let split = if site.php { split_php_name(text) } else { split_base(text) };
+        let Some((receiver, name)) = split else {
+            if !site.php && !text.contains('=') {
+                self.open_types.insert(site.class);
+            }
+            return;
+        };
+        let item = RefItem {
+            kind: RefKind::Type,
+            name,
+            receiver,
+            enclosing: site.scope,
+            span: site.span,
+            decorated: None,
+            arity: None,
+            arg_types: None,
+        };
+        let Outcome::Hit(target, strategy, confidence) = self.resolve_item(site.file, &item, site.scope) else {
+            // A parent, trait or interface outside the project.
+            if site.php {
+                self.php.open.insert(site.class);
+            } else {
+                self.open_types.insert(site.class);
+            }
+            return;
+        };
+        let target = self.prefer_body(target);
+        if target == site.class {
+            return;
+        }
+        let meta = EdgeMeta { confidence, strategy, evidence: Some((site.file, site.span)) };
+        self.add_edge(site.class, target, kind, meta);
+        // PHP: interface constants are members of implementing classes.
+        if kind == EdgeKind::Inherits || site.implements_members {
+            let v = self.bases.entry(site.class).or_default();
+            if !v.contains(&target) {
+                v.push(target);
             }
         }
     }
@@ -1992,58 +2249,73 @@ impl<'a> Resolver<'a> {
         if self.is_php(f) {
             return self.resolve_php(f, item, scope);
         }
-        let name = item.name;
-        let pack = self.packs[f as usize];
-        let selfs: &[&str] = pack.map_or(&[], |p| p.self_receivers());
-        let Some(receiver) = item.receiver.map(str::trim) else {
-            // 1. Local scope.
-            if let Some(n) = self.local_scope(f, scope, name) {
-                return Outcome::Hit(n, Strategy::SameModule, 0.95);
-            }
-            // 1b. Implicit self (`implicit_self` packs): enclosing class member.
-            if let Some(hit) = self.implicit_member(f, scope, name, Want::of(item.kind)) {
-                return hit;
-            }
-            // 1c. C++: a member of an enclosing namespace.
-            if let Some(hit) = self.namespace_scope(f, scope, name) {
-                return hit;
-            }
-            // 3. Imported binding.
-            match self.envs[f as usize].get(name) {
-                Some(Some(Target::Symbol(n))) => return Outcome::Hit(*n, Strategy::ImportResolved, 0.95),
-                // ECMAScript: calling, constructing or typing by a module
-                // binding (`const log = require("./log"); log()`) is its
-                // default export (`module.exports = …`).
-                Some(Some(Target::Module(m)))
-                    if self.families[f as usize] == Some(LanguageFamily::EcmaScript)
-                        && matches!(item.kind, RefKind::Call | RefKind::New | RefKind::Type) =>
-                {
-                    return match self.lookup_in_module(*m, "default", &mut Vec::new()) {
-                        Some(Target::Symbol(n)) => Outcome::Hit(n, Strategy::ImportResolved, 0.9),
-                        _ => Outcome::External,
-                    };
-                }
-                Some(Some(_)) => return Outcome::External,
-                Some(None) | None => {}
-            }
-            // 4. Same module (the whole package for package-scoped packs).
-            if let Some(n) = self.module_def(f, name) {
-                return Outcome::Hit(n, Strategy::SameModule, 0.9);
-            }
-            // 6. Unique name.
-            return self.unique_name(f, item.kind, name, false);
-        };
+        match item.receiver.map(str::trim) {
+            None => self.resolve_bare(f, item, scope),
+            Some(receiver) => self.resolve_with_receiver(f, item, scope, receiver),
+        }
+    }
 
+    /// A name without receiver: strategies 1, 1b, 1c, 3, 4 and 6.
+    fn resolve_bare(&self, f: FileId, item: &RefItem<'_>, scope: Option<LocalDefId>) -> Outcome {
+        let name = item.name;
+        // 1. Local scope.
+        if let Some(n) = self.local_scope(f, scope, name) {
+            return Outcome::Hit(n, Strategy::SameModule, 0.95);
+        }
+        // 1b. Implicit self (`implicit_self` packs): enclosing class member.
+        if let Some(hit) = self.implicit_member(f, scope, name, Want::of(item.kind)) {
+            return hit;
+        }
+        // 1c. C++: a member of an enclosing namespace.
+        if let Some(hit) = self.namespace_scope(f, scope, name) {
+            return hit;
+        }
+        // 3. Imported binding.
+        if let Some(hit) = self.imported_name(f, item) {
+            return hit;
+        }
+        // 4. Same module (the whole package for package-scoped packs).
+        if let Some(n) = self.module_def(f, name) {
+            return Outcome::Hit(n, Strategy::SameModule, 0.9);
+        }
+        // 6. Unique name.
+        self.unique_name(f, item.kind, name, false)
+    }
+
+    /// Strategy 3 for a bare name: its import binding, if any.
+    fn imported_name(&self, f: FileId, item: &RefItem<'_>) -> Option<Outcome> {
+        match self.envs[f as usize].get(item.name) {
+            Some(Some(Target::Symbol(n))) => Some(Outcome::Hit(*n, Strategy::ImportResolved, 0.95)),
+            // ECMAScript: calling, constructing or typing by a module
+            // binding (`const log = require("./log"); log()`) is its
+            // default export (`module.exports = …`).
+            Some(Some(Target::Module(m)))
+                if self.families[f as usize] == Some(LanguageFamily::EcmaScript)
+                    && matches!(item.kind, RefKind::Call | RefKind::New | RefKind::Type) =>
+            {
+                Some(match self.lookup_in_module(*m, "default", &mut Vec::new()) {
+                    Some(Target::Symbol(n)) => Outcome::Hit(n, Strategy::ImportResolved, 0.9),
+                    _ => Outcome::External,
+                })
+            }
+            Some(Some(_)) => Some(Outcome::External),
+            Some(None) | None => None,
+        }
+    }
+
+    /// A name with a receiver: self (2), typed (5), namespace and member
+    /// chain receivers, `super`, a dotted path (3, 4), unique method name (6).
+    fn resolve_with_receiver(
+        &self,
+        f: FileId,
+        item: &RefItem<'_>,
+        scope: Option<LocalDefId>,
+        receiver: &str,
+    ) -> Outcome {
+        let selfs: &[&str] = self.packs[f as usize].map_or(&[], |p| p.self_receivers());
         // 2. Self receiver (`$self`: also a method declared outside its type).
         if selfs.contains(&receiver) {
-            let class = self
-                .enclosing_type(f, scope)
-                .or_else(|| if receiver == SELF_RECEIVER { self.receiver_type_from_name(f, scope) } else { None });
-            return match class.and_then(|c| self.find_member(c, name, Want::of(item.kind))) {
-                Some((n, false)) => Outcome::Hit(n, Strategy::TypeResolved, 0.9),
-                Some((n, true)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
-                None => Outcome::Miss,
-            };
+            return self.self_receiver_member(f, item, scope, receiver);
         }
         // 5. Typed receiver: `$type:T` (declared type known in the file).
         if let Some(ty) = receiver.strip_prefix(TYPE_RECEIVER_PREFIX) {
@@ -2058,52 +2330,83 @@ impl<'a> Resolver<'a> {
             return self.resolve_member_chain(f, item, scope, chain);
         }
         if receiver == "super()" || receiver == "super" {
-            return self.super_member(f, scope, name, Want::of(item.kind));
+            return self.super_member(f, scope, item.name, Want::of(item.kind));
         }
-
-        let segs: Vec<&str> = receiver.split('.').collect();
-        if segs.iter().all(|s| is_ident(s)) && !selfs.contains(&segs[0]) {
-            let head = segs[0];
-            match self.envs[f as usize].get(head) {
-                // 3. Receiver bound by an import.
-                Some(Some(start)) => match self.walk(f, start.clone(), &segs[1..]) {
-                    Some(Target::Module(m)) => match self.lookup_in_module(m, name, &mut Vec::new()) {
-                        Some(Target::Symbol(n)) => return Outcome::Hit(n, Strategy::ImportResolved, 0.9),
-                        Some(_) => return Outcome::External,
-                        None => {}
-                    },
-                    Some(Target::Symbol(c))
-                        if self.nodes[c as usize].label.is_type() || self.is_constructor_function(c) =>
-                    {
-                        if let Some((n, _)) = self.find_member(c, name, Want::of(item.kind)) {
-                            return Outcome::Hit(n, Strategy::ImportResolved, 0.85);
-                        }
-                    }
-                    Some(Target::External) | Some(Target::Prefix(_)) => return Outcome::External,
-                    _ => {}
-                },
-                Some(None) => {}
-                // 4. Receiver is a class of the same module.
-                None => {
-                    let local = self.module_def(f, head);
-                    if local.is_none() && pack.is_some_and(|p| p.is_builtin(head)) {
-                        // `console.log`, `Math.max`, `str.join`: a builtin object.
-                        return Outcome::External;
-                    }
-                    let owner = |c: NodeId| self.nodes[c as usize].label.is_type() || self.is_constructor_function(c);
-                    if let Some(c) = local
-                        && owner(c)
-                        && let Some(Target::Symbol(c)) = self.walk(f, Target::Symbol(c), &segs[1..])
-                        && owner(c)
-                        && let Some((n, _)) = self.find_member(c, name, Want::of(item.kind))
-                    {
-                        return Outcome::Hit(n, Strategy::SameModule, 0.85);
-                    }
-                }
-            }
+        if let Some(hit) = self.resolve_dotted(f, item, receiver, selfs) {
+            return hit;
         }
         // 6. Unique method name.
-        self.unique_name(f, item.kind, name, true)
+        self.unique_name(f, item.kind, item.name, true)
+    }
+
+    /// Strategy 2: a member of the class enclosing `scope` (for `$self`,
+    /// else the receiver type named by a method declared outside its type).
+    fn self_receiver_member(
+        &self,
+        f: FileId,
+        item: &RefItem<'_>,
+        scope: Option<LocalDefId>,
+        receiver: &str,
+    ) -> Outcome {
+        let class = self
+            .enclosing_type(f, scope)
+            .or_else(|| if receiver == SELF_RECEIVER { self.receiver_type_from_name(f, scope) } else { None });
+        match class.and_then(|c| self.find_member(c, item.name, Want::of(item.kind))) {
+            Some((n, false)) => Outcome::Hit(n, Strategy::TypeResolved, 0.9),
+            Some((n, true)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+            None => Outcome::Miss,
+        }
+    }
+
+    /// A dotted receiver of identifiers: bound by an import (3) or a class
+    /// of the same module (4). `None` falls through to strategy 6.
+    fn resolve_dotted(&self, f: FileId, item: &RefItem<'_>, receiver: &str, selfs: &[&str]) -> Option<Outcome> {
+        let segs: Vec<&str> = receiver.split('.').collect();
+        if !segs.iter().all(|s| is_ident(s)) || selfs.contains(&segs[0]) {
+            return None;
+        }
+        match self.envs[f as usize].get(segs[0]) {
+            Some(Some(start)) => self.member_of_import(f, item, start, &segs[1..]),
+            Some(None) => None,
+            None => self.member_of_local(f, item, &segs),
+        }
+    }
+
+    /// 3. Receiver bound by an import, walked along `rest`.
+    fn member_of_import(&self, f: FileId, item: &RefItem<'_>, start: &Target, rest: &[&str]) -> Option<Outcome> {
+        match self.walk(f, start.clone(), rest) {
+            Some(Target::Module(m)) => match self.lookup_in_module(m, item.name, &mut Vec::new()) {
+                Some(Target::Symbol(n)) => Some(Outcome::Hit(n, Strategy::ImportResolved, 0.9)),
+                Some(_) => Some(Outcome::External),
+                None => None,
+            },
+            Some(Target::Symbol(c)) if self.owns_members(c) => self
+                .find_member(c, item.name, Want::of(item.kind))
+                .map(|(n, _)| Outcome::Hit(n, Strategy::ImportResolved, 0.85)),
+            Some(Target::External) | Some(Target::Prefix(_)) => Some(Outcome::External),
+            _ => None,
+        }
+    }
+
+    /// 4. Receiver is a class of the same module (`segs[0]` not imported).
+    fn member_of_local(&self, f: FileId, item: &RefItem<'_>, segs: &[&str]) -> Option<Outcome> {
+        let local = self.module_def(f, segs[0]);
+        if local.is_none() && self.packs[f as usize].is_some_and(|p| p.is_builtin(segs[0])) {
+            // `console.log`, `Math.max`, `str.join`: a builtin object.
+            return Some(Outcome::External);
+        }
+        let c = local.filter(|&c| self.owns_members(c))?;
+        let Some(Target::Symbol(c)) = self.walk(f, Target::Symbol(c), &segs[1..]) else { return None };
+        if !self.owns_members(c) {
+            return None;
+        }
+        self.find_member(c, item.name, Want::of(item.kind)).map(|(n, _)| Outcome::Hit(n, Strategy::SameModule, 0.85))
+    }
+
+    /// Whether `c` has members a receiver can name: a type or an ECMAScript
+    /// constructor function.
+    fn owns_members(&self, c: NodeId) -> bool {
+        self.nodes[c as usize].label.is_type() || self.is_constructor_function(c)
     }
 
     /// Strategy 6.
@@ -2186,49 +2489,56 @@ impl<'a> Resolver<'a> {
     fn resolve_references(&mut self) {
         let files: &'a [FileInput] = self.files;
         for (i, file) in files.iter().enumerate() {
-            let fid = i as FileId;
             let Some(facts) = file.facts.as_ref() else { continue };
-            let n_defs = facts.definitions.len();
-            let valid = |e: Option<LocalDefId>| e.filter(|&x| (x as usize) < n_defs);
-            let mut items: Vec<RefItem<'a>> = facts
-                .references
-                .iter()
-                .map(|r: &'a Reference| {
-                    let (name, arg_types) = split_arg_types(&r.name);
-                    RefItem {
-                        kind: r.kind,
-                        name,
-                        receiver: r.receiver.as_deref(),
-                        enclosing: valid(r.enclosing),
-                        span: r.span,
-                        decorated: None,
-                        arity: r.arity,
-                        arg_types,
-                    }
-                })
-                .collect();
+            let mut items = Self::reference_items(facts);
             // Packs that do not report decorator references: synthesize them
             // from the raw decorator texts.
             if !facts.references.iter().any(|r| r.kind == RefKind::Decorator) {
-                for (j, d) in facts.definitions.iter().enumerate() {
-                    for text in &d.decorators {
-                        if let Some((receiver, name)) = split_decorator(text) {
-                            items.push(RefItem {
-                                kind: RefKind::Decorator,
-                                name,
-                                receiver,
-                                enclosing: self.parents[i][j],
-                                span: d.name_span,
-                                decorated: Some(j as LocalDefId),
-                                arity: None,
-                                arg_types: None,
-                            });
-                        }
-                    }
-                }
+                self.synthesize_decorators(i, facts, &mut items);
             }
             for item in &items {
-                self.resolve_one(fid, item);
+                self.resolve_one(i as FileId, item);
+            }
+        }
+    }
+
+    /// The references of a file as items to resolve.
+    fn reference_items(facts: &'a FileFacts) -> Vec<RefItem<'a>> {
+        let n_defs = facts.definitions.len();
+        let valid = |e: Option<LocalDefId>| e.filter(|&x| (x as usize) < n_defs);
+        facts
+            .references
+            .iter()
+            .map(|r: &'a Reference| {
+                let (name, arg_types) = split_arg_types(&r.name);
+                RefItem {
+                    kind: r.kind,
+                    name,
+                    receiver: r.receiver.as_deref(),
+                    enclosing: valid(r.enclosing),
+                    span: r.span,
+                    decorated: None,
+                    arity: r.arity,
+                    arg_types,
+                }
+            })
+            .collect()
+    }
+
+    /// Decorator references from the raw decorator texts of file `i`.
+    fn synthesize_decorators(&self, i: usize, facts: &'a FileFacts, items: &mut Vec<RefItem<'a>>) {
+        for (j, d) in facts.definitions.iter().enumerate() {
+            for (receiver, name) in d.decorators.iter().filter_map(|text| split_decorator(text)) {
+                items.push(RefItem {
+                    kind: RefKind::Decorator,
+                    name,
+                    receiver,
+                    enclosing: self.parents[i][j],
+                    span: d.name_span,
+                    decorated: Some(j as LocalDefId),
+                    arity: None,
+                    arg_types: None,
+                });
             }
         }
     }
@@ -2241,105 +2551,120 @@ impl<'a> Resolver<'a> {
             self.resolve_bridge(f, item, caller);
             return;
         }
-        let base = match item.kind {
-            RefKind::Type | RefKind::Read => self.base_ref(f, item),
-            _ => None,
-        };
-        let (outcome, src, dst_override, edge_kind) = match (item.kind, base) {
-            (RefKind::Decorator, _) => {
-                let decorated = self.decorated_def(f, item);
-                let scope = match decorated {
-                    Some(d) if item.enclosing == Some(d) => self.parents[f as usize][d as usize],
-                    _ => item.enclosing,
-                };
-                let dst = decorated.map(|d| self.node_of(f, d));
-                (self.resolve_item(f, item, scope), None, dst, EdgeKind::Decorates)
-            }
-            // A name in a class's own base / implements list.
-            (_, Some((c, kind))) => {
-                let scope = self.parents[f as usize][c as usize];
-                (self.resolve_item(f, item, scope), Some(self.node_of(f, c)), None, kind)
-            }
-            (kind, None) => {
-                let edge = match kind {
-                    RefKind::Call | RefKind::New => EdgeKind::Calls,
-                    RefKind::Throw => EdgeKind::Throws,
-                    RefKind::Write => EdgeKind::Writes,
-                    _ => EdgeKind::References,
-                };
-                (self.resolve_item(f, item, item.enclosing), None, None, edge)
-            }
-        };
-        let (target, strategy, confidence) = match outcome {
-            Outcome::Hit(t, s, c) => (t, s, c),
-            Outcome::External => {
-                self.stats.references_external += 1;
-                return;
-            }
-            Outcome::Miss => {
-                tracing::trace!(
-                    kind = ?item.kind,
-                    receiver = item.receiver.unwrap_or("-"),
-                    name = item.name,
-                    path = %self.files[f as usize].path,
-                    "unresolved"
-                );
-                // PHP reports builtins with a namespace qualifier (`App\`, `\`).
-                let unqualified = match item.receiver {
-                    None => true,
-                    Some(r) => self.is_php(f) && r.ends_with('\\'),
-                };
-                if unqualified && self.packs[f as usize].is_some_and(|p| p.is_builtin(item.name)) {
-                    self.stats.references_builtin += 1;
-                }
-                return;
-            }
-        };
-        self.stats.references_resolved += 1;
-        *self.stats.resolved_by_strategy.entry(strategy.as_str().to_string()).or_default() += 1;
+        let plan = self.plan_edges(f, item);
+        let Some((target, strategy, confidence)) = self.count_outcome(f, item, plan.outcome) else { return };
         // Declarations → their body; overloads → by arity (RFC 0003 §10).
         let target = self.prefer_body(target);
-        let args = item.arg_types.as_deref();
-        for (target, strategy, confidence) in self.expand_overloads(f, target, item.arity, args, strategy, confidence) {
+        for (target, strategy, confidence) in self.expand_overloads(f, caller, item, target, strategy, confidence) {
             let meta = EdgeMeta { confidence, strategy, evidence: Some((f, item.span)) };
-            match edge_kind {
+            match plan.kind {
                 EdgeKind::Decorates => {
-                    if let Some(dst) = dst_override {
+                    if let Some(dst) = plan.dst {
                         self.add_edge(target, dst, EdgeKind::Decorates, meta);
                     }
                 }
                 EdgeKind::Inherits | EdgeKind::Implements => {
-                    let src = src.unwrap_or(caller);
+                    let src = plan.src.unwrap_or(caller);
                     if src != target {
-                        self.add_edge(src, target, edge_kind, meta);
+                        self.add_edge(src, target, plan.kind, meta);
                     }
                 }
-                EdgeKind::Calls => {
-                    self.add_edge(caller, target, EdgeKind::Calls, meta);
-                    if self.nodes[target as usize].label.is_type() {
-                        let ctor = match self.families[f as usize] {
-                            Some(LanguageFamily::Php) => self.find_member(target, "__construct", Want::Call),
-                            // Constructors are members named like the class.
-                            Some(LanguageFamily::Java | LanguageFamily::C) => {
-                                self.named_constructor(target).map(|c| (c, false))
-                            }
-                            _ => self
-                                .find_member(target, "__init__", Want::Call)
-                                .or_else(|| self.find_member(target, "constructor", Want::Call)),
-                        };
-                        if let Some((c, _)) = ctor {
-                            let c = self.prefer_body(c);
-                            for (c, s, conf) in
-                                self.expand_overloads(f, c, item.arity, args, strategy, confidence * 0.95)
-                            {
-                                let m = EdgeMeta { confidence: conf, strategy: s, ..meta };
-                                self.add_edge(caller, c, EdgeKind::Calls, m);
-                            }
-                        }
-                    }
-                }
+                EdgeKind::Calls => self.add_call(f, item, caller, target, meta),
                 kind => self.add_edge(caller, target, kind, meta),
             }
+        }
+    }
+
+    /// How a reference resolves and where its edges go.
+    fn plan_edges(&self, f: FileId, item: &RefItem<'_>) -> EdgePlan {
+        if item.kind == RefKind::Decorator {
+            let decorated = self.decorated_def(f, item);
+            let scope = match decorated {
+                Some(d) if item.enclosing == Some(d) => self.parents[f as usize][d as usize],
+                _ => item.enclosing,
+            };
+            let dst = decorated.map(|d| self.node_of(f, d));
+            return EdgePlan { outcome: self.resolve_item(f, item, scope), src: None, dst, kind: EdgeKind::Decorates };
+        }
+        let base = match item.kind {
+            RefKind::Type | RefKind::Read => self.base_ref(f, item),
+            _ => None,
+        };
+        // A name in a class's own base / implements list.
+        if let Some((c, kind)) = base {
+            let scope = self.parents[f as usize][c as usize];
+            let src = Some(self.node_of(f, c));
+            return EdgePlan { outcome: self.resolve_item(f, item, scope), src, dst: None, kind };
+        }
+        let kind = match item.kind {
+            RefKind::Call | RefKind::New => EdgeKind::Calls,
+            RefKind::Throw => EdgeKind::Throws,
+            RefKind::Write => EdgeKind::Writes,
+            _ => EdgeKind::References,
+        };
+        EdgePlan { outcome: self.resolve_item(f, item, item.enclosing), src: None, dst: None, kind }
+    }
+
+    /// Counts an outcome in the statistics; the target of a hit.
+    fn count_outcome(&mut self, f: FileId, item: &RefItem<'_>, outcome: Outcome) -> Option<(NodeId, Strategy, f32)> {
+        match outcome {
+            Outcome::Hit(t, s, c) => {
+                self.stats.references_resolved += 1;
+                *self.stats.resolved_by_strategy.entry(s.as_str().to_string()).or_default() += 1;
+                Some((t, s, c))
+            }
+            Outcome::External => {
+                self.stats.references_external += 1;
+                None
+            }
+            Outcome::Miss => {
+                self.count_miss(f, item);
+                None
+            }
+        }
+    }
+
+    fn count_miss(&mut self, f: FileId, item: &RefItem<'_>) {
+        tracing::trace!(
+            kind = ?item.kind,
+            receiver = item.receiver.unwrap_or("-"),
+            name = item.name,
+            path = %self.files[f as usize].path,
+            "unresolved"
+        );
+        // PHP reports builtins with a namespace qualifier (`App\`, `\`).
+        let unqualified = match item.receiver {
+            None => true,
+            Some(r) => self.is_php(f) && r.ends_with('\\'),
+        };
+        if unqualified && self.packs[f as usize].is_some_and(|p| p.is_builtin(item.name)) {
+            self.stats.references_builtin += 1;
+        }
+    }
+
+    /// `CALLS` to `target`; a call of a type also calls its constructor.
+    fn add_call(&mut self, f: FileId, item: &RefItem<'_>, caller: NodeId, target: NodeId, meta: EdgeMeta) {
+        self.add_edge(caller, target, EdgeKind::Calls, meta);
+        if !self.nodes[target as usize].label.is_type() {
+            return;
+        }
+        let Some((c, _)) = self.constructor_of(f, target) else { return };
+        let c = self.prefer_body(c);
+        for (c, s, conf) in self.expand_overloads(f, caller, item, c, meta.strategy, meta.confidence * 0.95) {
+            let m = EdgeMeta { confidence: conf, strategy: s, ..meta };
+            self.add_edge(caller, c, EdgeKind::Calls, m);
+        }
+    }
+
+    /// The constructor a call of type `class` from file `f` reaches.
+    fn constructor_of(&self, f: FileId, class: NodeId) -> Option<(NodeId, bool)> {
+        match self.families[f as usize] {
+            Some(LanguageFamily::Php) => self.find_member(class, "__construct", Want::Call),
+            // Constructors are members named like the class.
+            Some(LanguageFamily::Java | LanguageFamily::C) => self.named_constructor(class).map(|c| (c, false)),
+            _ => self
+                .find_member(class, "__init__", Want::Call)
+                .or_else(|| self.find_member(class, "constructor", Want::Call)),
         }
     }
 

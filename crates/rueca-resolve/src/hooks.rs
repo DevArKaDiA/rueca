@@ -13,6 +13,13 @@ use super::*;
 /// Confidence multiplier when a reference links several overloads.
 const OVERLOAD_FANOUT: f32 = 0.8;
 
+/// The candidates of an ambiguous overload choice without `caller`, unless
+/// it is the only one: see [`Resolver::expand_overloads`].
+fn without_caller(cands: &[NodeId], caller: NodeId) -> Vec<NodeId> {
+    let others: Vec<NodeId> = cands.iter().copied().filter(|&n| n != caller).collect();
+    if others.is_empty() { cands.to_vec() } else { others }
+}
+
 /// Splits an overload suffix off a qualified name: `Parser.parse(String)` →
 /// (`Parser.parse`, `String`). `None` when the name has no suffix. A
 /// trailing comment that tells apart callables with the same parameter
@@ -72,98 +79,98 @@ pub(crate) fn params_arity(params: &str) -> (u32, Option<u32>) {
 /// default value are optional; `...` (C varargs or a parameter pack) makes
 /// it variadic; `()` and `(void)` take none. `None` when no list is found.
 pub(crate) fn signature_arity(sig: &str, name: &str) -> Option<(u32, Option<u32>)> {
-    let bytes = sig.as_bytes();
-    // Skip a template head.
-    let mut from = 0;
-    if sig.starts_with("template") {
-        let mut depth = 0i32;
-        for (i, c) in sig.char_indices() {
-            match c {
-                '<' => depth += 1,
-                '>' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        from = i + 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
+    let open = param_list_open(sig, name, template_head_end(sig))?;
+    let close = matching_close(sig, open)?;
+    let params = sig[open + 1..close].trim();
+    if params.is_empty() || params == "void" {
+        return Some((0, Some(0)));
+    }
+    let (mut min, mut max, mut variadic) = (0u32, 0u32, false);
+    for p in split_params(params) {
+        if p.contains("...") {
+            variadic = true;
+            continue;
+        }
+        max += 1;
+        if !has_default_value(p) {
+            min += 1;
         }
     }
+    Some((min, if variadic { None } else { Some(max) }))
+}
+
+/// Byte offset just after a leading `template <…>` head (0 without one).
+fn template_head_end(sig: &str) -> usize {
+    if !sig.starts_with("template") {
+        return 0;
+    }
+    let mut depth = 0i32;
+    for (i, c) in sig.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    0
+}
+
+/// Byte offset of the `(` that follows `name` (as a word) at or after `from`.
+fn param_list_open(sig: &str, name: &str, from: usize) -> Option<usize> {
+    let bytes = sig.as_bytes();
     let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     let mut at = from;
-    let open = loop {
+    loop {
         let k = at + sig.get(at..)?.find(name)?;
         let end = k + name.len();
         let boundary = k == 0 || !word(bytes[k - 1]) || !word(name.as_bytes()[0]);
         let rest = sig[end..].trim_start();
         if boundary && rest.starts_with('(') {
-            break sig.len() - rest.len();
+            return Some(sig.len() - rest.len());
         }
         at = end;
-    };
+    }
+}
+
+/// Byte offset of the bracket closing the one at `open` (any of `()<>[]{}`).
+fn matching_close(sig: &str, open: usize) -> Option<usize> {
     let mut depth = 0i32;
-    let mut close = None;
     for (i, c) in sig[open..].char_indices() {
         match c {
             '(' | '<' | '[' | '{' => depth += 1,
             ')' | '>' | ']' | '}' => {
                 depth -= 1;
                 if depth == 0 {
-                    close = Some(open + i);
-                    break;
+                    return Some(open + i);
                 }
             }
             _ => {}
         }
     }
-    let params = sig[open + 1..close?].trim();
-    if params.is_empty() || params == "void" {
-        return Some((0, Some(0)));
-    }
-    let (mut min, mut max, mut variadic) = (0u32, 0u32, false);
+    None
+}
+
+/// Whether a parameter has a default value: a top-level `=` (not `==`,
+/// `<=`, `>=`, `!=`).
+fn has_default_value(p: &str) -> bool {
     let mut depth = 0i32;
-    let mut start = 0;
-    let mut parts = Vec::new();
-    for (i, c) in params.char_indices() {
+    let pb = p.as_bytes();
+    pb.iter().enumerate().any(|(i, &c)| {
         match c {
-            '(' | '<' | '[' | '{' => depth += 1,
-            ')' | '>' | ']' | '}' => depth -= 1,
-            ',' if depth == 0 => {
-                parts.push(&params[start..i]);
-                start = i + 1;
-            }
+            b'(' | b'<' | b'[' | b'{' => depth += 1,
+            b')' | b'>' | b']' | b'}' => depth -= 1,
             _ => {}
         }
-    }
-    parts.push(&params[start..]);
-    for p in parts {
-        let p = p.trim();
-        if p.contains("...") {
-            variadic = true;
-            continue;
-        }
-        max += 1;
-        // A default value: a top-level `=` (not `==`, `<=`, `>=`, `!=`).
-        let mut depth = 0i32;
-        let pb = p.as_bytes();
-        let has_default = pb.iter().enumerate().any(|(i, &c)| {
-            match c {
-                b'(' | b'<' | b'[' | b'{' => depth += 1,
-                b')' | b'>' | b']' | b'}' => depth -= 1,
-                _ => {}
-            }
-            c == b'='
-                && depth == 0
-                && pb.get(i + 1) != Some(&b'=')
-                && !matches!(i.checked_sub(1).map(|j| pb[j]), Some(b'=' | b'<' | b'>' | b'!'))
-        });
-        if !has_default {
-            min += 1;
-        }
-    }
-    Some((min, if variadic { None } else { Some(max) }))
+        c == b'='
+            && depth == 0
+            && pb.get(i + 1) != Some(&b'=')
+            && !matches!(i.checked_sub(1).map(|j| pb[j]), Some(b'=' | b'<' | b'>' | b'!'))
+    })
 }
 
 /// The type name written in a `$type:` receiver or a base list, without
@@ -239,73 +246,85 @@ fn namespace_expansion(signature: &str, name: &str) -> Option<(String, String)> 
 /// (`fmt::v12`, `fmt`): exact qualified-name lookups see through inline
 /// namespaces, as C++ does.
 pub(crate) fn expand_namespace_macros(files: &mut [FileInput]) -> Vec<(String, String)> {
-    let is_c = |f: &FileInput| f.language.map(Language::family) == Some(LanguageFamily::C);
-    if !files
+    let uses_macros = files
         .iter()
-        .filter(|f| is_c(f))
+        .filter(|f| is_c_file(f))
         .filter_map(|f| f.facts.as_ref())
-        .any(|x| x.definitions.iter().any(|d| d.qualified_name.contains("${")))
-    {
+        .any(|x| x.definitions.iter().any(|d| d.qualified_name.contains("${")));
+    if !uses_macros {
         return Vec::new();
     }
-    let mut map: BTreeMap<String, String> = BTreeMap::new();
-    let mut aliases: Vec<(String, String)> = Vec::new();
-    for f in files.iter().filter(|f| is_c(f)) {
-        for d in f.facts.iter().flat_map(|x| x.definitions.iter()) {
-            if d.label != Label::Constant {
-                continue;
-            }
-            let Some(sig) = d.signature.as_deref() else { continue };
-            if let Some((path, visible)) = namespace_expansion(sig, &d.name) {
-                let e = map.entry(d.name.clone()).or_default();
-                if e.is_empty() && !path.is_empty() {
-                    if visible != path && !aliases.iter().any(|(p, _)| *p == path) {
-                        aliases.push((path.clone(), visible));
-                    }
-                    *e = path;
-                }
-            }
-        }
-    }
-    let rewrite = |text: &str| -> String {
-        let mut out = String::with_capacity(text.len());
-        let mut rest = text;
-        while let Some(start) = rest.find("${") {
-            let Some(len) = rest[start..].find('}') else { break };
-            let name = &rest[start + 2..start + len];
-            let path = map.get(name).map_or("", String::as_str);
-            out.push_str(&rest[..start]);
-            let mut after = &rest[start + len + 1..];
-            if path.is_empty() {
-                // Drop the segment and its separator.
-                after = after.strip_prefix("::").unwrap_or_else(|| {
-                    if out.ends_with("::") {
-                        out.truncate(out.len() - 2);
-                    }
-                    after
-                });
-            } else {
-                out.push_str(path);
-            }
-            rest = after;
-        }
-        out.push_str(rest);
-        out
-    };
-    for f in files.iter_mut().filter(|f| is_c(f)) {
-        let Some(facts) = f.facts.as_mut() else { continue };
+    let (map, aliases) = namespace_macro_paths(files);
+    for facts in files.iter_mut().filter(|f| is_c_file(f)).filter_map(|f| f.facts.as_mut()) {
         for d in &mut facts.definitions {
             if d.qualified_name.contains("${") {
-                d.qualified_name = rewrite(&d.qualified_name);
+                d.qualified_name = rewrite_macro_segments(&d.qualified_name, &map);
             }
         }
         for r in &mut facts.references {
             if let Some(recv) = r.receiver.as_mut().filter(|r| r.contains("${")) {
-                *recv = rewrite(recv);
+                *recv = rewrite_macro_segments(recv, &map);
             }
         }
     }
     aliases
+}
+
+fn is_c_file(f: &FileInput) -> bool {
+    f.language.map(Language::family) == Some(LanguageFamily::C)
+}
+
+/// The namespace path each namespace macro opens (first non-empty
+/// definition wins), and the (path, visible path) pairs that differ.
+fn namespace_macro_paths(files: &[FileInput]) -> (BTreeMap<String, String>, Vec<(String, String)>) {
+    let mut map: BTreeMap<String, String> = BTreeMap::new();
+    let mut aliases: Vec<(String, String)> = Vec::new();
+    let constants = files
+        .iter()
+        .filter(|f| is_c_file(f))
+        .flat_map(|f| f.facts.iter().flat_map(|x| x.definitions.iter()))
+        .filter(|d| d.label == Label::Constant);
+    for d in constants {
+        let Some(sig) = d.signature.as_deref() else { continue };
+        let Some((path, visible)) = namespace_expansion(sig, &d.name) else { continue };
+        let e = map.entry(d.name.clone()).or_default();
+        if !e.is_empty() || path.is_empty() {
+            continue;
+        }
+        if visible != path && !aliases.iter().any(|(p, _)| *p == path) {
+            aliases.push((path.clone(), visible));
+        }
+        *e = path;
+    }
+    (map, aliases)
+}
+
+/// Replaces every `${MACRO}` segment of a name by the path the macro
+/// opens, or drops it (and its `::` separator) when it opens none.
+fn rewrite_macro_segments(text: &str, map: &BTreeMap<String, String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("${") {
+        let Some(len) = rest[start..].find('}') else { break };
+        let name = &rest[start + 2..start + len];
+        let path = map.get(name).map_or("", String::as_str);
+        out.push_str(&rest[..start]);
+        let mut after = &rest[start + len + 1..];
+        if path.is_empty() {
+            // Drop the segment and its separator.
+            after = after.strip_prefix("::").unwrap_or_else(|| {
+                if out.ends_with("::") {
+                    out.truncate(out.len() - 2);
+                }
+                after
+            });
+        } else {
+            out.push_str(path);
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Splits a qualified type text on its last `::` or `.` separator.
@@ -392,26 +411,36 @@ impl<'a> Resolver<'a> {
         let mut seen: HashSet<NodeId> = HashSet::from([m]);
         let mut level: Vec<(NodeId, f32)> = vec![(m, 1.0)];
         for _ in 0..MAX_MACRO_DEPTH {
-            let mut next = Vec::new();
-            for (n, c) in level {
-                for &(t, tc) in direct.get(&n).map(Vec::as_slice).unwrap_or_default() {
-                    let conf = c * tc;
-                    if self.is_macro(t) {
-                        if seen.insert(t) {
-                            next.push((t, conf));
-                        }
-                    } else {
-                        let e = best.entry(t).or_insert(0.0);
-                        *e = e.max(conf);
-                    }
-                }
-            }
-            if next.is_empty() {
+            level = self.macro_level(&level, direct, &mut seen, &mut best);
+            if level.is_empty() {
                 break;
             }
-            level = next;
         }
         best.into_iter().collect()
+    }
+
+    /// One level of [`Self::macro_closure`]: the targets of the macros of
+    /// `level` go to `best`, the macros not seen yet to the next level.
+    fn macro_level(
+        &self,
+        level: &[(NodeId, f32)],
+        direct: &BTreeMap<NodeId, Vec<(NodeId, f32)>>,
+        seen: &mut HashSet<NodeId>,
+        best: &mut BTreeMap<NodeId, f32>,
+    ) -> Vec<(NodeId, f32)> {
+        let mut next = Vec::new();
+        for &(n, c) in level {
+            for &(t, tc) in direct.get(&n).map(Vec::as_slice).unwrap_or_default() {
+                let conf = c * tc;
+                if !self.is_macro(t) {
+                    let e = best.entry(t).or_insert(0.0);
+                    *e = e.max(conf);
+                } else if seen.insert(t) {
+                    next.push((t, conf));
+                }
+            }
+        }
+        next
     }
 
     // -- packages ------------------------------------------------------------
@@ -574,31 +603,17 @@ impl<'a> Resolver<'a> {
     /// has exactly one body in the same family is replaced by that body as a
     /// reference target, and leaves the strategy-6 candidates.
     fn link_declarations(&mut self) {
-        let mut decls = Vec::new();
-        for i in 0..self.files.len() {
-            for (j, d) in self.defs(i as FileId).iter().enumerate() {
-                if d.is_declaration {
-                    decls.push(self.def_node[i][j]);
-                }
-            }
-        }
+        let decls: Vec<NodeId> = (0..self.files.len())
+            .flat_map(|i| {
+                let defs = self.defs(i as FileId);
+                (0..defs.len()).filter(move |&j| defs[j].is_declaration).map(move |j| (i, j))
+            })
+            .map(|(i, j)| self.def_node[i][j])
+            .collect();
         if decls.is_empty() {
             return;
         }
-        let decl_set: HashSet<NodeId> = decls.iter().copied().collect();
-        let mut body_of = HashMap::new();
-        for &d in &decls {
-            let node = &self.nodes[d as usize];
-            let family = node.language.map(Language::family);
-            let bodies: Vec<NodeId> = self.nodes_by_qn()[&node.qualified_name]
-                .iter()
-                .copied()
-                .filter(|&b| !decl_set.contains(&b) && self.nodes[b as usize].language.map(Language::family) == family)
-                .collect();
-            if let [b] = bodies[..] {
-                body_of.insert(d, b);
-            }
-        }
+        let body_of = self.single_bodies(&decls);
         for v in self.by_name.values_mut() {
             v.retain(|n| !body_of.contains_key(n));
         }
@@ -618,6 +633,26 @@ impl<'a> Resolver<'a> {
         self.body_of = body_of;
     }
 
+    /// Each declaration whose global qualified name has exactly one body
+    /// (a non-declaration of the same family) → that body.
+    fn single_bodies(&self, decls: &[NodeId]) -> HashMap<NodeId, NodeId> {
+        let decl_set: HashSet<NodeId> = decls.iter().copied().collect();
+        let mut body_of = HashMap::new();
+        for &d in decls {
+            let node = &self.nodes[d as usize];
+            let family = node.language.map(Language::family);
+            let bodies: Vec<NodeId> = self.nodes_by_qn()[&node.qualified_name]
+                .iter()
+                .copied()
+                .filter(|&b| !decl_set.contains(&b) && self.nodes[b as usize].language.map(Language::family) == family)
+                .collect();
+            if let [b] = bodies[..] {
+                body_of.insert(d, b);
+            }
+        }
+        body_of
+    }
+
     /// The body of a declaration, else the node itself.
     pub(crate) fn prefer_body(&self, n: NodeId) -> NodeId {
         self.body_of.get(&n).copied().unwrap_or(n)
@@ -632,41 +667,9 @@ impl<'a> Resolver<'a> {
     /// differ (two same-name functions of different files with one
     /// signature are not overloads of each other).
     fn build_overload_sets(&mut self) {
-        let mut groups: BTreeMap<(String, String), (Vec<NodeId>, bool)> = BTreeMap::new();
-        for i in 0..self.files.len() {
-            if !self.packs[i].is_some_and(|p| p.overloads()) {
+        for (_, (set, any_suffixed)) in self.overload_groups() {
+            if set.len() < 2 || (!any_suffixed && self.same_arity(&set)) {
                 continue;
-            }
-            for j in 0..self.def_node[i].len() {
-                let n = self.def_node[i][j];
-                if self.body_of.contains_key(&n) {
-                    continue;
-                }
-                let node = &self.nodes[n as usize];
-                let (base, suffixed) = match overload_suffix(&node.qualified_name) {
-                    Some((base, _)) => (base, true),
-                    None if node.language == Some(Language::Cpp) && node.label.is_callable() => {
-                        (node.qualified_name.as_str(), false)
-                    }
-                    None => continue,
-                };
-                let family = format!("{:?}", self.families[i]);
-                let (v, any_suffixed) = groups.entry((family, base.to_string())).or_default();
-                *any_suffixed |= suffixed;
-                if !v.contains(&n) {
-                    v.push(n);
-                }
-            }
-        }
-        for (_, (set, any_suffixed)) in groups {
-            if set.len() < 2 {
-                continue;
-            }
-            if !any_suffixed {
-                let first = self.def_arity(set[0]);
-                if set.iter().all(|&n| self.def_arity(n) == first) {
-                    continue;
-                }
             }
             let id = self.overload_sets.len();
             for &n in &set {
@@ -674,6 +677,50 @@ impl<'a> Resolver<'a> {
             }
             self.overload_sets.push(set);
         }
+    }
+
+    /// Candidate overload groups by (family, name without suffix), with
+    /// whether any member is suffixed.
+    fn overload_groups(&self) -> BTreeMap<(String, String), (Vec<NodeId>, bool)> {
+        let mut groups: BTreeMap<(String, String), (Vec<NodeId>, bool)> = BTreeMap::new();
+        for i in 0..self.files.len() {
+            if !self.packs[i].is_some_and(|p| p.overloads()) {
+                continue;
+            }
+            let family = format!("{:?}", self.families[i]);
+            for &n in &self.def_node[i] {
+                let Some((base, suffixed)) = self.overload_base(n) else { continue };
+                let (v, any_suffixed) = groups.entry((family.clone(), base.to_string())).or_default();
+                *any_suffixed |= suffixed;
+                if !v.contains(&n) {
+                    v.push(n);
+                }
+            }
+        }
+        groups
+    }
+
+    /// The name an overload set groups `n` under and whether `n` carries a
+    /// suffix: suffixed definitions and bare C++ callables (not
+    /// declarations with a body).
+    fn overload_base(&self, n: NodeId) -> Option<(&str, bool)> {
+        if self.body_of.contains_key(&n) {
+            return None;
+        }
+        let node = &self.nodes[n as usize];
+        match overload_suffix(&node.qualified_name) {
+            Some((base, _)) => Some((base, true)),
+            None if node.language == Some(Language::Cpp) && node.label.is_callable() => {
+                Some((node.qualified_name.as_str(), false))
+            }
+            None => None,
+        }
+    }
+
+    /// Whether every member of `set` has the same arity range.
+    fn same_arity(&self, set: &[NodeId]) -> bool {
+        let first = self.def_arity(set[0]);
+        set.iter().all(|&n| self.def_arity(n) == first)
     }
 
     /// Arity range of a definition: from its C/C++ signature (default
@@ -729,10 +776,16 @@ impl<'a> Resolver<'a> {
     }
 
     /// Expands a resolved target to its overloads (RFC 0003 §10.1): those
-    /// whose parameter count fits `arity`, narrowed by the static argument
-    /// types when the pack reports them (`args`, see [`overload_by_types`]);
+    /// whose parameter count fits the call's arity, narrowed by the static
+    /// argument types when the pack reports them (see [`overload_by_types`]);
     /// one candidate keeps the confidence, several are all linked × 0.8,
-    /// and no fitting one links the whole set × 0.8.
+    /// and no fitting one links the whole set × 0.8. A fan-out never links
+    /// the calling overload itself (`caller`) when another candidate
+    /// remains: an overload calling its own name with arguments of unknown
+    /// type (`fromJson(String, Class)` → `fromJson(json,
+    /// TypeToken.get(c))`) delegates to a sibling far more often than it
+    /// recurses; a recursion chosen by arity or argument types keeps its
+    /// self-loop.
     /// For a C/C++ reference of file `from`, only the overloads declared in
     /// files it sees (itself and its includes, transitively) are candidates,
     /// when there are any: C++ overload resolution only considers visible
@@ -740,13 +793,14 @@ impl<'a> Resolver<'a> {
     pub(crate) fn expand_overloads(
         &self,
         from: FileId,
+        caller: NodeId,
+        item: &RefItem<'_>,
         target: NodeId,
-        arity: Option<u32>,
-        args: Option<&[&str]>,
         strategy: Strategy,
         confidence: f32,
     ) -> Vec<(NodeId, Strategy, f32)> {
         let Some(&set) = self.overload_of.get(&target) else { return vec![(target, strategy, confidence)] };
+        let (arity, args) = (item.arity, item.arg_types.as_deref());
         let all = self.overload_sets[set].as_slice();
         let visible_only: Vec<NodeId>;
         let set: &[NodeId] = if self.families[from as usize] == Some(LanguageFamily::C) {
@@ -777,10 +831,13 @@ impl<'a> Resolver<'a> {
                 chosen = overload_by_types(&typed, args);
             }
         }
+        let fan_out = |cands: &[NodeId]| {
+            without_caller(cands, caller).into_iter().map(|n| (n, strategy, confidence * OVERLOAD_FANOUT)).collect()
+        };
         match chosen.len() {
             1 => vec![(chosen[0], strategy, confidence)],
-            0 => set.iter().map(|&n| (n, strategy, confidence * OVERLOAD_FANOUT)).collect(),
-            _ => chosen.into_iter().map(|n| (n, strategy, confidence * OVERLOAD_FANOUT)).collect(),
+            0 => fan_out(set),
+            _ => fan_out(&chosen),
         }
     }
 
@@ -815,28 +872,9 @@ impl<'a> Resolver<'a> {
         for depth in 0..=MAX_DEPTH {
             let mut next = Vec::new();
             for &t in &level {
-                for m in self.module_files(t) {
-                    let defs = self.defs(m);
-                    for &j in &self.top_level[m as usize] {
-                        let d = &defs[j as usize];
-                        if !d.exported || (self.package_of[m as usize].is_some() && d.qualified_name != d.name) {
-                            continue;
-                        }
-                        if seen.insert(d.name.as_str()) {
-                            out.push((d.name.clone(), self.node_of(m, j)));
-                        }
-                    }
-                }
-                if self.families[t as usize] != Some(LanguageFamily::C) || depth == MAX_DEPTH {
-                    continue;
-                }
-                for (k, imp) in self.imports(t).iter().enumerate() {
-                    let star = imp.names.iter().any(|n| n.name == "*" && n.alias.is_none());
-                    if let (true, Some(i)) = (star, self.import_targets[t as usize][k])
-                        && visited.insert(i)
-                    {
-                        next.push(i);
-                    }
+                self.exported_names(t, &mut seen, &mut out);
+                if self.families[t as usize] == Some(LanguageFamily::C) && depth != MAX_DEPTH {
+                    self.star_includes(t, &mut visited, &mut next);
                 }
             }
             if next.is_empty() {
@@ -847,6 +885,36 @@ impl<'a> Resolver<'a> {
         let v = std::rc::Rc::new(out);
         self.star_memo.borrow_mut().insert(target, v.clone());
         v
+    }
+
+    /// Exported top-level names of `t`'s module not `seen` yet (package
+    /// scope: not the `T.m` methods declared outside their type).
+    fn exported_names(&self, t: FileId, seen: &mut HashSet<&'a str>, out: &mut Vec<(String, NodeId)>) {
+        for m in self.module_files(t) {
+            let defs = self.defs(m);
+            let package_scoped = self.package_of[m as usize].is_some();
+            for &j in &self.top_level[m as usize] {
+                let d = &defs[j as usize];
+                if !d.exported || (package_scoped && d.qualified_name != d.name) {
+                    continue;
+                }
+                if seen.insert(d.name.as_str()) {
+                    out.push((d.name.clone(), self.node_of(m, j)));
+                }
+            }
+        }
+    }
+
+    /// The files a C/C++ file `t` star-includes, not `visited` yet.
+    fn star_includes(&self, t: FileId, visited: &mut HashSet<FileId>, next: &mut Vec<FileId>) {
+        for (k, imp) in self.imports(t).iter().enumerate() {
+            let star = imp.names.iter().any(|n| n.name == "*" && n.alias.is_none());
+            if let (true, Some(i)) = (star, self.import_targets[t as usize][k])
+                && visited.insert(i)
+            {
+                next.push(i);
+            }
+        }
     }
 
     // -- C++ namespaces ------------------------------------------------------
@@ -860,18 +928,26 @@ impl<'a> Resolver<'a> {
                 if n.language.map(Language::family) != Some(LanguageFamily::C) || n.file.is_none() {
                     continue;
                 }
-                let base = overload_suffix(&n.qualified_name).map_or(n.qualified_name.as_str(), |(b, _)| b);
-                m.entry(base.to_string()).or_default().push(i as NodeId);
-                // Through inline namespaces: `fmt::v12::format` is also `fmt::format`.
-                for (path, visible) in &self.inline_aliases {
-                    if let Some(rest) = base.strip_prefix(path.as_str()).and_then(|r| r.strip_prefix("::")) {
-                        let alias = if visible.is_empty() { rest.to_string() } else { format!("{visible}::{rest}") };
-                        m.entry(alias).or_default().push(i as NodeId);
-                    }
+                for key in self.base_qn_keys(n) {
+                    m.entry(key).or_default().push(i as NodeId);
                 }
             }
             m
         })
+    }
+
+    /// The global qualified name of a C/C++ node without overload suffix,
+    /// also through inline namespaces: `fmt::v12::format` is also
+    /// `fmt::format`.
+    fn base_qn_keys(&self, n: &Node) -> Vec<String> {
+        let base = overload_suffix(&n.qualified_name).map_or(n.qualified_name.as_str(), |(b, _)| b);
+        let mut keys = vec![base.to_string()];
+        for (path, visible) in &self.inline_aliases {
+            if let Some(rest) = base.strip_prefix(path.as_str()).and_then(|r| r.strip_prefix("::")) {
+                keys.push(if visible.is_empty() { rest.to_string() } else { format!("{visible}::{rest}") });
+            }
+        }
+        keys
     }
 
     /// The scopes enclosing a C/C++ reference, innermost first: the
@@ -1221,33 +1297,9 @@ impl<'a> Resolver<'a> {
                 continue;
             }
             let fid = i as FileId;
-            let defs = self.defs(fid);
-            for (j, d) in defs.iter().enumerate() {
-                if !d.label.is_callable() || d.is_test {
-                    continue;
-                }
-                let Some(p) = self.parents[i][j] else { continue };
-                if !defs[p as usize].label.is_type() {
-                    continue;
-                }
-                let class = self.node_of(fid, p);
-                let method = self.node_of(fid, j as LocalDefId);
-                // Constructors are not overridden.
-                if d.name == defs[p as usize].name {
-                    continue;
-                }
-                let own = self.param_types(method);
-                for &b in self.bases.get(&class).map_or(&[][..], |v| v.as_slice()) {
-                    let Some((found, _)) = self.find_member(b, &d.name, Want::Call) else { continue };
-                    let cands: Vec<NodeId> = match self.overload_of.get(&found) {
-                        Some(&s) => self.overload_sets[s].clone(),
-                        None => vec![found],
-                    };
-                    for c in self.override_targets(method, own.as_deref(), &cands) {
-                        // Between bodies when they exist (C++ out-of-line
-                        // definitions): what `trace` reaches from calls.
-                        out.push((self.prefer_body(method), self.prefer_body(c), fid, d.name_span));
-                    }
+            for (j, d) in self.defs(fid).iter().enumerate() {
+                for (src, dst) in self.overrides_of(fid, j as LocalDefId, d) {
+                    out.push((src, dst, fid, d.name_span));
                 }
             }
         }
@@ -1257,42 +1309,71 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// The (method, overridden method) pairs of definition `j` of `fid`,
+    /// a method of a type that is not a constructor; between bodies when
+    /// they exist (C++ out-of-line definitions): what `trace` reaches from
+    /// calls.
+    fn overrides_of(&self, fid: FileId, j: LocalDefId, d: &Definition) -> Vec<(NodeId, NodeId)> {
+        if !d.label.is_callable() || d.is_test {
+            return Vec::new();
+        }
+        let Some(p) = self.parents[fid as usize][j as usize] else { return Vec::new() };
+        let owner = &self.defs(fid)[p as usize];
+        // Constructors are not overridden.
+        if !owner.label.is_type() || d.name == owner.name {
+            return Vec::new();
+        }
+        let class = self.node_of(fid, p);
+        let method = self.node_of(fid, j);
+        let own = self.param_types(method);
+        let mut out = Vec::new();
+        for &b in self.bases.get(&class).map_or(&[][..], |v| v.as_slice()) {
+            let Some((found, _)) = self.find_member(b, &d.name, Want::Call) else { continue };
+            let cands: Vec<NodeId> = match self.overload_of.get(&found) {
+                Some(&s) => self.overload_sets[s].clone(),
+                None => vec![found],
+            };
+            for c in self.override_targets(method, own.as_deref(), &cands) {
+                out.push((self.prefer_body(method), self.prefer_body(c)));
+            }
+        }
+        out
+    }
+
     /// The candidates (same-named methods of a base) that `method`, with
     /// parameter types `own`, overrides (see [`Self::override_edges`]).
     fn override_targets(&self, method: NodeId, own: Option<&[String]>, cands: &[NodeId]) -> Vec<NodeId> {
-        let arity = |types: &[String]| match types.last() {
-            Some(t) if t.ends_with("...") => (types.len() as u32 - 1, None),
-            _ => (types.len() as u32, Some(types.len() as u32)),
-        };
         let mut same_arity = Vec::new();
         let mut same_types = Vec::new();
         for &c in cands {
             if c == method || !self.nodes[c as usize].label.is_callable() {
                 continue;
             }
-            let theirs = self.param_types(c);
-            match (own, theirs.as_deref()) {
-                (Some(a), Some(b)) => {
-                    if arity(a) != arity(b) {
-                        continue;
-                    }
-                    if a == b {
-                        same_types.push(c);
-                    }
-                }
-                _ if cands.len() > 1 => {
-                    // Several overloads and no way to pair: keep the
-                    // overload-suffix arity rule (all when unknown).
-                    let (x, y) = (self.def_arity(method), self.def_arity(c));
-                    if x.is_some() && y.is_some() && x != y {
-                        continue;
-                    }
-                }
-                _ => {}
+            let Some(types_equal) = self.override_fit(method, own, c, cands.len() > 1) else { continue };
+            if types_equal {
+                same_types.push(c);
             }
             same_arity.push(c);
         }
         if same_types.len() == 1 { same_types } else { same_arity }
+    }
+
+    /// Whether candidate `c` may be the method `method` (parameter types
+    /// `own`) overrides: `None` when the parameter counts differ, else
+    /// whether the parameter types are equal. `several`: `c` is one of
+    /// several overloads.
+    fn override_fit(&self, method: NodeId, own: Option<&[String]>, c: NodeId, several: bool) -> Option<bool> {
+        match (own, self.param_types(c).as_deref()) {
+            (Some(a), Some(b)) => (types_arity(a) == types_arity(b)).then_some(a == b),
+            // Several overloads and no way to pair: keep the overload-suffix
+            // arity rule (all when unknown).
+            _ if several => {
+                let (x, y) = (self.def_arity(method), self.def_arity(c));
+                let differ = x.is_some() && y.is_some() && x != y;
+                (!differ).then_some(false)
+            }
+            _ => Some(false),
+        }
     }
 }
 
@@ -1341,63 +1422,18 @@ fn may_accept(param: &str, arg: &str) -> bool {
 /// the most specific applicable overload). All of `typed` when none
 /// accepts the arguments (the types were wrong).
 pub(crate) fn overload_by_types(typed: &[(NodeId, Vec<String>)], args: &[&str]) -> Vec<NodeId> {
-    let known = |i: usize| args.get(i).copied().filter(|a| *a != "?");
-    let param = |params: &[String], i: usize| -> Option<String> {
-        match params.get(i) {
-            Some(p) => Some(p.clone()),
-            // Variadic tail: the element type.
-            None => params.last().filter(|p| p.ends_with("...")).cloned(),
-        }
-    };
-    // Only C/C++ types end in `*`: a known class argument never converts to
-    // a pointer parameter (`std::stringstream` for `const char*`).
-    let class_for_pointer = |p: &str, a: &str| {
-        p.trim_end_matches("...").ends_with('*') && !a.ends_with('*') && !a.ends_with("[]") && !PRIMITIVES.contains(&a)
-    };
-    let accepts = |params: &[String]| {
-        (0..args.len()).all(|i| match (known(i), param(params, i)) {
-            (Some(a), Some(p)) => {
-                !class_for_pointer(&p, a)
-                    && (may_accept(&p, a) || may_accept(p.strip_suffix("...").unwrap_or(&p), a.trim_end_matches("[]")))
-            }
-            _ => true,
-        })
-    };
-    // A C++ reference parameter binds an argument of its type, and a
-    // string literal (`char*`) is best taken by a string parameter.
-    let value = |t: &str| {
-        let t = t.trim_end_matches('&');
-        match t {
-            "string" | "string_view" | "basic_string" | "basic_string_view" => "char*".to_string(),
-            _ => t.to_string(),
-        }
-    };
-    let exact = |params: &[String]| {
-        (0..args.len()).all(|i| match (known(i), params.get(i)) {
-            (Some(a), Some(p)) => value(&normalize_param_type(a, false)) == value(p),
-            (None, Some(_)) => true,
-            _ => false,
-        }) && params.len() >= args.len()
-        // Trailing parameters beyond the arguments have defaults (C++): the
-        // arity filter ran before.
-    };
-    let compatible: Vec<&(NodeId, Vec<String>)> = typed.iter().filter(|(_, p)| accepts(p)).collect();
+    let compatible: Vec<&(NodeId, Vec<String>)> = typed.iter().filter(|(_, p)| accepts_args(p, args)).collect();
     if compatible.is_empty() {
         return typed.iter().map(|(n, _)| *n).collect();
     }
-    let exact: Vec<NodeId> = compatible.iter().filter(|(_, p)| exact(p)).map(|(n, _)| *n).collect();
-    if exact.len() == 1 && (0..args.len()).any(|i| known(i).is_some()) {
+    let exact: Vec<NodeId> = compatible.iter().filter(|(_, p)| exact_args(p, args)).map(|(n, _)| *n).collect();
+    if exact.len() == 1 && (0..args.len()).any(|i| known_arg(args, i).is_some()) {
         return exact;
     }
     // The most specific candidate: one whose parameters all pass to every
     // other's, and not the reverse (`twice(long)` over `twice(double)` for
     // an `int`). Class parameters always pass both ways (subtyping is not
     // known), so this only decides between primitives and `String`.
-    let more_specific = |a: &[String], b: &[String]| {
-        a.len() == b.len()
-            && a.iter().zip(b).all(|(x, y)| may_accept(y, x))
-            && !a.iter().zip(b).all(|(x, y)| may_accept(x, y))
-    };
     let best: Vec<NodeId> = compatible
         .iter()
         .filter(|(n, p)| compatible.iter().all(|(m, q)| m == n || more_specific(p, q)))
@@ -1407,6 +1443,74 @@ pub(crate) fn overload_by_types(typed: &[(NodeId, Vec<String>)], args: &[&str]) 
         return best;
     }
     compatible.into_iter().map(|(n, _)| *n).collect()
+}
+
+/// The static type of argument `i`, when known (`?` is unknown).
+fn known_arg<'s>(args: &[&'s str], i: usize) -> Option<&'s str> {
+    args.get(i).copied().filter(|a| *a != "?")
+}
+
+/// The parameter that takes argument `i`; past the end, the element type
+/// of a variadic tail.
+fn param_at(params: &[String], i: usize) -> Option<String> {
+    match params.get(i) {
+        Some(p) => Some(p.clone()),
+        None => params.last().filter(|p| p.ends_with("...")).cloned(),
+    }
+}
+
+/// Only C/C++ types end in `*`: a known class argument never converts to
+/// a pointer parameter (`std::stringstream` for `const char*`).
+fn class_for_pointer(p: &str, a: &str) -> bool {
+    p.trim_end_matches("...").ends_with('*') && !a.ends_with('*') && !a.ends_with("[]") && !PRIMITIVES.contains(&a)
+}
+
+/// Whether parameters `params` may accept every known argument type.
+fn accepts_args(params: &[String], args: &[&str]) -> bool {
+    (0..args.len()).all(|i| match (known_arg(args, i), param_at(params, i)) {
+        (Some(a), Some(p)) => {
+            !class_for_pointer(&p, a)
+                && (may_accept(&p, a) || may_accept(p.strip_suffix("...").unwrap_or(&p), a.trim_end_matches("[]")))
+        }
+        _ => true,
+    })
+}
+
+/// A type as an argument binds it: a C++ reference parameter binds an
+/// argument of its type, and a string literal (`char*`) is best taken by a
+/// string parameter.
+fn value_type(t: &str) -> String {
+    let t = t.trim_end_matches('&');
+    match t {
+        "string" | "string_view" | "basic_string" | "basic_string_view" => "char*".to_string(),
+        _ => t.to_string(),
+    }
+}
+
+/// Whether the parameter types equal the known argument types. Trailing
+/// parameters beyond the arguments have defaults (C++): the arity filter
+/// ran before.
+fn exact_args(params: &[String], args: &[&str]) -> bool {
+    (0..args.len()).all(|i| match (known_arg(args, i), params.get(i)) {
+        (Some(a), Some(p)) => value_type(&normalize_param_type(a, false)) == value_type(p),
+        (None, Some(_)) => true,
+        _ => false,
+    }) && params.len() >= args.len()
+}
+
+/// Whether parameters `a` all pass to `b`'s and not the reverse.
+fn more_specific(a: &[String], b: &[String]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| may_accept(y, x))
+        && !a.iter().zip(b).all(|(x, y)| may_accept(x, y))
+}
+
+/// Arity range of a list of parameter types (a `...` tail is variadic).
+fn types_arity(types: &[String]) -> (u32, Option<u32>) {
+    match types.last() {
+        Some(t) if t.ends_with("...") => (types.len() as u32 - 1, None),
+        _ => (types.len() as u32, Some(types.len() as u32)),
+    }
 }
 
 /// The parameter list written after `name(` in a signature, without the
@@ -1470,56 +1574,20 @@ fn split_params(params: &str) -> Vec<&str> {
 /// `named`: the text ends with the parameter name (a signature), which is
 /// dropped when another token precedes it.
 pub(crate) fn normalize_param_type(param: &str, named: bool) -> String {
-    let p = param;
-    // Annotations (`@Nullable`, `@Size(max = 3)`) and modifiers.
-    let mut text = String::new();
-    let mut depth = 0i32;
-    let mut skipping = false;
-    for c in p.chars() {
-        if skipping {
-            match c {
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        skipping = false;
-                    }
-                }
-                c if depth == 0 && c.is_whitespace() => skipping = false,
-                _ => {}
-            }
-            continue;
-        }
-        if c == '@' {
-            skipping = true;
-            continue;
-        }
-        text.push(c);
-    }
+    let text = strip_annotations(param);
     // A default value (C++ `int n = 0`).
     let text = text.split('=').next().unwrap_or(&text);
     let mut tokens: Vec<&str> = text
         .split(|c: char| c.is_whitespace())
         .filter(|t| !t.is_empty() && !matches!(*t, "final" | "const" | "volatile" | "struct" | "class" | "enum"))
         .collect();
-    if named && tokens.len() > 1 {
-        let last = tokens[tokens.len() - 1];
-        if last.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
-            tokens.pop();
-        }
+    if named
+        && tokens.len() > 1
+        && tokens[tokens.len() - 1].chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+    {
+        tokens.pop();
     }
-    let joined: String = tokens.concat();
-    // Generic / template arguments.
-    let mut out = String::new();
-    let mut depth = 0i32;
-    for c in joined.chars() {
-        match c {
-            '<' => depth += 1,
-            '>' => depth -= 1,
-            _ if depth == 0 => out.push(c),
-            _ => {}
-        }
-    }
+    let out = strip_generic_args(&tokens.concat());
     // Qualifiers: keep the last segment (`...` varargs is not a qualifier).
     let (core, varargs) = match out.strip_suffix("...") {
         Some(c) => (c.to_string(), true),
@@ -1530,6 +1598,50 @@ pub(crate) fn normalize_param_type(param: &str, named: bool) -> String {
         None => core,
     };
     if varargs { format!("{core}...") } else { core }
+}
+
+/// A parameter without its annotations (`@Nullable`, `@Size(max = 3)`).
+fn strip_annotations(p: &str) -> String {
+    let mut text = String::new();
+    let mut depth = 0i32;
+    let mut skipping = false;
+    for c in p.chars() {
+        if !skipping {
+            if c == '@' {
+                skipping = true;
+            } else {
+                text.push(c);
+            }
+            continue;
+        }
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    skipping = false;
+                }
+            }
+            c if depth == 0 && c.is_whitespace() => skipping = false,
+            _ => {}
+        }
+    }
+    text
+}
+
+/// A type without its generic / template arguments.
+fn strip_generic_args(t: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0i32;
+    for c in t.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 #[cfg(test)]

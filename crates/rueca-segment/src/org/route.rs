@@ -25,7 +25,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use rueca_model::{EdgeKind, Label};
+use rueca_model::{EdgeKind, FileEntry, Label};
 use serde::{Deserialize, Serialize};
 
 use super::link::RepoDeps;
@@ -153,63 +153,12 @@ impl RepoProfile {
             name_parts.push(p.name.clone());
         }
         let mut about = descriptions(seg).join("\n");
-        let readme = seg.files().iter().enumerate().filter_map(|(i, f)| readme_rank(&f.path).map(|r| (r, i))).min();
-        if let Some((_, f)) = readme
-            && let Ok(bytes) = seg.content(f as u32)
-        {
-            let head = &bytes[..bytes.len().min(README_BYTES)];
+        if let Some(head) = readme_head(seg) {
             about.push('\n');
-            about.push_str(&clean_readme(&String::from_utf8_lossy(head)));
+            about.push_str(&head);
         }
-        let files = seg.files();
-        let source_file = |f: Option<u32>| {
-            f.and_then(|f| files.get(f as usize))
-                .is_some_and(|e| e.language.is_some() && !is_test_path(&e.path) && !is_vendored_path(&e.path))
-        };
-        // Most referenced symbols: distinct sources of incoming references.
-        let mut counted: Vec<(usize, &str)> = Vec::new();
-        for (i, n) in seg.nodes().iter().enumerate() {
-            if n.is_test
-                || matches!(
-                    n.label,
-                    Label::Repository | Label::Folder | Label::File | Label::Module | Label::Package | Label::Test
-                )
-                || !source_file(n.file)
-            {
-                continue;
-            }
-            let mut srcs: BTreeSet<u32> = BTreeSet::new();
-            for kind in [EdgeKind::Calls, EdgeKind::References, EdgeKind::Inherits, EdgeKind::Implements] {
-                srcs.extend(seg.in_edges(i as u32, Some(kind)).iter().map(|e| e.other).filter(|&o| o != i as u32));
-            }
-            if srcs.len() >= 2 {
-                counted.push((srcs.len(), n.name.as_str()));
-            }
-        }
-        counted.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
-        let mut seen = BTreeSet::new();
-        let symbols: Vec<&str> =
-            counted.into_iter().map(|(_, n)| n).filter(|n| seen.insert(*n)).take(TOP_SYMBOLS).collect();
-        // Path vocabulary: directory names and file stems of source files.
-        let mut comp: HashMap<String, usize> = HashMap::new();
-        let mut languages = BTreeSet::new();
-        for f in files {
-            let Some(lang) = f.language else { continue };
-            languages.insert(lang.as_str().to_string());
-            if is_test_path(&f.path) || is_vendored_path(&f.path) {
-                continue;
-            }
-            let mut parts: Vec<&str> = f.path.split('/').collect();
-            if let Some(file) = parts.pop() {
-                parts.push(file.split('.').next().unwrap_or(file));
-            }
-            for p in parts.into_iter().filter(|p| !p.is_empty()) {
-                *comp.entry(p.to_lowercase()).or_default() += 1;
-            }
-        }
-        let mut comp: Vec<(String, usize)> = comp.into_iter().collect();
-        comp.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-        let paths: Vec<String> = comp.into_iter().take(TOP_PATHS).map(|(p, _)| p).collect();
+        let symbols = top_symbols(seg);
+        let (paths, languages) = path_vocabulary(seg.files());
         RepoProfile {
             format: PROFILE_FORMAT,
             linker,
@@ -222,6 +171,74 @@ impl RepoProfile {
             deps,
         }
     }
+}
+
+/// The head of the repository's main README, cleaned.
+fn readme_head(seg: &Segment) -> Option<String> {
+    let (_, f) = seg.files().iter().enumerate().filter_map(|(i, f)| readme_rank(&f.path).map(|r| (r, i))).min()?;
+    let bytes = seg.content(f as u32).ok()?;
+    let head = &bytes[..bytes.len().min(README_BYTES)];
+    Some(clean_readme(&String::from_utf8_lossy(head)))
+}
+
+/// Most referenced symbols: by the number of distinct sources of incoming
+/// references (at least two), source definitions only.
+fn top_symbols(seg: &Segment) -> Vec<&str> {
+    let files = seg.files();
+    let source_file = |f: Option<u32>| {
+        f.and_then(|f| files.get(f as usize))
+            .is_some_and(|e| e.language.is_some() && !is_test_path(&e.path) && !is_vendored_path(&e.path))
+    };
+    let mut counted: Vec<(usize, &str)> = Vec::new();
+    for (i, n) in seg.nodes().iter().enumerate() {
+        let structural = matches!(
+            n.label,
+            Label::Repository | Label::Folder | Label::File | Label::Module | Label::Package | Label::Test
+        );
+        if n.is_test || structural || !source_file(n.file) {
+            continue;
+        }
+        let referrers = distinct_referrers(seg, i as u32);
+        if referrers >= 2 {
+            counted.push((referrers, n.name.as_str()));
+        }
+    }
+    counted.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
+    let mut seen = BTreeSet::new();
+    counted.into_iter().map(|(_, n)| n).filter(|n| seen.insert(*n)).take(TOP_SYMBOLS).collect()
+}
+
+/// Distinct other nodes that call, reference, inherit or implement node `n`.
+fn distinct_referrers(seg: &Segment, n: u32) -> usize {
+    let mut srcs: BTreeSet<u32> = BTreeSet::new();
+    for kind in [EdgeKind::Calls, EdgeKind::References, EdgeKind::Inherits, EdgeKind::Implements] {
+        srcs.extend(seg.in_edges(n, Some(kind)).iter().map(|e| e.other).filter(|&o| o != n));
+    }
+    srcs.len()
+}
+
+/// Path vocabulary — the most frequent directory names and file stems of
+/// source files — and the languages of the repository.
+fn path_vocabulary(files: &[FileEntry]) -> (Vec<String>, BTreeSet<String>) {
+    let mut comp: HashMap<String, usize> = HashMap::new();
+    let mut languages = BTreeSet::new();
+    for f in files {
+        let Some(lang) = f.language else { continue };
+        languages.insert(lang.as_str().to_string());
+        if is_test_path(&f.path) || is_vendored_path(&f.path) {
+            continue;
+        }
+        let mut parts: Vec<&str> = f.path.split('/').collect();
+        if let Some(file) = parts.pop() {
+            parts.push(file.split('.').next().unwrap_or(file));
+        }
+        for p in parts.into_iter().filter(|p| !p.is_empty()) {
+            *comp.entry(p.to_lowercase()).or_default() += 1;
+        }
+    }
+    let mut comp: Vec<(String, usize)> = comp.into_iter().collect();
+    comp.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    (comp.into_iter().take(TOP_PATHS).map(|(p, _)| p).collect(), languages)
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +362,16 @@ impl RouteParams {
 // The repository documents of a generation
 // ---------------------------------------------------------------------------
 
+/// One profile field of a BM25 scoring: its index and weight, and the
+/// number of repositories with a profile and the field's average length.
+#[derive(Clone, Copy)]
+struct FieldScoring {
+    k: usize,
+    weight: f32,
+    n: f32,
+    avg: f32,
+}
+
 /// Term frequencies of each profile field of each repository.
 #[derive(Debug, Default)]
 pub(crate) struct RepoDocs {
@@ -382,35 +409,39 @@ impl RepoDocs {
 
     /// BM25 of `terms` against each of `repos` (field-weighted sum).
     pub(crate) fn scores(&self, terms: &[String], repos: &[usize], weights: &[f32; 4]) -> Vec<f32> {
-        const K1: f32 = 1.2;
-        const B: f32 = 0.75;
         let n = repos.iter().filter(|&&r| self.tf.get(r).is_some_and(Option::is_some)).count() as f32;
         let mut out = vec![0f32; repos.len()];
         if n == 0.0 {
             return out;
         }
-        for k in 0..4 {
-            if weights[k] == 0.0 {
-                continue;
-            }
+        for k in (0..4).filter(|&k| weights[k] != 0.0) {
             let avg = repos.iter().map(|&r| self.len[r][k] as f32).sum::<f32>() / n;
+            let field = FieldScoring { k, weight: weights[k], n, avg };
             for t in terms {
-                let df =
-                    repos.iter().filter(|&&r| self.tf[r].as_ref().is_some_and(|f| f[k].contains_key(t))).count() as f32;
-                if df == 0.0 {
-                    continue;
-                }
-                let idf = (1.0 + (n - df + 0.5) / (df + 0.5)).ln();
-                for (j, &r) in repos.iter().enumerate() {
-                    let Some(f) = &self.tf[r] else { continue };
-                    let Some(&tf) = f[k].get(t) else { continue };
-                    let tf = tf as f32;
-                    let norm = if avg > 0.0 { self.len[r][k] as f32 / avg } else { 1.0 };
-                    out[j] += weights[k] * idf * tf * (K1 + 1.0) / (tf + K1 * (1.0 - B + B * norm));
-                }
+                self.add_term_scores(t, &field, repos, &mut out);
             }
         }
         out
+    }
+
+    /// Adds the weighted BM25 of term `t` in one field to each repository's
+    /// score.
+    fn add_term_scores(&self, t: &str, field: &FieldScoring, repos: &[usize], out: &mut [f32]) {
+        const K1: f32 = 1.2;
+        const B: f32 = 0.75;
+        let FieldScoring { k, weight, n, avg } = *field;
+        let df = repos.iter().filter(|&&r| self.tf[r].as_ref().is_some_and(|f| f[k].contains_key(t))).count() as f32;
+        if df == 0.0 {
+            return;
+        }
+        let idf = (1.0 + (n - df + 0.5) / (df + 0.5)).ln();
+        for (j, &r) in repos.iter().enumerate() {
+            let Some(f) = &self.tf[r] else { continue };
+            let Some(&tf) = f[k].get(t) else { continue };
+            let tf = tf as f32;
+            let norm = if avg > 0.0 { self.len[r][k] as f32 / avg } else { 1.0 };
+            out[j] += weight * idf * tf * (K1 + 1.0) / (tf + K1 * (1.0 - B + B * norm));
+        }
     }
 }
 

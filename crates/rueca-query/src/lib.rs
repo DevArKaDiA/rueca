@@ -424,26 +424,7 @@ impl Engine {
     pub(crate) fn select(&self, c: &CommonArgs, id: Option<&SymbolIdParts>) -> anyhow::Result<Selection> {
         let store = Store::open(&self.store_dir)?;
         let (entries, org) = match &self.org {
-            Some(name) => {
-                let index = self.org_index(name)?;
-                let mut entries = Vec::new();
-                let mut visible = Vec::new();
-                for (i, r) in index.generation().repos.iter().enumerate() {
-                    if self.visibility.allows(&r.repo) {
-                        visible.push(i);
-                        entries.push(CatalogEntry {
-                            root: r.root.clone(),
-                            repo: r.repo.clone(),
-                            segment_id: r.segment_id.clone(),
-                            indexed_at: r.snapshot.indexed_at,
-                        });
-                    }
-                }
-                if entries.is_empty() {
-                    anyhow::bail!("organization `{name}` has no repositories you can read");
-                }
-                (entries, Some(OrgCtx { index, visible }))
-            }
+            Some(name) => self.org_entries(name)?,
             None => (store.entries()?, None),
         };
         self.evict_stale(&entries);
@@ -453,48 +434,11 @@ impl Engine {
                 self.store_dir.display()
             );
         }
-        let mut star = false;
-        let mut selected: Vec<CatalogEntry> = Vec::new();
-        let add = |e: CatalogEntry, selected: &mut Vec<CatalogEntry>| {
-            if !selected.iter().any(|x| x.root == e.root) {
-                selected.push(e);
-            }
-        };
-        match &c.repo {
-            None => match id {
-                Some(p) => add(self.entry_for_id(&store, &entries, p)?, &mut selected),
-                None if self.org.is_some() => {
-                    star = true;
-                    entries.iter().cloned().for_each(|e| add(e, &mut selected));
-                }
-                None => add(self.select_entry(&store, &entries, None, None)?, &mut selected),
-            },
-            Some(RepoArg::One(r)) if r.trim() == "*" => {
-                star = true;
-                entries.iter().cloned().for_each(|e| add(e, &mut selected));
-            }
-            Some(RepoArg::One(r)) => add(self.select_entry(&store, &entries, Some(r), None)?, &mut selected),
-            Some(RepoArg::Many(list)) => {
-                if list.is_empty() {
-                    anyhow::bail!("`repo` must not be an empty list (pass `\"*\"` for every indexed repository)");
-                }
-                for r in list {
-                    if r.trim() == "*" {
-                        star = true;
-                        entries.iter().cloned().for_each(|e| add(e, &mut selected));
-                    } else {
-                        add(self.select_entry(&store, &entries, Some(r), None)?, &mut selected);
-                    }
-                }
-            }
-        }
-        let org_repo = |e: &CatalogEntry| -> Option<usize> {
-            org.as_ref().and_then(|o| o.index.generation().repos.iter().position(|r| r.root == e.root))
-        };
+        let (selected, star) = self.selected_entries(&store, &entries, c, id)?;
         let mut views = Vec::with_capacity(selected.len());
         for e in selected {
             let seg = self.open_cached(&store, &e.segment_id)?;
-            let i = org_repo(&e);
+            let i = org.as_ref().and_then(|o| o.index.generation().repos.iter().position(|r| r.root == e.root));
             let mut v = View::new(seg, e);
             v.org_repo = i;
             views.push(v);
@@ -513,6 +457,72 @@ impl Engine {
             );
         }
         Ok(Selection { views: keep, org })
+    }
+
+    /// The catalog of organization `name`: the repositories the caller may
+    /// read, and the organization context.
+    fn org_entries(&self, name: &str) -> anyhow::Result<(Vec<CatalogEntry>, Option<OrgCtx>)> {
+        let index = self.org_index(name)?;
+        let mut entries = Vec::new();
+        let mut visible = Vec::new();
+        for (i, r) in index.generation().repos.iter().enumerate() {
+            if self.visibility.allows(&r.repo) {
+                visible.push(i);
+                entries.push(CatalogEntry {
+                    root: r.root.clone(),
+                    repo: r.repo.clone(),
+                    segment_id: r.segment_id.clone(),
+                    indexed_at: r.snapshot.indexed_at,
+                });
+            }
+        }
+        if entries.is_empty() {
+            anyhow::bail!("organization `{name}` has no repositories you can read");
+        }
+        Ok((entries, Some(OrgCtx { index, visible })))
+    }
+
+    /// The entries the `repo` argument (else the `id`, else the default)
+    /// selects, each root once, and whether `"*"` (or the organization
+    /// default) selected every one.
+    fn selected_entries(
+        &self,
+        store: &Store,
+        entries: &[CatalogEntry],
+        c: &CommonArgs,
+        id: Option<&SymbolIdParts>,
+    ) -> anyhow::Result<(Vec<CatalogEntry>, bool)> {
+        let mut selected: Vec<CatalogEntry> = Vec::new();
+        let mut star = false;
+        match &c.repo {
+            None => match id {
+                Some(p) => add_entry(&mut selected, self.entry_for_id(store, entries, p)?),
+                None if self.org.is_some() => {
+                    star = true;
+                    add_entries(&mut selected, entries);
+                }
+                None => add_entry(&mut selected, self.select_entry(store, entries, None, None)?),
+            },
+            Some(RepoArg::One(r)) if r.trim() == "*" => {
+                star = true;
+                add_entries(&mut selected, entries);
+            }
+            Some(RepoArg::One(r)) => add_entry(&mut selected, self.select_entry(store, entries, Some(r), None)?),
+            Some(RepoArg::Many(list)) => {
+                if list.is_empty() {
+                    anyhow::bail!("`repo` must not be an empty list (pass `\"*\"` for every indexed repository)");
+                }
+                for r in list {
+                    if r.trim() == "*" {
+                        star = true;
+                        add_entries(&mut selected, entries);
+                    } else {
+                        add_entry(&mut selected, self.select_entry(store, entries, Some(r), None)?);
+                    }
+                }
+            }
+        }
+        Ok((selected, star))
     }
 
     /// The current generation of organization `name`, opened (cached while
@@ -661,6 +671,20 @@ impl Engine {
         let seg = Arc::new(store.open_segment(segment_id)?);
         self.segments.lock().unwrap_or_else(|p| p.into_inner()).insert(segment_id.to_string(), seg.clone());
         Ok(seg)
+    }
+}
+
+/// Adds `e` to `selected` unless its root is there.
+fn add_entry(selected: &mut Vec<CatalogEntry>, e: CatalogEntry) {
+    if !selected.iter().any(|x| x.root == e.root) {
+        selected.push(e);
+    }
+}
+
+/// Adds every entry whose root is not in `selected` yet.
+fn add_entries(selected: &mut Vec<CatalogEntry>, entries: &[CatalogEntry]) {
+    for e in entries {
+        add_entry(selected, e.clone());
     }
 }
 

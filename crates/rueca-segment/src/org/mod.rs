@@ -93,7 +93,7 @@ use crate::bundle::Bundle;
 use crate::store::{atomic_write, canonical, ensure_dirs};
 use crate::symbols::{self, PriorsBySegment, SubsetStats, TANTIVY_PREFIX};
 use crate::tokenizer::{CODE_TOKENIZER, CodeTokenizer};
-use crate::{FORMAT_VERSION, Result, Segment, SegmentError, SegmentMeta, Store, SymbolQuery};
+use crate::{CatalogEntry, FORMAT_VERSION, Result, Segment, SegmentError, SegmentMeta, Store, SymbolQuery};
 
 pub use link::{
     LinkDir, LinkEdge, LinkInput, LinkRef, LinkTable, NoLinker, OrgDep, OrgLinker, OrgLinks, Package, RepoDeps,
@@ -355,50 +355,21 @@ pub fn update_org_with(store: &Store, name: &str, members: &[OrgMember], linker:
     let prev = current_generation(&store.dir, name)?;
     let catalog = store.entries()?;
     let template = tantivy_template()?;
-    let version = linker.version();
-    let next = prev.as_ref().map_or(1, |g| g.generation + 1);
-    let mut update = OrgUpdate { name: name.to_string(), ..OrgUpdate::default() };
-    let mut repos: Vec<OrgRepo> = Vec::new();
-    let mut roots = HashSet::new();
-    for m in members {
-        let root = canonical(Path::new(&m.root)).to_string_lossy().into_owned();
-        if !roots.insert(root.clone()) {
-            continue;
-        }
-        let Some(entry) = catalog.iter().find(|e| e.root == root) else {
-            update.missing.push(root);
-            continue;
-        };
-        let old = prev.as_ref().and_then(|g| g.repos.iter().find(|r| r.root == root));
-        if let Some(old) = old
-            && old.segment_id == entry.segment_id
-            && prev.as_ref().is_some_and(|g| g.tantivy == template)
-        {
-            let mut keep = old.clone();
-            if m.url.is_some() {
-                keep.url = m.url.clone();
-            }
-            repos.push(keep);
-            update.unchanged += 1;
-            continue;
-        }
-        let repo = extract_repo(store, &dir, &tmp, &entry.root, &entry.segment_id, m.url.clone(), next, &template)?;
-        update.bytes_copied += repo.index_bytes;
-        if old.is_some() {
-            update.replaced.push(repo.repo.clone());
-        } else {
-            update.added.push(repo.repo.clone());
-        }
-        repos.push(repo);
-    }
-    if let Some(g) = &prev {
-        update.removed = g.repos.iter().filter(|r| !roots.contains(&r.root)).map(|r| r.repo.clone()).collect();
-        // A member whose root is configured but no longer in the catalog.
-        for r in &g.repos {
-            if roots.contains(&r.root) && !repos.iter().any(|x| x.root == r.root) && !update.removed.contains(&r.repo) {
-                update.removed.push(r.repo.clone());
-            }
-        }
+    let mut b = OrgBuild {
+        store,
+        linker,
+        version: linker.version(),
+        next: prev.as_ref().map_or(1, |g| g.generation + 1),
+        dir,
+        tmp,
+        prev,
+        template,
+        update: OrgUpdate { name: name.to_string(), ..OrgUpdate::default() },
+        segments: HashMap::new(),
+    };
+    let (mut repos, roots) = b.collect_repos(members, &catalog)?;
+    if let Some(g) = &b.prev {
+        b.update.removed = removed_repos(g, &roots, &repos);
     }
     repos.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.root.cmp(&b.root)));
     if let Some(w) = repos.windows(2).find(|w| w[0].repo == w[1].repo) {
@@ -412,134 +383,274 @@ pub fn update_org_with(store: &Store, name: &str, members: &[OrgMember], linker:
     // Profiles: kept when present for the same segment, profile format and
     // linker version; computed otherwise.
     let t = Instant::now();
-    let mut segments: HashMap<String, Arc<Segment>> = HashMap::new();
-    let mut open = |id: &str| -> Result<Arc<Segment>> {
-        if let Some(s) = segments.get(id) {
-            return Ok(s.clone());
-        }
-        let s = Arc::new(store.open_segment(id)?);
-        segments.insert(id.to_string(), s.clone());
-        Ok(s)
-    };
-    let mut profiles: Vec<RepoProfile> = Vec::with_capacity(repos.len());
-    for r in &mut repos {
-        let file = profile_file_name(&r.segment_id);
-        let current = read_profile(&dir, &file).filter(|p| p.format == PROFILE_FORMAT && p.linker == version);
-        let profile = match current {
-            Some(p) => p,
-            None => {
-                let seg = open(&r.segment_id)?;
-                let deps = linker.analyze(store, &seg).unwrap_or_else(|e| {
-                    update.link_errors.push(format!("{}: analysis: {e}", r.repo));
-                    RepoDeps::default()
-                });
-                let p = RepoProfile::build(&seg, deps, version);
-                let bytes = serde_json::to_vec(&p).map_err(|e| SegmentError::Other(e.to_string()))?;
-                atomic_write(&dir.join(PROFILES_DIR).join(&file), &tmp, &bytes)?;
-                update.profiled.push(r.repo.clone());
-                p
-            }
-        };
-        r.profile = Some(file);
-        profiles.push(profile);
-    }
-    update.profile_ms = t.elapsed().as_millis() as u64;
+    let profiles = b.build_profiles(&mut repos)?;
+    b.update.profile_ms = t.elapsed().as_millis() as u64;
 
     // Links: per consumer, the repositories publishing what it imports.
     let t = Instant::now();
-    let prev_linker = prev.as_ref().map_or(0, |g| g.linker);
-    let mut wants: Vec<Vec<usize>> = Vec::with_capacity(repos.len());
-    for (i, p) in profiles.iter().enumerate() {
-        let deps: Vec<usize> = if version == 0 {
-            Vec::new()
-        } else {
-            (0..repos.len()).filter(|&j| j != i && p.deps.depends_on(&profiles[j].deps.packages)).collect()
-        };
-        wants.push(deps);
-    }
+    let wants = wanted_deps(&profiles, b.version);
     for i in 0..repos.len() {
-        let deps: Vec<OrgDep> = wants[i]
+        let links = b.links_of(i, &repos, &profiles, &wants[i])?;
+        repos[i].links = links;
+    }
+    b.update.link_ms = t.elapsed().as_millis() as u64;
+    b.publish(name, repos, started)
+}
+
+/// The state of one [`update_org_with`] run.
+struct OrgBuild<'s> {
+    store: &'s Store,
+    linker: &'s dyn OrgLinker,
+    /// The organization directory.
+    dir: PathBuf,
+    tmp: PathBuf,
+    prev: Option<OrgGeneration>,
+    template: Value,
+    version: u32,
+    /// The generation this run publishes.
+    next: u64,
+    update: OrgUpdate,
+    /// Store segments opened so far, by id.
+    segments: HashMap<String, Arc<Segment>>,
+}
+
+impl OrgBuild<'_> {
+    /// One repository per distinct member root that has a segment; the
+    /// member roots.
+    fn collect_repos(
+        &mut self,
+        members: &[OrgMember],
+        catalog: &[CatalogEntry],
+    ) -> Result<(Vec<OrgRepo>, HashSet<String>)> {
+        let mut repos: Vec<OrgRepo> = Vec::new();
+        let mut roots = HashSet::new();
+        for m in members {
+            let root = canonical(Path::new(&m.root)).to_string_lossy().into_owned();
+            if !roots.insert(root.clone()) {
+                continue;
+            }
+            match catalog.iter().find(|e| e.root == root) {
+                Some(entry) => repos.push(self.member_repo(m, entry)?),
+                None => self.update.missing.push(root),
+            }
+        }
+        Ok((repos, roots))
+    }
+
+    /// The repository of a member: the previous generation's when its
+    /// segment and the index template are unchanged, else extracted again.
+    fn member_repo(&mut self, m: &OrgMember, entry: &CatalogEntry) -> Result<OrgRepo> {
+        let old = self.prev.as_ref().and_then(|g| g.repos.iter().find(|r| r.root == entry.root));
+        if let Some(old) = old
+            && old.segment_id == entry.segment_id
+            && self.prev.as_ref().is_some_and(|g| g.tantivy == self.template)
+        {
+            let mut keep = old.clone();
+            if m.url.is_some() {
+                keep.url = m.url.clone();
+            }
+            self.update.unchanged += 1;
+            return Ok(keep);
+        }
+        let replaced = old.is_some();
+        let repo = extract_repo(
+            self.store,
+            &self.dir,
+            &self.tmp,
+            &entry.root,
+            &entry.segment_id,
+            m.url.clone(),
+            self.next,
+            &self.template,
+        )?;
+        self.update.bytes_copied += repo.index_bytes;
+        if replaced {
+            self.update.replaced.push(repo.repo.clone());
+        } else {
+            self.update.added.push(repo.repo.clone());
+        }
+        Ok(repo)
+    }
+
+    /// A store segment, opened once.
+    fn open(&mut self, id: &str) -> Result<Arc<Segment>> {
+        if let Some(s) = self.segments.get(id) {
+            return Ok(s.clone());
+        }
+        let s = Arc::new(self.store.open_segment(id)?);
+        self.segments.insert(id.to_string(), s.clone());
+        Ok(s)
+    }
+
+    /// The profile of every repository, read back or computed.
+    fn build_profiles(&mut self, repos: &mut [OrgRepo]) -> Result<Vec<RepoProfile>> {
+        let mut profiles: Vec<RepoProfile> = Vec::with_capacity(repos.len());
+        for r in repos.iter_mut() {
+            let file = profile_file_name(&r.segment_id);
+            let current =
+                read_profile(&self.dir, &file).filter(|p| p.format == PROFILE_FORMAT && p.linker == self.version);
+            let profile = match current {
+                Some(p) => p,
+                None => self.compute_profile(r, &file)?,
+            };
+            r.profile = Some(file);
+            profiles.push(profile);
+        }
+        Ok(profiles)
+    }
+
+    /// Analyzes a repository with the linker and stores its profile.
+    fn compute_profile(&mut self, r: &OrgRepo, file: &str) -> Result<RepoProfile> {
+        let seg = self.open(&r.segment_id)?;
+        let deps = match self.linker.analyze(self.store, &seg) {
+            Ok(deps) => deps,
+            Err(e) => {
+                self.update.link_errors.push(format!("{}: analysis: {e}", r.repo));
+                RepoDeps::default()
+            }
+        };
+        let p = RepoProfile::build(&seg, deps, self.version);
+        let bytes = serde_json::to_vec(&p).map_err(|e| SegmentError::Other(e.to_string()))?;
+        atomic_write(&self.dir.join(PROFILES_DIR).join(file), &self.tmp, &bytes)?;
+        self.update.profiled.push(r.repo.clone());
+        Ok(p)
+    }
+
+    /// The links of repository `i` to the repositories `want` (none
+    /// without dependencies): the previous ones when still valid, else
+    /// computed.
+    fn links_of(
+        &mut self,
+        i: usize,
+        repos: &[OrgRepo],
+        profiles: &[RepoProfile],
+        want: &[usize],
+    ) -> Result<Option<OrgLinks>> {
+        let deps: Vec<OrgDep> = want
             .iter()
             .map(|&j| OrgDep { repo: repos[j].repo.clone(), segment_id: repos[j].segment_id.clone() })
             .collect();
         if deps.is_empty() {
-            repos[i].links = None;
-            continue;
+            return Ok(None);
         }
-        let prev_links = prev.as_ref().and_then(|g| g.repos.iter().find(|x| x.root == repos[i].root)).and_then(|x| {
-            (x.segment_id == repos[i].segment_id && prev_linker == version).then_some(x.links.clone()).flatten()
-        });
-        if let Some(l) = prev_links
-            && l.deps == deps
-            && l.file.as_ref().is_none_or(|f| dir.join(link::LINKS_DIR).join(f).exists())
-        {
-            update.link_edges += u64::from(l.edges);
-            repos[i].links = Some(l);
-            continue;
+        let links = match self.reusable_links(&repos[i], &deps) {
+            Some(l) => l,
+            None => self.compute_links(i, repos, profiles, want, deps)?,
+        };
+        self.update.link_edges += u64::from(links.edges);
+        Ok(Some(links))
+    }
+
+    /// The previous generation's links of `r`, when its segment, the linker
+    /// version and the dependencies are the same and the link file is there.
+    fn reusable_links(&self, r: &OrgRepo, deps: &[OrgDep]) -> Option<OrgLinks> {
+        let g = self.prev.as_ref()?;
+        let x = g.repos.iter().find(|x| x.root == r.root)?;
+        if x.segment_id != r.segment_id || g.linker != self.version {
+            return None;
         }
-        let file = link::link_file_name(&repos[i].segment_id, &deps, version);
-        let consumer_seg = open(&repos[i].segment_id)?;
-        let mut dep_segs = Vec::with_capacity(deps.len());
-        for &j in &wants[i] {
-            dep_segs.push(open(&repos[j].segment_id)?);
-        }
+        let l = x.links.clone()?;
+        let file_ok = l.file.as_ref().is_none_or(|f| self.dir.join(link::LINKS_DIR).join(f).exists());
+        (l.deps == deps && file_ok).then_some(l)
+    }
+
+    /// Runs the linker for consumer `i` and stores its edges.
+    fn compute_links(
+        &mut self,
+        i: usize,
+        repos: &[OrgRepo],
+        profiles: &[RepoProfile],
+        want: &[usize],
+        deps: Vec<OrgDep>,
+    ) -> Result<OrgLinks> {
+        let file = link::link_file_name(&repos[i].segment_id, &deps, self.version);
+        let consumer_seg = self.open(&repos[i].segment_id)?;
+        let dep_segs = want.iter().map(|&j| self.open(&repos[j].segment_id)).collect::<Result<Vec<_>>>()?;
         let consumer = LinkInput { repo: &repos[i], segment: &consumer_seg, deps: &profiles[i].deps };
-        let inputs: Vec<LinkInput<'_>> = wants[i]
+        let inputs: Vec<LinkInput<'_>> = want
             .iter()
             .zip(&dep_segs)
             .map(|(&j, s)| LinkInput { repo: &repos[j], segment: s, deps: &profiles[j].deps })
             .collect();
-        let links = match linker.link(store, &consumer, &inputs) {
+        match self.linker.link(self.store, &consumer, &inputs) {
             Ok(edges) => {
                 let n = edges.len() as u32;
                 let file = if edges.is_empty() {
                     None
                 } else {
-                    link::write_links(&dir, &tmp, &file, &edges)?;
+                    link::write_links(&self.dir, &self.tmp, &file, &edges)?;
                     Some(file)
                 };
-                update.linked.push((repos[i].repo.clone(), n));
-                OrgLinks { file, deps, edges: n, error: None }
+                self.update.linked.push((repos[i].repo.clone(), n));
+                Ok(OrgLinks { file, deps, edges: n, error: None })
             }
             Err(e) => {
-                update.link_errors.push(format!("{}: {e}", repos[i].repo));
-                OrgLinks { file: None, deps, edges: 0, error: Some(e.to_string()) }
+                self.update.link_errors.push(format!("{}: {e}", repos[i].repo));
+                Ok(OrgLinks { file: None, deps, edges: 0, error: Some(e.to_string()) })
             }
-        };
-        update.link_edges += u64::from(links.edges);
-        repos[i].links = Some(links);
+        }
     }
-    update.link_ms = t.elapsed().as_millis() as u64;
 
-    update.repos = repos.len();
-    let changed = match &prev {
-        None => true,
-        Some(g) => g.repos != repos || g.tantivy != template || g.linker != version,
-    };
-    if !changed {
-        update.generation = prev.map_or(0, |g| g.generation);
+    /// Publishes generation `next` when anything changed.
+    fn publish(self, name: &str, repos: Vec<OrgRepo>, started: Instant) -> Result<OrgUpdate> {
+        let OrgBuild { store, dir, tmp, prev, template, version, next, mut update, .. } = self;
+        update.repos = repos.len();
+        let changed = match &prev {
+            None => true,
+            Some(g) => g.repos != repos || g.tantivy != template || g.linker != version,
+        };
+        if !changed {
+            update.generation = prev.map_or(0, |g| g.generation);
+            update.duration_ms = started.elapsed().as_millis() as u64;
+            return Ok(update);
+        }
+        let generation = OrgGeneration {
+            format: ORG_FORMAT,
+            name: name.to_string(),
+            generation: next,
+            created_at: now(),
+            repos,
+            tantivy: template,
+            linker: version,
+        };
+        let bytes = serde_json::to_vec_pretty(&generation).map_err(|e| SegmentError::Other(e.to_string()))?;
+        atomic_write(&generation_path(&dir, next), &tmp, &bytes)?;
+        let ptr = serde_json::to_vec_pretty(&OrgPointer { name: name.to_string(), generation: next })
+            .map_err(|e| SegmentError::Other(e.to_string()))?;
+        atomic_write(&dir.join(POINTER_FILE), &tmp, &ptr)?;
+        collect_garbage(store, &dir, next);
+        update.generation = next;
+        update.published = true;
         update.duration_ms = started.elapsed().as_millis() as u64;
-        return Ok(update);
+        Ok(update)
     }
-    let generation = OrgGeneration {
-        format: ORG_FORMAT,
-        name: name.to_string(),
-        generation: next,
-        created_at: now(),
-        repos,
-        tantivy: template,
-        linker: version,
-    };
-    let bytes = serde_json::to_vec_pretty(&generation).map_err(|e| SegmentError::Other(e.to_string()))?;
-    atomic_write(&generation_path(&dir, next), &tmp, &bytes)?;
-    let ptr = serde_json::to_vec_pretty(&OrgPointer { name: name.to_string(), generation: next })
-        .map_err(|e| SegmentError::Other(e.to_string()))?;
-    atomic_write(&dir.join(POINTER_FILE), &tmp, &ptr)?;
-    collect_garbage(store, &dir, next);
-    update.generation = next;
-    update.published = true;
-    update.duration_ms = started.elapsed().as_millis() as u64;
-    Ok(update)
+}
+
+/// Repositories of the previous generation `g` that are gone: their root
+/// is no longer a member, or no longer in the catalog.
+fn removed_repos(g: &OrgGeneration, roots: &HashSet<String>, repos: &[OrgRepo]) -> Vec<String> {
+    let mut removed: Vec<String> =
+        g.repos.iter().filter(|r| !roots.contains(&r.root)).map(|r| r.repo.clone()).collect();
+    // A member whose root is configured but no longer in the catalog.
+    for r in &g.repos {
+        if roots.contains(&r.root) && !repos.iter().any(|x| x.root == r.root) && !removed.contains(&r.repo) {
+            removed.push(r.repo.clone());
+        }
+    }
+    removed
+}
+
+/// Per repository, the other repositories publishing a package it uses
+/// (none with linker version 0).
+fn wanted_deps(profiles: &[RepoProfile], version: u32) -> Vec<Vec<usize>> {
+    (0..profiles.len())
+        .map(|i| {
+            if version == 0 {
+                return Vec::new();
+            }
+            (0..profiles.len()).filter(|&j| j != i && profiles[i].deps.depends_on(&profiles[j].deps.packages)).collect()
+        })
+        .collect()
 }
 
 fn profile_file_name(segment_id: &str) -> String {
@@ -641,15 +752,7 @@ fn collect_garbage(store: &Store, dir: &Path, current: u64) {
     }
     let live: HashSet<&str> =
         kept.iter().flat_map(|g| g.repos.iter().filter_map(|r| r.tantivy_segment.as_deref())).collect();
-    if let Ok(rd) = fs::read_dir(dir.join(INDEX_DIR)) {
-        for ent in rd.flatten() {
-            let name = ent.file_name().to_string_lossy().into_owned();
-            let stem = name.split('.').next().unwrap_or_default();
-            if !live.contains(stem) {
-                let _ = fs::remove_file(ent.path());
-            }
-        }
-    }
+    remove_files_where(&dir.join(INDEX_DIR), |name| !live.contains(name.split('.').next().unwrap_or_default()));
     // Profiles and link sets no kept generation names.
     let named: HashSet<&str> = kept
         .iter()
@@ -657,21 +760,24 @@ fn collect_garbage(store: &Store, dir: &Path, current: u64) {
         .flat_map(|r| r.profile.as_deref().into_iter().chain(r.links.as_ref().and_then(|l| l.file.as_deref())))
         .collect();
     for sub in [PROFILES_DIR, link::LINKS_DIR] {
-        if let Ok(rd) = fs::read_dir(dir.join(sub)) {
-            for ent in rd.flatten() {
-                if !named.contains(ent.file_name().to_string_lossy().as_ref()) {
-                    let _ = fs::remove_file(ent.path());
-                }
-            }
-        }
+        remove_files_where(&dir.join(sub), |name| !named.contains(name));
     }
     let catalog: HashSet<String> = store.entries().unwrap_or_default().into_iter().map(|e| e.segment_id).collect();
     let pinned = referenced_segments(&store.dir);
-    for g in dropped {
-        for r in g.repos {
-            if !catalog.contains(&r.segment_id) && !pinned.contains(&r.segment_id) {
-                let _ = fs::remove_file(store.segment_path(&r.segment_id));
-            }
+    for r in dropped.into_iter().flat_map(|g| g.repos) {
+        if !catalog.contains(&r.segment_id) && !pinned.contains(&r.segment_id) {
+            let _ = fs::remove_file(store.segment_path(&r.segment_id));
+        }
+    }
+}
+
+/// Deletes the entries of directory `dir` whose file name `doomed`
+/// selects. Best effort.
+fn remove_files_where(dir: &Path, doomed: impl Fn(&str) -> bool) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    for ent in rd.flatten() {
+        if doomed(ent.file_name().to_string_lossy().as_ref()) {
+            let _ = fs::remove_file(ent.path());
         }
     }
 }
