@@ -705,28 +705,39 @@ fn random_bytes_never_panic() {
         b"match x:\n case ",
     ];
     for round in 0..400 {
-        let len = (rng.next() % 600) as usize;
-        let mut src = Vec::with_capacity(len * 4);
-        for _ in 0..len {
-            if round % 2 == 0 {
-                src.push(rng.next() as u8);
-            } else {
-                src.extend_from_slice(tokens[(rng.next() as usize) % tokens.len()]);
-            }
-        }
+        let src = random_source(&mut rng, tokens, round % 2 == 0);
         let a = PythonPack.extract("r.py", Language::Python, &src, &Budget::default()).unwrap();
         let b = PythonPack.extract("r.py", Language::Python, &src, &Budget::default()).unwrap();
         assert_eq!(a, b);
-        for d in &a.definitions {
-            assert!(d.span.contains(&d.name_span) || d.label == Label::Field);
-            if let Some(p) = d.parent {
-                assert!((p as usize) < a.definitions.len());
-            }
+        assert_facts_consistent(&a);
+    }
+}
+
+/// Up to 600 random bytes (`raw`) or random tokens.
+fn random_source(rng: &mut Rng, tokens: &[&[u8]], raw: bool) -> Vec<u8> {
+    let len = (rng.next() % 600) as usize;
+    let mut src = Vec::with_capacity(len * 4);
+    for _ in 0..len {
+        if raw {
+            src.push(rng.next() as u8);
+        } else {
+            src.extend_from_slice(tokens[(rng.next() as usize) % tokens.len()]);
         }
-        for r in &a.references {
-            if let Some(e) = r.enclosing {
-                assert!((e as usize) < a.definitions.len());
-            }
+    }
+    src
+}
+
+/// Name spans inside spans, parents and enclosing definitions in range.
+fn assert_facts_consistent(facts: &rueca_model::FileFacts) {
+    for d in &facts.definitions {
+        assert!(d.span.contains(&d.name_span) || d.label == Label::Field);
+        if let Some(p) = d.parent {
+            assert!((p as usize) < facts.definitions.len());
+        }
+    }
+    for r in &facts.references {
+        if let Some(e) = r.enclosing {
+            assert!((e as usize) < facts.definitions.len());
         }
     }
 }

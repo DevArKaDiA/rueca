@@ -116,54 +116,61 @@ fn pyproject_roots(content: &str) -> Vec<String> {
             continue;
         }
         let key = line.split_once('=').map(|(k, _)| k.trim()).unwrap_or("");
-        match section.as_str() {
-            "tool.setuptools" if key == "package-dir" || key == "package_dir" => {
-                let strings = quoted_strings(line);
-                // {"" = "lib"}: an empty key followed by its value.
-                if let Some(pos) = strings.iter().position(|s| s.is_empty())
-                    && let Some(v) = strings.get(pos + 1)
-                {
-                    roots.push(v.to_string());
-                }
-            }
-            "tool.setuptools.package-dir" | "tool.setuptools.package_dir" => {
-                let strings = quoted_strings(line);
-                if strings.len() >= 2 && strings[0].is_empty() {
-                    roots.push(strings[1].to_string());
-                }
-            }
-            "tool.setuptools.packages.find" if key == "where" => {
-                roots.extend(quoted_strings(line).into_iter().map(String::from));
-            }
-            "tool.hatch.build.targets.wheel" if key == "packages" => {
-                for s in quoted_strings(line) {
-                    if let Some((d, _)) = s.trim_end_matches('/').rsplit_once('/') {
-                        roots.push(d.to_string());
-                    }
-                }
-            }
-            s if s == "tool.poetry" || s.starts_with("tool.poetry.") => {
-                if key == "packages" {
-                    in_poetry_packages = true;
-                }
-                if in_poetry_packages {
-                    if let Some(idx) = line.find("from") {
-                        let after = &line[idx + 4..];
-                        if after.trim_start().starts_with('=')
-                            && let Some(v) = quoted_strings(after).first()
-                        {
-                            roots.push(v.to_string());
-                        }
-                    }
-                    if line.ends_with(']') {
-                        in_poetry_packages = false;
-                    }
-                }
-            }
-            _ => {}
+        if section == "tool.poetry" || section.starts_with("tool.poetry.") {
+            in_poetry_packages = poetry_line_roots(line, key, in_poetry_packages, &mut roots);
+        } else {
+            setuptools_line_roots(&section, key, line, &mut roots);
         }
     }
     roots
+}
+
+/// Roots declared by one line of a setuptools / hatch section of
+/// `pyproject.toml`.
+fn setuptools_line_roots(section: &str, key: &str, line: &str, roots: &mut Vec<String>) {
+    match section {
+        "tool.setuptools" if key == "package-dir" || key == "package_dir" => {
+            let strings = quoted_strings(line);
+            // {"" = "lib"}: an empty key followed by its value.
+            if let Some(pos) = strings.iter().position(|s| s.is_empty())
+                && let Some(v) = strings.get(pos + 1)
+            {
+                roots.push(v.to_string());
+            }
+        }
+        "tool.setuptools.package-dir" | "tool.setuptools.package_dir" => {
+            let strings = quoted_strings(line);
+            if strings.len() >= 2 && strings[0].is_empty() {
+                roots.push(strings[1].to_string());
+            }
+        }
+        "tool.setuptools.packages.find" if key == "where" => {
+            roots.extend(quoted_strings(line).into_iter().map(String::from));
+        }
+        "tool.hatch.build.targets.wheel" if key == "packages" => {
+            let dirs = quoted_strings(line).into_iter().filter_map(|s| s.trim_end_matches('/').rsplit_once('/'));
+            roots.extend(dirs.map(|(d, _)| d.to_string()));
+        }
+        _ => {}
+    }
+}
+
+/// One line of a `tool.poetry*` section: collects the `from = "…"` roots of
+/// `packages = [...]`. Returns whether the next line is still inside the
+/// `packages` list.
+fn poetry_line_roots(line: &str, key: &str, in_packages: bool, roots: &mut Vec<String>) -> bool {
+    if key != "packages" && !in_packages {
+        return false;
+    }
+    if let Some(idx) = line.find("from") {
+        let after = &line[idx + 4..];
+        if after.trim_start().starts_with('=')
+            && let Some(v) = quoted_strings(after).first()
+        {
+            roots.push(v.to_string());
+        }
+    }
+    !line.ends_with(']')
 }
 
 fn setup_cfg_roots(content: &str) -> Vec<String> {
@@ -182,36 +189,28 @@ fn setup_cfg_roots(content: &str) -> Vec<String> {
             continue;
         }
         let (key, value) = if indented {
-            (continuation_key.as_str().to_string(), line.to_string())
+            (continuation_key.clone(), line.to_string())
         } else {
-            match line.split_once('=') {
-                Some((k, v)) => {
-                    continuation_key = k.trim().to_string();
-                    (continuation_key.clone(), v.trim().to_string())
-                }
-                None => continue,
-            }
+            let Some((k, v)) = line.split_once('=') else { continue };
+            continuation_key = k.trim().to_string();
+            (continuation_key.clone(), v.trim().to_string())
         };
-        match (section.as_str(), key.as_str()) {
-            ("options", "package_dir") => {
-                // `=src` or ` = src` (empty package name maps to the root).
-                if let Some(v) = value.trim().strip_prefix('=') {
-                    let v = v.trim();
-                    if !v.is_empty() {
-                        roots.push(v.to_string());
-                    }
-                }
-            }
-            ("options.packages.find", "where") => {
-                let v = value.trim();
-                if !v.is_empty() {
-                    roots.push(v.to_string());
-                }
-            }
-            _ => {}
+        if let Some(root) = setup_cfg_root(&section, &key, &value) {
+            roots.push(root);
         }
     }
     roots
+}
+
+/// The source root a `setup.cfg` entry declares, if any.
+fn setup_cfg_root(section: &str, key: &str, value: &str) -> Option<String> {
+    let v = match (section, key) {
+        // `=src` or ` = src` (empty package name maps to the root).
+        ("options", "package_dir") => value.trim().strip_prefix('=')?.trim(),
+        ("options.packages.find", "where") => value.trim(),
+        _ => return None,
+    };
+    (!v.is_empty()).then(|| v.to_string())
 }
 
 /// Strips `.py` / `.pyi`; `None` for other extensions.
@@ -291,39 +290,31 @@ pub(crate) fn resolve_import(from_path: &str, import: &Import, project: &Project
         return None;
     }
     if import.relative_level == 0 {
-        if module.is_empty() {
-            return None;
-        }
-        let configured = configured_roots(project);
-        let own_root = source_root(from_path, project, &configured);
-        let mut roots: Vec<String> = vec![String::new(), "src".to_string()];
-        roots.extend(configured);
-        roots.push(own_root);
-        let mut seen = std::collections::BTreeSet::new();
-        for root in roots {
-            if !seen.insert(root.clone()) {
-                continue;
-            }
-            if let Some(hit) = find_module_file(&root, module, project) {
-                return Some(hit);
-            }
-        }
-        return None;
+        return resolve_absolute(from_path, module, project);
     }
     let (mut base, _) = split_dir(from_path);
     for _ in 1..import.relative_level {
         base = parent_dir(base)?;
     }
     if module.is_empty() {
-        for init in ["__init__.py", "__init__.pyi"] {
-            let candidate = join(base, init);
-            if project.contains(&candidate) {
-                return Some(candidate);
-            }
-        }
-        return None;
+        return ["__init__.py", "__init__.pyi"].into_iter().map(|init| join(base, init)).find(|c| project.contains(c));
     }
     find_module_file(base, module, project)
+}
+
+/// `import a.b`: tried under the repository root, `src/`, the configured
+/// roots and the importing file's own source root, in that order.
+fn resolve_absolute(from_path: &str, module: &str, project: &ProjectFiles) -> Option<String> {
+    if module.is_empty() {
+        return None;
+    }
+    let configured = configured_roots(project);
+    let own_root = source_root(from_path, project, &configured);
+    let mut roots: Vec<String> = vec![String::new(), "src".to_string()];
+    roots.extend(configured);
+    roots.push(own_root);
+    let mut seen = std::collections::BTreeSet::new();
+    roots.into_iter().filter(|root| seen.insert(root.clone())).find_map(|root| find_module_file(&root, module, project))
 }
 
 #[cfg(test)]

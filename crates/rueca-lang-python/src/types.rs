@@ -23,6 +23,7 @@
 //! only makes it more conservative).
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use rueca_extract::text_of;
 use tree_sitter::Node;
@@ -201,18 +202,7 @@ impl Builder<'_> {
                 let last = name.rsplit('.').next().unwrap_or(&name);
                 (!matches!(last, "Any" | "Self" | "None" | "object")).then_some(name)
             }
-            "string" => {
-                let raw = self.text(t);
-                let mut inner = raw.trim_matches(|c| c == '"' || c == '\'').trim();
-                // `"Foo | None"`, `"Optional[Foo]"`.
-                if let Some(x) = inner.strip_prefix("Optional[").and_then(|x| x.strip_suffix(']')) {
-                    inner = x.trim();
-                }
-                let parts: Vec<&str> = inner.split('|').map(str::trim).filter(|p| *p != "None").collect();
-                let [one] = parts[..] else { return None };
-                let last = one.rsplit('.').next().unwrap_or(one);
-                (is_dotted(one) && !matches!(last, "Any" | "Self")).then(|| one.to_string())
-            }
+            "string" => self.string_annotation(t),
             "binary_operator" => {
                 let l = t.child_by_field_name("left")?;
                 let r = t.child_by_field_name("right")?;
@@ -223,30 +213,46 @@ impl Builder<'_> {
                     _ => None,
                 }
             }
-            "subscript" | "generic_type" => {
-                let value = t.child_by_field_name("value").or_else(|| t.named_child(0))?;
-                let head = self.dotted(value)?;
-                let head = head.rsplit('.').next().unwrap_or(&head).to_string();
-                let args: Vec<Node<'_>> = match t.kind() {
-                    "subscript" => {
-                        let mut c = t.walk();
-                        t.children_by_field_name("subscript", &mut c).collect()
-                    }
-                    _ => named_children(t).into_iter().skip(1).collect(),
-                };
-                let args: Vec<Node<'_>> = args
-                    .into_iter()
-                    .flat_map(|a| {
-                        if a.kind() == "type_parameter" || a.kind() == "tuple" { named_children(a) } else { vec![a] }
-                    })
-                    .collect();
-                let real: Vec<Node<'_>> = args.into_iter().filter(|a| self.text(*a).trim() != "None").collect();
-                match (head.as_str(), &real[..]) {
-                    ("Optional" | "Union", [one]) => self.annotation(*one, depth + 1),
-                    ("Annotated", [first, ..]) => self.annotation(*first, depth + 1),
-                    _ => None,
-                }
+            "subscript" | "generic_type" => self.generic_annotation(t, depth),
+            _ => None,
+        }
+    }
+
+    /// A string forward reference: `"Foo"`, `"Foo | None"`, `"Optional[Foo]"`.
+    fn string_annotation(&self, t: Node<'_>) -> Option<String> {
+        let raw = self.text(t);
+        let mut inner = raw.trim_matches(|c| c == '"' || c == '\'').trim();
+        // `"Foo | None"`, `"Optional[Foo]"`.
+        if let Some(x) = inner.strip_prefix("Optional[").and_then(|x| x.strip_suffix(']')) {
+            inner = x.trim();
+        }
+        let parts: Vec<&str> = inner.split('|').map(str::trim).filter(|p| *p != "None").collect();
+        let [one] = parts[..] else { return None };
+        let last = one.rsplit('.').next().unwrap_or(one);
+        (is_dotted(one) && !matches!(last, "Any" | "Self")).then(|| one.to_string())
+    }
+
+    /// `Optional[X]`, `Union[X, None]`, `Annotated[X, …]` (subscript or
+    /// generic type).
+    fn generic_annotation(&self, t: Node<'_>, depth: usize) -> Option<String> {
+        let value = t.child_by_field_name("value").or_else(|| t.named_child(0))?;
+        let head = self.dotted(value)?;
+        let head = head.rsplit('.').next().unwrap_or(&head).to_string();
+        let args: Vec<Node<'_>> = match t.kind() {
+            "subscript" => {
+                let mut c = t.walk();
+                t.children_by_field_name("subscript", &mut c).collect()
             }
+            _ => named_children(t).into_iter().skip(1).collect(),
+        };
+        let args: Vec<Node<'_>> = args
+            .into_iter()
+            .flat_map(|a| if a.kind() == "type_parameter" || a.kind() == "tuple" { named_children(a) } else { vec![a] })
+            .collect();
+        let real: Vec<Node<'_>> = args.into_iter().filter(|a| self.text(*a).trim() != "None").collect();
+        match (head.as_str(), &real[..]) {
+            ("Optional" | "Union", [one]) => self.annotation(*one, depth + 1),
+            ("Annotated", [first, ..]) => self.annotation(*first, depth + 1),
             _ => None,
         }
     }
@@ -260,34 +266,45 @@ impl Builder<'_> {
                 continue;
             }
             for c in named_children(n) {
-                if let Some(f) = function_of(c) {
-                    let name = f.child_by_field_name("name").map(|x| self.text(x));
-                    let ret = f.child_by_field_name("return_type").and_then(|r| self.annotation(r, 0));
-                    if let Some(name) = name {
-                        if n.kind() == "module" {
-                            self.table.functions.insert(name, ret);
-                        } else if let Some(class) = enclosing_class_body(n) {
-                            // Several definitions (properties, overloads): unknown unless equal.
-                            let e = self.table.methods.entry((class, name)).or_insert(ret.clone());
-                            if *e != ret {
-                                *e = None;
-                            }
-                        }
-                    }
-                } else if let Some(k) = class_of(c) {
-                    if n.kind() == "module"
-                        && let Some(name) = k.child_by_field_name("name")
-                    {
-                        self.table.classes.insert(self.text(name), k.id());
-                    }
-                    if let Some(body) = k.child_by_field_name("body") {
-                        stack.push((body, depth + 1));
-                    }
-                } else if matches!(c.kind(), "if_statement" | "try_statement" | "block" | "else_clause" | "elif_clause")
-                    || c.kind().ends_with("_clause")
-                {
-                    stack.push((c, depth + 1));
+                if let Some(next) = self.signature_child(n, c) {
+                    stack.push((next, depth + 1));
                 }
+            }
+        }
+    }
+
+    /// Records the function or class `c` of block `n`; returns the node to
+    /// walk next (a class body, or a compound statement / clause).
+    fn signature_child<'t>(&mut self, n: Node<'t>, c: Node<'t>) -> Option<Node<'t>> {
+        if let Some(f) = function_of(c) {
+            self.function_signature(n, f);
+            return None;
+        }
+        if let Some(k) = class_of(c) {
+            if n.kind() == "module"
+                && let Some(name) = k.child_by_field_name("name")
+            {
+                self.table.classes.insert(self.text(name), k.id());
+            }
+            return k.child_by_field_name("body");
+        }
+        let compound = matches!(c.kind(), "if_statement" | "try_statement" | "block" | "else_clause" | "elif_clause")
+            || c.kind().ends_with("_clause");
+        compound.then_some(c)
+    }
+
+    /// The return annotation of function `f` defined in block `n`.
+    fn function_signature(&mut self, n: Node<'_>, f: Node<'_>) {
+        let name = f.child_by_field_name("name").map(|x| self.text(x));
+        let ret = f.child_by_field_name("return_type").and_then(|r| self.annotation(r, 0));
+        let Some(name) = name else { return };
+        if n.kind() == "module" {
+            self.table.functions.insert(name, ret);
+        } else if let Some(class) = enclosing_class_body(n) {
+            // Several definitions (properties, overloads): unknown unless equal.
+            let e = self.table.methods.entry((class, name)).or_insert(ret.clone());
+            if *e != ret {
+                *e = None;
             }
         }
     }
@@ -374,118 +391,116 @@ impl Builder<'_> {
     /// Iterative walk: owners are functions and lambdas (module root at the
     /// bottom); classes give `self.x` assignments their class.
     fn walk(&mut self, root: Node<'_>, max_depth: usize) {
-        let mut stack: Vec<(Node<'_>, usize, std::rc::Rc<Frame>)> = vec![(
-            root,
-            0,
-            std::rc::Rc::new(Frame { owner: root.id(), class: None, self_name: None, class_body: None }),
-        )];
+        let mut stack: Vec<(Node<'_>, usize, Rc<Frame>)> =
+            vec![(root, 0, Rc::new(Frame { owner: root.id(), class: None, self_name: None, class_body: None }))];
         while let Some((n, depth, frame)) = stack.pop() {
             if depth > max_depth {
                 continue;
             }
-            let mut child_frame = frame.clone();
-            match n.kind() {
-                "function_definition" => {
-                    if let Some(name) = n.child_by_field_name("name") {
-                        let t = self.text(name);
-                        self.var(frame.owner, t, Fact::UntypedBinding);
-                    }
-                    let in_class = frame.class_body.is_some();
-                    let params = n.child_by_field_name("parameters");
-                    let self_name = if in_class {
-                        params.and_then(|p| named_children(p).into_iter().next()).map(|p| match p.kind() {
-                            "identifier" => self.text(p),
-                            _ => p.child_by_field_name("name").map(|x| self.text(x)).unwrap_or_default(),
-                        })
-                    } else {
-                        frame.self_name.clone()
-                    };
-                    if let Some(p) = params {
-                        self.parameters(n.id(), p);
-                    }
-                    child_frame = std::rc::Rc::new(Frame {
-                        owner: n.id(),
-                        class: if in_class { frame.class_body } else { frame.class },
-                        self_name,
-                        class_body: None,
-                    });
-                    // Only the body runs in the new owner (defaults and
-                    // annotations are evaluated outside).
-                    if let Some(b) = n.child_by_field_name("body") {
-                        stack.push((b, depth + 1, child_frame));
-                    }
-                    continue;
-                }
-                "lambda" => {
-                    if let Some(p) = n.child_by_field_name("parameters") {
-                        self.parameters(n.id(), p);
-                    }
-                    child_frame = std::rc::Rc::new(Frame {
-                        owner: n.id(),
-                        class: frame.class,
-                        self_name: frame.self_name.clone(),
-                        class_body: None,
-                    });
-                }
-                "class_definition" => {
-                    if let Some(name) = n.child_by_field_name("name") {
-                        let t = self.text(name);
-                        self.var(frame.owner, t, Fact::UntypedBinding);
-                    }
-                    if let Some(b) = n.child_by_field_name("body") {
-                        let f = std::rc::Rc::new(Frame {
-                            owner: frame.owner,
-                            class: None,
-                            self_name: None,
-                            class_body: Some(n.id()),
-                        });
-                        stack.push((b, depth + 1, f));
-                    }
-                    continue;
-                }
-                "assignment" => self.assignment(n, &frame),
-                "augmented_assignment" => {
-                    if let Some(l) = n.child_by_field_name("left") {
-                        self.assign_untyped(l, &frame);
+            match self.walk_node(n, &frame) {
+                Next::Children(child_frame) => {
+                    for c in named_children(n).into_iter().rev() {
+                        stack.push((c, depth + 1, child_frame.clone()));
                     }
                 }
-                "for_statement" | "for_in_clause" => {
-                    if let Some(l) = n.child_by_field_name("left") {
-                        self.untyped_target(frame.owner, l, 0);
-                    }
-                }
-                "as_pattern_target" | "named_expression" => {
-                    let t = if n.kind() == "named_expression" { n.child_by_field_name("name") } else { Some(n) };
-                    if let Some(t) = t {
-                        self.untyped_target(frame.owner, t, 0);
-                    }
-                }
-                "except_clause" => {
-                    // `except E as e`: the alias.
-                    if let Some(a) = n.child_by_field_name("alias") {
-                        self.untyped_target(frame.owner, a, 0);
-                    }
-                }
-                "import_statement" | "import_from_statement" | "global_statement" | "nonlocal_statement" => {
-                    for c in named_children(n) {
-                        let name = match c.kind() {
-                            "aliased_import" => c.child_by_field_name("alias"),
-                            "dotted_name" => c.named_child(0),
-                            "identifier" => Some(c),
-                            _ => None,
-                        };
-                        if let Some(name) = name
-                            && Some(c) != n.child_by_field_name("module_name")
-                        {
-                            let t = self.text(name);
-                            self.var(frame.owner, t, Fact::UntypedBinding);
-                        }
-                    }
-                }
-                _ => {}
+                Next::Body(body, body_frame) => stack.push((body, depth + 1, body_frame)),
+                Next::Stop => {}
             }
-            for c in named_children(n).into_iter().rev() {
-                stack.push((c, depth + 1, child_frame.clone()));
+        }
+    }
+
+    /// Records the bindings of node `n` and says how the walk continues.
+    fn walk_node<'t>(&mut self, n: Node<'t>, frame: &Rc<Frame>) -> Next<'t> {
+        match n.kind() {
+            "function_definition" => return self.walk_function(n, frame),
+            "class_definition" => return self.walk_class(n, frame),
+            "lambda" => return Next::Children(self.walk_lambda(n, frame)),
+            "assignment" => self.assignment(n, frame),
+            "augmented_assignment" => {
+                if let Some(l) = n.child_by_field_name("left") {
+                    self.assign_untyped(l, frame);
+                }
+            }
+            "import_statement" | "import_from_statement" | "global_statement" | "nonlocal_statement" => {
+                self.name_bindings(n, frame.owner);
+            }
+            _ => {
+                if let Some(t) = untyped_binding_target(n) {
+                    self.untyped_target(frame.owner, t, 0);
+                }
+            }
+        }
+        Next::Children(frame.clone())
+    }
+
+    /// Only the body runs in the new owner (defaults and annotations are
+    /// evaluated outside).
+    fn walk_function<'t>(&mut self, n: Node<'t>, frame: &Frame) -> Next<'t> {
+        if let Some(name) = n.child_by_field_name("name") {
+            let t = self.text(name);
+            self.var(frame.owner, t, Fact::UntypedBinding);
+        }
+        let in_class = frame.class_body.is_some();
+        let params = n.child_by_field_name("parameters");
+        let self_name = if in_class { params.and_then(|p| self.first_parameter(p)) } else { frame.self_name.clone() };
+        if let Some(p) = params {
+            self.parameters(n.id(), p);
+        }
+        let child_frame = Rc::new(Frame {
+            owner: n.id(),
+            class: if in_class { frame.class_body } else { frame.class },
+            self_name,
+            class_body: None,
+        });
+        match n.child_by_field_name("body") {
+            Some(b) => Next::Body(b, child_frame),
+            None => Next::Stop,
+        }
+    }
+
+    /// Name of the first parameter (`self`) of a parameter list.
+    fn first_parameter(&self, params: Node<'_>) -> Option<String> {
+        named_children(params).into_iter().next().map(|p| match p.kind() {
+            "identifier" => self.text(p),
+            _ => p.child_by_field_name("name").map(|x| self.text(x)).unwrap_or_default(),
+        })
+    }
+
+    fn walk_lambda(&mut self, n: Node<'_>, frame: &Frame) -> Rc<Frame> {
+        if let Some(p) = n.child_by_field_name("parameters") {
+            self.parameters(n.id(), p);
+        }
+        Rc::new(Frame { owner: n.id(), class: frame.class, self_name: frame.self_name.clone(), class_body: None })
+    }
+
+    fn walk_class<'t>(&mut self, n: Node<'t>, frame: &Frame) -> Next<'t> {
+        if let Some(name) = n.child_by_field_name("name") {
+            let t = self.text(name);
+            self.var(frame.owner, t, Fact::UntypedBinding);
+        }
+        match n.child_by_field_name("body") {
+            Some(b) => {
+                let f = Rc::new(Frame { owner: frame.owner, class: None, self_name: None, class_body: Some(n.id()) });
+                Next::Body(b, f)
+            }
+            None => Next::Stop,
+        }
+    }
+
+    /// Names bound by `import` / `from … import` / `global` / `nonlocal`.
+    fn name_bindings(&mut self, n: Node<'_>, owner: usize) {
+        for c in named_children(n) {
+            let name = match c.kind() {
+                "aliased_import" => c.child_by_field_name("alias"),
+                "dotted_name" => c.named_child(0),
+                "identifier" => Some(c),
+                _ => None,
+            };
+            if let Some(name) = name
+                && Some(c) != n.child_by_field_name("module_name")
+            {
+                let t = self.text(name);
+                self.var(owner, t, Fact::UntypedBinding);
             }
         }
     }
@@ -543,6 +558,28 @@ impl Builder<'_> {
             }
             _ => {}
         }
+    }
+}
+
+/// How [`Builder::walk`] continues after a node.
+enum Next<'t> {
+    /// All named children, in this frame.
+    Children(Rc<Frame>),
+    /// Only this node (a definition's body), in this frame.
+    Body(Node<'t>, Rc<Frame>),
+    /// Nothing below the node.
+    Stop,
+}
+
+/// The target bound without a type by `for x in …`, `(x := …)`,
+/// `case … as x` and `except E as x`.
+fn untyped_binding_target(n: Node<'_>) -> Option<Node<'_>> {
+    match n.kind() {
+        "for_statement" | "for_in_clause" => n.child_by_field_name("left"),
+        "named_expression" => n.child_by_field_name("name"),
+        "as_pattern_target" => Some(n),
+        "except_clause" => n.child_by_field_name("alias"),
+        _ => None,
     }
 }
 

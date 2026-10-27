@@ -1,6 +1,6 @@
 //! Text helpers: whitespace-collapsed node text, docstring cleaning.
 
-use rueca_extract::tree_sitter::Node;
+use rueca_extract::tree_sitter::{Node, TreeCursor};
 
 /// Maximum length (chars) of signatures and receivers.
 pub(crate) const MAX_ONE_LINE: usize = 200;
@@ -61,13 +61,21 @@ fn comment_ranges(node: Node<'_>, start: usize, end: usize) -> Vec<(usize, usize
         if overlaps && cursor.goto_first_child() {
             continue;
         }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() || cursor.node() == node {
-                return out;
-            }
+        if !skip_subtree(&mut cursor, node) {
+            return out;
+        }
+    }
+}
+
+/// Moves `cursor` past the current subtree to the next node of the walk;
+/// `false` once the walk is back at `root`.
+fn skip_subtree(cursor: &mut TreeCursor<'_>, root: Node<'_>) -> bool {
+    loop {
+        if cursor.goto_next_sibling() {
+            return true;
+        }
+        if !cursor.goto_parent() || cursor.node() == root {
+            return false;
         }
     }
 }
@@ -91,28 +99,38 @@ pub(crate) fn tidy(raw: &str) -> String {
             continue;
         }
         if pending_space && !collapsed.is_empty() {
-            let last = collapsed.chars().next_back();
-            // `a\n  .b` (attribute access split over lines) joins as `a.b`;
-            // `[int, ...]` keeps its space.
-            let attr_dot = ch == '.' && chars.get(i + 1).is_some_and(|c| c.is_alphabetic() || *c == '_');
-            let after_attr_dot = last == Some('.')
-                && collapsed.chars().rev().nth(1).is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | ')' | ']'));
-            let skip = matches!(last, Some('(' | '[' | '{'))
-                || matches!(ch, ')' | ']' | '}' | ',')
-                || attr_dot
-                || after_attr_dot;
-            // Multi-line trailing comma: `(\n a,\n)` → `(a)`; `(1,)` is kept.
-            if matches!(ch, ')' | ']') && collapsed.ends_with(',') {
-                collapsed.pop();
-            }
-            if !skip {
-                collapsed.push(' ');
-            }
+            flush_space(&mut collapsed, &chars, i);
         }
         pending_space = false;
         collapsed.push(ch);
     }
     collapsed
+}
+
+/// Emits the whitespace run before `chars[i]`: one space, or nothing where
+/// the tokens join; a multi-line trailing comma before `)` / `]` is dropped.
+fn flush_space(collapsed: &mut String, chars: &[char], i: usize) {
+    let skip = joins_without_space(collapsed, chars, i);
+    // Multi-line trailing comma: `(\n a,\n)` → `(a)`; `(1,)` is kept.
+    if matches!(chars[i], ')' | ']') && collapsed.ends_with(',') {
+        collapsed.pop();
+    }
+    if !skip {
+        collapsed.push(' ');
+    }
+}
+
+/// Whether the whitespace run before `chars[i]` is dropped rather than
+/// collapsed to one space after `collapsed`.
+fn joins_without_space(collapsed: &str, chars: &[char], i: usize) -> bool {
+    let ch = chars[i];
+    let last = collapsed.chars().next_back();
+    // `a\n  .b` (attribute access split over lines) joins as `a.b`;
+    // `[int, ...]` keeps its space.
+    let attr_dot = ch == '.' && chars.get(i + 1).is_some_and(|c| c.is_alphabetic() || *c == '_');
+    let after_attr_dot = last == Some('.')
+        && collapsed.chars().rev().nth(1).is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | ')' | ']'));
+    matches!(last, Some('(' | '[' | '{')) || matches!(ch, ')' | ']' | '}' | ',') || attr_dot || after_attr_dot
 }
 
 /// The value of a Python string literal node's text: prefix and quotes
