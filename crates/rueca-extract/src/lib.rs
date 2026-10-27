@@ -46,7 +46,7 @@ use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
 use rueca_model::{FileFacts, Import, Language, Span};
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::{Node, Parser, Tree, TreeCursor};
 
 pub use rueca_model;
 pub use tree_sitter;
@@ -490,13 +490,22 @@ pub fn count_errors(tree: &Tree) -> u32 {
         if node.has_error() && cursor.goto_first_child() {
             continue;
         }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return count;
-            }
+        if !skip_subtree(&mut cursor) {
+            return count;
+        }
+    }
+}
+
+/// Moves `cursor` to the next node in document order after its node's
+/// subtree (the next sibling of the node or of its nearest ancestor that
+/// has one); `false` past the last node.
+fn skip_subtree(cursor: &mut TreeCursor<'_>) -> bool {
+    loop {
+        if cursor.goto_next_sibling() {
+            return true;
+        }
+        if !cursor.goto_parent() {
+            return false;
         }
     }
 }
