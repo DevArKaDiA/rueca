@@ -65,10 +65,55 @@ Trunk-based development:
   relevant RFC or `docs/decisions.md` in the same PR. `CHANGELOG.md` is
   generated from PR titles at release time.
 - CI must pass: fmt, clippy (`-D warnings`), tests on Linux and macOS, MSRV,
-  rustdoc, `cargo deny`, DCO and the PR title check.
+  rustdoc, `cargo deny`, DCO, the PR title check and the SonarQube quality
+  gate (below).
 - If a change affects extraction or resolution quality, run the benchmark
   (`bench/README.md`) and include before/after numbers. Report regressions
   honestly; they are not automatically blockers.
+
+### Quality gate (SonarQube)
+
+Every PR, merge-queue entry and push to `main` runs the `SonarQube` check
+(`.github/workflows/sonarqube.yml`), and no release is published without it.
+It needs no account or secret: the job starts a throwaway SonarQube Community
+server as a service container (image pinned by digest) and
+`scripts/sonar-gate.sh` configures it through the Web API, runs
+`sonar-scanner` (pinned image) with `sonar-project.properties`, prints a
+summary (conditions, metrics, issues by rule and file) to the job summary and
+fails the job if the gate fails.
+
+- Profiles `rueca-strict`: Rust with **every** rule active, cognitive
+  complexity (`rust:S3776`) at 15 per function; Python with the built-in
+  default profile.
+- Gate `rueca-strict`, on the **overall** code (a fresh server sees every line
+  as new): 0 issues of any kind (bugs, vulnerabilities, code smells), every
+  security hotspot reviewed (i.e. none open), duplicated lines ≤ 3 %,
+  reliability / security / maintainability ratings A.
+- A finding that is wrong for a specific line is waived with `# NOSONAR` /
+  `// NOSONAR` on that line plus a comment saying why. Do not weaken the
+  profile or the gate to get a PR through.
+- Merge gate: `SonarQube` is a required status check of the `main` ruleset
+  (Settings → Rules → Rulesets → `main`, maintainers). The ruleset is not in
+  the repository; when the job name changes, update it there too.
+
+Run it locally (Docker, `curl`, `jq`) against a throwaway server; the script
+works against any URL (`SONAR_HOST_URL`, default `http://localhost:9000`):
+
+```sh
+docker run -d --name rueca-sonar-ci -p 9100:9000 \
+  --tmpfs /opt/sonarqube/data:rw,size=3g,mode=1777 \
+  sonarqube:community@sha256:aa0d41212704d1ed35f7ae3b49886b39f639590baf8020cdb191c2a2eb8f9eae
+SONAR_HOST_URL=http://localhost:9100 scripts/sonar-gate.sh            # whole repository
+SONAR_HOST_URL=http://localhost:9100 scripts/sonar-gate.sh -Dsonar.sources=bench   # one directory
+docker rm -f rueca-sonar-ci
+```
+
+Extra arguments go to `sonar-scanner`. The script waits for the server, so it
+can run right after `docker run` (about a minute end to end). The `--tmpfs`
+keeps Elasticsearch working when Docker's disk is nearly full (it refuses to
+create indices past 90 % use). The project is then browsable at
+`http://localhost:9100` (user `admin`, password `SONAR_ADMIN_PASSWORD`,
+default `Rueca-ephemeral-gate-1`).
 
 ### Developer Certificate of Origin
 
