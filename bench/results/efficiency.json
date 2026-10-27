@@ -523,23 +523,23 @@
   "c": {
    "trace": {
     "rueca": {
-     "n": 1206,
-     "true_edges": 6705,
-     "per_true_edge": 51.8496644295302,
-     "tokens_median": 220.5,
+     "n": 1204,
+     "true_edges": 6696,
+     "per_true_edge": 51.87589605734767,
+     "tokens_median": 221.0,
      "ci": [
-      50.383271276218146,
-      53.518580938873505
+      50.43814109848485,
+      53.5351903211097
      ]
     },
     "cbm": {
-     "n": 1206,
-     "true_edges": 5705,
-     "per_true_edge": 29.736021034180542,
+     "n": 1204,
+     "true_edges": 5696,
+     "per_true_edge": 29.740168539325843,
      "tokens_median": 130.0,
      "ci": [
-      28.7515639213728,
-      30.755174861797602
+      28.780923179985315,
+      30.7528287463731
      ]
     }
    },
@@ -591,35 +591,35 @@
    },
    "lookup": {
     "rueca": {
-     "n": 100,
-     "found": 99,
-     "per_found": 293.2020202020202
+     "n": 82,
+     "found": 81,
+     "per_found": 281.39506172839504
     },
     "cbm": {
-     "n": 100,
-     "found": 99,
-     "per_found": 107.29292929292929
+     "n": 82,
+     "found": 81,
+     "per_found": 105.79012345679013
     }
    },
    "raw": {
     "trace": {
-     "n": 1206,
+     "n": 1204,
      "rueca_median": 638.0,
      "cbm_median": 180.0,
-     "rueca_mean": 794.5174129353234,
-     "cbm_mean": 192.59618573797678,
-     "agent_n": 1206,
-     "agent_rueca_median": 220.5,
+     "rueca_mean": 795.0747508305648,
+     "cbm_mean": 192.6486710963455,
+     "agent_n": 1204,
+     "agent_rueca_median": 221.0,
      "agent_cbm_median": 130.0
     },
     "search": {
-     "n": 100,
-     "rueca_median": 855.0,
+     "n": 82,
+     "rueca_median": 841.0,
      "cbm_median": 82.0,
-     "rueca_mean": 788.64,
-     "cbm_mean": 123.47,
-     "agent_n": 100,
-     "agent_rueca_median": 308.0,
+     "rueca_mean": 764.5365853658536,
+     "cbm_mean": 121.29268292682927,
+     "agent_n": 82,
+     "agent_rueca_median": 291.5,
      "agent_cbm_median": 73.0
     }
    }
@@ -627,23 +627,23 @@
   "cpp": {
    "trace": {
     "rueca": {
-     "n": 891,
-     "true_edges": 3621,
-     "per_true_edge": 63.410383871858606,
-     "tokens_median": 184.0,
+     "n": 888,
+     "true_edges": 3630,
+     "per_true_edge": 63.32451790633609,
+     "tokens_median": 184.5,
      "ci": [
-      61.64187532022396,
-      65.3971697024882
+      61.54164857016055,
+      65.28369383333857
      ]
     },
     "cbm": {
-     "n": 891,
-     "true_edges": 2175,
-     "per_true_edge": 60.55954022988506,
+     "n": 888,
+     "true_edges": 2169,
+     "per_true_edge": 60.570769940064544,
      "tokens_median": 132.0,
      "ci": [
-      56.67082417629494,
-      64.93173671012092
+      56.59401235664045,
+      64.90971445394095
      ]
     }
    },
@@ -651,19 +651,19 @@
     "rueca": {
      "n": 38,
      "hit_rate": 0.6578947368421053,
-     "to_first_hit": 307.76,
+     "to_first_hit": 307.68,
      "to_first_hit_ci": [
-      194.12669930875575,
-      492.17249999999996
+      194.03562788018434,
+      492.1158333333332
      ],
-     "per_hit": 106.3006993006993,
+     "per_hit": 106.13286713286713,
      "per_hit_ci": [
-      82.79442149367833,
-      149.2174705822682
+      82.6089032558419,
+      149.13061597938142
      ],
      "func_hit_rate": 0.21052631578947367,
-     "func_to_first_hit": 1660.5,
-     "func_per_hit": 844.5,
+     "func_to_first_hit": 1657.5,
+     "func_per_hit": 843.1666666666666,
      "tokens_median": 395.0,
      "formats": [
       "text"
@@ -695,36 +695,36 @@
    },
    "lookup": {
     "rueca": {
-     "n": 100,
-     "found": 89,
-     "per_found": 409.02247191011236
+     "n": 52,
+     "found": 50,
+     "per_found": 356.88
     },
     "cbm": {
-     "n": 100,
-     "found": 62,
-     "per_found": 390.1774193548387
+     "n": 52,
+     "found": 40,
+     "per_found": 263.225
     }
    },
    "raw": {
     "trace": {
-     "n": 891,
-     "rueca_median": 531,
-     "cbm_median": 188,
-     "rueca_mean": 700.1997755331089,
-     "cbm_mean": 204.39281705948372,
-     "agent_n": 891,
-     "agent_rueca_median": 184,
-     "agent_cbm_median": 132
+     "n": 888,
+     "rueca_median": 533.5,
+     "cbm_median": 188.0,
+     "rueca_mean": 703.1666666666666,
+     "cbm_mean": 204.4966216216216,
+     "agent_n": 888,
+     "agent_rueca_median": 184.5,
+     "agent_cbm_median": 132.0
     },
     "search": {
-     "n": 100,
-     "rueca_median": 1004.5,
-     "cbm_median": 203.0,
-     "rueca_mean": 1022.04,
-     "cbm_mean": 276.85,
-     "agent_n": 100,
-     "agent_rueca_median": 351.0,
-     "agent_cbm_median": 176.0
+     "n": 52,
+     "rueca_median": 989.5,
+     "cbm_median": 126.5,
+     "rueca_mean": 998.2115384615385,
+     "cbm_mean": 231.55769230769232,
+     "agent_n": 52,
+     "agent_rueca_median": 340.0,
+     "agent_cbm_median": 111.0
     }
    }
   }
@@ -1082,7 +1082,7 @@
        "single_func_acc@10": 0.47619047619047616,
        "n_func": 21,
        "other_repo_top10": 0.9190476190476191,
-       "tokens_median": 7189,
+       "tokens_median": 7156,
        "single_tokens_median": 337,
        "file_acc@5_ratio": 0.3846153846153846,
        "tokens_per_correct": null,
@@ -1112,7 +1112,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 7203,
+         "tokens": 7156,
          "single_tokens": 478,
          "fh": null,
          "pf": null,
@@ -1140,7 +1140,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 1.0,
          "single_func_acc@10": 1.0,
-         "tokens": 7846,
+         "tokens": 7842,
          "single_tokens": 239,
          "fh": null,
          "pf": null,
@@ -1196,7 +1196,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 6734,
+         "tokens": 6737,
          "single_tokens": 467,
          "fh": null,
          "pf": null,
@@ -1210,7 +1210,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 6770,
+         "tokens": 6773,
          "single_tokens": 430,
          "fh": null,
          "pf": null,
@@ -1238,7 +1238,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 7024,
+         "tokens": 7034,
          "single_tokens": 284,
          "fh": null,
          "pf": null,
@@ -1280,7 +1280,7 @@
          "other_repo_top10": 0.9,
          "single_file_acc@5": 0.0,
          "single_func_acc@10": 0.0,
-         "tokens": 6839,
+         "tokens": 6828,
          "single_tokens": 377,
          "fh": null,
          "pf": null,
@@ -1388,28 +1388,28 @@
        ]
       }
      },
-     "index_seconds": 34.208977043104824,
-     "version": "rueca 0.1.0-alpha.1 (binary sha256 f4a33507702d, rfc0005 contract)",
+     "index_seconds": 29.660063835035544,
+     "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)",
      "org_layer": {
       "steps": 21,
-      "org_ms_median": 206.0,
-      "org_ms_max": 1413,
-      "repo_ms_median": 987.0,
-      "ratio_median": 0.25894736842105265,
-      "ratio_max": 0.47601476014760147,
+      "org_ms_median": 139.0,
+      "org_ms_max": 1310,
+      "repo_ms_median": 762.0,
+      "ratio_median": 0.2802197802197802,
+      "ratio_max": 0.4723618090452261,
       "replace": {
        "repo": "micropython/micropython",
-       "docs": 95353,
-       "repo_ms": 3616,
-       "first_repo_ms": 4663,
-       "org_ms": 499,
+       "docs": 95342,
+       "repo_ms": 2534,
+       "first_repo_ms": 4494,
+       "org_ms": 378,
        "org_repos": 21,
        "replaced": [
         "github.com/micropython/micropython"
        ],
-       "bytes_copied": 14715980,
-       "ratio": 0.13799778761061948,
-       "ratio_first": 0.1070126527986275
+       "bytes_copied": 14716983,
+       "ratio": 0.14917127071823205,
+       "ratio_first": 0.08411214953271028
       }
      }
     },
@@ -1664,7 +1664,7 @@
    },
    "queries": 21,
    "single_tokens_sum": 10660,
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 f4a33507702d, rfc0005 contract)",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)",
    "status": "pending",
    "reason": "local catalog holds one snapshot per root (RFC 0005 \u00a79)",
    "errors": [
@@ -1705,8 +1705,8 @@
      "commit": "22d924701a6ae2e4cd01e9a15bbaf3946094af65",
      "language": "python",
      "status": "ok",
-     "org_ms": 410,
-     "link_ms": 66,
+     "org_ms": 276,
+     "link_ms": 56,
      "edges": 182,
      "libraries": [
       {
@@ -1804,8 +1804,8 @@
      "commit": "b8ca298a5475497d01b194ed5688441454d8ee34",
      "language": "php",
      "status": "ok",
-     "org_ms": 1780,
-     "link_ms": 845,
+     "org_ms": 1392,
+     "link_ms": 661,
      "edges": 856,
      "libraries": [
       {
@@ -2060,8 +2060,8 @@
      "commit": "d8e6dfa42a22e9c21697ad37709abec7ae33895b",
      "language": "java",
      "status": "ok",
-     "org_ms": 1505,
-     "link_ms": 961,
+     "org_ms": 1368,
+     "link_ms": 907,
      "edges": 58,
      "libraries": [
       {
@@ -2107,8 +2107,8 @@
      "commit": "63c16c117a869426f2cbbfdaa099de449789fd18",
      "language": "java",
      "status": "ok",
-     "org_ms": 590,
-     "link_ms": 201,
+     "org_ms": 437,
+     "link_ms": 181,
      "edges": 820,
      "libraries": [
       {
@@ -2154,7 +2154,7 @@
      ]
     }
    ],
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 f4a33507702d, rfc0005 contract)"
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)"
   }
  }
 }
