@@ -246,30 +246,7 @@ fn build_index(
         let mut writer = index.writer_with_num_threads::<TantivyDocument>(1, 128 * 1024 * 1024).map_err(terr)?;
         writer.set_merge_policy(Box::new(NoMergePolicy));
         for (i, node) in nodes.iter().enumerate() {
-            let mut doc = TantivyDocument::default();
-            doc.add_text(f.text[0].0, &node.name);
-            doc.add_text(f.text[1].0, &node.qualified_name);
-            if let Some(s) = &node.signature {
-                doc.add_text(f.text[2].0, s);
-            }
-            doc.add_text(f.text[3].0, node_path(node, files));
-            if let Some(d) = &node.doc {
-                doc.add_text(f.text[4].0, d);
-            }
-            if let Some(Some(b)) = bodies.get(i) {
-                doc.add_text(f.text[5].0, b);
-            }
-            doc.add_text(f.name_exact, node.name.to_lowercase());
-            doc.add_text(f.qname_exact, node.qualified_name.to_lowercase());
-            if !matches!(node.label, Label::File | Label::Folder | Label::Repository) {
-                for suffix in qualified_suffixes(&node.qualified_name) {
-                    doc.add_text(f.qname_suffix, suffix);
-                }
-            }
-            doc.add_text(f.label, node.label.as_str());
-            if let Some(l) = node.language {
-                doc.add_text(f.language, l.as_str());
-            }
+            let mut doc = symbol_doc(&f, node, files, bodies.get(i).and_then(Option::as_deref));
             doc.add_u64(node_field, i as u64);
             writer.add_document(doc).map_err(terr)?;
             if commit_every.is_some_and(|k| (i + 1) % k == 0) {
@@ -287,6 +264,35 @@ fn build_index(
     check_doc_ids(&reader.searcher(), nodes.len())
         .map_err(|e| SegmentError::Other(format!("symbol index invariant violated at write: {e}")))?;
     Ok(())
+}
+
+/// The symbol index document of a node (without its `node` id).
+fn symbol_doc(f: &Fields, node: &Node, files: &[FileEntry], body: Option<&str>) -> TantivyDocument {
+    let mut doc = TantivyDocument::default();
+    doc.add_text(f.text[0].0, &node.name);
+    doc.add_text(f.text[1].0, &node.qualified_name);
+    if let Some(s) = &node.signature {
+        doc.add_text(f.text[2].0, s);
+    }
+    doc.add_text(f.text[3].0, node_path(node, files));
+    if let Some(d) = &node.doc {
+        doc.add_text(f.text[4].0, d);
+    }
+    if let Some(b) = body {
+        doc.add_text(f.text[5].0, b);
+    }
+    doc.add_text(f.name_exact, node.name.to_lowercase());
+    doc.add_text(f.qname_exact, node.qualified_name.to_lowercase());
+    if !matches!(node.label, Label::File | Label::Folder | Label::Repository) {
+        for suffix in qualified_suffixes(&node.qualified_name) {
+            doc.add_text(f.qname_suffix, suffix);
+        }
+    }
+    doc.add_text(f.label, node.label.as_str());
+    if let Some(l) = node.language {
+        doc.add_text(f.language, l.as_str());
+    }
+    doc
 }
 
 /// Embeds `meta.json` plus exactly the files of the segments it references
@@ -681,67 +687,75 @@ impl Bm25StatisticsProvider for SummedStats<'_> {
 /// The scoring query of `q` (see the crate docs, *Symbol index*) plus its
 /// label and language filters.
 pub(crate) fn build_query(f: &Fields, q: &SymbolQuery) -> Box<dyn Query> {
-    let mut counts: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
-    for t in tokens(&q.text) {
-        *counts.entry(t).or_default() += 1;
-    }
-    let scoring: Box<dyn Query> = if counts.is_empty() {
-        Box::new(ConstScoreQuery::new(Box::new(AllQuery), 1.0))
-    } else {
-        let mut should: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-        // One chunk (`getUserById`, `Session.request`) is a name lookup:
-        // the body only breaks ties. Several words describe behaviour.
-        let name_lookup = q.text.split_whitespace().count() <= 1;
-        for (t, &c) in &counts {
-            // Sublinear query term frequency: issue text that keeps
-            // naming a term is about it.
-            let qtf = 1.0 + (c as f32).ln();
-            for (i, &(field, boost)) in f.text.iter().enumerate() {
-                let boost = if i == BODY_FIELD && name_lookup { BODY_BOOST_NAME_LOOKUP } else { boost };
-                let tq = TermQuery::new(Term::from_field_text(field, t), IndexRecordOption::WithFreqs);
-                should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), boost * qtf))));
-            }
-        }
-        let whole = q.text.trim().to_lowercase();
-        for (field, boost) in [(f.name_exact, NAME_EXACT_BOOST), (f.qname_exact, QNAME_EXACT_BOOST)] {
-            let tq = TermQuery::new(Term::from_field_text(field, &whole), IndexRecordOption::Basic);
-            should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), boost))));
-        }
-        for part in dotted_parts(&q.text) {
-            let tq = TermQuery::new(Term::from_field_text(f.qname_suffix, &part), IndexRecordOption::Basic);
-            should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), QNAME_SUFFIX_BOOST))));
-        }
-        for part in adjacent_pairs(&q.text) {
-            let tq = TermQuery::new(Term::from_field_text(f.qname_suffix, &part), IndexRecordOption::Basic);
-            should.push((Occur::Should, Box::new(BoostQuery::new(Box::new(tq), QNAME_PAIR_BOOST))));
-        }
-        Box::new(BooleanQuery::new(should))
-    };
-    let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, scoring)];
-    let label_terms = |labels: &[Label]| -> Box<dyn Query> {
-        let should = labels
-            .iter()
-            .map(|l| {
-                let tq = TermQuery::new(Term::from_field_text(f.label, l.as_str()), IndexRecordOption::Basic);
-                (Occur::Should, Box::new(tq) as Box<dyn Query>)
-            })
-            .collect();
-        Box::new(BooleanQuery::new(should))
-    };
+    let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, scoring_query(f, q))];
     if q.labels.is_empty() {
         let mut excluded = DEFAULT_EXCLUDED.to_vec();
         if q.language.is_none_or(|l| l.family() != LanguageFamily::Data) {
             excluded.extend(DATA_DETAIL);
         }
-        clauses.push((Occur::MustNot, label_terms(&excluded)));
+        clauses.push((Occur::MustNot, label_terms(f, &excluded)));
     } else {
-        clauses.push((Occur::Must, Box::new(ConstScoreQuery::new(label_terms(&q.labels), 0.0))));
+        clauses.push((Occur::Must, Box::new(ConstScoreQuery::new(label_terms(f, &q.labels), 0.0))));
     }
     if let Some(lang) = q.language {
         let tq = TermQuery::new(Term::from_field_text(f.language, lang.as_str()), IndexRecordOption::Basic);
         clauses.push((Occur::Must, Box::new(ConstScoreQuery::new(Box::new(tq), 0.0))));
     }
     Box::new(BooleanQuery::new(clauses))
+}
+
+/// The scoring part of [`build_query`]: every document when the text has
+/// no token.
+fn scoring_query(f: &Fields, q: &SymbolQuery) -> Box<dyn Query> {
+    let mut counts: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    for t in tokens(&q.text) {
+        *counts.entry(t).or_default() += 1;
+    }
+    if counts.is_empty() {
+        return Box::new(ConstScoreQuery::new(Box::new(AllQuery), 1.0));
+    }
+    let mut should: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+    // One chunk (`getUserById`, `Session.request`) is a name lookup:
+    // the body only breaks ties. Several words describe behaviour.
+    let name_lookup = q.text.split_whitespace().count() <= 1;
+    for (t, &c) in &counts {
+        // Sublinear query term frequency: issue text that keeps
+        // naming a term is about it.
+        let qtf = 1.0 + (c as f32).ln();
+        for (i, &(field, boost)) in f.text.iter().enumerate() {
+            let boost = if i == BODY_FIELD && name_lookup { BODY_BOOST_NAME_LOOKUP } else { boost };
+            should.push(boosted_term(field, t, IndexRecordOption::WithFreqs, boost * qtf));
+        }
+    }
+    let whole = q.text.trim().to_lowercase();
+    for (field, boost) in [(f.name_exact, NAME_EXACT_BOOST), (f.qname_exact, QNAME_EXACT_BOOST)] {
+        should.push(boosted_term(field, &whole, IndexRecordOption::Basic, boost));
+    }
+    for part in dotted_parts(&q.text) {
+        should.push(boosted_term(f.qname_suffix, &part, IndexRecordOption::Basic, QNAME_SUFFIX_BOOST));
+    }
+    for part in adjacent_pairs(&q.text) {
+        should.push(boosted_term(f.qname_suffix, &part, IndexRecordOption::Basic, QNAME_PAIR_BOOST));
+    }
+    Box::new(BooleanQuery::new(should))
+}
+
+/// A `Should` clause: the term `text` of `field`, boosted.
+fn boosted_term(field: Field, text: &str, option: IndexRecordOption, boost: f32) -> (Occur, Box<dyn Query>) {
+    let tq = TermQuery::new(Term::from_field_text(field, text), option);
+    (Occur::Should, Box::new(BoostQuery::new(Box::new(tq), boost)))
+}
+
+/// Documents with any of `labels`.
+fn label_terms(f: &Fields, labels: &[Label]) -> Box<dyn Query> {
+    let should = labels
+        .iter()
+        .map(|l| {
+            let tq = TermQuery::new(Term::from_field_text(f.label, l.as_str()), IndexRecordOption::Basic);
+            (Occur::Should, Box::new(tq) as Box<dyn Query>)
+        })
+        .collect();
+    Box::new(BooleanQuery::new(should))
 }
 
 pub(crate) fn compile_glob(glob: &str) -> Result<GlobMatcher> {

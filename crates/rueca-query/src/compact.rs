@@ -311,8 +311,21 @@ struct TNode<'a> {
 /// (RFC 0006 §6) and the envelope lists the snapshots the answer touched.
 pub(crate) fn trace(snaps: &[&SnapshotDesc], r: &TraceResult, offset: usize, budget: usize) -> Response {
     let (listed, remap) = touched(snaps, std::iter::once(r.root_view).chain(r.nodes.iter().map(|n| n.view)));
-    let multi = listed.len() > 1;
-    // One entry per distinct node: `dir` is in / out / both, `d` the smallest depth.
+    let (uniq, pos) = merge_trace_nodes(r);
+    let page = TracePage { r, uniq: &uniq, pos: &pos, remap: &remap, multi: listed.len() > 1 };
+    let start = offset.min(uniq.len());
+    let n = uniq.len() - start;
+    fit(n.min(1), n, budget, |k| {
+        let (nodes, edges) = page.render(start..start + k);
+        let res = json!({"s": remap[&r.root_view], "nodes": nodes, "edges": edges, "tests_excluded": r.tests_excluded});
+        let (truncated, cursor) = next(start, k, n, r.truncated);
+        with_text("trace", envelope(&listed, res, truncated, cursor, vec![]))
+    })
+}
+
+/// One entry per distinct node of a trace — `dir` is in / out / both, `d`
+/// the smallest depth — and each node's index by id.
+fn merge_trace_nodes(r: &TraceResult) -> (Vec<TNode<'_>>, HashMap<&str, usize>) {
     let mut uniq: Vec<TNode<'_>> = Vec::new();
     let mut pos: HashMap<&str, usize> = HashMap::new();
     for n in &r.nodes {
@@ -331,70 +344,99 @@ pub(crate) fn trace(snaps: &[&SnapshotDesc], r: &TraceResult, offset: usize, bud
             }
         }
     }
-    // Global position: root 0, node i → i + 1.
-    let gpos = |id: &str| -> Option<usize> { if id == r.root.id { Some(0) } else { pos.get(id).map(|i| i + 1) } };
-    let start = offset.min(uniq.len());
-    let n = uniq.len() - start;
-    fit(n.min(1), n, budget, |k| {
-        let page = start..start + k;
-        let node_json = |t: &TNode<'_>| {
-            let mut m = Map::new();
-            if multi {
-                put(&mut m, "s", remap[&t.view]);
-            }
-            m.extend(brief(t.brief, true));
-            put(&mut m, "d", t.depth);
-            put(&mut m, "dir", t.dir);
-            Value::Object(m)
-        };
-        let mut root = Map::new();
-        if multi {
-            put(&mut root, "s", remap[&r.root_view]);
+    (uniq, pos)
+}
+
+/// The pages of a `trace` result. Global positions: root 0, node `i` →
+/// `i + 1`.
+struct TracePage<'a> {
+    r: &'a TraceResult,
+    uniq: &'a [TNode<'a>],
+    pos: &'a HashMap<&'a str, usize>,
+    remap: &'a HashMap<usize, usize>,
+    multi: bool,
+}
+
+impl TracePage<'_> {
+    fn gpos(&self, id: &str) -> Option<usize> {
+        if id == self.r.root.id { Some(0) } else { self.pos.get(id).map(|i| i + 1) }
+    }
+
+    fn path_of(&self, g: usize) -> Option<&str> {
+        if g == 0 { self.r.root.path.as_deref() } else { self.uniq[g - 1].brief.path.as_deref() }
+    }
+
+    fn node_json(&self, t: &TNode<'_>) -> Value {
+        let mut m = Map::new();
+        if self.multi {
+            put(&mut m, "s", self.remap[&t.view]);
         }
-        root.extend(brief(&r.root, true));
+        m.extend(brief(t.brief, true));
+        put(&mut m, "d", t.depth);
+        put(&mut m, "dir", t.dir);
+        Value::Object(m)
+    }
+
+    fn root_json(&self) -> Value {
+        let mut root = Map::new();
+        if self.multi {
+            put(&mut root, "s", self.remap[&self.r.root_view]);
+        }
+        root.extend(brief(&self.r.root, true));
         put(&mut root, "d", 0);
-        let mut nodes: Vec<Value> = vec![Value::Object(root)];
+        Value::Object(root)
+    }
+
+    /// The nodes (root first, then the page) and the edges of a page. An
+    /// edge belongs to the page of its later endpoint; an endpoint listed
+    /// on an earlier page is repeated.
+    fn render(&self, page: std::ops::Range<usize>) -> (Vec<Value>, Vec<Value>) {
+        let mut nodes: Vec<Value> = vec![self.root_json()];
         let mut local: HashMap<usize, usize> = HashMap::from([(0, 0)]);
         for i in page.clone() {
             local.insert(i + 1, nodes.len());
-            nodes.push(node_json(&uniq[i]));
+            nodes.push(self.node_json(&self.uniq[i]));
         }
-        let path_of = |g: usize| if g == 0 { r.root.path.as_deref() } else { uniq[g - 1].brief.path.as_deref() };
         let mut edges = Vec::new();
-        for e in &r.edges {
-            let (Some(gs), Some(gd)) = (gpos(&e.src), gpos(&e.dst)) else { continue };
-            // An edge belongs to the page of its later endpoint.
+        for e in &self.r.edges {
+            let (Some(gs), Some(gd)) = (self.gpos(&e.src), self.gpos(&e.dst)) else { continue };
             let later = gs.max(gd);
-            let on_page = if later == 0 { start == 0 } else { page.contains(&(later - 1)) };
-            if !on_page {
-                continue;
+            let on_page = if later == 0 { page.start == 0 } else { page.contains(&(later - 1)) };
+            if on_page {
+                let si = self.local_index(gs, &mut local, &mut nodes);
+                let di = self.local_index(gd, &mut local, &mut nodes);
+                edges.push(self.edge_json(e, si, di, gs));
             }
-            let mut index_of = |g: usize| -> usize {
-                if let Some(&l) = local.get(&g) {
-                    return l;
-                }
-                // An endpoint listed on an earlier page is repeated here.
-                local.insert(g, nodes.len());
-                nodes.push(node_json(&uniq[g - 1]));
-                nodes.len() - 1
-            };
-            let (si, di) = (index_of(gs), index_of(gd));
-            let mut edge = vec![json!(si), json!(di), json!(e.kind), json!(e.confidence), json!(e.strategy)];
-            match &e.call_site {
-                Some(cs) => {
-                    edge.push(json!(cs.line));
-                    if Some(cs.path.as_str()) != path_of(gs) {
-                        edge.push(json!(cs.path));
-                    }
-                }
-                None => edge.push(Value::Null),
-            }
-            edges.push(Value::Array(edge));
         }
-        let res = json!({"s": remap[&r.root_view], "nodes": nodes, "edges": edges, "tests_excluded": r.tests_excluded});
-        let (truncated, cursor) = next(start, k, n, r.truncated);
-        with_text("trace", envelope(&listed, res, truncated, cursor, vec![]))
-    })
+        (nodes, edges)
+    }
+
+    /// The index in `nodes` of global position `g`, appending the node
+    /// when it is not listed yet.
+    fn local_index(&self, g: usize, local: &mut HashMap<usize, usize>, nodes: &mut Vec<Value>) -> usize {
+        if let Some(&l) = local.get(&g) {
+            return l;
+        }
+        local.insert(g, nodes.len());
+        nodes.push(self.node_json(&self.uniq[g - 1]));
+        nodes.len() - 1
+    }
+
+    /// `[src, dst, kind, confidence, strategy, line, path?]`; the path only
+    /// when the call site is not in the source's file.
+    fn edge_json(&self, e: &TraceEdge, si: usize, di: usize, gs: usize) -> Value {
+        let mut edge = vec![json!(si), json!(di), json!(e.kind), json!(e.confidence), json!(e.strategy)];
+        match &e.call_site {
+            Some(cs) => {
+                edge.push(json!(cs.line));
+                if Some(cs.path.as_str()) != self.path_of(gs) {
+                    edge.push(json!(cs.path));
+                }
+            }
+            None => edge.push(Value::Null),
+        }
+        Value::Array(edge)
+    }
 }
 
 pub(crate) fn outline(snap: &SnapshotDesc, r: &FileOutlineResult, offset: usize, budget: usize) -> Response {
@@ -648,17 +690,23 @@ fn text_search_code(out: &mut String, r: &Value, multi: bool) {
                 }
                 current = sid;
             }
-            let line = m["line"].as_u64().unwrap_or(0);
-            let before = m.get("before").and_then(Value::as_array).cloned().unwrap_or_default();
-            for (i, b) in before.iter().enumerate() {
-                let n = line.saturating_sub((before.len() - i) as u64);
-                let _ = writeln!(out, "  {n}- {}", b.as_str().unwrap_or_default());
-            }
-            let _ = writeln!(out, "  {line}: {}", str_of(m, "text"));
-            for (i, a) in m.get("after").and_then(Value::as_array).into_iter().flatten().enumerate() {
-                let _ = writeln!(out, "  {}- {}", line + 1 + i as u64, a.as_str().unwrap_or_default());
-            }
+            text_code_match(out, m);
         }
+    }
+}
+
+/// A matched line with its context lines (`n-` before and after, `n:` the
+/// match).
+fn text_code_match(out: &mut String, m: &Value) {
+    let line = m["line"].as_u64().unwrap_or(0);
+    let before = m.get("before").and_then(Value::as_array).cloned().unwrap_or_default();
+    for (i, b) in before.iter().enumerate() {
+        let n = line.saturating_sub((before.len() - i) as u64);
+        let _ = writeln!(out, "  {n}- {}", b.as_str().unwrap_or_default());
+    }
+    let _ = writeln!(out, "  {line}: {}", str_of(m, "text"));
+    for (i, a) in m.get("after").and_then(Value::as_array).into_iter().flatten().enumerate() {
+        let _ = writeln!(out, "  {}- {}", line + 1 + i as u64, a.as_str().unwrap_or_default());
     }
 }
 
@@ -731,50 +779,59 @@ fn text_trace(out: &mut String, r: &Value) {
     let nodes = r["nodes"].as_array().cloned().unwrap_or_default();
     let edges = r["edges"].as_array().cloned().unwrap_or_default();
     for (i, n) in nodes.iter().enumerate() {
-        let _ = write!(out, "{i}");
-        if let Some(s) = n.get("s") {
-            let _ = write!(out, " [{s}]");
-        }
-        if let Some(dir) = n.get("dir").and_then(Value::as_str) {
-            let _ = write!(out, " {dir} d{}", n["d"]);
-        }
-        let _ = write!(out, " {} {}", str_of(n, "label"), local_name(n));
-        if let Some(p) = n.get("path").and_then(Value::as_str)
-            && p != local_name(n)
-        {
-            let _ = write!(out, "  {p}");
-        }
-        let sp = span(n);
-        if !sp.is_empty() {
-            let _ = write!(out, " {sp}");
-        }
+        text_trace_node(out, i, n);
         // Each edge is printed on its later endpoint: `→j` (this node calls
         // j) or `←j` (j calls this node).
         for e in &edges {
             let (Some(src), Some(dst)) = (e[0].as_u64(), e[1].as_u64()) else { continue };
             let (src, dst) = (src as usize, dst as usize);
-            if src.max(dst) != i {
-                continue;
-            }
-            let (arrow, other) = if src == i { ("→", dst) } else { ("←", src) };
-            let _ = write!(
-                out,
-                "  {arrow}{other} {} {} {}",
-                e[2].as_str().unwrap_or_default(),
-                e[3],
-                e[4].as_str().unwrap_or_default()
-            );
-            if let Some(line) = e.get(5).and_then(Value::as_u64) {
-                let _ = write!(out, " @{line}");
-            }
-            if let Some(p) = e.get(6).and_then(Value::as_str) {
-                let _ = write!(out, " {p}");
+            if src.max(dst) == i {
+                text_trace_edge(out, e, if src == i { ("→", dst) } else { ("←", src) });
             }
         }
         out.push('\n');
     }
     if let Some(t) = r["tests_excluded"].as_u64().filter(|&t| t > 0) {
         let _ = writeln!(out, "({t} tests excluded; `include_tests: true` lists them)");
+    }
+}
+
+/// `i [s] dir dD Label name  path Lx-y` of a trace node.
+fn text_trace_node(out: &mut String, i: usize, n: &Value) {
+    let _ = write!(out, "{i}");
+    if let Some(s) = n.get("s") {
+        let _ = write!(out, " [{s}]");
+    }
+    if let Some(dir) = n.get("dir").and_then(Value::as_str) {
+        let _ = write!(out, " {dir} d{}", n["d"]);
+    }
+    let _ = write!(out, " {} {}", str_of(n, "label"), local_name(n));
+    if let Some(p) = n.get("path").and_then(Value::as_str)
+        && p != local_name(n)
+    {
+        let _ = write!(out, "  {p}");
+    }
+    let sp = span(n);
+    if !sp.is_empty() {
+        let _ = write!(out, " {sp}");
+    }
+}
+
+/// `  →j kind confidence strategy @line path` of a trace edge, seen from
+/// one endpoint (`arrow`, the other endpoint).
+fn text_trace_edge(out: &mut String, e: &Value, (arrow, other): (&str, usize)) {
+    let _ = write!(
+        out,
+        "  {arrow}{other} {} {} {}",
+        e[2].as_str().unwrap_or_default(),
+        e[3],
+        e[4].as_str().unwrap_or_default()
+    );
+    if let Some(line) = e.get(5).and_then(Value::as_u64) {
+        let _ = write!(out, " @{line}");
+    }
+    if let Some(p) = e.get(6).and_then(Value::as_str) {
+        let _ = write!(out, " {p}");
     }
 }
 

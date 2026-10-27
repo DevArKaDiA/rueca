@@ -58,21 +58,7 @@ impl Resolver<'_> {
 
     /// Adds the implicit `IMPLEMENTS` / `OVERRIDES` edges of Go types.
     pub(crate) fn go_implicit_interfaces(&mut self) {
-        let mut interfaces = Vec::new();
-        let mut types = Vec::new();
-        for i in 0..self.files.len() {
-            if self.families[i] != Some(LanguageFamily::Go) {
-                continue;
-            }
-            for (j, d) in self.defs(i as FileId).iter().enumerate() {
-                let node = self.def_node[i][j];
-                match d.label {
-                    Label::Interface => interfaces.push((node, i as FileId)),
-                    Label::Struct | Label::TypeAlias => types.push(node),
-                    _ => {}
-                }
-            }
-        }
+        let (mut interfaces, mut types) = self.go_interfaces_and_types();
         if interfaces.is_empty() || types.is_empty() {
             return;
         }
@@ -92,42 +78,86 @@ impl Resolver<'_> {
         interfaces.dedup();
         let mut out: Vec<(NodeId, NodeId, EdgeKind, FileId, Span)> = Vec::new();
         for (iface, _) in interfaces {
-            // An interface embedding one outside the project (`fmt.Stringer`)
-            // is matched on its known methods, of which it needs two.
-            let wanted = self.go_method_set(iface);
-            let needed = if self.type_is_open(iface) { 2 } else { 1 };
-            if wanted.len() < needed {
-                continue;
-            }
-            // Types having every method name, starting from the rarest name.
-            let mut names: Vec<&String> = wanted.keys().collect();
-            names.sort_by_key(|n| by_method.get(*n).map_or(0, Vec::len));
-            let Some(first) = by_method.get(names[0]) else { continue };
-            let mut cands: Vec<NodeId> =
-                first.iter().copied().filter(|t| names.iter().all(|n| sets[t].contains_key(*n))).collect();
-            cands.sort_by(|a, b| {
-                self.nodes[*a as usize].qualified_name.cmp(&self.nodes[*b as usize].qualified_name).then(a.cmp(b))
-            });
-            cands.truncate(MAX_IMPLEMENTERS);
-            for t in cands {
-                let node = &self.nodes[t as usize];
-                let (Some(f), Some(span)) = (node.file, node.span) else { continue };
-                out.push((t, iface, EdgeKind::Implements, f, span));
-                for (name, &im) in &wanted {
-                    let m = sets[&t][name];
-                    let mn = &self.nodes[m as usize];
-                    if m != im
-                        && let (Some(mf), Some(ms)) = (mn.file, mn.span)
-                    {
-                        out.push((m, im, EdgeKind::Overrides, mf, ms));
-                    }
-                }
-            }
+            self.go_implementers(iface, &by_method, &sets, &mut out);
         }
         for (src, dst, kind, f, span) in out {
             let meta =
                 EdgeMeta { confidence: IMPLICIT_CONFIDENCE, strategy: Strategy::Heuristic, evidence: Some((f, span)) };
             self.add_edge(src, dst, kind, meta);
+        }
+    }
+
+    /// The Go interfaces (with their file) and the struct and alias types.
+    fn go_interfaces_and_types(&self) -> (Vec<(NodeId, FileId)>, Vec<NodeId>) {
+        let mut interfaces = Vec::new();
+        let mut types = Vec::new();
+        for i in 0..self.files.len() {
+            if self.families[i] != Some(LanguageFamily::Go) {
+                continue;
+            }
+            for (j, d) in self.defs(i as FileId).iter().enumerate() {
+                let node = self.def_node[i][j];
+                match d.label {
+                    Label::Interface => interfaces.push((node, i as FileId)),
+                    Label::Struct | Label::TypeAlias => types.push(node),
+                    _ => {}
+                }
+            }
+        }
+        (interfaces, types)
+    }
+
+    /// The `IMPLEMENTS` and `OVERRIDES` edges of interface `iface`: the
+    /// types having every method name of it (at most
+    /// [`MAX_IMPLEMENTERS`], by qualified name).
+    fn go_implementers(
+        &self,
+        iface: NodeId,
+        by_method: &BTreeMap<String, Vec<NodeId>>,
+        sets: &HashMap<NodeId, BTreeMap<String, NodeId>>,
+        out: &mut Vec<(NodeId, NodeId, EdgeKind, FileId, Span)>,
+    ) {
+        // An interface embedding one outside the project (`fmt.Stringer`)
+        // is matched on its known methods, of which it needs two.
+        let wanted = self.go_method_set(iface);
+        let needed = if self.type_is_open(iface) { 2 } else { 1 };
+        if wanted.len() < needed {
+            return;
+        }
+        // Types having every method name, starting from the rarest name.
+        let mut names: Vec<&String> = wanted.keys().collect();
+        names.sort_by_key(|n| by_method.get(*n).map_or(0, Vec::len));
+        let Some(first) = by_method.get(names[0]) else { return };
+        let mut cands: Vec<NodeId> =
+            first.iter().copied().filter(|t| names.iter().all(|n| sets[t].contains_key(*n))).collect();
+        cands.sort_by(|a, b| {
+            self.nodes[*a as usize].qualified_name.cmp(&self.nodes[*b as usize].qualified_name).then(a.cmp(b))
+        });
+        cands.truncate(MAX_IMPLEMENTERS);
+        for t in cands {
+            let node = &self.nodes[t as usize];
+            let (Some(f), Some(span)) = (node.file, node.span) else { continue };
+            out.push((t, iface, EdgeKind::Implements, f, span));
+            self.go_method_overrides(&wanted, &sets[&t], out);
+        }
+    }
+
+    /// `OVERRIDES` from each method of an implementing type (`have`) to the
+    /// interface method of the same name (`wanted`).
+    fn go_method_overrides(
+        &self,
+        wanted: &BTreeMap<String, NodeId>,
+        have: &BTreeMap<String, NodeId>,
+        out: &mut Vec<(NodeId, NodeId, EdgeKind, FileId, Span)>,
+    ) {
+        for (name, &im) in wanted {
+            let m = have[name];
+            let mn = &self.nodes[m as usize];
+            if m != im
+                && let (Some(mf), Some(ms)) = (mn.file, mn.span)
+            {
+                out.push((m, im, EdgeKind::Overrides, mf, ms));
+            }
         }
     }
 }

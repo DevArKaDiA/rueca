@@ -45,7 +45,6 @@ fn is_ident(c: char) -> bool {
 /// Calls `emit(text, start, end)` for every token of `text`, in order.
 pub fn for_each_token(text: &str, mut emit: impl FnMut(String, usize, usize)) {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
-    let end_of = |i: usize| chars.get(i).map(|(b, _)| *b).unwrap_or(text.len());
     let mut i = 0;
     while i < chars.len() {
         if !is_ident(chars[i].1) {
@@ -56,61 +55,80 @@ pub fn for_each_token(text: &str, mut emit: impl FnMut(String, usize, usize)) {
         while i < chars.len() && is_ident(chars[i].1) {
             i += 1;
         }
-        let run_end = i;
-        // Split the run into parts.
-        let mut parts: Vec<(usize, usize)> = Vec::new(); // char index ranges
-        let mut p = run_start;
-        let mut cur: Option<usize> = None;
-        while p < run_end {
-            let c = chars[p].1;
-            if c == '_' || c == '$' {
-                if let Some(s) = cur.take() {
-                    parts.push((s, p));
-                }
-                p += 1;
-                continue;
-            }
-            match cur {
-                None => cur = Some(p),
-                Some(s) => {
-                    let prev = class(chars[p - 1].1);
-                    let this = class(c);
-                    let next = chars.get(p + 1).filter(|_| p + 1 < run_end).map(|(_, n)| class(*n));
-                    let boundary = match (prev, this) {
-                        (Class::Lower, Class::Upper) => true,
-                        (Class::Upper, Class::Upper) => next == Some(Class::Lower),
-                        (Class::Digit, Class::Digit) => false,
-                        (Class::Digit, _) | (_, Class::Digit) => true,
-                        (Class::Other, Class::Other) => false,
-                        (Class::Other, _) | (_, Class::Other) => true,
-                        _ => false,
-                    };
-                    if boundary {
-                        parts.push((s, p));
-                        cur = Some(p);
-                    }
-                }
-            }
-            p += 1;
+        emit_run(text, &chars, (run_start, i), &mut emit);
+    }
+}
+
+/// Emits the tokens of the identifier run `chars[start..end]`: its parts,
+/// then the whole run when it differs from its only part.
+fn emit_run(
+    text: &str,
+    chars: &[(usize, char)],
+    (start, end): (usize, usize),
+    emit: &mut impl FnMut(String, usize, usize),
+) {
+    let end_of = |i: usize| chars.get(i).map(|(b, _)| *b).unwrap_or(text.len());
+    let parts = split_run(chars, start, end);
+    for &(s, e) in &parts {
+        let (bs, be) = (chars[s].0, end_of(e));
+        let tok = text[bs..be].to_lowercase();
+        if !tok.is_empty() && tok.len() <= MAX_TOKEN_BYTES {
+            emit(tok, bs, be);
         }
-        if let Some(s) = cur {
-            parts.push((s, run_end));
+    }
+    let whole_differs = parts.len() > 1 || parts.first().is_some_and(|&(s, e)| s != start || e != end);
+    if whole_differs {
+        let (bs, be) = (chars[start].0, end_of(end));
+        let tok = text[bs..be].to_lowercase();
+        if tok.len() <= MAX_TOKEN_BYTES && tok.chars().any(|c| c.is_alphanumeric()) {
+            emit(tok, bs, be);
         }
-        for &(s, e) in &parts {
-            let (bs, be) = (chars[s].0, end_of(e));
-            let tok = text[bs..be].to_lowercase();
-            if !tok.is_empty() && tok.len() <= MAX_TOKEN_BYTES {
-                emit(tok, bs, be);
+    }
+}
+
+/// The parts (char index ranges) of the identifier run `chars[start..end]`:
+/// split at `_` / `$` and at case and digit boundaries.
+fn split_run(chars: &[(usize, char)], start: usize, end: usize) -> Vec<(usize, usize)> {
+    let mut parts: Vec<(usize, usize)> = Vec::new();
+    let mut cur: Option<usize> = None;
+    for p in start..end {
+        let c = chars[p].1;
+        if c == '_' || c == '$' {
+            if let Some(s) = cur.take() {
+                parts.push((s, p));
             }
+            continue;
         }
-        let whole_differs = parts.len() > 1 || parts.first().is_some_and(|&(s, e)| s != run_start || e != run_end);
-        if whole_differs {
-            let (bs, be) = (chars[run_start].0, end_of(run_end));
-            let tok = text[bs..be].to_lowercase();
-            if tok.len() <= MAX_TOKEN_BYTES && tok.chars().any(|c| c.is_alphanumeric()) {
-                emit(tok, bs, be);
+        match cur {
+            None => cur = Some(p),
+            Some(s) if part_boundary(chars, p, end) => {
+                parts.push((s, p));
+                cur = Some(p);
             }
+            Some(_) => {}
         }
+    }
+    if let Some(s) = cur {
+        parts.push((s, end));
+    }
+    parts
+}
+
+/// Whether a new part starts at `chars[p]` (inside a part, before `end`):
+/// lower→upper, the last upper of an acronym before a lower, letter↔digit
+/// and cased↔uncased.
+fn part_boundary(chars: &[(usize, char)], p: usize, end: usize) -> bool {
+    let prev = class(chars[p - 1].1);
+    let this = class(chars[p].1);
+    let next = chars.get(p + 1).filter(|_| p + 1 < end).map(|(_, n)| class(*n));
+    match (prev, this) {
+        (Class::Lower, Class::Upper) => true,
+        (Class::Upper, Class::Upper) => next == Some(Class::Lower),
+        (Class::Digit, Class::Digit) => false,
+        (Class::Digit, _) | (_, Class::Digit) => true,
+        (Class::Other, Class::Other) => false,
+        (Class::Other, _) | (_, Class::Other) => true,
+        _ => false,
     }
 }
 
