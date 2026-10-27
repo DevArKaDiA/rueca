@@ -83,6 +83,12 @@ fn clean(written: &str) -> String {
     written.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
+/// The rest of a `namespace\Foo` name (relative to the current namespace),
+/// if non-empty.
+fn namespace_relative(w: &str) -> Option<&str> {
+    w.get(..10).filter(|p| p.eq_ignore_ascii_case("namespace\\")).map(|_| &w[10..]).filter(|rest| !rest.is_empty())
+}
+
 /// Namespace and imports in effect at a point of a file.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NameCtx {
@@ -131,9 +137,7 @@ impl NameCtx {
             return Some(Resolved::Exact(rest.to_string()));
         }
         // Relative to the current namespace: `namespace\Foo`.
-        if let Some(rest) = w.get(..10).filter(|p| p.eq_ignore_ascii_case("namespace\\")).map(|_| &w[10..])
-            && !rest.is_empty()
-        {
+        if let Some(rest) = namespace_relative(&w) {
             return Some(Resolved::Exact(self.prefixed(rest)));
         }
         match w.split_once('\\') {
@@ -142,21 +146,25 @@ impl NameCtx {
                 Some(target) => Some(Resolved::Exact(format!("{target}\\{rest}"))),
                 None => Some(Resolved::Exact(self.prefixed(&w))),
             },
-            None => {
-                let imported = match kind {
-                    NameKind::Class => self.classes.get(&w.to_ascii_lowercase()),
-                    NameKind::Function => self.functions.get(&w.to_ascii_lowercase()),
-                    NameKind::Constant => self.constants.get(&w),
-                };
-                if let Some(target) = imported {
-                    return Some(Resolved::Exact(target.clone()));
-                }
-                if kind == NameKind::Class || self.namespace.is_empty() {
-                    Some(Resolved::Exact(self.prefixed(&w)))
-                } else {
-                    Some(Resolved::Fallback { namespace: self.namespace.clone(), name: w })
-                }
-            }
+            None => Some(self.resolve_unqualified(w, kind)),
+        }
+    }
+
+    /// An unqualified name: an import of its kind, else the current
+    /// namespace (functions and constants fall back to the global one).
+    fn resolve_unqualified(&self, w: String, kind: NameKind) -> Resolved {
+        let imported = match kind {
+            NameKind::Class => self.classes.get(&w.to_ascii_lowercase()),
+            NameKind::Function => self.functions.get(&w.to_ascii_lowercase()),
+            NameKind::Constant => self.constants.get(&w),
+        };
+        if let Some(target) = imported {
+            return Resolved::Exact(target.clone());
+        }
+        if kind == NameKind::Class || self.namespace.is_empty() {
+            Resolved::Exact(self.prefixed(&w))
+        } else {
+            Resolved::Fallback { namespace: self.namespace.clone(), name: w }
         }
     }
 

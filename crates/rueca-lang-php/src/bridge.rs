@@ -151,6 +151,24 @@ fn comment_doc(element: Node<'_>, src: &[u8]) -> Option<String> {
     (!t.is_empty()).then(|| t.chars().take(500).collect())
 }
 
+/// The value shown in a key's signature: `[…]` for nested arrays, `•••` for
+/// secrets, else the first line (cut at 80 characters).
+fn value_preview(value: Node<'_>, key: &str, src: &[u8]) -> String {
+    if value.kind() == "array_creation_expression" {
+        return "[…]".to_string();
+    }
+    if is_secret(key) {
+        return "•••".to_string();
+    }
+    let value_text = text_of(value, src);
+    let line = value_text.lines().next().unwrap_or("").trim();
+    if line.chars().count() > 80 {
+        format!("{}…", line.chars().take(80).collect::<String>())
+    } else {
+        line.to_string()
+    }
+}
+
 fn entries(array: Node<'_>, parent: Option<LocalDefId>, prefix: &str, depth: usize, src: &[u8], facts: &mut FileFacts) {
     if depth >= MAX_DEPTH {
         return;
@@ -163,19 +181,7 @@ fn entries(array: Node<'_>, parent: Option<LocalDefId>, prefix: &str, depth: usi
         let [key, value] = parts.as_slice() else { continue };
         let Some(k) = string_literal(*key, src) else { continue };
         let qn = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
-        let value_text = text_of(*value, src);
-        let preview = if value.kind() == "array_creation_expression" {
-            "[…]".to_string()
-        } else if is_secret(&k) {
-            "•••".to_string()
-        } else {
-            let line = value_text.lines().next().unwrap_or("").trim();
-            if line.chars().count() > 80 {
-                format!("{}…", line.chars().take(80).collect::<String>())
-            } else {
-                line.to_string()
-            }
-        };
+        let preview = value_preview(*value, &k, src);
         let id = facts.definitions.len() as LocalDefId;
         facts.definitions.push(Definition {
             label: Label::Key,

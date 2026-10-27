@@ -1,7 +1,7 @@
 //! Text helpers: one-line headers without comments, docblock cleaning,
 //! truncation.
 
-use rueca_extract::tree_sitter::Node;
+use rueca_extract::tree_sitter::{Node, TreeCursor};
 
 /// Maximum length (chars) of signatures, decorators and receivers.
 pub(crate) const MAX_ONE_LINE: usize = 200;
@@ -66,13 +66,22 @@ fn comment_ranges(node: Node<'_>, start: usize, end: usize) -> Vec<(usize, usize
         if overlaps && n.kind() != "comment" && cursor.goto_first_child() {
             continue;
         }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() || cursor.node() == node {
-                return out;
-            }
+        if !goto_next_outside(&mut cursor, node) {
+            return out;
+        }
+    }
+}
+
+/// Moves `cursor` past the current subtree: to the next sibling of the
+/// current node or of its nearest ancestor below `root`. `false` once the
+/// walk of `root` is over.
+fn goto_next_outside(cursor: &mut TreeCursor<'_>, root: Node<'_>) -> bool {
+    loop {
+        if cursor.goto_next_sibling() {
+            return true;
+        }
+        if !cursor.goto_parent() || cursor.node() == root {
+            return false;
         }
     }
 }
