@@ -30,6 +30,7 @@ use rueca_extract::{Budget, ExtractError, count_errors};
 use rueca_model::Language;
 
 use crate::repair::{Edit, Site};
+use crate::text::next_in_preorder;
 use crate::{cond, mask, repair};
 
 /// Repair rounds per file at most.
@@ -81,26 +82,22 @@ fn error_sites(tree: &Tree) -> Vec<Site> {
     let mut cursor = tree.walk();
     loop {
         let node = cursor.node();
-        // An ERROR over several lines (the grammar gave up on a whole
-        // region, up to the file) is no place for a targeted repair: the
-        // errors inside it are.
-        let wide = node.is_error() && node.end_position().row > node.start_position().row + 2;
-        if node.is_error() || node.is_missing() {
+        let error = node.is_error() || node.is_missing();
+        if error {
             out.push(Site { start: node.start_byte(), end: node.end_byte(), in_body: in_body(node) });
             if out.len() >= MAX_SITES {
                 return out;
             }
         }
-        if (wide || !(node.is_error() || node.is_missing())) && node.has_error() && cursor.goto_first_child() {
+        // An ERROR over several lines (the grammar gave up on a whole
+        // region, up to the file) is no place for a targeted repair: the
+        // errors inside it are.
+        let wide = node.is_error() && node.end_position().row > node.start_position().row + 2;
+        if (wide || !error) && node.has_error() && cursor.goto_first_child() {
             continue;
         }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return out;
-            }
+        if !next_in_preorder(&mut cursor) {
+            return out;
         }
     }
 }
@@ -128,53 +125,16 @@ fn in_body(node: Node<'_>) -> bool {
 fn operator_calls(text: &[u8]) -> Vec<Edit> {
     const UNDERSCORES: &[u8] = b"________________";
     let toks = mask::lex(text);
-    let word = |t: &mask::Tok| &text[t.start..t.end];
-    let punct = |i: usize, c: u8| toks.get(i).is_some_and(|t| t.kind == mask::Kind::Punct(c));
     let mut out = Vec::new();
     for (i, t) in toks.iter().enumerate() {
-        if t.kind != mask::Kind::Ident || word(t) != b"operator" || i == 0 {
+        if t.kind != mask::Kind::Ident || &text[t.start..t.end] != b"operator" || i == 0 {
             continue;
         }
-        let p = &toks[i - 1];
-        // An expression or a statement start (`if (c) operator()(x);`);
-        // declarations have a type before `operator`.
-        let expression =
-            matches!(p.kind, mask::Kind::Punct(b'.' | b'(' | b',' | b'!' | b'?' | b';' | b'{' | b'}' | b')'))
-                || (punct(i - 1, b'>') && i >= 2 && punct(i - 2, b'-'))
-                || (p.kind == mask::Kind::Ident && word(p) == b"return");
-        if !expression {
+        if !operator_in_expression(&toks, text, i) {
             continue;
         }
-        // The symbols: `()` / `[]`, else punctuation up to the call's `(`.
-        let mut k = i + 1;
-        if (punct(k, b'(') && punct(k + 1, b')')) || (punct(k, b'[') && punct(k + 1, b']')) {
-            k += 2;
-        } else {
-            while k < toks.len() && k < i + 4 && matches!(toks[k].kind, mask::Kind::Punct(c) if c != b'(' && c != b';')
-            {
-                k += 1;
-            }
-        }
-        if k == i + 1 {
-            continue;
-        }
-        // Explicit template arguments: `operator()<bool>(value)`.
-        let mut call = k;
-        if punct(call, b'<') {
-            let mut depth = 0i32;
-            while call < toks.len() && call < k + 32 {
-                match toks[call].kind {
-                    mask::Kind::Punct(b'<') => depth += 1,
-                    mask::Kind::Punct(b'>') => depth -= 1,
-                    _ => {}
-                }
-                call += 1;
-                if depth == 0 {
-                    break;
-                }
-            }
-        }
-        if !punct(call, b'(') {
+        let Some(k) = operator_symbols_end(&toks, i) else { continue };
+        if !punct_at(&toks, template_args_end(&toks, k), b'(') {
             continue;
         }
         let (a, b) = (t.end, toks[k - 1].end);
@@ -183,6 +143,58 @@ fn operator_calls(text: &[u8]) -> Vec<Edit> {
         }
     }
     out
+}
+
+/// Whether token `i` is the punctuation `c`.
+fn punct_at(toks: &[mask::Tok], i: usize, c: u8) -> bool {
+    toks.get(i).is_some_and(|t| t.kind == mask::Kind::Punct(c))
+}
+
+/// Whether the `operator` at token `i` (> 0) is in an expression or at a
+/// statement start (`if (c) operator()(x);`); declarations have a type
+/// before `operator`.
+fn operator_in_expression(toks: &[mask::Tok], text: &[u8], i: usize) -> bool {
+    let p = &toks[i - 1];
+    matches!(p.kind, mask::Kind::Punct(b'.' | b'(' | b',' | b'!' | b'?' | b';' | b'{' | b'}' | b')'))
+        || (punct_at(toks, i - 1, b'>') && i >= 2 && punct_at(toks, i - 2, b'-'))
+        || (p.kind == mask::Kind::Ident && &text[p.start..p.end] == b"return")
+}
+
+/// The token after the symbols of the `operator` at `i`: `()` / `[]`, else
+/// punctuation up to the call's `(`; `None` when there is none.
+fn operator_symbols_end(toks: &[mask::Tok], i: usize) -> Option<usize> {
+    let mut k = i + 1;
+    if (punct_at(toks, k, b'(') && punct_at(toks, k + 1, b')'))
+        || (punct_at(toks, k, b'[') && punct_at(toks, k + 1, b']'))
+    {
+        return Some(k + 2);
+    }
+    while k < toks.len() && k < i + 4 && matches!(toks[k].kind, mask::Kind::Punct(c) if c != b'(' && c != b';') {
+        k += 1;
+    }
+    (k > i + 1).then_some(k)
+}
+
+/// The token after explicit template arguments at `k`
+/// (`operator()<bool>(value)`), `k` itself without any.
+fn template_args_end(toks: &[mask::Tok], k: usize) -> usize {
+    let mut call = k;
+    if !punct_at(toks, call, b'<') {
+        return call;
+    }
+    let mut depth = 0i32;
+    while call < toks.len() && call < k + 32 {
+        match toks[call].kind {
+            mask::Kind::Punct(b'<') => depth += 1,
+            mask::Kind::Punct(b'>') => depth -= 1,
+            _ => {}
+        }
+        call += 1;
+        if depth == 0 {
+            break;
+        }
+    }
+    call
 }
 
 /// C test macro heads before a block (`TEST(Group, Name)` + `{`) at file
@@ -195,25 +207,27 @@ fn c_test_heads(text: &[u8]) -> Vec<Edit> {
     let levels = mask::declaration_levels(&toks, text);
     let mut out = Vec::new();
     for (i, t) in toks.iter().enumerate() {
-        let word = &text[t.start..t.end];
-        if t.kind != mask::Kind::Ident
-            || !levels[i]
-            || !crate::extract::C_TEST_MACROS.iter().any(|m| m.as_bytes() == word)
-        {
-            continue;
-        }
-        let boundary =
-            i == 0 || matches!(toks[i - 1].kind, mask::Kind::Directive | mask::Kind::Punct(b';' | b'}' | b'{'));
-        let open = toks.get(i + 1).is_some_and(|n| n.kind == mask::Kind::Punct(b'('));
-        if !boundary || !open {
-            continue;
-        }
-        let Some(close) = mask::matching_paren(&toks, i + 1) else { continue };
-        if toks.get(close + 1).is_some_and(|n| n.kind == mask::Kind::Punct(b'{')) {
+        let Some(close) = test_head(&toks, &levels, text, i, crate::extract::C_TEST_MACROS) else { continue };
+        if punct_at(&toks, close + 1, b'{') {
             out.push(Edit { start: t.start, end: t.end, with: b"if" });
         }
     }
     out
+}
+
+/// A test macro call `NAME(…)` (`NAME` in `macros`) at token `i`, at
+/// declaration level and at a declaration boundary: the index of its `)`.
+fn test_head(toks: &[mask::Tok], levels: &[bool], text: &[u8], i: usize, macros: &[&str]) -> Option<usize> {
+    let t = &toks[i];
+    let word = &text[t.start..t.end];
+    if t.kind != mask::Kind::Ident || !levels[i] || !macros.iter().any(|m| m.as_bytes() == word) {
+        return None;
+    }
+    let boundary = i == 0 || matches!(toks[i - 1].kind, mask::Kind::Directive | mask::Kind::Punct(b';' | b'}' | b'{'));
+    if !boundary || !punct_at(toks, i + 1, b'(') {
+        return None;
+    }
+    mask::matching_paren(toks, i + 1)
 }
 
 /// C++ Catch2 / doctest test heads before a block (`TEST_CASE("title",
@@ -229,58 +243,46 @@ fn catch_test_heads(text: &[u8]) -> Vec<Edit> {
     let levels = mask::declaration_levels(&toks, text);
     let mut out = Vec::new();
     for (i, t) in toks.iter().enumerate() {
-        let word = &text[t.start..t.end];
-        if t.kind != mask::Kind::Ident
-            || !levels[i]
-            || !crate::extract::CATCH_MACROS.iter().any(|m| m.as_bytes() == word)
-        {
-            continue;
-        }
-        let boundary =
-            i == 0 || matches!(toks[i - 1].kind, mask::Kind::Directive | mask::Kind::Punct(b';' | b'}' | b'{'));
-        let open = toks.get(i + 1).is_some_and(|n| n.kind == mask::Kind::Punct(b'('));
-        if !boundary || !open {
-            continue;
-        }
-        let Some(close) = mask::matching_paren(&toks, i + 1) else { continue };
+        let Some(close) = test_head(&toks, &levels, text, i, crate::extract::CATCH_MACROS) else { continue };
         // `TEST_CASE()` (an anonymous test) stays: `if ()` is no statement.
-        if close == i + 2 || !toks.get(close + 1).is_some_and(|n| n.kind == mask::Kind::Punct(b'{')) {
+        if close == i + 2 || !punct_at(&toks, close + 1, b'{') {
             continue;
         }
         out.push(Edit { start: t.start, end: t.end, with: b"if" });
-        if !word.windows(8).any(|w| w == b"TEMPLATE") {
-            continue;
-        }
-        // Arguments at depth 0: keep the leading fixture name and string
-        // literals, blank from the comma before the first other one.
-        let mut depth = 0i32;
-        let mut args: Vec<(usize, usize)> = Vec::new();
-        let mut a = i + 2;
-        for (k, tok) in toks.iter().enumerate().take(close).skip(i + 2) {
-            match tok.kind {
-                mask::Kind::Punct(b'(' | b'[' | b'{') => depth += 1,
-                mask::Kind::Punct(b')' | b']' | b'}') => depth -= 1,
-                mask::Kind::Punct(b',') if depth == 0 => {
-                    args.push((a, k));
-                    a = k + 1;
-                }
-                _ => {}
-            }
-        }
-        args.push((a, close));
-        for (index, &(a, b)) in args.iter().enumerate() {
-            let arg = &toks[a..b];
-            let literal = !arg.is_empty() && arg.iter().all(|x| x.kind == mask::Kind::Literal);
-            let fixture = index == 0 && arg.len() == 1 && arg[0].kind == mask::Kind::Ident;
-            if !literal && !fixture {
-                if index > 0 && b > a {
-                    out.push(Edit { start: toks[a - 1].start, end: toks[close - 1].end, with: b"" });
-                }
-                break;
-            }
+        if text[t.start..t.end].windows(8).any(|w| w == b"TEMPLATE") {
+            out.extend(template_type_list(&toks, i, close));
         }
     }
     out
+}
+
+/// The type list of a template test head `NAME(…)` (`NAME` at token `i`,
+/// its `)` at `close`): the arguments at depth 0 keep the leading fixture
+/// name and string literals; the rest is blanked from the comma before
+/// the first other one.
+fn template_type_list(toks: &[mask::Tok], i: usize, close: usize) -> Option<Edit> {
+    let mut depth = 0i32;
+    let mut args: Vec<(usize, usize)> = Vec::new();
+    let mut a = i + 2;
+    for (k, tok) in toks.iter().enumerate().take(close).skip(i + 2) {
+        match tok.kind {
+            mask::Kind::Punct(b'(' | b'[' | b'{') => depth += 1,
+            mask::Kind::Punct(b')' | b']' | b'}') => depth -= 1,
+            mask::Kind::Punct(b',') if depth == 0 => {
+                args.push((a, k));
+                a = k + 1;
+            }
+            _ => {}
+        }
+    }
+    args.push((a, close));
+    let (index, &(a, b)) = args.iter().enumerate().find(|&(index, &(a, b))| {
+        let arg = &toks[a..b];
+        let literal = !arg.is_empty() && arg.iter().all(|x| x.kind == mask::Kind::Literal);
+        let fixture = index == 0 && arg.len() == 1 && arg[0].kind == mask::Kind::Ident;
+        !literal && !fixture
+    })?;
+    (index > 0 && b > a).then(|| Edit { start: toks[a - 1].start, end: toks[close - 1].end, with: b"" })
 }
 
 /// The text the grammar parses and its tree (module docs).
@@ -294,79 +296,114 @@ pub(crate) fn prepare(source: &[u8], language: Language, budget: &Budget) -> Res
     let plan = cond::plan(&groups, &toks, &text);
     let mut collapsed = plan.collapsed;
     apply(&mut text, &blanks(plan.blanks));
-    if language == Language::C {
-        let heads = c_test_heads(&text);
-        apply(&mut text, &heads);
+    let edits = if language == Language::C {
+        c_test_heads(&text)
     } else {
         let mut edits = operator_calls(&text);
         edits.extend(catch_test_heads(&text));
-        apply(&mut text, &edits);
-    }
-    let mut tree = rueca_extract::parse(&grammar, &text, budget)?;
-    let mut errors = count_errors(&tree);
-    let mut parses = 1;
+        edits
+    };
+    apply(&mut text, &edits);
+    let tree = rueca_extract::parse(&grammar, &text, budget)?;
+    let mut best = Attempt { errors: count_errors(&tree), text, tree, parses: 1 };
     for _ in 0..MAX_ROUNDS {
-        if errors == 0 {
+        if best.errors == 0 {
             break;
         }
-        let sites = error_sites(&tree);
-        let current = mask::lex_literals(&text);
-        let mut edits: Vec<Edit> = Vec::new();
-        // The edits of each site, for the one-at-a-time fallback.
-        let mut per_site: Vec<Vec<Edit>> = Vec::new();
-        let newlines: Vec<usize> = text.iter().enumerate().filter(|(_, b)| **b == b'\n').map(|(i, _)| i).collect();
-        let line = |at: usize| newlines.partition_point(|&n| n < at) as u32;
-        for site in &sites {
-            let (l0, l1) = (line(site.start), line(site.end));
-            if let Some(e) = repair::repair(&text, &current, *site) {
-                edits.extend(e.iter().cloned());
-                per_site.push(e);
-                continue;
-            }
-            // Else the `#if` group next to the error, or the innermost one
-            // containing it, keeps one branch.
-            let near = (l0.saturating_sub(1), l1 + 1);
-            let group = cond::collapse_near(&groups, &mut collapsed, &toks, usize::MAX, near)
-                .or_else(|| cond::collapse_near(&groups, &mut collapsed, &toks, site.start, (u32::MAX, u32::MAX)));
-            if let Some(r) = group {
-                edits.extend(blanks(r.clone()));
-                per_site.push(blanks(r));
-            }
-        }
+        let (edits, per_site) = round_edits(&best, &groups, &mut collapsed, &toks);
         if edits.is_empty() {
             break;
         }
-        let mut next = text.clone();
-        apply(&mut next, &edits);
-        let next_tree = rueca_extract::parse(&grammar, &next, budget)?;
-        parses += 1;
-        let next_errors = count_errors(&next_tree);
-        if next_errors < errors {
-            (text, tree, errors) = (next, next_tree, next_errors);
+        if best.try_edits(&grammar, budget, &edits)? {
             continue;
         }
-        // One bad repair can spoil a round: try the sites one at a time
-        // (bounded), keeping each repair that lowers the error count.
-        let mut improved = false;
-        for group in &per_site {
-            if parses >= MAX_PARSES {
-                break;
-            }
-            parses += 1;
-            let mut next = text.clone();
-            apply(&mut next, group);
-            let next_tree = rueca_extract::parse(&grammar, &next, budget)?;
-            let next_errors = count_errors(&next_tree);
-            if next_errors < errors {
-                (text, tree, errors) = (next, next_tree, next_errors);
-                improved = true;
-            }
-        }
-        if !improved || parses >= MAX_PARSES {
+        // One bad repair can spoil a round: try the sites one at a time.
+        let improved = best.try_each(&grammar, budget, &per_site)?;
+        if !improved || best.parses >= MAX_PARSES {
             break;
         }
     }
-    Ok((text, tree))
+    Ok((best.text, best.tree))
+}
+
+/// The best text so far, its tree and error count, and the parses spent.
+struct Attempt {
+    text: Vec<u8>,
+    tree: Tree,
+    errors: u32,
+    parses: usize,
+}
+
+impl Attempt {
+    /// Parses the text with `edits` applied and keeps it when it has fewer
+    /// errors; whether it did.
+    fn try_edits(
+        &mut self,
+        grammar: &rueca_extract::tree_sitter::Language,
+        budget: &Budget,
+        edits: &[Edit],
+    ) -> Result<bool, ExtractError> {
+        let mut next = self.text.clone();
+        apply(&mut next, edits);
+        let next_tree = rueca_extract::parse(grammar, &next, budget)?;
+        self.parses += 1;
+        let next_errors = count_errors(&next_tree);
+        if next_errors >= self.errors {
+            return Ok(false);
+        }
+        (self.text, self.tree, self.errors) = (next, next_tree, next_errors);
+        Ok(true)
+    }
+
+    /// Tries each edit group on its own while parses remain (at most
+    /// [`MAX_PARSES`] in all), keeping each that lowers the error count;
+    /// whether any did.
+    fn try_each(
+        &mut self,
+        grammar: &rueca_extract::tree_sitter::Language,
+        budget: &Budget,
+        groups: &[Vec<Edit>],
+    ) -> Result<bool, ExtractError> {
+        let mut improved = false;
+        for group in groups {
+            if self.parses >= MAX_PARSES {
+                break;
+            }
+            improved |= self.try_edits(grammar, budget, group)?;
+        }
+        Ok(improved)
+    }
+}
+
+/// The edits of one repair round over every error site of `best`, and the
+/// edits of each site (for the one-at-a-time fallback). A site gets its
+/// repairs, else the `#if` group next to the error, or the innermost one
+/// containing it, keeps one branch.
+fn round_edits(
+    best: &Attempt,
+    groups: &[cond::Group],
+    collapsed: &mut [bool],
+    toks: &[mask::Tok],
+) -> (Vec<Edit>, Vec<Vec<Edit>>) {
+    let text = &best.text;
+    let current = mask::lex_literals(text);
+    let newlines: Vec<usize> = text.iter().enumerate().filter(|(_, b)| **b == b'\n').map(|(i, _)| i).collect();
+    let line = |at: usize| newlines.partition_point(|&n| n < at) as u32;
+    let mut edits: Vec<Edit> = Vec::new();
+    let mut per_site: Vec<Vec<Edit>> = Vec::new();
+    for site in error_sites(&best.tree) {
+        let near = (line(site.start).saturating_sub(1), line(site.end) + 1);
+        let site_edits = repair::repair(text, &current, site).or_else(|| {
+            cond::collapse_near(groups, collapsed, toks, usize::MAX, near)
+                .or_else(|| cond::collapse_near(groups, collapsed, toks, site.start, (u32::MAX, u32::MAX)))
+                .map(blanks)
+        });
+        if let Some(e) = site_edits {
+            edits.extend(e.iter().cloned());
+            per_site.push(e);
+        }
+    }
+    (edits, per_site)
 }
 
 #[cfg(test)]

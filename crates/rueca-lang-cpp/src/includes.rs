@@ -22,7 +22,7 @@
 //! directories outside the repository are ignored: system headers resolve to
 //! nothing unless a project include directory has them.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use rueca_extract::ProjectFiles;
@@ -163,6 +163,52 @@ fn to_repo(abs: &str, root: Option<&str>, project: &ProjectFiles) -> Option<Stri
     }
 }
 
+/// The string field `k` of a JSON object.
+fn json_str(e: &serde_json::Value, k: &str) -> Option<String> {
+    e.get(k).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+/// The include directories of one `compile_commands.json` entry, relative
+/// to the repository, as (quote include, directory). `seen` holds the
+/// (quote, entry directory, flag) triples handled already.
+fn entry_include_dirs(
+    e: &serde_json::Value,
+    root: Option<&str>,
+    project: &ProjectFiles,
+    seen: &mut HashSet<(bool, String, String)>,
+) -> Vec<(bool, String)> {
+    let directory = json_str(e, "directory").unwrap_or_default();
+    let args: Vec<String> = match (e.get("arguments").and_then(|a| a.as_array()), json_str(e, "command")) {
+        (Some(a), _) => a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+        (None, Some(c)) => split_command(&c),
+        (None, None) => return Vec::new(),
+    };
+    let (quote, dirs) = include_flags(&args);
+    let mut out = Vec::new();
+    for (is_quote, list) in [(true, quote), (false, dirs)] {
+        for d in list {
+            if seen.insert((is_quote, directory.clone(), d.clone()))
+                && let Some(rel) = flag_dir(&directory, d, root, project)
+            {
+                out.push((is_quote, rel));
+            }
+        }
+    }
+    out
+}
+
+/// An include flag's directory `d`, written in an entry run from
+/// `directory`, relative to the repository.
+fn flag_dir(directory: &str, d: String, root: Option<&str>, project: &ProjectFiles) -> Option<String> {
+    let abs = if d.starts_with('/') { d } else { join(directory, &d) };
+    if abs.starts_with('/') {
+        to_repo(&abs, root, project)
+    } else {
+        // A relative `directory`: relative to the repository.
+        normalize(&abs)
+    }
+}
+
 /// The repository root implied by an absolute source path that is a
 /// project file (`/home/ci/fmt/src/os.cc` + `src/os.cc` → `/home/ci/fmt`).
 fn root_from(abs_file: &str, project: &ProjectFiles) -> Option<String> {
@@ -206,38 +252,16 @@ impl IncludeIndex {
 
     fn add_compile_commands(&mut self, text: &str, project: &ProjectFiles) {
         let Ok(serde_json::Value::Array(entries)) = serde_json::from_str::<serde_json::Value>(text) else { return };
-        let str_of = |e: &serde_json::Value, k: &str| e.get(k).and_then(|v| v.as_str()).map(str::to_string);
         // Repository root from the first entry whose file is a project file.
         let root = entries.iter().find_map(|e| {
-            let file = str_of(e, "file")?;
-            let abs = if file.starts_with('/') { file } else { join(&str_of(e, "directory")?, &file) };
+            let file = json_str(e, "file")?;
+            let abs = if file.starts_with('/') { file } else { join(&json_str(e, "directory")?, &file) };
             root_from(&abs, project)
         });
-        let mut seen_args = std::collections::HashSet::new();
+        let mut seen_args = HashSet::new();
         for e in &entries {
-            let directory = str_of(e, "directory").unwrap_or_default();
-            let args: Vec<String> = match (e.get("arguments").and_then(|a| a.as_array()), str_of(e, "command")) {
-                (Some(a), _) => a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
-                (None, Some(c)) => split_command(&c),
-                (None, None) => continue,
-            };
-            let (quote, dirs) = include_flags(&args);
-            for (is_quote, list) in [(true, quote), (false, dirs)] {
-                for d in list {
-                    if !seen_args.insert((is_quote, directory.clone(), d.clone())) {
-                        continue;
-                    }
-                    let abs = if d.starts_with('/') { d } else { join(&directory, &d) };
-                    let rel = if abs.starts_with('/') {
-                        to_repo(&abs, root.as_deref(), project)
-                    } else {
-                        // A relative `directory`: relative to the repository.
-                        normalize(&abs)
-                    };
-                    if let Some(rel) = rel {
-                        self.push(is_quote, rel);
-                    }
-                }
+            for (is_quote, rel) in entry_include_dirs(e, root.as_deref(), project, &mut seen_args) {
+                self.push(is_quote, rel);
             }
         }
     }
@@ -265,31 +289,25 @@ impl IncludeIndex {
         if spec.is_empty() || spec.starts_with('/') {
             return None;
         }
-        let try_in = |dir: &str| normalize(&join(dir, spec)).filter(|p| project.contains(p));
-        if !angle {
-            if let Some(p) = try_in(parent(from)) {
-                return Some(p);
-            }
-            for d in &self.quote_dirs {
-                if let Some(p) = try_in(d) {
-                    return Some(p);
-                }
-            }
-        }
-        for d in &self.dirs {
-            if let Some(p) = try_in(d) {
-                return Some(p);
-            }
-        }
+        // In order: the including file's directory and the quote directories
+        // (quoted includes only), the include directories, then conventional
+        // roots.
+        let quoted = (!angle).then(|| std::iter::once(parent(from)).chain(self.quote_dirs.iter().map(String::as_str)));
         let roots: &[&str] = if angle { &["include"] } else { &["include", "src", ""] };
-        for r in roots {
-            if let Some(p) = try_in(r) {
-                return Some(p);
-            }
+        let found = quoted
+            .into_iter()
+            .flatten()
+            .chain(self.dirs.iter().map(String::as_str))
+            .chain(roots.iter().copied())
+            .find_map(|dir| normalize(&join(dir, spec)).filter(|p| project.contains(p)));
+        if found.is_some() || (angle && !spec.contains('/')) {
+            return found;
         }
-        if angle && !spec.contains('/') {
-            return None;
-        }
+        self.unique_by_suffix(spec)
+    }
+
+    /// The only project file whose path is `spec` or ends with `/spec`.
+    fn unique_by_suffix(&self, spec: &str) -> Option<String> {
         let norm = normalize(spec)?;
         let base = norm.rsplit('/').next().unwrap_or(&norm);
         let suffix = format!("/{norm}");

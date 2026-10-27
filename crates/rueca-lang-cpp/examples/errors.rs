@@ -18,25 +18,37 @@ fn main() {
     loop {
         let n = cursor.node();
         if n.is_error() || n.is_missing() {
-            let row = n.start_position().row;
-            println!(
-                "{}:{} {} | {}",
-                row + 1,
-                n.start_position().column,
-                if n.is_missing() { format!("MISSING {}", n.kind()) } else { "ERROR".into() },
-                String::from_utf8_lossy(lines.get(row).copied().unwrap_or(b"")).trim()
-            );
+            print_error(n, &lines);
         }
         if n.has_error() && cursor.goto_first_child() {
             continue;
         }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return;
-            }
+        if !skip_subtree(&mut cursor) {
+            return;
+        }
+    }
+}
+
+/// Prints one ERROR / MISSING node: `line:column kind | source line`.
+fn print_error(n: tree_sitter::Node<'_>, lines: &[&[u8]]) {
+    let row = n.start_position().row;
+    println!(
+        "{}:{} {} | {}",
+        row + 1,
+        n.start_position().column,
+        if n.is_missing() { format!("MISSING {}", n.kind()) } else { "ERROR".into() },
+        String::from_utf8_lossy(lines.get(row).copied().unwrap_or(b"")).trim()
+    );
+}
+
+/// Moves `cursor` past its node's subtree; `false` past the last node.
+fn skip_subtree(cursor: &mut tree_sitter::TreeCursor<'_>) -> bool {
+    loop {
+        if cursor.goto_next_sibling() {
+            return true;
+        }
+        if !cursor.goto_parent() {
+            return false;
         }
     }
 }

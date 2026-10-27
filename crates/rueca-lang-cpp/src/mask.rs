@@ -182,127 +182,159 @@ pub(crate) fn lex_literals(src: &[u8]) -> Vec<Tok> {
 }
 
 fn lex_impl(src: &[u8], literals: bool) -> Vec<Tok> {
-    let mut toks = Vec::new();
-    let mut i = 0;
-    let mut line = 0u32;
-    let mut at_line_start = true;
-    let n = src.len();
-    while i < n {
-        let c = src[i];
+    let mut lexer = Lexer { src, literals, i: 0, line: 0, at_line_start: true, toks: Vec::new() };
+    while lexer.i < src.len() {
+        lexer.step();
+    }
+    lexer.toks
+}
+
+/// State of [`lex_impl`]: the position, its line, and the tokens so far.
+struct Lexer<'a> {
+    src: &'a [u8],
+    /// Whether literals become [`Kind::Literal`] tokens (else they are skipped).
+    literals: bool,
+    i: usize,
+    line: u32,
+    at_line_start: bool,
+    toks: Vec<Tok>,
+}
+
+impl Lexer<'_> {
+    /// Consumes the whitespace, comment or token at `self.i`.
+    fn step(&mut self) {
+        let c = self.src[self.i];
         if c == b'\n' {
-            line += 1;
-            at_line_start = true;
-            i += 1;
-            continue;
+            self.line += 1;
+            self.at_line_start = true;
+            self.i += 1;
+            return;
         }
         if c.is_ascii_whitespace() {
-            i += 1;
-            continue;
+            self.i += 1;
+            return;
         }
-        if at_line_start && c == b'#' {
-            // Preprocessor line, with `\` continuations; a block comment
-            // that starts on it may run over several lines (the line ends
-            // after the comment).
-            let start = i;
-            let first_line = line;
-            loop {
-                while i < n && src[i] != b'\n' {
-                    if src[i] == b'/' && src.get(i + 1) == Some(&b'*') {
-                        i += 2;
-                        while i + 1 < n && !(src[i] == b'*' && src[i + 1] == b'/') {
-                            if src[i] == b'\n' {
-                                line += 1;
-                            }
-                            i += 1;
-                        }
-                        i = (i + 2).min(n);
-                        continue;
-                    }
-                    if src[i] == b'/' && src.get(i + 1) == Some(&b'/') {
-                        while i < n && src[i] != b'\n' {
-                            i += 1;
-                        }
-                        break;
-                    }
-                    i += 1;
-                }
-                let mut j = i;
-                if j > start && src[j - 1] == b'\r' {
-                    j -= 1;
-                }
-                if i < n && j > start && src[j - 1] == b'\\' {
-                    i += 1;
-                    line += 1;
-                    continue;
-                }
+        if self.at_line_start && c == b'#' {
+            self.directive();
+            return;
+        }
+        self.at_line_start = false;
+        match (c, self.src.get(self.i + 1)) {
+            (b'/', Some(b'/')) => self.i = line_end(self.src, self.i),
+            (b'/', Some(b'*')) => self.i = skip_block_comment(self.src, self.i, &mut self.line),
+            (b'"' | b'\'', _) => {
+                let (start, first_line) = (self.i, self.line);
+                self.i = skip_quoted(self.src, self.i, &mut self.line);
+                self.push_literal(start, first_line);
+            }
+            _ if c.is_ascii_alphabetic() || c == b'_' => self.word(),
+            _ if c.is_ascii_digit() => self.number(),
+            _ => {
+                self.toks.push(Tok { start: self.i, end: self.i + 1, line: self.line, kind: Kind::Punct(c) });
+                self.i += 1;
+            }
+        }
+    }
+
+    /// Preprocessor line, with `\` continuations; a block comment that
+    /// starts on it may run over several lines (the line ends after the
+    /// comment).
+    fn directive(&mut self) {
+        let (start, first_line) = (self.i, self.line);
+        loop {
+            self.i = directive_line_end(self.src, self.i, &mut self.line);
+            if !continued(self.src, start, self.i) {
                 break;
             }
-            toks.push(Tok { start, end: i, line: first_line, kind: Kind::Directive });
-            continue;
+            self.i += 1;
+            self.line += 1;
         }
-        at_line_start = false;
-        if c == b'/' && i + 1 < n && src[i + 1] == b'/' {
-            while i < n && src[i] != b'\n' {
-                i += 1;
-            }
-            continue;
+        self.toks.push(Tok { start, end: self.i, line: first_line, kind: Kind::Directive });
+    }
+
+    /// An identifier, or a literal with a raw or encoding prefix
+    /// (`R"x(…)x"`, `u8"…"`, `L'x'`).
+    fn word(&mut self) {
+        let start = self.i;
+        while self.src.get(self.i).is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_') {
+            self.i += 1;
         }
-        if c == b'/' && i + 1 < n && src[i + 1] == b'*' {
-            i += 2;
-            while i + 1 < n && !(src[i] == b'*' && src[i + 1] == b'/') {
-                if src[i] == b'\n' {
-                    line += 1;
-                }
-                i += 1;
-            }
-            i = (i + 2).min(n);
-            continue;
+        let word = &self.src[start..self.i];
+        let quote = self.src.get(self.i).copied();
+        let first_line = self.line;
+        // Raw string literal: R"delim( … )delim" (also u8R, LR, uR, UR).
+        if quote == Some(b'"') && matches!(word, b"R" | b"u8R" | b"LR" | b"uR" | b"UR") {
+            self.i = skip_raw(self.src, self.i, &mut self.line);
+            self.push_literal(start, first_line);
+            return;
         }
-        if c == b'"' || c == b'\'' {
-            let (start, first_line) = (i, line);
-            i = skip_quoted(src, i, &mut line);
-            if literals {
-                toks.push(Tok { start, end: i, line: first_line, kind: Kind::Literal });
-            }
-            continue;
+        // Encoding prefix of a literal: u8"…", L'x'.
+        if self.literals && matches!(quote, Some(b'"' | b'\'')) && matches!(word, b"L" | b"u" | b"U" | b"u8") {
+            self.i = skip_quoted(self.src, self.i, &mut self.line);
+            self.push_literal(start, first_line);
+            return;
         }
-        if c.is_ascii_alphabetic() || c == b'_' {
-            let start = i;
-            while i < n && (src[i].is_ascii_alphanumeric() || src[i] == b'_') {
-                i += 1;
-            }
-            let word = &src[start..i];
-            // Raw string literal: R"delim( … )delim" (also u8R, LR, uR, UR).
-            if i < n && src[i] == b'"' && matches!(word, b"R" | b"u8R" | b"LR" | b"uR" | b"UR") {
-                let first_line = line;
-                i = skip_raw(src, i, &mut line);
-                if literals {
-                    toks.push(Tok { start, end: i, line: first_line, kind: Kind::Literal });
-                }
-                continue;
-            }
-            // Encoding prefix of a literal: u8"…", L'x'.
-            if literals && i < n && matches!(src[i], b'"' | b'\'') && matches!(word, b"L" | b"u" | b"U" | b"u8") {
-                let first_line = line;
-                i = skip_quoted(src, i, &mut line);
-                toks.push(Tok { start, end: i, line: first_line, kind: Kind::Literal });
-                continue;
-            }
-            toks.push(Tok { start, end: i, line, kind: Kind::Ident });
-            continue;
+        self.toks.push(Tok { start, end: self.i, line: self.line, kind: Kind::Ident });
+    }
+
+    fn number(&mut self) {
+        let start = self.i;
+        while self.src.get(self.i).is_some_and(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'\'')) {
+            self.i += 1;
         }
-        if c.is_ascii_digit() {
-            let start = i;
-            while i < n && (src[i].is_ascii_alphanumeric() || matches!(src[i], b'_' | b'.' | b'\'')) {
-                i += 1;
-            }
-            toks.push(Tok { start, end: i, line, kind: Kind::Punct(b'0') });
-            continue;
+        self.toks.push(Tok { start, end: self.i, line: self.line, kind: Kind::Punct(b'0') });
+    }
+
+    /// Records the literal `start..self.i` when literals are lexed.
+    fn push_literal(&mut self, start: usize, line: u32) {
+        if self.literals {
+            self.toks.push(Tok { start, end: self.i, line, kind: Kind::Literal });
         }
-        toks.push(Tok { start: i, end: i + 1, line, kind: Kind::Punct(c) });
+    }
+}
+
+/// Index of the `\n` ending the line at `i` (or the end of `src`).
+fn line_end(src: &[u8], mut i: usize) -> usize {
+    while i < src.len() && src[i] != b'\n' {
         i += 1;
     }
-    toks
+    i
+}
+
+/// Index after the block comment opening at `i`, counting its newlines.
+fn skip_block_comment(src: &[u8], mut i: usize, line: &mut u32) -> usize {
+    let n = src.len();
+    i += 2;
+    while i + 1 < n && !(src[i] == b'*' && src[i + 1] == b'/') {
+        if src[i] == b'\n' {
+            *line += 1;
+        }
+        i += 1;
+    }
+    (i + 2).min(n)
+}
+
+/// End of one physical line of a directive from `i`: the `\n` (or the
+/// end of `src`), skipping block comments, which may span lines.
+fn directive_line_end(src: &[u8], mut i: usize, line: &mut u32) -> usize {
+    while i < src.len() && src[i] != b'\n' {
+        match (src[i], src.get(i + 1)) {
+            (b'/', Some(b'*')) => i = skip_block_comment(src, i, line),
+            (b'/', Some(b'/')) => return line_end(src, i),
+            _ => i += 1,
+        }
+    }
+    i
+}
+
+/// Whether the directive `start..i` ends with a `\` continuation (`i` at
+/// its `\n`).
+fn continued(src: &[u8], start: usize, i: usize) -> bool {
+    let mut j = i;
+    if j > start && src[j - 1] == b'\r' {
+        j -= 1;
+    }
+    i < src.len() && j > start && src[j - 1] == b'\\'
 }
 
 fn skip_quoted(src: &[u8], mut i: usize, line: &mut u32) -> usize {
@@ -456,316 +488,503 @@ pub(crate) fn macro_ranges(src: &[u8]) -> Vec<(usize, usize)> {
 /// Computes the [`Plan`] for `src` (see the module docs).
 pub(crate) fn plan(src: &[u8]) -> Plan {
     let toks = lex(src);
-    let text = |t: &Tok| &src[t.start..t.end];
-    let is_ident = |t: Option<&Tok>, w: &str| t.is_some_and(|t| t.kind == Kind::Ident && text(t) == w.as_bytes());
-    let punct = |t: Option<&Tok>, c: u8| t.is_some_and(|t| t.kind == Kind::Punct(c));
-    let ident_in = |t: Option<&Tok>, set: &[&str]| {
-        t.is_some_and(|t| t.kind == Kind::Ident && set.iter().any(|w| w.as_bytes() == text(t)))
+    let view = View { src, toks: &toks };
+    let mut planner = Planner {
+        view,
+        levels: declaration_levels(&toks, src),
+        masked: vec![false; toks.len()],
+        blanks: Vec::new(),
+        conditions: Vec::new(),
     };
-    let macro_tok = |t: Option<&Tok>, min: usize, underscore: bool| {
-        t.is_some_and(|t| t.kind == Kind::Ident && is_macro(text(t), min) && (!underscore || text(t).contains(&b'_')))
-    };
-    let levels = declaration_levels(&toks, src);
-    let mut masked = vec![false; toks.len()];
-    let mut out = Vec::new();
-    let mut conditions = Vec::new();
-    // Masks tokens `a..=b` and everything between them (string literals
-    // and comments inside a macro's arguments).
-    let mask_range = |masked: &mut Vec<bool>, out: &mut Vec<(usize, usize)>, a: usize, b: usize| {
-        for m in masked.iter_mut().take(b + 1).skip(a) {
+    for i in 0..toks.len() {
+        planner.visit(i);
+    }
+    planner.blanks.sort_unstable();
+    Plan { blanks: planner.blanks, conditions: planner.conditions }
+}
+
+/// Keywords before a `(` that make it a condition, a cast or an operand,
+/// not a parameter list (rule 4).
+const NOT_A_FUNCTION: &[&str] =
+    &["if", "while", "for", "switch", "return", "sizeof", "alignof", "decltype", "catch", "case"];
+
+/// Qualifiers of a method that a trailing specifier may follow (rule 4).
+const METHOD_QUALIFIERS: &[&str] = &["const", "override", "noexcept"];
+
+/// Whether `t` is the punctuation `c`.
+fn punct(t: Option<&Tok>, c: u8) -> bool {
+    t.is_some_and(|t| t.kind == Kind::Punct(c))
+}
+
+/// Whether `t` is an identifier.
+fn ident(t: Option<&Tok>) -> bool {
+    t.is_some_and(|t| t.kind == Kind::Ident)
+}
+
+/// The tokens of the file being planned, with their text: the read-only
+/// side of [`plan`].
+#[derive(Clone, Copy)]
+struct View<'a> {
+    src: &'a [u8],
+    toks: &'a [Tok],
+}
+
+impl<'a> View<'a> {
+    fn get(self, i: usize) -> Option<&'a Tok> {
+        self.toks.get(i)
+    }
+
+    fn text(self, t: &Tok) -> &'a [u8] {
+        &self.src[t.start..t.end]
+    }
+
+    fn is_ident(self, t: Option<&Tok>, w: &str) -> bool {
+        t.is_some_and(|t| t.kind == Kind::Ident && self.text(t) == w.as_bytes())
+    }
+
+    fn ident_in(self, t: Option<&Tok>, set: &[&str]) -> bool {
+        t.is_some_and(|t| t.kind == Kind::Ident && set.iter().any(|w| w.as_bytes() == self.text(t)))
+    }
+
+    /// A macro-looking identifier of at least `min` bytes, containing `_`
+    /// when `underscore`.
+    fn macro_tok(self, t: Option<&Tok>, min: usize, underscore: bool) -> bool {
+        t.is_some_and(|t| {
+            t.kind == Kind::Ident && is_macro(self.text(t), min) && (!underscore || self.text(t).contains(&b'_'))
+        })
+    }
+
+    /// Rule 2: the index after the macros of `class MACRO… name` starting
+    /// at `j` (`j` itself when there is none).
+    fn class_macros_end(self, mut j: usize) -> usize {
+        while self.macro_tok(self.get(j), 2, false) {
+            // `class FMT_SO_VISIBILITY("default") name`.
+            let end = if punct(self.get(j + 1), b'(') { matching_paren(self.toks, j + 1) } else { Some(j) };
+            match end {
+                Some(e) if ident(self.get(e + 1)) => j = e + 1,
+                _ => break,
+            }
+        }
+        j
+    }
+
+    /// Rule 3: the chain of specifier macros from `i`, as (first, last)
+    /// token of each (the last is the `)` of an argument list).
+    fn macro_chain(self, i: usize) -> Vec<(usize, usize)> {
+        let mut j = i;
+        let mut ends = Vec::new();
+        while self.macro_tok(self.get(j), 3, true) {
+            let mut end = j;
+            if punct(self.get(j + 1), b'(') {
+                let Some(close) = matching_paren(self.toks, j + 1) else { break };
+                end = close;
+            }
+            ends.push((j, end));
+            j = end + 1;
+        }
+        ends
+    }
+
+    /// Rule 3: whether what follows the chain `ends` makes it a run of
+    /// declaration specifiers.
+    fn specifiers_follow(self, ends: &[(usize, usize)]) -> bool {
+        let Some(&(first, last)) = ends.last() else { return false };
+        let (f, g) = (self.get(last + 1), self.get(last + 2));
+        // `MACRO(args)[i] = x;` is a subscripted call, unless an attribute
+        // follows (`MACRO(args) [[nodiscard]]`).
+        let with_args = first != last;
+        self.ident_in(f, FOLLOWERS)
+            || (self.is_ident(f, "const") && self.ident_in(g, FUNDAMENTAL))
+            || punct(f, b'~')
+            || (punct(f, b'[') && (!with_args || punct(g, b'[')))
+            || self.qualified_name_at(last + 1)
+            || self.type_and_name_at(last + 1)
+            || self.constructor_at(last + 1, ends.len())
+    }
+
+    /// `ns::…` at `k`.
+    fn qualified_name_at(self, k: usize) -> bool {
+        ident(self.get(k)) && punct(self.get(k + 1), b':') && punct(self.get(k + 2), b':')
+    }
+
+    /// `Type name(` / `Type* name` at `k`: a type name cannot be followed
+    /// by another type name.
+    fn type_and_name_at(self, k: usize) -> bool {
+        let (f, g) = (self.get(k), self.get(k + 1));
+        if !ident(f) || self.ident_in(f, &["const", "volatile"]) {
+            return false;
+        }
+        let pointer = punct(g, b'*') || punct(g, b'&');
+        ident(g)
+            || ((pointer || punct(g, b'<')) && ident(self.get(k + 2)))
+            // `LUA_API lua_State *(lua_newstate) (…)`.
+            || (pointer && punct(self.get(k + 2), b'(') && ident(self.get(k + 3)) && punct(self.get(k + 4), b')'))
+    }
+
+    /// `Name(args) [noexcept] : init(…)` at `k`: a constructor after the
+    /// macros; also after two or more macros (`MACRO1 MACRO2 Name(args)`:
+    /// two macros cannot be a type and a name).
+    fn constructor_at(self, k: usize, macros: usize) -> bool {
+        if !ident(self.get(k)) || !punct(self.get(k + 1), b'(') {
+            return false;
+        }
+        macros >= 2 || matching_paren(self.toks, k + 1).is_some_and(|c| self.initializer_list_at(c + 1))
+    }
+
+    /// A constructor's `: init(…)` at `k`, after qualifiers such as
+    /// `noexcept(…)`.
+    fn initializer_list_at(self, mut k: usize) -> bool {
+        while self.ident_in(self.get(k), &["noexcept", "const", "override"]) {
+            k += 1;
+            if punct(self.get(k), b'(') {
+                let Some(e) = matching_paren(self.toks, k) else { return false };
+                k = e + 1;
+            }
+        }
+        punct(self.get(k), b':') && !punct(self.get(k + 1), b':')
+    }
+
+    /// Rule 5: the call ending at `close` ends its line before a
+    /// declaration.
+    fn call_ends_line(self, close: usize) -> bool {
+        let after = self.get(close + 1);
+        after.is_none_or(|a| a.line > self.toks[close].line || a.kind == Kind::Directive)
+            && after.is_none_or(|a| matches!(a.kind, Kind::Ident | Kind::Directive | Kind::Punct(b'~' | b'[' | b'}')))
+    }
+
+    /// Rule 5: `FMT_TYPE_CONSTANT(int, int_type);`: types as arguments,
+    /// which no call expression can have.
+    fn typed_args(self, open: usize, close: usize) -> bool {
+        punct(self.get(close + 1), b';')
+            && (open + 1..close).any(|k| {
+                let t = Some(&self.toks[k]);
+                self.ident_in(t, FUNDAMENTAL) || self.ident_in(t, &["const", "struct", "class", "typename"])
+            })
+    }
+
+    /// Rule 4: token `i` follows the `)` of a parameter list (not of a
+    /// cast: the `(` must follow a name).
+    fn after_parameter_list(self, i: usize) -> bool {
+        i > 0
+            && punct(self.get(i - 1), b')')
+            && matching_open(self.toks, i - 1).is_some_and(|o| {
+                (o > 0 && ident(self.get(o - 1)) && !self.ident_in(self.get(o - 1), NOT_A_FUNCTION))
+                    // `operator=(…)`, `operator()(…)`.
+                    || (o.saturating_sub(3)..o).any(|k| self.is_ident(self.get(k), "operator"))
+            })
+    }
+
+    /// Rule 4: token `i` follows a qualifier of a method (`f() const
+    /// MACRO`), not of a pointer (`const char* const NAME = …` declares
+    /// `NAME`).
+    fn after_method_qualifier(self, i: usize) -> bool {
+        i >= 2
+            && self.ident_in(self.get(i - 1), METHOD_QUALIFIERS)
+            && (punct(self.get(i - 2), b')') || self.ident_in(self.get(i - 2), METHOD_QUALIFIERS))
+    }
+
+    /// Rule 4: the last token of the trailing macros from `i`, with the
+    /// arguments of the first (`GTEST_LOCK_EXCLUDED_(mutex_)`).
+    fn trailing_end(self, i: usize) -> usize {
+        let mut j = i;
+        if punct(self.get(i + 1), b'(')
+            && let Some(close) = matching_paren(self.toks, i + 1)
+        {
+            j = close;
+        }
+        while self.macro_tok(self.get(j + 1), 3, true) {
+            j += 1;
+        }
+        j
+    }
+
+    /// Rule 4: what follows token `j` ends a declarator (`;`, `{`, `=`,
+    /// `:`, `->`, `const`, `override`, `final`).
+    fn ends_declarator(self, j: usize) -> bool {
+        let f = self.get(j + 1);
+        f.is_some_and(|t| matches!(t.kind, Kind::Punct(b';' | b'{' | b'=' | b':')))
+            || (punct(f, b'-') && punct(self.get(j + 2), b'>'))
+            || self.ident_in(f, &["const", "override", "final"])
+    }
+}
+
+/// The token a rule looks at, with its neighbours.
+struct Here<'a> {
+    i: usize,
+    prev: Option<&'a Tok>,
+    next: Option<&'a Tok>,
+    /// Whether the previous token is masked already.
+    prev_masked: bool,
+}
+
+/// One masking rule of [`Planner::visit`]: whether it masked the token.
+type Rule<'a> = fn(&mut Planner<'a>, &Here<'a>) -> bool;
+
+/// State of [`plan`]: what is masked so far.
+struct Planner<'a> {
+    view: View<'a>,
+    /// [`declaration_levels`] of the tokens.
+    levels: Vec<bool>,
+    masked: Vec<bool>,
+    blanks: Vec<(usize, usize)>,
+    conditions: Vec<(usize, usize)>,
+}
+
+impl<'a> Planner<'a> {
+    /// Masks tokens `a..=b` and everything between them (string literals
+    /// and comments inside a macro's arguments).
+    fn mask_range(&mut self, a: usize, b: usize) {
+        for m in self.masked.iter_mut().take(b + 1).skip(a) {
             *m = true;
         }
-        out.push((toks[a].start, toks[b].end));
-    };
+        self.blanks.push((self.view.toks[a].start, self.view.toks[b].end));
+    }
 
-    for i in 0..toks.len() {
-        if toks[i].kind == Kind::Directive {
-            if let Some(range) = include_test_condition(src, &toks[i]) {
-                conditions.push(range);
-            }
-            // The null directive (`#` alone) is valid C the grammars reject.
-            let line = &src[toks[i].start..toks[i].end];
-            if line[1..].iter().all(|b| b.is_ascii_whitespace() || *b == b'\\') {
-                out.push((toks[i].start, toks[i].end));
-                continue;
-            }
-            // Block comments inside a directive (`#define F(x) (x) /* … */ \`)
-            // break the grammar's macro bodies. A trailing one stays: blanked,
-            // it would leave spaces where the grammar wants the line end
-            // right after a valueless `#define X`.
-            let line = &src[toks[i].start..toks[i].end];
-            let mut k = 0;
-            while let Some(open) = line[k..].windows(2).position(|w| w == b"/*") {
-                let a = k + open;
-                let Some(close) = line[a + 2..].windows(2).position(|w| w == b"*/") else { break };
-                let b = a + 2 + close + 2;
-                let trailing = line[b..].iter().all(|c| c.is_ascii_whitespace());
-                if !trailing {
-                    out.push((toks[i].start + a, toks[i].start + b));
-                }
-                k = b;
-            }
-            // `#ifdef __cplusplus` / `extern "C" {` / `#endif` and the matching
-            // `}`: braces the grammar sees unbalanced.
-            if is_cplusplus_test(text(&toks[i])) {
-                let body: Vec<usize> = (i + 1..toks.len()).take_while(|&k| toks[k].kind != Kind::Directive).collect();
-                let closes = body.last().and_then(|&k| toks.get(k + 1)).is_some_and(|t| t.kind == Kind::Directive);
-                let open =
-                    body.len() == 2 && is_ident(Some(&toks[body[0]]), "extern") && punct(Some(&toks[body[1]]), b'{');
-                let close = body.len() == 1 && punct(Some(&toks[body[0]]), b'}');
-                if closes && (open || close) {
-                    mask_range(&mut masked, &mut out, body[0], *body.last().unwrap());
-                }
-            }
-            continue;
+    /// Applies the rules to token `i`.
+    fn visit(&mut self, i: usize) {
+        let view = self.view;
+        let tok = &view.toks[i];
+        if tok.kind == Kind::Directive {
+            self.directive(i);
+            return;
         }
-        if masked[i] || toks[i].kind != Kind::Ident {
-            continue;
+        if self.masked[i] || tok.kind != Kind::Ident {
+            return;
         }
-        let prev = i.checked_sub(1).map(|p| &toks[p]);
-        let prev_masked = i.checked_sub(1).is_some_and(|p| masked[p]);
-        let next = toks.get(i + 1);
-
-        // Rule 2: class / struct / union MACRO… name {
-        if ident_in(Some(&toks[i]), &["class", "struct", "union"]) {
-            let mut j = i + 1;
-            loop {
-                if !macro_tok(toks.get(j), 2, false) {
-                    break;
-                }
-                // `class FMT_SO_VISIBILITY("default") name`.
-                let end = if punct(toks.get(j + 1), b'(') { matching_paren(&toks, j + 1) } else { Some(j) };
-                match end {
-                    Some(e) if toks.get(e + 1).is_some_and(|t| t.kind == Kind::Ident) => j = e + 1,
-                    _ => break,
-                }
-            }
-            if j > i + 1 {
-                let after = toks.get(j + 1);
-                let ok = punct(after, b'{') || punct(after, b':') || punct(after, b'<') || is_ident(after, "final");
-                if ok {
-                    mask_range(&mut masked, &mut out, i + 1, j - 1);
-                }
-            }
-            continue;
+        let here = Here {
+            i,
+            prev: i.checked_sub(1).map(|p| &view.toks[p]),
+            next: view.get(i + 1),
+            prev_masked: i.checked_sub(1).is_some_and(|p| self.masked[p]),
+        };
+        if view.ident_in(Some(tok), &["class", "struct", "union"]) {
+            self.class_head(i);
+            return;
         }
-
-        // Rule 1: bare line.
-        if is_macro(text(&toks[i]), 3) {
-            let alone = prev.is_none_or(|p| p.line < toks[i].line || p.kind == Kind::Directive)
-                && next.is_none_or(|n| n.line > toks[i].line);
-            let prev_ok = prev_masked
-                || prev.is_none_or(|p| matches!(p.kind, Kind::Directive | Kind::Punct(b';' | b'{' | b'}' | b':')));
-            let next_ok =
-                next.is_none_or(|n| matches!(n.kind, Kind::Ident | Kind::Directive | Kind::Punct(b'~' | b'[')));
-            if alone && prev_ok && next_ok {
-                mask_range(&mut masked, &mut out, i, i);
-                continue;
-            }
+        if self.bare_line(&here) || !view.macro_tok(Some(tok), 3, true) {
+            return;
         }
-
-        if !macro_tok(Some(&toks[i]), 3, true) {
-            continue;
-        }
-
-        // Rule 7: `if MACRO (cond)` (a macro for `constexpr`), also with
-        // arguments: `if MACRO(x) (cond)`.
-        if is_ident(prev, "if") && punct(next, b'(') {
-            match matching_paren(&toks, i + 1) {
-                Some(c) if punct(toks.get(c + 1), b'(') => mask_range(&mut masked, &mut out, i, c),
-                _ => mask_range(&mut masked, &mut out, i, i),
-            }
-            continue;
-        }
-
-        // Rule 6: an enable-if macro in a template parameter list.
-        if (punct(prev, b',') || punct(prev, b'<'))
-            && punct(next, b'(')
-            && let Some(close) = matching_paren(&toks, i + 1)
-            && (punct(toks.get(close + 1), b'>') || punct(toks.get(close + 1), b','))
-            && in_template_head(&toks, src, i)
-        {
-            let from = if punct(prev, b',') { i - 1 } else { i };
-            let to = if punct(prev, b'<') && punct(toks.get(close + 1), b',') { close + 1 } else { close };
-            mask_range(&mut masked, &mut out, from, to);
-            continue;
-        }
-
-        // Rule 3: leading specifier macros, possibly a chain, possibly with
-        // an argument list.
-        // `public:` too, but not `ns::`.
-        let after_label = punct(prev, b':') && !(i >= 2 && punct(toks.get(i - 2), b':'));
-        let start_ok = prev_masked
-            || after_label
-            || prev.is_none_or(|p| {
-                matches!(p.kind, Kind::Directive | Kind::Punct(b';' | b'{' | b'}' | b'>' | b']'))
-                    || ident_in(Some(p), SPECIFIERS)
-            });
-        if start_ok {
-            let mut j = i;
-            let mut ends = Vec::new();
-            loop {
-                if !macro_tok(toks.get(j), 3, true) {
-                    break;
-                }
-                let mut end = j;
-                if punct(toks.get(j + 1), b'(') {
-                    match matching_paren(&toks, j + 1) {
-                        Some(close) => end = close,
-                        None => break,
-                    }
-                }
-                ends.push((j, end));
-                j = end + 1;
-            }
-            if let Some(&(_, last)) = ends.last() {
-                let f = toks.get(last + 1);
-                let g = toks.get(last + 2);
-                let qualified =
-                    f.is_some_and(|t| t.kind == Kind::Ident) && punct(g, b':') && punct(toks.get(last + 3), b':');
-                // `MACRO Type name(` / `MACRO Type* name`: a type name cannot
-                // be followed by another type name.
-                let two_types = f.is_some_and(|t| t.kind == Kind::Ident)
-                    && !ident_in(f, &["const", "volatile"])
-                    && (g.is_some_and(|t| t.kind == Kind::Ident)
-                        || ((punct(g, b'*') || punct(g, b'&') || punct(g, b'<'))
-                            && toks.get(last + 3).is_some_and(|t| t.kind == Kind::Ident))
-                        // `LUA_API lua_State *(lua_newstate) (…)`.
-                        || ((punct(g, b'*') || punct(g, b'&'))
-                            && punct(toks.get(last + 3), b'(')
-                            && toks.get(last + 4).is_some_and(|t| t.kind == Kind::Ident)
-                            && punct(toks.get(last + 5), b')')));
-                // `MACRO Name(args) [noexcept] : init(…)`: a constructor; also
-                // `MACRO1 MACRO2 Name(args)` (two macros cannot be a type and
-                // a name).
-                let constructor = f.is_some_and(|t| t.kind == Kind::Ident)
-                    && punct(g, b'(')
-                    && (ends.len() >= 2
-                        || matching_paren(&toks, last + 2).is_some_and(|c| {
-                            let mut k = c + 1;
-                            while ident_in(toks.get(k), &["noexcept", "const", "override"]) {
-                                k += 1;
-                                if punct(toks.get(k), b'(') {
-                                    match matching_paren(&toks, k) {
-                                        Some(e) => k = e + 1,
-                                        None => return false,
-                                    }
-                                }
-                            }
-                            punct(toks.get(k), b':') && !punct(toks.get(k + 1), b':')
-                        }));
-                // `MACRO(args)[i] = x;` is a subscripted call, unless an
-                // attribute follows (`MACRO(args) [[nodiscard]]`).
-                let with_args = ends.last().is_some_and(|&(a, b)| a != b);
-                let follows = ident_in(f, FOLLOWERS)
-                    || (is_ident(f, "const") && ident_in(g, FUNDAMENTAL))
-                    || punct(f, b'~')
-                    || (punct(f, b'[') && (!with_args || punct(g, b'[')))
-                    || qualified
-                    || two_types
-                    || constructor;
-                if follows {
-                    for &(a, b) in &ends {
-                        mask_range(&mut masked, &mut out, a, b);
-                    }
-                    continue;
-                }
-            }
-        }
-
-        // Rule 5: a statement-like macro call at declaration level, alone at
-        // the end of its line (`FMT_PRAGMA_GCC(push_options)`).
-        let decl_start = prev_masked
-            || prev.is_none_or(|p| matches!(p.kind, Kind::Directive | Kind::Punct(b';' | b'{' | b'}' | b':')));
-        if decl_start
-            && levels[i]
-            && punct(next, b'(')
-            && let Some(close) = matching_paren(&toks, i + 1)
-        {
-            let after = toks.get(close + 1);
-            let line_end = after.is_none_or(|a| a.line > toks[close].line || a.kind == Kind::Directive);
-            let after_ok =
-                after.is_none_or(|a| matches!(a.kind, Kind::Ident | Kind::Directive | Kind::Punct(b'~' | b'[' | b'}')));
-            // `FMT_TYPE_CONSTANT(int, int_type);`: types as arguments, which
-            // no call expression can have.
-            let typed_args = punct(after, b';')
-                && (i + 2..close).any(|k| {
-                    ident_in(Some(&toks[k]), FUNDAMENTAL)
-                        || ident_in(Some(&toks[k]), &["const", "struct", "class", "typename"])
-                });
-            if (line_end && after_ok) || typed_args {
-                mask_range(&mut masked, &mut out, i, close);
-                continue;
-            }
-        }
-
-        // Rule 8: an attribute macro after a parameter name
-        // (`const T& x FMT_LIFETIMEBOUND, int y`).
-        if (punct(next, b',') || punct(next, b')'))
-            && prev.is_some_and(|p| p.kind == Kind::Ident || p.kind == Kind::Punct(b']'))
-            && !ident_in(prev, NOT_A_NAME)
-            && levels[i]
-        {
-            mask_range(&mut masked, &mut out, i, i);
-            continue;
-        }
-
-        // Rule 9: a macro before a parameter's type and name
-        // (`f(EV_P_ ev_io *w)`, `f(UNUSED_ATTR int x)`).
-        if (punct(prev, b'(') || punct(prev, b','))
-            && levels[i]
-            && next.is_some_and(|t| t.kind == Kind::Ident)
-            && toks.get(i + 2).is_some_and(|t| t.kind == Kind::Ident || matches!(t.kind, Kind::Punct(b'*' | b'&')))
-            && !punct(toks.get(i + 2), b'(')
-        {
-            mask_range(&mut masked, &mut out, i, i);
-            continue;
-        }
-
-        // Rule 4: trailing specifier after a parameter list (not a cast:
-        // the `(` must follow a name).
-        let after_params = punct(prev, b')')
-            && matching_open(&toks, i - 1).is_some_and(|o| {
-                (o > 0
-                    && toks[o - 1].kind == Kind::Ident
-                    && !ident_in(
-                        Some(&toks[o - 1]),
-                        &["if", "while", "for", "switch", "return", "sizeof", "alignof", "decltype", "catch", "case"],
-                    ))
-                    // `operator=(…)`, `operator()(…)`.
-                    || (o.saturating_sub(3)..o).any(|k| is_ident(toks.get(k), "operator"))
-            });
-        // A qualifier of a method (`f() const MACRO`), not of a pointer
-        // (`const char* const NAME = …` declares `NAME`).
-        let qualifier = ident_in(prev, &["const", "override", "noexcept"])
-            && i >= 2
-            && (punct(toks.get(i - 2), b')') || ident_in(toks.get(i - 2), &["const", "override", "noexcept"]));
-        let after_decl = after_params || qualifier || prev_masked;
-        if after_decl {
-            let mut j = i;
-            // `GTEST_LOCK_EXCLUDED_(mutex_)`: a trailing macro with arguments.
-            if punct(next, b'(')
-                && let Some(close) = matching_paren(&toks, i + 1)
-            {
-                j = close;
-            }
-            while macro_tok(toks.get(j + 1), 3, true) {
-                j += 1;
-            }
-            let f = toks.get(j + 1);
-            let follows = punct(f, b';')
-                || punct(f, b'{')
-                || punct(f, b'=')
-                || punct(f, b':')
-                || (punct(f, b'-') && punct(toks.get(j + 2), b'>'))
-                || ident_in(f, &["const", "override", "final"]);
-            if follows && (!punct(next, b'(') || j > i) {
-                mask_range(&mut masked, &mut out, i, j);
+        // In order; the first rule that masks the token wins.
+        let rules: [Rule<'a>; 7] = [
+            Self::if_constexpr,
+            Self::template_parameter,
+            Self::leading_specifiers,
+            Self::declaration_call,
+            Self::parameter_attribute,
+            Self::parameter_prefix,
+            Self::trailing_specifiers,
+        ];
+        for rule in rules {
+            if rule(self, &here) {
+                return;
             }
         }
     }
-    out.sort_unstable();
-    Plan { blanks: out, conditions }
+
+    /// A preprocessor line: its `#if` condition, a null directive, block
+    /// comments inside it, `#ifdef __cplusplus` braces.
+    fn directive(&mut self, i: usize) {
+        let t = &self.view.toks[i];
+        if let Some(range) = include_test_condition(self.view.src, t) {
+            self.conditions.push(range);
+        }
+        let line = self.view.text(t);
+        // The null directive (`#` alone) is valid C the grammars reject.
+        if line[1..].iter().all(|b| b.is_ascii_whitespace() || *b == b'\\') {
+            self.blanks.push((t.start, t.end));
+            return;
+        }
+        self.blanks.extend(inner_block_comments(line).into_iter().map(|(a, b)| (t.start + a, t.start + b)));
+        if is_cplusplus_test(line) {
+            self.cplusplus_braces(i);
+        }
+    }
+
+    /// `#ifdef __cplusplus` / `extern "C" {` / `#endif` and the matching
+    /// `}`: braces the grammar sees unbalanced. `i` is the `#ifdef`.
+    fn cplusplus_braces(&mut self, i: usize) {
+        let view = self.view;
+        let toks = view.toks;
+        let body: Vec<usize> = (i + 1..toks.len()).take_while(|&k| toks[k].kind != Kind::Directive).collect();
+        let closes = body.last().and_then(|&k| toks.get(k + 1)).is_some_and(|t| t.kind == Kind::Directive);
+        let open =
+            body.len() == 2 && view.is_ident(Some(&toks[body[0]]), "extern") && punct(Some(&toks[body[1]]), b'{');
+        let close = body.len() == 1 && punct(Some(&toks[body[0]]), b'}');
+        if closes && (open || close) {
+            self.mask_range(body[0], body[body.len() - 1]);
+        }
+    }
+
+    /// Rule 2: `class` / `struct` / `union` MACRO… name `{`.
+    fn class_head(&mut self, i: usize) {
+        let view = self.view;
+        let j = view.class_macros_end(i + 1);
+        if j == i + 1 {
+            return;
+        }
+        let after = view.get(j + 1);
+        if punct(after, b'{') || punct(after, b':') || punct(after, b'<') || view.is_ident(after, "final") {
+            self.mask_range(i + 1, j - 1);
+        }
+    }
+
+    /// Rule 1: a macro alone on its line, between declarations.
+    fn bare_line(&mut self, here: &Here<'a>) -> bool {
+        let tok = &self.view.toks[here.i];
+        if !is_macro(self.view.text(tok), 3) {
+            return false;
+        }
+        let alone = here.prev.is_none_or(|p| p.line < tok.line || p.kind == Kind::Directive)
+            && here.next.is_none_or(|n| n.line > tok.line);
+        let prev_ok = here.prev_masked
+            || here.prev.is_none_or(|p| matches!(p.kind, Kind::Directive | Kind::Punct(b';' | b'{' | b'}' | b':')));
+        let next_ok =
+            here.next.is_none_or(|n| matches!(n.kind, Kind::Ident | Kind::Directive | Kind::Punct(b'~' | b'[')));
+        let hit = alone && prev_ok && next_ok;
+        if hit {
+            self.mask_range(here.i, here.i);
+        }
+        hit
+    }
+
+    /// Rule 7: `if MACRO (cond)` (a macro for `constexpr`), also with
+    /// arguments: `if MACRO(x) (cond)`.
+    fn if_constexpr(&mut self, here: &Here<'a>) -> bool {
+        let view = self.view;
+        if !view.is_ident(here.prev, "if") || !punct(here.next, b'(') {
+            return false;
+        }
+        let end = match matching_paren(view.toks, here.i + 1) {
+            Some(c) if punct(view.get(c + 1), b'(') => c,
+            _ => here.i,
+        };
+        self.mask_range(here.i, end);
+        true
+    }
+
+    /// Rule 6: an enable-if macro in a template parameter list, masked with
+    /// the comma before it (or after it, first in the list).
+    fn template_parameter(&mut self, here: &Here<'a>) -> bool {
+        let view = self.view;
+        let (after_comma, after_angle) = (punct(here.prev, b','), punct(here.prev, b'<'));
+        if !(after_comma || after_angle) || !punct(here.next, b'(') {
+            return false;
+        }
+        let Some(close) = matching_paren(view.toks, here.i + 1) else { return false };
+        let before_comma = punct(view.get(close + 1), b',');
+        if !(punct(view.get(close + 1), b'>') || before_comma) || !in_template_head(view.toks, view.src, here.i) {
+            return false;
+        }
+        let from = if after_comma { here.i - 1 } else { here.i };
+        let to = if after_angle && before_comma { close + 1 } else { close };
+        self.mask_range(from, to);
+        true
+    }
+
+    /// Rule 3: leading specifier macros, possibly a chain, possibly with
+    /// an argument list.
+    fn leading_specifiers(&mut self, here: &Here<'a>) -> bool {
+        let view = self.view;
+        // `public:` too, but not `ns::`.
+        let after_label = punct(here.prev, b':') && !(here.i >= 2 && punct(view.get(here.i - 2), b':'));
+        let start_ok = here.prev_masked
+            || after_label
+            || here.prev.is_none_or(|p| {
+                matches!(p.kind, Kind::Directive | Kind::Punct(b';' | b'{' | b'}' | b'>' | b']'))
+                    || view.ident_in(Some(p), SPECIFIERS)
+            });
+        if !start_ok {
+            return false;
+        }
+        let ends = view.macro_chain(here.i);
+        if !view.specifiers_follow(&ends) {
+            return false;
+        }
+        for (a, b) in ends {
+            self.mask_range(a, b);
+        }
+        true
+    }
+
+    /// Rule 5: a statement-like macro call at declaration level, alone at
+    /// the end of its line (`FMT_PRAGMA_GCC(push_options)`).
+    fn declaration_call(&mut self, here: &Here<'a>) -> bool {
+        let view = self.view;
+        let decl_start = here.prev_masked
+            || here.prev.is_none_or(|p| matches!(p.kind, Kind::Directive | Kind::Punct(b';' | b'{' | b'}' | b':')));
+        if !decl_start || !self.levels[here.i] || !punct(here.next, b'(') {
+            return false;
+        }
+        let Some(close) = matching_paren(view.toks, here.i + 1) else { return false };
+        if !view.call_ends_line(close) && !view.typed_args(here.i + 1, close) {
+            return false;
+        }
+        self.mask_range(here.i, close);
+        true
+    }
+
+    /// Rule 8: an attribute macro after a parameter name
+    /// (`const T& x FMT_LIFETIMEBOUND, int y`).
+    fn parameter_attribute(&mut self, here: &Here<'a>) -> bool {
+        let hit = (punct(here.next, b',') || punct(here.next, b')'))
+            && here.prev.is_some_and(|p| p.kind == Kind::Ident || p.kind == Kind::Punct(b']'))
+            && !self.view.ident_in(here.prev, NOT_A_NAME)
+            && self.levels[here.i];
+        if hit {
+            self.mask_range(here.i, here.i);
+        }
+        hit
+    }
+
+    /// Rule 9: a macro before a parameter's type and name
+    /// (`f(EV_P_ ev_io *w)`, `f(UNUSED_ATTR int x)`).
+    fn parameter_prefix(&mut self, here: &Here<'a>) -> bool {
+        let after = self.view.get(here.i + 2);
+        let hit = (punct(here.prev, b'(') || punct(here.prev, b','))
+            && self.levels[here.i]
+            && ident(here.next)
+            && after.is_some_and(|t| t.kind == Kind::Ident || matches!(t.kind, Kind::Punct(b'*' | b'&')))
+            && !punct(after, b'(');
+        if hit {
+            self.mask_range(here.i, here.i);
+        }
+        hit
+    }
+
+    /// Rule 4: a trailing specifier after a parameter list or a method
+    /// qualifier.
+    fn trailing_specifiers(&mut self, here: &Here<'a>) -> bool {
+        let view = self.view;
+        let i = here.i;
+        if !(view.after_parameter_list(i) || view.after_method_qualifier(i) || here.prev_masked) {
+            return false;
+        }
+        let j = view.trailing_end(i);
+        let hit = view.ends_declarator(j) && (!punct(here.next, b'(') || j > i);
+        if hit {
+            self.mask_range(i, j);
+        }
+        hit
+    }
+}
+
+/// Block comments inside a directive line followed by code on it
+/// (`#define F(x) (x) /* … */ \`): they break the grammar's macro bodies.
+/// A trailing one stays: blanked, it would leave spaces where the grammar
+/// wants the line end right after a valueless `#define X`.
+fn inner_block_comments(line: &[u8]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut k = 0;
+    while let Some(open) = line[k..].windows(2).position(|w| w == b"/*") {
+        let a = k + open;
+        let Some(close) = line[a + 2..].windows(2).position(|w| w == b"*/") else { break };
+        let b = a + 2 + close + 2;
+        if !line[b..].iter().all(|c| c.is_ascii_whitespace()) {
+            out.push((a, b));
+        }
+        k = b;
+    }
+    out
 }
 
 /// Directive kind of a preprocessor line: `if` (also `ifdef` / `ifndef`),
@@ -874,22 +1093,28 @@ pub(crate) fn mask(src: &[u8]) -> Option<Vec<u8>> {
         }
     }
     for (a, b) in plan.conditions {
-        let mut first = true;
-        for k in a..b {
-            let c = out[k];
-            let continuation = c == b'\\' && matches!(out.get(k + 1), Some(b'\n' | b'\r'));
-            if matches!(c, b'\n' | b'\r') || continuation {
-                continue;
-            }
-            if first && !c.is_ascii_whitespace() {
-                out[k] = b'1';
-                first = false;
-            } else {
-                out[k] = b' ';
-            }
-        }
+        replace_condition(&mut out, a, b);
     }
     Some(out)
+}
+
+/// Replaces the condition `a..b` of an `#if` line by `1` and spaces,
+/// keeping its line ends and `\` continuations.
+fn replace_condition(out: &mut [u8], a: usize, b: usize) {
+    let mut first = true;
+    for k in a..b {
+        let c = out[k];
+        let continuation = c == b'\\' && matches!(out.get(k + 1), Some(b'\n' | b'\r'));
+        if matches!(c, b'\n' | b'\r') || continuation {
+            continue;
+        }
+        out[k] = if first && !c.is_ascii_whitespace() {
+            first = false;
+            b'1'
+        } else {
+            b' '
+        };
+    }
 }
 
 #[cfg(test)]
