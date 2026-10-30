@@ -2388,7 +2388,7 @@ dependencies = [
  "rueca-extract",
  "rueca-model",
  "saphyr",
- "saphyr-parser",
+ "saphyr-parser 0.2.2",
  "serde_json",
  "toml",
  "toml_edit",
@@ -2577,14 +2577,14 @@ dependencies = [
 
 [[package]]
 name = "saphyr"
-version = "0.2.2"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0662b098655e5e779a80041b640702e341cf3ede4560ecc103cf0ef098c8e33e"
+checksum = "beb4eb8711f1bca00b6161efa715419032964f6ca210f750d2f35a533ea5fc2d"
 dependencies = [
  "encoding_rs 0.7.2",
  "hashlink",
  "ordered-float",
- "saphyr-parser",
+ "saphyr-parser 0.3.3",
  "thiserror",
 ]
 
@@ -2593,6 +2593,16 @@ name = "saphyr-parser"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c6220586c3dacac54bfddec87af86ddb31862d29666e7e35cf4baf70a25d387"
+dependencies = [
+ "arraydeque",
+ "thiserror",
+]
+
+[[package]]
+name = "saphyr-parser"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48cf5a82d41247a625f040af08e91008fec945bce3b0bffba992c44af092caa2"
 dependencies = [
  "arraydeque",
  "thiserror",
