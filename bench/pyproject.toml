@@ -19,7 +19,7 @@ dependencies = [
     "python-hcl2>=8.1.4,<9",
     "tomli-w>=1.0",
     "numpy>=2.0,<3",
-    "tiktoken>=0.12,<0.13",
+    "tiktoken>=0.12,<0.15",
 ]
 
 [project.scripts]
