@@ -1047,7 +1047,7 @@ sha256 = "0e0bf9355f892ad74ae98d4e1c404f39fd6654a8e351ee3e6ab162e4a64cd3ad"
 columns = ["instance_id", "repo", "base_commit", "patch", "problem_statement", "license"]
 card_license = "CC-BY-4.0"
 citation = "Badertdinov et al., SWE-rebench (Nebius, 2025); SWE-rebench V2 (2026)"
-role = "S1 PHP issues and patches on small repositories (automatically mined, LLM-screened)"
+role = "S1 PHP issues and patches on small repositories, and S1 calibration repositories (automatically mined, LLM-screened)"
 # keep only rows the dataset's own LLM screen rated well specified (code A)
 row_filter = { "meta.llm_metadata.code" = ["A"] }
 filter_repos = true  # 38k rows, 20 languages: read only the S1 repositories sourced from it
@@ -1071,17 +1071,70 @@ role = "S1 C++ issues and patches (fmt, nlohmann/json, Catch2, simdjson)"
 "cpp/simdjson__simdjson_dataset.jsonl" = "0a7aba551a76754fd088c5eccbab4caae025bdf6cdae2faa05a9f7b5f11994c2"
 
 # Multi-SWE-bench Rust (same dataset and revision as the C++ files): the
-# Rust calibration split (tokio-rs/bytes, every instance).
+# Rust calibration split (tokio-rs/bytes, tokio-rs/tracing, sharkdp/fd).
 [datasets.multi_swe_bench_rust]
 hf = "ByteDance-Seed/Multi-SWE-bench"
 revision = "56ff018c04a38e27ada1e9d0a6d5839a51f88f0d"
 format = "multi_swe_bench"
 card_license = "CC0 (dataset README; upstream repository licenses apply)"
 citation = "Zan et al., Multi-SWE-bench: A Multilingual Benchmark for Issue Resolving (2025)"
-role = "S1 Rust calibration issues and patches (tokio-rs/bytes)"
+role = "S1 Rust calibration issues and patches (tokio-rs/bytes, tokio-rs/tracing, sharkdp/fd)"
 
 [datasets.multi_swe_bench_rust.files]
 "rust/tokio-rs__bytes_dataset.jsonl" = "9516b916eb11556a27a62d79296829c821b19873fea0a9f8f02d52c043f855a0"
+"rust/tokio-rs__tracing_dataset.jsonl" = "b392ef573d20e1d96c0fbc6695779db104649fbd4a3002bb210264e61ac9a63a"
+"rust/sharkdp__fd_dataset.jsonl" = "3e2b3862f7b17a39aa27bf03458d27204af0a5e72c71f1e6e19b2bdd52ef45ea"
+
+# Multi-SWE-bench C, Go, Java and JS (same dataset and revision): calibration
+# split only (RFC 0007 §7.6: the split grows to 10–15 instances per
+# language), on repositories disjoint from every gated set. The JSONL files
+# of the gated repositories (jq, dubbo, gson, axios, express) are not used.
+[datasets.multi_swe_bench_c]
+hf = "ByteDance-Seed/Multi-SWE-bench"
+revision = "56ff018c04a38e27ada1e9d0a6d5839a51f88f0d"
+format = "multi_swe_bench"
+card_license = "CC0 (dataset README; upstream repository licenses apply)"
+citation = "Zan et al., Multi-SWE-bench: A Multilingual Benchmark for Issue Resolving (2025)"
+role = "S1 C calibration issues and patches (facebook/zstd, ponylang/ponyc)"
+
+[datasets.multi_swe_bench_c.files]
+"c/facebook__zstd_dataset.jsonl" = "689b60bfbe9b1c9558ac345468b54c40fbb30748069caa1a92ca747773610e7b"
+"c/ponylang__ponyc_dataset.jsonl" = "cddd6e471bd8a1ad9e9971d8a16ca5a0e9f002789cefc5a40ee025f8875122ee"
+
+[datasets.multi_swe_bench_go]
+hf = "ByteDance-Seed/Multi-SWE-bench"
+revision = "56ff018c04a38e27ada1e9d0a6d5839a51f88f0d"
+format = "multi_swe_bench"
+card_license = "CC0 (dataset README; upstream repository licenses apply)"
+citation = "Zan et al., Multi-SWE-bench: A Multilingual Benchmark for Issue Resolving (2025)"
+role = "S1 Go calibration issues and patches (grpc/grpc-go, zeromicro/go-zero)"
+
+[datasets.multi_swe_bench_go.files]
+"go/grpc__grpc-go_dataset.jsonl" = "cd8984b884679c44f71c2af958d74c692f4a1feb6ec68e74b0ddc312526b4e13"
+"go/zeromicro__go-zero_dataset.jsonl" = "6047e4f92571292d8fa77bb866b875930c2aa600f46d408eb02bfc7ed3e48e0f"
+
+[datasets.multi_swe_bench_java]
+hf = "ByteDance-Seed/Multi-SWE-bench"
+revision = "56ff018c04a38e27ada1e9d0a6d5839a51f88f0d"
+format = "multi_swe_bench"
+card_license = "CC0 (dataset README; upstream repository licenses apply)"
+citation = "Zan et al., Multi-SWE-bench: A Multilingual Benchmark for Issue Resolving (2025)"
+role = "S1 Java calibration issues and patches (fasterxml/jackson-core, mockito/mockito)"
+
+[datasets.multi_swe_bench_java.files]
+"java/fasterxml__jackson-core_dataset.jsonl" = "21f1f1350dcaf687840f6cf0dce4198c7958cc66cd6ab6722a0dd3a18860147e"
+"java/mockito__mockito_dataset.jsonl" = "ba9658d470f9365c764342cb41af899db0ab616c18887498e8db038bea7669bf"
+
+[datasets.multi_swe_bench_js]
+hf = "ByteDance-Seed/Multi-SWE-bench"
+revision = "56ff018c04a38e27ada1e9d0a6d5839a51f88f0d"
+format = "multi_swe_bench"
+card_license = "CC0 (dataset README; upstream repository licenses apply)"
+citation = "Zan et al., Multi-SWE-bench: A Multilingual Benchmark for Issue Resolving (2025)"
+role = "S1 TS/JS calibration issues and patches (iamkun/dayjs)"
+
+[datasets.multi_swe_bench_js.files]
+"js/iamkun__dayjs_dataset.jsonl" = "2385ad31059b7448d35aa2dba38c03c2cae9ed09f6e794d299649a22bef71c71"
 
 # Assembled localization gold (RFC 0002 §8/§9). Used for gold labels only;
 # issue text / patches still come from the source dataset of each instance.
@@ -1152,11 +1205,29 @@ language = "python"
 quota = 10
 sources = ["swe_bench_verified", "swe_bench_lite"]
 
-# Calibration split (RFC 0004 §7.7): SWE-rebench V2 rows (LLM screen code A)
-# on repositories disjoint from the gated ones, here and for every language below.
+# Calibration split (RFC 0004 §7.7; grown to 10–15 instances per language
+# by RFC 0007 §7.6): SWE-rebench V2 rows (LLM screen code A), Multi-SWE-bench
+# and spare SWE-PolyBench repositories, on repositories disjoint from every
+# gated set (S1, S3, data), here and for every language below. Python
+# calibration also avoids the SWE-bench Lite repositories (the Lite
+# diagnostic is never tuned on).
 
 [[s1.repos]]
 repo = "pallets/click"
+language = "python"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "yt-dlp/yt-dlp"
+language = "python"
+quota = 5
+sources = ["swe_polybench"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "Python-Markdown/markdown"
 language = "python"
 quota = 5
 sources = ["swe_rebench_v2"]
@@ -1195,6 +1266,20 @@ sources = ["swe_bench_multilingual"]
 [[s1.repos]]
 repo = "yargs/yargs"
 language = "javascript"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "iamkun/dayjs"
+language = "javascript"
+quota = 5
+sources = ["multi_swe_bench_js"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "sindresorhus/got"
+language = "typescript"
 quota = 5
 sources = ["swe_rebench_v2"]
 split = "calibration"
@@ -1251,6 +1336,20 @@ quota = 5
 sources = ["swe_rebench_v2"]
 split = "calibration"
 
+[[s1.repos]]
+repo = "CuyZ/Valinor"
+language = "php"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "phpactor/phpactor"
+language = "php"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
 # Go: every SWE-bench Multilingual Go instance.
 
 [[s1.repos]]
@@ -1288,6 +1387,20 @@ repo = "benhoyt/goawk"
 language = "go"
 quota = 5
 sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "grpc/grpc-go"
+language = "go"
+quota = 5
+sources = ["multi_swe_bench_go"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "zeromicro/go-zero"
+language = "go"
+quota = 5
+sources = ["multi_swe_bench_go"]
 split = "calibration"
 
 # Java: SWE-PolyBench (assembled modified_nodes gold) on small/medium
@@ -1331,6 +1444,20 @@ quota = 5
 sources = ["swe_rebench_v2"]
 split = "calibration"
 
+[[s1.repos]]
+repo = "fasterxml/jackson-core"
+language = "java"
+quota = 5
+sources = ["multi_swe_bench_java"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "mockito/mockito"
+language = "java"
+quota = 5
+sources = ["multi_swe_bench_java"]
+split = "calibration"
+
 # C: every SWE-bench Multilingual C instance.
 
 [[s1.repos]]
@@ -1362,6 +1489,20 @@ repo = "nanomsg/nng"
 language = "c"
 quota = 5
 sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "facebook/zstd"
+language = "c"
+quota = 5
+sources = ["multi_swe_bench_c"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "ponylang/ponyc"
+language = "c"
+quota = 5
+sources = ["multi_swe_bench_c"]
 split = "calibration"
 
 # C++: every SWE-bench Multilingual C++ instance (12), supplemented by
@@ -1397,6 +1538,20 @@ sources = ["multi_swe_bench_cpp"]
 repo = "randombit/botan"
 language = "cpp"
 quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "zeek/zeek"
+language = "cpp"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "ccache/ccache"
+language = "cpp"
+quota = 3
 sources = ["swe_rebench_v2"]
 split = "calibration"
 
@@ -1448,6 +1603,20 @@ sources = ["swe_bench_multilingual"]
 
 [[s1.repos]]
 repo = "tokio-rs/bytes"
+language = "rust"
+quota = 5
+sources = ["multi_swe_bench_rust"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "tokio-rs/tracing"
+language = "rust"
+quota = 5
+sources = ["multi_swe_bench_rust"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "sharkdp/fd"
 language = "rust"
 quota = 5
 sources = ["multi_swe_bench_rust"]
@@ -2182,6 +2351,86 @@ dataset = "swe_rebench_v2"
 assets = []
 
 [[s1.instances]]
+id = "yt-dlp__yt-dlp-5195"
+repo = "yt-dlp/yt-dlp"
+language = "python"
+base_commit = "2c98d998181c81ee49908be03c031204fd66d03d"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes", "contextbench"]
+
+[[s1.instances]]
+id = "yt-dlp__yt-dlp-10390"
+repo = "yt-dlp/yt-dlp"
+language = "python"
+base_commit = "6c056ea7aeb03660281653a9668547f2548f194f"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes", "contextbench"]
+
+[[s1.instances]]
+id = "yt-dlp__yt-dlp-4841"
+repo = "yt-dlp/yt-dlp"
+language = "python"
+base_commit = "07a1250e0e90515ff8142161536f9dafa6eaba1b"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes", "contextbench"]
+
+[[s1.instances]]
+id = "yt-dlp__yt-dlp-9862"
+repo = "yt-dlp/yt-dlp"
+language = "python"
+base_commit = "39bc699d2e6e39b26af028cc09a7b1d460d00e31"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes", "contextbench"]
+
+[[s1.instances]]
+id = "yt-dlp__yt-dlp-5933"
+repo = "yt-dlp/yt-dlp"
+language = "python"
+base_commit = "f079514957401f49db30ec4cd25f8c8246b0c1de"
+dataset = "swe_polybench"
+assets = ["swe_polybench:modified_nodes", "contextbench"]
+
+[[s1.instances]]
+id = "python-markdown__markdown-1361"
+repo = "Python-Markdown/markdown"
+language = "python"
+base_commit = "d60c16f712e5caf806e3c0ed40eac385a9d2e18a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "python-markdown__markdown-984"
+repo = "Python-Markdown/markdown"
+language = "python"
+base_commit = "a06659b62209de98cbc23715addb2b768a245788"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "python-markdown__markdown-1225"
+repo = "Python-Markdown/markdown"
+language = "python"
+base_commit = "efec51ac92059fc5b72f08832b481919a3ded6f3"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "python-markdown__markdown-1303"
+repo = "Python-Markdown/markdown"
+language = "python"
+base_commit = "e97ffebc9d22f6dc84087caaf11978d4548c617c"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "python-markdown__markdown-1038"
+repo = "Python-Markdown/markdown"
+language = "python"
+base_commit = "e02ed390666930ce8640d4cebcac51059e9a34d8"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
 id = "tailwindlabs__tailwindcss-553"
 repo = "tailwindlabs/tailwindcss"
 language = "typescript"
@@ -2550,6 +2799,86 @@ dataset = "swe_rebench_v2"
 assets = []
 
 [[s1.instances]]
+id = "iamkun__dayjs-938"
+repo = "iamkun/dayjs"
+language = "javascript"
+base_commit = "72cdb20552dd5af6c2295bf52075ba19cceb000f"
+dataset = "multi_swe_bench_js"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "iamkun__dayjs-734"
+repo = "iamkun/dayjs"
+language = "javascript"
+base_commit = "9ad2e47e0569b23991bb0d5578f49c792c12df08"
+dataset = "multi_swe_bench_js"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "iamkun__dayjs-1954"
+repo = "iamkun/dayjs"
+language = "javascript"
+base_commit = "74e82b9da5ec8b90361fc27ac7c8b63faf354502"
+dataset = "multi_swe_bench_js"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "iamkun__dayjs-1319"
+repo = "iamkun/dayjs"
+language = "javascript"
+base_commit = "cc993f0a8d18d33c0137616b80adc86127ba3424"
+dataset = "multi_swe_bench_js"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "iamkun__dayjs-882"
+repo = "iamkun/dayjs"
+language = "javascript"
+base_commit = "bcea06730da2d19ddbad844de3557ee077af821c"
+dataset = "multi_swe_bench_js"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sindresorhus__got-277"
+repo = "sindresorhus/got"
+language = "typescript"
+base_commit = "39bf82825133f85f6c33b0822eda3910f8ba99a5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "sindresorhus__got-301"
+repo = "sindresorhus/got"
+language = "typescript"
+base_commit = "8b4d06ef31942721157d437f4135fc84535ba7ba"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "sindresorhus__got-608"
+repo = "sindresorhus/got"
+language = "typescript"
+base_commit = "7ae6939f920d1174b181063ce61056a8a6def4bc"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "sindresorhus__got-441"
+repo = "sindresorhus/got"
+language = "typescript"
+base_commit = "841ab63a549de3e5297ae0bc962808d541259555"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "sindresorhus__got-652"
+repo = "sindresorhus/got"
+language = "typescript"
+base_commit = "50fdab303cb2a6b34383de13e5e0ece9ceaf80c9"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
 id = "briannesbitt__carbon-3103"
 repo = "briannesbitt/carbon"
 language = "php"
@@ -2906,6 +3235,86 @@ id = "jsonmapper__jsonmapper-61"
 repo = "JsonMapper/JsonMapper"
 language = "php"
 base_commit = "fce54a361adf03f9c5d6ca8fbe1567f41cb4d9c3"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cuyz__valinor-490"
+repo = "CuyZ/Valinor"
+language = "php"
+base_commit = "1b8efa1a90e46107e25079ce520f08642ccd65c6"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cuyz__valinor-504"
+repo = "CuyZ/Valinor"
+language = "php"
+base_commit = "19470614fa99b97341975a44fdf034ff6e9a6f6d"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cuyz__valinor-521"
+repo = "CuyZ/Valinor"
+language = "php"
+base_commit = "6942755865f91c80af8ea97fde2faa390478a6b8"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cuyz__valinor-498"
+repo = "CuyZ/Valinor"
+language = "php"
+base_commit = "f73158657c8e876e8b3142d6064878b6af1c3525"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cuyz__valinor-512"
+repo = "CuyZ/Valinor"
+language = "php"
+base_commit = "4e04201f2b52f0054ac18bce6ea50b5440645351"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "phpactor__phpactor-1917"
+repo = "phpactor/phpactor"
+language = "php"
+base_commit = "a516e6410243d863424096f4968d9d0c1f4ced1d"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "phpactor__phpactor-2699"
+repo = "phpactor/phpactor"
+language = "php"
+base_commit = "910d76487709cdef5f5e1f7ba8b482f3cd4e7697"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "phpactor__phpactor-1977"
+repo = "phpactor/phpactor"
+language = "php"
+base_commit = "0370a8e67e7c440e713bfa310737faece742b11e"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "phpactor__phpactor-2310"
+repo = "phpactor/phpactor"
+language = "php"
+base_commit = "bdd1dfbc8568918cb3b368b7c83afaf457bd6ced"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "phpactor__phpactor-2052"
+repo = "phpactor/phpactor"
+language = "php"
+base_commit = "a33a0ed52247ebdb8f13046d883e00899c2ae105"
 dataset = "swe_rebench_v2"
 assets = []
 
@@ -3278,6 +3687,86 @@ dataset = "swe_rebench_v2"
 assets = []
 
 [[s1.instances]]
+id = "grpc__grpc-go-2932"
+repo = "grpc/grpc-go"
+language = "go"
+base_commit = "61f27c14152c7551d5cc657c31e81a3597c82e48"
+dataset = "multi_swe_bench_go"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "grpc__grpc-go-2996"
+repo = "grpc/grpc-go"
+language = "go"
+base_commit = "45bd2846a34b039c5f1e69b7202f118687156b34"
+dataset = "multi_swe_bench_go"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "grpc__grpc-go-2951"
+repo = "grpc/grpc-go"
+language = "go"
+base_commit = "aa4eae656c8137762f4cb0065e80178b77acf2dc"
+dataset = "multi_swe_bench_go"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "grpc__grpc-go-3201"
+repo = "grpc/grpc-go"
+language = "go"
+base_commit = "7c1d326729dc9b0a07135f8902ddcc050ff8ab64"
+dataset = "multi_swe_bench_go"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "grpc__grpc-go-2371"
+repo = "grpc/grpc-go"
+language = "go"
+base_commit = "c1fc9faff6114b92549bd2145ac77cabff68740d"
+dataset = "multi_swe_bench_go"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "zeromicro__go-zero-1969"
+repo = "zeromicro/go-zero"
+language = "go"
+base_commit = "af05219b70c5e18542ebb499b18a1dff6ffacc6d"
+dataset = "multi_swe_bench_go"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "zeromicro__go-zero-2463"
+repo = "zeromicro/go-zero"
+language = "go"
+base_commit = "63cfe60f1a7583865757780ebfe2a5309a542134"
+dataset = "multi_swe_bench_go"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "zeromicro__go-zero-1783"
+repo = "zeromicro/go-zero"
+language = "go"
+base_commit = "ba8ac974aaa16ebcf00f17c653d131a3b6d74a30"
+dataset = "multi_swe_bench_go"
+assets = []
+
+[[s1.instances]]
+id = "zeromicro__go-zero-1821"
+repo = "zeromicro/go-zero"
+language = "go"
+base_commit = "ec3e02624c0b6ea726b34de08d9192d4edaacb6b"
+dataset = "multi_swe_bench_go"
+assets = []
+
+[[s1.instances]]
+id = "zeromicro__go-zero-1907"
+repo = "zeromicro/go-zero"
+language = "go"
+base_commit = "95282edb78f9ea1f70ce210de8b4fc58c636c458"
+dataset = "multi_swe_bench_go"
+assets = []
+
+[[s1.instances]]
 id = "google__gson-1703"
 repo = "google/gson"
 language = "java"
@@ -3638,6 +4127,86 @@ dataset = "swe_rebench_v2"
 assets = []
 
 [[s1.instances]]
+id = "fasterxml__jackson-core-891"
+repo = "fasterxml/jackson-core"
+language = "java"
+base_commit = "287ec3223b039f24d2db99809ae04a333b287435"
+dataset = "multi_swe_bench_java"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fasterxml__jackson-core-964"
+repo = "fasterxml/jackson-core"
+language = "java"
+base_commit = "2b53cce78c6ca037938e6f26d6935c5f9b8c07dd"
+dataset = "multi_swe_bench_java"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fasterxml__jackson-core-566"
+repo = "fasterxml/jackson-core"
+language = "java"
+base_commit = "3b20a1c603cb02b7f499ce28b6030577ad63c0f7"
+dataset = "multi_swe_bench_java"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fasterxml__jackson-core-183"
+repo = "fasterxml/jackson-core"
+language = "java"
+base_commit = "ac6d8e22847c19b2695cbd7d1f418e07a9a3dbb2"
+dataset = "multi_swe_bench_java"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "fasterxml__jackson-core-1263"
+repo = "fasterxml/jackson-core"
+language = "java"
+base_commit = "9ed17fc7e9df9203f11ccb17819009ab0a898aa3"
+dataset = "multi_swe_bench_java"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "mockito__mockito-3167"
+repo = "mockito/mockito"
+language = "java"
+base_commit = "b6554b29ed6c204a0dd4b8a670877fe0ba2e808b"
+dataset = "multi_swe_bench_java"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "mockito__mockito-3220"
+repo = "mockito/mockito"
+language = "java"
+base_commit = "a0214364c36c840b259a4e5a0b656378e47d90df"
+dataset = "multi_swe_bench_java"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "mockito__mockito-3129"
+repo = "mockito/mockito"
+language = "java"
+base_commit = "edc624371009ce981bbc11b7d125ff4e359cff7e"
+dataset = "multi_swe_bench_java"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "mockito__mockito-3133"
+repo = "mockito/mockito"
+language = "java"
+base_commit = "edc624371009ce981bbc11b7d125ff4e359cff7e"
+dataset = "multi_swe_bench_java"
+assets = []
+
+[[s1.instances]]
+id = "mockito__mockito-3173"
+repo = "mockito/mockito"
+language = "java"
+base_commit = "bfee15dda7acc41ef497d8f8a44c74dacce2933a"
+dataset = "multi_swe_bench_java"
+assets = []
+
+[[s1.instances]]
 id = "redis__redis-10068"
 repo = "redis/redis"
 language = "c"
@@ -3916,6 +4485,86 @@ language = "c"
 base_commit = "59301ab3f80991086519124d020edbe94a74615c"
 dataset = "swe_rebench_v2"
 assets = []
+
+[[s1.instances]]
+id = "facebook__zstd-1105"
+repo = "facebook/zstd"
+language = "c"
+base_commit = "04212178b50131ecbbf7bc2ffcce4d5ddcfd8e11"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "facebook__zstd-1458"
+repo = "facebook/zstd"
+language = "c"
+base_commit = "517d8c984ce9b30792fe5b6c8c79547d3748f34d"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "facebook__zstd-1733"
+repo = "facebook/zstd"
+language = "c"
+base_commit = "a505463710aa34bccafd268c44064c129cdfb3e2"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "facebook__zstd-1080"
+repo = "facebook/zstd"
+language = "c"
+base_commit = "99e8063d40c38355f26f97249c8ef3f30e15d5b4"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "facebook__zstd-1532"
+repo = "facebook/zstd"
+language = "c"
+base_commit = "eb3a7a38270dc2a1f533c1b347f8b9b56e789f8f"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "ponylang__ponyc-3725"
+repo = "ponylang/ponyc"
+language = "c"
+base_commit = "22df673d577367dffdc8f31ecf67fce963ac777a"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "ponylang__ponyc-4061"
+repo = "ponylang/ponyc"
+language = "c"
+base_commit = "65e2cfc70fc900976ea5e93fc500f39a6844ae73"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "ponylang__ponyc-4458"
+repo = "ponylang/ponyc"
+language = "c"
+base_commit = "e86d34aef1fd6abff7d8e777817f09be36509668"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "ponylang__ponyc-2865"
+repo = "ponylang/ponyc"
+language = "c"
+base_commit = "8823316c0666ae776a4aa523ad094e2d8ee10b90"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "ponylang__ponyc-1726"
+repo = "ponylang/ponyc"
+language = "c"
+base_commit = "c995c4674b9ef062fa74b38be52682f945007dd2"
+dataset = "multi_swe_bench_c"
+assets = ["contextbench"]
 
 [[s1.instances]]
 id = "fmtlib__fmt-2317"
@@ -4258,6 +4907,70 @@ id = "randombit__botan-2201"
 repo = "randombit/botan"
 language = "cpp"
 base_commit = "865184972cbda7a3b6bd46c2ec0b399cbdde7b6e"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "zeek__zeek-2291"
+repo = "zeek/zeek"
+language = "cpp"
+base_commit = "6d16f9bb420fa8f65ad1c0a862e5ab6a8ba321e4"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "zeek__zeek-4311"
+repo = "zeek/zeek"
+language = "cpp"
+base_commit = "33d7e5a7bfcb6b8ab70b6c31c9db06f4b0ca99e5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "zeek__zeek-1940"
+repo = "zeek/zeek"
+language = "cpp"
+base_commit = "becc966106aa2540755bf9805213f8feed8afb93"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "zeek__zeek-4134"
+repo = "zeek/zeek"
+language = "cpp"
+base_commit = "991bc9644dd9b77f09fff992658f10500dce77e1"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "zeek__zeek-3334"
+repo = "zeek/zeek"
+language = "cpp"
+base_commit = "e22bf8ebb6121fea5d4bd723ab8544b0eaa861dc"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ccache__ccache-1312"
+repo = "ccache/ccache"
+language = "cpp"
+base_commit = "689168c292f1ed26c5f4a3070aeb649dad7facb5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ccache__ccache-1384"
+repo = "ccache/ccache"
+language = "cpp"
+base_commit = "0c03c7e478fd9b330e7117dab6d6a41124b31d81"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ccache__ccache-1233"
+repo = "ccache/ccache"
+language = "cpp"
+base_commit = "23bbc238aa663934fb18dfbb0cd638a66d31d687"
 dataset = "swe_rebench_v2"
 assets = []
 
@@ -4644,3 +5357,83 @@ language = "rust"
 base_commit = "068ed41bc02c21fe0a0a4d8e95af8a4668276f5d"
 dataset = "multi_swe_bench_rust"
 assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tracing-1233"
+repo = "tokio-rs/tracing"
+language = "rust"
+base_commit = "881091a1dd5d3126faeabbca9e3779f1d16c3cce"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "tokio-rs__tracing-1252"
+repo = "tokio-rs/tracing"
+language = "rust"
+base_commit = "d8a46edafd0a51ee20e1d0e38e42274c7ca270ee"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "tokio-rs__tracing-1236"
+repo = "tokio-rs/tracing"
+language = "rust"
+base_commit = "4609f22aff1ad88b81e749e2536761d6ee364d1f"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "tokio-rs__tracing-2897"
+repo = "tokio-rs/tracing"
+language = "rust"
+base_commit = "908cc432a5994f6e17c8f36e13c217dc40085704"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "tokio-rs__tracing-1017"
+repo = "tokio-rs/tracing"
+language = "rust"
+base_commit = "cb1dd95b8a67c3c69450882e8f8818546330a8ff"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sharkdp__fd-555"
+repo = "sharkdp/fd"
+language = "rust"
+base_commit = "ee673c92d375d9e5a6c126480a0383bbe3042b96"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sharkdp__fd-658"
+repo = "sharkdp/fd"
+language = "rust"
+base_commit = "a851570b15bbca91f1f4ef230c6d8939f2459ecc"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sharkdp__fd-986"
+repo = "sharkdp/fd"
+language = "rust"
+base_commit = "3e201de9b06e4587781eaf4fe7e755d4f9d8c6df"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sharkdp__fd-813"
+repo = "sharkdp/fd"
+language = "rust"
+base_commit = "c06c9952b61f35a7881b399cd21d0a4f821e7055"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "sharkdp__fd-1162"
+repo = "sharkdp/fd"
+language = "rust"
+base_commit = "cbd11d8a45dc80392c5f1be9679051085e6a3376"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]

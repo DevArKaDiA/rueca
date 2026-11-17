@@ -1,13 +1,17 @@
 """rueca-bench command line.
 
   rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
-  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,data,health,org,s2,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
+  rueca-bench run    --arm {grep,cbm,rueca,vector,all} --suite {s1,s3,data,health,org,s2,lite,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force] [--split gated|calibration] [--limit N]
+  rueca-bench coir   [--profile cheap|full] [--preset P] [--dims N] [--max-tokens N] [--instruction task|preset|TEXT] [--tasks A,B] [--limit-corpus N]
   rueca-bench report [--s2-only]
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
 
 Language families are the manifest `[languages]` keys (python, ecma, php, ...);
-`data` selects the data-format suite (manifest `[[data.repos]]`).
+`data` selects the data-format suite (manifest `[[data.repos]]`). `vector`
+(dense retrieval through `rueca embed`) runs the localization suites only (s1,
+lite) and is never part of `--arm all`; `lite` (the SWE-bench Lite diagnostic)
+is never part of `--suite all`.
 """
 
 from __future__ import annotations
@@ -17,30 +21,71 @@ import shutil
 import sys
 
 from . import check as check_mod
+from . import coir as coir_mod
 from . import contracts as contracts_mod
 from . import data as data_mod
 from . import health as health_mod
+from . import lite as lite_mod
 from . import org as org_mod
 from . import report as report_mod
 from . import s1, s3
-from .arms import ARM_NAMES, make_arm
+from .arms import ARM_NAMES, S1_ARM_NAMES, make_arm
+from .arms.rueca import rueca_binary
 from .common import RUNS_DIR, WORK_DIR, families, log
+from .embed import DEFAULT_MAX_TOKENS, DEFAULT_PRESET
 from .prepare import setup
+
+SUITES = {"s1", "s3", "data", "health", "org", "s2", "lite"}
+ALL_SUITES = {"s1", "s3", "data", "health", "org", "s2"}
 
 
 def _arms(arg: str) -> list[str]:
     names = list(ARM_NAMES) if arg == "all" else [a.strip() for a in arg.split(",") if a.strip()]
     for n in names:
-        if n not in ARM_NAMES:
-            raise SystemExit(f"unknown arm {n!r}; choose from {ARM_NAMES} or all")
+        if n not in S1_ARM_NAMES:
+            raise SystemExit(f"unknown arm {n!r}; choose from {S1_ARM_NAMES} or all")
     out = []
     for n in names:
-        ok, why = make_arm(n).available()
-        if ok:
-            out.append(n)
-        else:
+        arm = make_arm(n)
+        ok, why = arm.available()
+        if not ok:
             log(f"arm {n} unavailable: {why} (reported as pending)")
+            continue
+        if hasattr(arm, "preflight"):
+            try:
+                arm.preflight()
+            except RuntimeError as exc:
+                raise SystemExit(f"arm {n}: {exc}") from exc
+        out.append(n)
     return out
+
+
+def _suites(arg: str) -> set[str]:
+    wanted = {x.strip() for x in arg.split(",") if x.strip()}
+    if "all" in wanted:
+        wanted = (wanted - {"all"}) | ALL_SUITES
+    unknown = wanted - SUITES
+    if unknown:
+        raise SystemExit(f"unknown suite(s) {sorted(unknown)}")
+    return wanted
+
+
+def _coir(a: argparse.Namespace) -> None:
+    coir_mod.require_mteb()
+    run = coir_mod.CoirRun(
+        preset=a.preset,
+        dims=a.dims,
+        max_tokens=a.max_tokens,
+        instruction=a.instruction,
+        profile=a.profile,
+        tasks=[t.strip() for t in a.tasks.split(",") if t.strip()] if a.tasks else None,
+        limit_corpus=a.limit_corpus,
+    )
+    emb = coir_mod.make_embedder(rueca_binary(), a.preset, a.max_tokens, a.batch, a.cpu, a.threads)
+    policy = coir_mod.InstructionPolicy(a.instruction, a.preset)
+    if any(policy.for_task(t) for t in run.task_names()) and not emb.supports_instruction():
+        raise SystemExit("rueca-bench coir: `rueca embed` has no --instruction flag; pass --instruction preset to use the preset's own")
+    print("\n".join(coir_mod.summary_lines(run.run(emb))))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,12 +101,26 @@ def main(argv: list[str] | None = None) -> int:
 
     rp = sub.add_parser("run", help="run arms on suites (resumable)")
     rp.add_argument("--arm", default="all")
-    rp.add_argument("--suite", default="all", help="s1, s3, data, health, org, s2, all, or a comma list")
+    rp.add_argument("--suite", default="all", help="s1, s3, data, health, org, s2, lite, all, or a comma list")
     rp.add_argument("--only", nargs="*", help="instance ids / repos (s1), suite names (s3), or for org: gated / calibration and/or repositories (a smoke run of the multi-repository scenario)")
     rp.add_argument("--workers", type=int, default=2, help="S1 repositories / S3 sets processed in parallel")
     rp.add_argument("--force", action="store_true", help="ignore cached arm outputs")
     rp.add_argument("--lang", nargs="*", help="language families to run (default: all)")
     rp.add_argument("--prune", action="store_true", help="delete each repository clone once its runs are done (bounded disk, e.g. CI)")
+    rp.add_argument("--limit", type=int, default=None, help="lite: the first N instances (sha256 order)")
+    rp.add_argument("--split", choices=["gated", "calibration"], default=None, help="s1: only the instances of one split")
+
+    op = sub.add_parser("coir", help="CoIR nDCG@10 of a `rueca embed` preset (needs `--group coir`)")
+    op.add_argument("--profile", choices=sorted(coir_mod.PROFILES), default="cheap")
+    op.add_argument("--preset", default=DEFAULT_PRESET)
+    op.add_argument("--dims", type=int, default=None, help="Matryoshka dimensions (default: the model's)")
+    op.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    op.add_argument("--instruction", default="task", help="task (Qwen3's per-task prompts), preset (the binary's default) or a literal instruction")
+    op.add_argument("--tasks", default=None, help="comma-separated mteb task names (overrides --profile)")
+    op.add_argument("--limit-corpus", type=int, default=None, help="smoke run: at most N documents per task")
+    op.add_argument("--batch", type=int, default=None)
+    op.add_argument("--cpu", action="store_true")
+    op.add_argument("--threads", type=int, default=None)
 
     pr = sub.add_parser("report", help="score cached outputs; write bench/results/*.json and docs/bench/alpha-results.md")
     pr.add_argument("--s2-only", action="store_true", help="publish S2 alone: s2.json, the contracts family of scorecard.json, the S2 rows of alpha-results.md")
@@ -88,16 +147,15 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         code_langs = {x for x in langs if x != "data"} if langs else None
         run_code = not langs or bool(code_langs)
-        wanted = {x.strip() for x in a.suite.split(",") if x.strip()}
-        if "all" in wanted:
-            wanted = {"s1", "s3", "data", "health", "org", "s2"}
-        unknown = wanted - {"s1", "s3", "data", "health", "org", "s2"}
-        if unknown:
-            raise SystemExit(f"unknown suite(s) {sorted(unknown)}")
+        wanted = _suites(a.suite)
+        loc_arms = arms
+        arms = [x for x in arms if x in ARM_NAMES]
         if "health" in wanted and run_code and "rueca" in arms:
             health_mod.run(languages=code_langs, force=a.force, only=a.only, prune=a.prune)
         if "s1" in wanted and run_code:
-            s1.run(arms, workers=a.workers, only=a.only, force=a.force, languages=code_langs, prune=a.prune)
+            s1.run(loc_arms, workers=a.workers, only=a.only, force=a.force, languages=code_langs, prune=a.prune, split=a.split)
+        if "lite" in wanted:
+            lite_mod.run(loc_arms, limit=a.limit, workers=a.workers, only=a.only, force=a.force, prune=a.prune)
         if "s3" in wanted and run_code:
             s3.run(arms, only=a.only, force=a.force, languages=code_langs, workers=a.workers, prune=a.prune)
         if "data" in wanted and (not langs or "data" in langs):
@@ -107,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
             org_mod.run_all(arms, force=a.force, only=a.only)
         if "s2" in wanted and not langs:
             contracts_mod.run(arms, force=a.force)  # cross-service edges (S2): one organization per group
+    elif a.cmd == "coir":
+        _coir(a)
     elif a.cmd == "report":
         if a.s2_only:
             report_mod.publish_s2()
@@ -118,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.work:
             shutil.rmtree(WORK_DIR, ignore_errors=True)
         for arm in a.runs or []:
-            for suite in ("s1", "s3", "data", "health"):
+            for suite in ("s1", "s3", "data", "health", "lite"):
                 shutil.rmtree(RUNS_DIR / suite / arm, ignore_errors=True)
             for kind in ("multirepo", "multirepo-gated", "multirepo-calibration", "multiref"):
                 (RUNS_DIR / "org" / f"{kind}-{arm}.json").unlink(missing_ok=True)

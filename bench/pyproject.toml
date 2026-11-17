@@ -42,3 +42,9 @@ cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
 dev = [
     "pytest>=9.1.1",
 ]
+# CoIR runner (`rueca-bench coir`, RFC 0007 §11.1): mteb loads the CoIR
+# tasks and scores them; it pulls torch and transformers (≈ 2 GB), so it is
+# not installed by default: `uv run --project bench --group coir rueca-bench coir`.
+coir = [
+    "mteb==2.27.15",
+]

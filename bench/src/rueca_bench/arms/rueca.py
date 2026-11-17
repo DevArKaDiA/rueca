@@ -208,14 +208,19 @@ def trace_graph(data: dict) -> dict:
     return {"root": root_id, "nodes": by_id, "node_list": nodes, "edges": edges}
 
 
+def rueca_binary() -> str | None:
+    """The Rueca binary: $RUECA_BIN (a path, or a name looked up on PATH)."""
+    tb = os.environ.get("RUECA_BIN", "")
+    return shutil.which(tb) if tb and os.path.sep not in tb else (tb or None)
+
+
 class RuecaArm(Arm):
     name = "rueca"
 
     def __init__(self, call_timeout: float = 120.0, index_timeout: float = 1800.0):
         self.call_timeout = call_timeout
         self.index_timeout = index_timeout
-        tb = os.environ.get("RUECA_BIN", "")
-        self.bin = shutil.which(tb) if tb and os.path.sep not in tb else (tb or None)
+        self.bin = rueca_binary()
         self._contract: str | None = None
 
     def available(self) -> tuple[bool, str]:

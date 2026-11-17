@@ -28,9 +28,10 @@ from . import data as data_mod
 from . import health as health_mod
 from . import crossrepo as crossrepo_mod
 from . import contracts as contracts_mod
+from . import lite as lite_mod
 from . import org as org_mod
 from . import orgstats as orgstats_mod
-from .arms import ARM_NAMES, make_arm
+from .arms import ARM_NAMES, S1_ARM_NAMES, make_arm, run_label
 from .arms.base import is_callable_label, same_def
 from .match import CallableIndex, class_map, class_members
 from .efficiency import search_aggregate, search_row, trace_aggregate
@@ -54,6 +55,7 @@ from .common import (
 from .metrics import mean, median, p95, score_files, score_functions
 from .s1 import EFF_LIMIT, EFF_VARIANT
 from .s1 import instances as s1_instances
+from .s1 import run_path as s1_run_path
 from .s3 import gold_path, prediction_in_scope, suites
 from .scip import gold_neighbours, questions
 from .stats import bootstrap_mean, bootstrap_pooled_f1, bootstrap_ratio, paired_bootstrap, quantile_ci, seeded, wilson
@@ -118,7 +120,7 @@ def common_groups(rows_by_arm: dict[str, set[str]]) -> list[str]:
 
 def load_published() -> dict:
     out = {}
-    for name in ("meta", "s1", "s3", "data", "efficiency", "health", "org"):
+    for name in ("meta", "s1", "s3", "data", "efficiency", "health", "org", "lite"):
         p = RESULTS_DIR / f"{name}.json"
         out[name] = read_json(p) if p.exists() else {}
     # the organization scores lived under efficiency.json's `org` key before org.json
@@ -152,7 +154,7 @@ def machine_info() -> dict:
 def _recorded_versions(name: str) -> list[str]:
     vers: set[str] = set()
     for suite in ("s1", "s3", "data", "health"):
-        for p in sorted((RUNS_DIR / suite / name).glob("*.json")):
+        for p in sorted((RUNS_DIR / suite / run_label(name)).glob("*.json")):
             v = read_json(p).get("arm_version")
             if v:
                 vers.add(v)
@@ -169,8 +171,8 @@ def versions_by_group(published: dict | None = None, carried: set[tuple[str, str
             if carried and (a, g) in carried:
                 out[g][a].update(vs)
     for suite in ("s1", "s3"):
-        for name in ARM_NAMES:
-            for p in sorted((RUNS_DIR / suite / name).glob("*.json")):
+        for name in S1_ARM_NAMES:
+            for p in sorted((RUNS_DIR / suite / run_label(name)).glob("*.json")):
                 rec = read_json(p)
                 if rec.get("arm_version") and rec.get("language"):
                     try:
@@ -182,7 +184,11 @@ def versions_by_group(published: dict | None = None, carried: set[tuple[str, str
 
 def arm_status() -> dict:
     out = {}
-    for name in ARM_NAMES:
+    for name in S1_ARM_NAMES:
+        if name not in ARM_NAMES and not _recorded_versions(name):
+            # a localization-only arm that never ran: no binary call (`rueca embed --info`)
+            out[name] = {"available": False, "reason": "not run", "version": None, "recorded_versions": []}
+            continue
         arm = make_arm(name)
         ok, why = arm.available()
         rec = _recorded_versions(name)
@@ -243,6 +249,9 @@ S1_AGG = [
     ("file_mrr", lambda r: r["file"]["mrr"], "m", "file"),
     ("func_acc@5", lambda r: r["function"]["acc@5"], "p", "func"),
     ("func_acc@10", lambda r: r["function"]["acc@10"], "p", "func"),
+    # all-gold (RFC 0007 §11.1, diagnostic): absent from rows scored before it existed
+    ("file_all_acc@5", lambda r: r["file"].get("all_acc@5"), "p", "file"),
+    ("func_all_acc@10", lambda r: r["function"].get("all_acc@10"), "p", "func"),
     ("func_recall@5", lambda r: r["function"]["recall@5"], "m", "func"),
     ("func_recall@10", lambda r: r["function"]["recall@10"], "m", "func"),
     ("func_mrr", lambda r: r["function"]["mrr"], "m", "func"),
@@ -257,7 +266,7 @@ def agg_s1(rows: list[dict], label: str) -> dict:
     pops = {"file": rows, "func": [r for r in rows if r["function"] is not None], "ctx": [r for r in rows if r["context"]]}
     out: dict = {"n": len(rows), "n_failed": sum(1 for r in rows if not r["ok"]), "n_func": len(pops["func"]), "n_ctx": len(pops["ctx"]), "ci": {}}
     for key, get, kind, pop in S1_AGG:
-        vals = [get(r) for r in pops[pop]]
+        vals = [x for x in (get(r) for r in pops[pop]) if x is not None]
         out[key] = mean(vals)
         if vals:
             out["ci"][key] = _wil(sum(vals), len(vals)) if kind == "p" else _boot(vals, "s1", label, key)
@@ -298,7 +307,10 @@ def score_s1(published: dict | None = None) -> dict:
     insts = s1_instances()
     splits = s1_splits()
     published = published or {}
-    pub_rows = {(r["arm"], r["variant"], r["id"]): r for r in published.get("per_instance", [])}
+    vector_tag = run_label("vector")
+    # vector rows are carried only from a publication of the same sweep setting
+    same_vector = published.get("vector_config") == vector_tag
+    pub_rows = {(r["arm"], r["variant"], r["id"]): r for r in published.get("per_instance", []) if r["arm"] != "vector" or same_vector}
     pub_gold = published.get("gold_per_instance", {})
     per: list[dict] = []
     summaries: dict[str, dict] = {}
@@ -309,8 +321,8 @@ def score_s1(published: dict | None = None) -> dict:
         gold = read_json(gp) if gp.exists() else None
         if gold is not None:
             summaries[inst["id"]] = _gold_summary(gold)
-        for arm in ARM_NAMES:
-            rp = RUNS_DIR / "s1" / arm / f"{safe_name(inst['id'])}.json"
+        for arm in S1_ARM_NAMES:
+            rp = s1_run_path(arm, inst["id"])
             if not rp.exists() or gold is None:
                 old = [pub_rows.get((arm, v, inst["id"])) for v in VARIANTS]
                 old = [dict(r, group=lang_group(inst["language"]), split=split) for r in old if r]
@@ -354,9 +366,11 @@ def score_s1(published: dict | None = None) -> dict:
                 per.append(row)
 
     gated = [r for r in per if r["split"] == "gated"]
+    # the pooled column is defined by the original arms; a localization-only
+    # arm gets it only when it covers every pooled language
     overall_groups = common_groups({arm: {r["group"] for r in gated if r["arm"] == arm} for arm in ARM_NAMES})
     table: dict = {}
-    for arm in ARM_NAMES:
+    for arm in S1_ARM_NAMES:
         for variant in VARIANTS:
             rows = [r for r in per if r["arm"] == arm and r["variant"] == variant]
             if not rows:
@@ -370,7 +384,8 @@ def score_s1(published: dict | None = None) -> dict:
                 cr = [r for r in rows if r["group"] == g and r["split"] == "calibration"]
                 if cr:
                     t[f"calibration:{g}"] = agg_s1(cr, f"{arm}/{variant}/cal/{g}")
-            t[OVERALL] = agg_s1([r for r in g_rows if r["group"] in overall_groups], f"{arm}/{variant}/overall")
+            if arm in ARM_NAMES or set(overall_groups) <= {r["group"] for r in g_rows}:
+                t[OVERALL] = agg_s1([r for r in g_rows if r["group"] in overall_groups], f"{arm}/{variant}/overall")
             for repo in sorted({r["repo"] for r in rows}):
                 t[f"repo:{repo}"] = agg_s1([r for r in rows if r["repo"] == repo], f"{arm}/{variant}/{repo}")
 
@@ -407,6 +422,7 @@ def score_s1(published: dict | None = None) -> dict:
         "carried": {f"{a}:{g}": n for (a, g), n in sorted(carried.items())},
         "failures": failures,
         "overall_groups": overall_groups,
+        "vector_config": vector_tag,
     }
 
 
@@ -921,6 +937,8 @@ def _metric_values(key: str, fam_label: str, s1: dict, s3: dict, health: dict, e
     if key in ("file_acc@5", "func_acc@10"):
         r = t("rueca")
         out = {"value": r.get(key), "ci": (r.get("ci") or {}).get(key), "n": r.get("n") if key.startswith("file") else r.get("n_func"), "bm25": t("grep").get(key), "cbm": t("cbm").get(key)}
+        if t("vector").get(key) is not None:
+            out["vector"] = t("vector")[key]
         a, b = _paired_rows(s1, "rueca", "grep", fam_label, v, "file" if key.startswith("file") else "func")
         out["paired"] = paired_bootstrap(a, b, sc["resamples"], seeded(sc["seed"], "paired", fam_label, key)) if a else None
         if out["paired"] and out["paired"].get("ci"):
@@ -1219,11 +1237,16 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
     if card.get("contracts"):
         L.append(contracts_mod.scorecard_row(card["contracts"]))
     L.append("")
+    # RFC 0007 §11.2: the localization rows gain a vector column once the arm has results
+    vec = any(m.get("vector") is not None for c in card["languages"].values() for m in c["metrics"].values())
+    if vec:
+        L.append(f"**vector** = the dense-retrieval arm (`rueca embed`, {_vector_setting(s1)}), localization rows only.")
+        L.append("")
     for key, c in card["languages"].items():
         L.append(f"### {c['label']} — `{c['status']}`")
         L.append("")
-        L.append("| Metric | Rueca (95% CI) | Floor | Target | Status | BM25 | cbm |")
-        L.append("|---|---|---|---|---|---|---|")
+        L.append("| Metric | Rueca (95% CI) | Floor | Target | Status | BM25 | cbm |" + (" vector |" if vec else ""))
+        L.append("|---|---|---|---|---|---|---|" + ("---|" if vec else ""))
         for mk, m in c["metrics"].items():
             m = dict(m, key=mk)
             unit = next((s.get("unit") for s in sc["metrics"] if s["key"] == mk), None)
@@ -1233,7 +1256,8 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
             if m.get("paired") and m["paired"].get("ci"):
                 p = m["paired"]
                 bm += f" (Δ {100 * p['diff']:+.1f}, {100 * p['ci'][0]:+.1f}–{100 * p['ci'][1]:+.1f})"
-            L.append(f"| {label} | {_value_txt(m)} | {_floor_txt(m)} | {_target_txt(m)} | {_status_txt(m)} | {bm} | {_num(m.get('cbm'), unit)} |")
+            vcell = (f" {_num(m['vector'], unit) if m.get('vector') is not None else '—'} |") if vec else ""
+            L.append(f"| {label} | {_value_txt(m)} | {_floor_txt(m)} | {_target_txt(m)} | {_status_txt(m)} | {bm} | {_num(m.get('cbm'), unit)} |{vcell}")
         L.append("")
         if c["failing"]:
             L.append(f"**Status `preview`** — failing: {_failing_txt(c)}.")
@@ -1272,6 +1296,18 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
     L.append("")
 
 
+def _vector_setting(s1: dict | None) -> str:
+    """The sweep setting behind the vector numbers (the run directory tag)."""
+    tag = (s1 or {}).get("vector_config") or run_label("vector")
+    return f"setting `{tag.split('/', 1)[-1]}`"
+
+
+def s1_arms(s1: dict) -> list[str]:
+    """Columns of the S1 tables: the original arms, plus localization-only
+    arms that have results."""
+    return [a for a in S1_ARM_NAMES if a in ARM_NAMES or a in s1["table"]]
+
+
 S1_METRICS = [
     ("File Acc@1", "file_acc@1"),
     ("File Acc@3", "file_acc@3"),
@@ -1281,6 +1317,8 @@ S1_METRICS = [
     ("File MRR", "file_mrr"),
     ("Func Acc@5", "func_acc@5"),
     ("Func Acc@10", "func_acc@10"),
+    ("File Acc@5, all gold (diagnostic)", "file_all_acc@5"),
+    ("Func Acc@10, all gold (diagnostic)", "func_all_acc@10"),
     ("Func Recall@10", "func_recall@10"),
     ("Func MRR", "func_mrr"),
     ("Ctx-file Recall@10 (ContextBench)", "ctx_recall@10"),
@@ -1311,74 +1349,11 @@ S3_HEAD = (
 )
 
 
-def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict, eff: dict | None = None, orgs: dict | None = None) -> str:
-    arms = list(ARM_NAMES)
+def _render_s1(L: list[str], s1: dict, arms: list[str]) -> None:
+    """The localization section: per-language tables for both query variants,
+    cost, per repository."""
     s1_groups = [g for g in language_groups() if any(g in s1["table"].get(a, {}).get(v, {}) for a in arms for v in VARIANTS)]
     groups_s1 = s1_groups + [OVERALL]
-    L: list[str] = []
-    L.append("# rueca-bench — results")
-    L.append("")
-    L.append(f"Generated by `rueca-bench report` on {meta['date']}. Do not edit by hand; methodology, gold sources and known biases: `bench/README.md`; quality bar: RFC 0004.")
-    L.append("")
-    render_scorecard(L, card, s3, meta, s1)
-
-    L.append("## Run metadata")
-    L.append("")
-    m = meta["machine"]
-    L.append(f"- Machine: {m['cpu']} ({m['cpus']} CPUs, {m['memory_gb']} GB), {m['platform']}; Python {m['python']}")
-    for a in arms:
-        st = meta["arms"][a]
-        ver = st["version"] if st["available"] else f"pending — {st['reason']}"
-        L.append(f"- Arm `{a}`: {ver}")
-    L.append(f"- Manifest sha256: `{meta['manifest_sha256'][:16]}…`")
-    L.append("- Every arm sees the same worktree and the same query string; ranked outputs are post-filtered identically (source extension of the instance language, non-test path).")
-    if meta.get("carried"):
-        cf = meta.get("carried_from") or {}
-        mc = cf.get("machine") or {}
-        L.append(f"- Carried forward from the published results of {cf.get('date', '?')} ({mc.get('cpu', '?')}), raw outputs not in this run's cache: {meta['carried']} (see `bench/README.md`, *Additive results*).")
-    L.append("")
-
-    # ---- calibration split
-    L.append("## Calibration split (RFC 0004 §7.7)")
-    L.append("")
-    L.append(
-        "Instances and repositories disjoint from the gated ones, declared with `split = \"calibration\"` in the manifest: the only place where ranking "
-        "weights and heuristics may be tuned. Never part of the scorecard; changes tuned here say so in their PR."
-    )
-    L.append("")
-    L.append("| Language | Set | n | grep | cbm | rueca |")
-    L.append("|---|---|---:|---|---|---|")
-    v = _sc()["variant"]
-    for g in language_groups():
-        key = f"calibration:{g}"
-        cells = []
-        n = None
-        for a in arms:
-            t = s1["table"].get(a, {}).get(v, {}).get(key)
-            if t:
-                n = t["n"]
-                cells.append(f"File Acc@5 {_ci(t['file_acc@5'], t['ci'].get('file_acc@5'))} · Func Acc@10 {_ci(t['func_acc@10'], t['ci'].get('func_acc@10'))}")
-            else:
-                cells.append("pending")
-        if n:
-            repos = sorted({r["repo"] for r in s1["per_instance"] if r["split"] == "calibration" and r["group"] == g})
-            L.append(f"| {g} | S1 `{v}` ({', '.join(repos)}) | {n} | " + " | ".join(cells) + " |")
-        cal3 = [s3["calibration"].get(a, {}).get(key) for a in arms]
-        if any(cal3):
-            names = [gi["repo"] for gi in s3["gold"].values() if gi.get("split") == "calibration" and not gi.get("micro") and lang_group(gi["language"]) == g]
-            cells = []
-            nn = None
-            for t in cal3:
-                if not t:
-                    cells.append("pending")
-                    continue
-                nn = t["n"]
-                cr, ce = t["callers"], t["callees"]
-                cells.append(f"callers P {_f(cr['precision'])} R {_f(cr['recall'])} · callees P {_f(ce['precision'])} R {_f(ce['recall'])}")
-            L.append(f"| {g} | S3 ({', '.join(names)}) | {nn} | " + " | ".join(cells) + " |")
-    L.append("")
-
-    # ---- S1
     g = s1["gold"]
     L.append("## Localization (S1)")
     L.append("")
@@ -1461,6 +1436,75 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict,
         )
         L.append("")
 
+
+def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict, eff: dict | None = None, orgs: dict | None = None, lite: dict | None = None) -> str:
+    arms = s1_arms(s1)
+    s3_arms = list(ARM_NAMES)
+    L: list[str] = []
+    L.append("# rueca-bench — results")
+    L.append("")
+    L.append(f"Generated by `rueca-bench report` on {meta['date']}. Do not edit by hand; methodology, gold sources and known biases: `bench/README.md`; quality bar: RFC 0004.")
+    L.append("")
+    render_scorecard(L, card, s3, meta, s1)
+
+    L.append("## Run metadata")
+    L.append("")
+    m = meta["machine"]
+    L.append(f"- Machine: {m['cpu']} ({m['cpus']} CPUs, {m['memory_gb']} GB), {m['platform']}; Python {m['python']}")
+    for a in arms:
+        st = meta["arms"].get(a) or {"available": False, "reason": "not run"}
+        ver = st["version"] if st["available"] else f"pending — {st['reason']}"
+        L.append(f"- Arm `{a}`: {ver}")
+    L.append(f"- Manifest sha256: `{meta['manifest_sha256'][:16]}…`")
+    L.append("- Every arm sees the same worktree and the same query string; ranked outputs are post-filtered identically (source extension of the instance language, non-test path).")
+    if meta.get("carried"):
+        cf = meta.get("carried_from") or {}
+        mc = cf.get("machine") or {}
+        L.append(f"- Carried forward from the published results of {cf.get('date', '?')} ({mc.get('cpu', '?')}), raw outputs not in this run's cache: {meta['carried']} (see `bench/README.md`, *Additive results*).")
+    L.append("")
+
+    # ---- calibration split
+    L.append("## Calibration split (RFC 0004 §7.7)")
+    L.append("")
+    L.append(
+        "Instances and repositories disjoint from the gated ones, declared with `split = \"calibration\"` in the manifest: the only place where ranking "
+        "weights and heuristics may be tuned. Never part of the scorecard; changes tuned here say so in their PR."
+    )
+    L.append("")
+    L.append("| Language | Set | n | " + " | ".join(arms) + " |")
+    L.append("|---|---|---:|" + "---|" * len(arms))
+    v = _sc()["variant"]
+    for g in language_groups():
+        key = f"calibration:{g}"
+        cells = []
+        n = None
+        for a in arms:
+            t = s1["table"].get(a, {}).get(v, {}).get(key)
+            if t:
+                n = t["n"]
+                cells.append(f"File Acc@5 {_ci(t['file_acc@5'], t['ci'].get('file_acc@5'))} · Func Acc@10 {_ci(t['func_acc@10'], t['ci'].get('func_acc@10'))}")
+            else:
+                cells.append("pending")
+        if n:
+            repos = sorted({r["repo"] for r in s1["per_instance"] if r["split"] == "calibration" and r["group"] == g})
+            L.append(f"| {g} | S1 `{v}` ({', '.join(repos)}) | {n} | " + " | ".join(cells) + " |")
+        cal3 = [s3["calibration"].get(a, {}).get(key) for a in s3_arms] + [None] * (len(arms) - len(s3_arms))
+        if any(cal3):
+            names = [gi["repo"] for gi in s3["gold"].values() if gi.get("split") == "calibration" and not gi.get("micro") and lang_group(gi["language"]) == g]
+            cells = []
+            nn = None
+            for a, t in zip(arms, cal3, strict=True):
+                if not t:
+                    cells.append("pending" if a in s3_arms else "—")
+                    continue
+                nn = t["n"]
+                cr, ce = t["callers"], t["callees"]
+                cells.append(f"callers P {_f(cr['precision'])} R {_f(cr['recall'])} · callees P {_f(ce['precision'])} R {_f(ce['recall'])}")
+            L.append(f"| {g} | S3 ({', '.join(names)}) | {nn} | " + " | ".join(cells) + " |")
+    L.append("")
+
+    _render_s1(L, s1, arms)
+
     # ---- S3
     L.append("## Structure (S3): depth-1 callers / callees, symbol lookup")
     L.append("")
@@ -1525,12 +1569,12 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict,
         return f"| {label} | " + " | ".join(cells) + " |"
 
     for grp in language_groups():
-        if not any(grp in s3["groups"].get(a, {}) for a in arms):
+        if not any(grp in s3["groups"].get(a, {}) for a in s3_arms):
             continue
-        for a in arms:
+        for a in s3_arms:
             L.append(s3line(f"**{grp}** (gated pool) · {a}", s3["groups"].get(a, {}).get(grp)))
     for name, gi in s3["gold"].items():
-        for a in arms:
+        for a in s3_arms:
             tag = "" if gi.get("split", "gated") == "gated" else f" [{gi.get('split')}]"
             L.append(s3line(f"{name}{tag} · {a}", s3["per_suite"].get(a, {}).get(name)))
     L.append("")
@@ -1539,7 +1583,7 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict,
     L.append("| Set / arm | callables | callees micro P (CI) | callees micro R (CI) | callees micro F1 (CI) | callers micro F1 |")
     L.append("|---|---:|---|---|---|---:|")
     for grp in language_groups():
-        for a in arms:
+        for a in s3_arms:
             t = s3["groups"].get(a, {}).get(f"micro:{grp}")
             if not t:
                 continue
@@ -1581,6 +1625,7 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict,
 
     if data and data.get("gold"):
         _render_data(L, data)
+    lite_mod.render(L, lite or {})
 
     # ---- failures
     L.append("## Failures and gaps")
@@ -1592,7 +1637,7 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict,
         L.append(f"- S1 `{a}` `{v_}`: {n}× {e}")
     for f in s3["failures"][:40]:
         L.append(f"- S3 `{f['arm']}` {f['suite']} {f.get('snippet', '')}: {str(f.get('error'))[:200]}")
-    for a in arms:
+    for a in s3_arms:
         st = meta["arms"][a]
         if not st["available"] and a not in s1["table"]:
             L.append(f"- Arm `{a}` pending: {st['reason']}.")
@@ -2203,6 +2248,9 @@ def report() -> None:
     data = data_mod.score(published["data"])
     health = health_mod.score(published["health"])
     eff = score_efficiency(s1, s3)
+    lite = lite_mod.score() if (RUNS_DIR / lite_mod.SUITE).is_dir() else {}
+    if not lite.get("table"):
+        lite = published.get("lite") or {}
     published_eff = published.get("efficiency") or {}
     carry_efficiency(eff, published_eff, carried_rueca_groups(s1, s3))
     orgs = score_orgs(published.get("org") or {})
@@ -2253,7 +2301,9 @@ def report() -> None:
     write_json(RESULTS_DIR / "org.json", orgs, compact=True)
     write_json(RESULTS_DIR / "scorecard.json", card)
     write_json(RESULTS_DIR / "s2.json", s2)
+    if lite.get("table"):
+        write_json(RESULTS_DIR / "lite.json", lite)
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    (DOCS_DIR / "alpha-results.md").write_text(render(meta, s1, s3, data, health, card, eff, orgs))
-    log(f"wrote {RESULTS_DIR}/{{meta,s1,s3,data,health,efficiency,org,scorecard}}.json and {DOCS_DIR / 'alpha-results.md'}")
+    (DOCS_DIR / "alpha-results.md").write_text(render(meta, s1, s3, data, health, card, eff, orgs, lite))
+    log(f"wrote {RESULTS_DIR}/{{meta,s1,s3,data,health,efficiency,org,scorecard,s2}}.json and {DOCS_DIR / 'alpha-results.md'}")
     print(readme_summary(card))
