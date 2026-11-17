@@ -111,7 +111,8 @@ fn org_fixture() -> OrgFix {
 impl OrgFix {
     fn update(&self) -> org::OrgUpdate {
         let st = Store::open(&self.store).unwrap();
-        let members: Vec<OrgMember> = self.roots.iter().map(|r| OrgMember { root: r.clone(), url: None }).collect();
+        let members: Vec<OrgMember> =
+            self.roots.iter().map(|r| OrgMember { root: r.clone(), ..Default::default() }).collect();
         org::update_org(&st, "acme", &members).unwrap()
     }
 
@@ -262,7 +263,8 @@ fn visibility_hides_repositories_everywhere() {
     // Scores do not depend on the hidden repository: they equal those of an
     // organization without it.
     let st = Store::open(&f.store).unwrap();
-    let members: Vec<OrgMember> = [0, 2].iter().map(|&i| OrgMember { root: f.roots[i].clone(), url: None }).collect();
+    let members: Vec<OrgMember> =
+        [0, 2].iter().map(|&i| OrgMember { root: f.roots[i].clone(), ..Default::default() }).collect();
     org::update_org(&st, "small", &members).unwrap();
     let small = Engine::for_org(f.store.clone(), "small").unwrap();
     let args = json!({"query": "refund payment invoice helper", "scores": true, "limit": 50});
@@ -343,7 +345,7 @@ impl OrgLinker for FakeLinker {
 fn linked_fixture() -> OrgFix {
     let f = org_fixture();
     let st = Store::open(&f.store).unwrap();
-    let members: Vec<OrgMember> = f.roots.iter().map(|r| OrgMember { root: r.clone(), url: None }).collect();
+    let members: Vec<OrgMember> = f.roots.iter().map(|r| OrgMember { root: r.clone(), ..Default::default() }).collect();
     let up = org::update_org_with(&st, "acme", &members, &FakeLinker).unwrap();
     assert_eq!(up.linked, [(BILLING.to_string(), 1)]);
     assert_eq!(up.link_edges, 1);

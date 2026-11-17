@@ -129,7 +129,7 @@ fn open_repo(root: &Path) -> anyhow::Result<gix::Repository> {
 
 /// Rejects names git would not accept as a ref (and anything that could be
 /// read as an option or a refspec).
-fn validate_ref_name(name: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_ref_name(name: &str) -> anyhow::Result<()> {
     let bad_char =
         |c: char| c.is_whitespace() || c.is_control() || matches!(c, ':' | '?' | '*' | '[' | '\\' | '^' | '~');
     let invalid = name.is_empty()
@@ -146,11 +146,11 @@ fn validate_ref_name(name: &str) -> anyhow::Result<()> {
 }
 
 /// `n` of `pr/<n>`.
-fn pr_number(name: &str) -> Option<&str> {
+pub(crate) fn pr_number(name: &str) -> Option<&str> {
     name.strip_prefix("pr/").filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
-fn is_hex(s: &str) -> bool {
+pub(crate) fn is_hex(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
@@ -646,7 +646,7 @@ pub fn remove_ref(store_dir: &Path, repo_id: &str, name: &str) -> anyhow::Result
 
 /// Whether `given` names the ref recorded as `recorded`: equal, or both
 /// commits with one a prefix (≥ 7 digits) of the other.
-fn names_ref(recorded: &str, given: &str) -> bool {
+pub(crate) fn names_ref(recorded: &str, given: &str) -> bool {
     if recorded == given {
         return true;
     }

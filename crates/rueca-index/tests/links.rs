@@ -9,7 +9,7 @@ use std::path::Path;
 
 use rueca_index::org::{OrgConfig, OrgIndexOptions, index_org};
 use rueca_segment::Store;
-use rueca_segment::org::{LinkDir, OrgIndex};
+use rueca_segment::org::{LinkDir, OrgIndex, OrgSelection, OrgSlot};
 
 fn write(root: &Path, rel: &str, text: &str) {
     let p = root.join(rel);
@@ -23,12 +23,14 @@ fn link_edges(store: &Path) -> BTreeSet<(String, String, String, String, String,
     let idx = OrgIndex::open(store, "acme").unwrap();
     let st = Store::open(store).unwrap();
     let g = idx.generation();
-    let segs: Vec<_> = g.repos.iter().map(|r| st.open_segment(&r.segment_id).unwrap()).collect();
+    let segs: Vec<_> = g.repos.iter().map(|r| st.open_segment(&r.default.segment_id).unwrap()).collect();
     let all: Vec<usize> = (0..g.repos.len()).collect();
     let mut out = BTreeSet::new();
     for (i, seg) in segs.iter().enumerate() {
         for n in 0..seg.nodes().len() as u32 {
-            for e in idx.link_edges(i, n, LinkDir::Out, None, &all).unwrap() {
+            for e in
+                idx.link_edges(OrgSlot::default_of(i), n, LinkDir::Out, None, &all, &OrgSelection::default()).unwrap()
+            {
                 out.insert((
                     g.repos[i].repo.clone(),
                     seg.node(n).qualified_name.clone(),
@@ -166,8 +168,8 @@ fn packages_resolve_across_repositories() {
     assert_eq!(p.deps.packages[0].keys, ["py:acmelib"]);
     assert!(p.about.contains("Payment gateway client"), "{}", p.about);
     let app = &g.repos[g.repo_index("local/pyapp").unwrap()];
-    assert_eq!(app.links.as_ref().unwrap().deps[0].repo, "local/pylib");
-    assert!(g.repos[g.repo_index("local/other").unwrap()].links.is_none());
+    assert_eq!(app.default.links.as_ref().unwrap().deps[0].repo, "local/pylib");
+    assert!(g.repos[g.repo_index("local/other").unwrap()].default.links.is_none());
 
     let edges = link_edges(&store);
     // Python: module imports, a call through the package's re-export, a base class.
@@ -214,4 +216,169 @@ fn packages_resolve_across_repositories() {
     let r = index_org(&OrgIndexOptions { only: Some(base.join("svc")), ..opts }).unwrap();
     assert!(r.update.linked.is_empty() || r.update.linked.iter().all(|(_, n)| *n == 0), "{:?}", r.update.linked);
     assert!(!link_edges(&store).iter().any(|e| e.0 == "local/svc"));
+}
+
+fn git(dir: &Path, args: &[&str]) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
+        .args(["-c", "init.defaultBranch=main"])
+        .args(args)
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+fn commit_all(dir: &Path, msg: &str) {
+    assert!(git(dir, &["add", "-A"]));
+    assert!(git(dir, &["commit", "-q", "-m", msg]));
+}
+
+/// `root` as a git repository on `main` holding `files`, with `branch`
+/// writing `changes` on top; `main` checked out. `None` without git.
+fn git_repo(root: &Path, files: &[(&str, &str)], branch: &str, changes: &[(&str, &str)]) -> Option<()> {
+    fs::create_dir_all(root).unwrap();
+    if !git(root, &["init", "-q"]) {
+        eprintln!("git not available; skipping");
+        return None;
+    }
+    assert!(git(root, &["symbolic-ref", "HEAD", "refs/heads/main"]));
+    for (p, t) in files {
+        write(root, p, t);
+    }
+    commit_all(root, "init");
+    assert!(git(root, &["checkout", "-q", "-b", branch]));
+    for (p, t) in changes {
+        write(root, p, t);
+    }
+    commit_all(root, branch);
+    assert!(git(root, &["checkout", "-q", "main"]));
+    Some(())
+}
+
+/// (source qn, target entry `repo@ref`, target qn, kind) of the outgoing
+/// link edges of entry `at` seen from `view`.
+fn edges_at(
+    idx: &OrgIndex,
+    st: &Store,
+    at: OrgSlot,
+    view: &OrgSelection,
+) -> BTreeSet<(String, String, String, String)> {
+    let g = idx.generation();
+    let open = |s: OrgSlot| st.open_segment(&g.entry(s).unwrap().segment_id).unwrap();
+    let seg = open(at);
+    let all: Vec<usize> = (0..g.repos.len()).collect();
+    let mut out = BTreeSet::new();
+    for n in 0..seg.nodes().len() as u32 {
+        for e in idx.link_edges(at, n, LinkDir::Out, None, &all, view).unwrap() {
+            let dst = open(e.slot);
+            out.insert((
+                seg.node(n).qualified_name.clone(),
+                format!("{}@{}", g.repos[e.repo].repo, g.ref_name(e.slot).unwrap()),
+                dst.node(e.node).qualified_name.clone(),
+                e.kind.as_str().to_string(),
+            ));
+        }
+    }
+    out
+}
+
+fn calls(edges: &BTreeSet<(String, String, String, String)>, src: &str, dst: &str) -> Option<String> {
+    edges.iter().find(|e| e.0 == src && e.2 == dst && e.3 == "CALLS").map(|e| e.1.clone())
+}
+
+/// RFC 0006 §9.3 on real packages: a consumer branch's new cross-repository
+/// call is in that branch's link set only; a library branch that renames
+/// the called function drops the consumer's edge in the branch's view and
+/// keeps it at the default.
+#[test]
+fn ref_link_sets_and_remapped_edges() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = fs::canonicalize(dir.path()).unwrap();
+    let store = base.join("store");
+    let core = "class Gateway:\n    def send(self, payload):\n        return payload\n\ndef charge(amount):\n    return Gateway().send(amount)\n\ndef refund(amount):\n    return amount\n";
+    let lib = [
+        ("pyproject.toml", "[project]\nname = \"acmelib\"\n"),
+        ("src/acmelib/__init__.py", "from .core import charge, refund\n"),
+        ("src/acmelib/core.py", core),
+    ];
+    let renamed = [
+        ("src/acmelib/__init__.py", "from .core import charge_amount, refund\n"),
+        ("src/acmelib/core.py", &core.replace("def charge(", "def charge_amount(")[..]),
+    ];
+    if git_repo(&base.join("pylib"), &lib, "rename", &renamed).is_none() {
+        return;
+    }
+    let checkout = "import acmelib\n\ndef pay(order):\n    return acmelib.charge(order.total)\n";
+    let app = [
+        ("pyproject.toml", "[project]\nname = \"shop\"\ndependencies = [\"acmelib>=1\"]\n"),
+        ("shop/checkout.py", checkout),
+    ];
+    let with_refund = format!("{checkout}\ndef give_back(order):\n    return acmelib.refund(order.total)\n");
+    git_repo(&base.join("pyapp"), &app, "feat/refund", &[("shop/checkout.py", &with_refund)]).unwrap();
+    fs::write(
+        base.join("rueca-org.toml"),
+        "name = \"acme\"\n[[repo]]\npath = \"pylib\"\nrefs = [\"rename\"]\n[[repo]]\npath = \"pyapp\"\nrefs = [\"feat/refund\"]\n",
+    )
+    .unwrap();
+    let opts = OrgIndexOptions {
+        config: OrgConfig::load(&base.join("rueca-org.toml")).unwrap(),
+        store: store.clone(),
+        budget: Default::default(),
+        threads: Some(2),
+        only: None,
+    };
+    let r = index_org(&opts).unwrap();
+    assert!(r.ref_errors.is_empty() && r.update.link_errors.is_empty(), "{:?}", r.update);
+    let linked: BTreeSet<&str> = r.update.linked.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(linked, BTreeSet::from(["local/pyapp", "local/pyapp@feat/refund"]));
+
+    let idx = OrgIndex::open(&store, "acme").unwrap();
+    let st = Store::open(&store).unwrap();
+    let g = idx.generation();
+    let (lib_i, app_i) = (g.repo_index("local/pylib").unwrap(), g.repo_index("local/pyapp").unwrap());
+    let app_main = OrgSlot::default_of(app_i);
+    let app_feat = g.find_ref(app_i, "feat/refund").unwrap();
+    let lib_rename = g.find_ref(lib_i, "rename").unwrap();
+    // The branch's link set is computed against the library's default.
+    let feat_links = g.entry(app_feat).unwrap().links.as_ref().unwrap();
+    assert_eq!(feat_links.deps[0].segment_id, g.repos[lib_i].default.segment_id);
+    assert!(g.repos[lib_i].refs[0].entry.links.is_none(), "the library imports nothing of the organization");
+
+    // The call that exists only on the consumer's branch.
+    let default_view = OrgSelection::default();
+    let main_edges = edges_at(&idx, &st, app_main, &default_view);
+    let mut feat_view = OrgSelection::default();
+    feat_view.set(app_i, vec![app_feat]);
+    let feat_edges = edges_at(&idx, &st, app_feat, &feat_view);
+    let charge = calls(&main_edges, "shop.checkout.pay", "acmelib.core.charge");
+    assert_eq!(charge.as_deref(), Some("local/pylib@main"), "{main_edges:#?}");
+    assert!(calls(&main_edges, "shop.checkout.give_back", "acmelib.core.refund").is_none(), "{main_edges:#?}");
+    assert!(calls(&feat_edges, "shop.checkout.give_back", "acmelib.core.refund").is_some(), "{feat_edges:#?}");
+    assert!(calls(&feat_edges, "shop.checkout.pay", "acmelib.core.charge").is_some(), "{feat_edges:#?}");
+
+    // The library's branch renamed `charge`: in its view the consumer's
+    // edge into it is dropped, the one into `refund` follows the branch.
+    let mut renamed_view = OrgSelection::default();
+    renamed_view.set(lib_i, vec![lib_rename]);
+    let main_on_renamed = edges_at(&idx, &st, app_main, &renamed_view);
+    assert!(calls(&main_on_renamed, "shop.checkout.pay", "acmelib.core.charge").is_none(), "{main_on_renamed:#?}");
+    assert!(calls(&main_on_renamed, "shop.checkout.pay", "acmelib.core.charge_amount").is_none());
+    renamed_view.set(app_i, vec![app_feat]);
+    let both = edges_at(&idx, &st, app_feat, &renamed_view);
+    let refund = calls(&both, "shop.checkout.give_back", "acmelib.core.refund");
+    assert_eq!(refund.as_deref(), Some("local/pylib@rename"), "{both:#?}");
+    assert!(both.iter().all(|e| e.1 == "local/pylib@rename"), "{both:#?}");
+    // The incoming side agrees: nothing calls the renamed function, the
+    // default's `charge` keeps its caller.
+    let lib_seg = |s: OrgSlot| st.open_segment(&g.entry(s).unwrap().segment_id).unwrap();
+    let all: Vec<usize> = (0..g.repos.len()).collect();
+    let renamed_seg = lib_seg(lib_rename);
+    let amount = renamed_seg.nodes_by_qualified_name("acmelib.core.charge_amount")[0];
+    assert!(idx.link_edges(lib_rename, amount, LinkDir::In, None, &all, &renamed_view).unwrap().is_empty());
+    let default_seg = lib_seg(OrgSlot::default_of(lib_i));
+    let charge_node = default_seg.nodes_by_qualified_name("acmelib.core.charge")[0];
+    let callers =
+        idx.link_edges(OrgSlot::default_of(lib_i), charge_node, LinkDir::In, None, &all, &default_view).unwrap();
+    assert_eq!(callers.iter().map(|e| e.slot).collect::<Vec<_>>(), [app_main]);
 }

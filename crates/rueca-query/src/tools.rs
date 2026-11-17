@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rueca_model::{EdgeKind, FileId, Label, NodeId, SymbolIdParts};
-use rueca_segment::org::{LinkDir, OrgScope, RouteMode};
+use rueca_segment::org::{LinkDir, OrgScope, OrgSelection, OrgSlot, RouteMode};
 use rueca_segment::{ContentMatch, ContentQuery, EdgeRef, Segment, SymbolQuery};
 
 use crate::args::{
@@ -207,7 +207,7 @@ impl Engine {
                 org.index
                     .search_with(
                         &base,
-                        &OrgScope { visible: &org.visible, selected: &selected },
+                        &OrgScope { visible: &org.visible, selected: &selected, view: None },
                         &boost,
                         self.route.local_stats && self.route.mode != RouteMode::Off,
                     )?
@@ -527,12 +527,12 @@ impl Engine {
             .get(repo)
             .ok_or_else(|| anyhow::anyhow!("organization repository #{repo} is out of range"))?;
         let store = rueca_segment::Store::open(&self.store_dir)?;
-        let seg = self.open_cached(&store, &g.segment_id)?;
+        let seg = self.open_cached(&store, &g.default.segment_id)?;
         let entry = rueca_segment::CatalogEntry {
-            root: g.root.clone(),
+            root: g.default.root.clone(),
             repo: g.repo.clone(),
-            segment_id: g.segment_id.clone(),
-            indexed_at: g.snapshot.indexed_at,
+            segment_id: g.default.segment_id.clone(),
+            indexed_at: g.default.snapshot.indexed_at,
             ref_name: None,
         };
         let mut v = View::new(seg, entry);
@@ -566,7 +566,8 @@ impl Engine {
                 Dir::Callers => LinkDir::In,
                 Dir::Callees => LinkDir::Out,
             };
-            for e in org.index.link_edges(repo, n, ld, Some(kind), &org.visible)? {
+            let at = OrgSlot::default_of(repo);
+            for e in org.index.link_edges(at, n, ld, Some(kind), &org.visible, &OrgSelection::default())? {
                 let other = self.view_of_repo(views, org, e.repo)?;
                 let ev = self.view_of_repo(views, org, e.evidence_repo)?;
                 out.push(((other, e.node), e.meta, ev));
@@ -713,7 +714,7 @@ fn org_dependencies(org: &OrgCtx, i: usize) -> (Vec<String>, Vec<String>) {
         packages.dedup();
     }
     let generation = org.index.generation();
-    let depends_on = match &generation.repos[i].links {
+    let depends_on = match &generation.repos[i].default.links {
         // Only dependencies the caller may see are named.
         Some(l) => l
             .deps

@@ -446,7 +446,7 @@ impl Engine {
         let mut views = Vec::with_capacity(selected.len());
         for e in selected {
             let seg = self.open_cached(&store, &e.segment_id)?;
-            let i = org.as_ref().and_then(|o| o.index.generation().repos.iter().position(|r| r.root == e.root));
+            let i = org.as_ref().and_then(|o| o.index.generation().repos.iter().position(|r| r.default.root == e.root));
             let mut v = View::new(seg, e);
             v.org_repo = i;
             views.push(v);
@@ -530,10 +530,10 @@ impl Engine {
             if self.visibility.allows(&r.repo) {
                 visible.push(i);
                 entries.push(CatalogEntry {
-                    root: r.root.clone(),
+                    root: r.default.root.clone(),
                     repo: r.repo.clone(),
-                    segment_id: r.segment_id.clone(),
-                    indexed_at: r.snapshot.indexed_at,
+                    segment_id: r.default.segment_id.clone(),
+                    indexed_at: r.default.snapshot.indexed_at,
                     ref_name: None,
                 });
             }

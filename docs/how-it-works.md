@@ -893,6 +893,28 @@ index**, so a question asked of the whole organization gets one ranking.
   the consumers whose own segment, one of whose dependencies, or whose set
   of dependencies changed — re-indexing a library re-links its reverse
   dependencies, nothing else.
+- **Refs in the organization** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--refs-over-the-organization-design)).
+  A member's ref snapshots — the `refs = [...]` of its `[[repo]]` in
+  `rueca-org.toml`, and any `rueca index <member> --ref <name>` — are
+  **entries of its repository** in the generation, next to the default
+  entry (the member root): an export belongs to the member whose
+  repository id it carries. Each entry has its own store segment, tantivy
+  segment (the organization index lists the default **and** the ref
+  segments), profile (`profiles/<segment>.json`) and link set
+  (`links/<segment>-<hash>.bin`); a generation written before refs reads
+  unchanged. An update reuses every entry by (root, segment) on its own, so
+  refreshing a ref copies, profiles and links that ref only. A ref's link
+  set comes from its own imports and points into its dependencies'
+  **default** entries, so a ref never re-links another repository; a view
+  that reads a library at a ref sees the consumers' edges remapped to the
+  ref's nodes by (label, qualified name, path), and loses those whose
+  target the ref no longer has. `rueca index --org <file>` syncs the file's
+  refs and refreshes the ones indexed earlier (a `url` member's branches
+  are fetched from the remote first), `rueca index --org <file> <member>
+  --ref <name> [--remove]` handles one, a plain `rueca index <path> --ref
+  <name>` updates the organizations holding the repository, `rueca status`
+  lists `main@… + feature/x@…` per repository and `rueca links --org <org>
+  --repo <id> --ref <name>` prints one ref's link set.
 - **Across repositories at query time.** `trace` follows link edges in
   both directions: callers of a library function include its callers in
   other repositories, each node carrying its snapshot (`s`). A link edge is
