@@ -11,7 +11,9 @@
   §8.3, §15 open question 8
 - Research date: 2026-11-17. Crate versions, specifications, host
   documentation and comparable systems were checked that day (§15). Code
-  references are to commit `c82029013c6d`. "Measured on this repository"
+  references are to commit `1568e47` (`main` after #60, #63 and #64)
+  unless a reference names `c82029013c6d`, the commit the draft was
+  written against. "Measured on this repository"
   means a release build of that commit; *(estimate)* marks arithmetic on
   stated inputs; *(derived)* arithmetic on published figures;
   *(unverified)* a claim no primary source confirmed; *(default)* a
@@ -19,7 +21,7 @@
 
 ## 1. Summary
 
-Rueca gets a server form: the same crates, segments and seven tools, run
+Rueca gets a server form: the same crates, segments and eight tools, run
 as a container that indexes every repository of an organization (default
 branches, chosen branches and tags, pull requests) and answers over MCP
 on HTTP.
@@ -79,16 +81,16 @@ Local mode and `--org` (RFC 0006 §7) cannot be that service:
 | Limit today | Where |
 |---|---|
 | **One writer per store**: `write_segment` and `Store::register` "are not coordinated across threads or processes … can lose one of two simultaneous catalog updates" | `crates/rueca-segment/src/lib.rs:28-37` |
-| No lock anywhere (no `flock`, `fs2`, `fd-lock`); tantivy's `acquire_lock` is a no-op | `crates/rueca-segment/src/org/mod.rs:1120-1122` |
+| No lock anywhere (no `flock`, `fs2`, `fd-lock`); tantivy's `acquire_lock` is a no-op | `crates/rueca-segment/src/org/mod.rs:1122-1124` |
 | The catalog is one JSON array rewritten by read-modify-write | `Store::register_impl`, `crates/rueca-segment/src/store.rs:126-141` |
-| One machine: `File::open` + `mmap`, no storage trait, "No hotcache and no object-storage reads" | `bundle.rs:175-181`, `lib.rs:239-240` |
-| The read path creates directories (`Store::open` → `ensure_dirs`): a read-only mount fails | `crates/rueca-query/src/lib.rs:463`, `store.rs:12-17` |
-| MCP over stdio only; no axum, hyper or tower in `Cargo.lock` | `serve_stdio`, `crates/rueca-mcp/src/lib.rs:393-409` |
-| `Visibility` exists, but nothing outside tests sets it, and local `select` ignores it | `crates/rueca-query/src/lib.rs:324-339, 459-485` |
-| No per-query time budget | `Engine::respond`, `crates/rueca-query/src/lib.rs:428-443` |
-| Extraction in process (rayon + `catch_unwind`), no memory limit | `crates/rueca-index/src/lib.rs:262-276, 523-542`; `crates/rueca-extract/src/lib.rs:61-72` |
-| No jobs: indexing runs in the CLI or on the `rueca-auto-index` thread | `crates/rueca-mcp/src/lib.rs:351-373` |
-| "packs only grow" | `crates/rueca-segment/src/lib.rs:212-215` |
+| One machine: `File::open` + `mmap`, no storage trait, "No hotcache and no object-storage reads" | `bundle.rs:175-181`, `lib.rs:240-241` |
+| The read path creates directories (`Store::open` → `ensure_dirs`): a read-only mount fails | `crates/rueca-query/src/lib.rs:486`, `store.rs:12-17` |
+| MCP over stdio only; no HTTP crate and no async runtime in `Cargo.lock` | `serve_stdio`, `crates/rueca-mcp/src/lib.rs:359`; `docs/mcp-protocol.md` §8 |
+| `Visibility` exists, but nothing outside tests sets it, and local `select` ignores it | `crates/rueca-query/src/lib.rs:346-361, 482-508` |
+| No per-query time budget | `Engine::respond`, `crates/rueca-query/src/lib.rs:450-465` |
+| Extraction in process (rayon + `catch_unwind`), no memory limit | `crates/rueca-index/src/lib.rs:264-278, 525-544`; `crates/rueca-extract/src/lib.rs:61-72` |
+| No jobs: indexing runs in the CLI or on the `rueca-auto-index` thread | `spawn_gate`, `crates/rueca-mcp/src/lib.rs:327` |
+| "packs only grow" | `crates/rueca-segment/src/lib.rs:213-216` |
 | `url` members are `git clone --depth 1` checkouts under the store | `clone_dir` / `sync_clone`, `crates/rueca-index/src/org.rs:169-211` |
 
 Agents in an organization need one URL that answers for every repository
@@ -102,9 +104,9 @@ embeddings".
 
 **Goals.** Index every configured repository of one organization
 (default branch, branch and tag globs, pull request heads) from URLs,
-with no operator action after configuration. Serve the seven tools
+with no operator action after configuration. Serve the eight tools
 (`search_symbols`, `search_code`, `get_symbol`, `get_snippet`, `trace`,
-`get_file_outline`, `list_repositories`) with `docs/tools.md`'s arguments
+`get_file_outline`, `list_repositories`, `list_contracts`) with `docs/tools.md`'s arguments
 (`repo`, `ref`, `budget_tokens`, `cursor`, `format`) unchanged. Answers
 equal to local mode for the same snapshots (§8.3). N stateless replicas
 and N indexers with no coordinator but object storage. Per-caller
@@ -287,7 +289,7 @@ prometheus = true
 **Precedence** (RFC 0007 §8.3's rule): argument, environment, file,
 built-in default. Environment: `RUECA_CONFIG`, `RUECA_ROLE`,
 `RUECA_STORE_URL`, `RUECA_LOG` (today's `EnvFilter`,
-`crates/rueca-cli/src/main.rs:184-197`) and the variables `env:`
+`crates/rueca-cli/src/main.rs:226-239`) and the variables `env:`
 references name. `rueca serve --check-config` validates the file, the
 references and the store, then exits.
 
@@ -321,7 +323,7 @@ names and formats (`crates/rueca-segment/src/org/mod.rs:13-21`,
 
 | Local store | Service store | Why |
 |---|---|---|
-| `catalog.json`: one array sorted by root (`lib.rs:217-226`) | `repos/<repo-dir>/catalog.json` per repository | CAS contention per repository; there are no roots |
+| `catalog.json`: one array sorted by root (`lib.rs:218-227`) | `repos/<repo-dir>/catalog.json` per repository | CAS contention per repository; there are no roots |
 | shared `packs/` + `packs/index.rcpi` | `repos/<repo-dir>/packs/`, no index file | a snapshot lists its packs (§5.9) |
 | `refs/<repo-dir>/<ref>/` exports, `orgs/<n>/clones/` | none; scratch and bare mirrors on the indexer | the bucket holds only what readers read |
 | `tmp/` | none | `Create` is atomic per object |
@@ -339,8 +341,8 @@ so a retry never overwrites another writer's change. Both `e_tag` and
 `MissingVersion` without one (`src/gcp/client.rs`).
 
 **Ids.** A segment id is `<repo slug>-<commit12>-<unix seconds>-<16 random
-bits>` (`crates/rueca-segment/src/writer.rs:34-38`) and a pack id
-`<unix seconds>-<32 random bits>` (`writer.rs:77`): two indexers writing
+bits>` (`crates/rueca-segment/src/writer.rs:36-40`) and a pack id
+`<unix seconds>-<32 random bits>` (`writer.rs:79`): two indexers writing
 the same commit in the same second collide on a segment with probability
 1/65,536 *(derived)*. **Recorded:** service mode widens both random parts
 to 64 bits (ids are strings; no format change), so a `Create` collision
@@ -374,9 +376,9 @@ few dozen refs is a few kilobytes *(estimate)*.
 ### 5.4 Generation pointer and updater lease
 
 `orgs/<name>/org.json` keeps today's `{name, generation}` (`OrgPointer`,
-`org/mod.rs:235-238`). Today `publish` writes `generations/<next>.json`,
+`org/mod.rs:236-239`). Today `publish` writes `generations/<next>.json`,
 renames `org.json` over the old one, then collects garbage
-(`org/mod.rs:843-876`). In service mode: (1) `generations/<next>.json`
+(`org/mod.rs:844-877`). In service mode: (1) `generations/<next>.json`
 with `Create` (`AlreadyExists`: another updater published `next`; stop,
 re-read, rebuild on top of it); (2) `org.json` with `Update` against the
 e-tag read when the build started (`Precondition`: the same); (3) no
@@ -397,8 +399,8 @@ fails steps 1–2 and rebuilds; a duplicated build costs compute only.
 Replicas GET `org.json` with `If-None-Match: <e-tag>` every 5 s
 *(default)*; `304` (`object_store` `NotModified`) is one request; a
 change reopens the generation with today's logic (`Engine::org_index`,
-`crates/rueca-query/src/lib.rs:634-651`; `current_generation` retries
-when a generation file is gone, `org/mod.rs:359-375`).
+`crates/rueca-query/src/lib.rs:657-674`; `current_generation` retries
+when a generation file is gone, `org/mod.rs:360-376`).
 
 ### 5.5 Local filesystem: a file lock
 
@@ -424,13 +426,13 @@ and opens them as today, `mmap` + BLAKE3 over every component
 (`Bundle::open`, `bundle.rs:175-181`). Eviction is LRU by bytes within
 `cache_bytes`, never touching the current generation's open set, and
 drops the segment from the engine's map (`evict_stale`,
-`crates/rueca-query/src/lib.rs:785-789`). Each new generation prefetches
+`crates/rueca-query/src/lib.rs:808-812`). Each new generation prefetches
 the organization index files (every organization-scope query needs
 them), then default segments, most recently read first; ref segments
 load on first use.
 
 This repository's segment is 14,199,972 bytes for 1,599 files (measured
-on this repository; of 30 components, `nodes` 3.25 MB, tantivy 4.4 MB,
+on this repository at `c82029013c6d`; of 30 components, `nodes` 3.25 MB, tantivy 4.4 MB,
 n-grams 2.9 MB). Fifty such repositories hold ≈ 710 MB of default
 segments *(estimate)*: ≈ 7 s to download at 100 MB/s, ≈ 28 s at 25 MB/s
 *(estimate: assumed bandwidth)*, ≈ 0.9 s to open *(estimate: 50 × RFC
@@ -446,7 +448,7 @@ bench organization's measured time to ready exceeds 60 s.
 
 - **Facts**: each indexer keeps today's local cache
   (`<sha>-<lang>-v<ver>-f<FACTS_FORMAT>[-p<hash>].bin`,
-  `crates/rueca-index/src/lib.rs:544-570`). `facts_write_through = true`
+  `crates/rueca-index/src/lib.rs:546-572`). `facts_write_through = true`
   also writes misses to `facts/` (`Create`) and reads it on a local miss.
   Off by default: a GET per missed file is slow next to a local read, and
   a repository's refs already run in sequence on one indexer (§7.5),
@@ -462,7 +464,7 @@ bench organization's measured time to ready exceeds 60 s.
 Mark-and-sweep by the updater, hourly *(default)*. **Live set**: every
 snapshot in a repository catalog (segment, `vectors` segment, packs); the
 current and previous generations, as today's `collect_garbage` keeps `n`
-and `n − 1` (`org/mod.rs:1022-1054`), with every `index/`, `profiles/`,
+and `n − 1` (`org/mod.rs:1024-1056`), with every `index/`, `profiles/`,
 `links/` object and segment they name; vector files named by a live
 segment's `vectors.meta`. **Sweep**: list each immutable prefix and
 delete what is outside the live set and older than the **grace period,
@@ -498,7 +500,7 @@ error listing the indexed refs.
 
 ### 5.9 Segment meta and the store lock question
 
-`SegmentMeta` (`crates/rueca-segment/src/lib.rs:319-332`) gains
+`SegmentMeta` (`crates/rueca-segment/src/lib.rs:323-336`) gains
 `#[serde(default, skip_serializing_if = "Vec::is_empty")] pub packs:
 Vec<String>`, the packs holding the snapshot's blobs; local stores leave
 it empty and keep `index.rcpi`. Format 2 takes it without a bump
@@ -593,8 +595,9 @@ pub enum PutError { AlreadyExists, Precondition, Other(anyhow::Error) }
 `object_store` is async; `rueca-segment` and `rueca-index` are not.
 **Recorded:** the trait is async (boxed futures for `dyn Storage`); local
 commands keep their synchronous code over the local implementation;
-service roles run on the tokio runtime `rueca-mcp` already owns (tokio
-1.54.1). RFC 0001 §8.1's `SegmentReader` / `SegmentWriter` stay unbuilt:
+service roles bring `tokio` for `axum` and `object_store` in the service
+crate, while `rueca-mcp`'s core stays synchronous and runtime-free
+(`docs/mcp-protocol.md` §8). RFC 0001 §8.1's `SegmentReader` / `SegmentWriter` stay unbuilt:
 a segment is still a local file; only how it arrives changes.
 
 ## 6. MCP over HTTP
@@ -615,17 +618,17 @@ of this section ran rmcp's `transport-streamable-http-server` under
 
 | Item | Choice | Source |
 |---|---|---|
-| MCP layer | `rueca-mcp` without an SDK: JSON-RPC 2.0 over a `Transport` trait (stdio today, HTTP here); `Engine::respond` unchanged behind it | the replacement branch above; the stdio seam `serve<T>` (`crates/rueca-mcp/src/lib.rs:377-384` at `c82029013c6d`) |
+| MCP layer | `rueca-mcp`'s own, landed in #64: `RuecaServer::handle(msg, &mut Session) -> Step` (`crates/rueca-mcp/src/protocol.rs:134-142`), `Step { Reply, Call, Silent, Cancel }` (`protocol.rs:105-116`), `ToolCall::run` (`tools.rs:195`), `parse_line` (`jsonrpc.rs`); synchronous, no I/O, no runtime | `docs/mcp-protocol.md` §8 |
 | HTTP | `axum` 0.8.9 (MIT, MSRV 1.80), `hyper` 1.12.0, `tower-http` 0.7.1 (`trace`, `limit`, `timeout`) | [tower-http](https://crates.io/crates/tower-http) |
 | Mount | `Router::new().route("/mcp", post(mcp_handler))`; no `GET`, no `DELETE` | §6.2 |
-| Protocol versions | 2026-07-28 (stateless, `server/discover`) and the handshake versions the stdio layer serves, every one served statelessly | [changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog) |
+| Protocol versions | `SUPPORTED_VERSIONS` (`protocol.rs:20`): 2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25 with `initialize`, 2026-07-28 stateless with `server/discover`; every one served statelessly over HTTP | `docs/mcp-protocol.md` §7; [changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog) |
 
 Transport behaviour, the same choices made against rmcp's
 `StreamableHttpServerConfig` and now Rueca's own (`[http]`, §4.4):
 
 | Behaviour | Rueca | Why |
 |---|---|---|
-| Sessions | none: `Mcp-Session-Id` ignored, never minted; `initialize` answered statelessly | stateless for every version (SEP-2567 already makes 2026-07-28 requests stateless) |
+| Sessions | none: `Mcp-Session-Id` ignored, never minted. Per request: `initialize`, or a body whose `_meta` carries a protocol version → `Session::new()`; anything else → `Session::legacy(<MCP-Protocol-Version header, "2025-03-26" when absent>)` (`protocol.rs:83-95`; `docs/mcp-protocol.md` §8) | stateless for every version (SEP-2567 already makes 2026-07-28 requests stateless) |
 | Response body | always `application/json`, one JSON-RPC response per `POST`; no SSE | tool calls are short: one body, no stream, no load-balancer affinity (§13, question 11) |
 | `allowed_hosts` | `[http].allowed_hosts` + the canonical host; loopback when unset | public deployments must set it |
 | `allowed_origins` | `[http].allowed_origins` + the canonical origin | `Origin` MUST be validated (403) |
@@ -633,13 +636,17 @@ Transport behaviour, the same choices made against rmcp's
 | Required headers | `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` checked against `_meta` by the handler itself | §6.2; tested in phase 1 |
 | Shutdown | the server stops accepting, drains in-flight calls up to `request_timeout`, exits | graceful drain |
 
-Handlers keep today's dispatch: a tool call → `spawn_blocking` →
-`Engine::respond` (`call_tool` → `call_blocking`,
-`crates/rueca-mcp/src/lib.rs:149-183` at `c82029013c6d`; the replacement
-keeps the shape). The validated principal travels as an `axum`
-request extension into the handler and selects that call's
-`Visibility`. `IndexGate` and `INDEX_WAIT` (120 s, `lib.rs:188`) are
-local only.
+The handler is one message per `POST`: `parse_line(body)` → `handle` →
+`Step::Reply` is `200` with `Outgoing::to_json()`; `Step::Call` runs
+`call.run(&server)` under `spawn_blocking` (it ends in
+`RuecaServer::call_blocking` → `Engine::respond`,
+`crates/rueca-mcp/src/lib.rs:133-144`) and answers `200`; `Step::Silent`
+and `Step::Cancel` answer `202`; `Incoming::Unparsable` is `400` with
+-32700 (`docs/mcp-protocol.md` §8). The validated principal travels as an
+`axum` request extension into the handler and selects that call's
+`Visibility`. `IndexGate` and `INDEX_WAIT` (120 s, `lib.rs:164`) are
+local only; `tokio` enters only in the HTTP layer, as that document
+asks.
 
 ### 6.2 Specification behaviours (MCP 2026-07-28)
 
@@ -655,11 +662,11 @@ and the [changelog](https://modelcontextprotocol.io/specification/2026-07-28/cha
 | `Origin` or `Host` not allowed | `403` |
 | Body over the limit | `413` |
 | `Mcp-Session-Id`, `Last-Event-ID` | ignored, never minted |
-| `server/discover` | answered (MUST, SEP-2575; the stdio server already does, `lib.rs:386-392` at `c82029013c6d`) |
+| `server/discover` | answered (MUST, SEP-2575; `handle` already does, advertising `SUPPORTED_VERSIONS`, `protocol.rs:20`) |
 
 Rueca sends no server-initiated messages, so the removed GET stream costs
 nothing; `tools/list` keeps a 1 h public cache TTL (`ttlMs` /
-`cacheScope`, SEP-2549; today's stdio server sets it, `lib.rs:141-142`;
+`cacheScope`, SEP-2549; `TOOLS_TTL_MS`, `protocol.rs:31`;
 the list does not depend on the principal). The `Mcp-Method` / `Mcp-Name`
 / body match is Rueca's own check, tested in phase 1. 2025-11-25 clients
 ([transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports))
@@ -756,7 +763,7 @@ fetch a JWKS (§13, question 13). The chain is static tokens, then OIDC.
 
 The engine already filters by `Visibility::Repos(set)` inside the
 organization index before top-k, counts and BM25 statistics
-(`crates/rueca-query/src/lib.rs:324-339`, `org_entries` from 567), so RFC
+(`crates/rueca-query/src/lib.rs:346-361`, `org_entries` from 590), so RFC
 0006 §5's contract holds: results, totals, truncation markers and link
 edges never reveal an unreadable repository. Service mode supplies the
 set:
@@ -770,7 +777,7 @@ set:
   `list_repositories`, no results, no repository named in errors;
 - `admins` (`token:<name>`, `group:<name>`) grants the `admin` role for
   §6.8 and no visibility;
-- local `select` (`lib.rs:459-485`) applies `Visibility` too, with
+- local `select` (`lib.rs:482-508`) applies `Visibility` too, with
   `Visibility::All` its default, so local users see no change;
 - Org mode swaps the rule source for mirrored grants (RFC 0001 §13); the
   type stays.
@@ -779,7 +786,7 @@ set:
 
 - **Deadline.** Today the only bounds are `budget_tokens` (default
   2,000), `search_code`'s `scan_budget_bytes` (256 MiB,
-  `crates/rueca-segment/src/lib.rs:489-501`) and `limit`s.
+  `crates/rueca-segment/src/lib.rs:493-505`) and `limit`s.
   `Engine::respond` gains a `Deadline` (default 10 s) checked in the
   search collectors, `trace`'s traversal and `search_code`'s scan; on
   expiry the tool returns an error that names the deadline and suggests a
@@ -1011,8 +1018,8 @@ intended path.
 One job per repository at a time; its refs run **sequentially**, default
 branch first, so the facts cache is warm for the rest (RFC 0006 §9.3).
 `jobs = 1` per indexer: a job is already parallel (rayon,
-`crates/rueca-index/src/lib.rs:262-265`; writer threads
-`min(available_parallelism, 16)`, `writer.rs:186-189`). Zoekt pins
+`crates/rueca-index/src/lib.rs:264-267`; writer threads
+`min(available_parallelism, 16)`, `writer.rs:188-191`). Zoekt pins
 repositories to indexers by consistent hashing only because its shards
 live on local disk ([Sourcegraph](https://sourcegraph.com/docs/admin/architecture));
 here any indexer takes any job, preferring the last holder
@@ -1083,16 +1090,16 @@ Each ref reuses the local pipeline:
    reported (today a missing object fails the export), and the export
    opens a bare mirror (`git::discover` on a bare repository is
    *(unverified)*; phase 2 tests it).
-2. **Index** with `index_worktree` (`crates/rueca-index/src/lib.rs:241-375`)
+2. **Index** with `index_worktree` (`crates/rueca-index/src/lib.rs:243-377`)
    and `IndexOptions { root, store, repo, ref_name, commit, threads }`
-   (`lib.rs:81-104`), pinned to the commit and ref name with `dirty =
+   (`lib.rs:82-105`), pinned to the commit and ref name with `dirty =
    false`, as `index_ref` does (`refs.rs:579-599`). `store` is a per-job
    staging store whose `packs/` holds the footers of the repository's
    packs (the writer stores only new blobs) and whose `facts/` is the
    indexer's cache.
 3. **Publish** the new segment and pack (§7.9).
 
-Measured on this repository (release build, 1,599 files): cold 1,982 ms
+Measured on this repository at `c82029013c6d` (release build, 1,599 files): cold 1,982 ms
 (walk 29, extract 409, resolve 870, write 672); warm, 1,457 of 1,457
 cache hits, 864 ms (27, 117, 100, 619). The segment write is ≈ 72% of a
 warm re-index *(derived)*.
@@ -1100,7 +1107,7 @@ warm re-index *(derived)*.
 ### 7.8 Failure isolation
 
 Today extraction runs in process: each file under `catch_unwind`
-(`lib.rs:523-542`), the resolver too (`lib.rs:322-323`), per-file
+(`lib.rs:525-544`), the resolver too (`lib.rs:324-325`), per-file
 `Budget { max_bytes: 2 MiB, max_parse_time: 5 s, max_depth: 512 }`
 enforced through tree-sitter progress callbacks and match limits
 (`crates/rueca-extract/src/lib.rs:61-72`); no memory limit, no process
@@ -1113,13 +1120,13 @@ crashes fails alone (§7.5, rule 5) while the facts cache, on disk, stays
 shared:
 
 - **stdin**: one JSON object. `budget` travels explicitly because
-  `IndexOptions.budget` is `#[serde(skip)]` (`lib.rs:89-90`) and `Budget`
+  `IndexOptions.budget` is `#[serde(skip)]` (`lib.rs:90-91`) and `Budget`
   is not `Serialize` (`crates/rueca-extract/src/lib.rs:60-66`):
   `{"version": 1, "options": {"root": "/work/7f3a/export", "store":
   "/work/7f3a/store", "repo": "github.com/acme/billing", "ref_name":
   "main", "commit": "9f1c2e7a…", "threads": null}, "budget":
   {"max_bytes": 2097152, "max_parse_time_ms": 5000, "max_depth": 512}}`.
-- **stdout**: `{"ok": <IndexReport>}` (`lib.rs:122-145`, with `timings`)
+- **stdout**: `{"ok": <IndexReport>}` (`lib.rs:123-146`, with `timings`)
   or `{"error": {"stage": "resolve", "message": "…"}}`; **stderr**: JSON
   log lines, forwarded under the job's span.
 - **Limits**, `setrlimit` before `exec`: `RLIMIT_AS` (24 GiB
@@ -1148,9 +1155,9 @@ turn ordinary failures into coverage gaps.
 3. CAS the job (§7.5, rule 4).
 4. The updater's next tick (5 s) lists `jobs/`, re-reads the catalogs of
    jobs that became `done`, and runs today's `update_org_with(store,
-   name, members, linker)` (`org/mod.rs:458-510`) with `PackageLinker`
-   (`crates/rueca-index/src/link.rs:115-124`), which reads facts from the
-   cache or re-extracts from packs (`link.rs:159-204`): the organization
+   name, members, linker)` (`org/mod.rs:459-511`) with `PackageLinker`
+   (`crates/rueca-index/src/link.rs:125-134`), which reads facts from the
+   cache or re-extracts from packs (`link.rs:169-214`): the organization
    layer is rebuildable from the bucket alone. Profiles, link sets and
    tantivy files go up with `Create`, then §5.4's two CAS steps.
 5. Replicas see the pointer within 5 s and download what changed.
@@ -1161,7 +1168,7 @@ Push → queryable for a one-commit push to a repository of this one's size:
 |---|---|---|
 | Webhook ack, `ls-remote`, lease | 1–3 s | *(estimate: three round trips)* |
 | Fetch, depth 1, filtered | 1–10 s | *(estimate)* |
-| Export + index, warm facts | ≈ 1–2 s | 864 ms warm index (measured on this repository) + export *(estimate)* |
+| Export + index, warm facts | ≈ 1–2 s | 864 ms warm index (measured on this repository at `c82029013c6d`) + export *(estimate)* |
 | Upload 14.2 MB + catalog CAS | 0.5–2 s | *(estimate: 10–30 MB/s)* |
 | Updater wait | 0–5 s | tick |
 | Generation build | ≤ 2× the repository's index time | RFC 0006 §8 floor |
@@ -1513,8 +1520,8 @@ recommendation given; the "revisit if" notes stay.
 
 ## 14. Dogfood notes: where Rueca failed while writing this RFC
 
-Code claims were located with Rueca's own tools on this repository
-(`rueca query … --text`, 10–130 ms per call with the segment open).
+Code claims were located with Rueca's own tools on this repository at
+`c82029013c6d` (`rueca query … --text`, 10–130 ms per call with the segment open).
 Worked: `get_file_outline` (`org/mod.rs`, 1,658 lines, ~18 ms) replaced
 most file reads; `trace` callers of `Store.register`, `update_org_with`
 and `atomic_write` gave every writer path with call-site lines (§5.11's
@@ -1552,8 +1559,9 @@ or section; `search_symbols` with `labels: ["EnvVar"]` listed every
 9. `search_symbols "fetch"` ranked bench fixtures above product code; the
    transport code (`refs.rs:237`, `org.rs:183`) was reached by tracing
    `index_ref`.
-10. Stale documentation: the `rueca-mcp` crate doc says rmcp 3.7
-    (`lib.rs:14`), `Cargo.lock` resolves 3.10.0.
+10. Stale documentation at `c82029013c6d`: the `rueca-mcp` crate doc said
+    rmcp 3.7 while `Cargo.lock` resolved 3.10.0; moot since #64 removed
+    rmcp.
 
 ## 15. Sources
 
