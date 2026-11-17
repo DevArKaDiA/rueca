@@ -89,6 +89,29 @@ pub enum RepoArg {
     Many(Vec<String>),
 }
 
+/// `ref`: one ref, or several of the same repositories (a multi-ref comparison, RFC 0005 §6).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RefArg {
+    /// A branch (`main`, `feature/x`), a pull request (`pr/<n>`), a tag, `HEAD`, `worktree`, or a
+    /// commit (full, or a unique prefix of at least 7 hex digits).
+    One(String),
+    /// Several refs, read side by side: identical symbols are one item with the snapshots they
+    /// are `in`; versions that differ are flagged `changed`.
+    Many(Vec<String>),
+}
+
+impl RefArg {
+    /// The ref names, in order (trimmed; empty names dropped).
+    pub fn names(&self) -> Vec<&str> {
+        let all: Vec<&str> = match self {
+            RefArg::One(r) => vec![r.as_str()],
+            RefArg::Many(list) => list.iter().map(String::as_str).collect(),
+        };
+        all.into_iter().map(str::trim).filter(|r| !r.is_empty()).collect()
+    }
+}
+
 /// Response format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -112,12 +135,16 @@ pub struct CommonArgs {
     /// repository of an `id` argument for tools that take one); otherwise the server's root, else
     /// the repository of an `id` argument, else the only indexed repository.
     pub repo: Option<RepoArg>,
-    /// Ref to read: a branch name, `HEAD`, `worktree`, or a commit (full, or a unique prefix of at
-    /// least 7 hex digits). Local mode indexes the working tree of each root (its checked-out
-    /// branch plus uncommitted changes), which is the default; other refs are an error that lists
-    /// the indexed refs.
+    /// Ref to read: a branch (`main`, `feature/x`), a pull request (`pr/<n>`), a tag, or a commit
+    /// (full, or a unique prefix of at least 7 hex digits); `HEAD` / `worktree` name the default.
+    /// A string, or a list to compare refs of one repository (identical symbols come back once
+    /// with the snapshots they are `in`; versions that differ are `changed`). Default: the
+    /// repository's default ref (local: the working tree, its branch plus uncommitted changes).
+    /// In an organization, `ref` with `repo` reads that repository at the ref and every other
+    /// one at its default; without `repo`, every repository that has the ref is read at it.
+    /// An unknown ref is an error that lists the indexed refs.
     #[serde(rename = "ref")]
-    pub ref_: Option<String>,
+    pub ref_: Option<RefArg>,
     /// `compact` (default) or `verbose` (the alpha result shapes and defaults, for one release).
     pub format: Option<FormatArg>,
     /// Approximate size cap of the response in tokens (bytes / 4 of the text rendering), default
@@ -130,6 +157,11 @@ pub struct CommonArgs {
 impl CommonArgs {
     pub fn verbose(&self) -> bool {
         self.format == Some(FormatArg::Verbose)
+    }
+
+    /// The `ref` names, in order (empty without `ref`).
+    pub fn ref_names(&self) -> Vec<&str> {
+        self.ref_.as_ref().map(RefArg::names).unwrap_or_default()
     }
 }
 
@@ -408,7 +440,8 @@ mod tests {
         ] {
             let p = &s["properties"];
             assert_eq!(s["additionalProperties"], false);
-            assert_eq!(p["ref"]["type"], "string", "{s}");
+            let refs = p["ref"]["anyOf"].as_array().unwrap_or_else(|| panic!("{s}"));
+            assert_eq!((refs[0]["type"].as_str(), refs[1]["type"].as_str()), (Some("string"), Some("array")));
             assert_eq!(p["cursor"]["type"], "string", "{s}");
             assert_eq!(p["budget_tokens"]["type"], "integer", "{s}");
             let formats: Vec<&str> = p["format"]["oneOf"]
@@ -429,8 +462,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(a.common.repo, Some(RepoArg::Many(vec!["a".into(), "b".into()])));
-        assert_eq!(a.common.ref_.as_deref(), Some("main"));
+        assert_eq!(a.common.ref_names(), ["main"]);
         assert!(a.common.verbose());
+        let a = parse_args::<TraceArgs>(
+            "trace",
+            &input_schema::<TraceArgs>(),
+            json!({"name": "f", "ref": ["main", " pr/7 ", ""]}),
+        )
+        .unwrap();
+        assert_eq!(a.common.ref_names(), ["main", "pr/7"]);
         let e = parse_args::<TraceArgs>("trace", &input_schema::<TraceArgs>(), json!({"name": "f", "format": "short"}))
             .unwrap_err();
         assert!(e.to_string().contains("invalid argument `format`"), "{e}");

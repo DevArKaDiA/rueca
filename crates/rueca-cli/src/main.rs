@@ -3,10 +3,13 @@
 //!
 //! ```text
 //! rueca index [PATH] [--store DIR] [--repo ID] [--json]
+//! rueca index [PATH] --ref NAME [--remove] [--store DIR] [--repo ID] [--json]
 //! rueca index --org FILE [PATH] [--store DIR] [--json]
+//! rueca index --org FILE PATH --ref NAME [--remove] [--store DIR] [--json]
 //! rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
 //! rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
 //! rueca status [--store DIR] [--json]
+//! rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
 //! ```
 //!
 //! `--store`, `--root`, `--org`, `-v`, `--json` and `--pretty` are global
@@ -15,7 +18,14 @@
 //! name of an organization already built in the store. `index --org FILE`
 //! indexes every repository of the file (or only the one containing PATH)
 //! and updates the organization; a plain `index PATH` of a member also
-//! updates the organizations that hold it. JSON output is compact unless `--pretty`.
+//! updates the organizations that hold it. `index PATH --ref NAME` indexes a
+//! branch, `pr/<n>`, tag or commit of PATH's repository as a snapshot of its
+//! own, exported under `<store>/refs/` (RFC 0006 §9.3; `--remove` drops it)
+//! and updates the organizations holding the repository; `index --org FILE
+//! PATH --ref NAME` does it for one member of the file (PATH: its path, `id`
+//! or `url`), and `index --org FILE` syncs every member's `refs`. `status`
+//! lists ref snapshots under their repository and each organization's refs;
+//! `links --ref` prints one ref entry's link set. JSON output is compact unless `--pretty`.
 //! Logs go to stderr (`-v` debug, `-vv` trace, or `RUECA_LOG=<filter>`).
 //! `query` prints the tool's JSON result to stdout (with `--text`, the
 //! compact text rendering an MCP client gets as text content); on error it
@@ -84,6 +94,16 @@ enum Command {
         /// Worker threads (default: available parallelism).
         #[arg(long, value_name = "N")]
         threads: Option<usize>,
+        /// Index a ref of PATH's repository instead of its working tree: a
+        /// branch, `pr/<n>`, a tag or a commit (fetched from `origin` when
+        /// absent), exported under the store as a snapshot of its own; the
+        /// organizations holding the repository list it. With --org FILE:
+        /// a ref of the member PATH (its path, `id` or `url`).
+        #[arg(long = "ref", value_name = "NAME")]
+        ref_name: Option<String>,
+        /// With --ref: remove that ref snapshot and its export.
+        #[arg(long, requires = "ref_name")]
+        remove: bool,
     },
     /// Run one tool and print its JSON result. Same semantics as MCP.
     #[command(
@@ -115,6 +135,10 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         /// Only edges leaving this repository (id).
         #[arg(long, value_name = "ID")]
         repo: Option<String>,
+        /// With --repo: the link set of that ref entry of the repository
+        /// (its edges into its dependencies' default refs).
+        #[arg(long = "ref", value_name = "NAME", requires = "repo")]
+        ref_name: Option<String>,
     },
 }
 
@@ -123,17 +147,28 @@ fn main() -> ExitCode {
     init_logging(cli.verbose, matches!(cli.command, Command::Mcp { .. }));
     let store = cli.store.clone().unwrap_or_else(Store::default_dir);
     let result = match cli.command {
-        Command::Index { path, repo, threads } => match cli.org {
-            Some(org) => cmd_index_org(&store, &org, path, repo, cli.json, cli.pretty, threads),
-            None => cmd_index(&store, path, repo, cli.json, cli.pretty, threads),
+        Command::Index { path, repo, threads, ref_name, remove } => match (cli.org, ref_name) {
+            (Some(org), Some(name)) => {
+                let out = Output { json: cli.json, pretty: cli.pretty };
+                cmd_index_org_ref(&store, &org, RefCmd { path, repo, name, remove, threads }, out)
+            }
+            (Some(org), None) => cmd_index_org(&store, &org, path, repo, cli.json, cli.pretty, threads),
+            (None, Some(name)) => {
+                let out = Output { json: cli.json, pretty: cli.pretty };
+                cmd_index_ref(&store, RefCmd { path, repo, name, remove, threads }, out)
+            }
+            (None, None) => cmd_index(&store, path, repo, cli.json, cli.pretty, threads),
         },
         Command::Query { tool, args, text } => {
             return cmd_query(&store, cli.root, cli.org.as_deref(), &tool, args, cli.pretty, text);
         }
         Command::Mcp { no_auto_index } => cmd_mcp(&store, cli.root, cli.org.as_deref(), !no_auto_index),
         Command::Status => cmd_status(&store, cli.json, cli.pretty),
-        Command::Links { repo } => match cli.org.as_deref() {
-            Some(org) => cmd_links(&store, org, repo.as_deref(), cli.json, cli.pretty),
+        Command::Links { repo, ref_name } => match cli.org.as_deref() {
+            Some(org) => {
+                let out = Output { json: cli.json, pretty: cli.pretty };
+                cmd_links(&store, org, LinksCmd { repo: repo.as_deref(), ref_name: ref_name.as_deref() }, out)
+            }
             None => Err(anyhow::anyhow!("`links` needs --org <file|name>")),
         },
     };
@@ -181,6 +216,7 @@ fn cmd_index(
         repo,
         budget: rueca_extract::Budget::default(),
         threads,
+        ..rueca_index::IndexOptions::default()
     };
     let report = rueca_index::index_worktree(&opts)?;
     // Organizations holding this root replace its part (RFC 0006 §3.2).
@@ -193,13 +229,7 @@ fn cmd_index(
         println!("{}", render(&v, pretty));
         return Ok(());
     }
-    let s = &report.segment;
-    let snap = &s.snapshot;
-    let pct = if report.references_total > 0 {
-        100.0 * report.references_resolved as f64 / report.references_total as f64
-    } else {
-        100.0
-    };
+    let snap = &report.segment.snapshot;
     println!(
         "indexed {} ({} @ {}{})",
         report.root,
@@ -207,6 +237,21 @@ fn cmd_index(
         short(&snap.commit),
         if snap.dirty { ", dirty" } else { "" }
     );
+    print_index_details(&report);
+    for u in &orgs {
+        print_org_update(u);
+    }
+    Ok(())
+}
+
+/// The files / graph / references / segment lines of an index summary.
+fn print_index_details(report: &rueca_index::IndexReport) {
+    let s = &report.segment;
+    let pct = if report.references_total > 0 {
+        100.0 * report.references_resolved as f64 / report.references_total as f64
+    } else {
+        100.0
+    };
     println!(
         "  files:      {} total, {} extracted, {} skipped, {} cache hits",
         report.files_total, report.files_extracted, report.files_skipped, report.facts_cache_hits
@@ -214,10 +259,114 @@ fn cmd_index(
     println!("  graph:      {} nodes, {} edges", s.node_count, s.edge_count);
     println!("  references: {}/{} resolved ({pct:.1}%)", report.references_resolved, report.references_total);
     println!("  segment:    {} ({}) in {} ms", s.id, human_bytes(s.bytes), report.duration_ms);
-    for u in &orgs {
-        print_org_update(u);
+}
+
+/// JSON / pretty flags of a command's output.
+#[derive(Debug, Clone, Copy)]
+struct Output {
+    json: bool,
+    pretty: bool,
+}
+
+/// `rueca index [PATH] --ref NAME [--remove]`.
+struct RefCmd {
+    path: Option<PathBuf>,
+    repo: Option<String>,
+    name: String,
+    remove: bool,
+    threads: Option<usize>,
+}
+
+/// Indexes (or removes) a ref snapshot of PATH's repository (RFC 0006 §9.3).
+fn cmd_index_ref(store: &Path, cmd: RefCmd, out: Output) -> anyhow::Result<()> {
+    let path = cmd.path.unwrap_or_else(|| PathBuf::from("."));
+    let root = std::fs::canonicalize(&path).map_err(|e| anyhow::anyhow!("cannot open `{}`: {e}", path.display()))?;
+    if cmd.remove {
+        let repo = rueca_index::repo_id(&root, cmd.repo.as_deref());
+        let prefix = rueca_index::refs::root_prefix(&root);
+        let removed = rueca_index::refs::remove_ref(store, &repo, &prefix, &cmd.name)?;
+        // Organizations holding the repository drop the ref's entry.
+        let orgs = rueca_index::org::update_orgs_of_repo(store, &repo)?;
+        if out.json {
+            let mut v = serde_json::to_value(&removed)?;
+            if !orgs.is_empty() {
+                v["orgs"] = serde_json::to_value(&orgs)?;
+            }
+            println!("{}", render(&v, out.pretty));
+        } else {
+            println!("removed ref {} of {} ({})", removed.ref_name, removed.repo, removed.export_dir);
+            orgs.iter().for_each(print_org_update);
+        }
+        return Ok(());
     }
+    let report = rueca_index::refs::index_ref(&rueca_index::refs::RefIndexOptions {
+        root,
+        name: cmd.name,
+        store: store.to_path_buf(),
+        repo: cmd.repo,
+        budget: rueca_extract::Budget::default(),
+        threads: cmd.threads,
+    })?;
+    // Organizations holding the repository list the ref (RFC 0006 §9.3):
+    // only its entry changes.
+    let orgs = rueca_index::org::update_orgs_of_repo(store, &report.repo)?;
+    if out.json {
+        let mut v = ref_report_json(&report)?;
+        if !orgs.is_empty() {
+            v["orgs"] = serde_json::to_value(&orgs)?;
+        }
+        println!("{}", render(&v, out.pretty));
+        return Ok(());
+    }
+    print_ref_report(&report);
+    orgs.iter().for_each(print_org_update);
     Ok(())
+}
+
+/// The text summary of an indexed ref.
+fn print_ref_report(report: &rueca_index::refs::RefIndexReport) {
+    println!(
+        "indexed ref {} of {} ({} @ {}){}",
+        report.ref_name,
+        report.repo,
+        report.kind.as_str(),
+        short(&report.commit),
+        if report.unchanged { ": unchanged" } else { "" }
+    );
+    if report.unchanged {
+        let s = &report.index.segment;
+        println!("  export:     {} (kept)", report.export_dir);
+        println!("  graph:      {} nodes, {} edges, {} files", s.node_count, s.edge_count, s.file_count);
+        println!("  segment:    {} ({})", s.id, human_bytes(s.bytes));
+    } else {
+        println!("  export:     {} ({} files) in {} ms", report.export_dir, report.export.files, report.export_ms);
+        print_index_details(&report.index);
+    }
+    println!("  total:      {} ms (resolve {} ms)", report.duration_ms, report.resolve_ms);
+}
+
+/// The `--json` report of `index --ref`: the export's IndexReport plus the
+/// ref fields; `duration_ms` is the whole run, `index_ms` the indexing.
+fn ref_report_json(report: &rueca_index::refs::RefIndexReport) -> anyhow::Result<Value> {
+    let mut v = serde_json::to_value(&report.index)?;
+    v["index_ms"] = json!(report.index.duration_ms);
+    for (k, x) in [
+        ("ref", json!(report.ref_name)),
+        ("kind", serde_json::to_value(report.kind)?),
+        ("commit", json!(report.commit)),
+        ("repo", json!(report.repo)),
+        ("source", json!(report.source)),
+        ("fetched", json!(report.fetched)),
+        ("export_dir", json!(report.export_dir)),
+        ("unchanged", json!(report.unchanged)),
+        ("export", serde_json::to_value(&report.export)?),
+        ("resolve_ms", json!(report.resolve_ms)),
+        ("export_ms", json!(report.export_ms)),
+        ("duration_ms", json!(report.duration_ms)),
+    ] {
+        v[k] = x;
+    }
+    Ok(v)
 }
 
 /// `--org` of `query` / `mcp`: an organization file, or the name of an
@@ -276,6 +425,56 @@ fn cmd_index_org(
             r.duration_ms
         );
     }
+    for r in &report.refs {
+        println!(
+            "indexed ref {} of {} ({} @ {}){} in {} ms",
+            r.ref_name,
+            r.repo,
+            r.kind.as_str(),
+            short(&r.commit),
+            if r.unchanged { ": unchanged" } else { "" },
+            r.duration_ms
+        );
+    }
+    for e in &report.ref_errors {
+        println!("  ref not indexed: {e}");
+    }
+    print_org_update(&report.update);
+    Ok(())
+}
+
+/// `rueca index --org FILE PATH --ref NAME [--remove]`: one ref of one
+/// member, then the organization layer.
+fn cmd_index_org_ref(store: &Path, org: &str, cmd: RefCmd, out: Output) -> anyhow::Result<()> {
+    if cmd.repo.is_some() {
+        anyhow::bail!("`--repo` cannot be combined with `--org`; set `id` on the `[[repo]]` in the organization file");
+    }
+    let (_, config) = org_arg(org)?;
+    let Some(config) = config else {
+        anyhow::bail!("`rueca index --org` needs the organization file (`rueca-org.toml`), not a name");
+    };
+    let opts = rueca_index::org::OrgIndexOptions {
+        config,
+        store: store.to_path_buf(),
+        budget: rueca_extract::Budget::default(),
+        threads: cmd.threads,
+        only: Some(cmd.path.unwrap_or_else(|| PathBuf::from("."))),
+    };
+    let report = rueca_index::org::index_org_ref(&opts, &cmd.name, cmd.remove)?;
+    if out.json {
+        let mut v = serde_json::to_value(&report)?;
+        if let Some(r) = &report.indexed {
+            v["indexed"] = ref_report_json(r)?;
+        }
+        println!("{}", render(&v, out.pretty));
+        return Ok(());
+    }
+    if let Some(r) = &report.indexed {
+        print_ref_report(r);
+    }
+    if let Some(r) = &report.removed {
+        println!("removed ref {} of {} ({})", r.ref_name, r.repo, r.export_dir);
+    }
     print_org_update(&report.update);
     Ok(())
 }
@@ -293,8 +492,32 @@ fn print_org_update(u: &rueca_segment::org::OrgUpdate) {
         u.unchanged,
         u.duration_ms
     );
+    let ref_work = u.refs_added.len() + u.refs_replaced.len() + u.refs_removed.len();
+    if u.refs > 0 || ref_work > 0 {
+        println!(
+            "  refs:       {} ({} added, {} replaced, {} removed, {} unchanged)",
+            u.refs,
+            u.refs_added.len(),
+            u.refs_replaced.len(),
+            u.refs_removed.len(),
+            u.refs_unchanged
+        );
+    }
+    for c in &u.costs {
+        println!(
+            "  {}: copy {} µs ({}), profile {} µs, links {} µs",
+            c.entry,
+            c.copy_us,
+            human_bytes(c.bytes_copied),
+            c.profile_us,
+            c.link_us
+        );
+    }
     if !u.missing.is_empty() {
         println!("  not indexed yet (left out): {}", u.missing.join(", "));
+    }
+    for r in &u.unowned_refs {
+        println!("  left out: {r}");
     }
 }
 
@@ -392,52 +615,34 @@ fn cmd_mcp(store: &Path, root: Option<PathBuf>, org: Option<&str>, auto_index: b
     })
 }
 
-fn cmd_links(store: &Path, org: &str, only: Option<&str>, json: bool, pretty: bool) -> anyhow::Result<()> {
+/// `rueca links` filters.
+struct LinksCmd<'a> {
+    /// Only edges leaving this repository.
+    repo: Option<&'a str>,
+    /// With `repo`: that ref entry's link set.
+    ref_name: Option<&'a str>,
+}
+
+fn cmd_links(store: &Path, org: &str, cmd: LinksCmd<'_>, out: Output) -> anyhow::Result<()> {
+    use rueca_segment::org::{OrgSelection, OrgSlot};
     let (name, _) = org_arg(org)?;
     let idx = rueca_segment::org::OrgIndex::open(store, &name)?;
     let st = Store::open(store)?;
     let g = idx.generation();
     let all: Vec<usize> = (0..g.repos.len()).collect();
-    let mut segs = Vec::with_capacity(g.repos.len());
-    for r in &g.repos {
-        segs.push(st.open_segment(&r.segment_id)?);
+    let mut view = OrgSelection::default();
+    let mut slots: Vec<OrgSlot> = all.iter().map(|&i| OrgSlot::default_of(i)).collect();
+    if let Some(r) = cmd.repo {
+        let i = g.repo_index(r).ok_or_else(|| anyhow::anyhow!("repository `{r}` is not in organization `{name}`"))?;
+        slots = match cmd.ref_name {
+            Some(x) => g.select(i, &[x])?,
+            None => vec![OrgSlot::default_of(i)],
+        };
+        view.set(i, slots.clone());
     }
-    if let Some(r) = only
-        && g.repo_index(r).is_none()
-    {
-        anyhow::bail!("repository `{r}` is not in organization `{name}`");
-    }
-    let path_of =
-        |seg: &rueca_segment::Segment, n: u32| -> Option<String> { seg.node(n).file.map(|f| seg.file(f).path.clone()) };
-    let mut edges = Vec::new();
-    for (i, seg) in segs.iter().enumerate() {
-        if only.is_some_and(|r| g.repos[i].repo != r) {
-            continue;
-        }
-        for n in 0..seg.nodes().len() as u32 {
-            for e in idx.link_edges(i, n, rueca_segment::org::LinkDir::Out, None, &all)? {
-                let dst = &segs[e.repo];
-                edges.push(json!({
-                    "consumer": g.repos[e.evidence_repo].repo,
-                    "src_repo": g.repos[i].repo,
-                    "src": seg.node(n).qualified_name,
-                    "src_label": seg.node(n).label.as_str(),
-                    "src_path": path_of(seg, n),
-                    "dst_repo": g.repos[e.repo].repo,
-                    "dst": dst.node(e.node).qualified_name,
-                    "dst_label": dst.node(e.node).label.as_str(),
-                    "dst_path": path_of(dst, e.node),
-                    "kind": e.kind.as_str(),
-                    "strategy": e.meta.strategy.as_str(),
-                    "confidence": e.meta.confidence,
-                    "path": e.meta.evidence.map(|(f, _)| segs[e.evidence_repo].file(f).path.clone()),
-                    "line": e.meta.evidence.map(|(_, s)| s.start_line + 1),
-                }));
-            }
-        }
-    }
-    if json {
-        println!("{}", render(&json!({"org": name, "generation": g.generation, "edges": edges}), pretty));
+    let edges = link_rows(&idx, &st, &slots, &view)?;
+    if out.json {
+        println!("{}", render(&json!({"org": name, "generation": g.generation, "edges": edges}), out.pretty));
         return Ok(());
     }
     for e in &edges {
@@ -456,8 +661,61 @@ fn cmd_links(store: &Path, org: &str, only: Option<&str>, json: bool, pretty: bo
     Ok(())
 }
 
+/// One JSON row per outgoing link edge of the entries `slots`, seen from
+/// `view`.
+fn link_rows(
+    idx: &rueca_segment::org::OrgIndex,
+    st: &Store,
+    slots: &[rueca_segment::org::OrgSlot],
+    view: &rueca_segment::org::OrgSelection,
+) -> anyhow::Result<Vec<Value>> {
+    use rueca_segment::org::{LinkDir, OrgSlot};
+    let g = idx.generation();
+    let all: Vec<usize> = (0..g.repos.len()).collect();
+    let mut segs: std::collections::HashMap<OrgSlot, rueca_segment::Segment> = std::collections::HashMap::new();
+    for s in g.slots() {
+        if let Some(e) = g.entry(s) {
+            segs.insert(s, st.open_segment(&e.segment_id)?);
+        }
+    }
+    let label = |s: OrgSlot| match s.ref_idx {
+        None => g.repos[s.repo].repo.clone(),
+        Some(_) => format!("{}@{}", g.repos[s.repo].repo, g.ref_name(s).unwrap_or_default()),
+    };
+    let path_of =
+        |seg: &rueca_segment::Segment, n: u32| -> Option<String> { seg.node(n).file.map(|f| seg.file(f).path.clone()) };
+    let mut edges = Vec::new();
+    for &at in slots {
+        let seg = &segs[&at];
+        for n in 0..seg.nodes().len() as u32 {
+            for e in idx.link_edges(at, n, LinkDir::Out, None, &all, view)? {
+                let dst = &segs[&e.slot];
+                edges.push(json!({
+                    "consumer": label(e.evidence),
+                    "src_repo": label(at),
+                    "src": seg.node(n).qualified_name,
+                    "src_label": seg.node(n).label.as_str(),
+                    "src_path": path_of(seg, n),
+                    "dst_repo": label(e.slot),
+                    "dst": dst.node(e.node).qualified_name,
+                    "dst_label": dst.node(e.node).label.as_str(),
+                    "dst_path": path_of(dst, e.node),
+                    "kind": e.kind.as_str(),
+                    "strategy": e.meta.strategy.as_str(),
+                    "confidence": e.meta.confidence,
+                    "path": e.meta.evidence.map(|(f, _)| segs[&e.evidence].file(f).path.clone()),
+                    "line": e.meta.evidence.map(|(_, s)| s.start_line + 1),
+                }));
+            }
+        }
+    }
+    Ok(edges)
+}
+
 /// The `status` row of an indexed root (its segment's counts, or the error
-/// opening it).
+/// opening it). `ref` is the snapshot's ref (its branch, `HEAD` when
+/// detached, `worktree` outside git); `ref_snapshot` marks a ref exported
+/// under the store (`index --ref`).
 fn root_row(st: &Store, e: &CatalogEntry, now: u64) -> Value {
     let mut row = json!({
         "root": e.root,
@@ -465,10 +723,15 @@ fn root_row(st: &Store, e: &CatalogEntry, now: u64) -> Value {
         "segment_id": e.segment_id,
         "indexed_at": e.indexed_at,
         "age_secs": now.saturating_sub(e.indexed_at),
+        "ref_snapshot": e.is_ref_export(),
     });
+    if let Some(r) = &e.ref_name {
+        row["ref"] = json!(r);
+    }
     match st.open_segment(&e.segment_id) {
         Ok(seg) => {
             let m = seg.meta();
+            row["ref"] = json!(ref_label(m.snapshot.branch.as_deref(), &m.snapshot.commit));
             row["commit"] = json!(m.snapshot.commit);
             row["dirty"] = json!(m.snapshot.dirty);
             row["nodes"] = json!(m.node_count);
@@ -481,6 +744,15 @@ fn root_row(st: &Store, e: &CatalogEntry, now: u64) -> Value {
     row
 }
 
+/// A snapshot's ref as the tools name it (RFC 0005 §4).
+fn ref_label(branch: Option<&str>, commit: &str) -> String {
+    match branch {
+        Some(b) if !b.is_empty() => b.to_string(),
+        _ if commit.len() >= 7 && commit.bytes().all(|b| b.is_ascii_hexdigit()) => "HEAD".into(),
+        _ => "worktree".into(),
+    }
+}
+
 /// The `status` row of an organization.
 fn org_row(g: &OrgGeneration, now: u64) -> Value {
     json!({
@@ -490,12 +762,20 @@ fn org_row(g: &OrgGeneration, now: u64) -> Value {
         "age_secs": now.saturating_sub(g.created_at),
         "repos": g.repos.iter().map(|r| json!({
             "repo": r.repo,
-            "root": r.root,
+            "root": r.default.root,
             "url": r.url,
-            "commit": r.snapshot.commit,
-            "segment_id": r.segment_id,
-            "docs": r.docs,
-            "index_bytes": r.index_bytes,
+            "ref": rueca_segment::org::snapshot_ref_name(&r.default.snapshot),
+            "commit": r.default.snapshot.commit,
+            "segment_id": r.default.segment_id,
+            "docs": r.default.docs,
+            "index_bytes": r.default.index_bytes,
+            "refs": r.refs.iter().map(|x| json!({
+                "ref": x.ref_name,
+                "commit": x.entry.snapshot.commit,
+                "segment_id": x.entry.segment_id,
+                "docs": x.entry.docs,
+                "index_bytes": x.entry.index_bytes,
+            })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     })
 }
@@ -516,24 +796,26 @@ fn cmd_status(store: &Path, json: bool, pretty: bool) -> anyhow::Result<()> {
         println!("no indexed roots in {} (run `rueca index <path>`)", store.display());
         return Ok(());
     }
-    let table: Vec<[String; 7]> = rows
-        .iter()
-        .map(|r| {
-            let commit =
-                r["commit"].as_str().map(|c| format!("{}{}", short(c), if r["dirty"] == true { "*" } else { "" }));
-            let num = |k: &str| r[k].as_u64().map(|n| n.to_string()).unwrap_or_else(|| "?".into());
-            [
-                r["root"].as_str().unwrap_or_default().to_string(),
-                r["repo"].as_str().unwrap_or_default().to_string(),
-                commit.unwrap_or_else(|| "error".into()),
-                num("nodes"),
-                num("edges"),
-                num("files"),
-                human_age(r["age_secs"].as_u64().unwrap_or(0)),
-            ]
-        })
-        .collect();
-    let header = ["ROOT", "REPO", "COMMIT", "NODES", "EDGES", "FILES", "AGE"];
+    print_roots(&rows);
+    for r in rows.iter().filter(|r| r.get("error").is_some()) {
+        eprintln!("rueca: cannot open segment of {}: {}", r["root"].as_str().unwrap_or_default(), r["error"]);
+    }
+    for g in &orgs {
+        print_org(g, now);
+    }
+    Ok(())
+}
+
+/// The table of working-tree roots, each repository's ref snapshots listed
+/// under its first root; ref snapshots of repositories without a working
+/// tree come last, under their repository.
+fn print_roots(rows: &[Value]) {
+    let is_ref = |r: &Value| r["ref_snapshot"] == true;
+    let repo = |r: &Value| r["repo"].as_str().unwrap_or_default().to_string();
+    let own: Vec<&Value> = rows.iter().filter(|r| !is_ref(r)).collect();
+    let refs: Vec<&Value> = rows.iter().filter(|r| is_ref(r)).collect();
+    let table: Vec<[String; 8]> = own.iter().map(|r| table_cells(r)).collect();
+    let header = ["ROOT", "REPO", "REF", "COMMIT", "NODES", "EDGES", "FILES", "AGE"];
     let mut widths = header.map(str::len);
     for row in &table {
         for (w, cell) in widths.iter_mut().zip(row) {
@@ -545,37 +827,77 @@ fn cmd_status(store: &Path, json: bool, pretty: bool) -> anyhow::Result<()> {
             .iter()
             .zip(widths)
             .enumerate()
-            .map(|(i, (c, w))| if (3..6).contains(&i) { format!("{c:>w$}") } else { format!("{c:<w$}") })
+            .map(|(i, (c, w))| if (4..7).contains(&i) { format!("{c:>w$}") } else { format!("{c:<w$}") })
             .collect::<Vec<_>>()
             .join("  ")
             .trim_end()
             .to_string()
     };
     println!("{}", line(header.to_vec()));
-    for row in &table {
-        println!("{}", line(row.iter().map(String::as_str).collect()));
-    }
-    for r in rows.iter().filter(|r| r.get("error").is_some()) {
-        eprintln!("rueca: cannot open segment of {}: {}", r["root"].as_str().unwrap_or_default(), r["error"]);
-    }
-    for g in &orgs {
-        let docs: u64 = g.repos.iter().map(|r| u64::from(r.docs)).sum();
-        let bytes: u64 = g.repos.iter().map(|r| r.index_bytes).sum();
-        println!();
-        println!(
-            "organization {}: generation {}, {} repositories, {} symbol documents ({}), {} old",
-            g.name,
-            g.generation,
-            g.repos.len(),
-            docs,
-            human_bytes(bytes),
-            human_age(now.saturating_sub(g.created_at))
-        );
-        for r in &g.repos {
-            println!("  {}  {}  {}", r.repo, short(&r.snapshot.commit), r.root);
+    let mut listed = std::collections::BTreeSet::new();
+    for (r, cells) in own.iter().zip(&table) {
+        println!("{}", line(cells.iter().map(String::as_str).collect()));
+        if listed.insert(repo(r)) {
+            refs.iter().filter(|x| repo(x) == repo(r)).for_each(|x| println!("{}", ref_line(x)));
         }
     }
-    Ok(())
+    let orphans: Vec<&Value> = refs.iter().copied().filter(|r| !listed.contains(&repo(r))).collect();
+    for r in orphans {
+        if listed.insert(repo(r)) {
+            println!("{} (no working tree indexed)", repo(r));
+        }
+        println!("{}", ref_line(r));
+    }
+}
+
+/// The table cells of a working-tree row.
+fn table_cells(r: &Value) -> [String; 8] {
+    let commit = r["commit"].as_str().map(|c| format!("{}{}", short(c), if r["dirty"] == true { "*" } else { "" }));
+    let num = |k: &str| r[k].as_u64().map(|n| n.to_string()).unwrap_or_else(|| "?".into());
+    [
+        r["root"].as_str().unwrap_or_default().to_string(),
+        r["repo"].as_str().unwrap_or_default().to_string(),
+        r["ref"].as_str().unwrap_or("?").to_string(),
+        commit.unwrap_or_else(|| "error".into()),
+        num("nodes"),
+        num("edges"),
+        num("files"),
+        human_age(r["age_secs"].as_u64().unwrap_or(0)),
+    ]
+}
+
+/// One ref snapshot under its repository:
+/// `  ref feature/x @0123456789ab  812 nodes  3m  (export)`.
+fn ref_line(r: &Value) -> String {
+    let nodes = r["nodes"].as_u64().map(|n| n.to_string()).unwrap_or_else(|| "?".into());
+    format!(
+        "  ref {} @{}  {nodes} nodes  {}  (export)",
+        r["ref"].as_str().unwrap_or("?"),
+        r["commit"].as_str().map(short).unwrap_or("error"),
+        human_age(r["age_secs"].as_u64().unwrap_or(0))
+    )
+}
+
+fn print_org(g: &OrgGeneration, now: u64) {
+    let entries = || g.repos.iter().flat_map(|r| r.entries());
+    let docs: u64 = entries().map(|e| u64::from(e.docs)).sum();
+    let bytes: u64 = entries().map(|e| e.index_bytes).sum();
+    let refs: usize = g.repos.iter().map(|r| r.refs.len()).sum();
+    println!();
+    println!(
+        "organization {}: generation {}, {} repositories{}, {} symbol documents ({}), {} old",
+        g.name,
+        g.generation,
+        g.repos.len(),
+        if refs > 0 { format!(" + {refs} refs") } else { String::new() },
+        docs,
+        human_bytes(bytes),
+        human_age(now.saturating_sub(g.created_at))
+    );
+    for (i, r) in g.repos.iter().enumerate() {
+        let refs: Vec<String> = g.refs_of(i).iter().map(|x| format!("{}@{}", x.ref_name, short(&x.commit))).collect();
+        println!("  {}  {}  {}", r.repo, refs.join(" + "), r.default.root);
+    }
 }
 
 fn short(commit: &str) -> &str {

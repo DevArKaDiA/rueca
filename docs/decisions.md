@@ -1,5 +1,67 @@
 # Decisions log
 
+## 2026-11-16 — Refs are snapshots of their own, exported from the object database
+
+RFC 0006 phase 3. A branch, pull request, tag or commit indexed with
+`rueca index [PATH] --ref <name>` (or a member's `refs = [...]`) is one
+store root, one segment and one catalog entry under the repository's id,
+exactly like the working tree: its tree is written blob by blob from the
+object database with `gix` into `<store>/refs/<repo>/<ref>/` and indexed
+there. Not `git worktree` (it writes into the user's repository, locks the
+branch and leaves state behind), not `git archive` (`export-ignore`,
+`export-subst` and content filters change files and their blob ids, which
+loses facts-cache hits and makes the snapshot lie about the commit), and
+not delta segments over the base (RFC 0001's plan, which needs blob
+visibility in every reader; left to service mode). Measured on
+`pallets/click` (debug build): the second ref re-extracts 52 of 156 files,
+13 for the `stable` branch; the segment write is not shared, so its index
+time stays 0.9–1.05× the first's. `pr/<n>` is fetched into
+`refs/rueca/pr/<n>`, the only kind of ref Rueca writes.
+
+## 2026-11-16 — A ref view is a selection of segments of the one organization index
+
+RFC 0006 phase 3. The organization index lists every repository's default
+**and** ref segments; a call selects one (or, with a `ref` list, several)
+per repository and BM25 statistics, routing and visibility are computed
+over the selection, which the phase 1 collector already did. RFC 0006 §4's
+"organization statistics with A filtered out plus A's ref scored through a
+second `Bm25StatisticsProvider`" is that selection; a separate overlay
+would have been a second scoring path to keep equal to the first.
+`repo: A, ref: X` reads A at X and every other repository at its default;
+`ref: X` without `repo` reads every repository that has X at it and the
+others at their default (the organization "as of" a release branch); with
+`repo`, a selected repository without the ref is an error listing its
+indexed refs. Measured: reading a ref costs what reading the default does
+(99 vs 97 ms for an organization search, debug CLI).
+
+## 2026-11-16 — Link sets per ref against the defaults, remapped on read
+
+RFC 0006 phase 3. A ref's outgoing link set is computed when it is indexed,
+its imports resolved jointly against its dependencies' **default**
+entries, and versioned like a default's; a ref never re-links another
+repository. Edges into a repository read at a ref are remapped on read to
+the ref's nodes by (label, qualified name, path), through a
+correspondence built per (repository, ref) on first use, and dropped when
+the ref no longer has the target (click `7.1.2` drops flask's call to
+`Context.with_resource`, added in click 8.0). Resolving imports on the fly
+at query time (§4's plan) was rejected: it runs the joint resolver inside a
+query. Measured: the organization layer per added ref is 0.18–0.63× the
+ref's own indexing (floor ≤ 2×), linking being its largest part.
+
+## 2026-11-16 — Collapse across refs by file blob
+
+RFC 0005 §6 over refs: a symbol is matched across the snapshots of one
+repository by (label, qualified name, path) and its versions are compared
+by file blob. Facts are extracted per blob, so an equal blob is an equal
+symbol for certain and costs no comparison; the price is that a symbol of
+a changed file is `changed` even when its own text is the same. Hashing
+each symbol's span was left open (RFC 0006 §12). `search_symbols`
+collapses before the `limit`; `get_symbol` and `get_file_outline` list
+other versions in `versions`; `trace` returns the union graph with `in`
+on nodes and a trailing `{in, changed}` on edges. Measured (10 queries,
+`limit` 50): 473 items for 648 per-ref items on click `main` / `8.5.1`,
+500 for 678 on flask `main` / `pr/5918`.
+
 ## 2026-11-16 — Rust: call results typed from signatures; methods by name only when unique
 
 Dogfooding showed name-matched edges where the receiver's type was

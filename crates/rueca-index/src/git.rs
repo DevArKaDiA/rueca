@@ -1,6 +1,6 @@
 //! Git reads for the local indexer, via `gix` (RFC 0002 §7.1: gix for all
-//! reads, the `git` CLI only for network operations, which local indexing
-//! never needs).
+//! reads, the `git` CLI only for network operations, which indexing a
+//! working tree never needs; fetching a ref does, see [`crate::refs`]).
 //!
 //! What is read:
 //!
@@ -43,21 +43,39 @@ pub(crate) struct GitInfo {
     pub submodules: BTreeSet<String>,
 }
 
-/// Reads git metadata for `root` (canonical). `None` when `root` is not inside
-/// a git working tree or the repository cannot be read.
-pub(crate) fn read(root: &Path) -> Option<GitInfo> {
-    let repo = gix::discover(root).ok()?;
+/// The repository containing `root` and the root's path inside its working
+/// tree (`/` separators, empty at the top). `root` is canonicalized first,
+/// so a path through a symbolic link (macOS `/tmp` → `/private/tmp`) finds
+/// the same repository and prefix as its target. `None` when `root` is not
+/// inside a git working tree.
+pub(crate) fn discover(root: &Path) -> Option<(gix::Repository, String)> {
+    let root = std::fs::canonicalize(root).ok()?;
+    let repo = gix::discover(&root).ok()?;
     let workdir = std::fs::canonicalize(repo.workdir()?).ok()?;
     let prefix = root.strip_prefix(&workdir).ok()?;
     let prefix: Vec<String> =
         prefix.components().map(|c| c.as_os_str().to_str().map(str::to_string)).collect::<Option<_>>()?;
-    let prefix = prefix.join("/");
+    Some((repo, prefix.join("/")))
+}
+
+/// The normalized `remote.origin.url` of a repository.
+pub(crate) fn origin_of(repo: &gix::Repository) -> Option<String> {
+    repo.config_snapshot().string("remote.origin.url").and_then(|u| crate::normalize_remote(&u.to_string()))
+}
+
+/// The repository id `root`'s enclosing repository gets from its `origin`
+/// remote, if any (configuration only, no tree read).
+pub(crate) fn origin_repo_id(root: &Path) -> Option<String> {
+    discover(root).and_then(|(repo, _)| origin_of(&repo))
+}
+
+/// Reads git metadata for `root` (canonical). `None` when `root` is not inside
+/// a git working tree or the repository cannot be read.
+pub(crate) fn read(root: &Path) -> Option<GitInfo> {
+    let (repo, prefix) = discover(root)?;
 
     let mut info = GitInfo {
-        repo_id: repo
-            .config_snapshot()
-            .string("remote.origin.url")
-            .and_then(|u| crate::normalize_remote(&u.to_string())),
+        repo_id: origin_of(&repo),
         branch: repo.head_name().ok().flatten().map(|n| n.shorten().to_string()),
         ..Default::default()
     };

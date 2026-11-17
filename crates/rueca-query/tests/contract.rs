@@ -433,3 +433,371 @@ fn defaults_differ_between_compact_and_verbose() {
         json!({"s": 0, "repo": "local/big", "ref": "worktree", "commit": "worktree", "overlay": false})
     );
 }
+
+/// `pkg/service.py` on branch `feature/x`: `issue` also calls a new `audit`,
+/// `test_issue` is gone; `src/util/index.ts` is unchanged.
+const PY_FEATURE: &str = "import os
+
+class Base:
+    def run(self):
+        return 1
+
+class InvoiceService(Base):
+    \"\"\"Issues invoices.\"\"\"
+    def issue(self, invoice):
+        helper()
+        audit(invoice)
+        return self.run()
+
+def helper():
+    return os.getcwd()
+
+def audit(invoice):
+    return invoice
+";
+const C3: &str = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00";
+
+/// The billing snapshot of `feature/x`, exported under the store and
+/// registered as a ref snapshot of billing.
+fn feature_ref(store: &std::path::Path) -> String {
+    let base = std::fs::canonicalize(store).unwrap();
+    let root = base.join("refs").join("github-com-acme-billing").join("feature-x");
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.to_string_lossy().into_owned();
+    let mut b = Builder::new(BILLING, C3, &root);
+    b.graph.snapshot.branch = Some("feature/x".into());
+    let (pf, pn) = b.file("pkg/service.py", PY_FEATURE);
+    let (tf, tn) = b.file("src/util/index.ts", TS);
+    let py = |b: &mut Builder, parent, label, name: &str, qn: &str, l0, l1, sig: &str| {
+        b.sym(parent, pf, label, name, qn, span(PY_FEATURE, l0, l1), Some(sig), true, false)
+    };
+    let base_c = py(&mut b, pn, Label::Class, "Base", "pkg.service.Base", 2, 4, "class Base:");
+    let run = py(&mut b, base_c, Label::Method, "run", "pkg.service.Base.run", 3, 4, "def run(self)");
+    let svc = py(
+        &mut b,
+        pn,
+        Label::Class,
+        "InvoiceService",
+        "pkg.service.InvoiceService",
+        6,
+        11,
+        "class InvoiceService(Base):",
+    );
+    let issue =
+        py(&mut b, svc, Label::Method, "issue", "pkg.service.InvoiceService.issue", 8, 11, "def issue(self, invoice)");
+    let helper = py(&mut b, pn, Label::Function, "helper", "pkg.service.helper", 13, 14, "def helper()");
+    let audit = py(&mut b, pn, Label::Function, "audit", "pkg.service.audit", 16, 17, "def audit(invoice)");
+    let ts = |b: &mut Builder, parent, label, name: &str, qn: &str, l0, l1, sig: &str, exported| {
+        b.sym(parent, tf, label, name, qn, span(TS, l0, l1), Some(sig), exported, false)
+    };
+    let fmt = ts(
+        &mut b,
+        tn,
+        Label::Function,
+        "formatAmount",
+        "src/util/index:formatAmount",
+        0,
+        2,
+        "export function formatAmount(n: number): string",
+        true,
+    );
+    let session = ts(&mut b, tn, Label::Class, "Session", "src/util/index:Session", 3, 5, "export class Session", true);
+    let request =
+        ts(&mut b, session, Label::Method, "request", "src/util/index:Session.request", 4, 4, "request()", true);
+    ts(&mut b, tn, Label::Function, "helper", "src/util/index:helper", 6, 6, "function helper()", false);
+    use rueca_model::{EdgeKind as K, Strategy as S};
+    b.edge(svc, base_c, K::Inherits, 0.95, S::SameModule, Some((pf, line_span(PY_FEATURE, 6))));
+    b.edge(issue, helper, K::Calls, 0.95, S::SameModule, Some((pf, line_span(PY_FEATURE, 9))));
+    b.edge(issue, audit, K::Calls, 0.95, S::SameModule, Some((pf, line_span(PY_FEATURE, 10))));
+    b.edge(issue, run, K::Calls, 0.6, S::Heuristic, Some((pf, line_span(PY_FEATURE, 11))));
+    b.edge(request, fmt, K::Calls, 0.95, S::SameModule, Some((tf, line_span(TS, 4))));
+    b.graph.validate().expect("valid graph");
+    let st = rueca_segment::Store::open(store).unwrap();
+    let meta = rueca_segment::write_segment(&b.graph, &Sources(b.sources.clone()), store).unwrap();
+    st.register_ref(&root, &meta, "feature/x").unwrap();
+    root
+}
+
+/// [`two`] plus billing's `feature/x` ref snapshot.
+fn two_refs() -> Two {
+    let t = two();
+    feature_ref(&t.engine.store_dir);
+    t
+}
+
+const BOTH: [&str; 2] = ["main", "feature/x"];
+
+/// `(qn, in, changed)` of every item of a compact `search_symbols` answer.
+fn marks(r: &Value) -> Vec<(String, Value, bool)> {
+    let mut out = Vec::new();
+    for g in r["results"].as_array().unwrap() {
+        for s in g["symbols"].as_array().unwrap() {
+            out.push((s["qn"].as_str().unwrap().to_string(), s["in"].clone(), s["changed"] == true));
+        }
+    }
+    out
+}
+
+#[test]
+fn ref_lists_collapse_identical_symbols_and_flag_changes() {
+    let t = two_refs();
+    // One ref: the ref snapshot alone, no marks.
+    let r = call(&t.engine, "search_symbols", json!({"query": "audit", "ref": "feature/x"}));
+    assert_eq!(
+        r["snapshots"],
+        json!([{"s": 0, "repo": BILLING, "ref": "feature/x", "commit": C3, "overlay": false,
+        "url": format!("https://github.com/acme/billing/blob/{C3}/{{path}}#L{{start}}-L{{end}}")}])
+    );
+    assert_eq!(marks(&r)[0], ("pkg.service.audit".to_string(), Value::Null, false));
+
+    // Identical in both refs (same blob): one item in [0, 1], not changed.
+    let r = call(&t.engine, "search_symbols", json!({"query": "formatAmount", "ref": BOTH}));
+    let refs: Vec<&str> = r["snapshots"].as_array().unwrap().iter().map(|s| s["ref"].as_str().unwrap()).collect();
+    assert_eq!(refs, BOTH);
+    assert_eq!(marks(&r)[0], ("src/util/index:formatAmount".to_string(), json!([0, 1]), false), "{r}");
+    assert_eq!(marks(&r).iter().filter(|m| m.0 == "src/util/index:formatAmount").count(), 1);
+    // A changed file: one item per version, each `changed`.
+    let r = call(&t.engine, "search_symbols", json!({"query": "issue", "ref": BOTH, "labels": ["Method"]}));
+    let issue: Vec<_> = marks(&r).into_iter().filter(|m| m.0 == "pkg.service.InvoiceService.issue").collect();
+    assert_eq!(
+        issue,
+        [
+            ("pkg.service.InvoiceService.issue".to_string(), json!([0]), true),
+            ("pkg.service.InvoiceService.issue".to_string(), json!([1]), true)
+        ],
+        "{r}"
+    );
+    // Deleted on the branch, added on the branch.
+    let r = call(&t.engine, "search_symbols", json!({"query": "test_issue", "ref": BOTH}));
+    assert_eq!(marks(&r)[0], ("pkg.service.test_issue".to_string(), json!([0]), true));
+    let r = call(&t.engine, "search_symbols", json!({"query": "audit", "ref": BOTH}));
+    assert_eq!(marks(&r)[0], ("pkg.service.audit".to_string(), json!([1]), true));
+    assert_eq!(r["snapshots"].as_array().unwrap().len(), 2, "the snapshots of every item's `in`");
+
+    // Collapse happens before the limit: an identical symbol counts once.
+    let all = marks(&call(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "limit": 50})));
+    // 3 symbols of the changed file in both versions, the TS helper once.
+    assert_eq!(all.len(), 7, "{all:?}");
+    assert_eq!(all.iter().filter(|m| m.2).count(), 6, "{all:?}");
+    let page1 = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "limit": 4}));
+    assert_eq!((marks(&page1).len(), page1["next_cursor"].as_str()), (4, Some("4")));
+    let page2 = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "limit": 4, "cursor": "4"}));
+    // The same items (pages group by file on their own).
+    let sorted = |mut v: Vec<(String, Value, bool)>| {
+        v.sort_by(|a, b| (&a.0, a.1.to_string()).cmp(&(&b.0, b.1.to_string())));
+        v
+    };
+    assert_eq!(sorted([marks(&page1), marks(&page2)].concat()), sorted(all));
+    assert_eq!(page2["next_cursor"], Value::Null);
+
+    // Text marks: `[0,1]` for an item in several snapshots, `changed`.
+    let txt = text(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH}));
+    assert!(
+        txt.starts_with(
+            "[0] github.com/acme/billing@7696364aef89+ (main)\n[1] github.com/acme/billing@c0ffee00c0ff (feature/x)\n"
+        ),
+        "{txt}"
+    );
+    assert!(txt.contains("  Function helper L7  function helper() [0,1]\n"), "{txt}");
+    assert!(txt.contains("  Function helper L13-14  def helper() changed\n"), "{txt}");
+    // Verbose keeps the alpha shapes: no collapse, no marks.
+    let v = call(&t.engine, "search_symbols", json!({"query": "formatAmount", "ref": BOTH, "format": "verbose"}));
+    assert_eq!(v["results"].as_array().unwrap().iter().filter(|h| h["name"] == "formatAmount").count(), 2);
+}
+
+#[test]
+fn ref_lists_in_get_symbol_trace_and_outline() {
+    let t = two_refs();
+    // get_symbol: one item per distinct version; the other version is not a
+    // candidate.
+    let r = call(&t.engine, "get_symbol", json!({"qualified_name": "InvoiceService.issue", "ref": BOTH}));
+    let res = &r["results"];
+    assert_eq!((res["s"].clone(), res["in"].clone(), res["changed"].clone()), (json!(0), json!([0]), json!(true)));
+    let v = &res["versions"][0];
+    assert_eq!((v["s"].clone(), v["in"].clone(), v["changed"].clone()), (json!(1), json!([1]), json!(true)), "{r}");
+    assert_eq!(v["symbol"]["id"], format!("{BILLING}@c0ffee00c0ff:pkg/service.py#InvoiceService.issue"));
+    assert_eq!((v["callers"].as_u64(), v["callees"].as_u64()), (Some(0), Some(3)));
+    assert!(res["candidates"].as_array().unwrap().is_empty(), "{r}");
+    let txt = text(&t.engine, "get_symbol", json!({"qualified_name": "InvoiceService.issue", "ref": BOTH}));
+    assert!(txt.contains("Method InvoiceService.issue  pkg/service.py L9-11  python exported changed\n"), "{txt}");
+    assert!(
+        txt.contains(
+            "  version [1] changed: Method InvoiceService.issue L9-12  def issue(self, invoice)  callers 0, callees 3\n"
+        ),
+        "{txt}"
+    );
+    let r = call(&t.engine, "get_symbol", json!({"qualified_name": "formatAmount", "ref": BOTH}));
+    assert_eq!(
+        (r["results"]["in"].clone(), r["results"].get("changed"), r["results"].get("versions")),
+        (json!([0, 1]), None, None)
+    );
+
+    // trace: the union graph of both refs.
+    let args = json!({"qualified_name": "InvoiceService.issue", "direction": "callees", "ref": BOTH});
+    let r = call(&t.engine, "trace", args.clone());
+    let nodes = r["results"]["nodes"].as_array().unwrap();
+    let node = |qn: &str| nodes.iter().position(|n| n["qn"] == qn).unwrap_or_else(|| panic!("{qn}: {r}"));
+    assert_eq!(nodes.len(), 4, "root, run, helper, audit: {r}");
+    assert_eq!((nodes[0]["in"].clone(), nodes[0]["changed"].clone()), (json!([0, 1]), json!(true)));
+    let (helper, audit) = (node("pkg.service.helper"), node("pkg.service.audit"));
+    assert_eq!((nodes[audit]["s"].clone(), nodes[audit]["in"].clone()), (json!(1), json!([1])));
+    let edges = r["results"]["edges"].as_array().unwrap();
+    let edge = |dst: usize| edges.iter().find(|e| e[1] == dst).unwrap_or_else(|| panic!("{dst}: {r}"));
+    assert_eq!(edge(helper)[6], json!({"in": [0, 1]}), "in both refs: {r}");
+    assert_eq!(edge(audit)[6], json!({"in": [1], "changed": true}), "only on the branch: {r}");
+    let txt = text(&t.engine, "trace", args);
+    assert!(txt.contains(&format!("{audit} [1] out d1 Function audit  pkg/service.py L17-18 changed  ←0 CALLS 0.95 same_module @11 [1] changed\n")), "{txt}");
+    assert!(txt.contains(" [0,1] changed  ←0 CALLS 0.95 same_module @10\n"), "{txt}");
+    // Callers on main only: the test that the branch deleted.
+    let r = call(
+        &t.engine,
+        "trace",
+        json!({"qualified_name": "InvoiceService.issue", "direction": "callers", "ref": BOTH, "include_tests": true}),
+    );
+    let t_node = &r["results"]["nodes"][1];
+    assert_eq!(
+        (t_node["qn"].as_str(), t_node["in"].clone(), t_node["changed"].clone()),
+        (Some("pkg.service.test_issue"), json!([0]), json!(true))
+    );
+
+    // get_file_outline: per-ref groups, one per distinct version of the file.
+    let r = call(&t.engine, "get_file_outline", json!({"path": "src/util/index.ts", "ref": BOTH}));
+    assert_eq!((r["results"]["in"].clone(), r["results"].get("versions")), (json!([0, 1]), None));
+    let r = call(&t.engine, "get_file_outline", json!({"path": "pkg/service.py", "ref": BOTH}));
+    let res = &r["results"];
+    assert_eq!(
+        (res["in"].clone(), res["changed"].clone(), res["versions"][0]["in"].clone()),
+        (json!([0]), json!(true), json!([1]))
+    );
+    let names = |v: &Value| {
+        v["symbols"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+    };
+    assert!(
+        names(res).contains(&"test_issue".to_string()) && names(&res["versions"][0]).contains(&"audit".to_string()),
+        "{r}"
+    );
+    let txt = text(&t.engine, "get_file_outline", json!({"path": "pkg/service.py", "ref": BOTH}));
+    assert!(
+        txt.contains("pkg/service.py (python, 17 lines) [0] changed\n")
+            && txt.contains("version [1] changed: pkg/service.py (python, 18 lines)\n"),
+        "{txt}"
+    );
+    // The outline cursor runs over every version.
+    let r1 = call(&t.engine, "get_file_outline", json!({"path": "pkg/service.py", "ref": BOTH, "budget_tokens": 100}));
+    assert_eq!(r1["truncated"], true, "{r1}");
+
+    // An unknown ref in a list errors listing the indexed refs.
+    let e = err(&t.engine, "search_symbols", json!({"query": "x", "ref": ["main", "nope"]}));
+    assert!(
+        e.contains("ref `nope` is not indexed for repository `github.com/acme/billing`")
+            && e.contains("`feature/x` (c0ffee00c0ff, ref snapshot)")
+            && e.contains("`main` (7696364aef89+"),
+        "{e}"
+    );
+    let e = err(&t.engine, "search_symbols", json!({"query": "x", "ref": []}));
+    assert!(e.contains("must not be an empty list"), "{e}");
+
+    // list_repositories lists every snapshot of a repository, the default first.
+    let r = call(&t.engine, "list_repositories", json!({}));
+    let billing = &r["results"][0];
+    assert_eq!(
+        billing["refs"],
+        json!([{"ref": "main", "commit": "7696364aef89"}, {"ref": "feature/x", "commit": "c0ffee00c0ff"}])
+    );
+    let txt = text(&t.engine, "list_repositories", json!({}));
+    assert!(txt.contains("github.com/acme/billing  refs main@7696364aef89, feature/x@c0ffee00c0ff  2 files"), "{txt}");
+}
+
+/// Registers the demo graph of `repo` as its ref snapshot `name` at
+/// `commit`, exported under the store.
+fn demo_ref(store: &std::path::Path, repo: &str, name: &str, commit: &str) {
+    let base = std::fs::canonicalize(store).unwrap();
+    let root = base.join("refs").join(repo.replace(['/', '.'], "-")).join(name.replace('/', "-"));
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.to_string_lossy().into_owned();
+    let (mut b, _) = demo(repo, &root);
+    b.graph.snapshot.commit = commit.into();
+    b.graph.snapshot.branch = Some(name.into());
+    b.graph.validate().expect("valid graph");
+    let meta = rueca_segment::write_segment(&b.graph, &Sources(b.sources.clone()), store).unwrap();
+    rueca_segment::Store::open(store).unwrap().register_ref(&root, &meta, name).unwrap();
+}
+
+#[test]
+fn a_ref_snapshot_wins_over_the_working_tree_of_its_name() {
+    // billing's working tree is on `main` with uncommitted changes;
+    // `rueca index . --ref main` exported the commit `main` points to.
+    let t = two();
+    demo_ref(&t.engine.store_dir, BILLING, "main", C3);
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": "main"}));
+    let snap = &r["snapshots"][0];
+    assert_eq!(
+        (snap["ref"].as_str(), snap["commit"].as_str(), snap["overlay"].as_bool()),
+        (Some("main"), Some(C3), Some(false)),
+        "{r}"
+    );
+    // The working tree is still the default, and `HEAD` / its commit name it.
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper"}));
+    assert_eq!(r["snapshots"][0]["overlay"], true, "{r}");
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": "HEAD"}));
+    assert_eq!(r["snapshots"][0]["overlay"], true, "{r}");
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": &C1[..7]}));
+    assert_eq!(r["snapshots"][0]["overlay"], true, "{r}");
+}
+
+#[test]
+fn ref_snapshots_are_not_roots_of_their_own() {
+    // One working tree and one ref snapshot, no default root: a call without
+    // `repo` reads the working tree.
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("store");
+    let root = dir.path().join("billing");
+    std::fs::create_dir_all(&root).unwrap();
+    let root = std::fs::canonicalize(&root).unwrap().to_string_lossy().into_owned();
+    demo(BILLING, &root).0.write(&store, &root);
+    feature_ref(&store);
+    let e = Engine::new(store, None).unwrap();
+    let r = call(&e, "search_symbols", json!({"query": "helper"}));
+    assert_eq!(r["snapshots"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(
+        (r["snapshots"][0]["repo"].as_str(), r["snapshots"][0]["overlay"].as_bool()),
+        (Some(BILLING), Some(false))
+    );
+    assert_ne!(r["snapshots"][0]["ref"], "feature/x", "{r}");
+    let r = call(&e, "search_symbols", json!({"query": "audit", "ref": "feature/x"}));
+    assert_eq!(r["snapshots"][0]["ref"], "feature/x", "{r}");
+}
+
+#[test]
+fn a_pull_request_without_repo_names_one_repository() {
+    let t = two();
+    let store = t.engine.store_dir.clone();
+    demo_ref(&store, BILLING, "pr/7", C3);
+    // One repository has `pr/7`: read there, the others at their default.
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "repo": "*", "ref": "pr/7"}));
+    let refs: Vec<&str> = r["snapshots"].as_array().unwrap().iter().map(|s| s["ref"].as_str().unwrap()).collect();
+    assert!(refs.contains(&"pr/7"), "{r}");
+    // Two have one: pull request numbers are per repository.
+    demo_ref(&store, WEB, "pr/7", "dead00dead00dead00dead00dead00dead00dead");
+    let e = err(&t.engine, "search_symbols", json!({"query": "x", "repo": "*", "ref": "pr/7"}));
+    assert!(
+        e.contains("`pr/7` exists in several repositories (github.com/acme/billing, github.com/acme/web): name `repo`"),
+        "{e}"
+    );
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "repo": WEB, "ref": "pr/7"}));
+    assert_eq!((r["snapshots"][0]["repo"].as_str(), r["snapshots"][0]["ref"].as_str()), (Some(WEB), Some("pr/7")));
+    // Not a pull request: every repository that has it.
+    demo_ref(&store, BILLING, "release", "1111111111111111111111111111111111111111");
+    demo_ref(&store, WEB, "release", "2222222222222222222222222222222222222222");
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "repo": "*", "ref": "release"}));
+    assert_eq!(r["snapshots"].as_array().unwrap().len(), 2, "{r}");
+}
+
+#[test]
+fn huge_cursors_do_not_overflow() {
+    let t = two_refs();
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "cursor": "4294967295"}));
+    assert_eq!((r["results"].as_array().map(Vec::len), r["next_cursor"].clone()), (Some(0), Value::Null), "{r}");
+    let e = err(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "cursor": "18446744073709551615"}));
+    assert!(e.contains("invalid `cursor`"), "{e}");
+}

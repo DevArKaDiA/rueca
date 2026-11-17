@@ -140,3 +140,133 @@ fn mcp_serves_an_organization() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+fn git(dir: &std::path::Path, args: &[&str]) -> bool {
+    StdCommand::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
+        .args(args)
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// A git repository on `main` with branch `branch` adding `extra`; `main`
+/// checked out. `false` without git.
+fn repo_with_branch(root: &std::path::Path, file: (&str, &str), branch: &str, extra: (&str, &str)) -> bool {
+    std::fs::create_dir_all(root).unwrap();
+    if !git(root, &["init", "-q"]) {
+        return false;
+    }
+    assert!(git(root, &["symbolic-ref", "HEAD", "refs/heads/main"]));
+    write(root, file.0, file.1);
+    assert!(git(root, &["add", "-A"]) && git(root, &["commit", "-q", "-m", "main"]));
+    assert!(git(root, &["checkout", "-q", "-b", branch]));
+    write(root, extra.0, extra.1);
+    assert!(git(root, &["add", "-A"]) && git(root, &["commit", "-q", "-m", branch]));
+    assert!(git(root, &["checkout", "-q", "main"]));
+    true
+}
+
+/// Refs over an organization from the command line (RFC 0006 §9.3): the
+/// file's `refs`, `index --org FILE PATH --ref NAME [--remove]`, a plain
+/// `index PATH --ref NAME` propagated, `status` and `links --ref`.
+#[test]
+fn refs_of_an_organization() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let store = base.join("store");
+    let (a, b) = (base.join("alpha"), base.join("beta"));
+    if !repo_with_branch(
+        &a,
+        ("alpha/core.py", "def alpha_core():\n    return 1\n"),
+        "feature/x",
+        ("alpha/x.py", "def x():\n    return 2\n"),
+    ) {
+        eprintln!("git not available; skipping");
+        return;
+    }
+    assert!(repo_with_branch(
+        &b,
+        ("beta/core.py", "def beta_core():\n    return 1\n"),
+        "next",
+        ("beta/n.py", "def n():\n    return 3\n")
+    ));
+    let file = base.join("rueca-org.toml");
+    std::fs::write(
+        &file,
+        "name = \"duo\"\n[[repo]]\npath = \"alpha\"\nrefs = [\"feature/x\"]\n[[repo]]\npath = \"beta\"\n",
+    )
+    .unwrap();
+
+    let v = json_out(&rueca(&store).args(["index", "--org"]).arg(&file).arg("--json").output().unwrap());
+    assert_eq!(v["update"]["refs"], 1);
+    assert_eq!(v["update"]["refs_added"], json!(["local/alpha@feature/x"]));
+    assert_eq!(v["refs"][0]["ref"], "feature/x");
+    assert!(v["update"]["costs"].as_array().unwrap().iter().any(|c| c["entry"] == "local/alpha@feature/x"), "{v}");
+    let text = String::from_utf8(rueca(&store).args(["index", "--org"]).arg(&file).output().unwrap().stdout).unwrap();
+    assert!(text.contains("indexed ref feature/x of local/alpha") && text.contains("refs:       1"), "{text}");
+
+    // One ref of one member through the file.
+    let v = json_out(
+        &rueca(&store).args(["index", "--org"]).arg(&file).arg(&b).args(["--ref", "next", "--json"]).output().unwrap(),
+    );
+    assert_eq!(v["repo"], "local/beta");
+    assert_eq!(v["indexed"]["ref"], "next");
+    assert_eq!(v["update"]["refs_added"], json!(["local/beta@next"]));
+    assert_eq!(v["update"]["unchanged"], 2);
+    // A plain `index PATH --ref NAME` updates the organizations holding it.
+    let v = json_out(&rueca(&store).arg("index").arg(&a).args(["--ref", "HEAD", "--json"]).output().unwrap());
+    let pinned = v["ref"].as_str().unwrap().to_string();
+    assert_eq!(v["orgs"][0]["refs_added"], json!([format!("local/alpha@{pinned}")]));
+
+    // `status` lists every repository's refs.
+    let v = json_out(&rueca(&store).args(["status", "--json"]).output().unwrap());
+    let repos = v["orgs"][0]["repos"].as_array().unwrap();
+    let refs: Vec<&str> = repos[0]["refs"].as_array().unwrap().iter().map(|r| r["ref"].as_str().unwrap()).collect();
+    assert_eq!((repos[0]["ref"].as_str(), refs.len()), (Some("main"), 2), "{v}");
+    assert!(refs.contains(&"feature/x") && refs.contains(&pinned.as_str()));
+    let text = String::from_utf8(rueca(&store).arg("status").output().unwrap().stdout).unwrap();
+    assert!(text.contains("2 repositories + 3 refs"), "{text}");
+    assert!(text.lines().any(|l| l.contains("local/beta  main@") && l.contains(" + next@")), "{text}");
+
+    // Queries read refs through the organization: `list_repositories` lists
+    // them with their commits, a `ref` list compares two refs of a member.
+    let query = |tool: &str, args: &str| {
+        let out = rueca(&store).args(["query", tool, args, "--org", "duo", "--text"]).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let text = query("list_repositories", "{}");
+    assert!(text.lines().any(|l| l.contains("local/alpha  refs main@") && l.contains(", feature/x@")), "{text}");
+    let text =
+        query("search_symbols", r#"{"query": "alpha core x", "repo": "local/alpha", "ref": ["main", "feature/x"]}"#);
+    assert!(text.contains("(main)\n[1] local/alpha@") && text.contains(" (feature/x)\n"), "{text}");
+    assert!(text.lines().any(|l| l.contains("Function alpha_core") && l.ends_with(" [0,1]")), "{text}");
+    assert!(text.lines().any(|l| l.contains("Function x L1-2") && l.ends_with(" changed")), "{text}");
+    let text = query("search_symbols", r#"{"query": "n", "ref": "next"}"#);
+    assert!(text.contains("local/beta@") && text.contains(" (next)\n"), "{text}");
+
+    // `links --ref`: an empty link set prints its count; an unknown ref
+    // lists the indexed ones.
+    let out = rueca(&store).args(["links", "--org", "duo", "--repo", "local/beta", "--ref", "next"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("0 cross-repository edges"), "{out:?}");
+    let out = rueca(&store).args(["links", "--org", "duo", "--repo", "local/beta", "--ref", "nope"]).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("indexed refs: main@"), "{out:?}");
+    let out = rueca(&store).args(["links", "--org", "duo", "--ref", "next"]).output().unwrap();
+    assert!(!out.status.success(), "--ref needs --repo");
+
+    // `--remove` through the file.
+    let v = json_out(
+        &rueca(&store)
+            .args(["index", "--org"])
+            .arg(&file)
+            .arg(&b)
+            .args(["--ref", "next", "--remove", "--json"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(v["update"]["refs_removed"], json!(["local/beta@next"]));
+    assert_eq!(v["removed"]["ref"], "next");
+}

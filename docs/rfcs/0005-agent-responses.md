@@ -226,8 +226,8 @@ collapse correctness and savings).
 | Ids with 12-digit commit, accept prefixes / ref names | ✅ | same |
 | Envelope (`snapshots`, `s`) | ✅ (one snapshot, overlay flag) | many |
 | `repo` list / `"*"` with rank fusion | ✅ across locally indexed roots | across the org view |
-| `ref` argument | ✅ (working tree; other refs error until the catalog keeps several snapshots per repository) | branches, PRs, tags |
-| Collapse across refs (§6) | design and tests on two local snapshots | delta segments + blob visibility |
+| `ref` argument | ✅ (working tree, and ref snapshots indexed with `rueca index --ref`, RFC 0006 §9.3; a string or a list) | branches, PRs, tags (organization: RFC 0006 §9.3) |
+| Collapse across refs (§6) | ✅ (`search_symbols`, `get_symbol`, `trace`, `get_file_outline` over a `ref` list) | delta segments + blob visibility (service) |
 | Grouping, short fields, `trace` edges by index, defaults, `budget_tokens` | ✅ | same |
 | Text content rendering | ✅ | same |
 | Host URL templates | ✅ when the remote is known | ✅ |
@@ -272,7 +272,12 @@ RFC only requires the tool contract to be ready for it.
 - **Collapse (§6)**: `rueca_query::multiref::{collapse, collapse_edges}`
   with unit tests on two synthetic snapshots of one repository; an item
   absent from some requested snapshot of its repository is also `changed`.
-  No local tool calls it yet.
+  *(RFC 0006 phase 3: the tools call it over a `ref` list — a symbol is
+  matched across snapshots by (label, qualified name, path) and its versions
+  compared by blob; `get_symbol` and `get_file_outline` list other versions
+  in `versions`, `trace` returns the union graph with `in` on nodes and
+  edges, and the text marks items ` [0,1]` / ` changed`; `docs/tools.md`
+  is the contract.)*
 - `format: "verbose"` keeps the alpha shapes *and* alpha defaults (limits,
   depth 2, no budget).
 

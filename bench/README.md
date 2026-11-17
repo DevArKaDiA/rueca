@@ -927,17 +927,22 @@ labeler). RFC 0006 §8: floor ≥ 90 / 75, target ≥ 97 / 90. Raw output
 **Multi-ref.** `[multiref] instance` (psf__requests-2317): the repository at
 the base commit and at a fix commit (base + the instance's gold patch,
 committed by the bench with a fixed identity and date, so its id is
-deterministic), both indexed into one store. Gold (`collapse_gold`): every
-callable of the changed files classified `changed` (its text differs),
-`added`, `removed` or `same_in_changed_file`, and every symbol of an
-unchanged file `identical` (same blob: one item listing both snapshots).
-Queries: every changed / added / removed function name and a fixed sample of
-unchanged ones, each a `search_symbols` over both refs; `score_collapse`
-counts collapsed identical symbols, `in` lists and `changed` flags. The two
-single-ref answers per query are measured today (the uncollapsed baseline);
-the multi-ref answer is *pending* while the local catalog holds one snapshot
-per root (RFC 0005 §9). Trace collapse needs per-commit call-graph gold and
-is not scored yet.
+deterministic). The base worktree is indexed, then the fix commit as a ref
+snapshot of the same repository (`rueca index <base> --ref <fix commit>`,
+RFC 0006 §9.3: exported from the object database, facts shared by blob;
+the report keeps each step's files extracted and facts-cache hits). Gold
+(`collapse_gold`): every callable of the changed files classified `changed`
+(its text differs), `added`, `removed` or `same_in_changed_file`, and every
+symbol of an unchanged file `identical` (same blob: one item listing both
+snapshots). Queries: every changed / added / removed function name and a
+fixed sample of unchanged ones, each a `search_symbols` with `ref: [base,
+fix]` against the two single-ref answers (`ref: base`, `ref: fix`: the
+uncollapsed baseline, in tokens); `score_collapse` counts collapsed
+identical symbols, `in` lists and `changed` flags. Rueca compares versions
+by file blob, so an unchanged callable of a changed file comes back once
+per ref and flagged: it is counted apart (`changed_same_file`), not as a
+false positive. Trace collapse needs per-commit call-graph gold and is not
+scored yet.
 
 ### Configuration — data formats (RFC 0003 §3.3)
 

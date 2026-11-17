@@ -111,7 +111,8 @@ fn org_fixture() -> OrgFix {
 impl OrgFix {
     fn update(&self) -> org::OrgUpdate {
         let st = Store::open(&self.store).unwrap();
-        let members: Vec<OrgMember> = self.roots.iter().map(|r| OrgMember { root: r.clone(), url: None }).collect();
+        let members: Vec<OrgMember> =
+            self.roots.iter().map(|r| OrgMember { root: r.clone(), ..Default::default() }).collect();
         org::update_org(&st, "acme", &members).unwrap()
     }
 
@@ -223,9 +224,13 @@ fn list_repositories_shows_the_organization() {
     assert_eq!(items[0]["default_ref"], "main");
     assert_eq!(items[0]["languages"], json!({"python": 1, "typescript": 1}));
     assert_eq!(items[1]["symbols"], 2);
-    assert_eq!(items[2]["refs"], json!(["worktree"]));
+    assert_eq!(items[2]["refs"], json!([{"ref": "worktree", "commit": "worktree"}]));
     let txt = e.respond("list_repositories", json!({})).unwrap().text;
-    assert!(txt.contains("[1] github.com/acme/payments  refs HEAD  1 files, 2 symbols, 2 edges  python 1"), "{txt}");
+    assert!(
+        txt.contains("[1] github.com/acme/payments  refs HEAD@a1b2c3d4e5f6  1 files, 2 symbols, 2 edges  python 1"),
+        "{txt}"
+    );
+    assert!(txt.contains("[2] local/shipping  refs worktree  1 files"), "{txt}");
     let v = call(&e, "list_repositories", json!({"format": "verbose"}));
     assert_eq!(v["repositories"].as_array().unwrap().len(), 3);
     // Local mode lists every indexed root.
@@ -262,7 +267,8 @@ fn visibility_hides_repositories_everywhere() {
     // Scores do not depend on the hidden repository: they equal those of an
     // organization without it.
     let st = Store::open(&f.store).unwrap();
-    let members: Vec<OrgMember> = [0, 2].iter().map(|&i| OrgMember { root: f.roots[i].clone(), url: None }).collect();
+    let members: Vec<OrgMember> =
+        [0, 2].iter().map(|&i| OrgMember { root: f.roots[i].clone(), ..Default::default() }).collect();
     org::update_org(&st, "small", &members).unwrap();
     let small = Engine::for_org(f.store.clone(), "small").unwrap();
     let args = json!({"query": "refund payment invoice helper", "scores": true, "limit": 50});
@@ -343,7 +349,7 @@ impl OrgLinker for FakeLinker {
 fn linked_fixture() -> OrgFix {
     let f = org_fixture();
     let st = Store::open(&f.store).unwrap();
-    let members: Vec<OrgMember> = f.roots.iter().map(|r| OrgMember { root: r.clone(), url: None }).collect();
+    let members: Vec<OrgMember> = f.roots.iter().map(|r| OrgMember { root: r.clone(), ..Default::default() }).collect();
     let up = org::update_org_with(&st, "acme", &members, &FakeLinker).unwrap();
     assert_eq!(up.linked, [(BILLING.to_string(), 1)]);
     assert_eq!(up.link_edges, 1);
@@ -451,4 +457,328 @@ fn routing_ranks_repositories_and_weighs_symbols() {
     let top = RouteParams { mode: RouteMode::Top, top: 1, ..RouteParams::default() };
     let r = ranking(&call(&f.engine().with_routing(top), "search_symbols", q));
     assert!(!r.is_empty() && r.iter().all(|x| x.0 == PAYMENTS), "{r:?}");
+}
+
+const KEEP: &str = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00";
+const RENAME: &str = "decade00decade00decade00decade00decade00";
+const AUDIT_PY: &str = "def audit(payment):\n    return payment\n";
+const RENAMED_PY: &str = "def charge_card_v2(card, amount):\n    return gateway.charge(card, amount)\n";
+
+/// Registers ref `name` of payments (commit `commit`) as a ref snapshot
+/// exported under the store, built by `build`.
+fn payments_ref(store: &std::path::Path, name: &str, commit: &str, build: impl FnOnce(&mut Builder)) {
+    let root = std::fs::canonicalize(store).unwrap().join("refs").join("github-com-acme-payments").join(name);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.to_string_lossy().into_owned();
+    let mut b = Builder::new(PAYMENTS, commit, &root);
+    b.graph.snapshot.branch = Some(name.into());
+    build(&mut b);
+    b.graph.validate().unwrap();
+    let meta = rueca_segment::write_segment(&b.graph, &Sources(b.sources.clone()), store).unwrap();
+    Store::open(store).unwrap().register_ref(&root, &meta, name).unwrap();
+}
+
+/// The linked organization, payments on `main` with two refs: `keep`
+/// (`charge.py` unchanged, plus `aaa.py`, which shifts every node id) and
+/// `rename` (`charge_card` renamed to `charge_card_v2`).
+fn refs_fixture() -> OrgFix {
+    let f = org_fixture();
+    let mut p = payments(&f.roots[1], "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", false);
+    p.graph.snapshot.branch = Some("main".into());
+    p.write(&f.store, &f.roots[1]);
+    payments_ref(&f.store, "keep", KEEP, |b| {
+        let (f, n) = b.file("payments/aaa.py", AUDIT_PY);
+        b.sym(
+            n,
+            f,
+            Label::Function,
+            "audit",
+            "payments.aaa.audit",
+            span(AUDIT_PY, 0, 1),
+            Some("def audit(payment)"),
+            true,
+            false,
+        );
+        let fresh = payments("", "", false);
+        let base = b.graph.nodes.len() as u32;
+        let file_base = b.graph.files.len() as u32;
+        for mut node in fresh.graph.nodes {
+            node.file = node.file.map(|x| x + file_base);
+            b.graph.nodes.push(node);
+        }
+        for mut file in fresh.graph.files {
+            file.node += base;
+            b.graph.files.push(file);
+        }
+        for mut e in fresh.graph.edges {
+            e.src += base;
+            e.dst += base;
+            b.graph.edges.push(e);
+        }
+        b.sources.extend(fresh.sources);
+    });
+    payments_ref(&f.store, "rename", RENAME, |b| {
+        let (f, n) = b.file("payments/charge.py", RENAMED_PY);
+        b.sym(
+            n,
+            f,
+            Label::Function,
+            "charge_card_v2",
+            "payments.charge.charge_card_v2",
+            span(RENAMED_PY, 0, 1),
+            Some("def charge_card_v2(card, amount)"),
+            true,
+            false,
+        );
+    });
+    let st = Store::open(&f.store).unwrap();
+    let members: Vec<OrgMember> = f.roots.iter().map(|r| OrgMember { root: r.clone(), ..Default::default() }).collect();
+    let up = org::update_org_with(&st, "acme", &members, &FakeLinker).unwrap();
+    assert_eq!(up.refs_added, ["github.com/acme/payments@keep", "github.com/acme/payments@rename"], "{up:?}");
+    f
+}
+
+/// `(ref, qn)` of a compact `search_symbols` answer.
+fn hits_by_ref(v: &Value) -> Vec<(String, String)> {
+    let refs: Vec<String> = v["snapshots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| format!("{}@{}", s["repo"].as_str().unwrap(), s["ref"].as_str().unwrap()))
+        .collect();
+    let mut out = Vec::new();
+    for g in v["results"].as_array().unwrap() {
+        for s in g["symbols"].as_array().unwrap() {
+            out.push((refs[g["s"].as_u64().unwrap() as usize].clone(), s["qn"].as_str().unwrap().to_string()));
+        }
+    }
+    out
+}
+
+#[test]
+fn ref_views_over_the_organization() {
+    let f = refs_fixture();
+    let e = f.engine();
+    let pay_keep = format!("{PAYMENTS}@keep");
+    // `repo: A, ref: X`: A at X (envelope and results), pinned ids.
+    let v = call(&e, "search_symbols", json!({"query": "audit", "repo": PAYMENTS, "ref": "keep"}));
+    assert_eq!(hits_by_ref(&v)[0], (pay_keep.clone(), "payments.aaa.audit".to_string()), "{v}");
+    assert_eq!(
+        (v["snapshots"][0]["commit"].as_str(), v["snapshots"][0]["overlay"].as_bool()),
+        (Some(KEEP), Some(false))
+    );
+    let id = v["results"][0]["symbols"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(id, format!("{PAYMENTS}@c0ffee00c0ff:payments/aaa.py#audit"));
+    // Every repository `repo` names must have the ref.
+    let m = err(&e, "search_symbols", json!({"query": "x", "repo": [BILLING, PAYMENTS], "ref": "keep"}));
+    assert!(
+        m.contains(
+            "ref `keep` is not indexed for repository `github.com/acme/billing`; indexed refs: main@7696364aef89"
+        ),
+        "{m}"
+    );
+    assert!(m.contains("rueca index --org <file> <member> --ref <name>"), "{m}");
+    // `ref` without `repo`: every repository that has it at it, others at
+    // their default.
+    let v = call(&e, "search_symbols", json!({"query": "audit invoice issue", "ref": "keep", "limit": 50}));
+    let refs: BTreeSet<String> = hits_by_ref(&v).into_iter().map(|h| h.0).collect();
+    assert!(refs.contains(&pay_keep) && refs.contains(&format!("{BILLING}@main")), "{v}");
+    assert!(!refs.contains(&format!("{PAYMENTS}@main")), "{v}");
+    // An unknown ref lists every selected repository's refs.
+    let m = err(&e, "search_symbols", json!({"query": "x", "ref": "nope"}));
+    assert!(
+        m.contains("ref `nope` is not indexed for any selected repository")
+            && m.contains("github.com/acme/payments: main@a1b2c3d4e5f6, keep@c0ffee00c0ff, rename@decade00deca"),
+        "{m}"
+    );
+
+    // `ref` as a list: several entries of one repository, collapsed.
+    let v = call(
+        &e,
+        "search_symbols",
+        json!({"query": "charge card audit", "repo": PAYMENTS, "ref": ["main", "keep"], "limit": 50}),
+    );
+    let refs: Vec<&str> = v["snapshots"].as_array().unwrap().iter().map(|s| s["ref"].as_str().unwrap()).collect();
+    assert_eq!(refs, ["main", "keep"]);
+    let items: Vec<(String, Value, bool)> = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|g| {
+            g["symbols"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| (s["qn"].as_str().unwrap().to_string(), s["in"].clone(), s["changed"] == true))
+        })
+        .collect();
+    assert!(items.contains(&("payments.charge.charge_card".to_string(), json!([0, 1]), false)), "{v}");
+    assert!(items.contains(&("payments.aaa.audit".to_string(), json!([1]), true)), "{v}");
+    assert_eq!(items.iter().filter(|i| i.0 == "payments.charge.charge_card").count(), 1, "{v}");
+    let txt = e
+        .respond("search_symbols", json!({"query": "charge card audit", "repo": PAYMENTS, "ref": ["main", "keep"]}))
+        .unwrap()
+        .text;
+    assert!(
+        txt.contains("charge_card L1-2  def charge_card(card, amount) [0,1]\n")
+            && txt.contains("audit L1-2  def audit(payment) changed\n"),
+        "{txt}"
+    );
+
+    // Ids whose commit is a ref snapshot's resolve to it.
+    for tool in ["get_symbol", "get_snippet", "trace"] {
+        let r = call(&e, tool, json!({"id": id}));
+        assert_eq!(
+            (r["snapshots"][0]["ref"].as_str(), r["snapshots"].as_array().unwrap().len()),
+            (Some("keep"), 1),
+            "{tool}: {r}"
+        );
+    }
+    let r = call(&e, "get_symbol", json!({"id": format!("{PAYMENTS}@c0ffee0:payments/charge.py#charge_card")}));
+    assert_eq!(r["results"]["symbol"]["id"], format!("{PAYMENTS}@c0ffee00c0ff:payments/charge.py#charge_card"));
+}
+
+#[test]
+fn trace_sees_link_edges_remapped_into_a_ref() {
+    let f = refs_fixture();
+    let e = f.engine();
+    let callee = |r: &Value| {
+        trace_names(r).into_iter().filter(|(repo, _)| repo == PAYMENTS).map(|(_, qn)| qn).collect::<Vec<_>>()
+    };
+    // Default view: billing's call into payments' default.
+    let args = |reference: Option<&str>| {
+        let mut a = json!({"qualified_name": "InvoiceService.issue", "direction": "callees"});
+        if let Some(r) = reference {
+            a["ref"] = json!(r);
+        }
+        a
+    };
+    let v = call(&e, "trace", args(None));
+    assert_eq!(callee(&v), ["payments.charge.charge_card"]);
+    // Payments viewed at `keep`: the edge lands on keep's own node.
+    let v = call(&e, "trace", args(Some("keep")));
+    assert_eq!(callee(&v), ["payments.charge.charge_card"], "{v}");
+    let snaps = v["snapshots"].as_array().unwrap();
+    let pay = snaps.iter().find(|s| s["repo"] == PAYMENTS).unwrap();
+    assert_eq!((pay["ref"].as_str(), pay["commit"].as_str()), (Some("keep"), Some(KEEP)));
+    let node = v["results"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["qn"] == "payments.charge.charge_card")
+        .unwrap()
+        .clone();
+    assert_eq!(node["id"], format!("{PAYMENTS}@c0ffee00c0ff:payments/charge.py#charge_card"));
+    let txt = e.respond("trace", args(Some("keep"))).unwrap().text;
+    assert!(
+        txt.contains("github.com/acme/payments@c0ffee00c0ff (keep)")
+            && txt.contains("Function charge_card  payments/charge.py L1-2  ←0 CALLS 0.95 import_resolved @10"),
+        "{txt}"
+    );
+    // At `rename` the target is gone: the edge is dropped.
+    let v = call(&e, "trace", args(Some("rename")));
+    assert!(callee(&v).is_empty(), "{v}");
+    // Callers of keep's node: billing's default, through the remapped edge.
+    let v = call(
+        &e,
+        "trace",
+        json!({"qualified_name": "payments.charge.charge_card", "direction": "callers", "repo": PAYMENTS, "ref": "keep"}),
+    );
+    assert!(trace_names(&v).contains(&(BILLING.to_string(), "pkg.service.InvoiceService.issue".to_string())), "{v}");
+    // Both refs at once: one node for charge_card, the edge in both.
+    let v = call(
+        &e,
+        "trace",
+        json!({"qualified_name": "payments.charge.charge_card", "direction": "callers", "repo": PAYMENTS, "ref": ["main", "keep"]}),
+    );
+    let nodes = v["results"]["nodes"].as_array().unwrap();
+    assert_eq!((nodes.len(), nodes[0]["in"].clone(), nodes[0].get("changed")), (2, json!([0, 1]), None), "{v}");
+    assert_eq!(v["results"]["edges"][0].as_array().unwrap().last().unwrap(), &json!({"in": [0, 1]}), "{v}");
+}
+
+#[test]
+fn refs_respect_visibility_and_are_listed() {
+    let f = refs_fixture();
+    let e = f.engine();
+    // `list_repositories`: every indexed snapshot, the default first, and
+    // routing unchanged.
+    let v = call(&e, "list_repositories", json!({}));
+    let pay = v["results"].as_array().unwrap().iter().find(|r| r["repo"] == PAYMENTS).unwrap().clone();
+    assert_eq!(
+        pay["refs"],
+        json!([{"ref": "main", "commit": "a1b2c3d4e5f6"}, {"ref": "keep", "commit": "c0ffee00c0ff"}, {"ref": "rename", "commit": "decade00deca"}])
+    );
+    assert_eq!(
+        (pay["default_ref"].as_str(), pay["commit"].as_str()),
+        (Some("main"), None),
+        "compact keeps no commit: {pay}"
+    );
+    let txt = e.respond("list_repositories", json!({})).unwrap().text;
+    assert!(
+        txt.contains(
+            "github.com/acme/payments  refs main@a1b2c3d4e5f6, keep@c0ffee00c0ff, rename@decade00deca  1 files"
+        ),
+        "{txt}"
+    );
+    let v = call(&e, "list_repositories", json!({"format": "verbose"}));
+    let pay = v["repositories"].as_array().unwrap().iter().find(|r| r["repo"] == PAYMENTS).unwrap().clone();
+    assert_eq!(
+        (pay["commit"].as_str(), pay["refs"][1]["ref"].as_str()),
+        (Some("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"), Some("keep"))
+    );
+    let v = call(&e, "list_repositories", json!({"query": "charge the card through the payments gateway"}));
+    assert_eq!(v["results"][0]["repo"], PAYMENTS, "{v}");
+    let v = call(&e, "list_repositories", json!({"query": "charge the card", "ref": "keep"}));
+    assert_eq!(v["results"][0]["repo"], PAYMENTS, "routing with payments at keep: {v}");
+
+    // A hidden repository's refs are hidden too, and errors do not name it.
+    let hidden = f
+        .engine()
+        .with_visibility(Visibility::Repos([BILLING.to_string(), SHIPPING.to_string()].into_iter().collect()));
+    let keep = err(&hidden, "search_symbols", json!({"query": "x", "ref": "keep"}));
+    let nope = err(&hidden, "search_symbols", json!({"query": "x", "ref": "nope"}));
+    assert_eq!(keep.replace("keep", "<r>"), nope.replace("nope", "<r>"));
+    assert!(!keep.contains("payments") && !keep.contains("c0ffee"), "{keep}");
+    let v = call(&hidden, "list_repositories", json!({}));
+    assert!(!v.to_string().contains("payments") && !v.to_string().contains("c0ffee"), "{v}");
+    let m = err(&hidden, "get_symbol", json!({"id": format!("{PAYMENTS}@c0ffee00c0ff:payments/aaa.py#audit")}));
+    assert!(m.contains("not indexed in organization") && !m.contains("keep"), "{m}");
+}
+
+#[test]
+fn a_pull_request_without_repo_names_one_visible_repository() {
+    let f = refs_fixture();
+    payments_ref(&f.store, "pr/7", KEEP, |b| {
+        b.file("payments/charge.py", CHARGE_PY);
+    });
+    let root = std::fs::canonicalize(&f.store).unwrap().join("refs").join("github-com-acme-billing").join("pr-7");
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.to_string_lossy().into_owned();
+    let (mut b, _) = demo(BILLING, &root);
+    b.graph.snapshot.commit = RENAME.into();
+    b.graph.snapshot.branch = Some("pr/7".into());
+    let meta = rueca_segment::write_segment(&b.graph, &Sources(b.sources.clone()), &f.store).unwrap();
+    Store::open(&f.store).unwrap().register_ref(&root, &meta, "pr/7").unwrap();
+    let st = Store::open(&f.store).unwrap();
+    let members: Vec<OrgMember> = f.roots.iter().map(|r| OrgMember { root: r.clone(), ..Default::default() }).collect();
+    org::update_org_with(&st, "acme", &members, &FakeLinker).unwrap();
+
+    let e = f.engine();
+    let m = err(&e, "search_symbols", json!({"query": "x", "ref": "pr/7"}));
+    assert!(
+        m.contains(
+            "`pr/7` exists in several repositories (github.com/acme/billing, github.com/acme/payments): name `repo`"
+        ),
+        "{m}"
+    );
+    let v = call(&e, "search_symbols", json!({"query": "charge card", "repo": PAYMENTS, "ref": "pr/7"}));
+    assert_eq!(v["snapshots"][0]["ref"], "pr/7", "{v}");
+    // Only one visible repository has it: accepted, and nothing names the
+    // hidden one.
+    let hidden = f
+        .engine()
+        .with_visibility(Visibility::Repos([BILLING.to_string(), SHIPPING.to_string()].into_iter().collect()));
+    let v = call(&hidden, "search_symbols", json!({"query": "helper", "ref": "pr/7"}));
+    assert!(!v.to_string().contains("payments"), "{v}");
+    assert!(v["snapshots"].as_array().unwrap().iter().any(|s| s["repo"] == BILLING && s["ref"] == "pr/7"), "{v}");
 }

@@ -66,9 +66,12 @@ and callees (impact analysis). Use `search_code` for literals, messages and conf
 printed name also works as `qualified_name`. Symbol ids returned by any tool can be passed as `id` \
 to the others. Lines are 1-based. Every tool takes `repo` (one, a list, or \"*\" for every indexed \
 repository), `ref` and `budget_tokens` (default 2000); a cut response says `truncated` and how to \
-continue (`cursor`). When the server serves an organization, omitting `repo` searches every \
-repository of it in one ranking; `list_repositories` lists them. Results come from the last index of \
-the working tree; edges carry a confidence (0–1) and the strategy used to resolve them.";
+continue (`cursor`). `ref` reads another indexed ref (a branch, `pr/<n>`, a tag or a commit); a list \
+of refs compares them: a symbol identical in several comes back once with the snapshots it is `in`, \
+one that differs is marked `changed`. When the server serves an organization, omitting `repo` \
+searches every repository of it in one ranking; `list_repositories` lists them and their indexed \
+refs. Results come from the last index (by default of the working tree); edges carry a confidence \
+(0–1) and the strategy used to resolve them.";
 
 /// The MCP handler: a shared engine plus the advertised tool list.
 #[derive(Clone)]
@@ -282,6 +285,7 @@ pub fn index_root(root: &Path, store: &Path) -> anyhow::Result<()> {
         repo: None,
         budget: rueca_extract::Budget::default(),
         threads: None,
+        ..rueca_index::IndexOptions::default()
     };
     let report = rueca_index::index_worktree(&index_opts)?;
     tracing::info!(

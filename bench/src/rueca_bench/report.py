@@ -1817,7 +1817,8 @@ def _render_org(L: list[str], orgs: dict) -> None:
     else:
         c = mf["counts"]
         L.append(
-            f"Rueca: unchanged symbols collapsed {c['identical_ok']} / {c['identical']}; changed flags TP {c['changed_tp']}, FP {c['changed_fp']}, FN {c['changed_fn']}; "
+            f"Rueca: unchanged symbols collapsed {c['identical_ok']} / {c['identical']}; changed flags TP {c['changed_tp']}, FP {c['changed_fp']}, FN {c['changed_fn']} "
+            f"(plus {c.get('changed_same_file', 0)} unchanged symbols of changed files, flagged by blob); "
             f"`in` lists correct {c['in_ok']} / {c['in_total']}; tokens {mf['multi_tokens_sum']:,} for the multi-ref answers vs {mf['paired_single_tokens_sum']:,} for two single-ref answers."
         )
     L.append("")

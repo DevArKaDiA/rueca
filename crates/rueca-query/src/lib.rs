@@ -47,11 +47,22 @@
 //! indexed root. Without it: the repository of an `id` argument (the root
 //! whose commit the id names when several roots index that repository), else
 //! the engine's default root, else the only indexed root, else an error
-//! listing the indexed roots. `ref` then keeps the snapshots it names
-//! ([`snapshot::SnapshotDesc::matches_ref`]); local mode has one snapshot per
-//! root (its working tree, named by the checked-out branch, `HEAD` when
-//! detached, `worktree` outside git), and any other ref is an error listing
-//! the indexed refs (with `"*"`, snapshots without the ref are skipped).
+//! listing the indexed roots. Ref snapshots (`rueca index --ref`, RFC 0006
+//! §9.3: catalog entries with `ref_name`, rooted at an export under the
+//! store) are never the default: a repository id, `"*"` and the default root
+//! select working trees. `ref` (one name or a list) then picks, for each
+//! selected snapshot, the ones of its repository that the refs name, in
+//! order: a ref snapshot of its repository recorded under that name (a
+//! commit by any prefix of ≥ 7 digits) first — `--ref main` exports the
+//! commit `main` points to, while the working tree on `main` may be dirty,
+//! as in organization mode — else the selected snapshot itself when it
+//! matches ([`snapshot::SnapshotDesc::matches_ref`]: its branch, `HEAD`,
+//! `worktree` or its commit), else another snapshot with the same
+//! repository id (another worktree, a ref snapshot by commit). A ref a
+//! selected repository does not have is an error listing its indexed refs
+//! (with `"*"`, a repository is read at the refs it has, and only a ref no
+//! repository has is an error; a `pr/<n>` must then name one repository:
+//! pull request numbers are per repository).
 //!
 //! With several snapshots, `search_symbols` returns **one ranking** (RFC 0006
 //! §6, no rank fusion): every snapshot's symbol index is scored with BM25
@@ -61,11 +72,20 @@
 //! matches in snapshot order; `get_symbol`, `get_snippet` and `trace` resolve
 //! an `id` in its own snapshot and a name in every snapshot (the best match
 //! wins, the best match of each other snapshot is a candidate);
-//! `get_file_outline` and path snippets need the path to exist in exactly one
-//! selected snapshot. [`multiref`] holds the collapse of identical symbols
-//! across refs (RFC 0005 §6), which no local tool reaches yet. Responses list
-//! only the snapshots their items come from (with one selected snapshot,
-//! that snapshot is always listed).
+//! `get_file_outline` and path snippets need the path to exist in the
+//! snapshots of one repository. Responses list only the snapshots their
+//! items come from (with one selected snapshot, that snapshot is always
+//! listed).
+//!
+//! **Several snapshots of one repository** (a `ref` list, RFC 0005 §6):
+//! `search_symbols`, `get_symbol`, `trace` and `get_file_outline` find the
+//! same symbol in each (same label, qualified name and path) and collapse
+//! identical versions — same file blob — with [`multiref`]: one item with the
+//! snapshots it is `in`, `changed` when it is not identical in every
+//! requested snapshot of its repository; search collapses before cutting at
+//! `limit`; `trace` walks from every version of the root and returns the
+//! union graph. Repositories read at one snapshot are answered exactly as
+//! before; `format: "verbose"` never collapses.
 //!
 //! # Organization mode (RFC 0006)
 //!
@@ -75,14 +95,20 @@
 //! one generation even while the organization is updated), filtered by the
 //! engine's [`Visibility`]. `repo` omitted means the whole organization (the
 //! repository of an `id` argument for `get_symbol`, `get_snippet` and
-//! `trace`); one repository or a list narrows it. `search_symbols` runs on
-//! the organization symbol index: the visible set and the selection are
+//! `trace`); one repository or a list narrows it. `ref` selects entries of
+//! the generation (RFC 0006 §9.3): with `repo`, those repositories at the
+//! ref and every other one at its default (§4's view); without `repo`, every
+//! repository that has the ref at it; an `id` whose commit is a ref snapshot's
+//! reads that snapshot. `search_symbols` runs on the organization symbol
+//! index with that view (statistics over the entries it reads, routing with
+//! each repository's entry profile): the visible set and the selection are
 //! applied inside the index before top-k (statistics over the visible
 //! repositories only), so results, totals and scores never depend on a
 //! repository the caller cannot read, and a repository named in `repo` that
-//! is not visible is reported exactly like one that does not exist. Other
-//! tools read the selected repositories' segments. Local mode passes
-//! [`Visibility::All`].
+//! is not visible is reported exactly like one that does not exist (so are
+//! its refs). `trace` sees link edges through the view: edges into a
+//! repository read at a ref are remapped to the ref's nodes. Other tools read
+//! the selected entries' segments. Local mode passes [`Visibility::All`].
 //!
 //! # Symbol lookup
 //!
@@ -142,6 +168,8 @@
 mod args;
 pub mod compact;
 pub mod multiref;
+mod orgsel;
+mod refset;
 pub mod snapshot;
 mod text;
 mod tools;
@@ -155,13 +183,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::BTreeSet;
 
 use rueca_model::SymbolIdParts;
-use rueca_segment::org::{OrgIndex, RouteParams};
+use rueca_segment::org::{OrgIndex, OrgSelection, RouteParams};
 use rueca_segment::{CatalogEntry, Segment, Store};
 use serde_json::Value;
 
 pub use args::{
     CommonArgs, DirectionArg, FormatArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, LanguageArg,
-    ListRepositoriesArgs, RepoArg, SearchCodeArgs, SearchSymbolsArgs, TraceArgs,
+    ListRepositoriesArgs, RefArg, RepoArg, SearchCodeArgs, SearchSymbolsArgs, TraceArgs,
 };
 pub use compact::render_text;
 pub use text::split_lines;
@@ -281,8 +309,9 @@ config key). Use it for impact analysis before changing a function. \
 Example: {\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\", \"depth\": 3}";
 
 const DESC_LIST_REPOSITORIES: &str = "List the repositories this server can read (in an organization, every \
-repository you may see): repository id, default ref, indexed refs, languages (files per language) and counts of \
-files, symbols and edges. Use it to learn what exists and to narrow other tools with `repo`. Example: {}";
+repository you may see): repository id, default ref, every indexed ref with its commit, languages (files per \
+language) and counts of files, symbols and edges. Use it to learn what exists and to narrow other tools with `repo` \
+and `ref`. Example: {}";
 
 const DESC_GET_FILE_OUTLINE: &str = "Outline of one file: its classes, functions, methods and other definitions, \
 nested by containment and ordered by line, with signatures and 1-based line ranges. Cheaper than reading the file; \
@@ -329,13 +358,19 @@ pub struct Engine {
 pub(crate) struct Selection {
     pub views: Vec<View>,
     pub org: Option<OrgCtx>,
+    /// Local mode: the store's catalog (every indexed snapshot).
+    pub catalog: Vec<CatalogEntry>,
 }
 
-/// The organization generation a call reads and the repositories (indexes
-/// into its `repos`) the caller may see.
+/// The organization generation a call reads, the repositories (indexes
+/// into its `repos`) the caller may see, and which entries of each it reads.
 pub(crate) struct OrgCtx {
     pub index: Arc<OrgIndex>,
     pub visible: Vec<usize>,
+    /// The entries read (RFC 0006 §9.3): the `ref` argument's, or an `id`'s
+    /// ref snapshot; every other repository at its default. Search
+    /// statistics, routing and link edges see the organization through it.
+    pub view: OrgSelection,
 }
 
 impl Engine {
@@ -422,46 +457,114 @@ impl Engine {
     }
 
     pub(crate) fn select(&self, c: &CommonArgs, id: Option<&SymbolIdParts>) -> anyhow::Result<Selection> {
+        if matches!(&c.ref_, Some(RefArg::Many(list)) if list.is_empty()) {
+            anyhow::bail!("`ref` must not be an empty list (omit it for the default ref)");
+        }
         let store = Store::open(&self.store_dir)?;
-        let (entries, org) = match &self.org {
-            Some(name) => self.org_entries(name)?,
-            None => (store.entries()?, None),
-        };
-        self.evict_stale(&entries);
+        if let Some(name) = &self.org {
+            return self.select_org(&store, name, c, id);
+        }
+        let entries = store.entries()?;
+        self.evict_stale(entries.iter().map(|e| e.segment_id.as_str()));
         if entries.is_empty() {
             anyhow::bail!(
                 "no repositories are indexed in store `{}`; run `rueca index <path>` first",
                 self.store_dir.display()
             );
         }
-        let (selected, star) = self.selected_entries(&store, &entries, c, id)?;
+        let (mut selected, star) = self.selected_entries(&store, &entries, c, id)?;
+        let refs = c.ref_names();
+        if !refs.is_empty() {
+            selected = self.pick_refs(&store, &entries, selected, &refs, star)?;
+        }
         let mut views = Vec::with_capacity(selected.len());
         for e in selected {
-            let seg = self.open_cached(&store, &e.segment_id)?;
-            let i = org.as_ref().and_then(|o| o.index.generation().repos.iter().position(|r| r.root == e.root));
-            let mut v = View::new(seg, e);
-            v.org_repo = i;
-            views.push(v);
+            views.push(View::new(self.open_cached(&store, &e.segment_id)?, e));
         }
-        let Some(r) = c.ref_.as_deref() else { return Ok(Selection { views, org }) };
-        let (keep, miss): (Vec<View>, Vec<View>) = views.into_iter().partition(|v| v.snap.matches_ref(r));
-        if let Some(v) = miss.first()
-            && (!star || keep.is_empty())
-        {
-            let refs = self.indexed_refs(&store, &entries, v.repo());
-            anyhow::bail!(
-                "ref `{r}` is not indexed for repository `{}`; indexed refs: {refs}. Local mode indexes the \
-                 working tree of each root (its checked-out branch plus uncommitted changes); index another \
-                 worktree to read another ref",
-                v.repo()
-            );
-        }
-        Ok(Selection { views: keep, org })
+        Ok(Selection { views, org: None, catalog: entries })
     }
 
-    /// The catalog of organization `name`: the repositories the caller may
-    /// read, and the organization context.
-    fn org_entries(&self, name: &str) -> anyhow::Result<(Vec<CatalogEntry>, Option<OrgCtx>)> {
+    /// Local mode: for each selected entry, the snapshots of its repository
+    /// that refs `names` name, in order (see the crate docs, *Snapshot
+    /// selection*). A repository without one of them is an error; with
+    /// `"*"`, a repository is read at the refs it has and skipped when it
+    /// has none, and a ref no repository has is an error.
+    fn pick_refs(
+        &self,
+        store: &Store,
+        entries: &[CatalogEntry],
+        selected: Vec<CatalogEntry>,
+        names: &[&str],
+        star: bool,
+    ) -> anyhow::Result<Vec<CatalogEntry>> {
+        let mut picked = Vec::with_capacity(selected.len() * names.len());
+        let mut found = vec![false; names.len()];
+        if star {
+            check_pr_refs(names, |r| {
+                let mut repos: Vec<&str> = selected
+                    .iter()
+                    .filter(|b| self.ref_snapshot(store, entries, b, r).is_some())
+                    .map(|b| b.repo.as_str())
+                    .collect();
+                repos.sort_unstable();
+                repos.dedup();
+                repos.into_iter().map(str::to_string).collect()
+            })?;
+        }
+        for base in &selected {
+            for (k, r) in names.iter().enumerate() {
+                match self.ref_snapshot(store, entries, base, r) {
+                    Some(e) => {
+                        found[k] = true;
+                        add_entry(&mut picked, e);
+                    }
+                    None if !star => return Err(self.unknown_ref(store, entries, r, &base.repo)),
+                    None => {}
+                }
+            }
+        }
+        if let Some(k) = found.iter().position(|f| !f)
+            && let Some(base) = selected.first()
+        {
+            return Err(self.unknown_ref(store, entries, names[k], &base.repo));
+        }
+        Ok(picked)
+    }
+
+    /// The snapshot of `base`'s repository that ref `r` names: a ref
+    /// snapshot recorded under that name, else `base` when `r` names it,
+    /// else the first other entry of its repository that `r` names.
+    fn ref_snapshot(
+        &self,
+        store: &Store,
+        entries: &[CatalogEntry],
+        base: &CatalogEntry,
+        r: &str,
+    ) -> Option<CatalogEntry> {
+        let siblings = || entries.iter().filter(|e| e.repo == base.repo && e.root != base.root);
+        let all = || std::iter::once(base).chain(siblings());
+        let named = |e: &&CatalogEntry| e.ref_name.as_deref().is_some_and(|n| names_recorded_ref(n, r));
+        all().find(named).or_else(|| all().find(|e| self.entry_matches_ref(store, e, r))).cloned()
+    }
+
+    fn entry_matches_ref(&self, store: &Store, e: &CatalogEntry, r: &str) -> bool {
+        self.open_cached(store, &e.segment_id)
+            .is_ok_and(|seg| snapshot::SnapshotDesc::from_info(seg.snapshot()).matches_ref(r))
+    }
+
+    /// The error for a ref repository `repo` has no snapshot of.
+    fn unknown_ref(&self, store: &Store, entries: &[CatalogEntry], r: &str, repo: &str) -> anyhow::Error {
+        let refs = self.indexed_refs(store, entries, repo);
+        anyhow::anyhow!(
+            "ref `{r}` is not indexed for repository `{repo}`; indexed refs: {refs}. `rueca index <path> --ref \
+             <name>` indexes another ref (a branch, `pr/<n>`, a tag or a commit)"
+        )
+    }
+
+    /// The catalog of organization `name`: the default entries of the
+    /// repositories the caller may read, and the organization context (every
+    /// repository at its default).
+    fn org_entries(&self, name: &str) -> anyhow::Result<(Vec<CatalogEntry>, OrgCtx)> {
         let index = self.org_index(name)?;
         let mut entries = Vec::new();
         let mut visible = Vec::new();
@@ -469,17 +572,18 @@ impl Engine {
             if self.visibility.allows(&r.repo) {
                 visible.push(i);
                 entries.push(CatalogEntry {
-                    root: r.root.clone(),
+                    root: r.default.root.clone(),
                     repo: r.repo.clone(),
-                    segment_id: r.segment_id.clone(),
-                    indexed_at: r.snapshot.indexed_at,
+                    segment_id: r.default.segment_id.clone(),
+                    indexed_at: r.default.snapshot.indexed_at,
+                    ref_name: None,
                 });
             }
         }
         if entries.is_empty() {
             anyhow::bail!("organization `{name}` has no repositories you can read");
         }
-        Ok((entries, Some(OrgCtx { index, visible })))
+        Ok((entries, OrgCtx { index, visible, view: OrgSelection::default() }))
     }
 
     /// The entries the `repo` argument (else the `id`, else the default)
@@ -499,13 +603,13 @@ impl Engine {
                 Some(p) => add_entry(&mut selected, self.entry_for_id(store, entries, p)?),
                 None if self.org.is_some() => {
                     star = true;
-                    add_entries(&mut selected, entries);
+                    add_entries(&mut selected, &default_entries(entries));
                 }
                 None => add_entry(&mut selected, self.select_entry(store, entries, None, None)?),
             },
             Some(RepoArg::One(r)) if r.trim() == "*" => {
                 star = true;
-                add_entries(&mut selected, entries);
+                add_entries(&mut selected, &default_entries(entries));
             }
             Some(RepoArg::One(r)) => add_entry(&mut selected, self.select_entry(store, entries, Some(r), None)?),
             Some(RepoArg::Many(list)) => {
@@ -515,7 +619,7 @@ impl Engine {
                 for r in list {
                     if r.trim() == "*" {
                         star = true;
-                        add_entries(&mut selected, entries);
+                        add_entries(&mut selected, &default_entries(entries));
                     } else {
                         add_entry(&mut selected, self.select_entry(store, entries, Some(r), None)?);
                     }
@@ -546,13 +650,22 @@ impl Engine {
         Ok(idx)
     }
 
-    /// Indexed refs of repository `repo`, for error messages.
+    /// Indexed refs of repository `repo`, for error messages: working trees
+    /// first, then ref snapshots.
     fn indexed_refs(&self, store: &Store, entries: &[CatalogEntry], repo: &str) -> String {
-        let refs: Vec<String> = entries
-            .iter()
-            .filter(|e| e.repo == repo)
-            .filter_map(|e| self.open_cached(store, &e.segment_id).ok())
-            .map(|seg| snapshot::SnapshotDesc::from_info(seg.snapshot()).describe())
+        let mut mine: Vec<&CatalogEntry> = entries.iter().filter(|e| e.repo == repo).collect();
+        mine.sort_by_key(|e| e.is_ref_export());
+        let refs: Vec<String> = mine
+            .into_iter()
+            .filter_map(|e| Some((e, self.open_cached(store, &e.segment_id).ok()?)))
+            .map(|(e, seg)| {
+                let d = snapshot::SnapshotDesc::from_info(seg.snapshot());
+                if e.is_ref_export() {
+                    format!("`{}` ({}, ref snapshot)", d.ref_name, d.id_commit())
+                } else {
+                    d.describe()
+                }
+            })
             .collect();
         if refs.is_empty() { "none".to_string() } else { refs.join(", ") }
     }
@@ -634,16 +747,25 @@ impl Engine {
                 ),
             };
         }
+        // The only root: ref snapshots are not roots of their own.
+        let mut own = entries.iter().filter(|e| !e.is_ref_export());
+        if let (Some(e), None) = (own.next(), own.next()) {
+            return Ok(e.clone());
+        }
         if entries.len() == 1 {
             return Ok(entries[0].clone());
         }
         anyhow::bail!("several repositories are indexed; pass `repo` (a root path or repository id): {}", roots())
     }
 
-    /// Entry whose repository id is `repo`. If several roots share the id, the
-    /// one containing the default root wins; otherwise it is ambiguous.
+    /// Entry whose repository id is `repo`: its working tree (ref snapshots
+    /// only when the repository has no working tree indexed; then the first).
+    /// If several working trees share the id, the one containing the default
+    /// root wins; otherwise it is ambiguous.
     fn entry_by_repo_id(&self, entries: &[CatalogEntry], repo: &str) -> anyhow::Result<Option<CatalogEntry>> {
-        let hits: Vec<&CatalogEntry> = entries.iter().filter(|e| e.repo == repo).collect();
+        let all: Vec<&CatalogEntry> = entries.iter().filter(|e| e.repo == repo).collect();
+        let own: Vec<&CatalogEntry> = all.iter().copied().filter(|e| !e.is_ref_export()).collect();
+        let hits = if own.is_empty() { all.into_iter().take(1).collect() } else { own };
         match hits.len() {
             0 => Ok(None),
             1 => Ok(Some(hits[0].clone())),
@@ -659,9 +781,11 @@ impl Engine {
         }
     }
 
-    fn evict_stale(&self, entries: &[CatalogEntry]) {
+    /// Drops cached segments that are not in `live`.
+    fn evict_stale<'a>(&self, live: impl IntoIterator<Item = &'a str>) {
+        let live: BTreeSet<&str> = live.into_iter().collect();
         let mut cache = self.segments.lock().unwrap_or_else(|p| p.into_inner());
-        cache.retain(|id, _| entries.iter().any(|e| &e.segment_id == id));
+        cache.retain(|id, _| live.contains(id.as_str()));
     }
 
     fn open_cached(&self, store: &Store, segment_id: &str) -> anyhow::Result<Arc<Segment>> {
@@ -679,6 +803,47 @@ fn add_entry(selected: &mut Vec<CatalogEntry>, e: CatalogEntry) {
     if !selected.iter().any(|x| x.root == e.root) {
         selected.push(e);
     }
+}
+
+/// The entries `"*"` selects: every working tree, and the first ref snapshot
+/// of a repository that has no working tree indexed.
+fn default_entries(entries: &[CatalogEntry]) -> Vec<CatalogEntry> {
+    let own: BTreeSet<&str> = entries.iter().filter(|e| !e.is_ref_export()).map(|e| e.repo.as_str()).collect();
+    let mut seen = BTreeSet::new();
+    entries
+        .iter()
+        .filter(|e| !e.is_ref_export() || (!own.contains(e.repo.as_str()) && seen.insert(e.repo.as_str())))
+        .cloned()
+        .collect()
+}
+
+/// Whether ref name `given` names the ref snapshot recorded as `recorded`:
+/// equal (`refs/heads/<name>` too), or both commits with one a prefix of at
+/// least 7 digits of the other (a commit is recorded under its 12-digit
+/// form).
+fn names_recorded_ref(recorded: &str, given: &str) -> bool {
+    let given = given.trim();
+    let given = given.strip_prefix("refs/heads/").unwrap_or(given);
+    rueca_segment::org::ref_names_match(recorded, given)
+}
+
+/// `ref` without `repo` (or `"*"`): pull request numbers are per
+/// repository, so a `pr/<n>` among `names` must be held by exactly one of
+/// the selected repositories (`holders` lists those holding a ref, all of
+/// them visible to the caller). Zero is left to the unknown-ref error.
+pub(crate) fn check_pr_refs(names: &[&str], holders: impl Fn(&str) -> Vec<String>) -> anyhow::Result<()> {
+    for r in names.iter().filter(|r| is_pr_ref(r)) {
+        let repos = holders(r);
+        if repos.len() > 1 {
+            anyhow::bail!("`{r}` exists in several repositories ({}): name `repo`", repos.join(", "));
+        }
+    }
+    Ok(())
+}
+
+/// `pr/<n>`.
+fn is_pr_ref(r: &str) -> bool {
+    r.trim().strip_prefix("pr/").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Adds every entry whose root is not in `selected` yet.

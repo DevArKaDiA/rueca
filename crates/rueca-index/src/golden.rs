@@ -44,7 +44,7 @@ fn copy_dir(from: &Path, to: &Path) {
 /// Extracts and resolves `root` with the default registry and a fixed
 /// snapshot identity, and renders the graph one JSON value per line.
 pub(crate) fn render_graph(root: &Path) -> String {
-    let paths = walk(root).unwrap();
+    let paths = walk(root, &crate::WalkOptions { parents: true, ..Default::default() }).unwrap();
     let registry = default_registry();
     let cache = tempfile::tempdir().unwrap();
     let kept = AtomicU64::new(0);

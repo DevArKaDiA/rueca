@@ -137,6 +137,24 @@ fn put_opt(m: &mut Map<String, Value>, k: &str, v: Option<impl Into<Value>>) {
     }
 }
 
+/// `"in"` (renumbered by `remap`) and `"changed": true` of an item of a
+/// multi-ref response; nothing for a repository read at one snapshot.
+fn put_mark(m: &mut Map<String, Value>, mark: Option<&RefMark>, remap: &HashMap<usize, usize>) {
+    let Some(mark) = mark else { return };
+    let mut in_: Vec<usize> = mark.in_.iter().filter_map(|s| remap.get(s).copied()).collect();
+    in_.sort_unstable();
+    put(m, "in", json!(in_));
+    if mark.changed {
+        put(m, "changed", true);
+    }
+}
+
+/// The snapshots `marks` read against, for [`touched`]: a multi-ref item
+/// lists every requested snapshot of its repository.
+fn marked<'a>(marks: impl IntoIterator<Item = Option<&'a RefMark>>) -> impl Iterator<Item = usize> {
+    marks.into_iter().flatten().flat_map(|m| m.in_.iter().chain(&m.peers).copied()).collect::<Vec<_>>().into_iter()
+}
+
 /// `{id, qn, label, lines}`; `path` too when `with_path`.
 fn brief(b: &Brief, with_path: bool) -> Map<String, Value> {
     let mut m = Map::new();
@@ -182,7 +200,7 @@ fn group(items: impl IntoIterator<Item = (usize, Option<String>, Value)>, key: &
 
 pub(crate) fn search_symbols(
     snaps: &[&SnapshotDesc],
-    hits: &[(usize, SymbolSearchHit)],
+    hits: &[(usize, SymbolSearchHit, Option<RefMark>)],
     offset: usize,
     more: bool,
     scores: bool,
@@ -190,12 +208,14 @@ pub(crate) fn search_symbols(
 ) -> Response {
     let n = hits.len();
     fit(n.min(1), n, budget, |k| {
-        let (listed, remap) = touched(snaps, hits[..k].iter().map(|(s, _)| *s));
-        let items = hits[..k].iter().map(|(s, h)| {
+        let used = hits[..k].iter().map(|(s, _, _)| *s).chain(marked(hits[..k].iter().map(|h| h.2.as_ref())));
+        let (listed, remap) = touched(snaps, used);
+        let items = hits[..k].iter().map(|(s, h, mark)| {
             let mut m = symbol_item(&h.brief, h.signature.as_ref());
             if scores {
                 put(&mut m, "score", sig3(h.score));
             }
+            put_mark(&mut m, mark.as_ref(), &remap);
             (remap[s], h.brief.path.clone(), Value::Object(m))
         });
         let (truncated, cursor) = next(offset, k, n, more);
@@ -229,28 +249,61 @@ pub(crate) fn search_code(
     })
 }
 
-pub(crate) fn get_symbol(snap: &SnapshotDesc, r: &GetSymbolResult, budget: usize) -> Response {
+/// A `get_symbol` answer: the result read from `view`, and with several
+/// refs of its repository its mark and the other versions.
+pub(crate) struct SymbolAnswer<'a> {
+    pub view: usize,
+    pub result: &'a GetSymbolResult,
+    pub mark: Option<&'a RefMark>,
+    pub versions: &'a [SymbolVersion],
+}
+
+/// `{id, name, qn, label, path, lines, lang, sig, doc, exported, test}`.
+fn symbol_json(s: &SymbolDetail) -> Value {
+    let mut sym = Map::new();
+    put(&mut sym, "id", s.brief.id.clone());
+    put(&mut sym, "name", s.brief.name.clone());
+    put(&mut sym, "qn", s.brief.qualified_name.clone());
+    put(&mut sym, "label", s.brief.label.clone());
+    put_opt(&mut sym, "path", s.brief.path.clone());
+    put_opt(&mut sym, "lines", lines_of(s.brief.start_line, s.brief.end_line));
+    put_opt(&mut sym, "lang", s.language.clone());
+    put_opt(&mut sym, "sig", s.signature.clone());
+    put_opt(&mut sym, "doc", s.doc.clone());
+    put(&mut sym, "exported", s.exported);
+    put(&mut sym, "test", s.is_test);
+    Value::Object(sym)
+}
+
+/// The other versions of a multi-ref `get_symbol`: `{s, in, changed, symbol, callers, callees}`.
+fn symbol_versions(versions: &[SymbolVersion], remap: &HashMap<usize, usize>) -> Value {
+    let items = versions.iter().map(|v| {
+        let mut m = Map::new();
+        put(&mut m, "s", remap[&v.view]);
+        put_mark(&mut m, Some(&v.mark), remap);
+        put(&mut m, "symbol", symbol_json(&v.symbol));
+        put(&mut m, "callers", v.callers_count);
+        put(&mut m, "callees", v.callees_count);
+        Value::Object(m)
+    });
+    Value::Array(items.collect())
+}
+
+pub(crate) fn get_symbol(snaps: &[&SnapshotDesc], a: &SymbolAnswer<'_>, budget: usize) -> Response {
+    let r = a.result;
+    let used = std::iter::once(a.view)
+        .chain(a.versions.iter().map(|v| v.view))
+        .chain(marked(std::iter::once(a.mark).chain(a.versions.iter().map(|v| Some(&v.mark)))));
+    let (listed, remap) = touched(snaps, used);
     // Lists are cut in this order of priority when over budget.
     let lists: [(&str, &[Brief]); 4] =
         [("children", &r.children), ("bases", &r.bases), ("subtypes", &r.subtypes), ("candidates", &r.candidates)];
     let total: usize = lists.iter().map(|(_, l)| l.len()).sum();
     fit(0, total, budget, |k| {
-        let s = &r.symbol;
-        let mut sym = Map::new();
-        put(&mut sym, "id", s.brief.id.clone());
-        put(&mut sym, "name", s.brief.name.clone());
-        put(&mut sym, "qn", s.brief.qualified_name.clone());
-        put(&mut sym, "label", s.brief.label.clone());
-        put_opt(&mut sym, "path", s.brief.path.clone());
-        put_opt(&mut sym, "lines", lines_of(s.brief.start_line, s.brief.end_line));
-        put_opt(&mut sym, "lang", s.language.clone());
-        put_opt(&mut sym, "sig", s.signature.clone());
-        put_opt(&mut sym, "doc", s.doc.clone());
-        put(&mut sym, "exported", s.exported);
-        put(&mut sym, "test", s.is_test);
         let mut res = Map::new();
-        put(&mut res, "s", 0);
-        put(&mut res, "symbol", Value::Object(sym));
+        put(&mut res, "s", remap[&a.view]);
+        put_mark(&mut res, a.mark, &remap);
+        put(&mut res, "symbol", symbol_json(&r.symbol));
         put(&mut res, "parent", r.parent.as_ref().map_or(Value::Null, |b| Value::Object(brief(b, false))));
         let mut left = k;
         let mut omitted = Map::new();
@@ -269,8 +322,11 @@ pub(crate) fn get_symbol(snap: &SnapshotDesc, r: &GetSymbolResult, budget: usize
         put_opt(&mut res, "readers", r.readers_count);
         put_opt(&mut res, "writers", r.writers_count);
         put(&mut res, "candidates", candidates);
+        if !a.versions.is_empty() {
+            put(&mut res, "versions", symbol_versions(a.versions, &remap));
+        }
         let extra = if omitted.is_empty() { vec![] } else { vec![("omitted", Value::Object(omitted))] };
-        with_text("get_symbol", envelope(&[snap], Value::Object(res), k < total, None, extra))
+        with_text("get_symbol", envelope(&listed, Value::Object(res), k < total, None, extra))
     })
 }
 
@@ -304,13 +360,18 @@ struct TNode<'a> {
     depth: u32,
     dir: &'static str,
     view: usize,
+    mark: Option<&'a RefMark>,
 }
 
 /// `trace` over one snapshot, or several when the walk followed
 /// cross-repository link edges: then every node carries its snapshot `s`
 /// (RFC 0006 §6) and the envelope lists the snapshots the answer touched.
 pub(crate) fn trace(snaps: &[&SnapshotDesc], r: &TraceResult, offset: usize, budget: usize) -> Response {
-    let (listed, remap) = touched(snaps, std::iter::once(r.root_view).chain(r.nodes.iter().map(|n| n.view)));
+    let marks = std::iter::once(r.root_mark.as_ref())
+        .chain(r.nodes.iter().map(|n| n.mark.as_ref()))
+        .chain(r.edges.iter().map(|e| e.mark.as_ref()));
+    let used = std::iter::once(r.root_view).chain(r.nodes.iter().map(|n| n.view)).chain(marked(marks));
+    let (listed, remap) = touched(snaps, used);
     let (uniq, pos) = merge_trace_nodes(r);
     let page = TracePage { r, uniq: &uniq, pos: &pos, remap: &remap, multi: listed.len() > 1 };
     let start = offset.min(uniq.len());
@@ -340,7 +401,7 @@ fn merge_trace_nodes(r: &TraceResult) -> (Vec<TNode<'_>>, HashMap<&str, usize>) 
             }
             None => {
                 pos.insert(&n.brief.id, uniq.len());
-                uniq.push(TNode { brief: &n.brief, depth: n.depth, dir, view: n.view });
+                uniq.push(TNode { brief: &n.brief, depth: n.depth, dir, view: n.view, mark: n.mark.as_ref() });
             }
         }
     }
@@ -374,6 +435,7 @@ impl TracePage<'_> {
         m.extend(brief(t.brief, true));
         put(&mut m, "d", t.depth);
         put(&mut m, "dir", t.dir);
+        put_mark(&mut m, t.mark, self.remap);
         Value::Object(m)
     }
 
@@ -384,6 +446,7 @@ impl TracePage<'_> {
         }
         root.extend(brief(&self.r.root, true));
         put(&mut root, "d", 0);
+        put_mark(&mut root, self.r.root_mark.as_ref(), self.remap);
         Value::Object(root)
     }
 
@@ -422,8 +485,9 @@ impl TracePage<'_> {
         nodes.len() - 1
     }
 
-    /// `[src, dst, kind, confidence, strategy, line, path?]`; the path only
-    /// when the call site is not in the source's file.
+    /// `[src, dst, kind, confidence, strategy, line, path?, {in, changed}?]`;
+    /// the path only when the call site is not in the source's file, the
+    /// object only for an edge of a repository read at several refs.
     fn edge_json(&self, e: &TraceEdge, si: usize, di: usize, gs: usize) -> Value {
         let mut edge = vec![json!(si), json!(di), json!(e.kind), json!(e.confidence), json!(e.strategy)];
         match &e.call_site {
@@ -435,55 +499,127 @@ impl TracePage<'_> {
             }
             None => edge.push(Value::Null),
         }
+        if e.mark.is_some() {
+            let mut m = Map::new();
+            put_mark(&mut m, e.mark.as_ref(), self.remap);
+            edge.push(Value::Object(m));
+        }
         Value::Array(edge)
     }
 }
 
-pub(crate) fn outline(snap: &SnapshotDesc, r: &FileOutlineResult, offset: usize, budget: usize) -> Response {
-    // Pre-order: (parent index, symbol).
-    fn flatten<'a>(
-        syms: &'a [OutlineSymbol],
-        parent: Option<usize>,
-        out: &mut Vec<(Option<usize>, &'a OutlineSymbol)>,
-    ) {
-        for s in syms {
-            let i = out.len();
-            out.push((parent, s));
-            flatten(&s.children, Some(i), out);
+/// A `get_file_outline` answer: the outline read from `view`, and with
+/// several refs of its repository its mark and the other versions of the
+/// file (per-ref groups).
+pub(crate) struct OutlineAnswer<'a> {
+    pub view: usize,
+    pub result: &'a FileOutlineResult,
+    pub mark: Option<&'a RefMark>,
+    pub versions: &'a [OutlineVersion],
+}
+
+/// Outline symbols in pre-order: (parent index, symbol).
+type Flat<'a> = Vec<(Option<usize>, &'a OutlineSymbol)>;
+
+fn flatten<'a>(syms: &'a [OutlineSymbol], parent: Option<usize>, out: &mut Flat<'a>) {
+    for s in syms {
+        let i = out.len();
+        out.push((parent, s));
+        flatten(&s.children, Some(i), out);
+    }
+}
+
+/// The symbols `flat[start..start + k]`, nested where their parent is on the
+/// page, the others at the top level.
+fn outline_page(flat: &Flat<'_>, start: usize, k: usize) -> Vec<Value> {
+    let page = start..start + k;
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); k];
+    let mut roots = Vec::new();
+    for i in page.clone() {
+        match flat[i].0 {
+            Some(p) if page.contains(&p) => children[p - start].push(i - start),
+            _ => roots.push(i - start),
         }
     }
-    let mut flat = Vec::new();
-    flatten(&r.symbols, None, &mut flat);
-    let start = offset.min(flat.len());
-    let n = flat.len() - start;
+    fn build(j: usize, start: usize, flat: &Flat<'_>, children: &[Vec<usize>]) -> Value {
+        let s = flat[start + j].1;
+        let mut m = symbol_item(&s.brief, s.signature.as_ref());
+        if !children[j].is_empty() {
+            let kids = children[j].iter().map(|&c| build(c, start, flat, children)).collect();
+            put(&mut m, "children", Value::Array(kids));
+        }
+        Value::Object(m)
+    }
+    roots.iter().map(|&j| build(j, start, flat, &children)).collect()
+}
+
+/// One version of a file outline on page `page` of the concatenated
+/// pre-orders, its symbols starting at global position `base`.
+struct OutlinePart<'a> {
+    view: usize,
+    result: &'a FileOutlineResult,
+    mark: Option<&'a RefMark>,
+    flat: Flat<'a>,
+    base: usize,
+}
+
+impl OutlinePart<'_> {
+    /// The local range of `page` in this part (empty when they do not meet).
+    fn local(&self, page: &std::ops::Range<usize>) -> std::ops::Range<usize> {
+        let lo = page.start.max(self.base).min(self.base + self.flat.len()) - self.base;
+        let hi = page.end.min(self.base + self.flat.len()).max(self.base) - self.base;
+        lo..hi.max(lo)
+    }
+
+    fn symbols(&self, page: &std::ops::Range<usize>) -> Value {
+        let r = self.local(page);
+        Value::Array(outline_page(&self.flat, r.start, r.len()))
+    }
+}
+
+pub(crate) fn outline(snaps: &[&SnapshotDesc], a: &OutlineAnswer<'_>, offset: usize, budget: usize) -> Response {
+    let used = std::iter::once(a.view)
+        .chain(a.versions.iter().map(|v| v.view))
+        .chain(marked(std::iter::once(a.mark).chain(a.versions.iter().map(|v| Some(&v.mark)))));
+    let (listed, remap) = touched(snaps, used);
+    // The versions' pre-orders one after the other: the cursor counts over all.
+    let mut parts: Vec<OutlinePart<'_>> = Vec::with_capacity(1 + a.versions.len());
+    let mut total = 0;
+    let all = std::iter::once((a.view, a.result, a.mark))
+        .chain(a.versions.iter().map(|v| (v.view, &v.outline, Some(&v.mark))));
+    for (view, result, mark) in all {
+        let mut flat = Vec::new();
+        flatten(&result.symbols, None, &mut flat);
+        parts.push(OutlinePart { view, result, mark, base: total, flat });
+        total += parts.last().map_or(0, |p| p.flat.len());
+    }
+    let start = offset.min(total);
+    let n = total - start;
     fit(n.min(1), n, budget, |k| {
         let page = start..start + k;
-        let mut children: Vec<Vec<usize>> = vec![Vec::new(); k];
-        let mut roots = Vec::new();
-        for i in page.clone() {
-            match flat[i].0 {
-                Some(p) if page.contains(&p) => children[p - start].push(i - start),
-                _ => roots.push(i - start),
-            }
-        }
-        fn build(j: usize, start: usize, flat: &[(Option<usize>, &OutlineSymbol)], children: &[Vec<usize>]) -> Value {
-            let s = flat[start + j].1;
-            let mut m = symbol_item(&s.brief, s.signature.as_ref());
-            if !children[j].is_empty() {
-                let kids = children[j].iter().map(|&c| build(c, start, flat, children)).collect();
-                put(&mut m, "children", Value::Array(kids));
-            }
-            Value::Object(m)
-        }
-        let symbols: Vec<Value> = roots.iter().map(|&j| build(j, start, &flat, &children)).collect();
+        let p0 = &parts[0];
         let mut res = Map::new();
-        put(&mut res, "s", 0);
-        put(&mut res, "path", r.path.clone());
-        put_opt(&mut res, "lang", r.language.clone());
-        put(&mut res, "line_count", r.line_count);
-        put(&mut res, "symbols", Value::Array(symbols));
+        put(&mut res, "s", remap[&p0.view]);
+        put_mark(&mut res, p0.mark, &remap);
+        put(&mut res, "path", p0.result.path.clone());
+        put_opt(&mut res, "lang", p0.result.language.clone());
+        put(&mut res, "line_count", p0.result.line_count);
+        put(&mut res, "symbols", p0.symbols(&page));
+        if parts.len() > 1 {
+            let shown =
+                parts[1..].iter().filter(|p| !p.local(&page).is_empty() || (p.flat.is_empty() && page.end == total));
+            let versions = shown.map(|p| {
+                let mut m = Map::new();
+                put(&mut m, "s", remap[&p.view]);
+                put_mark(&mut m, p.mark, &remap);
+                put(&mut m, "line_count", p.result.line_count);
+                put(&mut m, "symbols", p.symbols(&page));
+                Value::Object(m)
+            });
+            put(&mut res, "versions", Value::Array(versions.collect()));
+        }
         let (truncated, cursor) = next(start, k, n, false);
-        with_text("get_file_outline", envelope(&[snap], Value::Object(res), truncated, cursor, vec![]))
+        with_text("get_file_outline", envelope(&listed, Value::Object(res), truncated, cursor, vec![]))
     })
 }
 
@@ -645,6 +781,27 @@ fn brief_text(b: &Value, here: Option<&str>) -> String {
     s
 }
 
+/// `[a,b]` of an item's `in` list.
+fn in_list(v: &Value) -> String {
+    let in_: Vec<String> = v.get("in").and_then(Value::as_array).into_iter().flatten().map(Value::to_string).collect();
+    format!("[{}]", in_.join(","))
+}
+
+/// The marks of an item of a multi-ref response: ` [a,b]` when it is in
+/// several snapshots, ` changed` when it is not identical in every
+/// requested ref of its repository.
+fn mark_text(v: &Value) -> String {
+    let mut out = String::new();
+    if v.get("in").and_then(Value::as_array).is_some_and(|a| a.len() > 1) {
+        out.push(' ');
+        out.push_str(&in_list(v));
+    }
+    if v["changed"] == true {
+        out.push_str(" changed");
+    }
+    out
+}
+
 fn group_header(out: &mut String, g: &Value, multi: bool) {
     if multi {
         let _ = write!(out, "[{}] ", g["s"]);
@@ -668,6 +825,7 @@ fn text_search_symbols(out: &mut String, r: &Value, multi: bool) {
             if let Some(score) = s.get("score") {
                 let _ = write!(out, "  ({score})");
             }
+            out.push_str(&mark_text(s));
             out.push('\n');
         }
     }
@@ -730,6 +888,7 @@ fn text_get_symbol(out: &mut String, r: &Value) {
     if s["test"] == true {
         out.push_str(" test");
     }
+    out.push_str(&mark_text(r));
     out.push('\n');
     if str_of(s, "qn") != local_name(s) {
         let _ = writeln!(out, "  qn: {}", str_of(s, "qn"));
@@ -755,6 +914,19 @@ fn text_get_symbol(out: &mut String, r: &Value) {
     }
     out.push('\n');
     list_text(out, "candidates", &r["candidates"], here);
+    for v in r.get("versions").and_then(Value::as_array).into_iter().flatten() {
+        text_symbol_version(out, v, here);
+    }
+}
+
+/// `  version [s…] changed: Label name path Lx-y  sig  callers a, callees b`.
+fn text_symbol_version(out: &mut String, v: &Value, here: Option<&str>) {
+    let changed = if v["changed"] == true { " changed" } else { "" };
+    let _ = write!(out, "  version {}{changed}: {}", in_list(v), brief_text(&v["symbol"], here));
+    if let Some(sig) = v["symbol"].get("sig").and_then(Value::as_str) {
+        let _ = write!(out, "  {}", one_line(sig));
+    }
+    let _ = writeln!(out, "  callers {}, callees {}", v["callers"], v["callees"]);
 }
 
 fn list_text(out: &mut String, name: &str, list: &Value, here: Option<&str>) {
@@ -815,10 +987,12 @@ fn text_trace_node(out: &mut String, i: usize, n: &Value) {
     if !sp.is_empty() {
         let _ = write!(out, " {sp}");
     }
+    out.push_str(&mark_text(n));
 }
 
 /// `  →j kind confidence strategy @line path` of a trace edge, seen from
-/// one endpoint (`arrow`, the other endpoint).
+/// one endpoint (`arrow`, the other endpoint); ` [s…] changed` when it is not
+/// in every requested ref of its repository.
 fn text_trace_edge(out: &mut String, e: &Value, (arrow, other): (&str, usize)) {
     let _ = write!(
         out,
@@ -833,6 +1007,9 @@ fn text_trace_edge(out: &mut String, e: &Value, (arrow, other): (&str, usize)) {
     if let Some(p) = e.get(6).and_then(Value::as_str) {
         let _ = write!(out, " {p}");
     }
+    if let Some(m) = e.as_array().and_then(|a| a.last()).filter(|m| m.is_object() && m["changed"] == true) {
+        let _ = write!(out, " {} changed", in_list(m));
+    }
 }
 
 fn text_repositories(out: &mut String, r: &Value, multi: bool) {
@@ -840,12 +1017,11 @@ fn text_repositories(out: &mut String, r: &Value, multi: bool) {
         if multi {
             let _ = write!(out, "[{}] ", item["s"]);
         }
-        let refs: Vec<&str> = item["refs"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
         let _ = write!(
             out,
             "{}  refs {}  {} files, {} symbols, {} edges",
             str_of(item, "repo"),
-            refs.join(", "),
+            refs_text(&item["refs"]),
             item["files"],
             item["symbols"],
             item["edges"]
@@ -875,10 +1051,54 @@ fn text_repositories(out: &mut String, r: &Value, multi: bool) {
     }
 }
 
+/// Refs listed per repository in the text (`format: compact` lists them all).
+const MAX_REFS_TEXT: usize = 8;
+
+/// `main@7696364aef89, pr/7@a1b2c3d4e5f6` (a ref without a commit alone),
+/// then `(+n)` past [`MAX_REFS_TEXT`].
+fn refs_text(refs: &Value) -> String {
+    let all = refs.as_array().map(Vec::as_slice).unwrap_or_default();
+    let mut parts: Vec<String> = all
+        .iter()
+        .take(MAX_REFS_TEXT)
+        .map(|r| {
+            let (name, commit) = (str_of(r, "ref"), str_of(r, "commit"));
+            if commit.is_empty() || commit == name { name.to_string() } else { format!("{name}@{commit}") }
+        })
+        .collect();
+    if all.len() > MAX_REFS_TEXT {
+        parts.push(format!("(+{})", all.len() - MAX_REFS_TEXT));
+    }
+    parts.join(", ")
+}
+
 fn text_outline(out: &mut String, r: &Value) {
     let _ = write!(out, "{}", str_of(r, "path"));
     let lang = r.get("lang").and_then(Value::as_str);
-    let _ = writeln!(out, " ({}{} lines)", lang.map(|l| format!("{l}, ")).unwrap_or_default(), r["line_count"]);
+    let lang = lang.map(|l| format!("{l}, ")).unwrap_or_default();
+    let _ = writeln!(out, " ({lang}{} lines){}", r["line_count"], outline_mark(r));
+    text_outline_symbols(out, &r["symbols"], 1);
+    for v in r.get("versions").and_then(Value::as_array).into_iter().flatten() {
+        let changed = if v["changed"] == true { " changed" } else { "" };
+        let _ =
+            writeln!(out, "version {}{changed}: {} ({lang}{} lines)", in_list(v), str_of(r, "path"), v["line_count"]);
+        text_outline_symbols(out, &v["symbols"], 1);
+    }
+}
+
+/// The marks of the first outline of a multi-ref `get_file_outline`: the
+/// snapshots it is (`in`, else `[s]`) even when it is one, so the text says
+/// which ref the version is, then ` changed`.
+fn outline_mark(r: &Value) -> String {
+    if r.get("in").is_none() && r.get("versions").is_none() {
+        return mark_text(r);
+    }
+    let tag = if r.get("in").is_some() { in_list(r) } else { format!("[{}]", r["s"]) };
+    let changed = if r["changed"] == true { " changed" } else { "" };
+    format!(" {tag}{changed}")
+}
+
+fn text_outline_symbols(out: &mut String, syms: &Value, depth: usize) {
     fn rec(out: &mut String, syms: &Value, depth: usize) {
         for s in syms.as_array().into_iter().flatten() {
             let _ = write!(out, "{:indent$}{} {}", "", str_of(s, "label"), local_name(s), indent = depth * 2);
@@ -895,7 +1115,7 @@ fn text_outline(out: &mut String, r: &Value) {
             }
         }
     }
-    rec(out, &r["symbols"], 1);
+    rec(out, syms, depth);
 }
 
 #[cfg(test)]

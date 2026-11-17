@@ -24,15 +24,21 @@
 //!   publishing a package it imports).
 //! - **Link table**: the link edges of a generation, by endpoint, for
 //!   `trace` ([`super::OrgIndex::link_edges`]).
+//! - **Refs** (RFC 0006 §9.3): a ref entry of a repository is a consumer of
+//!   its own — its link set is computed against its dependencies' default
+//!   entries, from the imports of the ref's own segment, and versioned the
+//!   same way (its own segment in the file name). A change of a ref never
+//!   recomputes another repository's links: link sets only point at
+//!   default entries.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
 use rueca_model::{EdgeKind, EdgeMeta, NodeId};
 use serde::{Deserialize, Serialize};
 
-use super::{OrgRepo, corrupt};
+use super::{OrgRepo, OrgSlot, corrupt};
 use crate::store::atomic_write;
 use crate::{Result, Segment, SegmentError, Store};
 
@@ -151,7 +157,9 @@ pub struct LinkEdge {
 }
 
 /// One side of a link computation: a repository of the generation being
-/// built, its opened segment and what it publishes / imports.
+/// built, the opened segment of one of its entries (a consumer: its default
+/// or one of its refs; a dependency: always its default) and what that
+/// segment publishes / imports.
 pub struct LinkInput<'a> {
     pub repo: &'a OrgRepo,
     pub segment: &'a Segment,
@@ -227,20 +235,60 @@ pub enum LinkDir {
 /// One link edge seen from one of its endpoints.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LinkRef {
-    /// The other endpoint: repository index in the generation and node.
+    /// The other endpoint: repository index in the generation and node (of
+    /// the entry `slot`).
     pub repo: usize,
     pub node: NodeId,
     pub kind: EdgeKind,
     pub meta: EdgeMeta,
     /// Repository whose file table `meta.evidence` refers to (the consumer).
     pub evidence_repo: usize,
+    /// The other endpoint's entry: `repo`'s default or one of its refs.
+    pub slot: OrgSlot,
+    /// The consumer entry whose file table `meta.evidence` refers to.
+    pub evidence: OrgSlot,
 }
 
-/// Every link edge of a generation, by endpoint.
+/// One link edge stored at one of its endpoints: the other endpoint, and
+/// whether the endpoint it is stored at is the consumer's.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Stored {
+    pub(crate) other: OrgSlot,
+    pub(crate) node: NodeId,
+    pub(crate) kind: EdgeKind,
+    pub(crate) meta: EdgeMeta,
+    /// The consumer entry (whose link set holds the edge).
+    pub(crate) consumer: OrgSlot,
+    /// The endpoint this is stored at is the consumer's node (else a
+    /// dependency's default node).
+    pub(crate) at_consumer: bool,
+}
+
+impl Stored {
+    pub(crate) fn as_ref(&self) -> LinkRef {
+        LinkRef {
+            repo: self.other.repo,
+            node: self.node,
+            kind: self.kind,
+            meta: self.meta,
+            evidence_repo: self.consumer.repo,
+            slot: self.other,
+            evidence: self.consumer,
+        }
+    }
+}
+
+/// Every link edge of a generation as stored: each consumer entry's (a
+/// repository's default or one of its refs) edges into its dependencies'
+/// default entries, by endpoint. Views that read other entries remap them
+/// ([`super::OrgIndex::link_edges`]).
 #[derive(Debug, Default)]
 pub struct LinkTable {
-    out: HashMap<(usize, NodeId), Vec<LinkRef>>,
-    inc: HashMap<(usize, NodeId), Vec<LinkRef>>,
+    out: HashMap<(OrgSlot, NodeId), Vec<Stored>>,
+    inc: HashMap<(OrgSlot, NodeId), Vec<Stored>>,
+    /// Per repository, the nodes of its default entry that link edges point
+    /// at (what a ref of it must remap).
+    targets: HashMap<usize, HashSet<NodeId>>,
     edges: usize,
 }
 
@@ -249,52 +297,92 @@ impl LinkTable {
         let mut t = LinkTable::default();
         let index: HashMap<&str, usize> = repos.iter().enumerate().map(|(i, r)| (r.repo.as_str(), i)).collect();
         for (ci, r) in repos.iter().enumerate() {
-            let Some(links) = &r.links else { continue };
-            let Some(file) = &links.file else { continue };
-            // Dependencies that are not (or no longer at that segment) in
-            // the generation cannot be read: their edges are dropped.
-            let deps: Vec<Option<usize>> = links
-                .deps
-                .iter()
-                .map(|d| index.get(d.repo.as_str()).copied().filter(|&j| repos[j].segment_id == d.segment_id))
-                .collect();
-            for e in read_links(dir, file)? {
-                let Some(Some(di)) = deps.get(e.dep as usize).copied() else { continue };
-                let ((from, fnode), (to, tnode)) =
-                    if e.reversed { ((di, e.dst), (ci, e.src)) } else { ((ci, e.src), (di, e.dst)) };
-                t.out.entry((from, fnode)).or_default().push(LinkRef {
-                    repo: to,
-                    node: tnode,
-                    kind: e.kind,
-                    meta: e.meta,
-                    evidence_repo: ci,
-                });
-                t.inc.entry((to, tnode)).or_default().push(LinkRef {
-                    repo: from,
-                    node: fnode,
-                    kind: e.kind,
-                    meta: e.meta,
-                    evidence_repo: ci,
-                });
-                t.edges += 1;
+            for (ref_idx, entry) in r.slots() {
+                if let Some(links) = &entry.links {
+                    t.add_link_set(dir, repos, &index, OrgSlot { repo: ci, ref_idx }, links)?;
+                }
             }
         }
         for v in t.out.values_mut().chain(t.inc.values_mut()) {
-            v.sort_by_key(|a| (a.kind, a.repo, a.node));
+            v.sort_by_key(|a| (a.kind, a.other, a.node));
         }
         Ok(t)
     }
 
-    /// Link edges at `(repo, node)` in direction `dir`, optionally of one
-    /// kind, ordered by (kind, repository, node).
-    pub fn edges(&self, repo: usize, node: NodeId, dir: LinkDir, kind: Option<EdgeKind>) -> Vec<LinkRef> {
+    /// Reads and stores the link set `links` of consumer entry `consumer`.
+    fn add_link_set(
+        &mut self,
+        dir: &Path,
+        repos: &[OrgRepo],
+        index: &HashMap<&str, usize>,
+        consumer: OrgSlot,
+        links: &OrgLinks,
+    ) -> Result<()> {
+        let Some(file) = &links.file else { return Ok(()) };
+        // Dependencies that are not (or no longer at that segment) in the
+        // generation cannot be read: their edges are dropped.
+        let deps: Vec<Option<usize>> = links
+            .deps
+            .iter()
+            .map(|d| index.get(d.repo.as_str()).copied().filter(|&j| repos[j].default.segment_id == d.segment_id))
+            .collect();
+        for e in read_links(dir, file)? {
+            if let Some(Some(di)) = deps.get(e.dep as usize).copied() {
+                self.add(consumer, OrgSlot::default_of(di), &e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Stores edge `e` of consumer entry `consumer` into dependency entry
+    /// `dep` at both endpoints.
+    fn add(&mut self, consumer: OrgSlot, dep: OrgSlot, e: &LinkEdge) {
+        let c = (consumer, e.src);
+        let d = (dep, e.dst);
+        let (from, to) = if e.reversed { (d, c) } else { (c, d) };
+        let stored = |other: (OrgSlot, NodeId), at_consumer: bool| Stored {
+            other: other.0,
+            node: other.1,
+            kind: e.kind,
+            meta: e.meta,
+            consumer,
+            at_consumer,
+        };
+        self.out.entry(from).or_default().push(stored(to, !e.reversed));
+        self.inc.entry(to).or_default().push(stored(from, e.reversed));
+        self.targets.entry(dep.repo).or_default().insert(e.dst);
+        self.edges += 1;
+    }
+
+    /// The stored edges at `(slot, node)` in direction `dir`, optionally of
+    /// one kind.
+    pub(crate) fn stored(
+        &self,
+        slot: OrgSlot,
+        node: NodeId,
+        dir: LinkDir,
+        kind: Option<EdgeKind>,
+    ) -> impl Iterator<Item = &Stored> + '_ {
         let map = match dir {
             LinkDir::Out => &self.out,
             LinkDir::In => &self.inc,
         };
-        map.get(&(repo, node))
-            .map(|v| v.iter().filter(|e| kind.is_none_or(|k| e.kind == k)).copied().collect())
-            .unwrap_or_default()
+        map.get(&(slot, node)).into_iter().flatten().filter(move |e| kind.is_none_or(|k| e.kind == k))
+    }
+
+    /// The nodes of repository `repo`'s default entry that link edges point
+    /// at.
+    pub(crate) fn targets(&self, repo: usize) -> Option<&HashSet<NodeId>> {
+        self.targets.get(&repo)
+    }
+
+    /// Link edges as stored at `(slot, node)` in direction `dir`, optionally
+    /// of one kind, ordered by (kind, entry, node): a consumer entry's own
+    /// edges and, at a default entry, the edges of consumers pointing at it
+    /// (every consumer entry, whatever a view selects; see
+    /// [`super::OrgIndex::link_edges`] for a view).
+    pub fn edges(&self, slot: OrgSlot, node: NodeId, dir: LinkDir, kind: Option<EdgeKind>) -> Vec<LinkRef> {
+        self.stored(slot, node, dir, kind).map(Stored::as_ref).collect()
     }
 
     /// Number of link edges.

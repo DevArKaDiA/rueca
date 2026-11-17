@@ -45,6 +45,14 @@ def test_score_collapse_perfect_and_broken():
     assert (c["identical_ok"], c["identical"]) == (0, 1)
     assert (c["changed_tp"], c["changed_fp"], c["changed_fn"]) == (0, 1, 1)
     assert c["in_ok"] == 0
+    # blob-level versions: `g` is unchanged inside a changed file, so Rueca
+    # lists it once per ref, flagged; counted apart, not as a false positive
+    by_blob = [
+        {"path": "m.py", "qn": "g", "in": [0], "changed": True},
+        {"path": "m.py", "qn": "g", "in": [1], "changed": True},
+    ]
+    c = score_collapse(by_blob, gold, 0, 1)
+    assert (c["changed_fp"], c["changed_same_file"], c["in_ok"], c["in_total"]) == (0, 1, 2, 2)
 
 
 def test_org_file_lists_every_root(tmp_path):

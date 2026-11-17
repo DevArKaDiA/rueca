@@ -2,7 +2,8 @@
 
 This is the tool contract of Rueca since RFC 0005 ([responses for
 agents](rfcs/0005-agent-responses.md)), with the organization scope of RFC
-0006 ([the organization graph](rfcs/0006-org-graph.md), phase 1). The MCP
+0006 ([the organization graph](rfcs/0006-org-graph.md), phases 1–3: one
+ranking, cross-repository edges, refs). The MCP
 server, the CLI and the benchmark all use it. The alpha shapes (v0.1.0-alpha) stay available for one
 release with `"format": "verbose"` ([below](#verbose-alpha-format)).
 
@@ -14,27 +15,43 @@ release with `"format": "verbose"` ([below](#verbose-alpha-format)).
   | Arg | Type | Default |
   |---|---|---|
   | `repo` | a repository id (`github.com/o/r`, `local/<dir>`) or indexed root path; a list of them; or `"*"` for every indexed repository | organization mode (`--org`): the whole organization (for `get_symbol`, `get_snippet`, `trace`: the repository of an `id` argument); otherwise the server's `--root`, else the repository of an `id` argument, else the only indexed root, else an error listing indexed roots |
-  | `ref` | branch name, `HEAD`, `worktree`, or a commit (full, or a unique prefix of ≥ 7 hex digits) | the working tree |
+  | `ref` | a branch (`main`, `feature/x`), a pull request (`pr/<n>`), a tag, or a commit (full, or a unique prefix of ≥ 7 hex digits); `HEAD` / `worktree` name the default. A string, or a list to compare refs ([below](#several-refs-of-one-repository)) | the repository's default ref (local: the working tree) |
   | `budget_tokens` | int, 100–1,000,000 | 2000 |
   | `cursor` | string: the `next_cursor` of a previous response | — |
   | `format` | `compact` or `verbose` | `compact` |
 
-- **Refs in local mode.** Each indexed root is one snapshot: its working tree,
-  i.e. the checked-out branch (`main`; `HEAD` when detached; `worktree`
-  outside git) plus uncommitted changes. `ref` accepts that branch, `HEAD`,
-  `worktree` or the commit; any other ref is an error that lists the indexed
-  refs of the repository (index another worktree to read another branch).
-  With `repo: "*"`, snapshots that do not have the ref are skipped. The
-  service and org modes will hold several snapshots per repository
-  (branches, `pr/<n>`, tags) under the same argument.
+- **Refs.** Every indexed ref of a repository is a snapshot of its own. The
+  default is the indexed root: its working tree, i.e. the checked-out
+  branch (`main`; `HEAD` when detached; `worktree` outside git) plus
+  uncommitted changes. Other refs are indexed with `rueca index [PATH] --ref
+  <name>` (a branch, `pr/<n>`, a tag or a commit; in an organization also
+  the member's `refs = [...]` and `rueca index --org <file> <member> --ref
+  <name>`) and read with `ref`, which accepts the ref's name, the default's
+  branch, `HEAD`, `worktree`, or a snapshot's commit. `ref` applies to the
+  repositories `repo` selects: with `repo` (one or a list), every one of
+  them must have every ref named; without `repo` (organization mode) or
+  with `"*"`, each repository is read at the refs it has and the others at
+  their default — the organization "as of" a release branch. Pull request
+  numbers are per repository: `pr/<n>` without `repo` (or with `"*"`) is
+  accepted only when exactly one selected repository you can read has it;
+  otherwise name `repo`. In
+  organization mode the other repositories stay in the call's view at their
+  default (RFC 0006 §4: `repo: A, ref: pr/7` is the organization with A
+  replaced by A at `pr/7`): search statistics, routing and `trace`'s link
+  edges see that view. A ref that is not indexed is an error that lists the
+  indexed refs of the repository (`ref` without `repo`: of every selected
+  repository) and how to index one; a repository the caller cannot read is
+  never named, nor are its refs.
 - **Symbol ids** are pinned: `<repo>@<commit12>[+]:<path>#<local-qualified-name>`
   (`rueca_model::symbol_id`), with the first 12 hex digits of the commit and
   `+` when the indexed working tree has uncommitted changes (the overlay):
   `github.com/acme/billing@7696364aef89+:src/invoices/service.py#InvoiceService.issue`.
   Outside git the commit is `worktree`. Tools accept the full commit, any
   prefix of ≥ 7 hex digits, the 12-digit form (with or without `+`) or a ref
-  name (`@main`). An id whose commit is no longer indexed resolves against
-  the repository's current snapshot (local mode), so ids survive a re-index.
+  name (`@main`). An id whose commit is that of a ref snapshot reads that
+  snapshot without `ref`. An id whose commit is no longer indexed resolves
+  against the repository's current snapshot (its default), so ids survive a
+  re-index.
   For PHP the local qualified name is the fully qualified name
   (`app/Models/User.php#App\Models\User::save`); for C/C++ too
   (`src/foo.cpp#ns::Foo::bar`). Canonical env vars have no file and use the
@@ -96,8 +113,9 @@ Every response (default `format: compact`) is:
   over several repositories lists only those its items come from (none for
   an empty answer); a request on one snapshot always lists it. Items refer to one by `s`
   (an index valid within the response); their ids stay fully pinned, so an
-  id copied out of a response is valid on its own. `commit` is the full id
-  (`worktree` outside git); `overlay: true` means the working tree had
+  id copied out of a response is valid on its own. `ref` is the snapshot's
+  ref (`main`, `pr/7`; a ref snapshot never has an overlay); `commit` is the
+  full id (`worktree` outside git); `overlay: true` means the working tree had
   uncommitted changes when indexed (ids carry `+`). `url` is a template for
   links on the repository's host (`{path}`, `{start}`, `{end}`), present for
   `github.com`, `gitlab.com`, `bitbucket.org` and hosts named `github.*` /
@@ -134,6 +152,10 @@ src/invoices/service.py
 (truncated; continue with "cursor": "10")
 ```
 
+An item of a repository read at several refs ends with ` [0,1]` when it is
+in several snapshots and ` changed` when it is not identical in all of them
+([below](#several-refs-of-one-repository)).
+
 **Several repositories.** With `repo` a list or `"*"` (or omitted in
 organization mode), `search_symbols` returns **one ranking**: BM25
 statistics are those of every selected repository together, so scores are
@@ -145,8 +167,56 @@ scores. `search_code` lists matches in snapshot (repository) order.
 `get_symbol`, `get_snippet` and `trace` resolve an `id` in its own
 snapshot, and a name in every selected snapshot (the best match wins; the
 best match of each other snapshot is listed in `candidates`).
-`get_file_outline` and path snippets need the path to exist in exactly one
-selected snapshot.
+`get_file_outline` and path snippets need the path to exist in the
+snapshots of one repository.
+
+**Several refs of one repository** (a `ref` list, RFC 0005 §6). `ref:
+["main", "pr/7"]` reads both snapshots of each selected repository, side by
+side; the envelope lists every requested snapshot of such a repository.
+Extraction is per blob, so a symbol whose file blob is the same in two refs
+has identical facts: a symbol is found in each snapshot by (label,
+qualified name, path), and its versions are compared by file blob.
+
+- An item identical in several snapshots is **one item** with `"in": [s, …]`
+  (snapshot indexes); its `s` and id are those of the first. A symbol whose
+  file differs appears once per distinct version, each with its own `in`.
+  Every item of such a repository carries `in`; `"changed": true` marks
+  those not identical in every requested ref (another version, or absent:
+  added or deleted on a ref). Repositories read at one snapshot get neither,
+  so their items are exactly the single-ref ones.
+- `search_symbols` collapses before cutting at `limit` (an identical symbol
+  counts once; `next_cursor` counts collapsed items). `get_symbol` answers
+  the best match's version with its `in` / `changed` and lists the other
+  versions in `"versions": [{"s", "in", "changed", "symbol", "callers",
+  "callees"}]` (not as candidates). `get_file_outline` is grouped per ref:
+  the first listed ref's outline with its `in` / `changed`, then each other
+  distinct version of the file in `"versions": [{"s", "in", "changed",
+  "line_count", "symbols"}]`, the cursor counting symbols over all of them.
+  `trace` walks from every version of the root and returns the **union
+  graph**: a node per symbol (its `in`: the snapshots it was reached in) and
+  an edge per (source, destination, kind), whose `in` (the snapshots whose
+  walk found it) ends the edge array as `{"in": [s, …], "changed": true}`
+  (see [`trace`](#trace)), so "who calls `f` on the PR but not on `main`"
+  is one response. `search_code` lists the matches of each snapshot and
+  `get_snippet` reads the first listed ref that has the file; neither
+  collapses. `format: "verbose"` never collapses.
+- Text: an item, node or symbol line ends with ` [0,1]` when it is in
+  several snapshots and ` changed` when it is changed; an edge not found in
+  every requested ref ends with ` [s…] changed`; other versions print as
+  `version [s…] changed: …`, and the first outline of a grouped
+  `get_file_outline` always names its snapshots (`path (python, 17 lines)
+  [0] changed`):
+
+```
+[0] github.com/acme/billing@7696364aef89+ (main)
+[1] github.com/acme/billing@c0ffee00c0ff (feature/x)
+[0] pkg/service.py
+  Function helper L13-14  def helper() changed
+[1] pkg/service.py
+  Function helper L14-15  def helper() changed
+[0] src/util/index.ts
+  Function helper L7  function helper() [0,1]
+```
 
 **Organization mode** (`rueca mcp --org`, `rueca query --org`; RFC 0006).
 The server reads one organization: the repositories of its current
@@ -158,7 +228,9 @@ score the same whether it is searched alone or with the others. Callers see
 only the repositories they may read: the visible set is applied before
 top-k, before counts and before BM25 statistics, and a repository that is
 not visible is reported exactly like one that does not exist (local mode
-sees everything). `list_repositories` lists the organization.
+sees everything). `ref` reads repositories at other indexed refs
+([Refs](#common-conventions)); `list_repositories` lists the organization
+and every indexed ref.
 
 **Repository routing** (RFC 0006 phase 2): when a `search_symbols` call
 reads several repositories of an organization, the query also scores the
@@ -167,8 +239,9 @@ and BM25 over each repository's profile (repository and package names,
 descriptions and README head, most referenced symbols, path vocabulary) —
 and every symbol score of a repository is multiplied by its prior
 `((0.25 + r) / 1.25)²`, `r` ∈ [0, 1] being its relevance relative to the
-best visible repository. The prior reorders, it never drops a result; with
-one selected repository it does nothing. `list_repositories` with `query`
+best visible repository, each scored at the ref the call reads (a ref
+routes with its own profile). The prior reorders, it never drops a result;
+with one selected repository it does nothing. `list_repositories` with `query`
 returns the same repository ranking with `score`s. `RUECA_ORG_ROUTE`
 overrides the parameters for experiments (`off`, `prior,alpha=2,mu=0.5`,
 `top,top=2`; see `rueca_segment::org::RouteParams`).
@@ -219,7 +292,9 @@ best result ranks):
 ]
 ```
 
-`next_cursor` is the offset of the next result.
+`next_cursor` is the offset of the next result. With a `ref` list, items of
+a repository read at several refs carry `"in"` and `"changed"` ([Several
+refs](#several-refs-of-one-repository)).
 
 **Language names** (`search_symbols`, `search_code`): `python`,
 `typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`, `java`, `cpp`, `c` (a `.h` header is `cpp` when the
@@ -287,12 +362,22 @@ Results:
 }
 ```
 
-`readers` / `writers` answer "is this env var / config key used, and is it
-set anywhere?" before a `trace`. A canonical env var (`$env:NAME`) has no
+`callers` / `callees` count edges inside the symbol's repository; in
+organization mode, cross-repository link edges are not counted (`trace`
+follows them). `readers` / `writers` answer "is this env var / config key
+used, and is it set anywhere?" before a `trace`. A canonical env var (`$env:NAME`) has no
 `path` or `lines`. Over budget, the lists are cut (children, then bases,
 subtypes, candidates), `truncated` is set and `"omitted": {"children": n, …}`
 says what was left out; there is no cursor (use `get_file_outline` or
-`trace` for the rest).
+`trace` for the rest). With a `ref` list the result also has `"in"` /
+`"changed"` and the symbol's other versions in `"versions"` ([Several
+refs](#several-refs-of-one-repository)); text:
+
+```
+Method InvoiceService.issue  pkg/service.py L9-11  python exported changed
+  …
+  version [1] changed: Method InvoiceService.issue L9-12  def issue(self, invoice)  callers 0, callees 3
+```
 
 ### `get_snippet`
 
@@ -339,7 +424,15 @@ Results:
 In organization mode the walk also follows cross-repository link edges
 (callers of a library function in the repositories that import it, a
 consumer's calls into its dependencies), only between repositories the
-caller can read. When the answer spans several snapshots, every node
+caller can read. Link edges are computed between default refs (a ref's own
+imports are linked against its dependencies' defaults); when the call reads
+a repository at another ref, the edges into it are **remapped** to that
+ref's nodes by (label, qualified name, path), and an edge whose target the
+ref no longer has is dropped: `trace` from a consumer's function with
+`ref: "7.1.2"` (a tag only the library has, no `repo`) shows its calls
+into the library as of that tag, and `repo: <consumer>, ref: "pr/7"`
+traces the pull request's own calls, linked against the libraries'
+defaults. When the answer spans several snapshots, every node
 carries its snapshot `"s"` (the result's `"s"` is the root's), the
 envelope lists the snapshots touched, and the text prefixes such nodes with
 `[s]`:
@@ -367,9 +460,21 @@ github.com/acme/billing@7696364aef89+ (main)
 ```
 
 Each edge is printed on its later endpoint: `→j` this node calls node `j`,
-`←j` node `j` calls this node. `next_cursor` is the number of non-root
-nodes already returned; a later page repeats the root as node 0 and any
-earlier node an edge needs.
+`←j` node `j` calls this node. With several refs of one repository (a `ref`
+list), nodes carry `in` / `changed` and the edges of that repository end
+with an object `{"in": [s, …]}` (plus `"changed": true` when a walk from
+some requested ref did not find it); text:
+
+```
+[0] github.com/acme/billing@7696364aef89+ (main)
+[1] github.com/acme/billing@c0ffee00c0ff (feature/x)
+0 [0] Method InvoiceService.issue  pkg/service.py L9-11 [0,1] changed
+2 [1] out d1 Function audit  pkg/service.py L17-18 changed  ←0 CALLS 0.95 same_module @11 [1] changed
+3 [0] out d1 Function helper  pkg/service.py L13-14 [0,1] changed  ←0 CALLS 0.95 same_module @10
+```
+
+`next_cursor` is the number of non-root nodes already returned; a later
+page repeats the root as node 0 and any earlier node an edge needs.
 
 Edge types beyond calls: `["INHERITS"]` walks a class hierarchy,
 `["IMPORTS"]` file dependencies (`File` → `File`, and `File` → `Folder` for
@@ -408,19 +513,26 @@ body or initializer, and a `Class` callee is a constructor call (its
 Results: `{"s", "path", "lang", "line_count", "symbols": [ {"id", "name", "qn", "label", "lines", "sig", "children" (opt): [ … ]} ] }`
 (nested by containment, ordered by line). `next_cursor` is the number of
 symbols already returned in pre-order; a later page nests what it can and
-lists the rest at the top level.
+lists the rest at the top level. With a `ref` list: `"in"` / `"changed"`
+and `"versions": [{"s", "in", "changed", "line_count", "symbols"}]`, one
+per other distinct version of the file (text: `version [1] changed:
+pkg/service.py (python, 18 lines)` and its symbols).
 
 ### `list_repositories`
 
 The repositories this server can read, sorted by id: in organization mode
-every visible repository of the organization, otherwise every indexed root
-(`repo` narrows it, `ref` filters snapshots).
+every visible repository of the organization, otherwise every indexed
+repository (`repo` narrows it; `ref` picks the snapshot each summary
+describes).
 
 | Arg | Type | Default |
 |---|---|---|
 | `query` | string: rank the repositories for this text (organization mode; see *Repository routing*) | — |
 
-Results: `[{"s", "repo", "default_ref", "refs": [ref, …], "languages": {"python": files, …}, "files", "symbols", "edges", "packages" (opt), "packages_more" (opt), "depends_on" (opt), "score" (opt)}]`
+Results: `[{"s", "repo", "default_ref", "refs": [{"ref", "commit"}, …], "languages": {"python": files, …}, "files", "symbols", "edges", "packages" (opt), "packages_more" (opt), "depends_on" (opt), "score" (opt)}]`
+(`refs`: every indexed snapshot of the repository — the default ref first,
+then its ref snapshots — with the first 12 hex digits of its commit;
+`ref` reads any of them)
 (`packages`: up to 8 package names the repository publishes, `packages_more`
 the rest's count; `depends_on`: visible repositories it imports packages
 from; `score`: relevance for `query`, 1 = best, results then ordered by it)
@@ -429,14 +541,16 @@ files, folders, modules or packages), plus `"org"` (the organization name,
 or `null`) next to `next_cursor`. `next_cursor` is the number of
 repositories already returned. Verbose: `{"org", "repositories": [{"repo",
 "root", "default_ref", "commit", "refs", "languages", "files", "symbols",
-"edges", "packages" (all), "depends_on", "score"}]}`. Text (`packages …`,
-`depends on …` and `(score)` follow when present):
+"edges", "packages" (all), "depends_on", "score"}]}` (`refs` as above,
+`commit` the default's full commit). Text (`refs` as `name@commit12`, at
+most 8 then `(+n)`; `packages …`, `depends on …` and `(score)` follow when
+present):
 
 ```
 [0] github.com/acme/billing@7696364aef89 (main)
 [1] github.com/acme/payments@a1b2c3d4e5f6 (main)
-[0] github.com/acme/billing  refs main  120 files, 3400 symbols, 9100 edges  python 110, yaml 10
-[1] github.com/acme/payments  refs main  80 files, 2100 symbols, 5300 edges  typescript 78, json 2
+[0] github.com/acme/billing  refs main@7696364aef89, pr/7@c0ffee00c0ff  120 files, 3400 symbols, 9100 edges  python 110, yaml 10
+[1] github.com/acme/payments  refs main@a1b2c3d4e5f6  80 files, 2100 symbols, 5300 edges  typescript 78, json 2
 ```
 
 ## CLI
@@ -447,14 +561,30 @@ rueca index [PATH] [--store DIR] [--repo ID] [--json]
     (or the IndexReport as JSON). Organizations holding PATH are updated
     (only its part; JSON: "orgs").
 
+rueca index [PATH] --ref NAME [--remove] [--store DIR] [--repo ID] [--json]
+    Index a ref of PATH's repository as a snapshot of its own: a branch,
+    `pr/<n>`, a tag or a commit (fetched from `origin` when absent; `pr/<n>`
+    always), its tree exported from the object database under
+    <store>/refs/; the working tree is not touched. Re-running at the same
+    commit does nothing; --remove drops the snapshot and its export.
+    Organizations holding the repository list (or drop) the ref.
+
 rueca index --org FILE [PATH] [--store DIR] [--json]
     Index every repository of the organization file (or only the one
     containing PATH), then build or update the organization layer: the
     symbol index, routing profiles and package registry, and the link
     sets of the repositories whose links changed. JSON: {"org", "indexed":
     [IndexReport], "update" ({…, "profiled", "linked", "link_edges",
-    "link_errors", "profile_ms", "link_ms"}), "repos_ms", "org_ms",
-    "duration_ms"}.
+    "link_errors", "profile_ms", "link_ms", "refs_added", "refs_replaced",
+    "refs_removed", "costs"}), "refs" (one report per ref synced),
+    "ref_errors", "repos_ms", "refs_ms", "org_ms", "duration_ms"}. Every
+    member's refs are synced: its `refs = [...]` and the refs indexed
+    earlier; none is removed.
+
+rueca index --org FILE MEMBER --ref NAME [--remove] [--store DIR] [--json]
+    Index (or remove) one ref of a member (its path, `id` or `url`), then
+    update the organization: only that ref's entry changes (segment copy,
+    profile, link set against its dependencies' defaults).
 
 rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
     Run one tool and print its JSON result (with --text, the compact text
@@ -465,16 +595,20 @@ rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
     --org FILE, builds the organization first if the store has none.
 
 rueca status [--store DIR] [--json]
-    List indexed roots with repo, commit, node/edge/file counts, age, and
-    the organizations (generation, repositories).
+    List indexed roots with repo, commit, node/edge/file counts, age, the
+    ref snapshots under each repository (`ref 8.5.1 @cf19179e8e2f …
+    (export)`), and the organizations (generation, repositories and refs:
+    `main@08b803cf32ce + 8.5.1@cf19179e8e2f`).
 
-rueca links --org FILE|NAME [--repo ID] [--store DIR] [--json]
+rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
     List the organization's cross-repository edges (RFC 0006 link layer):
     one line per edge, or JSON {"org", "generation", "edges": [{"consumer",
     "src_repo", "src", "src_label", "src_path", "dst_repo", "dst",
     "dst_label", "dst_path", "kind", "strategy", "confidence", "path",
-    "line"}]} (`consumer`: the repository the edge was observed in;
-    `--repo`: edges leaving that repository).
+    "line"}]} (`consumer`: the repository the edge was observed in, as
+    `repo@ref` for a ref entry; `--repo`: edges leaving that repository;
+    `--ref`: the link set of that ref entry, into its dependencies'
+    default refs).
 ```
 
 **Organization file** (`rueca-org.toml`, RFC 0006 §7):
@@ -488,7 +622,13 @@ path = "~/src/billing"             # `~` and paths relative to this file
 [[repo]]
 url = "https://github.com/acme/payments"   # cloned under <store>/orgs/acme/clones/ with `git`
 id = "github.com/acme/payments"            # optional repository id (like `index --repo`)
+refs = ["release/2.x", "pr/123"]           # optional: other refs indexed next to the default
 ```
+
+The default ref of a member is its root (a `path` member's working tree; a
+`url` member's clone at the remote's HEAD). `refs` are indexed by `rueca
+index --org` as snapshots of their own (a `url` member's branches are
+fetched first); refs added with `--ref` are kept and refreshed too.
 
 The organization lives in `<store>/orgs/<name>/` ([how it
 works](how-it-works.md#46-the-organization-layer-rueca-segment-org)).
@@ -502,7 +642,8 @@ Store default: `$RUECA_HOME`, else `~/.cache/rueca`.
 unchanged, for one release (the next minor removes it): no envelope, long
 field names, `search_symbols` limit 20, `search_code` 50, `trace` depth 2 and
 200 nodes, no budget. Ids are the pinned RFC 0005 form in both formats;
-`repo`, `ref` and `cursor` work in both. The MCP text content of a verbose
+`repo`, `ref` and `cursor` work in both (a `ref` list is not collapsed:
+each snapshot's items are listed). The MCP text content of a verbose
 result is the compact JSON.
 
 - **Brief**: `{ "id", "name", "qualified_name", "label", "path", "start_line", "end_line" }`

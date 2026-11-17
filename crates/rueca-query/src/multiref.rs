@@ -11,10 +11,10 @@
 //! ref). `trace` edges collapse the same way, by `(repository, source,
 //! destination, kind)`.
 //!
-//! Local mode keeps one snapshot per root, so no tool reaches this yet; it
-//! is the function the service and org modes apply to merged results. The
-//! item kept for a group is the first one seen, so its id is pinned to that
-//! snapshot and stays valid on its own.
+//! The tools reach it through a `ref` list (local ref snapshots and
+//! organization ref entries; the query-side glue finds each symbol's
+//! versions first). The item kept for a group is the first one seen, so its
+//! id is pinned to that snapshot and stays valid on its own.
 
 use std::collections::{BTreeSet, HashMap};
 

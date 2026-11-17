@@ -22,6 +22,7 @@ fn options(root: &Path, store: &Path) -> IndexOptions {
         repo: Some("local/demo".into()),
         budget: Budget::default(),
         threads: Some(2),
+        ..IndexOptions::default()
     }
 }
 
@@ -220,6 +221,7 @@ fn smoke_real_repositories() {
             repo: None,
             budget: Budget::default(),
             threads: None,
+            ..IndexOptions::default()
         };
         let r = index_worktree(&opts).unwrap();
         print_report(&r);

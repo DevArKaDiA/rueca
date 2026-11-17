@@ -639,6 +639,52 @@ fn catalog_register_replace_and_lookup() {
     assert!(store.open_segment(&d.id).is_ok());
 }
 
+/// Ref snapshots (RFC 0006 §9.3): marked entries, removal by root with the
+/// replacement rule for segment files, and catalogs written before refs.
+#[test]
+fn catalog_ref_entries_and_unregister() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let (wt, export) = (work.path().join("shop"), dir.path().join("refs/local-demo/feature-x"));
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::create_dir_all(&export).unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let (graph, mem) = fixture();
+    let a = write_segment(&graph, &mem, dir.path()).unwrap();
+    let b = write_segment(&graph, &mem, dir.path()).unwrap();
+    store.register(wt.to_str().unwrap(), &a).unwrap();
+    store.register_ref(export.to_str().unwrap(), &b, "feature/x").unwrap();
+    let entries = store.entries().unwrap();
+    assert_eq!(entries.len(), 2);
+    let r = entries.iter().find(|e| e.is_ref_export()).unwrap();
+    assert_eq!((r.ref_name.as_deref(), r.segment_id.as_str()), (Some("feature/x"), b.id.as_str()));
+    assert!(entries.iter().any(|e| e.ref_name.is_none() && e.segment_id == a.id));
+    // Working-tree entries are serialized without the field, as before refs.
+    let raw = std::fs::read_to_string(dir.path().join("catalog.json")).unwrap();
+    assert_eq!(raw.matches("ref_name").count(), 1, "{raw}");
+
+    // Unregistering a root shared with no one deletes its segment.
+    let gone = store.unregister(export.to_str().unwrap()).unwrap().unwrap();
+    assert_eq!(gone.segment_id, b.id);
+    assert!(!store.segment_path(&b.id).exists());
+    assert_eq!(store.entries().unwrap().len(), 1);
+    assert!(store.unregister(export.to_str().unwrap()).unwrap().is_none());
+    // A segment another entry still uses is kept.
+    store.register_ref(export.to_str().unwrap(), &a, "feature/x").unwrap();
+    store.unregister(export.to_str().unwrap()).unwrap().unwrap();
+    assert!(store.segment_path(&a.id).exists());
+
+    // A catalog written before refs reads back with no ref names.
+    let old = format!(
+        r#"[{{"root":"{}","repo":"local/demo","segment_id":"{}","indexed_at":1}}]"#,
+        std::fs::canonicalize(&wt).unwrap().display(),
+        a.id
+    );
+    std::fs::write(dir.path().join("catalog.json"), old).unwrap();
+    let entries = store.entries().unwrap();
+    assert_eq!((entries.len(), entries[0].ref_name.clone()), (1, None));
+}
+
 #[test]
 fn default_dir_respects_rueca_home() {
     // Only read the env; the test runner may run tests in parallel.
