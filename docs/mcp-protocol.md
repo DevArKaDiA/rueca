@@ -30,7 +30,7 @@ notifications.
   characters (`→ … –`). serde_json writes them as raw UTF-8 and escapes only
   `"`, `\` and control characters, so do the same.
 - Tools: `rueca_query::tool_definitions()`, in `TOOL_NAMES` order:
-  `search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline, list_repositories`.
+  `search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline, list_repositories, list_contracts`.
 
 ## 2. Framing (stdio)
 
@@ -107,7 +107,7 @@ Exact messages:
 
 - Missing `_meta`: `request _meta is missing or has malformed required fields: ` followed by the missing keys joined with `, `, in this order:
   `io.modelcontextprotocol/protocolVersion`, `io.modelcontextprotocol/clientCapabilities`.
-- Unknown tool (Rueca's own message, unchanged): ``unknown tool `<name>` (available: search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline, list_repositories)``.
+- Unknown tool (Rueca's own message, unchanged): ``unknown tool `<name>` (available: search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline, list_repositories, list_contracts)``.
 
 ## 4. Lifecycle selection and legacy `initialize`
 
@@ -500,7 +500,7 @@ reproduced.
    `read_only_tools`).
 4. **Inspector e2e** (done 2026-11-17, Inspector 2.13.0, legacy lifecycle):
    `npx @modelcontextprotocol/inspector --cli rueca mcp --root <repo>
-   --method tools/list` lists the 7 tools; `--method tools/call --tool-name
+   --method tools/list` lists the 8 tools; `--method tools/call --tool-name
    search_symbols --tool-arg query=invoice` returns results;
    `--tool-name get_symbol` without arguments returns `isError: true`.
 5. **Claude Code e2e** (done 2026-11-17, Claude Code 2.1.311, 2026-07-28

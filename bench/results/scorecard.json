@@ -3624,7 +3624,6 @@
   "min_s1": 30,
   "variant": "kw"
  },
- "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830)",
  "org": {
   "status": "ok",
   "split": "gated",
@@ -4727,5 +4726,181 @@
    "mde": "(1.96 + 0.84) * sqrt(d / n): paired binary outcome, 80% power, two-sided alpha 0.05, d = discordance rate",
    "mde_old_n": 21
   }
- }
+ },
+ "contracts": {
+  "label": "Cross-service edges",
+  "status": "stable",
+  "failing": [],
+  "metrics": {
+   "http-code_precision": {
+    "label": "http-code precision",
+    "value": 0.9830508474576272,
+    "ci": [
+     0.9607843137254902,
+     1.0
+    ],
+    "n": 118,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "http-code_recall": {
+    "label": "http-code recall",
+    "value": 0.9797979797979798,
+    "ci": [
+     0.957983193277311,
+     1.0
+    ],
+    "n": 99,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "http-spec_precision": {
+    "label": "http-spec precision",
+    "value": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "n": 131,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "http-spec_recall": {
+    "label": "http-spec recall",
+    "value": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "n": 110,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "rpc-spec-client_precision": {
+    "label": "rpc-spec-client precision",
+    "value": 0.9605263157894737,
+    "ci": [
+     0.8911891448212178,
+     0.9956521739130435
+    ],
+    "n": 228,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u26a0"
+   },
+   "rpc-spec-client_recall": {
+    "label": "rpc-spec-client recall",
+    "value": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "n": 212,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "rpc-spec-server_precision": {
+    "label": "rpc-spec-server precision",
+    "value": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "n": 18,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "rpc-spec-server_recall": {
+    "label": "rpc-spec-server recall",
+    "value": 0.9,
+    "ci": [
+     0.8181818181818182,
+     1.0
+    ],
+    "n": 20,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "rpc-code_precision": {
+    "label": "rpc-code precision",
+    "value": 0.9551724137931035,
+    "ci": [
+     0.8481626751096647,
+     1.0
+    ],
+    "n": 290,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u26a0"
+   },
+   "rpc-code_recall": {
+    "label": "rpc-code recall",
+    "value": 0.9540636042402827,
+    "ci": [
+     0.8895326925324296,
+     0.9897959183673469
+    ],
+    "n": 283,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "all_precision": {
+    "label": "all precision",
+    "value": 0.9694267515923567,
+    "ci": [
+     0.9375,
+     0.9916555830374886
+    ],
+    "n": 785,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": false,
+    "status": "\u2705"
+   },
+   "all_recall": {
+    "label": "all recall",
+    "value": 0.9765193370165746,
+    "ci": [
+     0.9559316938962671,
+     0.9920887639465652
+    ],
+    "n": 724,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": false,
+    "status": "\u2705"
+   }
+  }
+ },
+ "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830)"
 }
