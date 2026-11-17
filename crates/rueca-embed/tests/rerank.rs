@@ -68,7 +68,7 @@ const CASES: &[(&str, [&str; 5], [f32; 5])] = &[
             "def plot_histogram(values):\n    \"\"\"Plots a histogram of values.\"\"\"",
             "def send_email(to, subject, body):\n    \"\"\"Sends an email through SMTP.\"\"\"",
         ],
-        [9.998400e-01, 2.472939e-02, 4.645336e-03, 2.071597e-04, 2.764612e-05],
+        [9.9984e-01, 2.472939e-02, 4.645336e-03, 2.071597e-04, 2.764612e-05],
     ),
     (
         "React component that shows a modal confirmation dialog",

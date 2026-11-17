@@ -51,7 +51,7 @@ pub struct RerankArgs {
     timing: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct Record {
     id: Value,
     text: String,

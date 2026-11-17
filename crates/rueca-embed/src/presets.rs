@@ -348,8 +348,7 @@ pub const RERANK_INSTRUCTION: &str = DEFAULT_CODE_INSTRUCTION;
 /// of the LM head into a two-way classifier (`cls.output`, rank pooling).
 const fn qwen_reranker(
     name: &'static str,
-    model: &'static str,
-    revision: &'static str,
+    (model, revision): (&'static str, &'static str),
     quantization: &'static str,
     status: PresetStatus,
     dims: usize,
@@ -497,8 +496,7 @@ pub static PRESETS: &[Preset] = &[
     ),
     qwen_reranker(
         "qwen3-reranker-0.6b-q8",
-        "Qwen/Qwen3-Reranker-0.6B",
-        "e61197ed45024b0ed8a2d74b80b4d909f1255473",
+        ("Qwen/Qwen3-Reranker-0.6B", "e61197ed45024b0ed8a2d74b80b4d909f1255473"),
         "Q8_0",
         PresetStatus::Unavailable,
         1024,
@@ -514,8 +512,7 @@ pub static PRESETS: &[Preset] = &[
     ),
     qwen_reranker(
         "qwen3-reranker-4b-q4",
-        "Qwen/Qwen3-Reranker-4B",
-        "",
+        ("Qwen/Qwen3-Reranker-4B", ""),
         "Q4_K_M",
         PresetStatus::Planned,
         2560,
