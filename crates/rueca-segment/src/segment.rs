@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use roaring::RoaringBitmap;
 use rueca_model::{EdgeKind, FileEntry, FileId, Node, NodeId};
@@ -12,6 +13,7 @@ use crate::graph::{self, EdgeMetaRec};
 use crate::ngram::{self, NgramIndex};
 use crate::packs::PackReader;
 use crate::symbols::{self, SymbolIndex};
+use crate::vectors::{self, Vectors};
 use crate::{
     ContentMatch, ContentQuery, ContentSearchResult, EdgeRef, FORMAT_VERSION, Result, SegmentError, SegmentMeta,
     SymbolHit, SymbolQuery,
@@ -49,6 +51,10 @@ pub(crate) struct Inner {
     text_files: RoaringBitmap,
     symbols: SymbolIndex,
     packs: PackReader,
+    /// Optional `vectors.*` (RFC 0007 §6); bulk checksums verified once, on
+    /// first use ([`Inner::vectors`]).
+    vectors: Option<Vectors>,
+    vectors_checked: OnceLock<std::result::Result<(), String>>,
 }
 
 fn corrupt(msg: impl Into<String>) -> SegmentError {
@@ -169,6 +175,8 @@ impl Inner {
             return Err(corrupt(format!("{} out of range", symbols::BODILESS_COMPONENT)));
         }
         let symbols = SymbolIndex::open(&bundle, &nodes, &files, &bodiless)?;
+        // Optional (added without a format bump): absent = lexical only.
+        let vectors = Vectors::open(&bundle, n)?;
         Ok(Inner {
             meta,
             nodes,
@@ -189,8 +197,31 @@ impl Inner {
             text_files,
             symbols,
             packs: PackReader::new(store),
+            vectors,
+            vectors_checked: OnceLock::new(),
             bundle,
         })
+    }
+
+    /// The segment's vectors, their deferred checksums verified on the
+    /// first call (RFC 0007 §6.5).
+    pub fn vectors(&self) -> Result<Option<&Vectors>> {
+        let Some(v) = self.vectors.as_ref() else { return Ok(None) };
+        let checked = self.vectors_checked.get_or_init(|| {
+            [vectors::KEYS, vectors::SCALE, vectors::DATA]
+                .iter()
+                .try_for_each(|c| self.bundle.verify(c))
+                .map_err(|e| e.to_string())
+        });
+        match checked {
+            Ok(()) => Ok(Some(v)),
+            Err(e) => Err(SegmentError::Corrupt(e.trim_start_matches("corrupt segment: ").to_string())),
+        }
+    }
+
+    /// The bundle (for re-publication with vectors).
+    pub(crate) fn bundle(&self) -> &Bundle {
+        &self.bundle
     }
 
     pub fn file_by_path(&self, path: &str) -> Option<FileId> {

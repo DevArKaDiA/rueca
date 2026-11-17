@@ -16,6 +16,7 @@
 //! <store>/packs/<pack-id>.rcpack  content packs (one zstd frame per blob)
 //! <store>/packs/index.rcpi        store-level blob index (derived, rebuildable)
 //! <store>/orgs/<name>/            organizations: pointer, generations, shared symbol index ([`org`])
+//! <store>/vectors/<embed-key>/    store vector cache: f16 rows by vector key ([`vcache`]; `$RUECA_VECTOR_DIR` moves it)
 //! <store>/tmp/                    writer scratch space (same filesystem)
 //! ```
 //!
@@ -56,7 +57,10 @@
 //! and BLAKE3 checksum, array lengths/alignment, every cross-table id (edge
 //! endpoints, edge kinds and strategies, evidence files, CSR offsets, name
 //! index permutations, file ↔ node references, trigram offsets, text-file
-//! bitmap) and the symbol index against the node table. Any failure is
+//! bitmap) and the symbol index against the node table. `vectors.keys`,
+//! `vectors.scale` and `vectors.data` are the exception: their bounds and
+//! lengths are checked at open, their checksums on the first
+//! [`Segment::vectors`] call, so lexical queries never hash them. Any failure is
 //! [`SegmentError::Corrupt`]; malformed input never panics in Rueca code.
 //! Readers ignore components they do not know, so components can be added
 //! without a version bump; any other change bumps [`FORMAT_VERSION`].
@@ -92,6 +96,11 @@
 //! | `ngrams.offsets` | `[u64; K+1]` | byte offsets into `ngrams.postings` |
 //! | `ngrams.postings` | roaring bitmaps | per key, the serialized bitmap of file ids containing it |
 //! | `ngrams.text_files` | roaring bitmap | file ids that are indexed text (the universe for scans) |
+//! | `vectors.meta` (optional) | JSON | [`VectorsMeta`]: the embedding model record, embed and model keys, `dims`, `rows`, `encoding` `i8` (RFC 0007 §6) |
+//! | `vectors.nodes` (optional) | `[u32; V]` | node ids with a vector, strictly ascending |
+//! | `vectors.keys` (optional) | `[[u8; 32]; V]` | vector keys, the keys of the store vector cache ([`vcache`]) |
+//! | `vectors.scale` (optional) | `[f32; V]` | per-row int8 scale |
+//! | `vectors.data` (optional) | `[i8; V × dims]` | rows: Matryoshka-truncated to `dims`, re-normalized, quantized |
 //!
 //! Enum values are stored by declaration index: `Label`, `Language` and
 //! `Strategy` variants are only ever appended (RFC 0003 added `Key`,
@@ -269,7 +278,11 @@ mod segment;
 mod store;
 mod symbols;
 pub mod tokenizer;
+pub mod vcache;
+pub mod vectors;
 mod writer;
+
+pub use vectors::{Vectors, VectorsMeta, VectorsWrite};
 
 use std::path::{Path, PathBuf};
 
@@ -343,7 +356,19 @@ pub struct SegmentMeta {
 /// reads already-stored blobs back from the packs to build the n-gram index.
 /// Single writer per store (see crate docs).
 pub fn write_segment(graph: &ResolvedGraph, contents: &dyn ContentSource, store: &Path) -> Result<SegmentMeta> {
-    writer::write_segment(graph, contents, store)
+    writer::write_segment(graph, contents, store, None)
+}
+
+/// [`write_segment`] with the snapshot's symbol vectors (RFC 0007 §6) in
+/// the same bundle: the one-publication path when every vector is already
+/// in the store cache.
+pub fn write_segment_with(
+    graph: &ResolvedGraph,
+    contents: &dyn ContentSource,
+    store: &Path,
+    vectors: Option<&VectorsWrite>,
+) -> Result<SegmentMeta> {
+    writer::write_segment(graph, contents, store, vectors)
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +463,14 @@ impl Store {
     }
     pub fn open_segment(&self, segment_id: &str) -> Result<Segment> {
         Segment::open(&self.segment_path(segment_id), &self.dir)
+    }
+    /// Publishes a copy of `segment` with `vectors` (RFC 0007 §5.6, the
+    /// second publication after a lexical one): a new segment file under a
+    /// new id holding every component of `segment` unchanged (but `meta`,
+    /// which carries the new id) plus the `vectors.*` components. The
+    /// caller registers it; `segment` stays readable until then.
+    pub fn republish_with_vectors(&self, segment: &Segment, vectors: &VectorsWrite) -> Result<SegmentMeta> {
+        writer::republish_with_vectors(&self.dir, segment, vectors)
     }
 }
 
@@ -621,6 +654,40 @@ impl Segment {
     /// Full content of a file, from the content packs.
     pub fn content(&self, file: FileId) -> Result<Vec<u8>> {
         self.inner.content(file)
+    }
+    /// The query-independent prior of every node (index = node id), the
+    /// factor `search_symbols` multiplies BM25 by (crate docs, *Symbol
+    /// index*).
+    pub fn priors(&self) -> std::sync::Arc<[f32]> {
+        self.inner.symbols().priors()
+    }
+    /// The symbol vectors (RFC 0007 §6), `None` for a lexical-only segment.
+    /// The first call verifies the checksums of the bulk components, which
+    /// opening the segment skips.
+    ///
+    /// # Errors
+    ///
+    /// [`SegmentError::Corrupt`] when a vectors component fails its checksum.
+    pub fn vectors(&self) -> Result<Option<&Vectors>> {
+        self.inner.vectors()
+    }
+    /// The filter `search_symbols` applies for `query` without its text:
+    /// labels (the default exclusions when `labels` is empty), language and
+    /// `path_glob`. Dense retrieval applies it to its candidates.
+    ///
+    /// # Errors
+    ///
+    /// An invalid `path_glob`.
+    pub fn symbol_filter(&self, query: &SymbolQuery) -> Result<impl Fn(NodeId) -> bool + '_> {
+        let glob = query.path_glob.as_deref().map(symbols::compile_glob).transpose()?;
+        let labels = symbols::label_filter(query);
+        let language = query.language;
+        Ok(move |n: NodeId| {
+            let Some(node) = self.inner.nodes.get(n as usize) else { return false };
+            labels(node.label)
+                && language.is_none_or(|l| node.language == Some(l))
+                && glob.as_ref().is_none_or(|g| g.is_match(self.inner.node_path(n)))
+        })
     }
 }
 

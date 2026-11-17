@@ -2852,6 +2852,7 @@ dependencies = [
  "tantivy",
  "tempfile",
  "thiserror",
+ "tracing",
  "zstd",
 ]
 

@@ -107,11 +107,18 @@ impl Deref for SharedMmap {
 // does not move the mapping, so derefs stay valid for its whole lifetime.
 unsafe impl stable_deref_trait::StableDeref for SharedMmap {}
 
-/// An opened, fully validated bundle.
+/// An opened bundle: every component's bounds checked, every checksum
+/// verified except those of lazily checked components
+/// ([`crate::vectors::is_lazy`]), whose expected hashes wait in `deferred`
+/// for [`Bundle::verify`].
 pub(crate) struct Bundle {
     pub map: SharedMmap,
     pub components: HashMap<String, Range<usize>>,
+    pub deferred: HashMap<String, [u8; 32]>,
 }
+
+/// The component table of a footer and the checksums left for later.
+type Components = (HashMap<String, Range<usize>>, HashMap<String, [u8; 32]>);
 
 fn corrupt(msg: impl Into<String>) -> SegmentError {
     SegmentError::Corrupt(msg.into())
@@ -126,11 +133,12 @@ fn le_u64(b: &[u8], at: usize) -> Option<u64> {
 }
 
 /// The component table of a footer, every component checked against its
-/// bounds and checksum.
-fn read_components(b: &[u8], footer: &[u8], footer_offset: u64) -> Result<HashMap<String, Range<usize>>> {
+/// bounds and (except lazy ones) its checksum.
+fn read_components(b: &[u8], footer: &[u8], footer_offset: u64) -> Result<Components> {
     let count = le_u32(footer, 0).ok_or_else(|| corrupt("footer"))? as usize;
     let mut at = 4usize;
     let mut components = HashMap::with_capacity(count.min(4096));
+    let mut deferred = HashMap::new();
     for _ in 0..count {
         let (name, off, len, hash) = footer_entry(footer, &mut at)?;
         let end = off.checked_add(len).ok_or_else(|| corrupt("component bounds"))?;
@@ -138,7 +146,9 @@ fn read_components(b: &[u8], footer: &[u8], footer_offset: u64) -> Result<HashMa
             return Err(corrupt(format!("component {name} out of bounds")));
         }
         let range = off as usize..end as usize;
-        if blake3::hash(&b[range.clone()]).as_bytes() != hash {
+        if crate::vectors::is_lazy(&name) {
+            deferred.insert(name.clone(), hash.try_into().map_err(|_| corrupt("footer entry"))?);
+        } else if blake3::hash(&b[range.clone()]).as_bytes() != hash {
             return Err(corrupt(format!("checksum mismatch in component {name}")));
         }
         if components.insert(name.clone(), range).is_some() {
@@ -148,7 +158,7 @@ fn read_components(b: &[u8], footer: &[u8], footer_offset: u64) -> Result<HashMa
     if at != footer.len() {
         return Err(corrupt("trailing bytes in footer"));
     }
-    Ok(components)
+    Ok((components, deferred))
 }
 
 /// The footer entry at `*at` — (name, offset, length, blake3 hash) — and
@@ -221,8 +231,26 @@ impl Bundle {
         if blake3::hash(footer).as_bytes() != &b[t + 16..t + 48] {
             return Err(corrupt("footer checksum mismatch"));
         }
-        let components = read_components(b, footer, footer_offset)?;
-        Ok(Bundle { map: SharedMmap(mmap), components })
+        let (components, deferred) = read_components(b, footer, footer_offset)?;
+        Ok(Bundle { map: SharedMmap(mmap), components, deferred })
+    }
+
+    /// Verifies the checksum of a component whose check was deferred at
+    /// open (a no-op for the others, already verified).
+    pub fn verify(&self, name: &str) -> Result<()> {
+        let Some(want) = self.deferred.get(name) else { return Ok(()) };
+        let r = self.range(name)?;
+        if blake3::hash(&self.map[r]).as_bytes() != want {
+            return Err(corrupt(format!("checksum mismatch in component {name}")));
+        }
+        Ok(())
+    }
+
+    /// The components in file order: (name, range).
+    pub fn in_file_order(&self) -> Vec<(&str, Range<usize>)> {
+        let mut v: Vec<(&str, Range<usize>)> = self.components.iter().map(|(n, r)| (n.as_str(), r.clone())).collect();
+        v.sort_by_key(|(_, r)| r.start);
+        v
     }
 
     pub fn range(&self, name: &str) -> Result<Range<usize>> {
