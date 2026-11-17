@@ -135,7 +135,7 @@ such edges disappear. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-markdown`, `rueca-lang-data`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-markdown`, `rueca-lang-data`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -214,6 +214,36 @@ What packs deliberately do and don't do:
   own callers and `OVERRIDES`. Fully qualified type names
   (`com.acme.Owner`) and static on-demand imports are recorded as extra
   single imports so they resolve like explicit ones.
+- **Rust names follow the module tree, items join with `.`.** The module
+  name of a file is its module path, crate name first
+  (`rueca_index::link`, from `Cargo.toml` and the file layout, §4.3); the
+  local name of an item joins its containers with `.`: a function `f`, a
+  nested function `outer.inner`, an item of an inline module `m.f` (the
+  module is a `Module` definition owning its items), a trait item `Tr.m`.
+  Items of an `impl` block are named after the last segment of the self
+  type (`impl<T> Vec<T>` → `Vec.push`, `impl Display for &Foo<'a>` →
+  `Foo.fmt`) and are top level (or children of their inline module), not
+  children of the type: the block may be in another file than the type.
+  They carry the self type as written in `bases` and the trait in
+  `implements`, which the resolver turns into membership, `IMPLEMENTS` and
+  `OVERRIDES` (§4.4). Structs and unions are `Struct` (named fields are
+  `Field`s), enums `Enum` (variants `Constant`s), traits `Interface`,
+  `macro_rules!` a callable `Function` (an invocation of a repository macro
+  is a call). Receivers are typed from the file (`self` → `$self`,
+  annotations, `T { … }` / `T::new()` / `T(…)`, return types of the file's
+  functions and methods, `?` / `unwrap()`, `for` elements, `Some(x)`
+  patterns, struct fields, a generic parameter's bound, `impl Tr` / `dyn
+  Tr`, smart pointers seen through); `self.a.b.m()` with `a` declared in
+  another file is `$member:a.b`. **Macro arguments are code**: a macro's
+  argument list is a flat token tree to tree-sitter, so the pack parses it
+  again on its own — wrapped as a tuple, an array or a block, the text copied
+  byte for byte so every node maps back to the file by one offset — and
+  visits it like the file's own code (`println!("{}", total())`,
+  `assert_eq!(v.len(), 3)`, `vec![make()]`, `write!(f, …)`), with its own
+  local scopes for closures inside the arguments. Standard macros are not
+  references; `stringify!`, `concat!`, `include*!` and `quote!`-style token
+  builders are not re-parsed, and `macro_rules!` bodies are token patterns,
+  not code (rust-analyzer records no references in them either).
 - **Receiver types from declarations and assignments** (TS/JS, Python;
   "strategy 5"). A per-file pre-pass records what every binding of a name
   says about its type, per function (and for module-level names and class
@@ -304,7 +334,10 @@ What packs deliberately do and don't do:
   methods, and classes named `*Test` / `*Tests` / `*IT` or declaring tests
   (`Method` / `Class` with `is_test: true`);
   GoogleTest `TEST(Suite, Name)` / `TEST_F` / `TEST_P`
-  (`Suite::Name`) and Catch2 / doctest `TEST_CASE("title")` blocks.
+  (`Suite::Name`) and Catch2 / doctest `TEST_CASE("title")` blocks; in
+  Rust, functions with a test attribute (`#[test]`, `#[tokio::test]`,
+  `#[bench]`, `#[rstest]`, …), everything in a `#[cfg(test)]` module and
+  every definition under `tests/` or `benches/`.
 - **Named function expressions are definitions** in JS/TS wherever they
   appear (`app.use(function handler() {})`, `defineGetter(req, "query",
   function query() {})`, `return function timing() {}`): a `Function` child
@@ -392,7 +425,9 @@ literal names: Python `os.environ["X"]`, `os.environ.get("X")`,
 `import.meta.env.X`, `Deno.env.get("X")`, and `config.get("a.b")` with
 `config` imported from the `config` package (node-config); PHP
 `getenv('X')`, `$_ENV['X']`, `$_SERVER['X']`, Laravel `env('X')`,
-`config('app.name')` and `Config::get(…)`. Laravel config files are PHP:
+`config('app.name')` and `Config::get(…)`; Rust `std::env::var("X")`,
+`env::var("X")` / `var("X")` with `std::env` / `std::env::var` imported (and
+`var_os`), `env!("X")` and `option_env!("X")`. Laravel config files are PHP:
 the array a `config/<file>.php` returns becomes `Key`s (`name`,
 `providers.cache.driver`), and `env()` calls inside an entry are reads by
 that key.
@@ -406,7 +441,7 @@ facts depend on the path as well as the bytes (data file kinds are chosen by
 name) add a hash of the path to the key. A pack may also decline a file with
 a reason (`skipped:data-shape`): the file stays listed and searchable.
 
-**Detection** is by extension, then by file name (`Dockerfile`,
+**Detection** is by extension (`.rs` is Rust), then by file name (`Dockerfile`,
 `Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`,
 `AndroidManifest.xml`; other XML stays text); a C header
 (`.h`) is C++ when the snapshot has C++ sources. A file gets a language in
@@ -430,7 +465,16 @@ Two per-language hooks, still without guessing symbols:
   one package (`module_scope` = `Package`).
   Java
   reads the `package` clause (`com.acme.core`; the default package is
-  empty), and all files of one package form one module.
+  empty), and all files of one package form one module. Rust returns the
+  file's **module path**: every `Cargo.toml` with a `[package]` is a
+  package whose targets are crates (the library, `[lib] path` or
+  `src/lib.rs`, named by `[lib] name` or the package name with `-` → `_`;
+  binaries `src/main.rs`, `src/bin/*`, `[[bin]]`; `tests/`, `examples/`,
+  `benches/` crates; `build.rs`), a file belongs to the crate whose root
+  it is or whose directory holds it (else the library), and its module path
+  is the crate name plus the directories and stem below the crate root
+  (`rueca_index::link`; `mod.rs` names its directory). Every file is its
+  own module.
 - `resolve_import(from, import)`: maps a specifier to a project file or to
   *nothing* (third-party, builtin). Python follows relative levels and source
   roots (`from .http` in `shop/api.py` → `shop/http.py`). TS/JS uses
@@ -472,6 +516,19 @@ Two per-language hooks, still without guessing symbols:
   `include/`, `src/` and the repository root, then the only project file
   whose path ends with `/x.h`; `#include <x.h>` is a system header unless a
   project include directory (or `include/`) has it.
+  Rust imports are module paths normalized at their site (`self::` and
+  `super::` inside inline modules folded into the file's module, see the
+  crate docs, *Imports*): `mod x;` is `<dir>/x.rs` or `<dir>/x/mod.rs` of
+  the declaring file's module directory (`#[path]` honoured); `crate::a::b`
+  starts at the crate root, `super::` at the parent module, a first segment
+  that is a module the file declares or a **crate of the snapshot** (a
+  dependency of the file's package — renames, `path` and `workspace = true`
+  entries followed — else any crate with that name, same workspace first)
+  continues from there, and each further segment is a module file; the
+  walk returns the deepest module file. `std`, `core`, `alloc` and
+  third-party crates resolve to nothing. `resolve_import` maps module
+  paths to files; the resolver walks the rest of a `use` path itself
+  (inline modules, re-exports, types, §4.4).
 
 Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0);
 for documents that means "links to" (docs → docs, code files, images).
@@ -546,7 +603,8 @@ and Markdown resolve exactly as above; Terraform uses directory scope; Go
 uses package scope, directory imports, `$self` and `$type:`; Java uses
 package scope, implicit self, typed receivers, overloads and overrides;
 C and C++ use implicit self, typed receivers, declarations, overloads,
-overrides and includes):
+overrides and includes; Rust uses `$self`, `$type:` and `$member:` with its
+own module rules, below):
 
 | Rule | Hook | Effect | Confidence |
 |---|---|---|---|
@@ -626,6 +684,38 @@ overloaded (`type_resolved` 0.90), so `trace` on an interface method with
 anonymous classes included. JDK and dependency types are external; `java.lang`
 names are builtins.
 
+Rust references go through the same ladder with Rust's module semantics
+(`rueca-resolve` crate docs, *Rust*): a name in a module is one of its
+items, else what its `mod`, `use` (leaves, re-exports, globs) and
+`extern crate` declarations bind, and a `use` path is walked from its
+anchor (`crate`, `self` / `super`, a name in scope, a crate) through module
+files, inline modules, types and re-export chains. Path qualifiers used in
+code (`crate::a::f()`, `super::g()`, `serde_json::to_string(…)`) are bound
+by synthetic imports the pack adds for them.
+
+| Rust reference | Rule (edge `strategy`) | Confidence |
+|---|---|---|
+| `f()` in the same module; a nested function or an item of the enclosing inline module | same module / local scope | 0.90 / 0.95 |
+| `f()`, `T` bound by `use` (also through `pub use` chains and globs) | imported binding (`import_resolved`) | 0.95 |
+| `m::f()`, `crate::a::f()`, `super::f()`, `other_crate::f()` | imported module (`import_resolved`) | 0.90 |
+| `T::new()`, `E::V` through an import / a type of the file | imported / same-module type (`import_resolved` / `same_module`) | 0.85 |
+| `self.m()`, `Self::f()`, `self.field` in an `impl` (the type may be declared in another file) | self receiver (`type_resolved`) | 0.90 |
+| `x.m()` with `x` typed from the file (`$type:T`), `self.a.m()` through declared field types (`$member:a`); trait default methods through the type | typed receiver (`type_resolved`) | 0.85 |
+| `x.m()` on a generic `T: Tr`, `impl Tr` or `dyn Tr` | the trait's method (`type_resolved`) | 0.85 |
+| `x.m()` with an unknown receiver: one trait method (its implementations count as it), or one method, of that name | `heuristic` | 0.50; two or three candidates × 0.8 each |
+| `my_macro!()` with no import (`#[macro_use]`): the only `macro_rules!` of that name | `unique_name` | 0.60 |
+
+Items of an `impl` block are attached to the type their self type names
+(resolved in the item's scope, wherever the type is declared); `impl Tr for
+T` adds `IMPLEMENTS` `T` → `Tr`, makes `Tr` a base of `T` (its default
+methods are found through `T`) and `OVERRIDES` from each item to the
+trait's (`type_resolved` 0.90); a blanket impl (`impl<T: B> Tr for T`)
+overrides the trait's items and its items are the by-name targets. Rust
+types are open: a member missing from one is external (a derive, a
+blanket implementation outside the project), and so is a method call on
+an unknown receiver whose name no project method has or that is a common
+standard-library method (`unwrap`, `iter`, `insert`, …).
+
 In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
 → 0.95; `Session().request` has the receiver `$type:Session`, so rung 5
 applies → 0.85.
@@ -646,6 +736,7 @@ applies → 0.85.
 **The code ↔ config bridge and data pointers** (RFC 0003 §6–§7; Go emits
 env var reads — `os.Getenv("X")`, `os.LookupEnv` — and viper config key
 reads; Java emits env var and Spring config key reads; C and C++ emit `getenv("X")`
+reads; Rust emits `std::env::var("X")`, `env!("X")` and `option_env!("X")`
 reads). These
 references never go through the
 ladder: they match exact names only, so an env var or a key path can never
@@ -758,7 +849,8 @@ index**, so a question asked of the whole organization gets one ranking.
   **package registry** from each repository's manifests (`package.json`
   names, Python distributions and their top-level packages, `go.mod`
   modules, Composer PSR-4 namespaces, Maven / Gradle artifacts with their
-  Java packages, C / C++ `include/` directories) and records the imports
+  Java packages, C / C++ `include/` directories, Cargo packages with their
+  library crate name) and records the imports
   each repository's own pack could not resolve inside it. A repository
   that imports (or, by its manifests, requires) a package another one
   publishes depends on it; the consumer and its dependencies are then
@@ -801,9 +893,9 @@ and outlines read the repository segment of the id they are given; only
 | Label | Produced from |
 |---|---|
 | `Repository`, `Folder`, `File` | the walk (every listed file, any language) |
-| `Module` | TS `namespace` / `declare module` |
-| `Class`, `Interface`, `Trait`, `Struct`, `Enum`, `TypeAlias` | class / interface / PHP trait / Go struct / C and C++ `struct` and `union` / enum / type declarations (`typedef`, `using`) |
-| `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters; Go methods (`Server.Start`, attached to their type through the package) and interface methods; C/C++ prototypes and out-of-line bodies, function-like macros |
+| `Module` | TS `namespace` / `declare module`; Rust inline `mod m { … }` |
+| `Class`, `Interface`, `Trait`, `Struct`, `Enum`, `TypeAlias` | class / interface / PHP trait / Go struct / C and C++ `struct` and `union` / enum / type declarations (`typedef`, `using`); Rust `struct` / `union` (`Struct`), `enum`, `trait` (`Interface`), `type` |
+| `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters; Go methods (`Server.Start`, attached to their type through the package) and interface methods; C/C++ prototypes and out-of-line bodies, function-like macros; Rust `impl` and trait items (`Type.method`, `Trait.method`), `macro_rules!` |
 | `Package` | Go external test packages (`package x_test`), marking the module |
 | `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, PHP properties (`$email`, also promoted constructor parameters), module-level assignments (`UPPER_CASE` → `Constant`), PHP `const` / `define()` / enum cases |
 | `Test` | JS/TS `describe` / `it` / `test` blocks, Pest tests, GoogleTest `TEST*` and Catch2 `TEST_CASE` blocks (Python and PHPUnit tests are `Function` / `Method` / `Class` with `is_test: true`) |
@@ -825,8 +917,8 @@ reads by code and by config that reads env) and `WRITES` from env var
 providers form the code ↔ config bridge; `REFERENCES` also carries data
 pointers (`$ref`, aliases, `depends_on`, Terraform traversals), and
 `INHERITS` YAML merges, compose `extends` and Dockerfile `FROM <stage>`.
-`OVERRIDES` come from Java and C++ overrides and Go's implicit interfaces
-(heuristic). Go embedding (struct fields and
+`OVERRIDES` come from Java and C++ overrides, Rust trait impls and Go's
+implicit interfaces (heuristic). Go embedding (struct fields and
 interfaces) and type aliases are `INHERITS`; Go `IMPLEMENTS` edges are
 inferred (heuristic 0.5).
 Python, ECMAScript, PHP and Java reads of ordinary names stay `REFERENCES`.
@@ -1137,8 +1229,9 @@ gaps show up on real repositories.
 | Go extraction, receivers, `go.mod` module model | `rueca-lang-go` | crate docs, `src/locals.rs`, `src/modules.rs` |
 | Java extraction, packages, Maven / Gradle source roots | `rueca-lang-java` | crate docs, `src/extract.rs`, `src/project.rs`, `queries/locals.scm` |
 | C/C++ extraction, preprocessing (masking, conditionals, repairs), include directories | `rueca-lang-cpp` | crate docs, `src/extract.rs`, `src/preprocess.rs`, `src/mask.rs`, `src/cond.rs`, `src/repair.rs`, `src/includes.rs` |
+| Rust extraction, receivers, macro arguments, Cargo module model | `rueca-lang-rust` | crate docs, `src/extract.rs`, `src/receivers.rs`, `src/macros.rs`, `src/modules.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
-| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces) |
+| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
 | Organization index, generations, visibility | `rueca-segment` | `src/org.rs` (module docs) |
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |

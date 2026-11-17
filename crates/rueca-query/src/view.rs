@@ -88,12 +88,17 @@ impl View {
         if family == Some(LanguageFamily::Php) {
             return Some(node.qualified_name.clone());
         }
-        // RFC 0003 families: the global name is module + separator + local
-        // name, with the module recorded per file (Go import paths and Java
-        // packages contain dots, data key paths and overload suffixes do not
+        // RFC 0003 families and Rust: the global name is module + separator +
+        // local name, with the module recorded per file (Go import paths and
+        // Java packages contain dots, Rust module paths `::`, data key paths and overload suffixes do not
         // follow `DEFINES` names).
-        if let Some(family @ (LanguageFamily::Data | LanguageFamily::Go | LanguageFamily::C | LanguageFamily::Java)) =
-            family
+        if let Some(
+            family @ (LanguageFamily::Data
+            | LanguageFamily::Go
+            | LanguageFamily::C
+            | LanguageFamily::Java
+            | LanguageFamily::Rust),
+        ) = family
             && let Some(local) = self.module_local_name(node, family)
         {
             return Some(local);

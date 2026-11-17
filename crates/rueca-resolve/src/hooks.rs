@@ -1160,6 +1160,9 @@ impl<'a> Resolver<'a> {
     /// (`example.com/m/server.Server` for `….Server.Handle`, `ns::Foo` for
     /// `ns::Foo::bar`).
     pub(crate) fn receiver_type_from_name(&self, f: FileId, scope: Option<LocalDefId>) -> Option<NodeId> {
+        if self.is_rust(f) {
+            return self.rust_impl_type_of(f, scope);
+        }
         let defs = self.defs(f);
         let mut cur = scope;
         while let Some(a) = cur {

@@ -54,6 +54,7 @@ pub enum Language {
     Cpp,
     C,
     Java,
+    Rust,
 }
 
 impl Language {
@@ -78,6 +79,7 @@ impl Language {
         Language::Cpp,
         Language::C,
         Language::Java,
+        Language::Rust,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -101,6 +103,7 @@ impl Language {
             Language::Cpp => "cpp",
             Language::C => "c",
             Language::Java => "java",
+            Language::Rust => "rust",
         }
     }
 
@@ -147,6 +150,7 @@ impl Language {
             }
             "c" | "h" => Language::C,
             "java" => Language::Java,
+            "rs" => Language::Rust,
             _ => return None,
         })
     }
@@ -194,6 +198,7 @@ impl Language {
             Language::Go => LanguageFamily::Go,
             Language::Cpp | Language::C => LanguageFamily::C,
             Language::Java => LanguageFamily::Java,
+            Language::Rust => LanguageFamily::Rust,
         }
     }
 }
@@ -224,6 +229,9 @@ pub enum LanguageFamily {
     C,
     /// Java: module name = package.
     Java,
+    /// Rust: module name = module path (`rueca_index::link`); local names
+    /// join items with `.` (`Linker.new`, `tests.helper`).
+    Rust,
 }
 
 impl LanguageFamily {
@@ -233,15 +241,15 @@ impl LanguageFamily {
     /// (module = namespace), Markdown `docs/guide.md:Install > Linux`, data
     /// `config/app.yaml:database.host`, Go
     /// `github.com/gin-gonic/gin.Engine.ServeHTTP`, Java
-    /// `com.example.Owner.getPets`. C and C++ have no module names (the
-    /// local name `fmt::v11::format_to` is global); `::` is the separator
-    /// their local names use.
+    /// `com.example.Owner.getPets`, Rust `rueca_index::link::Linker.new`.
+    /// C and C++ have no module names (the local name `fmt::v11::format_to`
+    /// is global); `::` is the separator their local names use.
     pub fn module_separator(self) -> &'static str {
         match self {
             LanguageFamily::Python | LanguageFamily::Go | LanguageFamily::Java => ".",
             LanguageFamily::EcmaScript | LanguageFamily::Markdown | LanguageFamily::Data => ":",
             LanguageFamily::Php => "\\",
-            LanguageFamily::C => "::",
+            LanguageFamily::C | LanguageFamily::Rust => "::",
         }
     }
 }
@@ -722,7 +730,8 @@ pub struct Node {
     ///   (`App\Models\User::save`, `App\Models\User::$email`).
     /// - Structured data: `<path>:<key path>` (`config/app.yaml:database.host`).
     /// - Go: `<import path>.<local>`; Java: `<package>.<local>`; C/C++: the
-    ///   namespace / class path (`fmt::v11::format_to`).
+    ///   namespace / class path (`fmt::v11::format_to`); Rust: `<module
+    ///   path>::<local>` (`rueca_index::link::Linker.new`).
     /// - Canonical env vars (file-less `EnvVar` nodes): `$env:<NAME>`.
     /// - Files and folders: the repository-relative path. Repository: the repo id.
     pub qualified_name: String,
@@ -984,6 +993,7 @@ mod tests {
             ("src/redis.c", Some(C)),
             ("src/redis.h", Some(C)),
             ("src/main/java/com/x/Owner.java", Some(Java)),
+            ("crates/x/src/lib.rs", Some(Rust)),
         ];
         for (path, want) in cases {
             assert_eq!(Language::from_path(path), *want, "{path}");
@@ -1000,6 +1010,7 @@ mod tests {
         assert_eq!(Go.family().module_separator(), ".");
         assert_eq!(Cpp.family(), C.family());
         assert_eq!(Java.family().module_separator(), ".");
+        assert_eq!(Rust.family().module_separator(), "::");
     }
 
     /// Segments and facts store enum variants by index (postcard). These
@@ -1013,10 +1024,11 @@ mod tests {
             b[0]
         }
         let langs: Vec<u8> = Language::ALL.iter().map(idx).collect();
-        assert_eq!(langs, (0..19).collect::<Vec<u8>>());
+        assert_eq!(langs, (0..20).collect::<Vec<u8>>());
         assert_eq!(idx(&Language::Markdown), 5);
         assert_eq!(idx(&Language::Json), 6);
         assert_eq!(idx(&Language::Java), 18);
+        assert_eq!(idx(&Language::Rust), 19);
         let labels: Vec<u8> = Label::ALL.iter().map(idx).collect();
         assert_eq!(labels, (0..26).collect::<Vec<u8>>());
         assert_eq!(idx(&Label::Section), 21);

@@ -1,0 +1,745 @@
+//! Rust module semantics and `impl` blocks (the Rust family).
+//!
+//! The pack (`rueca-lang-rust` crate docs) writes Rust's facts in the
+//! generic vocabulary; this module gives them Rust's meaning where the
+//! generic rules differ:
+//!
+//! - **Module lookups.** A name in a Rust module is one of its items (top
+//!   level of the file; items of an `impl` block are not module names), else
+//!   what its declarations bind, in order: `mod x;` (the module file),
+//!   `extern crate`, `use` leaves (private ones too: the module and its
+//!   descendants see them) and path anchors, then its glob imports
+//!   (`use m::*`), then a child module file no `mod` binds (a `mod x;`
+//!   written inside a macro such as `cfg_if!`). A `use` path is resolved
+//!   from its anchor — the crate root (`crate`), the file's module or an
+//!   ancestor (`self` / `super`), a name the file binds (uniform paths),
+//!   else a crate of the snapshot — and then walked segment by segment through module files (`mod` declarations),
+//!   inline modules, types (associated items, enum variants) and
+//!   re-exports. The file's binding environment holds every name its
+//!   declarations bind; a glob binds the visible names of its target.
+//! - **`IMPORTS`** go from a file to the module file each `use` leaf (or
+//!   glob) is found in, to the file a `mod x;` names and to the root of an
+//!   `extern crate`; the synthetic imports of path anchors make none.
+//! - **Inline modules** (`Module` definitions) own their items: `m::f` and
+//!   `tests.helper` are member lookups, which also see the names a `use`
+//!   inside the module binds (`mod facade { pub use crate::engine::work; }`;
+//!   the pack marks such imports `$in:<module>`). The file's binding
+//!   environment includes those imports too (code in an inline module is
+//!   resolved with the file's environment).
+//! - **`impl` items** (a definition whose `bases` is the self type of its
+//!   `impl` block) are attached to the type their `bases` names, resolved
+//!   like a type reference in the item's outer scope, wherever the type is
+//!   declared; `$self` / `$member:` receivers inside them use that type. An
+//!   `impl Tr for T` adds `IMPLEMENTS` `T` → `Tr` (the strategy and
+//!   confidence of resolving `Tr`), makes `Tr` a base of `T` (default
+//!   methods are found through `T`), and gives each item `OVERRIDES` to the
+//!   trait's item with its name (`type_resolved` 0.90). A trait outside the
+//!   project makes `T` open: a member missing from it is external (an
+//!   `Iterator` adaptor on a type implementing `Iterator`).
+//! - **Blanket impls** (`impl<T: Bound> Tr for T`, base `<T>`): the items
+//!   override the trait's and are the targets of by-name calls of their
+//!   name (they apply to every type).
+//! - **Methods by name** (a call whose receiver type is unknown): the
+//!   implementations of one trait method count as that trait method, so a
+//!   name that only one trait declares (implemented anywhere) resolves to
+//!   the trait's method (`heuristic` 0.50); two or three distinct
+//!   candidates are all linked at 0.50 × 0.8, as C++ overloads that the
+//!   arguments cannot tell apart are; more is no edge. Names of common
+//!   standard-library methods (`unwrap`, `iter`, `insert`, …) never match by
+//!   name: such calls are far more often on standard types, and are counted
+//!   as external.
+//! - Rust types have no constructors (`T::new` is an ordinary associated
+//!   function), and are open: a member missing from one is external (a
+//!   derive, a blanket implementation, an associated type of a foreign
+//!   trait), as is a method call on an unknown receiver whose name no
+//!   project method has.
+//! - **Macros by name**: a bare call that no rung resolves is the only
+//!   `macro_rules!` with that name in the snapshot, test code included
+//!   (`#[macro_use]` makes macros visible without imports), `unique_name`
+//!   0.60.
+
+use super::*;
+
+/// Fan-out factor of ambiguous by-name method calls (as overloads).
+const AMBIGUOUS_FANOUT: f32 = 0.8;
+
+/// Most candidates a by-name method call fans out to.
+const MAX_AMBIGUOUS: usize = 3;
+
+/// Deepest nesting of Rust module lookups (re-exports of re-exports through
+/// inline modules can form cycles that the per-lookup `visited` list of a
+/// walk does not see).
+const MAX_NESTING: usize = 32;
+
+/// Common methods of the standard library's types and traits (`Option`,
+/// `Result`, iterators, collections, strings, smart pointers, locks): an
+/// unknown receiver calling one of these is not matched by name.
+const STD_METHODS: &[&str] = &[
+    "abs",
+    "add",
+    "and",
+    "and_modify",
+    "and_then",
+    "any",
+    "append",
+    "as_bytes",
+    "as_deref",
+    "as_mut",
+    "as_path",
+    "as_ptr",
+    "as_ref",
+    "as_slice",
+    "as_str",
+    "binary_search",
+    "borrow",
+    "borrow_mut",
+    "bytes",
+    "capacity",
+    "chain",
+    "char_indices",
+    "chars",
+    "checked_add",
+    "checked_sub",
+    "chunks",
+    "clear",
+    "clone",
+    "cloned",
+    "cmp",
+    "collect",
+    "contains",
+    "contains_key",
+    "copied",
+    "count",
+    "dedup",
+    "display",
+    "drain",
+    "ends_with",
+    "entry",
+    "enumerate",
+    "eq",
+    "err",
+    "expect",
+    "extend",
+    "extend_from_slice",
+    "file_name",
+    "filter",
+    "filter_map",
+    "find",
+    "find_map",
+    "first",
+    "flat_map",
+    "flatten",
+    "fold",
+    "for_each",
+    "from",
+    "get",
+    "get_mut",
+    "insert",
+    "into",
+    "into_iter",
+    "is_empty",
+    "is_err",
+    "is_none",
+    "is_ok",
+    "is_some",
+    "iter",
+    "iter_mut",
+    "join",
+    "keys",
+    "last",
+    "len",
+    "lines",
+    "lock",
+    "map",
+    "map_err",
+    "map_or",
+    "map_or_else",
+    "max",
+    "min",
+    "ne",
+    "next",
+    "nth",
+    "ok",
+    "ok_or",
+    "ok_or_else",
+    "or",
+    "or_default",
+    "or_else",
+    "or_insert",
+    "or_insert_with",
+    "parse",
+    "partial_cmp",
+    "peek",
+    "pop",
+    "position",
+    "push",
+    "push_str",
+    "read",
+    "recv",
+    "remove",
+    "replace",
+    "reserve",
+    "retain",
+    "rev",
+    "send",
+    "skip",
+    "skip_while",
+    "sort",
+    "sort_by",
+    "sort_by_key",
+    "sort_unstable",
+    "split",
+    "split_once",
+    "starts_with",
+    "step_by",
+    "strip_prefix",
+    "strip_suffix",
+    "sum",
+    "swap",
+    "take",
+    "take_while",
+    "then",
+    "then_some",
+    "to_lowercase",
+    "to_owned",
+    "to_str",
+    "to_string",
+    "to_uppercase",
+    "to_vec",
+    "trim",
+    "trim_end",
+    "trim_start",
+    "truncate",
+    "try_into",
+    "unwrap",
+    "unwrap_or",
+    "unwrap_or_default",
+    "unwrap_or_else",
+    "values",
+    "values_mut",
+    "windows",
+    "write",
+    "zip",
+];
+
+impl Resolver<'_> {
+    pub(crate) fn is_rust(&self, f: FileId) -> bool {
+        self.families[f as usize] == Some(LanguageFamily::Rust)
+    }
+
+    /// Whether node `n` is a Rust inline module (it owns its items).
+    pub(crate) fn is_rust_module(&self, n: NodeId) -> bool {
+        let node = &self.nodes[n as usize];
+        node.label == Label::Module && node.language.map(Language::family) == Some(LanguageFamily::Rust)
+    }
+
+    /// Whether `d`, a definition of file `f`, is an item of an `impl` block.
+    pub(crate) fn is_rust_impl_item(&self, f: FileId, d: &Definition) -> bool {
+        self.is_rust(f) && !d.bases.is_empty() && !d.label.is_type()
+    }
+
+    // -- module lookups ------------------------------------------------------
+
+    /// `name` in Rust module `f` (see the module docs).
+    pub(crate) fn rust_lookup(&self, f: FileId, name: &str, visited: &mut Vec<(FileId, String)>) -> Option<Target> {
+        self.rust_nested(|| self.rust_lookup_unguarded(f, name, visited))
+    }
+
+    /// Runs a nested Rust lookup, `None` beyond [`MAX_NESTING`].
+    fn rust_nested<T>(&self, f: impl FnOnce() -> Option<T>) -> Option<T> {
+        let depth = self.rust_depth.get();
+        if depth >= MAX_NESTING {
+            return None;
+        }
+        self.rust_depth.set(depth + 1);
+        let out = f();
+        self.rust_depth.set(depth);
+        out
+    }
+
+    fn rust_lookup_unguarded(&self, f: FileId, name: &str, visited: &mut Vec<(FileId, String)>) -> Option<Target> {
+        if let Some(n) = self.module_def(f, name) {
+            return Some(Target::Symbol(n));
+        }
+        for (k, imp) in self.imports(f).iter().enumerate() {
+            if let Some(bound) = self.rust_import_binding(f, k, imp, name, visited) {
+                return bound;
+            }
+        }
+        self.imports(f)
+            .iter()
+            .filter(|imp| imp.names.iter().any(|n| n.name == "*"))
+            .find_map(|imp| self.rust_glob_lookup(f, imp, name, visited))
+            .or_else(|| self.rust_child_module(f, name))
+    }
+
+    /// A child module file of `f` that no `mod` declaration of the file
+    /// binds (one written inside a macro: `cfg_if!`, tokio's `cfg_rt!`):
+    /// `<dir>/name.rs` or `<dir>/name/mod.rs` of `f`'s module directory.
+    fn rust_child_module(&self, f: FileId, name: &str) -> Option<Target> {
+        self.resolve_module(f, 1, name).filter(|&m| m != f).map(Target::Module)
+    }
+
+    /// What import `k` of `f` binds to `name`: `None` when it does not bind
+    /// it, `Some(None)` when it does but the target is not found.
+    fn rust_import_binding(
+        &self,
+        f: FileId,
+        k: usize,
+        imp: &Import,
+        name: &str,
+        visited: &mut Vec<(FileId, String)>,
+    ) -> Option<Option<Target>> {
+        if imp.names.is_empty() {
+            if imp.module_alias.as_deref() != Some(name) {
+                return None;
+            }
+            return Some(self.rust_module_import(f, k, imp));
+        }
+        let n = imp.names.iter().find(|n| n.name != "*" && n.alias.as_deref().unwrap_or(&n.name) == name)?;
+        Some(self.rust_use_leaf(f, imp, &n.name, visited))
+    }
+
+    /// A `mod x;`, `extern crate` or path-anchor import: its module file;
+    /// a missing crate is external, a missing `mod` file a miss.
+    fn rust_module_import(&self, f: FileId, k: usize, imp: &Import) -> Option<Target> {
+        match self.import_targets[f as usize][k] {
+            Some(t) => Some(Target::Module(t)),
+            None if imp.relative_level == 1 && !imp.type_only => None,
+            None => Some(Target::External),
+        }
+    }
+
+    /// The leaf `leaf` of a `use` import.
+    fn rust_use_leaf(
+        &self,
+        f: FileId,
+        imp: &Import,
+        leaf: &str,
+        visited: &mut Vec<(FileId, String)>,
+    ) -> Option<Target> {
+        if imp.module.is_empty() && imp.relative_level == 0 {
+            // `use foo;`: a name in scope, else a crate.
+            return self.rust_uniform(f, leaf, visited);
+        }
+        match self.rust_module_path(f, imp, visited)? {
+            Target::Module(m) => self.lookup_in_module(m, leaf, visited),
+            Target::Symbol(c) => self.find_member(c, leaf, Want::Type).map(|(n, _)| Target::Symbol(n)),
+            other => Some(other),
+        }
+    }
+
+    /// `name` through glob import `k` of `f`.
+    fn rust_glob_lookup(
+        &self,
+        f: FileId,
+        imp: &Import,
+        name: &str,
+        visited: &mut Vec<(FileId, String)>,
+    ) -> Option<Target> {
+        match self.rust_module_path(f, imp, visited)? {
+            Target::Module(m) if m != f => {
+                self.lookup_in_module(m, name, visited).filter(|t| matches!(t, Target::Symbol(_)))
+            }
+            Target::Symbol(c) => self.find_member(c, name, Want::Type).map(|(n, _)| Target::Symbol(n)),
+            _ => None,
+        }
+    }
+
+    /// The module (file, inline module or type) an import's module path
+    /// names: its anchor, then each segment.
+    fn rust_module_path(&self, f: FileId, imp: &Import, visited: &mut Vec<(FileId, String)>) -> Option<Target> {
+        let module = imp.module.as_str();
+        let (start, rest): (Target, Vec<&str>) = if imp.relative_level > 0 {
+            let anchor = self.resolve_module(f, imp.relative_level, "")?;
+            (Target::Module(anchor), module.split("::").filter(|s| !s.is_empty()).collect())
+        } else if let Some(rest) = module.strip_prefix("::") {
+            let mut segs = rest.split("::");
+            let krate = segs.next()?;
+            (self.rust_crate(f, krate), segs.collect())
+        } else {
+            let mut segs = module.split("::");
+            let first = segs.next()?;
+            let start = if first == "crate" {
+                Target::Module(self.resolve_module(f, 0, "crate")?)
+            } else {
+                self.rust_uniform(f, first, visited)?
+            };
+            (start, segs.collect())
+        };
+        self.rust_walk(start, &rest, visited)
+    }
+
+    /// Walks module path segments from `start` (as [`Resolver::walk`], with
+    /// the lookup chain's `visited` list).
+    fn rust_walk(&self, start: Target, segs: &[&str], visited: &mut Vec<(FileId, String)>) -> Option<Target> {
+        let mut cur = start;
+        for seg in segs {
+            cur = match cur {
+                Target::Module(m) => self.lookup_in_module(m, seg, visited)?,
+                Target::Symbol(n) if self.owns_members(n) => Target::Symbol(self.find_member(n, seg, Want::Type)?.0),
+                Target::Symbol(_) | Target::Prefix(_) => return None,
+                Target::External => return Some(Target::External),
+            };
+        }
+        Some(cur)
+    }
+
+    /// A crate by name, as seen from `f`: its root module, else external.
+    fn rust_crate(&self, f: FileId, name: &str) -> Target {
+        match self.resolve_module(f, 0, &format!("::{name}")) {
+            Some(m) => Target::Module(m),
+            None => Target::External,
+        }
+    }
+
+    /// The first segment of a uniform path: a name `f` declares or binds,
+    /// else a crate.
+    fn rust_uniform(&self, f: FileId, first: &str, visited: &mut Vec<(FileId, String)>) -> Option<Target> {
+        match self.lookup_in_module(f, first, visited) {
+            Some(t) => Some(t),
+            None => Some(self.rust_crate(f, first)),
+        }
+    }
+
+    /// The binding environment of Rust file `fid` (see the module docs).
+    pub(crate) fn rust_env(&self, fid: FileId) -> Env {
+        let mut env = Env::new();
+        let imports = self.imports(fid);
+        for (k, imp) in imports.iter().enumerate() {
+            for name in Self::rust_bound_names(imp) {
+                let t = self.rust_import_binding(fid, k, imp, &name, &mut Vec::new()).flatten();
+                env.entry(name).or_insert(t);
+            }
+        }
+        for imp in imports.iter().filter(|i| i.names.iter().any(|n| n.name == "*")) {
+            for name in self.rust_glob_names(fid, imp) {
+                if env.contains_key(&name) || self.module_def(fid, &name).is_some() {
+                    continue;
+                }
+                let t = self.rust_glob_lookup(fid, imp, &name, &mut Vec::new());
+                if t.is_some() {
+                    env.insert(name, t);
+                }
+            }
+        }
+        env
+    }
+
+    /// Names an import binds by itself (not globs).
+    fn rust_bound_names(imp: &Import) -> Vec<String> {
+        if imp.names.is_empty() {
+            return imp.module_alias.iter().cloned().collect();
+        }
+        imp.names.iter().filter(|n| n.name != "*").map(|n| n.alias.clone().unwrap_or_else(|| n.name.clone())).collect()
+    }
+
+    /// The names a glob import may bind: items of its target module and the
+    /// names the target's own declarations bind (one level of re-exports;
+    /// deeper ones resolve lazily), or the members of a type / inline module.
+    fn rust_glob_names(&self, fid: FileId, imp: &Import) -> Vec<String> {
+        match self.rust_module_path(fid, imp, &mut Vec::new()) {
+            Some(Target::Module(m)) if m != fid => {
+                let defs = self.defs(m);
+                let mut names: Vec<String> = self.top_level[m as usize]
+                    .iter()
+                    .map(|&j| &defs[j as usize])
+                    .filter(|d| !self.is_rust_impl_item(m, d))
+                    .map(|d| d.name.clone())
+                    .collect();
+                for i in self.imports(m).iter().filter(|i| !i.type_only) {
+                    names.extend(Self::rust_bound_names(i));
+                }
+                names
+            }
+            Some(Target::Symbol(c)) => self.members.get(&c).map(|m| m.keys().cloned().collect()).unwrap_or_default(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// `IMPORTS` edges of Rust files (see the module docs).
+    pub(crate) fn rust_import_edges(&mut self) {
+        let mut out = Vec::new();
+        for i in 0..self.files.len() {
+            let fid = i as FileId;
+            if !self.is_rust(fid) {
+                continue;
+            }
+            for (k, imp) in self.imports(fid).iter().enumerate() {
+                if imp.type_only {
+                    continue;
+                }
+                if let Some(t) = self.rust_import_file(fid, k, imp) {
+                    out.push((fid, t, imp.span));
+                }
+            }
+        }
+        for (fid, t, span) in out {
+            let meta = EdgeMeta { confidence: 1.0, strategy: Strategy::ImportResolved, evidence: Some((fid, span)) };
+            let (src, dst) = (self.file_node[fid as usize], self.file_node[t as usize]);
+            self.add_edge(src, dst, EdgeKind::Imports, meta);
+        }
+    }
+
+    /// The file an import reaches: the module file of a `mod` / `extern
+    /// crate`, the file a `use` leaf or glob target is in.
+    fn rust_import_file(&self, fid: FileId, k: usize, imp: &Import) -> Option<FileId> {
+        if imp.names.is_empty() {
+            return self.import_targets[fid as usize][k];
+        }
+        let target = match imp.names.iter().find(|n| n.name != "*") {
+            Some(n) => self.rust_use_leaf(fid, imp, &n.name, &mut Vec::new())?,
+            None => self.rust_module_path(fid, imp, &mut Vec::new())?,
+        };
+        let file = match target {
+            Target::Module(m) => Some(m),
+            Target::Symbol(n) => self.nodes[n as usize].file,
+            _ => None,
+        }?;
+        (file != fid).then_some(file)
+    }
+
+    /// Member `name` of Rust inline module `m` bound by a `use` declared
+    /// inside it (`mod facade { pub use crate::engine::work; }`).
+    pub(crate) fn rust_module_member(&self, m: NodeId, name: &str) -> Option<NodeId> {
+        self.rust_nested(|| self.rust_module_member_unguarded(m, name))
+    }
+
+    fn rust_module_member_unguarded(&self, m: NodeId, name: &str) -> Option<NodeId> {
+        let node = &self.nodes[m as usize];
+        let f = node.file?;
+        let module = &self.module_names[f as usize];
+        let local = node.qualified_name.strip_prefix(module.as_str())?.strip_prefix("::")?;
+        let marker = format!("$in:{local}");
+        let imports = self.imports(f);
+        let imp = imports.iter().find(|i| {
+            i.module_alias.as_deref() == Some(marker.as_str())
+                && i.names.iter().any(|n| n.name != "*" && n.alias.as_deref().unwrap_or(&n.name) == name)
+        })?;
+        let leaf = imp.names.iter().find(|n| n.alias.as_deref().unwrap_or(&n.name) == name)?;
+        match self.rust_use_leaf(f, imp, &leaf.name, &mut Vec::new())? {
+            Target::Symbol(n) => Some(n),
+            _ => None,
+        }
+    }
+
+    // -- impl blocks ---------------------------------------------------------
+
+    /// The type node a type path written in Rust file `f` names
+    /// (`a.b.Foo`), resolved in `scope`.
+    fn rust_type_of_path(&self, f: FileId, scope: Option<LocalDefId>, text: &str) -> Option<(NodeId, Strategy, f32)> {
+        let (receiver, name) = match text.rsplit_once('.') {
+            Some((r, n)) => (Some(r), n),
+            None => (None, text),
+        };
+        let item = RefItem {
+            kind: RefKind::Type,
+            name,
+            receiver,
+            enclosing: scope,
+            span: Span::default(),
+            decorated: None,
+            arity: None,
+            arg_types: None,
+        };
+        match self.resolve_item(f, &item, scope) {
+            Outcome::Hit(n, s, c) if self.owns_members(n) => Some((n, s, c)),
+            _ => None,
+        }
+    }
+
+    /// An item of an `impl` block: attached to its self type, with
+    /// `IMPLEMENTS` and `OVERRIDES` for a trait impl (see the module docs).
+    pub(crate) fn rust_impl_item(&mut self, fid: FileId, j: LocalDefId, d: &Definition) {
+        let item = self.node_of(fid, j);
+        let scope = self.parents[fid as usize][j as usize];
+        if d.bases[0].starts_with('<') {
+            return self.rust_blanket_item(fid, scope, item, d);
+        }
+        let Some((ty, _, _)) = self.rust_type_of_path(fid, scope, &d.bases[0]) else { return };
+        self.rust_impl_type.insert(item, ty);
+        self.add_member(ty, &d.name, item, d.label);
+        let Some(text) = d.implements.first() else { return };
+        let Some((tr, strategy, confidence)) = self.rust_type_of_path(fid, scope, text) else {
+            self.open_types.insert(ty);
+            return;
+        };
+        if tr != ty {
+            let meta = EdgeMeta { confidence, strategy, evidence: Some((fid, d.name_span)) };
+            self.add_edge(ty, tr, EdgeKind::Implements, meta);
+            let bases = self.bases.entry(ty).or_default();
+            if !bases.contains(&tr) {
+                bases.push(tr);
+            }
+        }
+        let want = if d.label.is_callable() { Want::Call } else { Want::Value };
+        if let Some((m, _)) = self.find_member(tr, &d.name, want).filter(|(m, _)| *m != item) {
+            let meta =
+                EdgeMeta { confidence: 0.9, strategy: Strategy::TypeResolved, evidence: Some((fid, d.name_span)) };
+            self.add_edge(item, m, EdgeKind::Overrides, meta);
+            self.rust_overrides.insert(item, m);
+        }
+    }
+
+    /// An item of a blanket impl (`impl<T: Bound> Tr for T`): no type to
+    /// attach to; it overrides the trait's item and stands for it in
+    /// by-name calls.
+    fn rust_blanket_item(&mut self, fid: FileId, scope: Option<LocalDefId>, item: NodeId, d: &Definition) {
+        self.rust_blanket.insert(item);
+        let Some((tr, _, _)) = d.implements.first().and_then(|t| self.rust_type_of_path(fid, scope, t)) else { return };
+        let want = if d.label.is_callable() { Want::Call } else { Want::Value };
+        if let Some((m, _)) = self.find_member(tr, &d.name, want).filter(|(m, _)| *m != item) {
+            let meta =
+                EdgeMeta { confidence: 0.9, strategy: Strategy::TypeResolved, evidence: Some((fid, d.name_span)) };
+            self.add_edge(item, m, EdgeKind::Overrides, meta);
+        }
+    }
+
+    /// The type a Rust method's `impl` block is for.
+    pub(crate) fn rust_impl_type_of(&self, f: FileId, scope: Option<LocalDefId>) -> Option<NodeId> {
+        let defs = self.defs(f);
+        let mut cur = scope;
+        while let Some(a) = cur {
+            if defs[a as usize].label.is_callable() && !defs[a as usize].bases.is_empty() {
+                return self.rust_impl_type.get(&self.node_of(f, a)).copied();
+            }
+            cur = self.parents[f as usize][a as usize];
+        }
+        None
+    }
+
+    // -- methods by name -----------------------------------------------------
+
+    /// The by-name candidates of a method call with an unknown receiver:
+    /// implementations of a trait method stand for it.
+    fn rust_method_candidates(&self, f: FileId, kind: RefKind, name: &str) -> Vec<NodeId> {
+        if name.chars().count() < 4 || STD_METHODS.binary_search(&name).is_ok() {
+            return Vec::new();
+        }
+        let family = self.families[f as usize];
+        let mut keys: Vec<NodeId> = self
+            .by_name
+            .get(name)
+            .map_or(&[][..], |v| v.as_slice())
+            .iter()
+            .copied()
+            .filter(|&n| {
+                let node = &self.nodes[n as usize];
+                node.language.map(Language::family) == family && compatible(kind, node.label, true)
+            })
+            .map(|n| self.rust_overrides.get(&n).copied().unwrap_or(n))
+            .collect();
+        // A blanket impl applies to every type: its items are the targets.
+        if keys.iter().any(|k| self.rust_blanket.contains(k)) {
+            keys.retain(|k| self.rust_blanket.contains(k));
+        }
+        keys.sort_unstable();
+        keys.dedup();
+        keys
+    }
+
+    /// Strategy 6 for a Rust method call with an unknown receiver; a
+    /// standard-library method name is external.
+    pub(crate) fn rust_unique_method(&self, f: FileId, kind: RefKind, name: &str) -> Outcome {
+        if STD_METHODS.binary_search(&name).is_ok() {
+            return Outcome::External;
+        }
+        if !self.rust_has_method(f, kind, name) {
+            // No project method has the name: the call is on a type outside
+            // the project.
+            return Outcome::External;
+        }
+        let keys = self.rust_method_candidates(f, kind, name);
+        match keys.len() {
+            1 => Outcome::Hit(keys[0], Strategy::Heuristic, 0.5),
+            2..=MAX_AMBIGUOUS => Outcome::Hit(keys[0], Strategy::Heuristic, 0.5 * AMBIGUOUS_FANOUT),
+            _ => Outcome::Miss,
+        }
+    }
+
+    /// Whether any Rust definition of the snapshot could be the target of
+    /// a by-name call (any length, any name).
+    fn rust_has_method(&self, f: FileId, kind: RefKind, name: &str) -> bool {
+        let family = self.families[f as usize];
+        self.by_name.get(name).is_some_and(|v| {
+            v.iter().any(|&n| {
+                let node = &self.nodes[n as usize];
+                node.language.map(Language::family) == family && compatible(kind, node.label, true)
+            })
+        })
+    }
+
+    /// A member missing from Rust type `c` named by a path receiver: external
+    /// (Rust types are open, see [`Self::rust_open_types`]).
+    pub(crate) fn rust_missing_member(&self, f: FileId, c: NodeId) -> Option<Outcome> {
+        (self.is_rust(f) && self.type_is_open(c)).then_some(Outcome::External)
+    }
+
+    /// A bare Rust call no ladder rung resolved: the only `macro_rules!`
+    /// of the snapshot with that name, test code included (`#[macro_use]`
+    /// macros are in scope without an import; a function cannot be called
+    /// like a macro, so the name says it is the macro), `unique_name` 0.60.
+    pub(crate) fn rust_macro_by_name(&self, f: FileId, kind: RefKind, name: &str) -> Outcome {
+        if !self.is_rust(f) || kind != RefKind::Call {
+            return Outcome::Miss;
+        }
+        match self.rust_macros.get(name).map(Vec::as_slice) {
+            Some([m]) => Outcome::Hit(*m, Strategy::UniqueName, 0.6),
+            _ => Outcome::Miss,
+        }
+    }
+
+    /// Rust types are open (and the `macro_rules!` table is built): a
+    /// member missing from a project type may come
+    /// from a derive (`Clone`, `Default`) or a blanket implementation
+    /// outside the project (`ToString` for `Display` types), so it is
+    /// external, never a by-name guess.
+    pub(crate) fn rust_open_types(&mut self) {
+        let rust: Vec<NodeId> = (0..self.nodes.len() as NodeId)
+            .filter(|&n| {
+                let node = &self.nodes[n as usize];
+                node.label.is_type() && node.language.map(Language::family) == Some(LanguageFamily::Rust)
+            })
+            .collect();
+        self.open_types.extend(rust);
+        for (i, n) in self.nodes.iter().enumerate() {
+            let is_macro = n.label == Label::Function
+                && n.language.map(Language::family) == Some(LanguageFamily::Rust)
+                && n.signature.as_deref().is_some_and(|sig| sig.starts_with("macro_rules!"));
+            if is_macro {
+                self.rust_macros.entry(n.name.clone()).or_default().push(i as NodeId);
+            }
+        }
+    }
+
+    /// The other candidates of an ambiguous by-name Rust method call (see
+    /// [`Self::rust_unique_method`]), each at the fan-out confidence.
+    pub(crate) fn rust_ambiguous(
+        &self,
+        from: FileId,
+        item: &RefItem<'_>,
+        target: NodeId,
+        strategy: Strategy,
+        confidence: f32,
+    ) -> Option<Vec<(NodeId, Strategy, f32)>> {
+        let ambiguous = strategy == Strategy::Heuristic && confidence < 0.5 && item.receiver.is_some();
+        if !ambiguous || !self.is_rust(from) {
+            return None;
+        }
+        let keys = self.rust_method_candidates(from, item.kind, item.name);
+        if !keys.contains(&target) {
+            return None;
+        }
+        Some(keys.into_iter().map(|k| (k, strategy, confidence)).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn std_methods_are_sorted() {
+        assert!(STD_METHODS.windows(2).all(|w| w[0] < w[1]), "STD_METHODS must be sorted");
+    }
+}

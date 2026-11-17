@@ -22,6 +22,7 @@ rueca-lang-data.workspace = true
 rueca-lang-go.workspace = true
 rueca-lang-java.workspace = true
 rueca-lang-cpp.workspace = true
+rueca-lang-rust.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
