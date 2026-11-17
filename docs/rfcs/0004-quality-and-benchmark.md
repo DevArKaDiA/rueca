@@ -204,7 +204,9 @@ RFC 0003's "supported" becomes `stable`; its "parity row" becomes the
    ≥ 300 structural questions per direction, ≥ 30 localization instances
    (≥ 40 where datasets allow). Today Java, C and C++ have one structural
    repository each; candidates are chosen by the bench (SCIP-indexable
-   without a full dependency build).
+   without a full dependency build). The organization suite (RFC 0006 §8)
+   needs ≥ 60 gated organization instances, with a separate calibration
+   split; today 120 issue + 16 impact instances gated, 29 calibration.
 3. **Replace PyCG with an own Python micro-benchmark**, same format and
    conventions as the PHP / Go / Java / C / C++ sets and cross-checked
    against scip-python. PyCG stays as a diagnostic row.
@@ -216,11 +218,18 @@ RFC 0003's "supported" becomes `stable`; its "parity row" becomes the
    added.
 6. **Confidence intervals in every table**: Wilson intervals for
    proportions, bootstrap for macro averages and paired differences; the
-   scorecard flags ⚠ when an interval crosses a floor.
+   scorecard flags ⚠ when an interval crosses a floor. Paired comparisons
+   also state the discordance d (the share of instances where one arm hits
+   and the other misses) and the minimum detectable effect at 80% power,
+   two-sided α = 0.05, MDE ≈ (1.96 + 0.84) · √(d / n), so an interval that
+   crosses zero is read against what the population could detect.
 7. **No fitting on gated instances.** A small calibration split per
    language (instances and repositories disjoint from the gated ones) is
    where ranking weights and heuristics are tuned; the gated set is only
    evaluated. Changes that were tuned are documented with the split they used.
+   Organization-mode settings (repository routing) are tuned on the
+   calibration organization: the calibration members and their instances,
+   with the gated members as distractors only (RFC 0006 §8).
 8. **Regression check in CI.** A scheduled workflow builds `main`, runs the
    Rueca arm over cached corpora and gold (baseline arms are re-run only when
    their versions change), and fails when any floor metric drops by more

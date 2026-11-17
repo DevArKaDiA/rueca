@@ -312,3 +312,19 @@ def split_of(spec: dict) -> str:
     ranking weights and heuristics may be tuned; reported separately) or
     `diagnostic` (reported, never gated)."""
     return spec.get("split", "gated")
+
+
+# --- organization scenarios: raw outputs and organization files ----------------------
+
+
+def org_run_path(kind: str, arm: str) -> Path:
+    """Raw output of an organization scenario: .cache/runs/org/<kind>-<arm>.json."""
+    return RUNS_DIR / "org" / f"{kind}-{arm}.json"
+
+
+def write_org_file(path: Path, roots: list[Path], name: str = "bench") -> None:
+    """The organization file of the Rueca arm: one `[[repo]]` per root."""
+    lines = [f'name = "{name}"', ""]
+    for r in roots:
+        lines += ["[[repo]]", f"path = {json.dumps(str(r))}", ""]
+    path.write_text("\n".join(lines))

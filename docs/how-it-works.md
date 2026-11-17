@@ -834,8 +834,11 @@ index**, so a question asked of the whole organization gets one ranking.
   index <root>` of a member) re-indexes that repository with the normal
   pipeline, then replaces only its part: the new segment's tantivy files are
   copied in, the old ones dropped from the list. Other repositories are not
-  touched. On the benchmark's 21-repository organization this takes 70–140 ms
-  (mostly fsyncs), against 0.2–4.7 s for indexing the repository itself.
+  touched. On the benchmark's first, 21-repository organization this took
+  70–140 ms (mostly fsyncs), against 0.2–4.7 s for indexing the repository
+  itself; on today's 42-member organization, with routing profiles and link
+  sets included, re-indexing micropython updates the organization layer in
+  504 ms against 2,681 ms (`docs/bench/alpha-results.md`).
 - **Generations.** The list of repositories (id, root, snapshot, the store
   segment and tantivy segment of each) plus the index schema is an immutable
   **generation** file; `orgs/<name>/org.json` points at the current one and
@@ -866,9 +869,11 @@ index**, so a question asked of the whole organization gets one ranking.
   relevance 1; every symbol score of a repository is multiplied, inside
   the top-k, by `((0.25 + r) / 1.25)²` — a prior, so a strong match in
   another repository still surfaces. `list_repositories` with `query`
-  returns that ranking. On the benchmark's calibration split this lifts
-  organization File Acc@5 from 0.64× to 0.92× the single-repository value
-  (`bench/README.md`, *Org scenarios*).
+  returns that ranking. On the benchmark's earlier 35-instance calibration
+  split this lifted organization File Acc@5 from 0.64× to 0.92× the
+  single-repository value; on today's organization suite the same default
+  gives 0.85× on the 120 gated issues and 0.78× on the 29 calibration ones
+  (`bench/README.md`, *Org scenarios*; RFC 0006 §9.2).
 - **The link layer: packages.** `rueca index --org` also builds a
   **package registry** from each repository's manifests (`package.json`
   names, Python distributions and their top-level packages, `go.mod`

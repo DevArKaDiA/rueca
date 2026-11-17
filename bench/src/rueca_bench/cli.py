@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("run", help="run arms on suites (resumable)")
     rp.add_argument("--arm", default="all")
     rp.add_argument("--suite", default="all", help="s1, s3, data, health, org, all, or a comma list")
-    rp.add_argument("--only", nargs="*", help="instance ids / repos (s1) or suite names (s3)")
+    rp.add_argument("--only", nargs="*", help="instance ids / repos (s1), suite names (s3), or for org: gated / calibration and/or repositories (a smoke run of the multi-repository scenario)")
     rp.add_argument("--workers", type=int, default=2, help="S1 repositories / S3 sets processed in parallel")
     rp.add_argument("--force", action="store_true", help="ignore cached arm outputs")
     rp.add_argument("--lang", nargs="*", help="language families to run (default: all)")
@@ -101,8 +101,8 @@ def main(argv: list[str] | None = None) -> int:
         if "data" in wanted and (not langs or "data" in langs):
             data_mod.run(arms, only=a.only, force=a.force)
         if "org" in wanted and not langs:
-            # after S1: the org view is compared with the single-repository answers
-            org_mod.run_all(arms, force=a.force)
+            # self-contained: the single-repository answers come from the same org run
+            org_mod.run_all(arms, force=a.force, only=a.only)
     elif a.cmd == "report":
         report_mod.report()
     elif a.cmd == "check":
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         for arm in a.runs or []:
             for suite in ("s1", "s3", "data", "health"):
                 shutil.rmtree(RUNS_DIR / suite / arm, ignore_errors=True)
-            for kind in ("multirepo", "multiref"):
+            for kind in ("multirepo", "multirepo-gated", "multirepo-calibration", "multiref"):
                 (RUNS_DIR / "org" / f"{kind}-{arm}.json").unlink(missing_ok=True)
     return 0
 

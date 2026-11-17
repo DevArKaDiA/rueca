@@ -94,6 +94,13 @@ def file_exists_at(repo: str, commit: str, rel_path: str) -> bool:
     return run(["git", "cat-file", "-e", f"{commit}:{rel_path}"], cwd=repo_dir(repo), timeout=120).rc == 0
 
 
+def blob_id(repo: str, commit: str, rel_path: str) -> str | None:
+    """Object id of a path at a commit (a tree lookup: no blob is fetched),
+    None when the path does not exist there."""
+    res = run(["git", "rev-parse", "--verify", "--quiet", f"{commit}:{rel_path}"], cwd=repo_dir(repo), timeout=120)
+    return (res.stdout.strip() or None) if res.rc == 0 else None
+
+
 def add_worktree(repo: str, commit: str, name: str) -> Path:
     ensure_commit(repo, commit)
     dest = WORK_DIR / safe_name(name)

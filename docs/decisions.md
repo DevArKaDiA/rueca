@@ -109,6 +109,63 @@ on nodes and a trailing `{in, changed}` on edges. Measured (10 queries,
 `limit` 50): 473 items for 648 per-ref items on click `main` / `8.5.1`,
 500 for 678 on flask `main` / `pr/5918`.
 
+## 2026-11-16 — Organization suite: pinned members, gold at the pin, BM25 as the floor arm
+
+The organization scenario had 21 instances, one per repository: one
+instance was 4.8 points and, with the discordance measured today, a paired
+File Acc@5 comparison could not detect less than 29.0 points. It is rebuilt to be big enough to trust. Members are
+every gated S1 repository (42), each **pinned** at the base commit of its
+first gated S1 instance and indexed one at a time into one organization;
+the calibration organization adds the 8 calibration members pinned the
+same way, the gated members as distractors. **Issue** instances: per
+member the first 3 (calibration: 5) S1 instances whose gold — files and
+functions of the real fix patch — is present at the pin, the gold
+**carried to the pin** (functions re-resolved there), the issue's keyword
+query unchanged. An instance whose fix is already at the pin
+(`patch_at_pin == reverse`) is left out: its question has no answer to
+find. Gated: 120 issue instances over 42 members (`patch_at_pin` base 42 /
+applies 22 / neither 56); calibration: 29, never gated.
+
+A second kind, **impact**: an issue of a library member (tokio for axum;
+carbon, monolog, commonmark for laravel/framework; gson for dubbo and
+apollo) scored, besides its own gold, on the consumer files that use a
+symbol its fix changes, as labelled at the pins by the independent
+cross-repository labeler — 16 gated (carbon 6, monolog 4, gson 3, tokio
+3, commonmark 0); consumer hit@10 / hit@20 / recall@20. The opposite
+direction, **spanning** (a consumer's issue whose answer includes the
+library symbols named in its patch), was built and measured: it yields
+only 2 instances, both trivial (`tokio_macros::test`), so it is not used;
+kept as a documented negative result (`spanning.py`).
+
+Arms: Rueca natively (`--org`, one ranking) and per repository merged by
+rank fusion; **BM25 over the union of the members** (one ranking with the
+union's statistics, and per repository + rank fusion) as the plain-text
+floor arm, as BM25 is for S1; cbm per project + rank fusion. *Single* is
+each arm's own-repository answer in the same run. Every rate carries a
+Wilson interval; paired comparisons (Rueca − BM25 and the others) a
+paired bootstrap (10,000 resamples, the `[scorecard]` seed), the
+discordance d and the minimum detectable effect at 80% power, MDE ≈ (1.96
++ 0.84) · √(d / n), also stated for the old n = 21. The 21-instance
+numbers are another population: dropped, not carried, not compared.
+Cross-repository edges grow to 12 labelled pairs (Flask → Werkzeug, Axum →
+Tokio / Hyper / Tower, Tokio → Mio added; a Rust labeler over Cargo
+packages and module trees) and are pooled over all pairs, without Rust and
+Rust alone, so the Rust gaps do not hide in an average.
+
+Measured (gated, `docs/bench/alpha-results.md`): File Acc@5 56.7 vs 66.7
+single (0.85×, 0.74–0.96: at the floor, interval crossing it); Rueca −
+BM25 +4.2 (−4.2…+12.5, MDE 12.1) on File Acc@5 and +11.3 (+4.3…+19.1, MDE
+11.2) on Function Acc@10; tokens per correct answer 1.29× single;
+calibration 0.78×. Impact: consumer hit@10 12.5% vs 37.5% for BM25 —
+the organization ranking does not surface consumers of a changed library
+symbol. Cross-repository edges: 98.3 / 74.9 all, 99.8 / 96.2 without
+Rust, 94.5 / 53.2 Rust alone; the Rust gaps (attribute macros, items
+inside macro invocation bodies, method resolution by type name across
+crates, Cargo dependencies matched by name only) are findings about
+Rueca, listed in RFC 0006 §9.2 and §12. cbm (per project + rank fusion, no
+cross-project search): File Acc@5 11.7 against 56.7 alone; Rueca − cbm
++45.0 (+35.8…+54.2).
+
 ## 2026-11-16 — Rust: call results typed from signatures; methods by name only when unique
 
 Dogfooding showed name-matched edges where the receiver's type was

@@ -28,6 +28,7 @@ from . import data as data_mod
 from . import health as health_mod
 from . import crossrepo as crossrepo_mod
 from . import org as org_mod
+from . import orgstats as orgstats_mod
 from .arms import ARM_NAMES, make_arm
 from .arms.base import is_callable_label, same_def
 from .match import CallableIndex, class_map, class_members
@@ -116,9 +117,12 @@ def common_groups(rows_by_arm: dict[str, set[str]]) -> list[str]:
 
 def load_published() -> dict:
     out = {}
-    for name in ("meta", "s1", "s3", "data", "efficiency", "health"):
+    for name in ("meta", "s1", "s3", "data", "efficiency", "health", "org"):
         p = RESULTS_DIR / f"{name}.json"
         out[name] = read_json(p) if p.exists() else {}
+    # the organization scores lived under efficiency.json's `org` key before org.json
+    if not out["org"] and out["efficiency"].get("org"):
+        out["org"] = out["efficiency"]["org"]
     return out
 
 
@@ -1665,47 +1669,223 @@ def _x(r: float | None) -> str:
     return "—" if r is None else f"{r:.2f}×"
 
 
-def _render_org_rfc0006(L: list[str], mr: dict) -> None:
-    """RFC 0006 §8: organization File Acc@5 against the right repository
-    alone, incremental update of the organization layer, tokens per correct
-    answer at organization scope (Rueca)."""
-    a = (mr.get("arms") or {}).get("rueca") or {}
-    m = (a.get("modes") or {}).get("native") or {}
-    if a.get("carried") or m.get("status") != "ok":
+ORG_ARM_LABEL = {"rueca": "Rueca", "grep": "BM25 (grep)", "cbm": "cbm"}
+ORG_KIND_LABEL = {"issue": "issue", "impact": "impact"}
+RUST_GAPS = (
+    "Rust gaps (findings about Rueca, not labeler noise): attribute macros (`#[tokio::main]`, `#[tokio::test]`) are uses the link layer "
+    "does not record — a large share of the axum → tokio uses it misses; bodies of macro invocations are not extracted, so uses inside them are "
+    "invisible; and cross-repository method resolution by type name can pick a same-named type of another crate (the wrong tokio → mio "
+    "edges)."
+)
+
+
+def _org_mode_label(arm: str, mode: str) -> str:
+    if mode == "per_repo":
+        return "per repository + RRF"
+    return {"rueca": "organization `--org`", "grep": "one BM25 over the union"}.get(arm, mode)
+
+
+def _org_rate(r: dict | None, with_n: bool = False) -> str:
+    if not r or r.get("value") is None:
+        return "—"
+    return _ci(r["value"], r.get("ci")) + (f", n = {r['n']}" if with_n else "")
+
+
+def _org_ratio(r: dict | None) -> str:
+    if not r or r.get("value") is None:
+        return "—"
+    ci = r.get("ci")
+    return _x(r["value"]) + (f" ({ci[0]:.2f}–{ci[1]:.2f})" if ci else "")
+
+
+def _signed(x: float | None) -> str:
+    return "—" if x is None else f"{100 * x:+.1f}"
+
+
+def _mde_txt(p: dict, key: str) -> str:
+    """An MDE cell: `—` without a discordant instance (no variance to read
+    it from), `> 100` when no difference could be detected."""
+    x = p.get(key)
+    if x is None or not p.get("discordant"):
+        return "—"
+    return "> 100" if x > 1 else _f(x)
+
+
+def _org_design(L: list[str], mr: dict, cal: dict) -> None:
+    s = load_manifest().get("org", {})
+    gated = sum(1 for r in s.get("repos", []) if r.get("split", "gated") == "gated")
+    calib = sum(1 for r in s.get("repos", []) if r.get("split") == "calibration")
+    L.append(
+        f"**Design.** The organization is {gated} gated members (`[[org.repos]]`, every gated S1 repository pinned at the base commit of its first "
+        f"gated instance) and, for the calibration split, those plus {calib} calibration members (pinned the same way); a member is indexed one "
+        "at a time from a worktree at its pin. **Issue** instances: per member, its first "
+        f"{s.get('max_instances_per_repo', 3)} S1 instances (calibration: {s.get('calibration_max_instances_per_repo', 5)}) whose gold is present "
+        "at the pin and whose fix is not already there, scored against that gold carried to the pin; query = the S1 keyword query of the issue. "
+        "**Impact** instances: every S1 instance of a library member (one a consumer member depends on: tokio for axum; carbon, monolog and "
+        "commonmark for laravel/framework; gson for dubbo and apollo) whose consumers use what its fix changes — the consumer files whose uses, "
+        "labelled at the pins by the independent cross-repository labeler, reach a symbol of the fix (`impact.py`); the same query, scored on "
+        "its own gold and on those consumer files (an id of both kinds is asked once and scored as both). Arms: Rueca (one organization, "
+        "`--org`), BM25 (one ranking over the union of the members), cbm (no cross-project search); every arm also per repository merged by "
+        "reciprocal rank fusion (k = 60); *single* = the same arm's own-repository answer in the same run. File Acc@5 / Function Acc@10 use "
+        "repository-qualified paths and the candidate filter of every language. These numbers are not comparable with the 21-instance "
+        "scenario published before 2026-11-16 (another population; `bench/README.md`, *Changelog of scoring rules*)."
+    )
+    L.append("")
+    L.append("| Split | Language | Members | Issue instances | Impact instances | Fix at the pin, issue (base / applies / neither) |")
+    L.append("|---|---|---:|---:|---:|---|")
+    for split, sc in (("gated", mr), ("calibration", cal)):
+        counts = (sc or {}).get("counts") or {}
+        if not counts:
+            L.append(f"| {split} | — | pending | | | |")
+            continue
+        tot = {"members": 0, "issue": 0, "impact": 0, "base": 0, "applies": 0, "neither": 0}
+        for grp in language_groups():
+            c = counts.get(grp)
+            if not c:
+                continue
+            iss, imp = c.get("issue") or {}, c.get("impact") or {}
+            pap = iss.get("patch_at_pin") or {}
+            tot["members"] += c.get("members", 0)
+            tot["issue"] += iss.get("n", 0)
+            tot["impact"] += imp.get("n", 0)
+            for k in ("base", "applies", "neither"):
+                tot[k] += pap.get(k, 0)
+            L.append(f"| {split} | {grp} | {c.get('members', 0)} | {iss.get('n', 0)} | {imp.get('n', 0)} | {pap.get('base', 0)} / {pap.get('applies', 0)} / {pap.get('neither', 0)} |")
+        L.append(f"| {split} | **all** | {tot['members']} | {tot['issue']} | {tot['impact']} | {tot['base']} / {tot['applies']} / {tot['neither']} |")
+    L.append("")
+
+
+def _org_results_table(L: list[str], st: dict) -> None:
+    L.append(
+        "| Arm | Mode | n | File Acc@5 (95% CI) | File Acc@5 single | Org / single (95% CI) | Function Acc@10 (95% CI) | Function Acc@10 single "
+        "| Other-repository share of top 10 | Tokens (median) | Tokens per correct |"
+    )
+    L.append("|---|---|---:|---|---|---|---|---|---:|---:|---:|")
+    for arm in org_mod.ORG_ARMS:
+        a = (st.get("arms") or {}).get(arm) or {}
+        if "status" in a and a.get("status") != "ok":
+            reason = f": {str(a.get('reason'))[:120]}" if a.get("reason") and a.get("status") != "pending" else ""
+            L.append(f"| {ORG_ARM_LABEL[arm]} | — | — | {a.get('status')}{reason} | | | | | | | |")
+            continue
+        for mode in ("native", "per_repo"):
+            m = a.get(mode)
+            if m is None:
+                continue
+            if m.get("status") != "ok":
+                L.append(f"| {ORG_ARM_LABEL[arm]} | {_org_mode_label(arm, mode)} | — | pending: {str(m.get('reason') or '')[:160]} | | | | | | | |")
+                continue
+            L.append(
+                f"| {ORG_ARM_LABEL[arm]} | {_org_mode_label(arm, mode)} | {m['n']} | {_org_rate(m['file_acc@5'])} | {_org_rate(m['single_file_acc@5'])} | "
+                f"{_org_ratio(m['file_acc@5_ratio'])} | {_org_rate(m['func_acc@10'], with_n=True)} | {_org_rate(m['single_func_acc@10'])} | "
+                f"{_f(m.get('other_repo_top10'))} | {_tok(m.get('tokens_median'))} | {_tok(m.get('tokens_per_correct'))} |"
+            )
+    L.append("")
+
+
+def _org_paired(L: list[str], st: dict) -> None:
+    L.append(
+        "**Paired comparisons** (A − B over the instances both answered; percentile bootstrap, 10,000 resamples, fixed seed; status as RFC 0004 "
+        "§6.1 reads a relative floor: ✅ the whole 95% interval ≥ 0, ⚠ it crosses 0, ❌ it is below 0). *Discordant* = instances where one arm "
+        "hits and the other misses (d = their share). *MDE* = the minimum detectable effect at 80% power, two-sided α = 0.05, for a paired "
+        "binary outcome: MDE ≈ (1.96 + 0.84) · √(d / n); *MDE at n = 21* = the same with the 21 instances of the previous scenario (issue rows; it had no impact kind). A "
+        "difference smaller than the MDE can go undetected; an interval that crosses 0 with an MDE of 15 points says no more than that "
+        "(— = no discordant instance, so no variance to read an MDE from)."
+    )
+    L.append("")
+    L.append("| Kind | A − B | Metric | n | A | B | Δ (95% CI) | Status | Discordant (d) | Half-width | MDE | MDE at n = 21 |")
+    L.append("|---|---|---|---:|---:|---:|---|---|---:|---:|---:|---:|")
+    labels = {"file_acc@5": "File Acc@5", "func_acc@10": "Function Acc@10", "consumer_hit@10": "Consumer hit@10"}
+    for p in st.get("paired") or []:
+        head = f"| {ORG_KIND_LABEL[p['kind']]} | {p['a']} − {p['b']} | {labels.get(p['metric'], p['metric'])}"
+        if not p.get("n"):
+            L.append(f"{head} | — | | | pending | | | | | |")
+            continue
+        ci = p.get("ci")
+        delta = _signed(p.get("diff")) + (f" ({_signed(ci[0])}–{_signed(ci[1])})" if ci else "")
+        L.append(
+            f"{head} | {p['n']} | {_f(p.get('mean_a'))} | {_f(p.get('mean_b'))} | {delta} | {p['status']} | {p['discordant']} ({_f(p['discordance'])}) | "
+            f"{_f(p.get('half_width'))} | {_mde_txt(p, 'mde')} | {_mde_txt(p, 'mde_old_n') if p['kind'] == 'issue' else '—'} |"
+        )
+    L.append("")
+
+
+def _org_impact(L: list[str], st: dict) -> None:
+    n = st.get("impact_instances") or 0
+    L.append(
+        f"**Impact instances** ({n}): own side as an issue (File Acc@5, Function Acc@10 against the library's gold at the pin); consumer side = "
+        "the consumer files that use a symbol of the fix — *consumer hit@k* = a consumer gold file among the first k distinct candidate files of "
+        "the answer, *consumer recall@20* = consumer gold files in the first 20 / min(their number, 20). The single answer holds the own "
+        "repository only (no consumer hit by construction)."
+    )
+    L.append("")
+    if not st.get("impact"):
+        L.append("Pending (no output with impact instances)." if n == 0 else "Pending.")
+        L.append("")
         return
-    L.append("**RFC 0006 §8 — organization suite (Rueca).**")
-    L.append("")
-    L.append("| Metric | Organization | Single repository | Ratio | Floor | Target |")
-    L.append("|---|---:|---:|---:|---:|---:|")
-    L.append(
-        f"| File Acc@5, organization scope vs the right repository alone | {_f(m.get('file_acc@5'))} | {_f(m.get('single_file_acc@5'))} | "
-        f"{_x(m.get('file_acc@5_ratio'))} | ≥ 0.85× | ≥ 0.95× |"
-    )
-    L.append(
-        f"| Tokens per correct answer (Σ top-10 tokens / queries with a gold file of the instance's repository in the top 10: "
-        f"{m.get('found_top10')} org, {m.get('single_found_top10')} single) | {_tok(m.get('tokens_per_correct'))} | "
-        f"{_tok(m.get('single_tokens_per_correct'))} | {_x(m.get('tokens_per_correct_ratio'))} | reported | ≤ 1.2× |"
-    )
-    layer = a.get("org_layer") or {}
-    rep = layer.get("replace") or {}
-    if rep:
-        L.append(
-            f"| Incremental update: re-index {rep.get('repo')} ({rep.get('docs') or 0:,} symbols) in the organization of {rep.get('org_repos')} "
-            f"(organization layer vs the repository's own index; its first index took {rep.get('first_repo_ms') or 0:,} ms) | "
-            f"{rep.get('org_ms') or 0:,} ms | {rep.get('repo_ms') or 0:,} ms | {_x(rep.get('ratio'))} | ≤ 2× | ≤ 1× |"
-        )
-    if layer.get("steps"):
-        L.append(
-            f"| Organization layer per added repository ({layer['steps']} `index --org` steps, median / max) | "
-            f"{layer['org_ms_median']:,.0f} / {layer['org_ms_max']:,} ms | {layer['repo_ms_median']:,.0f} ms (median) | "
-            f"{_x(layer.get('ratio_median'))} / {_x(layer.get('ratio_max'))} | ≤ 2× | ≤ 1× |"
-        )
+    L.append("| Arm | Mode | n | Own File Acc@5 (95% CI) | Own Function Acc@10 (95% CI) | Consumer hit@10 (95% CI) | Consumer hit@20 (95% CI) | Consumer recall@20 | Other-repository share of top 10 | Consumer files (median) |")
+    L.append("|---|---|---:|---|---|---|---|---:|---:|---:|")
+    for arm in org_mod.ORG_ARMS:
+        a = (st.get("impact") or {}).get(arm)
+        if not a:
+            L.append(f"| {ORG_ARM_LABEL[arm]} | — | — | pending | | | | | | |")
+            continue
+        for mode in ("native", "per_repo"):
+            m = a.get(mode)
+            if m is None:
+                continue
+            if m.get("status") != "ok":
+                L.append(f"| {ORG_ARM_LABEL[arm]} | {_org_mode_label(arm, mode)} | — | pending | | | | | | |")
+                continue
+            L.append(
+                f"| {ORG_ARM_LABEL[arm]} | {_org_mode_label(arm, mode)} | {m['n']} | {_org_rate(m['file_acc@5'])} | {_org_rate(m['func_acc@10'], with_n=True)} | "
+                f"{_org_rate(m['consumer_hit@10'])} | {_org_rate(m['consumer_hit@20'])} | {_f(m.get('consumer_recall@20'))} | {_f(m.get('other_repo_top10'))} | "
+                f"{_tok(m.get('consumer_files_median'))} |"
+            )
     L.append("")
 
 
-def _render_crossrepo(L: list[str], xr: dict) -> None:
+def _render_org_rfc0006(L: list[str], rows: list[dict]) -> None:
+    """RFC 0006 §8: organization File Acc@5 against the right repository
+    alone, tokens per correct answer, incremental update of the organization
+    layer (Rueca, gated split)."""
+    L.append("**RFC 0006 §8 — organization suite (Rueca, gated split).**")
+    L.append("")
+    if not rows or rows[0].get("status") == "pending":
+        L.append("Pending (no Rueca organization output).")
+        L.append("")
+        return
+    L.append("| Metric | Organization | Single repository | Ratio (95% CI) | Floor | Target | Status |")
+    L.append("|---|---:|---:|---|---:|---:|---|")
+    for r in rows:
+        ci = r.get("ci")
+        ratio = _x(r.get("ratio")) + (f" ({ci[0]:.2f}–{ci[1]:.2f})" if ci else "")
+        tgt = "✅" if r.get("target_met") else "not met"
+        if r["key"] == "file_acc@5_ratio":
+            L.append(f"| {r['label']} (n = {r['n']}) | {_f(r['value'])} | {_f(r['single'])} | {ratio} | ≥ 0.85× | ≥ 0.95× ({tgt}) | {r['status']} |")
+        elif r["key"] == "tokens_per_correct_ratio":
+            f_org, f_single = r.get("found") or [None, None]
+            L.append(
+                f"| Tokens per correct answer (Σ top-10 tokens / queries with a gold file of the instance's repository in the top 10: {f_org} org, "
+                f"{f_single} single) | {_tok(r['value'])} | {_tok(r['single'])} | {ratio} | reported | ≤ 1.2× ({tgt}) | — |"
+            )
+        elif r["key"] == "incremental_update":
+            L.append(
+                f"| Incremental update: re-index {r.get('repo')} ({r.get('docs') or 0:,} symbols) in the organization of {r.get('org_repos')} (organization "
+                f"layer vs the repository's own index; its first index took {r.get('first_repo_ms') or 0:,} ms) | {r.get('value') or 0:,} ms | "
+                f"{r.get('single') or 0:,} ms | {ratio} | ≤ 2× | ≤ 1× ({tgt}) | {r['status']} |"
+            )
+        elif r["key"] == "org_layer_per_step":
+            L.append(
+                f"| Organization layer per added repository ({r['steps']} `index --org` steps, median / max) | {r['value']:,.0f} / {r['value_max']:,} ms | "
+                f"{r['single']:,.0f} ms (median) | {_x(r.get('ratio'))} / {_x(r.get('ratio_max'))} | ≤ 2× (max) | ≤ 1× ({tgt}) | {r['status']} |"
+            )
+    L.append("")
+
+
+def _render_crossrepo(L: list[str], xr: dict, pools: dict | None = None) -> None:
     """RFC 0006 §8: cross-repository edges (packages), precision / recall on
-    labelled pairs (`crossrepo.py`)."""
+    labelled pairs (`crossrepo.py`), per pair and pooled (all, without
+    Rust, Rust alone)."""
     L.append("### Cross-repository edges (packages)")
     L.append("")
     if not xr:
@@ -1718,10 +1898,11 @@ def _render_crossrepo(L: list[str], xr: dict) -> None:
         return
     L.append(
         "Consumers pinned with the libraries they depend on, each group one organization (`rueca index --org`), its link layer listed with "
-        "`rueca links --org`. Gold labelled from the consumer's source by an independent labeler (`crossrepo.py`): *imports* = (consumer file, "
-        "library file) of every import of a library module or class; *uses* = (consumer file, library symbol) imported by name and used, or "
-        "reached through an imported library module. A non-`IMPORTS` edge is correct when it targets a used symbol, a member of it or of one of its "
-        "library ancestors; precision is a lower bound (targets the labeler cannot see count as errors)."
+        "`rueca links --org`. Gold labelled from the consumer's source by an independent labeler (`crossrepo.py`; Python `ast`, PHP and Java "
+        "`use` / `import` statements, Rust Cargo packages and module trees): *imports* = (consumer file, library file) of every import of a "
+        "library module or class; *uses* = (consumer file, library symbol) imported by name and used, or reached through an imported library "
+        "module or path. A non-`IMPORTS` edge is correct when it targets a used symbol, a member of it or of one of its library ancestors; "
+        "precision is a lower bound (targets the labeler cannot see count as errors). Pooled rows: Wilson 95% intervals."
         + (" Carried from the published results." if xr.get("carried") else "")
     )
     L.append("")
@@ -1746,52 +1927,57 @@ def _render_crossrepo(L: list[str], xr: dict) -> None:
     if sm:
         ip, ir = pr(sm["imports"])
         up, ur = pr(sm["uses"])
-        ap, ar = pr(sm["all"])
         L.append(f"| **all** | {ip} | {ir} | {up} | {ur} | {sm['all']['predicted']} |")
-        L.append("")
-        L.append(f"RFC 0006 §8 cross-repository edges (packages), all kinds pooled: precision {ap}, recall {ar} (floor ≥ 90 / 75, target ≥ 97 / 90).")
     L.append("")
+    if pools:
+        L.append("RFC 0006 §8 cross-repository edges (packages), imports and uses pooled (floor ≥ 90 / 75, target ≥ 97 / 90):")
+        L.append("")
+        L.append("| Pairs | n pairs | Precision (95% CI) | Status | Recall (95% CI) | Status |")
+        L.append("|---|---:|---|---|---|---|")
+        names = {"all": "all", "without_rust": "without Rust (Python, PHP, Java)", "rust": "Rust alone"}
+        for key in ("all", "without_rust", "rust"):
+            p = pools.get(key)
+            if not p:
+                continue
+            c = p["counts"]
+            L.append(
+                f"| {names[key]} | {p['pairs']} | {_org_rate(p['precision'])} ({c['correct']}/{c['predicted']}) | {p['precision']['status']} | "
+                f"{_org_rate(p['recall'])} ({c['found']}/{c['gold']}) | {p['recall']['status']} |"
+            )
+        L.append("")
+        if pools.get("rust"):
+            L.append(RUST_GAPS)
+            L.append("")
 
 
 def _render_org(L: list[str], orgs: dict) -> None:
     mr = orgs.get("multirepo") or {}
+    st = orgs.get("stats") or {}
     L.append("## Org scenarios (RFC 0005 §5–§6, §8)")
     L.append("")
-    L.append("### Multi-repository store")
+    L.append("### Multi-repository organization")
     L.append("")
     if not mr.get("arms"):
-        L.append("Not run (`rueca-bench run --suite org`).")
+        L.append("Pending: no organization output (`rueca-bench run --suite org`).")
         L.append("")
     else:
-        L.append(
-            f"{mr['instances']} S1 instances, one per repository (the first gated instance of the first `[org] repos_per_family` gated repositories of "
-            f"every language), all {len(mr['repos'])} repositories indexed into one store at those instances' base commits. Each keyword query is asked of "
-            "the whole organization: **native** = one Rueca `search_symbols` served with `--org` (RFC 0006: one ranking over the organization symbol index, "
-            "the organization built one repository at a time with `rueca index --org`); **per repository** = one search per repository, merged "
-            "by the bench with reciprocal rank fusion (k = 60) — what an agent must do without an org query (cbm has no cross-project search). "
-            "Localization as in S1 with repository-qualified paths and the candidate filter of every language; *single* = the same arm's S1 answer "
-            "on the instance's repository alone. Tokens: the top-10 answer an agent reads (per repository: the sum of its calls)."
-            + (" Carried from the published results." if mr.get("carried") else "")
-        )
+        _org_design(L, mr, mr.get("calibration") or {})
+        g = st.get("gated") or {}
+        L.append(f"**Gated split** ({g.get('instances', 0)} issue instances).")
         L.append("")
-        L.append("| Arm | Mode | n | File Acc@5 org | File Acc@5 single | Function Acc@10 org | Function Acc@10 single | Other-repository share of top 10 | Tokens org (median) | Tokens single (median) |")
-        L.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
-        for arm, a in mr["arms"].items():
-            if a.get("status") != "ok":
-                L.append(f"| {arm} | — | | {a.get('status')}: {a.get('error', '')[:120]} | | | | | | |")
-                continue
-            for mode, m in a["modes"].items():
-                label = ("organization `--org`" if not a.get("carried") else "native `repo: \"*\"`") if mode == "native" else "per repository + RRF"
-                if m.get("status") != "ok":
-                    L.append(f"| {arm} | {label} | — | pending: {m.get('reason', '')[:160]} | | | | | | |")
-                    continue
-                L.append(
-                    f"| {arm} | {label} | {m['n']} | {_f(m['file_acc@5'])} | {_f(m.get('single_file_acc@5'))} | {_f(m.get('func_acc@10'))} | {_f(m.get('single_func_acc@10'))} | "
-                    f"{_f(m.get('other_repo_top10'))} | {_tok(m.get('tokens_median'))} | {_tok(m.get('single_tokens_median'))} |"
-                )
+        _org_results_table(L, g)
+        _org_paired(L, g)
+        _org_impact(L, g)
+        c = st.get("calibration") or {}
+        L.append(f"**Calibration split — never used for gating; routing was tuned here** ({c.get('instances', 0)} issue instances).")
         L.append("")
-        _render_org_rfc0006(L, mr)
-    _render_crossrepo(L, orgs.get("crossrepo") or {})
+        if (mr.get("calibration") or {}).get("arms"):
+            _org_results_table(L, c)
+        else:
+            L.append("Pending.")
+            L.append("")
+        _render_org_rfc0006(L, orgs.get("rfc0006") or [])
+    _render_crossrepo(L, orgs.get("crossrepo") or {}, orgs.get("crossrepo_pools"))
     mf = orgs.get("multiref") or {}
     L.append("### Multi-ref (one repository at two commits)")
     L.append("")
@@ -1892,6 +2078,56 @@ def _render_data(L: list[str], data: dict) -> None:
         L.append("")
 
 
+def carry_multirepo(mr: dict, published: dict) -> dict:
+    """Published multi-repository scores enter only for the same population
+    (`org.population`: members, pins, instance ids and kinds): the whole
+    split when nothing was run here, an arm when that arm was not. Scores of
+    another population (the 21-instance scenario) are never carried."""
+    for split in ("gated", "calibration"):
+        cur = mr if split == "gated" else (mr.get("calibration") or {})
+        pub = published if split == "gated" else (published.get("calibration") or {})
+        if not pub.get("population"):
+            continue
+        if not cur.get("arms"):
+            cur = dict(pub, carried=True)
+        elif cur.get("population") == pub["population"]:
+            for arm, rec in (pub.get("arms") or {}).items():
+                if arm not in cur["arms"]:
+                    cur["arms"][arm] = dict(rec, carried=True)
+        if split == "gated":
+            mr = {**cur, "calibration": mr.get("calibration") or {}}
+        else:
+            mr["calibration"] = cur
+    return mr
+
+
+def score_orgs(published_org: dict) -> dict:
+    """Org scenarios scored from the cache: multi-repository (carried only
+    for the same population, `carry_multirepo`), multi-ref and
+    cross-repository edges (carried when not run), the statistics of both
+    splits (`orgstats.org_stats`), the RFC 0006 §8 rows and the
+    cross-repository pools."""
+    orgs = {"multirepo": org_mod.score_multirepo(), "multiref": org_mod.score_multiref(), "crossrepo": crossrepo_mod.score_crossrepo()}
+    for k in ("multiref", "crossrepo"):
+        if not orgs[k] or not orgs[k].get("status"):
+            if published_org.get(k):
+                orgs[k] = dict(published_org[k], carried=True)
+    mr = carry_multirepo(orgs["multirepo"], published_org.get("multirepo") or {})
+    orgs["multirepo"] = mr
+    gated = orgstats_mod.org_stats(mr, "gated")
+    orgs["stats"] = {"gated": gated, "calibration": orgstats_mod.org_stats(mr.get("calibration") or {}, "calibration")}
+    orgs["rfc0006"] = orgstats_mod.rfc0006_rows(mr, gated)
+    orgs["crossrepo_pools"] = orgstats_mod.crossrepo_pools(orgs["crossrepo"])
+    return orgs
+
+
+def attach_org(card: dict, orgs: dict) -> dict:
+    """Add the scorecard's `org` block (gated split; `orgstats.org_block`)
+    after every existing key, which it never touches."""
+    card["org"] = orgstats_mod.org_block(orgs["multirepo"], orgs["stats"]["gated"], orgs["crossrepo"])
+    return card
+
+
 def readme_summary(card: dict) -> str:
     """One line per language for the root README (copied by hand)."""
     lines = []
@@ -1913,18 +2149,7 @@ def report() -> None:
     eff = score_efficiency(s1, s3)
     published_eff = published.get("efficiency") or {}
     carry_efficiency(eff, published_eff, carried_rueca_groups(s1, s3))
-    orgs = {"multirepo": org_mod.score_multirepo(s1), "multiref": org_mod.score_multiref(), "crossrepo": crossrepo_mod.score_crossrepo()}
-    for k in ("multirepo", "multiref", "crossrepo"):
-        if not orgs[k] or not orgs[k].get("arms", orgs[k].get("status")):
-            if published_eff.get("org", {}).get(k):
-                orgs[k] = dict(published_eff["org"][k], carried=True)
-    # an arm not run this time keeps its published multi-repository numbers
-    pub_mr = (published_eff.get("org") or {}).get("multirepo") or {}
-    mr = orgs["multirepo"]
-    if mr.get("arms") is not None and not mr.get("carried"):
-        for arm, rec in (pub_mr.get("arms") or {}).items():
-            if arm not in mr["arms"]:
-                mr["arms"][arm] = dict(rec, carried=True)
+    orgs = score_orgs(published.get("org") or {})
     log("report: scorecard")
     card = build_scorecard(s1, s3, health, data, eff)
     carried_pairs = {tuple(k.split(":", 1)) for k in s1.get("carried", {})}
@@ -1958,15 +2183,18 @@ def report() -> None:
         "carried_from": {k: published["meta"].get(k) for k in ("date", "machine")} if carried_txt else None,
     }
     card["rueca"] = arms["rueca"]["version"]
+    attach_org(card, orgs)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     write_json(RESULTS_DIR / "meta.json", meta)
     write_json(RESULTS_DIR / "s1.json", s1)
     write_json(RESULTS_DIR / "s3.json", s3, compact=True)
     write_json(RESULTS_DIR / "data.json", data)
     write_json(RESULTS_DIR / "health.json", health)
-    write_json(RESULTS_DIR / "efficiency.json", {"tokens_per_correct_answer": eff, "org": orgs})
+    write_json(RESULTS_DIR / "efficiency.json", {"tokens_per_correct_answer": eff})
+    # one row per organization question and arm (compact, like s3.json)
+    write_json(RESULTS_DIR / "org.json", orgs, compact=True)
     write_json(RESULTS_DIR / "scorecard.json", card)
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     (DOCS_DIR / "alpha-results.md").write_text(render(meta, s1, s3, data, health, card, eff, orgs))
-    log(f"wrote {RESULTS_DIR}/{{meta,s1,s3,data,health,efficiency,scorecard}}.json and {DOCS_DIR / 'alpha-results.md'}")
+    log(f"wrote {RESULTS_DIR}/{{meta,s1,s3,data,health,efficiency,org,scorecard}}.json and {DOCS_DIR / 'alpha-results.md'}")
     print(readme_summary(card))
