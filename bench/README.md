@@ -291,6 +291,43 @@ File Acc@5 and Function Acc@10, any-gold and all-gold: published Lite
 numbers (LocAgent, SweRank) are all-gold. Python only, never tuned on, not
 in the scorecard.
 
+### Compare: decision tables over cached runs (RFC 0007)
+
+```sh
+uv run --project bench rueca-bench compare --split calibration --base grep --arms vector --variant both
+uv run --project bench rueca-bench compare --arms vector:qwen3-0.6b-q8-dfull-t512-idefault-f0-x1 vector:qwen3-0.6b-q8-d256-t512-idefault-f0-x1 \
+    --cache /path/to/other/bench/.cache --json /tmp/compare.json
+```
+
+`rueca-bench compare --arms ARM[:TAG] ... [--base grep] [--split
+calibration|gated|all] [--variant kw|raw|both] [--cache DIR] [--json OUT]`
+(`compare.py`) turns the cached S1 outputs of one split into the tables the
+RFC 0007 rules read, without running anything and without writing to the
+cache (`--cache` may be another checkout's, even while a run is filling
+it). A column is an arm (`grep`, `rueca`) or an arm and one sweep setting:
+`vector` expands to every tag under `runs/s1/vector/`, `vector:<tag>`
+selects one (likewise `rueca-hybrid[:<tag>]`, below). Scoring is the
+report's (`metrics.py`; a failed query is a miss), on the instances of the
+split with gold. Markdown goes to stdout, the whole result (both variants)
+to `--json`:
+
+- **Pooled** and **per language**, per variant: n, any-gold and all-gold
+  File Acc@5 and Function Acc@10, file and function MRR.
+- **Paired bootstrap** of column − base per instance (`stats.py`, the
+  manifest's `bootstrap_resamples` = 10,000 and `bootstrap_seed`, 95%),
+  pooled and per language, for the four Acc@k metrics; a column is paired
+  only on the instances both have, so a sweep that is still running shows
+  a smaller n instead of a biased number.
+- **Objective** (RFC 0007 §7.6, also §3.4's model rule): the macro over
+  languages of ½ (File Acc@5 + Function Acc@10), per variant and averaged
+  over `kw` and `raw`, with its difference to the base; the number of
+  languages it covers is shown (compare only columns with the same
+  coverage).
+- **Top-10 overlap** for every pair of non-base columns: the mean over
+  common instances of the Jaccard index of the two top-10 file lists and of
+  the two top-10 function lists (both empty: 1). RFC 0007 §3.3 (int4 vs
+  F16, floor 0.9) and §6.3 (dimensions) read it.
+
 ### Sharing a cache between checkouts
 
 `RUECA_BENCH_CACHE` moves the whole cache. `RUECA_BENCH_SHARED_CACHE` points at

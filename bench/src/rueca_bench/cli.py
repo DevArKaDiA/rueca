@@ -3,6 +3,8 @@
   rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
   rueca-bench run    --arm {grep,cbm,rueca,vector,all} --suite {s1,s3,data,health,org,s2,lite,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force] [--split gated|calibration] [--limit N]
   rueca-bench coir   [--profile cheap|full] [--preset P] [--dims N] [--max-tokens N] [--instruction task|preset|TEXT] [--tasks A,B] [--limit-corpus N]
+  rueca-bench compare --arms ARM[:TAG] ... [--base grep] [--split calibration|gated|all] [--variant kw|raw|both] [--cache DIR] [--json OUT]
+  rueca-bench sweep  --arm rueca --mode hybrid|semantic [--alpha A,B,...] [--norm minmax,theoretical] [--n N,...] [--split calibration] [--lang FAMILY ...]
   rueca-bench report [--s2-only]
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
@@ -19,9 +21,11 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from pathlib import Path
 
 from . import check as check_mod
 from . import coir as coir_mod
+from . import compare as compare_mod
 from . import contracts as contracts_mod
 from . import data as data_mod
 from . import health as health_mod
@@ -31,7 +35,7 @@ from . import report as report_mod
 from . import s1, s3
 from .arms import ARM_NAMES, S1_ARM_NAMES, make_arm
 from .arms.rueca import rueca_binary
-from .common import RUNS_DIR, WORK_DIR, families, log
+from .common import CACHE, RUNS_DIR, WORK_DIR, families, log, write_json
 from .embed import DEFAULT_MAX_TOKENS, DEFAULT_PRESET
 from .prepare import setup
 
@@ -88,6 +92,14 @@ def _coir(a: argparse.Namespace) -> None:
     print("\n".join(coir_mod.summary_lines(run.run(emb))))
 
 
+def _compare(a: argparse.Namespace) -> None:
+    cache = Path(a.cache).resolve() if a.cache else CACHE
+    res = compare_mod.Comparison(cache, a.split, a.base, a.arms).run()
+    if a.json:
+        write_json(Path(a.json), res)
+    print(compare_mod.render(res, a.variant), end="")
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="rueca-bench", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -121,6 +133,15 @@ def main(argv: list[str] | None = None) -> int:
     op.add_argument("--batch", type=int, default=None)
     op.add_argument("--cpu", action="store_true")
     op.add_argument("--threads", type=int, default=None)
+
+    mp = sub.add_parser("compare", help="decision tables over cached S1 outputs: metrics per arm / tag, paired bootstrap against a base, RFC 0007 §7.6 objective, top-10 overlap")
+    mp.add_argument("--suite", choices=["s1"], default="s1")
+    mp.add_argument("--split", choices=["calibration", "gated", "all"], default="calibration")
+    mp.add_argument("--base", default="grep", help="the arm (or arm:tag) every column is paired against")
+    mp.add_argument("--arms", nargs="+", required=True, help="arm (every tag it has, e.g. vector) or arm:tag (one sweep setting)")
+    mp.add_argument("--variant", choices=["kw", "raw", "both"], default="both", help="query variants shown (the JSON always holds both)")
+    mp.add_argument("--cache", default=None, help="bench cache to read (default: this checkout's .cache); never written")
+    mp.add_argument("--json", default=None, help="also write the result as JSON to this file")
 
     pr = sub.add_parser("report", help="score cached outputs; write bench/results/*.json and docs/bench/alpha-results.md")
     pr.add_argument("--s2-only", action="store_true", help="publish S2 alone: s2.json, the contracts family of scorecard.json, the S2 rows of alpha-results.md")
@@ -167,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
             contracts_mod.run(arms, force=a.force)  # cross-service edges (S2): one organization per group
     elif a.cmd == "coir":
         _coir(a)
+    elif a.cmd == "compare":
+        _compare(a)
     elif a.cmd == "report":
         if a.s2_only:
             report_mod.publish_s2()
