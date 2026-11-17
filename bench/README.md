@@ -54,10 +54,10 @@ uv run --project bench rueca-bench check                 # regression check vs t
   to language families (manifest `[languages]` keys: `python`, `ecma`,
   `php`, `go`, `java`, `c`, `cpp`, `rust`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
-- `run --arm {grep,cbm,rueca,vector,all|a,b} --suite {s1,s3,data,health,org,lite,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--limit N] [--workers N] [--force] [--prune]`.
+- `run --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all|a,b} --suite {s1,s3,data,health,org,lite,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--limit N] [--workers N] [--force] [--prune]`.
   `--split` restricts S1 to one split; `lite` (the SWE-bench Lite
-  diagnostic, `--limit N` for a subset) and the `vector` arm are never
-  included by `all`.
+  diagnostic, `--limit N` for a subset) and the `vector`, `rueca-hybrid`
+  and `rueca-semantic` arms are never included by `all`.
   Outputs are cached per (arm, instance) in `.cache/runs/`; re-running only
   computes what is missing (`--force` recomputes). Arm failures are recorded
   (and scored as misses), never dropped. `--workers` runs S1 repositories
@@ -82,14 +82,19 @@ uv run --project bench rueca-bench check                 # regression check vs t
   only those families are re-selected; every other instance keeps its entry
   and position.
 - `clean --work` removes worktrees; `clean --runs rueca` drops cached Rueca outputs.
+- `compare` (decision tables over cached outputs) and `sweep` (the RFC 0007
+  §7.6 fusion sweep): below, after the vector arm.
 - `uv run --project bench pytest bench/tests` — unit tests of the harness
   pieces (efficiency counting, contract normalizers, health rules, rank
   fusion, the organization file and RFC 0006 metrics, the multi-ref scorer,
   S3 gold derivation and scoring, the vector arm, the `rueca embed`
-  protocol against a fake binary, all-gold metrics, the CoIR dry run); CI
+  protocol against a fake binary, all-gold metrics, the CoIR dry run,
+  `compare`, the Rueca hybrid arm and the sweep against the fake binary,
+  the plateau choice, the RFC 0007 §11.2 gate rows); CI
   runs them in the `bench harness` job (the CoIR dry run is skipped without
   the `coir` group).
-- Per-call timeouts: 120 s per query, 1800 s per index (`arms/__init__.py`).
+- Per-call timeouts: 120 s per query, 1800 s per index (`arms/__init__.py`;
+  7200 s when the Rueca arm indexes with `--embed`).
 - S1 runs repositories in parallel (`--workers`, default 2), instances of one
   repository sequentially (one partial clone per repository, one detached
   worktree per instance, removed afterwards). S3 runs sets in parallel, the
@@ -222,6 +227,96 @@ table also shows the **all-gold** diagnostic: File Acc@5 counting an
 instance only when every gold file is in the top 5, Function Acc@10 only
 when every gold function is in the top 10 (the LocAgent / SweRank
 convention; S1's gated Acc@k counts any gold item).
+
+### Rueca hybrid and semantic modes (RFC 0007 phase 1)
+
+```sh
+rueca models pull qwen3-0.6b-q8               # weights into ~/.cache/rueca/models (or $RUECA_MODEL_DIR)
+RUECA_BENCH_RUECA_MODE=hybrid uv run --project bench rueca-bench run --arm rueca --suite s1 --split calibration --prune
+RUECA_FUSION_ALPHA=0.7 uv run --project bench rueca-bench run --arm rueca-hybrid --suite s1 --split calibration   # another setting
+```
+
+`RUECA_BENCH_RUECA_MODE` = `lexical` (default; the Rueca arm exactly as
+before, so existing outputs stay valid), `hybrid` or `semantic`. A
+non-lexical mode is its own localization-only arm, `rueca-hybrid` /
+`rueca-semantic` (`--arm rueca` under the variable is renamed to it, and
+the S3, data, health and organization suites keep running lexically
+without it):
+
+- **Index**: `rueca index <worktree> --store <instance store> --json
+  --embed=<preset>`, the preset from `RUECA_BENCH_VECTOR_PRESET` (default
+  `qwen3-0.6b-q8`, the vector arm's knob). The run record's `index_info`
+  keeps the binary's `vectors` report (units, cached, embedded, tokens,
+  time). The preflight stops the run before any instance when `rueca index`
+  has no `--embed` or the preset's weights are missing (an index failure
+  would be recorded and never retried).
+- **Store sharing**: the store stays one per instance (deleted after it, as
+  for the lexical arm), but every call gets `RUECA_VECTOR_DIR` =
+  `$RUECA_BENCH_RUECA_VECTOR_DIR` (default `.cache/rueca-vectors`), the Rust
+  store vector cache (RFC 0007 §5.5: content-addressed by embed key, shard
+  locks, safe for parallel indexers), so a later commit of a repository —
+  or a re-index in a sweep — embeds only symbols whose canonical text
+  changed. `RUECA_MODEL_DIR` points at `$RUECA_MODEL_DIR`, else the default
+  store's `models/` (`$RUECA_HOME`, else `~/.cache/rueca`): a fresh
+  per-instance store has no weights of its own. This cache is the binary's
+  format, not the vector arm's `.cache/vectors`.
+- **Query**: `search_symbols` with `{"mode": "hybrid"}` (or `semantic`), in
+  the verbose scoring shape; an explicit mode errors instead of silently
+  ranking lexically. Every call gets `RUECA_FUSION_ALPHA`, `RUECA_FUSION_N`
+  and `RUECA_FUSION_NORM` from the environment, with the bench's explicit
+  defaults 0.5 / 100 / `minmax` (the binary's own), so the run directory
+  names exactly what ran: `runs/s1/rueca-<mode>/<preset>-a<α>-n<N>-<norm>/`
+  (`report` reads the setting the environment names, like the vector arm).
+  The fused score of each result is kept as `scores` (as the vector and
+  `grep` arms keep theirs).
+- **Report**: `rueca-hybrid` (and `rueca-semantic`) get S1 columns next to
+  `rueca`, `grep` and `vector` once they have results, a `hybrid` column in
+  the scorecard's localization rows, and a *Semantic search gates* section
+  (`semgates.py`, also `scorecard.json` `semantic_gates`) with RFC 0007
+  §11.2's rows, paired per instance: File Acc@5 hybrid − BM25 `raw` pooled
+  (whole interval above 0 and ≥ +5), hybrid − vector `raw` pooled (interval
+  not below 0), Function Acc@10 hybrid − BM25 `raw` (≥ +3, not below 0),
+  `kw` pooled hybrid − BM25 (not below 0), and per language and variant
+  hybrid − the better of BM25 and the vector arm there (not below 0); for
+  the gated split (the gate) and the calibration split (a diagnostic).
+  Published rows of an arm with sweep settings are carried only into a
+  report of the same setting (`s1.json` `run_labels`).
+
+### Fusion sweep (RFC 0007 §7.6)
+
+```sh
+export UV_NO_EDITABLE=1 RUECA_BIN=$PWD/target/release/rueca
+uv run --project bench rueca-bench run --arm grep --suite s1 --split calibration --prune      # the base, if not cached
+uv run --project bench rueca-bench sweep --suite s1 --split calibration --arm rueca --mode hybrid \
+    --alpha 0,0.1,...,1 --norm minmax,theoretical --n 100 --prune --json /tmp/sweep.json
+uv run --project bench rueca-bench sweep --mode hybrid --alpha 0,0.1,...,1 --norm minmax,theoretical --report-only
+```
+
+`rueca-bench sweep` (`sweep.py`) runs every setting (α × normalization ×
+N, one preset; `semantic` mode ignores α and runs α = 0) on the
+calibration split only. Per instance it indexes **once** with `--embed`
+and re-runs only the queries for each pending setting, each written to its
+own run directory (an interrupted sweep resumes; `--force` recomputes); the
+efficiency search is skipped. Then it prints the `compare` tables (base
+`grep`) and the plateau choice:
+
+- objective: the macro over languages of ½ (File Acc@5 + Function Acc@10),
+  `--variant both` (default) the mean of `kw` and `raw`;
+- one instance = 1 / n of the objective, n the pooled instances (one
+  instance flipping both metrics in a language of average size);
+- the plateau: a maximal run of consecutive α values on one (normalization,
+  N) curve, all within one instance of the best setting; the widest run
+  wins (then the higher mean objective, then the order given) and its
+  **centre** is the choice, not the arg-max (an even run: the better middle
+  point, the lower α on a tie);
+- leave one language out: the choice redone without each language; stable
+  on that language when that choice scores there within one instance (1 /
+  n of the language) of the full choice.
+
+Cost: one `rueca query` process per call loads the model (about 0.2 s), so
+22 settings × 2 variants × 118 instances are about 5,200 calls; indexing
+pays the lexical index once per instance, embeddings only on the first
+commit of each repository (the shared cache).
 
 ### CoIR runner (RFC 0007 §11.1)
 

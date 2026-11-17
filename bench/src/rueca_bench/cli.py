@@ -1,7 +1,7 @@
 """rueca-bench command line.
 
   rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
-  rueca-bench run    --arm {grep,cbm,rueca,vector,all} --suite {s1,s3,data,health,org,s2,lite,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force] [--split gated|calibration] [--limit N]
+  rueca-bench run    --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all} --suite {s1,s3,data,health,org,s2,lite,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force] [--split gated|calibration] [--limit N]
   rueca-bench coir   [--profile cheap|full] [--preset P] [--dims N] [--max-tokens N] [--instruction task|preset|TEXT] [--tasks A,B] [--limit-corpus N]
   rueca-bench compare --arms ARM[:TAG] ... [--base grep] [--split calibration|gated|all] [--variant kw|raw|both] [--cache DIR] [--json OUT]
   rueca-bench sweep  --arm rueca --mode hybrid|semantic [--alpha A,B,...] [--norm minmax,theoretical] [--n N,...] [--split calibration] [--lang FAMILY ...]
@@ -11,9 +11,11 @@
 
 Language families are the manifest `[languages]` keys (python, ecma, php, ...);
 `data` selects the data-format suite (manifest `[[data.repos]]`). `vector`
-(dense retrieval through `rueca embed`) runs the localization suites only (s1,
-lite) and is never part of `--arm all`; `lite` (the SWE-bench Lite diagnostic)
-is never part of `--suite all`.
+(dense retrieval through `rueca embed`) and `rueca-hybrid` / `rueca-semantic`
+(Rueca indexed with `--embed`; also `--arm rueca` with
+RUECA_BENCH_RUECA_MODE=hybrid|semantic) run the localization suites only (s1,
+lite) and are never part of `--arm all`; `lite` (the SWE-bench Lite
+diagnostic) is never part of `--suite all`.
 """
 
 from __future__ import annotations
@@ -33,7 +35,8 @@ from . import lite as lite_mod
 from . import org as org_mod
 from . import report as report_mod
 from . import s1, s3
-from .arms import ARM_NAMES, S1_ARM_NAMES, make_arm
+from . import sweep as sweep_mod
+from .arms import ARM_NAMES, S1_ARM_NAMES, canonical_arm, make_arm
 from .arms.rueca import rueca_binary
 from .common import CACHE, RUNS_DIR, WORK_DIR, families, log, write_json
 from .embed import DEFAULT_MAX_TOKENS, DEFAULT_PRESET
@@ -43,25 +46,43 @@ SUITES = {"s1", "s3", "data", "health", "org", "s2", "lite"}
 ALL_SUITES = {"s1", "s3", "data", "health", "org", "s2"}
 
 
+def _canonical(names: list[str]) -> list[str]:
+    """`rueca` under RUECA_BENCH_RUECA_MODE=hybrid|semantic runs as
+    `rueca-<mode>` (localization suites only)."""
+    try:
+        out = [canonical_arm(n) for n in names]
+    except ValueError as exc:
+        raise SystemExit(f"rueca-bench: {exc}") from exc
+    if out != names:
+        log(f"RUECA_BENCH_RUECA_MODE: the rueca arm runs as {', '.join(n for n in out if n not in names)} (localization suites only)")
+    return out
+
+
+def _ready(n: str) -> bool:
+    """Builds the arm: False when unavailable (reported as pending); exits
+    on a misconfiguration or a failed preflight."""
+    try:
+        arm = make_arm(n)
+    except ValueError as exc:  # a fusion knob out of range
+        raise SystemExit(f"arm {n}: {exc}") from exc
+    ok, why = arm.available()
+    if not ok:
+        log(f"arm {n} unavailable: {why} (reported as pending)")
+        return False
+    if hasattr(arm, "preflight"):
+        try:
+            arm.preflight()
+        except RuntimeError as exc:
+            raise SystemExit(f"arm {n}: {exc}") from exc
+    return True
+
+
 def _arms(arg: str) -> list[str]:
     names = list(ARM_NAMES) if arg == "all" else [a.strip() for a in arg.split(",") if a.strip()]
     for n in names:
         if n not in S1_ARM_NAMES:
             raise SystemExit(f"unknown arm {n!r}; choose from {S1_ARM_NAMES} or all")
-    out = []
-    for n in names:
-        arm = make_arm(n)
-        ok, why = arm.available()
-        if not ok:
-            log(f"arm {n} unavailable: {why} (reported as pending)")
-            continue
-        if hasattr(arm, "preflight"):
-            try:
-                arm.preflight()
-            except RuntimeError as exc:
-                raise SystemExit(f"arm {n}: {exc}") from exc
-        out.append(n)
-    return out
+    return [n for n in _canonical(names) if _ready(n)]
 
 
 def _suites(arg: str) -> set[str]:
@@ -98,6 +119,27 @@ def _compare(a: argparse.Namespace) -> None:
     if a.json:
         write_json(Path(a.json), res)
     print(compare_mod.render(res, a.variant), end="")
+
+
+def _sweep(a: argparse.Namespace, langs: set[str] | None) -> None:
+    try:
+        sw = sweep_mod.Sweep(
+            mode=a.mode,
+            preset=a.preset,
+            alphas=sweep_mod.parse_alphas(a.alpha),
+            norms=[x.strip() for x in a.norm.split(",") if x.strip()],
+            ns=[int(x) for x in a.n.split(",") if x.strip()],
+            split=a.split,
+        )
+        sw.configs()
+    except ValueError as exc:
+        raise SystemExit(f"rueca-bench sweep: {exc}") from exc
+    if not a.report_only:
+        sw.run(only=a.only, languages=langs, workers=a.workers, force=a.force, prune=a.prune)
+    text, res = sweep_mod.report(sw, a.base, a.variant)
+    if a.json:
+        write_json(Path(a.json), res)
+    print(text, end="")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -142,6 +184,25 @@ def main(argv: list[str] | None = None) -> int:
     mp.add_argument("--variant", choices=["kw", "raw", "both"], default="both", help="query variants shown (the JSON always holds both)")
     mp.add_argument("--cache", default=None, help="bench cache to read (default: this checkout's .cache); never written")
     mp.add_argument("--json", default=None, help="also write the result as JSON to this file")
+
+    wp = sub.add_parser("sweep", help="RFC 0007 §7.6 fusion sweep of the Rueca arm on the calibration split, then compare tables and the plateau choice")
+    wp.add_argument("--suite", choices=["s1"], default="s1")
+    wp.add_argument("--split", choices=["calibration"], default="calibration", help="tuning happens on the calibration split only (RFC 0004 §7.7)")
+    wp.add_argument("--arm", choices=["rueca"], default="rueca")
+    wp.add_argument("--mode", choices=["hybrid", "semantic"], default="hybrid")
+    wp.add_argument("--alpha", default="0,0.1,...,1", help="comma list, or first,second,...,last (semantic mode: ignored)")
+    wp.add_argument("--norm", default="minmax,theoretical", help="comma list of minmax, theoretical")
+    wp.add_argument("--n", default="100", help="comma list of candidates per list (RUECA_FUSION_N)")
+    wp.add_argument("--preset", default=None, help="embedding preset (default: RUECA_BENCH_VECTOR_PRESET, else qwen3-0.6b-q8)")
+    wp.add_argument("--base", default="grep", help="the arm the compare tables pair against")
+    wp.add_argument("--variant", choices=["kw", "raw", "both"], default="both", help="objective of the plateau choice (both: mean of kw and raw)")
+    wp.add_argument("--lang", nargs="*", help="language families to run (default: all)")
+    wp.add_argument("--only", nargs="*", help="instance ids / repositories")
+    wp.add_argument("--workers", type=int, default=1, help="repositories in parallel")
+    wp.add_argument("--force", action="store_true", help="re-run settings already cached")
+    wp.add_argument("--prune", action="store_true", help="delete each repository clone once its runs are done")
+    wp.add_argument("--report-only", action="store_true", help="run nothing: tables and plateau from the cached outputs")
+    wp.add_argument("--json", default=None, help="also write compare tables and plateau as JSON")
 
     pr = sub.add_parser("report", help="score cached outputs; write bench/results/*.json and docs/bench/alpha-results.md")
     pr.add_argument("--s2-only", action="store_true", help="publish S2 alone: s2.json, the contracts family of scorecard.json, the S2 rows of alpha-results.md")
@@ -190,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
         _coir(a)
     elif a.cmd == "compare":
         _compare(a)
+    elif a.cmd == "sweep":
+        _sweep(a, langs)
     elif a.cmd == "report":
         if a.s2_only:
             report_mod.publish_s2()
