@@ -123,39 +123,49 @@ impl Store {
         atomic_write(&self.dir.join(CATALOG_FILE), &self.dir.join("tmp"), &bytes)
     }
 
-    pub(crate) fn register_impl(&self, root: &str, meta: &SegmentMeta) -> Result<()> {
+    pub(crate) fn register_impl(&self, root: &str, meta: &SegmentMeta, ref_name: Option<&str>) -> Result<()> {
         let root = canonical(Path::new(root)).to_string_lossy().into_owned();
         let mut entries = self.entries_impl()?;
-        let mut replaced = Vec::new();
-        entries.retain(|e| {
-            if e.root == root {
-                replaced.push(e.segment_id.clone());
-                false
-            } else {
-                true
-            }
-        });
+        let replaced = take_root(&mut entries, &root);
         entries.push(CatalogEntry {
             root,
             repo: meta.snapshot.repo.clone(),
             segment_id: meta.id.clone(),
             indexed_at: meta.snapshot.indexed_at,
+            ref_name: ref_name.map(str::to_string),
         });
         entries.sort_by(|a, b| a.root.cmp(&b.root));
         self.save(&entries)?;
-        // The catalog no longer points at the replaced segment, so deleting it
-        // is best effort: a failure (e.g. a reader still holding it open on a
-        // platform that forbids unlinking mapped files) only leaks a file.
-        // Readers that already mapped it keep working on Unix. Segments an
-        // organization generation still reads are kept (the organization
-        // deletes them when it drops that generation).
+        self.drop_unreferenced(&entries, replaced.into_iter().map(|e| e.segment_id).filter(|s| *s != meta.id));
+        Ok(())
+    }
+
+    pub(crate) fn unregister_impl(&self, root: &str) -> Result<Option<CatalogEntry>> {
+        let root = canonical(Path::new(root)).to_string_lossy().into_owned();
+        let mut entries = self.entries_impl()?;
+        let mut removed = take_root(&mut entries, &root);
+        let Some(entry) = removed.pop() else { return Ok(None) };
+        self.save(&entries)?;
+        self.drop_unreferenced(&entries, std::iter::once(entry.segment_id.clone()));
+        Ok(Some(entry))
+    }
+
+    /// Deletes the segment files of `candidates` that no entry of `entries`
+    /// and no kept organization generation references.
+    ///
+    /// The catalog no longer points at them, so deleting is best effort: a
+    /// failure (e.g. a reader still holding one open on a platform that
+    /// forbids unlinking mapped files) only leaks a file. Readers that
+    /// already mapped it keep working on Unix. Segments an organization
+    /// generation still reads are kept (the organization deletes them when
+    /// it drops that generation).
+    fn drop_unreferenced(&self, entries: &[CatalogEntry], candidates: impl Iterator<Item = String>) {
         let pinned = crate::org::referenced_segments(&self.dir);
-        for old in replaced {
-            if old != meta.id && !entries.iter().any(|e| e.segment_id == old) && !pinned.contains(&old) {
+        for old in candidates {
+            if !entries.iter().any(|e| e.segment_id == old) && !pinned.contains(&old) {
                 let _ = fs::remove_file(self.segment_path(&old));
             }
         }
-        Ok(())
     }
 
     pub(crate) fn entry_for_path_impl(&self, path: &Path) -> Result<Option<CatalogEntry>> {
@@ -166,4 +176,12 @@ impl Store {
             .filter(|e| path.starts_with(Path::new(&e.root)))
             .max_by_key(|e| Path::new(&e.root).components().count()))
     }
+}
+
+/// Removes the entries whose root is `root` from `entries` and returns them.
+fn take_root(entries: &mut Vec<CatalogEntry>, root: &str) -> Vec<CatalogEntry> {
+    let (taken, kept): (Vec<CatalogEntry>, Vec<CatalogEntry>) =
+        std::mem::take(entries).into_iter().partition(|e| e.root == root);
+    *entries = kept;
+    taken
 }

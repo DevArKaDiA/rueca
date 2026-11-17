@@ -217,9 +217,13 @@
 //! # Catalog
 //!
 //! `catalog.json` is a JSON array of [`CatalogEntry`] sorted by root,
-//! rewritten atomically on every [`Store::register`]. Roots are canonicalized;
-//! [`Store::entry_for_path`] returns the entry with the longest root that is
-//! an ancestor of (or equal to) the canonicalized path.
+//! rewritten atomically on every [`Store::register`] / [`Store::unregister`].
+//! Roots are canonicalized; [`Store::entry_for_path`] returns the entry with
+//! the longest root that is an ancestor of (or equal to) the canonicalized
+//! path. Several entries may share a repository id: worktrees of one
+//! repository, and its ref snapshots (RFC 0006 §9.3), whose roots are
+//! exports under `<store>/refs/` and which carry
+//! [`CatalogEntry::ref_name`].
 //!
 //! # Deviations from RFC 0001 §8 / RFC 0002 §6 (alpha)
 //!
@@ -344,11 +348,34 @@ pub fn write_segment(graph: &ResolvedGraph, contents: &dyn ContentSource, store:
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CatalogEntry {
-    /// Absolute, canonicalized working-tree root.
+    /// Absolute, canonicalized working-tree root (for a ref snapshot: its
+    /// export directory under `<store>/refs/`).
     pub root: String,
     pub repo: String,
     pub segment_id: String,
     pub indexed_at: u64,
+    /// The ref this entry is a snapshot of when its root is a ref export
+    /// (`rueca index --ref`, RFC 0006 §9.3): `feature/x`, `pr/123`, `v1.2`
+    /// or a 12-digit commit. `None` for a working tree (the repository's own
+    /// root, its default ref). Absent in catalogs written before refs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ref_name: Option<String>,
+}
+
+impl CatalogEntry {
+    /// Whether the entry is a ref snapshot exported under the store (not a
+    /// working tree).
+    pub fn is_ref_export(&self) -> bool {
+        self.ref_name.is_some()
+    }
+}
+
+/// The file-name-safe slug of a repository id used in segment ids and in
+/// ref export directories (`github.com/o/r` → `github-com-o-r`): ASCII
+/// alphanumerics lowercased, every other run of characters one `-`, at most
+/// 48 characters. Not injective; callers that need uniqueness check it.
+pub fn repo_slug(repo: &str) -> String {
+    writer::slug(repo, 48)
 }
 
 /// The local catalog (`catalog.json`). Small and rewritten atomically.
@@ -372,7 +399,19 @@ impl Store {
     /// another entry or a kept organization generation ([`org`]) still
     /// references it.
     pub fn register(&self, root: &str, meta: &SegmentMeta) -> Result<()> {
-        self.register_impl(root, meta)
+        self.register_impl(root, meta, None)
+    }
+    /// Like [`Store::register`], marking the entry as the snapshot of ref
+    /// `ref_name` exported at `root` ([`CatalogEntry::ref_name`]).
+    pub fn register_ref(&self, root: &str, meta: &SegmentMeta, ref_name: &str) -> Result<()> {
+        self.register_impl(root, meta, Some(ref_name))
+    }
+    /// Removes the entry of `root` (canonicalized) and returns it; `None`
+    /// when no entry has that root. Its segment file is deleted unless
+    /// another entry or a kept organization generation still references it
+    /// (the same rule as a replacement by [`Store::register`]).
+    pub fn unregister(&self, root: &str) -> Result<Option<CatalogEntry>> {
+        self.unregister_impl(root)
     }
     /// All catalog entries, sorted by root.
     pub fn entries(&self) -> Result<Vec<CatalogEntry>> {

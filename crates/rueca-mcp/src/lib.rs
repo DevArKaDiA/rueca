@@ -282,6 +282,7 @@ pub fn index_root(root: &Path, store: &Path) -> anyhow::Result<()> {
         repo: None,
         budget: rueca_extract::Budget::default(),
         threads: None,
+        ..rueca_index::IndexOptions::default()
     };
     let report = rueca_index::index_worktree(&index_opts)?;
     tracing::info!(

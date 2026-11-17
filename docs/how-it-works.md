@@ -794,6 +794,20 @@ component exists because a tool needs it:
 The segment is written to a temp file and atomically renamed; the catalog
 then points the indexed root at it. Query time never reads the working tree.
 
+**Ref snapshots** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--refs-over-the-organization-design)).
+`rueca index [PATH] --ref <name>` indexes a branch, pull request (`pr/<n>`),
+tag or commit of PATH's repository without touching its working tree: the
+name is resolved with `gix` (a branch or pull request missing locally is
+fetched from `origin`), the commit's tree is written blob by blob to
+`<store>/refs/<repo-slug>/<ref-slug>/`, and that export is indexed like any
+root, its snapshot pinned to the ref (`ref` = the name, `commit`, never
+dirty) under the repository's own id. The catalog entry carries `ref_name`,
+so one repository id groups its working tree and its ref snapshots; tools
+read the working tree unless `ref` names another snapshot. The facts cache
+is keyed by blob, so a second ref only re-extracts the files that differ;
+re-indexing a ref at the same commit does nothing, and `--ref <name>
+--remove` drops the snapshot and its export.
+
 ### 4.6 The organization layer (`rueca-segment` `org`)
 
 When repositories are configured as an organization (`rueca-org.toml`,

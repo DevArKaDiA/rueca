@@ -65,6 +65,7 @@ fn index_org_then_one_member() {
         repo: None,
         budget: Default::default(),
         threads: Some(2),
+        ..IndexOptions::default()
     })
     .unwrap();
     let ups = update_orgs_containing(&store, &base.join("billing")).unwrap();

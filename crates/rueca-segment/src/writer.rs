@@ -13,7 +13,7 @@ use crate::bundle::BundleWriter;
 use crate::packs::{BlobIndex, BlobLoc, PackReader, PackWriter, Sha, compress, parse_sha};
 use crate::{ContentSource, FORMAT_VERSION, Result, SegmentError, SegmentMeta, graph, ngram, priors, store, symbols};
 
-fn slug(s: &str, max: usize) -> String {
+pub(crate) fn slug(s: &str, max: usize) -> String {
     let mut out = String::new();
     for c in s.chars() {
         if c.is_ascii_alphanumeric() {

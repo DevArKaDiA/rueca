@@ -150,12 +150,14 @@ pub fn clone_dir(store: &Path, org_name: &str, url: &str) -> PathBuf {
     dir
 }
 
-fn git(args: &[&str], cwd: Option<&Path>) -> anyhow::Result<()> {
+/// Runs the `git` executable (clones and fetches: the network operations
+/// gix is not used for), failing with its stderr.
+pub(crate) fn git(args: &[&str], cwd: Option<&Path>) -> anyhow::Result<()> {
     let mut cmd = Command::new("git");
     if let Some(d) = cwd {
         cmd.arg("-C").arg(d);
     }
-    let out = cmd.args(args).output().context("cannot run `git` (needed for `url` repositories)")?;
+    let out = cmd.args(args).output().context("cannot run `git` (needed for `url` repositories and fetching refs)")?;
     if !out.status.success() {
         anyhow::bail!("git {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
     }
@@ -241,6 +243,7 @@ pub fn index_org(opts: &OrgIndexOptions) -> anyhow::Result<OrgIndexReport> {
             repo: r.id.clone(),
             budget: opts.budget.clone(),
             threads: opts.threads,
+            ..IndexOptions::default()
         })
         .with_context(|| format!("indexing {}", root.display()))?;
         indexed.push(report);

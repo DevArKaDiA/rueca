@@ -533,6 +533,7 @@ impl Engine {
             repo: g.repo.clone(),
             segment_id: g.segment_id.clone(),
             indexed_at: g.snapshot.indexed_at,
+            ref_name: None,
         };
         let mut v = View::new(seg, entry);
         v.org_repo = Some(repo);

@@ -112,10 +112,11 @@ pub struct CommonArgs {
     /// repository of an `id` argument for tools that take one); otherwise the server's root, else
     /// the repository of an `id` argument, else the only indexed repository.
     pub repo: Option<RepoArg>,
-    /// Ref to read: a branch name, `HEAD`, `worktree`, or a commit (full, or a unique prefix of at
-    /// least 7 hex digits). Local mode indexes the working tree of each root (its checked-out
-    /// branch plus uncommitted changes), which is the default; other refs are an error that lists
-    /// the indexed refs.
+    /// Ref to read: a branch name, `pr/<n>`, a tag, `HEAD`, `worktree`, or a commit (full, or a
+    /// unique prefix of at least 7 hex digits). Default: the working tree of each root (its
+    /// checked-out branch plus uncommitted changes); other refs are read from the ref snapshots
+    /// indexed with `rueca index --ref`; a ref that is not indexed is an error that lists the
+    /// indexed refs.
     #[serde(rename = "ref")]
     pub ref_: Option<String>,
     /// `compact` (default) or `verbose` (the alpha result shapes and defaults, for one release).

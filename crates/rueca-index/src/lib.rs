@@ -49,6 +49,11 @@
 //! Organizations (RFC 0006 §7): [`org`] reads `rueca-org.toml`, indexes its
 //! repositories with this pipeline and builds the organization layer, with
 //! [`link`] computing package registries and cross-repository edges.
+//!
+//! Refs (RFC 0006 §9.3): [`refs`] resolves a branch, pull request, tag or
+//! commit of a repository, exports its tree under `<store>/refs/` and indexes
+//! that tree with this pipeline, the snapshot pinned to the ref
+//! ([`IndexOptions::ref_name`], [`IndexOptions::commit`]).
 
 use std::collections::HashMap;
 use std::fs;
@@ -70,8 +75,9 @@ mod git;
 mod golden;
 pub mod link;
 pub mod org;
+pub mod refs;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct IndexOptions {
     /// Working-tree root to index.
     pub root: PathBuf,
@@ -80,9 +86,37 @@ pub struct IndexOptions {
     /// Repository id override; default `local/<dirname>` or derived from the
     /// git `origin` remote (`github.com/owner/name`).
     pub repo: Option<String>,
+    #[serde(skip)]
     pub budget: Budget,
     /// Worker threads; `None` = available parallelism.
     pub threads: Option<usize>,
+    /// Ref the tree at `root` is an export of (RFC 0006 §9.3; set by
+    /// [`refs::index_ref`]). With [`IndexOptions::commit`] (and `repo`,
+    /// both required with it) the snapshot is pinned instead of read from
+    /// git: `branch` = this name, `commit` = that commit, `dirty` = false,
+    /// and the catalog entry is marked as a ref snapshot
+    /// (`CatalogEntry::ref_name`).
+    #[serde(default)]
+    pub ref_name: Option<String>,
+    /// Full commit of the exported ref (see [`IndexOptions::ref_name`]).
+    #[serde(default)]
+    pub commit: Option<String>,
+}
+
+impl IndexOptions {
+    /// The ref name and commit the snapshot is pinned to, when set. Both or
+    /// neither must be set, and `repo` with them (an export has no `.git`
+    /// to read an identity from).
+    fn pinned(&self) -> anyhow::Result<Option<(&str, &str)>> {
+        match (self.ref_name.as_deref(), self.commit.as_deref()) {
+            (None, None) => Ok(None),
+            (Some(r), Some(c)) => {
+                anyhow::ensure!(self.repo.is_some(), "indexing ref `{r}` needs the repository id (`repo`)");
+                Ok(Some((r, c)))
+            }
+            _ => anyhow::bail!("`ref_name` and `commit` are set together (a ref snapshot) or not at all"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -206,18 +240,21 @@ const CONTENT_MEMORY_CAP: u64 = 512 * 1024 * 1024;
 /// untracked, non-ignored files) and registers the new segment in the store.
 pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
     let started = Instant::now();
+    let pinned = opts.pinned()?;
     let root = fs::canonicalize(&opts.root).with_context(|| format!("cannot access {}", opts.root.display()))?;
     anyhow::ensure!(root.is_dir(), "{} is not a directory", root.display());
     let root_str = root.to_string_lossy().into_owned();
     let mut timings = PhaseTimings::default();
+    let store = Store::open(&opts.store).with_context(|| format!("cannot open store {}", opts.store.display()))?;
 
-    // 1. Walk.
+    // 1. Walk. A store inside the root (ref exports are source trees) is
+    // never indexed; an export reads no ignore files above its own root.
     let t = Instant::now();
-    let paths = walk(&root)?;
+    let walk_opts = WalkOptions { skip: fs::canonicalize(&opts.store).ok(), parents: pinned.is_none() };
+    let paths = walk(&root, &walk_opts)?;
     timings.walk_ms = t.elapsed().as_millis() as u64;
     debug!(files = paths.len(), ms = timings.walk_ms, "walk");
 
-    let store = Store::open(&opts.store).with_context(|| format!("cannot open store {}", opts.store.display()))?;
     let registry = default_registry();
 
     // 2–3. Read, hash, extract (cached).
@@ -277,7 +314,10 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
 
     // 4. Resolve.
     let t = Instant::now();
-    let snapshot = snapshot_info(&root, opts.repo.as_deref(), &files);
+    let snapshot = match pinned {
+        Some((ref_name, commit)) => pinned_snapshot(&root, opts.repo.as_deref().unwrap_or_default(), ref_name, commit),
+        None => snapshot_info(&root, opts.repo.as_deref(), &files),
+    };
     let files_total = files.len() as u64;
     let out = catch_unwind(AssertUnwindSafe(|| rueca_resolve::resolve(snapshot, files, &project, &registry)))
         .map_err(|_| anyhow::anyhow!("resolver panicked (a language pack's module hooks failed)"))?;
@@ -291,7 +331,11 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
     let t = Instant::now();
     let source = WorktreeContent { root: &root, contents: std::sync::Mutex::new(contents) };
     let meta = rueca_segment::write_segment(&out.graph, &source, &opts.store).context("writing segment")?;
-    store.register(&root_str, &meta).context("registering segment")?;
+    match pinned {
+        Some((ref_name, _)) => store.register_ref(&root_str, &meta, ref_name),
+        None => store.register(&root_str, &meta),
+    }
+    .context("registering segment")?;
     timings.write_ms = t.elapsed().as_millis() as u64;
     debug!(segment = %meta.id, bytes = meta.bytes, ms = timings.write_ms, "write");
 
@@ -334,10 +378,21 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
 // Walk
 // ---------------------------------------------------------------------------
 
+/// What [`walk`] adds to the fixed rules.
+#[derive(Debug, Default)]
+struct WalkOptions {
+    /// A directory never entered (the store, when it lies inside the root).
+    skip: Option<PathBuf>,
+    /// Read ignore files of the root's parent directories (working trees:
+    /// yes; ref exports under the store: no, their parents are not theirs).
+    parents: bool,
+}
+
 /// Repository-relative paths (`/` separators) of every indexable regular file
 /// under `root`, sorted.
-fn walk(root: &Path) -> anyhow::Result<Vec<String>> {
+fn walk(root: &Path, opts: &WalkOptions) -> anyhow::Result<Vec<String>> {
     let mut builder = ignore::WalkBuilder::new(root);
+    let skip = opts.skip.clone();
     builder
         // Hidden files are listed (`.github/workflows`, `.eslintrc.js`): only
         // ignore rules and the hard excludes decide.
@@ -346,10 +401,10 @@ fn walk(root: &Path) -> anyhow::Result<Vec<String>> {
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
-        .parents(true)
+        .parents(opts.parents)
         .require_git(false)
         .follow_links(false)
-        .filter_entry(keep_entry);
+        .filter_entry(move |e| keep_entry(e) && skip.as_deref().is_none_or(|s| e.depth() == 0 || e.path() != s));
     let mut out = Vec::new();
     for entry in builder.build() {
         let entry = match entry {
@@ -544,6 +599,20 @@ impl ContentSource for WorktreeContent<'_> {
 // Snapshot info
 // ---------------------------------------------------------------------------
 
+/// The repository id of the working tree at `root` (canonical), as
+/// [`index_worktree`] records it: `repo_override`, else the normalized
+/// `remote.origin.url` of the enclosing git repository, else
+/// `local/<dirname>`.
+pub fn repo_id(root: &Path, repo_override: Option<&str>) -> String {
+    repo_override.map(str::to_string).or_else(|| git::origin_repo_id(root)).unwrap_or_else(|| local_repo_id(root))
+}
+
+/// `local/<dirname>` of a root outside a hosted repository.
+fn local_repo_id(root: &Path) -> String {
+    let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "root".into());
+    format!("local/{name}")
+}
+
 /// Snapshot identity from git (via `gix`, see [`git`]): repo id from
 /// `remote.origin.url` (else `local/<dirname>`), commit = `HEAD` (else
 /// `"worktree"`), dirty = indexed content differs from `HEAD`.
@@ -552,10 +621,7 @@ fn snapshot_info(root: &Path, repo_override: Option<&str>, files: &[FileInput]) 
     let repo = repo_override
         .map(str::to_string)
         .or_else(|| info.as_ref().and_then(|i| i.repo_id.clone()))
-        .unwrap_or_else(|| {
-            let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "root".into());
-            format!("local/{name}")
-        });
+        .unwrap_or_else(|| local_repo_id(root));
     let commit = info.as_ref().and_then(|i| i.commit.clone()).unwrap_or_else(|| "worktree".into());
     let dirty = match &info {
         Some(i) => git::is_dirty(i, root, files.iter().map(|f| (f.path.as_str(), f.blob_sha.as_str()))),
@@ -566,6 +632,20 @@ fn snapshot_info(root: &Path, repo_override: Option<&str>, files: &[FileInput]) 
         commit,
         dirty,
         branch: info.as_ref().and_then(|i| i.branch.clone()),
+        root: Some(root.to_string_lossy().into_owned()),
+        indexed_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+        rueca_version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+/// The identity of a ref export (RFC 0006 §9.3): what the caller pinned, no
+/// git read (the export has no `.git`); never dirty.
+fn pinned_snapshot(root: &Path, repo: &str, ref_name: &str, commit: &str) -> SnapshotInfo {
+    SnapshotInfo {
+        repo: repo.to_string(),
+        commit: commit.to_string(),
+        dirty: false,
+        branch: Some(ref_name.to_string()),
         root: Some(root.to_string_lossy().into_owned()),
         indexed_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
         rueca_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -651,7 +731,7 @@ mod tests {
         write("venv/lib/x.py", b"\n");
         write("pkg/__pycache__/a.pyc", b"\x00");
         write("README.md", b"# hi\n");
-        let paths = walk(root).unwrap();
+        let paths = walk(root, &WalkOptions { parents: true, ..Default::default() }).unwrap();
         let expected = [".github/ci.yml", ".gitignore", "README.md", "src/a.py"];
         assert_eq!(paths, expected.map(String::from).to_vec());
     }
@@ -690,7 +770,7 @@ mod tests {
     }
 
     fn load_all(root: &Path, registry: &Registry, store: &Path) -> Vec<Loaded> {
-        let paths = walk(root).unwrap();
+        let paths = walk(root, &WalkOptions { parents: true, ..Default::default() }).unwrap();
         let kept = AtomicU64::new(0);
         let budget = Budget::default();
         let facts_dir = store.join("facts");

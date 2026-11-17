@@ -47,11 +47,16 @@
 //! indexed root. Without it: the repository of an `id` argument (the root
 //! whose commit the id names when several roots index that repository), else
 //! the engine's default root, else the only indexed root, else an error
-//! listing the indexed roots. `ref` then keeps the snapshots it names
-//! ([`snapshot::SnapshotDesc::matches_ref`]); local mode has one snapshot per
-//! root (its working tree, named by the checked-out branch, `HEAD` when
-//! detached, `worktree` outside git), and any other ref is an error listing
-//! the indexed refs (with `"*"`, snapshots without the ref are skipped).
+//! listing the indexed roots. Ref snapshots (`rueca index --ref`, RFC 0006
+//! §9.3: catalog entries with `ref_name`, rooted at an export under the
+//! store) are never the default: a repository id, `"*"` and the default root
+//! select working trees. `ref` then picks, for each selected snapshot, the
+//! one of its repository that the ref names
+//! ([`snapshot::SnapshotDesc::matches_ref`]): the selected snapshot itself
+//! when it matches (its branch, `HEAD`, `worktree` or its commit), else
+//! another snapshot with the same repository id (a ref snapshot, another
+//! worktree). A ref no snapshot of the repository has is an error listing
+//! its indexed refs (with `"*"`, repositories without the ref are skipped).
 //!
 //! With several snapshots, `search_symbols` returns **one ranking** (RFC 0006
 //! §6, no rank fusion): every snapshot's symbol index is scored with BM25
@@ -434,7 +439,10 @@ impl Engine {
                 self.store_dir.display()
             );
         }
-        let (selected, star) = self.selected_entries(&store, &entries, c, id)?;
+        let (mut selected, star) = self.selected_entries(&store, &entries, c, id)?;
+        if let (Some(r), None) = (c.ref_.as_deref(), &self.org) {
+            selected = self.pick_refs(&store, &entries, selected, r, star)?;
+        }
         let mut views = Vec::with_capacity(selected.len());
         for e in selected {
             let seg = self.open_cached(&store, &e.segment_id)?;
@@ -443,20 +451,73 @@ impl Engine {
             v.org_repo = i;
             views.push(v);
         }
-        let Some(r) = c.ref_.as_deref() else { return Ok(Selection { views, org }) };
+        let Some(r) = c.ref_.as_deref().filter(|_| self.org.is_some()) else {
+            return Ok(Selection { views, org });
+        };
         let (keep, miss): (Vec<View>, Vec<View>) = views.into_iter().partition(|v| v.snap.matches_ref(r));
         if let Some(v) = miss.first()
             && (!star || keep.is_empty())
         {
-            let refs = self.indexed_refs(&store, &entries, v.repo());
-            anyhow::bail!(
-                "ref `{r}` is not indexed for repository `{}`; indexed refs: {refs}. Local mode indexes the \
-                 working tree of each root (its checked-out branch plus uncommitted changes); index another \
-                 worktree to read another ref",
-                v.repo()
-            );
+            return Err(self.unknown_ref(&store, &entries, r, v.repo()));
         }
         Ok(Selection { views: keep, org })
+    }
+
+    /// Local mode: for each selected entry, the snapshot of its repository
+    /// that ref `r` names (see the crate docs, *Snapshot selection*). A
+    /// repository without one is an error, skipped with `"*"` unless no
+    /// repository has the ref.
+    fn pick_refs(
+        &self,
+        store: &Store,
+        entries: &[CatalogEntry],
+        selected: Vec<CatalogEntry>,
+        r: &str,
+        star: bool,
+    ) -> anyhow::Result<Vec<CatalogEntry>> {
+        let mut picked = Vec::with_capacity(selected.len());
+        let mut missing: Option<String> = None;
+        for base in &selected {
+            match self.ref_snapshot(store, entries, base, r) {
+                Some(e) => add_entry(&mut picked, e),
+                None => {
+                    missing.get_or_insert_with(|| base.repo.clone());
+                }
+            }
+        }
+        if let Some(repo) = missing
+            && (!star || picked.is_empty())
+        {
+            return Err(self.unknown_ref(store, entries, r, &repo));
+        }
+        Ok(picked)
+    }
+
+    /// `base` when ref `r` names it, else the first other entry of its
+    /// repository that `r` names.
+    fn ref_snapshot(
+        &self,
+        store: &Store,
+        entries: &[CatalogEntry],
+        base: &CatalogEntry,
+        r: &str,
+    ) -> Option<CatalogEntry> {
+        let siblings = entries.iter().filter(|e| e.repo == base.repo && e.root != base.root);
+        std::iter::once(base).chain(siblings).find(|e| self.entry_matches_ref(store, e, r)).cloned()
+    }
+
+    fn entry_matches_ref(&self, store: &Store, e: &CatalogEntry, r: &str) -> bool {
+        self.open_cached(store, &e.segment_id)
+            .is_ok_and(|seg| snapshot::SnapshotDesc::from_info(seg.snapshot()).matches_ref(r))
+    }
+
+    /// The error for a ref repository `repo` has no snapshot of.
+    fn unknown_ref(&self, store: &Store, entries: &[CatalogEntry], r: &str, repo: &str) -> anyhow::Error {
+        let refs = self.indexed_refs(store, entries, repo);
+        anyhow::anyhow!(
+            "ref `{r}` is not indexed for repository `{repo}`; indexed refs: {refs}. `rueca index <path> --ref \
+             <name>` indexes another ref (a branch, `pr/<n>`, a tag or a commit)"
+        )
     }
 
     /// The catalog of organization `name`: the repositories the caller may
@@ -473,6 +534,7 @@ impl Engine {
                     repo: r.repo.clone(),
                     segment_id: r.segment_id.clone(),
                     indexed_at: r.snapshot.indexed_at,
+                    ref_name: None,
                 });
             }
         }
@@ -499,13 +561,13 @@ impl Engine {
                 Some(p) => add_entry(&mut selected, self.entry_for_id(store, entries, p)?),
                 None if self.org.is_some() => {
                     star = true;
-                    add_entries(&mut selected, entries);
+                    add_entries(&mut selected, &default_entries(entries));
                 }
                 None => add_entry(&mut selected, self.select_entry(store, entries, None, None)?),
             },
             Some(RepoArg::One(r)) if r.trim() == "*" => {
                 star = true;
-                add_entries(&mut selected, entries);
+                add_entries(&mut selected, &default_entries(entries));
             }
             Some(RepoArg::One(r)) => add_entry(&mut selected, self.select_entry(store, entries, Some(r), None)?),
             Some(RepoArg::Many(list)) => {
@@ -515,7 +577,7 @@ impl Engine {
                 for r in list {
                     if r.trim() == "*" {
                         star = true;
-                        add_entries(&mut selected, entries);
+                        add_entries(&mut selected, &default_entries(entries));
                     } else {
                         add_entry(&mut selected, self.select_entry(store, entries, Some(r), None)?);
                     }
@@ -546,13 +608,22 @@ impl Engine {
         Ok(idx)
     }
 
-    /// Indexed refs of repository `repo`, for error messages.
+    /// Indexed refs of repository `repo`, for error messages: working trees
+    /// first, then ref snapshots.
     fn indexed_refs(&self, store: &Store, entries: &[CatalogEntry], repo: &str) -> String {
-        let refs: Vec<String> = entries
-            .iter()
-            .filter(|e| e.repo == repo)
-            .filter_map(|e| self.open_cached(store, &e.segment_id).ok())
-            .map(|seg| snapshot::SnapshotDesc::from_info(seg.snapshot()).describe())
+        let mut mine: Vec<&CatalogEntry> = entries.iter().filter(|e| e.repo == repo).collect();
+        mine.sort_by_key(|e| e.is_ref_export());
+        let refs: Vec<String> = mine
+            .into_iter()
+            .filter_map(|e| Some((e, self.open_cached(store, &e.segment_id).ok()?)))
+            .map(|(e, seg)| {
+                let d = snapshot::SnapshotDesc::from_info(seg.snapshot());
+                if e.is_ref_export() {
+                    format!("`{}` ({}, ref snapshot)", d.ref_name, d.id_commit())
+                } else {
+                    d.describe()
+                }
+            })
             .collect();
         if refs.is_empty() { "none".to_string() } else { refs.join(", ") }
     }
@@ -640,10 +711,14 @@ impl Engine {
         anyhow::bail!("several repositories are indexed; pass `repo` (a root path or repository id): {}", roots())
     }
 
-    /// Entry whose repository id is `repo`. If several roots share the id, the
-    /// one containing the default root wins; otherwise it is ambiguous.
+    /// Entry whose repository id is `repo`: its working tree (ref snapshots
+    /// only when the repository has no working tree indexed; then the first).
+    /// If several working trees share the id, the one containing the default
+    /// root wins; otherwise it is ambiguous.
     fn entry_by_repo_id(&self, entries: &[CatalogEntry], repo: &str) -> anyhow::Result<Option<CatalogEntry>> {
-        let hits: Vec<&CatalogEntry> = entries.iter().filter(|e| e.repo == repo).collect();
+        let all: Vec<&CatalogEntry> = entries.iter().filter(|e| e.repo == repo).collect();
+        let own: Vec<&CatalogEntry> = all.iter().copied().filter(|e| !e.is_ref_export()).collect();
+        let hits = if own.is_empty() { all.into_iter().take(1).collect() } else { own };
         match hits.len() {
             0 => Ok(None),
             1 => Ok(Some(hits[0].clone())),
@@ -679,6 +754,18 @@ fn add_entry(selected: &mut Vec<CatalogEntry>, e: CatalogEntry) {
     if !selected.iter().any(|x| x.root == e.root) {
         selected.push(e);
     }
+}
+
+/// The entries `"*"` selects: every working tree, and the first ref snapshot
+/// of a repository that has no working tree indexed.
+fn default_entries(entries: &[CatalogEntry]) -> Vec<CatalogEntry> {
+    let own: BTreeSet<&str> = entries.iter().filter(|e| !e.is_ref_export()).map(|e| e.repo.as_str()).collect();
+    let mut seen = BTreeSet::new();
+    entries
+        .iter()
+        .filter(|e| !e.is_ref_export() || (!own.contains(e.repo.as_str()) && seen.insert(e.repo.as_str())))
+        .cloned()
+        .collect()
 }
 
 /// Adds every entry whose root is not in `selected` yet.
