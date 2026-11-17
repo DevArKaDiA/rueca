@@ -265,7 +265,8 @@ impl Engine {
             limit: if collapse { offset.saturating_add(limit + 1).saturating_mul(per_repo) } else { limit + 1 },
             offset: if collapse { 0 } else { offset },
         };
-        let (ranked, retrieval) = self.rank_with_mode(&sel, &base, a.mode)?;
+        let rerank = self.rerank_request(a.rerank, a.rerank_k);
+        let (ranked, retrieval) = self.rank_with_mode(&sel, &base, a.mode, rerank)?;
         let mut ranked: Vec<(Key, f64, Option<RefMark>)> = if collapse {
             refset::collapse_hits(views, ranked).into_iter().skip(offset).collect()
         } else {
@@ -294,16 +295,7 @@ impl Engine {
 
     /// `(view, node, score)`: one ranking over every selected snapshot (RFC
     /// 0006 §6) — the organization index, or the snapshots' indexes scored
-    /// with summed statistics.
-    pub(crate) fn rank_symbols(
-        &self,
-        sel: &Selection,
-        base: &SymbolQuery,
-    ) -> anyhow::Result<Vec<(usize, NodeId, f64)>> {
-        Ok(self.rank_symbols_routed(sel, base)?.hits)
-    }
-
-    /// [`Engine::rank_symbols`] with the routing it applied per view.
+    /// with summed statistics — with the routing it applied per view.
     pub(crate) fn rank_symbols_routed(&self, sel: &Selection, base: &SymbolQuery) -> anyhow::Result<Ranked> {
         let views = &sel.views;
         let unrouted = |hits| Ranked { hits, boost: vec![1.0; views.len()], routed: vec![true; views.len()] };

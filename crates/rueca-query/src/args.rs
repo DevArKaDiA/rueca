@@ -204,6 +204,12 @@ pub struct SearchSymbolsArgs {
     /// --embed` and the model loads, else `lexical`. An explicit `hybrid` or `semantic` that
     /// cannot be served is an error.
     pub mode: Option<SearchModeArg>,
+    /// Rerank the top `rerank_k` results with a cross-encoder (slower: seconds). Default: the
+    /// store's `[retrieval] rerank` (off). An explicit `true` without the reranker's weights is
+    /// an error.
+    pub rerank: Option<bool>,
+    /// Candidates the reranker scores, 1–200 (default 50).
+    pub rerank_k: Option<i64>,
     #[serde(flatten)]
     pub common: CommonArgs,
 }

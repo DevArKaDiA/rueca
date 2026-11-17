@@ -67,7 +67,10 @@
 //! `search_symbols` takes `mode` (RFC 0007): over snapshots indexed with
 //! vectors it fuses BM25 with embedding similarity by default (`hybrid`),
 //! or ranks by the embedding alone (`semantic`); the envelope's `retrieval`
-//! says which ranking a call got ([`FusionParams`], `hybrid.rs`).
+//! says which ranking a call got ([`FusionParams`], `hybrid.rs`). Graph
+//! expansion and a centrality prior ([`GraphParams`], `graph.rs`, off by
+//! default) and a cross-encoder reranker (`rerank`, [`RerankParams`],
+//! `rerank.rs`, off by default) refine that first stage.
 //!
 //! With several snapshots, `search_symbols` returns **one ranking** (RFC 0006
 //! §6, no rank fusion): every snapshot's symbol index is scored with BM25
@@ -173,10 +176,12 @@
 mod args;
 pub mod compact;
 mod contracts;
+mod graph;
 mod hybrid;
 pub mod multiref;
 mod orgsel;
 mod refset;
+mod rerank;
 pub mod snapshot;
 mod text;
 mod tools;
@@ -200,7 +205,9 @@ pub use args::{
     SearchModeArg, SearchSymbolsArgs, TraceArgs,
 };
 pub use compact::render_text;
+pub use graph::{ExpandEdges, GraphParams};
 pub use hybrid::{FusionParams, Norm, PresetQueryLoader, QueryEmbedderLoader};
+pub use rerank::{PresetRerankerLoader, RERANK_TEXT_TOKENS, RerankParams, RerankerLoader};
 pub use text::split_lines;
 
 use view::View;
@@ -389,6 +396,14 @@ pub struct Engine {
     /// Query embedders by embed key, loaded once per process (a failure is
     /// kept too, so an absent model is not retried on every call).
     embedders: Mutex<HashMap<String, hybrid::EmbedderSlot>>,
+    /// Graph expansion and the centrality prior (RFC 0007 §7.3, §7.4).
+    graph: GraphParams,
+    /// The reranker stage (RFC 0007 §7.5).
+    rerank: RerankParams,
+    /// Where rerankers come from.
+    rerank_loader: Arc<dyn RerankerLoader>,
+    /// Rerankers by preset, loaded once per process (failures kept).
+    rerankers: Mutex<HashMap<String, rerank::RerankerSlot>>,
 }
 
 /// The snapshots a call reads, plus the organization context in organization
@@ -414,6 +429,7 @@ pub(crate) struct OrgCtx {
 impl Engine {
     pub fn new(store_dir: PathBuf, default_root: Option<PathBuf>) -> anyhow::Result<Engine> {
         let default_root = default_root.map(|r| std::fs::canonicalize(&r).unwrap_or(r));
+        let config = rueca_embed::RetrievalConfig::load(&store_dir).unwrap_or_default();
         Ok(Engine {
             default_root,
             org: None,
@@ -421,9 +437,13 @@ impl Engine {
             route: RouteParams::from_env(),
             segments: Mutex::new(HashMap::new()),
             org_index: Mutex::new(None),
-            fusion: FusionParams::resolve(&rueca_embed::RetrievalConfig::load(&store_dir).unwrap_or_default()),
+            fusion: FusionParams::resolve(&config),
             query_loader: Arc::new(PresetQueryLoader { store: store_dir.clone() }),
             embedders: Mutex::new(HashMap::new()),
+            graph: GraphParams::resolve(&config),
+            rerank: RerankParams::resolve(&config),
+            rerank_loader: Arc::new(PresetRerankerLoader { store: store_dir.clone() }),
+            rerankers: Mutex::new(HashMap::new()),
             store_dir,
         })
     }
@@ -437,6 +457,36 @@ impl Engine {
 
     pub fn fusion(&self) -> &FusionParams {
         &self.fusion
+    }
+
+    /// Sets graph expansion and the centrality prior (default:
+    /// [`GraphParams::resolve`] over the environment and `<store>/rueca.toml`).
+    pub fn with_graph(mut self, graph: GraphParams) -> Engine {
+        self.graph = graph;
+        self
+    }
+
+    pub fn graph(&self) -> &GraphParams {
+        &self.graph
+    }
+
+    /// Sets the reranker stage (default: [`RerankParams::resolve`] over the
+    /// environment and `<store>/rueca.toml`).
+    pub fn with_rerank(mut self, rerank: RerankParams) -> Engine {
+        self.rerank = rerank;
+        self
+    }
+
+    pub fn rerank_params(&self) -> &RerankParams {
+        &self.rerank
+    }
+
+    /// Sets where rerankers come from (default: the presets of
+    /// `rueca-embed`, weights from the store's model cache).
+    pub fn with_reranker(mut self, loader: Arc<dyn RerankerLoader>) -> Engine {
+        self.rerank_loader = loader;
+        self.rerankers = Mutex::new(HashMap::new());
+        self
     }
 
     /// Sets where query embedders come from (default: the presets of

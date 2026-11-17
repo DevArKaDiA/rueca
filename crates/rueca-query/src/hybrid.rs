@@ -33,6 +33,8 @@ use rueca_segment::{SymbolQuery, Vectors, VectorsMeta};
 use serde_json::{Value, json};
 
 use crate::args::SearchModeArg;
+use crate::graph::{ExpandEdges, Hit};
+use crate::rerank::{RerankInfo, RerankRequest};
 use crate::{Engine, Selection};
 
 /// Dense candidates rescored from the `f16` cache, at most (RFC 0007 §6.2).
@@ -144,6 +146,12 @@ pub(crate) struct Retrieval {
     pub alpha: Option<f32>,
     /// Snapshots (repository ids) ranked without vectors in a fused answer.
     pub lexical: Vec<String>,
+    /// Graph expansion: the edge set and how many neighbours joined.
+    pub expansion: Option<(ExpandEdges, usize)>,
+    /// Centrality prior exponent, when not 0.
+    pub centrality: Option<f32>,
+    /// The reranker stage, when it ran.
+    pub reranker: Option<RerankInfo>,
     pub warnings: Vec<String>,
 }
 
@@ -163,6 +171,15 @@ impl Retrieval {
         }
         if !self.lexical.is_empty() {
             m.insert("lexical".into(), json!(self.lexical));
+        }
+        if let Some((edges, added)) = self.expansion {
+            m.insert("expansion".into(), json!({"edges": edges.as_str(), "added": added}));
+        }
+        if let Some(beta) = self.centrality {
+            m.insert("centrality".into(), json!(crate::compact::sig3(f64::from(beta))));
+        }
+        if let Some(r) = &self.reranker {
+            m.insert("reranker".into(), r.to_json());
         }
         if !self.warnings.is_empty() {
             m.insert("warnings".into(), json!(self.warnings));
@@ -273,22 +290,55 @@ pub(crate) type RankedNodes = Vec<(usize, NodeId, f64)>;
 /// A query embedder loaded once per process, or why it could not be.
 pub(crate) type EmbedderSlot = Result<Arc<dyn Embedder>, String>;
 
+/// A first-stage ranking: hits, the routing boost per view, the envelope.
+pub(crate) struct StageOne {
+    pub hits: RankedNodes,
+    pub boost: Vec<f32>,
+    pub retrieval: Retrieval,
+}
+
 impl Engine {
     /// The ranking of `search_symbols` in the requested mode, honoring
-    /// `base.offset` / `base.limit`, and what the envelope says about it.
+    /// `base.offset` / `base.limit`, and what the envelope says about it:
+    /// the first stage (lexical or fused), then the graph signals and the
+    /// reranker over a pool of at least N candidates when either is on.
     pub(crate) fn rank_with_mode(
         &self,
         sel: &Selection,
         base: &SymbolQuery,
         mode: Option<SearchModeArg>,
+        rerank: Option<RerankRequest>,
     ) -> anyhow::Result<(RankedNodes, Retrieval)> {
+        if !self.graph.active() && rerank.is_none() {
+            let one = self.stage_one(sel, base, mode)?;
+            return Ok((one.hits, one.retrieval));
+        }
+        let limit = if base.limit == 0 { 20 } else { base.limit };
+        let want = base.offset.saturating_add(limit);
+        let pool = self.fusion.n.max(want).max(rerank.map_or(0, |r| r.k));
+        let StageOne { mut hits, boost, mut retrieval } =
+            self.stage_one(sel, &SymbolQuery { offset: 0, limit: pool, ..base.clone() }, mode)?;
+        let added = self.graph_stage(sel, base, &mut hits, &boost)?;
+        if self.graph.expand != ExpandEdges::Off {
+            retrieval.expansion = Some((self.graph.expand, added));
+        }
+        retrieval.centrality = (self.graph.centrality_beta != 0.0).then_some(self.graph.centrality_beta);
+        if let Some(req) = rerank {
+            self.rerank_stage(sel, &base.text, &mut hits, req, &mut retrieval)?;
+        }
+        Ok((hits.into_iter().skip(base.offset).take(limit).collect(), retrieval))
+    }
+
+    /// The first stage in the requested mode, honoring `base.offset` /
+    /// `base.limit`.
+    fn stage_one(&self, sel: &Selection, base: &SymbolQuery, mode: Option<SearchModeArg>) -> anyhow::Result<StageOne> {
         if mode == Some(SearchModeArg::Lexical) {
-            return Ok((self.rank_symbols(sel, base)?, Retrieval::lexical(Vec::new())));
+            return self.lexical_stage(sel, base, Retrieval::lexical(Vec::new()));
         }
         let semantic = mode == Some(SearchModeArg::Semantic);
         let (dense, mut retrieval) = match self.dense_setup(sel, &base.text, mode.is_some())? {
             Setup::Dense(d, r) => (d, r),
-            Setup::Lexical(r) => return Ok((self.rank_symbols(sel, base)?, r)),
+            Setup::Lexical(r) => return self.lexical_stage(sel, base, r),
         };
         let limit = if base.limit == 0 { 20 } else { base.limit };
         let pool = self.fusion.n.max(base.offset.saturating_add(limit));
@@ -302,7 +352,14 @@ impl Engine {
             retrieval.warnings.push(format!("not searched in semantic mode (no vectors): {}", skipped.join(", ")));
         }
         let fused = fuse(&cands, alpha, self.fusion.norm);
-        Ok((fused.into_iter().skip(base.offset).take(limit).collect(), retrieval))
+        let hits: Vec<Hit> = fused.into_iter().skip(base.offset).take(limit).collect();
+        Ok(StageOne { hits, boost: ranked.boost, retrieval })
+    }
+
+    /// BM25 with priors and routing (today's path).
+    fn lexical_stage(&self, sel: &Selection, base: &SymbolQuery, retrieval: Retrieval) -> anyhow::Result<StageOne> {
+        let ranked = self.rank_symbols_routed(sel, base)?;
+        Ok(StageOne { hits: ranked.hits, boost: ranked.boost, retrieval })
     }
 
     /// Which views have vectors for one model, that model loaded and the
@@ -341,7 +398,7 @@ impl Engine {
         let lexical: Vec<String> =
             sel.views.iter().zip(&vectors).filter(|(_, x)| x.is_none()).map(|(v, _)| v.repo().to_string()).collect();
         let model = Some(format!("{}:{}", meta.preset, short(&meta.model_key)));
-        let r = Retrieval { mode: "hybrid", model, alpha: None, lexical, warnings };
+        let r = Retrieval { mode: "hybrid", model, lexical, warnings, ..Retrieval::default() };
         Ok(Setup::Dense(Box::new(Dense { vectors, queries, meta }), r))
     }
 

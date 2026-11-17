@@ -422,6 +422,30 @@ fn trace_follows_link_edges_across_repositories() {
     assert!(v["results"][0].get("depends_on").is_none(), "{v}");
 }
 
+/// The impact question (RFC 0007 §7.3): a library symbol's consumers in
+/// other repositories join a search for it through graph expansion over the
+/// link layer.
+#[test]
+fn expansion_reaches_consumers_across_repositories() {
+    let f = linked_fixture();
+    let expand = rueca_query::GraphParams { expand: rueca_query::ExpandEdges::Calls, ..Default::default() };
+    let q = json!({"query": "charge_card", "scores": true, "mode": "lexical"});
+    let consumer = (BILLING.to_string(), "pkg.service.InvoiceService.issue".to_string());
+    let has = |v: &Value| ranking(v).iter().any(|(r, qn, _)| (r.clone(), qn.clone()) == consumer);
+    let off = call(&f.engine(), "search_symbols", q.clone());
+    assert!(!has(&off), "{off}");
+    let v = call(&f.engine().with_graph(expand), "search_symbols", q.clone());
+    assert!(has(&v), "{v}");
+    assert_eq!(ranking(&v)[0].1, "payments.charge.charge_card", "{v}");
+    assert!(v["retrieval"]["expansion"]["added"].as_u64().unwrap() >= 1, "{v}");
+    // Not across what the caller cannot read, nor outside `repo`.
+    let only = f.engine().with_visibility(Visibility::Repos([PAYMENTS.to_string()].into_iter().collect()));
+    assert!(!has(&call(&only.with_graph(expand), "search_symbols", q.clone())));
+    let mut narrowed = q;
+    narrowed["repo"] = json!(PAYMENTS);
+    assert!(!has(&call(&f.engine().with_graph(expand), "search_symbols", narrowed)));
+}
+
 #[test]
 fn routing_ranks_repositories_and_weighs_symbols() {
     let f = linked_fixture();
