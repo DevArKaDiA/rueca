@@ -28,13 +28,17 @@ organization (the default in organization mode), at any indexed ref.
 ## 2. Motivation
 
 RFC 0005 searched several repositories by querying each one and merging the
-rankings with reciprocal rank fusion. The benchmark's multi-repository
-scenario (21 repositories in one store) showed why that fails: with
-`repo: "*"`, File Acc@5 drops to **9.5%** against **61.9%** when the right
-repository is queried alone, and 94% of the top 10 comes from other
-repositories. Rank fusion gives every repository's best hit the same weight,
-so the 21 first places tie; BM25 scores from separate indexes cannot be
-compared because each index has its own term statistics.
+rankings with reciprocal rank fusion. The benchmark's first multi-repository
+scenario (21 repositories in one store, one issue each) showed why that
+fails: with `repo: "*"`, File Acc@5 drops to **9.5%** against **61.9%** when
+the right repository is queried alone, and 94% of the top 10 comes from
+other repositories. Rank fusion gives every repository's best hit the same
+weight, so the 21 first places tie; BM25 scores from separate indexes cannot
+be compared because each index has its own term statistics. The
+organization suite that replaced that scenario (§8; 120 issues over 42
+repositories) measures the same failure: per-repository search merged by
+rank fusion keeps **24.2%** against **66.7%** alone, with 91.7% of the top
+10 from other repositories.
 
 A federated search treats the organization as N islands. Agents in an
 organization ask questions that cross them: where is this endpoint
@@ -187,16 +191,45 @@ path = "~/src/payments"
 
 The benchmark's multi-repository scenario becomes the organization suite:
 
-| Metric | Today (rank fusion) | Floor | Target |
+| Metric | Today (gated split, n = 120; `docs/bench/alpha-results.md`) | Floor | Target |
 |---|---|---|---|
-| File Acc@5, organization scope vs the right repository alone | 9.5% vs 61.9% | ≥ 0.85 × single-repository | ≥ 0.95 × |
-| Cross-repository edges (packages) precision / recall on labelled pairs | — | ≥ 90 / 75 | ≥ 97 / 90 |
-| Incremental update: re-index one repository of 21 | — | org layer ≤ 2× the repository's own index time | ≤ 1× |
-| Tokens per correct answer, organization scope | 831 vs 337 single-repo (top 10) | reported | ≤ 1.2 × single-repo |
+| File Acc@5, organization scope vs the right repository alone | 56.7% vs 66.7% (0.85×, 95% CI 0.74–0.96 ⚠; rank fusion: 24.2%) | ≥ 0.85 × single-repository | ≥ 0.95 × |
+| Cross-repository edges (packages) precision / recall on labelled pairs | 12 pairs: 98.3 / 74.9 (recall ❌); without Rust (8 pairs) 99.8 / 96.2; Rust alone (4 pairs) 94.5 / 53.2 | ≥ 90 / 75 | ≥ 97 / 90 |
+| Incremental update: re-index one repository of 42 | micropython/micropython: organization layer 504 ms vs 2,681 ms (0.19×) | org layer ≤ 2× the repository's own index time | ≤ 1× |
+| Tokens per correct answer, organization scope | 701 vs 542 single-repo (1.29×, 95% CI 1.13–1.50; top 10) | reported | ≤ 1.2 × single-repo |
+
+The suite's population (`bench/README.md`, *Org scenarios*). Members are
+every gated S1 repository (42, eight languages), each **pinned** at the
+base commit of its first gated S1 instance and indexed one at a time into
+one organization; the calibration organization adds 8 calibration members
+pinned the same way, the gated members acting as distractors. **Issue**
+instances: per member, the first 3 S1 instances (calibration: 5) whose gold
+— the files and functions of the real fix patch — is present at the pin
+and whose fix is not already there (`patch_at_pin != reverse`); the gold is
+carried to the pin and the query is the issue's keyword query. Gated: 120
+issue instances over 42 members (python 14, ts/js 15, php 21, go 15, java
+15, c 12, cpp 10, rust 18); calibration: 29, never gated. **Impact**
+instances (16 gated) ask the issue of a library member (tokio for axum;
+carbon, monolog and commonmark for laravel/framework; gson for dubbo and
+apollo) and score, besides its own gold, the consumer files that use a
+symbol the fix changes, labelled at the pins by the independent
+cross-repository labeler: they measure whether one organization ranking
+surfaces the consumers of a changed library symbol (consumer hit@10 /
+hit@20, recall@20). Every arm answers the same questions natively and per
+repository merged by rank fusion, against its own single-repository answer
+in the same run: Rueca (`--org`), BM25 over the union of the members (the
+plain-text floor arm) and cbm (per project + rank fusion). Rates
+carry Wilson intervals; Rueca − BM25 and the other pairs are paired
+bootstraps that also state the discordance and the minimum detectable
+effect (RFC 0004 §7.6): at n = 120 a File Acc@5 difference below 12.1
+points can go undetected (29.0 at the 21 instances of the first scenario).
 
 Cross-repository gold: pairs of corpus repositories where one depends on
 another (a library and a consumer pinned to it), labelled from the
-consumer's imports.
+consumer's imports and uses by an independent labeler (Python `ast`, PHP
+and Java `use` / `import`, Rust Cargo packages and module trees); pooled
+over all 12 pairs, over the pairs without Rust and over the Rust pairs
+alone.
 
 ## 9. Phasing
 
@@ -265,7 +298,9 @@ The organization symbol index, the scope API and local `--org` landed in
   repository named in `repo` or in an id is reported like one that does not
   exist).
 
-Measured (bench organization suite, 21 repositories, `bench/README.md`):
+Measured at the time (the first organization scenario, 21 instances over
+21 repositories; another population than today's suite, §8 — kept as the
+record of phase 1, not comparable with §9.2):
 
 | Metric | Phase 1 | Floor | Target |
 |---|---|---|---|
@@ -312,7 +347,11 @@ repositories) and the CLI (`rueca links --org`). Choices and deviations:
   calibration S1 instances asked of an organization of the 7 calibration
   repositories plus the gated organization's 21 repositories as
   distractors (their documents only), against each instance's repository
-  searched alone in the same store (`bench/README.md`, *Org scenarios*):
+  searched alone in the same store (`bench/README.md`, *Org scenarios*).
+  The sweep below is the historical record of that choice: it was run on
+  the earlier 35-instance calibration organization, before the
+  organization suite of §8 (whose calibration split, 29 instances over a
+  50-member organization, measures the chosen default):
 
   | Routing | File Acc@5 org / single | Other repositories in the top 10 | Tokens per correct answer, org / single |
   |---|---|---|---|
@@ -367,31 +406,69 @@ repositories) and the CLI (`rueca links --org`). Choices and deviations:
   only by order: a consumer's import is tried against every dependency
   publishing a matching key, first match wins; lockfiles are not read.
 
-Measured (bench organization suite, `bench/README.md`):
+Measured on the organization suite of §8 (`docs/bench/alpha-results.md`,
+*Org scenarios*; method in `bench/README.md`). The 21-instance rows
+published here before 2026-11-16 are dropped: another population, not
+comparable and no longer carried (§10).
 
-| Metric | Phase 2 | Phase 1 | Floor | Target |
-|---|---|---|---|---|
-| File Acc@5, organization scope vs the right repository alone, calibration split (35 instances, 28 repositories) | 65.7% vs 71.4% (0.92×) | 45.7% (0.64×) | ≥ 0.85× | ≥ 0.95× |
-| File Acc@5, organization scope vs the right repository alone, gated (21 instances, 21 repositories) | 42.9% vs 61.9% (0.69×) | 47.6% (0.77×) | ≥ 0.85× | ≥ 0.95× |
-| Other repositories' share of the top 10, gated | 15.7% | 36.7% | — | — |
-| Tokens per correct answer, organization scope (top 10), gated | 782 vs 529 (1.48×) | 886 (1.67×) | reported | ≤ 1.2× |
-| Cross-repository edges (packages), precision / recall on 7 labelled pairs (Python, PHP, Java) | 99.7 / 95.3 (imports 100 / 100, uses 99.7 / 91.4) | — | ≥ 90 / 75 | ≥ 97 / 90 |
-| Incremental update: re-index micropython of 21 (profiles, routing, links included) | 499 ms vs 3,616 ms (0.14×) | 0.05× | ≤ 2× | ≤ 1× |
-| Organization layer per added repository (21 steps) | median 206 ms, max 1,413 ms (0.26× / 0.48×) | 0.10× / 0.40× | ≤ 2× | ≤ 1× |
+| Metric | Phase 2 | Floor | Target |
+|---|---|---|---|
+| File Acc@5, organization scope vs the right repository alone, gated (120 issue instances, 42 members) | 56.7% (47.7–65.2) vs 66.7% (0.85×, 0.74–0.96 ⚠) | ≥ 0.85× | ≥ 0.95× |
+| File Acc@5, organization scope vs the right repository alone, calibration split (29 issue instances, 50 members; routing tuned here, never gated) | 62.1% (44.0–77.3) vs 79.3% (0.78×, 0.60–0.95) | ≥ 0.85× | ≥ 0.95× |
+| Function Acc@10, organization scope vs alone, gated (n = 115) | 37.4% (29.1–46.5) vs 48.7% | — | — |
+| BM25 over the union of the members, gated: File Acc@5 / Function Acc@10 | 52.5% (43.6–61.2) / 26.1% (18.9–34.8) | — | — |
+| Rueca − BM25 over the union, gated, paired: File Acc@5 / Function Acc@10 | +4.2 (−4.2…+12.5) ⚠, d = 22.5%, MDE 12.1 / +11.3 (+4.3…+19.1) ✅, d = 18.3%, MDE 11.2 | reported (status as RFC 0004 §6.1) | — |
+| Rueca organization − Rueca per repository + rank fusion, gated, File Acc@5 | +32.5 (+23.3…+41.7) ✅ (rank fusion: 24.2%) | — | — |
+| Other repositories' share of the top 10, gated | 11.3% (BM25 over the union 28.7%; rank fusion 91.7%) | — | — |
+| Tokens per correct answer, organization scope (top 10), gated | 701 vs 542 (1.29×, 1.13–1.50) | reported | ≤ 1.2× |
+| Impact (16 gated): consumer hit@10, Rueca vs BM25 over the union | 12.5% vs 37.5% (−25.0, −50.0…−6.2 ❌) | — | — |
+| Impact: own File Acc@5, Rueca vs BM25 over the union | 81.2% vs 62.5% | — | — |
+| Cross-repository edges (packages), precision / recall, 12 labelled pairs pooled | 98.3 (97.8–98.7) / 74.9 (72.2–77.4) ❌ | ≥ 90 / 75 | ≥ 97 / 90 |
+| — without Rust (8 pairs: Python, PHP, Java) | 99.8 / 96.2 | ≥ 90 / 75 | ≥ 97 / 90 |
+| — Rust alone (4 pairs) | 94.5 / 53.2 ❌ | ≥ 90 / 75 | ≥ 97 / 90 |
+| Incremental update: re-index micropython (95,342 symbols) of 42 (profiles, routing, links included) | 504 ms vs 2,681 ms (0.19×) | ≤ 2× | ≤ 1× |
+| Organization layer per added repository (42 steps) | median 273 ms, max 1,598 ms (0.30× / 3.62× ❌) | ≤ 2× (max) | ≤ 1× |
 
-Routing moves the calibration split past the floor but not the gated set:
-of its three phase-1 misses, `fmtlib/fmt` and `coder/code-server` are now
-routed to the right repository and still miss because the right file
-ranks lower under organization-wide statistics than alone; `jqlang/jq`
-is not routed — its distinctive terms (`NO_COLOR`, `isatty`) occur in a
-handful of symbols of `src/main.c`, while other repositories hold more of
-the query's generic words (`terminal`, `color`, `support`); and
-`micropython/micropython` (a number-formatting question that
-`fmtlib/fmt` matches better) is lost. The gated set is 21 instances (one is 4.8 points); the
-next levers are per-repository ranking within a routed repository
-without losing comparable scores (a score transplant: the organization
-score distribution, the repository's own order) and a larger calibration
-split to tune it on.
+cbm (per project + rank fusion; it has no cross-project search): File Acc@5
+11.7 (7.1–18.6) against 56.7 alone (0.21×), Function Acc@10 6.1; Rueca
+native − cbm +45.0 (+35.8…+54.2) ✅ on File Acc@5, +31.3 (+22.6…+40.0) ✅
+on Function Acc@10; impact consumer hit@10 12.5 vs 12.5.
+
+At 120 gated instances the organization ranking sits at the floor: 0.85×
+the single-repository File Acc@5, with an interval (0.74–0.96) that
+crosses it (⚠), and the 0.95× target not met. On the calibration split,
+where routing was tuned, the same default gives 0.78× (0.60–0.95) over 29
+instances of a 50-member organization: the 0.92× of the earlier
+35-instance calibration organization did not carry over. Routing does its
+part — 11.3% of the top 10 comes from other repositories, against 28.7%
+for BM25 over the same union — so the lead to check on the misses stays
+the one phase 2 found: the right file ranking lower inside a routed
+repository under organization-wide statistics than alone. Against the
+plain-text floor arm, Rueca is ahead on Function Acc@10 (+11.3, interval
+above zero) and not distinguishable on File Acc@5 (+4.2; a true difference
+under 12.1 points can go undetected at this n). The per-step maximum over
+the floor (3.62×) is one small repository whose own index is fast. The
+impact kind is a loss: the organization ranking returns the library's own
+files (own File Acc@5 81.2%) and almost never the consumers that use the
+changed symbol (consumer hit@10 12.5%), which BM25 over the union reaches
+more often (37.5%) (§12, question 6). The next levers stay per-repository
+ranking within a routed repository without losing comparable scores (a
+score transplant: the organization score distribution, the repository's
+own order) and, for impact, signals from the link layer.
+
+Open findings from the Rust pairs (about Rueca, not the labeler; §12,
+question 5):
+
+- **Attribute macros** (`#[tokio::main]`, `#[tokio::test]`) produce no
+  link edge: 70 of the 176 labelled axum → tokio uses.
+- **Items inside macro invocation bodies** — `mod`, `use` and items in
+  `cfg_net! { … }` and similar — are not extracted, so re-exports such as
+  `tokio::net::TcpListener` and `tokio::spawn` are invisible to consumers.
+- **Cross-repository method resolution by type name** can pick a
+  same-named type of another crate (`TcpStream.peek` → mio): most of the
+  38 wrong tokio → mio edges.
+- The linker matches Cargo dependencies by package name only, never by
+  version.
 
 ### 9.3 Phase 3 — implemented
 
@@ -638,11 +715,25 @@ five refs).
   ref replacement" (§4).
 - **RFC 0005 §5** — remove rank fusion across repositories; `repo` semantics
   per §6.
+- **2026-11-16 — organization suite** (§8, §9.2). The 21-instance
+  scenario (one issue per repository) is replaced by 42 gated members
+  pinned at the base commit of their first gated S1 instance, up to 3
+  issue instances each whose real-fix gold is present at the pin and whose
+  fix is not already there (120 gated; a calibration organization of 50
+  members with 29 instances, never gated), plus 16 impact instances
+  scored on the consumers of the changed library symbols; BM25 over the
+  union of the members joins as the floor arm; every rate carries a Wilson
+  interval and every paired comparison its discordance and minimum
+  detectable effect (RFC 0004 §7.6). Cross-repository edges grow to 12
+  labelled pairs (Rust included) and are reported over all pairs, without
+  Rust and Rust alone. The earlier 21-instance numbers are another
+  population and are no longer carried.
 
 ## 11. Alternatives considered
 
 - **Federated search with rank fusion** (RFC 0005 as written). Rejected:
-  measured 9.5% vs 61.9% (§2).
+  measured 9.5% vs 61.9% (§2); 24.2% vs 66.7% on the organization suite
+  (§8).
 - **Global statistics injected into per-repository searches** (no shared
   index). Possible with `Bm25StatisticsProvider`, but needs every
   repository's index opened per query and gives no place for cross-repository
@@ -686,3 +777,17 @@ five refs).
    writer wins and a collection can race a registration. Local mode runs
    one indexer at a time; service mode needs the lock (or a transactional
    catalog).
+10. Rust in the link layer (§9.2, open findings): attribute macros
+   (`#[tokio::main]`, `#[tokio::test]`) as uses, items and `mod` / `use`
+   inside macro invocation bodies (`cfg_net! { … }`), method resolution
+   across repositories that does not pick a same-named type of another
+   crate, and Cargo dependencies matched by version as well as name. Rust
+   pairs pool at 94.5 / 53.2; the all-pairs recall (74.9) misses the
+   floor because of them.
+11. Impact: the consumers of a changed library symbol are not surfaced by
+   the organization ranking (consumer hit@10 12.5% vs 37.5% for BM25 over
+   the union, 16 gated impact instances). Which signals answer "who uses
+   what this fix changes" inside one ranking — semantic search (RFC 0007)
+   and graph signals from the link layer (callers of the matched library
+   symbols across repositories) — is the question the impact kind
+   measures.

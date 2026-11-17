@@ -4,16 +4,19 @@ on each other.
 
 **Pairs** ([`GROUPS`]): a consumer pinned with the libraries it depends on,
 each library at a release the consumer's manifest accepts — Flask 3.1.3 with
-Click 8.1.8 and Jinja 3.1.6 (Python), Laravel (the S1 organization commit)
-with Carbon, Monolog 3.9.0 and league/commonmark 2.8.3 (PHP), Apache Dubbo
-and Apollo (S1 commits) with Gson 2.15.0 (Java). Each group is one
-organization (`rueca index --org`); `rueca links --org` lists its
-cross-repository edges.
+Click 8.1.8, Jinja 3.1.6 and Werkzeug 3.1.5 (Python), Laravel (the S1
+organization commit) with Carbon, Monolog 3.9.0 and league/commonmark 2.8.3
+(PHP), Apache Dubbo and Apollo (S1 commits) with Gson 2.15.0 (Java), Axum
+(its organization pin) with Tokio (its organization pin), Hyper 0.14.27 and
+Tower 0.4.13, and Tokio with Mio 1.0.1 (Rust); the pin rule is above
+`GROUPS`. Each group is one organization (`rueca index --org`); `rueca
+links --org` lists its cross-repository edges.
 
 **Gold**, labelled from the consumer's own source with an independent,
 per-language labeler (Python `ast`; PHP and Java by regular expressions over
 `use` / `import` statements, the library's Composer PSR-4 map or package
-directories):
+directories; Rust by a token walk over the library's Cargo packages and
+module tree, see below):
 
 - *imports* — (consumer file, library file) for every import statement of a
   library module or class: Python `import m` / `from m import x` (the
@@ -39,6 +42,38 @@ a method of an object a library call returned (`ctx = get_context();
 ctx.exit()`), a library class used without an import — count against
 precision, which is therefore a lower bound.
 
+**Rust** (`RustLib`, `label_rust`). A library is every Cargo package of the
+library repository with a library target (`[lib] path`, default
+`src/lib.rs`; crate `[lib] name`, else the package name with `-` → `_`;
+workspace members alike, `version.workspace` read from the root). Its
+module tree follows `mod x;` (`x.rs` / `x/mod.rs`, `#[path = "…"]`) and
+inline `mod x { … }`, also inside macro invocation bodies (`cfg_net! { pub
+mod net; }`: a macro body is transparent, a function, impl or `macro_rules!`
+body is not). A path resolves segment by segment through child modules,
+items, `use` bindings (re-exports, `as`, groups, `self`, `crate` / `super`,
+other crates of the repository) and glob re-exports; a crate root also sees
+its `#[macro_export]` macros. Qualified names are Rueca's: the defining
+file's module path (crate, then directories and file stem below the crate
+root's directory) and the local name (`tokio::net::tcp::listener::TcpListener`,
+`kit::time.sleep` in an inline module). Consumer side: a code name is a
+library crate when a manifest of the consumer depends on its package
+(renames, `workspace = true`) with a requirement whose compatibility range
+holds the pinned version. *imports* = (consumer file, the library file
+defining what a `use` path names — the item's file after re-exports, the
+module's file for a module; Rueca's convention, not the path's module
+prefix); glob imports count as imports of the module. *uses* = items bound
+by `use` and named outside the `use` statements (a trait also when one of
+its methods is called, `use …::AsyncReadExt as _`), plus paths in code
+through a library crate or an imported library module (`tokio::spawn`,
+`#[tokio::main]` → `tokio_macros::main`, `mpsc::channel`); bindings of the
+consumer's modules a file glob-imports (`use super::*`) count as its own.
+Library ancestors of a used type are the library traits it implements
+(`impl Trait for Type`, by last segment). Blind spots: items a macro
+generates (`doc! { macro_rules! select … }`, derives), glob imports of a
+library module (no use is attributed through them), `#[cfg]` alternatives
+(the first binding wins), shadowing by local names, `#[path]` inside inline
+modules; methods of values a library call returned count against precision.
+
 Raw outputs: .cache/runs/org/crossrepo-rueca.json.
 """
 
@@ -46,19 +81,34 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import shutil
+import tomllib
 import traceback
 from collections.abc import Callable, Iterator
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
 from .arms import make_arm
-from .common import CACHE, log, read_json, run, write_json
+from .common import CACHE, log, org_run_path, read_json, run, write_json, write_org_file
 from .corpus import add_worktree, remove_worktree
-from .org import run_path, write_org_file
 
-# consumer, its commit, and the libraries (repo, commit, language) it imports
+# consumer, its commit, and the libraries (repo, commit, language) it imports.
+#
+# Pins. A repository of the gated S1 set is pinned where the organization
+# scenario pins it: the base commit of its first gated `[[s1.instances]]`
+# entry in manifest order (the "org pin"). A library outside the benchmark
+# is pinned by one deterministic rule (`pick_release`): the release tag the
+# consumer's lockfile names when the consumer commits one (`uv.lock`,
+# `Cargo.lock`), else the highest release tag that meets the consumer's
+# requirement at its pin (Cargo.toml / pyproject.toml) and was published
+# before the consumer pin's commit date. The Rueca linker matches Cargo
+# dependencies by package name only (`cargo:<name>` requires, `rust:<crate>`
+# import keys), never by version; the labeler skips a dependency whose
+# requirement is outside the pinned version's compatibility range (axum's
+# `hyper1 = { package = "hyper", version = "=1.0.0-rc.4" }` is not hyper 0.14).
 GROUPS = [
     {
         "consumer": "pallets/flask",
@@ -67,7 +117,32 @@ GROUPS = [
         "libraries": [
             {"repo": "pallets/click", "commit": "934813e4d421071a1b3db3973c02fe2721359a6e", "packages": ["click"]},  # 8.1.8
             {"repo": "pallets/jinja", "commit": "15206881c006c79667fe5154fe80c01c65410679", "packages": ["jinja2"]},  # 3.1.6
+            # 3.1.5: flask 3.1.3's uv.lock (requirement werkzeug>=3.1.0; 3.1.6 was tagged the day after the pin)
+            {"repo": "pallets/werkzeug", "commit": "e3d06f4b1f7ff40a63eba78f81d9cda18f805d6d", "packages": ["werkzeug"]},
         ],
+    },
+    {
+        # org pin: base of tokio-rs__axum-2096 (axum 0.6, 2023-07-16; no Cargo.lock)
+        "consumer": "tokio-rs/axum",
+        "commit": "6f7ff8556587d51c6919a864926e4b8090f92c3f",
+        "language": "rust",
+        "libraries": [
+            # org pin: base of tokio-rs__tokio-6724 (tokio 1.39.2; axum requires tokio 1.25.0)
+            {"repo": "tokio-rs/tokio", "commit": "0cbf1a5adae81e8ff86ca6d040aeee67cf888262"},
+            # v0.14.27 (2023-06-26): highest release meeting hyper 0.14.24 before the axum pin
+            {"repo": "hyperium/hyper", "commit": "d77c2599bc023b258b90a17f5b633c8b7b0cbd4b"},
+            # tower-0.4.13 (2022-06-17): highest release meeting tower 0.4.13 before the axum pin
+            # (tower-layer 0.3.1 / tower-service 0.3.2 in that tree; axum asks 0.3.2 / 0.3)
+            {"repo": "tower-rs/tower", "commit": "04527aeb439761875a3e4f96d2090622731bc719"},
+        ],
+    },
+    {
+        # org pin: base of tokio-rs__tokio-6724 (tokio 1.39.2, 2024-07-29; no Cargo.lock)
+        "consumer": "tokio-rs/tokio",
+        "commit": "0cbf1a5adae81e8ff86ca6d040aeee67cf888262",
+        "language": "rust",
+        # v1.0.1 (2024-07-23): highest release meeting mio 1.0.1 before the tokio pin
+        "libraries": [{"repo": "tokio-rs/mio", "commit": "4a5114e518b982f49ce093be6d0d2a2ab86472d1"}],
     },
     {
         "consumer": "laravel/framework",
@@ -211,11 +286,12 @@ def _dotted(node: ast.AST) -> str | None:
     return None
 
 
-def label_python(consumer: Path, libs: list[tuple[str, PyLib]]) -> tuple[set, set, dict, dict]:
+def label_python(consumer: Path, libs: list[tuple[str, PyLib]], only: set[str] | None = None) -> tuple[set, set, dict, dict]:
     """(imports, uses, ancestors, inherited): imports {(file, lib, lib file)},
     uses {(file, lib, qualified name)}, ancestors {(lib, qn): {base qns}},
     inherited {(file, lib): {qns}} = library ancestors of consumer classes
-    the file names (accepted targets for precision, not gold uses)."""
+    the file names (accepted targets for precision, not gold uses). `only`
+    restricts the consumer files labelled (every labeler)."""
     imports: set = set()
     uses: set = set()
     lib_of = dict(libs)
@@ -223,6 +299,8 @@ def label_python(consumer: Path, libs: list[tuple[str, PyLib]]) -> tuple[set, se
     class_lib: dict[str, set] = {}  # consumer class name -> {(lib, qn)} of library bases
     class_bases: dict[str, set] = {}  # consumer class name -> names of its other bases
     for rel in _files(consumer, ".py"):
+        if only is not None and rel not in only:
+            continue
         try:
             tree = ast.parse(_read(consumer, rel))
         except SyntaxError:
@@ -269,7 +347,10 @@ def label_python(consumer: Path, libs: list[tuple[str, PyLib]]) -> tuple[set, se
                         class_lib.setdefault(node.name, set()).add((lname, qn))
                     elif rest and head in modules:
                         lname, mod = modules[head]
-                        qn = lib_of[lname].resolve(mod, rest.rsplit(".", 1)[-1]) if "." not in rest else None
+                        *subs, last = rest.split(".")
+                        for part in subs:  # `werkzeug.test.EnvironBuilder` through submodules
+                            mod = f"{mod}.{part}" if f"{mod}.{part}" in lib_of[lname].modules else ""
+                        qn = lib_of[lname].resolve(mod, last) if mod else None
                         if qn:
                             class_lib.setdefault(node.name, set()).add((lname, qn))
                     elif dotted:
@@ -469,12 +550,14 @@ class PhpLib:
         return out
 
 
-def label_php(consumer: Path, libs: list[tuple[str, PhpLib]]) -> tuple[set, set, dict, dict]:
+def label_php(consumer: Path, libs: list[tuple[str, PhpLib]], only: set[str] | None = None) -> tuple[set, set, dict, dict]:
     imports: set = set()
     uses: set = set()
     texts: dict[str, str] = {}
     cparents: dict[str, set[str]] = {}  # consumer class FQN -> parents (FQN)
     for rel in _files(consumer, ".php"):
+        if only is not None and rel not in only:
+            continue
         text = _read(consumer, rel)
         texts[rel] = text
         m = _PHP_NS.search(text)
@@ -572,10 +655,12 @@ class JavaLib:
         return out
 
 
-def label_java(consumer: Path, libs: list[tuple[str, JavaLib]]) -> tuple[set, set, dict, dict]:
+def label_java(consumer: Path, libs: list[tuple[str, JavaLib]], only: set[str] | None = None) -> tuple[set, set, dict, dict]:
     imports: set = set()
     uses: set = set()
     for rel in _files(consumer, ".java"):
+        if only is not None and rel not in only:
+            continue
         text = _read(consumer, rel)
         found = list(_JAVA_IMPORT.finditer(text))
         lines = {text.count("\n", 0, m.start()) + 1 for m in found}
@@ -599,6 +684,866 @@ def label_java(consumer: Path, libs: list[tuple[str, JavaLib]]) -> tuple[set, se
     return imports, uses, ancestors, {}
 
 
+# --- Rust ----------------------------------------------------------------------------------
+
+_RUST_TOKEN = re.compile(r"(?:r#)?[A-Za-z_][A-Za-z0-9_]*|::|\S")
+_RUST_PATH_ATTR = re.compile(r"#\[\s*path\s*=\s*\"([^\"]+)\"\s*\]")
+_RUST_PATH = re.compile(r"(?<![\w:])(?:::\s*)?[A-Za-z_]\w*(?:\s*::\s*[A-Za-z_]\w*)+")
+_RUST_IDENT = re.compile(r"[A-Za-z_]\w*")
+_RUST_RAW = re.compile(r'(?:br|cr|r)(#*)"')
+_RUST_MODIFIERS = frozenset({"pub", "unsafe", "async", "default", "auto", "extern", "const", '"'})
+_RUST_ITEMS = frozenset({"fn", "struct", "enum", "union", "trait", "type", "const", "static"})
+# Module-level contexts: a macro invocation's body (`cfg_rt! { … }`) is
+# transparent, an inline module adds its name to the local name prefix.
+_RUST_TRANSPARENT = ("macro", "mod")
+
+
+def _rust_strip(text: str) -> str:
+    """`text` with comments, string and character literals blanked (newlines
+    kept, a string becomes `""`), lifetimes left alone."""
+    out: list[str] = []
+    i, n = 0, len(text)
+
+    def blank(s: str) -> str:
+        return "".join("\n" if c == "\n" else " " for c in s)
+
+    while i < n:
+        c = text[i]
+        if c == "/" and text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i))
+            i = j
+        elif c == "/" and text.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif text.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            out.append(blank(text[i:j]))
+            i = j
+        elif c in "rbc" and text[i + 1 : i + 2] in ('"', "#", "r") and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")) and (m := _RUST_RAW.match(text, i)):
+            close = '"' + m.group(1)
+            j = text.find(close, m.end())
+            j = n if j < 0 else j + len(close)
+            out.append('""' + blank(text[i + 2 : j]))
+            i = j
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            j = min(j + 1, n)
+            out.append('""' + blank(text[i + 2 : j]))
+            i = j
+        elif c == "'":
+            if text.startswith("\\", i + 1):
+                j = text.find("'", i + 3)
+                j = n if j < 0 else j + 1
+            elif i + 2 < n and text[i + 2] == "'":
+                j = i + 3
+            else:  # a lifetime or a label
+                out.append(c)
+                i += 1
+                continue
+            out.append(blank(text[i:j]))
+            i = j
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _rust_use_tree(toks: list[str]) -> list[tuple[tuple[str, ...], str | None]]:
+    """Entries of a `use` tree (the tokens between `use` and `;`): (path,
+    bound name), the bound name `None` for a glob import (`a::*`). A group's
+    `self` binds its prefix; `as _` binds `_`."""
+    out: list[tuple[tuple[str, ...], str | None]] = []
+    pos = 0
+
+    def tree(prefix: tuple[str, ...]) -> None:
+        nonlocal pos
+        path = list(prefix)
+        while pos < len(toks):
+            t = toks[pos]
+            if t == "::":
+                pos += 1
+            elif t == "{":
+                pos += 1
+                while pos < len(toks) and toks[pos] != "}":
+                    if toks[pos] == ",":
+                        pos += 1
+                        continue
+                    tree(tuple(path))
+                pos += 1
+                return
+            elif t == "*":
+                pos += 1
+                out.append((tuple(path), None))
+                return
+            elif _RUST_IDENT.fullmatch(t.removeprefix("r#")):
+                pos += 1
+                name = t.removeprefix("r#")
+                if pos < len(toks) and toks[pos] == "::":
+                    path.append(name)
+                    continue
+                alias = None
+                if pos + 1 < len(toks) and toks[pos] == "as":
+                    alias = toks[pos + 1].removeprefix("r#")
+                    pos += 2
+                if name == "self":
+                    if path:
+                        out.append((tuple(path), alias or path[-1]))
+                else:
+                    out.append((tuple(path + [name]), alias or name))
+                return
+            else:
+                pos += 1
+                return
+
+    while pos < len(toks):
+        if toks[pos] == ",":
+            pos += 1
+            continue
+        tree(())
+    return out
+
+
+class _RustFile(NamedTuple):
+    """What one Rust file declares. Keys carry the inline-module prefix:
+    `(("tests",), "helper")` is `helper` in `mod tests { … }`."""
+
+    mods: dict  # (inline, name) -> {"inline": bool, "path": str | None}
+    items: dict  # (inline, name) -> kind (fn, struct, trait, macro_rules, …)
+    uses: dict  # inline -> [(path, bound name or None for a glob)] (module level)
+    all_uses: list  # [(start offset, end offset, entries, inline)], every `use` of the file
+    impls: list  # [(trait last segment or None, self type last segment)]
+    trait_methods: dict  # (inline, trait) -> {method names}
+    macro_exports: set  # names of `#[macro_export] macro_rules!`
+    code: str  # the stripped text
+
+
+def _rust_strip_attrs(stmt: list[str]) -> list[str]:
+    """`stmt` without its leading attributes (`#[…]`, `#![…]`)."""
+    i = 0
+    while i < len(stmt) and stmt[i] == "#":
+        j = i + 1
+        if j < len(stmt) and stmt[j] == "!":
+            j += 1
+        if j >= len(stmt) or stmt[j] != "[":
+            break
+        depth = 0
+        while j < len(stmt):
+            depth += {"[": 1, "]": -1}.get(stmt[j], 0)
+            j += 1
+            if depth == 0:
+                break
+        i = j
+    return stmt[i:]
+
+
+def _rust_head(stmt: list[str]) -> list[str]:
+    """`stmt` from its item keyword on: attributes, visibility (`pub`,
+    `pub(crate)`) and modifiers (`unsafe`, `async`, `extern "C"`, `const fn`)
+    left out."""
+    s = _rust_strip_attrs(stmt)
+    i = 0
+    while i < len(s):
+        if s[i] == "pub" and i + 1 < len(s) and s[i + 1] == "(":
+            j = s.index(")", i) if ")" in s[i:] else len(s) - 1
+            i = j + 1
+        elif s[i] == "const" and i + 1 < len(s) and s[i + 1] in ("fn", "unsafe", "async", "extern"):
+            i += 1
+        elif s[i] in _RUST_MODIFIERS and s[i] != "const":
+            i += 1
+        else:
+            break
+    return s[i:]
+
+
+def _rust_scan(text: str) -> _RustFile:
+    """Declarations of a Rust file by a token walk with a context stack:
+    module-level items are those outside every block but macro invocation
+    bodies (`cfg_net! { pub mod net; }`) and inline modules."""
+    code = _rust_strip(text)
+    toks = [(m.group(), m.start()) for m in _RUST_TOKEN.finditer(code)]
+    path_attrs = {}
+    for m in _RUST_PATH_ATTR.finditer(text):
+        mm = re.match(r"\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)", text[m.end() :])
+        if mm:
+            path_attrs[mm.group(1)] = m.group(1)
+    exports = set(re.findall(r"#\[\s*macro_export[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*macro_rules!\s*(\w+)", code))
+    f = _RustFile({}, {}, {}, [], [], {}, exports, code)
+    stack: list[tuple[str, str]] = []
+    stmt: list[str] = []
+
+    def level() -> tuple[str, ...] | None:
+        """The inline-module prefix when at module level, else None."""
+        if all(k in _RUST_TRANSPARENT for k, _ in stack):
+            return tuple(n for k, n in stack if k == "mod")
+        return None
+
+    def in_trait() -> tuple[tuple[str, ...], str] | None:
+        if stack and stack[-1][0] == "trait" and all(k in _RUST_TRANSPARENT for k, _ in stack[:-1]):
+            return tuple(n for k, n in stack[:-1] if k == "mod"), stack[-1][1]
+        return None
+
+    def item(head: list[str], inline: tuple[str, ...]) -> None:
+        if len(head) >= 2 and head[0] in _RUST_ITEMS and head[1] != "_" and _RUST_IDENT.fullmatch(head[1].removeprefix("r#")):
+            f.items.setdefault((inline, head[1].removeprefix("r#")), head[0])
+        elif len(head) >= 3 and head[0] == "macro_rules" and head[1] == "!":
+            f.items.setdefault((inline, head[2]), "macro_rules")
+
+    i = 0
+    while i < len(toks):
+        t, off = toks[i]
+        head = _rust_head(stmt) if stmt and t in ("use", "{", ";") else []
+        if t == "use" and not head:
+            j = i + 1
+            while j < len(toks) and toks[j][0] != ";":
+                j += 1
+            entries = _rust_use_tree([x for x, _ in toks[i + 1 : j]]) if j > i + 1 and toks[i + 1][0] != "<" else []
+            end = toks[j][1] + 1 if j < len(toks) else len(code)
+            f.all_uses.append((off, end, entries, tuple(n for k, n in stack if k == "mod")))
+            inline = level()
+            if inline is not None:
+                f.uses.setdefault(inline, []).extend(entries)
+            stmt = []
+            i = j + 1
+            continue
+        if t == "{":
+            inline = level()
+            trait = in_trait()
+            if "macro_rules" in head:
+                kind = ("opaque", "")
+                if inline is not None:
+                    item(head, inline)
+            elif head and len(head) >= 2 and head[-1] == "!" and _RUST_IDENT.fullmatch(head[-2]) and all(x == "::" or _RUST_IDENT.fullmatch(x) for x in head[:-1]):
+                kind = ("macro", "")
+            elif head[:1] == ["mod"] and len(head) >= 2:
+                kind = ("mod", head[1].removeprefix("r#"))
+                if inline is not None:
+                    f.mods.setdefault((inline, kind[1]), {"inline": True, "path": None})
+            elif head[:1] == ["trait"] and len(head) >= 2:
+                kind = ("trait", head[1])
+                if inline is not None:
+                    item(head, inline)
+            elif head[:1] == ["impl"]:
+                kind = ("impl", "")
+                if inline is not None:
+                    depth, names, trait_name, prev = 0, [], None, ""
+                    for x in head[1:]:
+                        if x == "<" or (x == ">" and prev != "-"):
+                            depth += 1 if x == "<" else -1
+                        prev = x
+                        if x == "where" and depth == 0:
+                            break
+                        if depth == 0 and x == "for" and names:
+                            trait_name = names[-1]
+                            names = []
+                        elif depth == 0 and _RUST_IDENT.fullmatch(x) and x not in ("dyn", "mut", "const", "unsafe", "for"):
+                            names.append(x)
+                    if names:
+                        f.impls.append((trait_name, names[-1]))
+            else:
+                kind = ("opaque", "")
+                if inline is not None:
+                    item(head, inline)
+                elif trait is not None and head[:1] == ["fn"] and len(head) >= 2:
+                    f.trait_methods.setdefault(trait, set()).add(head[1])
+            stack.append(kind)
+            stmt = []
+        elif t == "}":
+            if stack:
+                stack.pop()
+            stmt = []
+        elif t == ";":
+            inline = level()
+            trait = in_trait()
+            if inline is not None and head[:1] == ["mod"] and len(head) >= 2:
+                name = head[1].removeprefix("r#")
+                f.mods.setdefault((inline, name), {"inline": False, "path": path_attrs.get(name)})
+            elif inline is not None:
+                item(head, inline)
+            elif trait is not None and head[:1] == ["fn"] and len(head) >= 2:
+                f.trait_methods.setdefault(trait, set()).add(head[1])
+            stmt = []
+        else:
+            stmt.append(t)
+        i += 1
+    return f
+
+
+def _toml(root: Path, rel: str) -> dict:
+    try:
+        return tomllib.loads(_read(root, rel))
+    except (tomllib.TOMLDecodeError, ValueError):
+        return {}
+
+
+def _manifests(root: Path) -> list[str]:
+    return [m for m in _files(root, "Cargo.toml") if m.rsplit("/", 1)[-1] == "Cargo.toml" and "/target/" not in f"/{m}"]
+
+
+class RustLib:
+    """A library repository's Cargo packages: every `[package]` with a library
+    target (`[lib] path`, default `src/lib.rs`; crate name `[lib] name`, else
+    the package name with `-` → `_`), its module tree from `mod x;`
+    declarations (`x.rs` / `x/mod.rs`, `#[path]`, inline `mod x { … }`,
+    declarations inside macro bodies), its items and its `use` statements
+    (re-exports, followed when resolving a path)."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.crates: dict[str, dict] = {}  # crate name -> {package, version, root, dir}
+        self.files: dict[str, _RustFile] = {}
+        self.children: dict[tuple, tuple] = {}  # (module, name) -> child module
+        self.parent: dict[tuple, tuple] = {}
+        self.crate_of: dict[str, str] = {}  # file -> crate name
+        self._memo: dict[tuple, tuple | None] = {}
+        self._paths: dict[str, str] | None = None
+        workspace_version = None
+        for m in sorted(_manifests(root), key=lambda p: (p.count("/"), p)):
+            doc = _toml(root, m)
+            ws = (doc.get("workspace") or {}).get("package") or {}
+            if workspace_version is None and isinstance(ws.get("version"), str):
+                workspace_version = ws["version"]
+            pkg = doc.get("package")
+            if not isinstance(pkg, dict) or not isinstance(pkg.get("name"), str):
+                continue
+            d = m.rsplit("/", 1)[0] if "/" in m else ""
+            lib = doc.get("lib") if isinstance(doc.get("lib"), dict) else {}
+            lib_root = "/".join(x for x in (d, lib.get("path") or "src/lib.rs") if x)
+            lib_root = os.path.normpath(lib_root).replace(os.sep, "/")
+            if not (root / lib_root).is_file():
+                continue
+            name = (lib.get("name") or pkg["name"]).replace("-", "_")
+            version = pkg.get("version") if isinstance(pkg.get("version"), str) else workspace_version
+            if name not in self.crates:
+                self.crates[name] = {"package": pkg["name"], "version": version, "root": lib_root, "dir": lib_root.rsplit("/", 1)[0] if "/" in lib_root else ""}
+                self._load_tree(name, lib_root)
+        trait_qns: dict[str, set[str]] = {}
+        for file, info in self.files.items():
+            for (inline, name), kind in info.items.items():
+                if kind == "trait":
+                    trait_qns.setdefault(name, set()).add(self.qn((file, inline), name))
+        self.traits_of: dict[str, set[str]] = {}  # self type name -> trait qns it implements
+        for info in self.files.values():
+            for trait, ty in info.impls:
+                if trait and trait in trait_qns:
+                    self.traits_of.setdefault(ty, set()).update(trait_qns[trait])
+
+    def _load_tree(self, crate: str, root_file: str) -> None:
+        todo = [root_file]
+        while todo:
+            file = todo.pop()
+            if file in self.files or not (self.root / file).is_file():
+                continue
+            self.crate_of[file] = crate
+            info = self.files[file] = _rust_scan(_read(self.root, file))
+            base = file.rsplit("/", 1)[0] if "/" in file else ""
+            stem = file.rsplit("/", 1)[-1][:-3]
+            own_dir = base if file == root_file or stem == "mod" else f"{base}/{stem}".lstrip("/")
+            for (inline, name), decl in sorted(info.mods.items()):
+                mod = (file, inline)
+                if decl["inline"]:
+                    child = (file, inline + (name,))
+                elif decl["path"]:
+                    target = os.path.normpath(f"{'/'.join([base, *inline]) if inline else base}/{decl['path']}").replace(os.sep, "/").lstrip("/")
+                    child = (target, ())
+                    todo.append(target)
+                else:
+                    d = "/".join(x for x in (own_dir, *inline) if x)
+                    cands = [f"{d}/{name}.rs".lstrip("/"), f"{d}/{name}/mod.rs".lstrip("/")]
+                    target = next((c for c in cands if (self.root / c).is_file()), None)
+                    if target is None:
+                        continue
+                    child = (target, ())
+                    todo.append(target)
+                self.children.setdefault((mod, name), child)
+                self.parent.setdefault(child, mod)
+            for inline_key in {k[0] for k in info.items} | set(info.uses):
+                for n in range(1, len(inline_key) + 1):
+                    self.parent.setdefault((file, inline_key[:n]), (file, inline_key[: n - 1]))
+
+    def module_path(self, file: str) -> str:
+        """Rueca's module path of a file: crate name, then the directories and
+        file stem below the crate root's directory (`mod.rs` names its
+        directory, the root is the crate)."""
+        crate = self.crate_of.get(file, "")
+        info = self.crates.get(crate)
+        if info is None or file == info["root"]:
+            return crate
+        rel = file[len(info["dir"]) + 1 :] if info["dir"] and file.startswith(info["dir"] + "/") else file
+        parts = rel[:-3].split("/")
+        if parts[-1] == "mod":
+            parts = parts[:-1]
+        return "::".join([crate, *parts])
+
+    def qn(self, mod: tuple, name: str) -> str:
+        file, inline = mod
+        return f"{self.module_path(file)}::{'.'.join((*inline, name))}"
+
+    def root_module(self, crate: str) -> tuple | None:
+        info = self.crates.get(crate)
+        return (info["root"], ()) if info and info["root"] in self.files else None
+
+    def lookup(self, mod: tuple, name: str, want_module: bool, depth: int = 0) -> tuple | None:
+        """`name` seen from module `mod`: ("mod", module, None) or ("item", module,
+        name), through child modules, items, `use` bindings (re-exports) and
+        glob imports; a crate root also sees its `#[macro_export]` macros."""
+        key = (mod, name, want_module)
+        if key in self._memo:
+            return self._memo[key]
+        if depth > 16:
+            return None
+        self._memo[key] = None  # in progress: cycles resolve to nothing
+        res = self._lookup(mod, name, want_module, depth)
+        self._memo[key] = res
+        return res
+
+    def _lookup(self, mod: tuple, name: str, want_module: bool, depth: int) -> tuple | None:
+        file, inline = mod
+        info = self.files.get(file)
+        if info is None:
+            return None
+        child = self.children.get((mod, name))
+        if want_module and child:
+            return ("mod", child, None)
+        if (inline, name) in info.items:
+            return ("item", mod, name)
+        for path, bound in info.uses.get(inline, ()):
+            if bound == name and path:
+                r = self.resolve(mod, path, want_module, depth + 1)[0]
+                if r:
+                    return r
+        if child:
+            return ("mod", child, None)
+        for path, bound in info.uses.get(inline, ()):
+            if bound is None and path:
+                target = self.resolve(mod, path, True, depth + 1)[0]
+                if target and target[0] == "mod":
+                    r = self.lookup(target[1], name, want_module, depth + 1)
+                    if r:
+                        return r
+        crate = self.crate_of.get(file)
+        if crate and mod == self.root_module(crate):
+            for f2, info2 in self.files.items():
+                if self.crate_of.get(f2) == crate and name in info2.macro_exports:
+                    for (inl, n), kind in info2.items.items():
+                        if n == name and kind == "macro_rules":
+                            return ("item", (f2, inl), name)
+        return None
+
+    def resolve(self, mod: tuple, path: tuple[str, ...], want_module: bool = False, depth: int = 0) -> tuple[tuple | None, tuple | None]:
+        """A path seen from module `mod` → (resolution, deepest module reached).
+        Stops at the first item: further segments are its members."""
+        if not path or depth > 16:
+            return None, None
+        head, rest = path[0], list(path[1:])
+        if head == "crate":
+            cur = self.root_module(self.crate_of.get(mod[0], ""))
+        elif head == "self":
+            cur = mod
+        elif head == "super":
+            cur = self.parent.get(mod)
+            while rest and rest[0] == "super" and cur:
+                cur = self.parent.get(cur)
+                rest = rest[1:]
+        else:
+            r = self.lookup(mod, head, bool(rest) or want_module, depth)
+            if r is None and head in self.crates:
+                r = ("mod", self.root_module(head), None)
+            if r is None:
+                return None, None
+            if r[0] == "item":
+                return r, mod
+            cur = r[1]
+        return self._walk(cur, rest, want_module, depth)
+
+    def _walk(self, cur: tuple | None, rest: list[str], want_module: bool, depth: int) -> tuple[tuple | None, tuple | None]:
+        if cur is None:
+            return None, None
+        for k, seg in enumerate(rest):
+            last = k == len(rest) - 1
+            r = self.lookup(cur, seg, not last or want_module, depth)
+            if r is None:
+                return None, cur
+            if r[0] == "item":
+                return r, cur
+            cur = r[1]
+        return ("mod", cur, None), cur
+
+    def resolve_extern(self, crate: str, path: tuple[str, ...]) -> tuple[tuple | None, tuple | None]:
+        """`crate::path` from outside the library (a consumer's `use` or path)."""
+        root = self.root_module(crate)
+        return self._walk(root, list(path), False, 0) if root else (None, None)
+
+    def path_of(self, qn: str) -> str | None:
+        """The file defining item `qn`."""
+        if self._paths is None:
+            self._paths = {self.qn((file, inline), name): file for file, info in self.files.items() for (inline, name) in info.items}
+        return self._paths.get(qn)
+
+    def file_of(self, res: tuple | None) -> str | None:
+        return res[1][0] if res else None
+
+    def kind(self, res: tuple) -> str | None:
+        file, inline = res[1]
+        return self.files[file].items.get((inline, res[2]))
+
+    def methods(self, res: tuple) -> set[str]:
+        file, inline = res[1]
+        return self.files[file].trait_methods.get((inline, res[2]), set())
+
+    def ancestors(self, qn: str) -> set[str]:
+        """Library traits the type `qn` implements (`impl Trait for Type`,
+        matched by last segment): their default methods are members too."""
+        return set(self.traits_of.get(re.split(r"::|\.", qn)[-1], set())) - {qn}
+
+
+def _cargo_dependencies(root: Path) -> dict[str, set[tuple[str, str | None]]]:
+    """Code name → {(package name, version requirement)} of every dependency
+    table of every manifest of a repository (`[dependencies]`, dev, build and
+    `[target.…]` tables; `package =` renames; `workspace = true` entries read
+    from the root's `[workspace.dependencies]`); `path`-only entries are the
+    repository's own crates and left out."""
+    out: dict[str, set[tuple[str, str | None]]] = {}
+    workspace: dict = {}
+    docs = []
+    for m in sorted(_manifests(root), key=lambda p: (p.count("/"), p)):
+        doc = _toml(root, m)
+        ws = (doc.get("workspace") or {}).get("dependencies")
+        if isinstance(ws, dict) and not workspace:
+            workspace = ws
+        docs.append(doc)
+
+    def tables(doc: dict) -> Iterator[dict]:
+        for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+            if isinstance(doc.get(key), dict):
+                yield doc[key]
+        for t in (doc.get("target") or {}).values():
+            if isinstance(t, dict):
+                for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+                    if isinstance(t.get(key), dict):
+                        yield t[key]
+
+    for doc in docs:
+        for table in tables(doc):
+            for key, spec in table.items():
+                if isinstance(spec, dict) and spec.get("workspace") is True:
+                    base = workspace.get(key)
+                    spec = {**(base if isinstance(base, dict) else {"version": base}), **{k: v for k, v in spec.items() if k != "workspace"}}
+                if isinstance(spec, str):
+                    spec = {"version": spec}
+                if not isinstance(spec, dict):
+                    continue
+                if "path" in spec and "version" not in spec:
+                    continue
+                version = spec.get("version") if isinstance(spec.get("version"), str) else None
+                out.setdefault(key.replace("-", "_"), set()).add((spec.get("package") or key, version))
+    return out
+
+
+def _rust_crate_map(consumer: Path, libs: list[tuple[str, RustLib]]) -> dict[str, tuple[str, RustLib, str]]:
+    """Code name → (library, its RustLib, crate) of the consumer's
+    dependencies on library crates (see `label_rust`)."""
+    deps = _cargo_dependencies(consumer)
+    own = {(_toml(consumer, m).get("package") or {}).get("name", "").replace("-", "_") for m in _manifests(consumer)}
+    crate_of: dict[str, tuple[str, RustLib, str]] = {}
+    for code, wanted in sorted(deps.items()):
+        if code in own:
+            continue
+        for lname, lib in libs:
+            for crate, info in lib.crates.items():
+                if any(pkg == info["package"] and (req is None or info["version"] is None or compatible(info["version"], req)) for pkg, req in wanted):
+                    crate_of.setdefault(code, (lname, lib, crate))
+    return crate_of
+
+
+class _RustConsumer:
+    """A consumer's files seen through its library dependencies: per file,
+    the `use` bindings of library items and modules (its own `use`
+    statements, plus those of the consumer modules it glob-imports:
+    `use super::*` in a test module), and the library files they import."""
+
+    def __init__(self, root: Path, libs: list[tuple[str, RustLib]]):
+        self.root = root
+        self.crate_of = _rust_crate_map(root, libs)
+        self.own = RustLib(root)  # the consumer's own library crates: module tree for its glob imports
+        self._scans: dict[str, _RustFile] = {}
+        self._direct: dict[str, tuple[dict, set]] = {}
+
+    def scan(self, rel: str) -> _RustFile:
+        if rel not in self._scans:
+            self._scans[rel] = self.own.files.get(rel) or _rust_scan(_read(self.root, rel))
+        return self._scans[rel]
+
+    def direct(self, rel: str) -> tuple[dict, set]:
+        """(bound name → (library, RustLib, resolution), {(library, file)})
+        of a file's own `use` statements naming a library crate."""
+        if rel in self._direct:
+            return self._direct[rel]
+        bindings: dict[str, tuple[str, RustLib, tuple]] = {}
+        files: set = set()
+        for _, _, entries, _ in self.scan(rel).all_uses:
+            for path, bound in entries:
+                if not path or path[0] not in self.crate_of:
+                    continue
+                lname, lib, crate = self.crate_of[path[0]]
+                res = lib.resolve_extern(crate, path[1:])[0]
+                if res is None:
+                    continue
+                files.add((lname, lib.file_of(res)))
+                if bound is not None:
+                    bindings[bound] = (lname, lib, res)
+        self._direct[rel] = (bindings, files)
+        return self._direct[rel]
+
+    def bindings(self, rel: str, depth: int = 0) -> dict:
+        out = dict(self.direct(rel)[0])
+        if depth > 3 or rel not in self.own.files:
+            return out
+        for _, _, entries, inline in self.scan(rel).all_uses:
+            for path, bound in entries:
+                if bound is not None or not path or path[0] in self.crate_of:
+                    continue
+                target = self.own.resolve((rel, inline), path, True)[0]
+                if target and target[0] == "mod" and target[1][0] != rel:
+                    for k, v in self.bindings(target[1][0], depth + 1).items():
+                        out.setdefault(k, v)
+        return out
+
+    def label(self, rel: str) -> tuple[set, set]:
+        """({(library, library file)} imported, {(library, qualified name)} used)."""
+        f = self.scan(rel)
+        bindings = self.bindings(rel)
+        body = list(f.code)
+        for start, end, _, _ in f.all_uses:
+            body[start:end] = [" "] * (end - start)
+        text = "".join(body)
+        idents = set(_RUST_IDENT.findall(text))
+        called = called_names(text)
+        used: set = set()
+        for bound, (lname, lib, res) in bindings.items():
+            if res[0] != "item":
+                continue
+            if (bound != "_" and bound in idents) or (lib.kind(res) == "trait" and lib.methods(res) & called):
+                used.add((lname, lib.qn(res[1], res[2])))
+        for m in _RUST_PATH.finditer(text):
+            segs = [x.strip() for x in m.group().split("::") if x.strip()]
+            if segs[0] in self.crate_of:
+                lname, lib, crate = self.crate_of[segs[0]]
+                res = lib.resolve_extern(crate, tuple(segs[1:]))[0]
+            elif segs[0] in bindings and bindings[segs[0]][2][0] == "mod":
+                lname, lib, mod = bindings[segs[0]]
+                res = lib._walk(mod[1], segs[1:], False, 0)[0]
+            else:
+                continue
+            if res is not None and res[0] == "item":
+                used.add((lname, lib.qn(res[1], res[2])))
+        return self.direct(rel)[1], used
+
+
+_IDENT_RE = re.compile(r"[A-Za-z_]\w*")
+_WS = " \t\r\n"
+
+
+def called_names(text: str) -> set[str]:
+    """Names of the method calls in `text`: `.name(` and `.name::<` (a
+    turbofish call), whitespace allowed around the name. One linear scan over
+    identifiers (no regex with optional whitespace runs)."""
+    out: set[str] = set()
+    for m in _IDENT_RE.finditer(text):
+        i = m.start() - 1
+        while i >= 0 and text[i] in _WS:
+            i -= 1
+        if i < 0 or text[i] != ".":
+            continue
+        j = m.end()
+        while j < len(text) and text[j] in _WS:
+            j += 1
+        if text.startswith("(", j) or (text.startswith("::", j) and text[j + 2 :].lstrip(_WS).startswith("<")):
+            out.add(m.group())
+    return out
+
+
+def label_rust(consumer: Path, libs: list[tuple[str, RustLib]], only: set[str] | None = None) -> tuple[set, set, dict, dict]:
+    """(imports, uses, ancestors, {}) of a Rust consumer, `only` restricting
+    the consumer files labelled. A code name maps to a library crate when one
+    of the consumer's manifests depends on its package with a requirement
+    whose compatibility range holds the pinned version (`hyper1 = { package
+    = "hyper", version = "=1.0.0-rc.4" }` is not hyper 0.14); the consumer's
+    own crates shadow a library's."""
+    imports: set = set()
+    uses: set = set()
+    c = _RustConsumer(consumer, libs)
+    for rel in _files(consumer, ".rs"):
+        if (only is not None and rel not in only) or "target" in rel.split("/")[:-1]:
+            continue
+        files, used = c.label(rel)
+        imports |= {(rel, lname, file) for lname, file in files}
+        uses |= {(rel, lname, qn) for lname, qn in used}
+    lib_of = dict(libs)
+    ancestors = {(lname, qn): lib_of[lname].ancestors(qn) for _, lname, qn in uses}
+    return imports, uses, ancestors, {}
+
+
+# --- release pins --------------------------------------------------------------------------
+
+_VERSION = re.compile(r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-.]?((?:rc|alpha|beta|a|b|dev|pre)[.\w-]*))?")
+
+
+def parse_version(text: str) -> tuple[int, int, int, str] | None:
+    """`1.2.3` / `v0.14.27` / `tower-0.4.13` / `1.0.0-rc.4` → (major, minor,
+    patch, pre-release or ""); missing parts are 0."""
+    m = _VERSION.search(text)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2) or 0), int(m.group(3) or 0), m.group(4) or ""
+
+
+def _vkey(v: tuple[int, int, int, str]) -> tuple:
+    # a pre-release sorts before its release
+    return (v[0], v[1], v[2], 0 if v[3] else 1, v[3])
+
+
+def _comparators(req: str, eco: str) -> list[tuple[str, tuple[int, int, int, str], int]]:
+    """(operator, version, number of version parts written) of a requirement."""
+    out = []
+    for part in req.split(","):
+        part = part.strip()
+        if not part or part == "*":
+            continue
+        m = re.match(r"(\^|~=|~|==|=|>=|<=|>|<|!=)?\s*(.+)", part)
+        op = m.group(1) or ("^" if eco == "cargo" else "==")
+        body = m.group(2).strip()
+        v = parse_version(body.replace("*", "0"))
+        if v is None:
+            continue
+        written = len(re.match(r"[\d.]*\d", body.lstrip("v")).group().split(".")) if re.match(r"v?\d", body) else 3
+        if body.endswith(".*"):
+            op = {"==": "~", "=": "~"}.get(op, op)
+        out.append((op, v, written))
+    return out
+
+
+def _caret_lower(v: tuple[int, int, int, str], written: int) -> tuple[int, int, int, str]:
+    """The first release of `v`'s compatibility series (`0.14.24` → `0.14.0`)."""
+    if v[0] > 0 or written == 1:
+        return (v[0], 0, 0, "")
+    if v[1] > 0 or written == 2:
+        return (0, v[1], 0, "")
+    return (0, 0, v[2], "")
+
+
+def _caret_upper(v: tuple[int, int, int, str], written: int) -> tuple[int, int, int, str]:
+    if v[0] > 0 or written == 1:
+        return (v[0] + 1, 0, 0, "")
+    if v[1] > 0 or written == 2:
+        return (0, v[1] + 1, 0, "")
+    return (0, 0, v[2] + 1, "")
+
+
+def satisfies(version: str, req: str, eco: str = "cargo") -> bool:
+    """Whether `version` meets requirement `req`: Cargo (`1.25`, `^0.14.24`,
+    `~1.2`, `=1.0.0-rc.4`, `>=1, <2`) or PEP 440 (`>=3.1.0`, `~=3.1`,
+    `==3.*`, `!=3.0.1`)."""
+    v = parse_version(version)
+    if v is None:
+        return False
+    k = _vkey(v)
+    for op, w, written in _comparators(req, eco):
+        lo = _vkey(w)
+        if op == "^":
+            ok = lo <= k < _vkey(_caret_upper(w, written))
+        elif op in ("~", "~="):
+            if op == "~=" and written >= 2:
+                up = (w[0] + 1, 0, 0, "") if written == 2 else (w[0], w[1] + 1, 0, "")
+            else:
+                up = (w[0] + 1, 0, 0, "") if written == 1 else (w[0], w[1] + 1, 0, "")
+            ok = lo <= k < _vkey(up)
+        elif op in ("=", "=="):
+            ok = v[:written] == w[:written] and (written < 3 or v[3] == w[3])
+        elif op == "!=":
+            ok = v != w
+        else:
+            ok = {">=": k >= lo, "<=": k <= lo, ">": k > lo, "<": k < lo}[op]
+        if not ok:
+            return False
+    return True
+
+
+def compatible(version: str, req: str) -> bool:
+    """Whether `version` is in the compatibility range of Cargo requirement
+    `req` (the upper bound of its caret / tilde / exact comparators; the lower
+    bound is not checked: a pinned library one patch or minor release below
+    a consumer's minimum has the same API for the labeler)."""
+    v = parse_version(version)
+    if v is None:
+        return False
+    for op, w, written in _comparators(req, "cargo"):
+        if op in ("^", "=", "=="):
+            if not _vkey(_caret_lower(w, written)) <= _vkey(v[:3] + ("",)) < _vkey(_caret_upper(w, written)):
+                return False
+        elif op == "~" and v[:2] != w[:2]:
+            return False
+        elif op == "<" and not _vkey(v) < _vkey(w):
+            return False
+    return True
+
+
+def pick_release(candidates: list[tuple[str, str, str]], req: str, before: str, eco: str = "cargo") -> tuple[str, str, str] | None:
+    """The pin rule for a library outside the benchmark: among (tag, sha,
+    ISO date) release tags, the highest version that meets the consumer's
+    requirement and was published before the consumer pin's commit date
+    (ISO 8601, compared as instants); pre-releases only when `req` names
+    one."""
+    best = None
+    cut = _instant(before)
+    for tag, sha, date in candidates:
+        v = parse_version(tag)
+        if v is None or (v[3] and "-" not in req and "rc" not in req) or _instant(date) >= cut or not satisfies(tag, req, eco):
+            continue
+        if best is None or _vkey(v) > _vkey(parse_version(best[0])):
+            best = (tag, sha, date)
+    return best
+
+
+def _instant(iso: str) -> datetime:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+
+
+# --- per language ---------------------------------------------------------------------------
+
+LABELERS: dict[str, Callable] = {"python": label_python, "php": label_php, "java": label_java, "rust": label_rust}
+
+
+def make_libs(language: str, roots: dict[str, Path], libraries: list[dict]) -> list[tuple[str, PyLib | PhpLib | JavaLib | RustLib]]:
+    """(repo, library index) of a group's libraries checked out at `roots`."""
+    if language == "python":
+        return [(x["repo"], PyLib(roots[x["repo"]], x["packages"])) for x in libraries]
+    cls = {"php": PhpLib, "java": JavaLib, "rust": RustLib}[language]
+    return [(x["repo"], cls(roots[x["repo"]])) for x in libraries]
+
+
+def symbol_name(qn: str, language: str) -> str:
+    """The last segment of a library symbol's qualified name (`Carbon\\Carbon`
+    → `Carbon`, `tokio::sync::broadcast::Sender` → `Sender`)."""
+    return re.split(r"\\|::|\.", qn)[-1] if language in ("php", "rust") else qn.rsplit(".", 1)[-1]
+
+
+def symbol_path(lib: PyLib | PhpLib | JavaLib | RustLib, qn: str, language: str) -> str | None:
+    """The library file that defines symbol `qn` (a `uses` target)."""
+    if language == "python":
+        return lib.modules.get(qn.rsplit(".", 1)[0])
+    if language == "rust":
+        return lib.path_of(qn)
+    return lib.classes.get(qn)
+
+
 # --- scoring -------------------------------------------------------------------------------
 
 
@@ -606,7 +1551,7 @@ def _owner_match(dst: str, target: str, language: str) -> bool:
     """`dst` (an arm's target qualified name) is `target` or a member of it."""
     if dst == target:
         return True
-    seps = {"python": ".", "php": "::", "java": "."}
+    seps = {"python": ".", "php": "::", "java": ".", "rust": "."}
     return dst.startswith(target + seps[language])
 
 
@@ -691,7 +1636,7 @@ def run_crossrepo(arm_names: list[str], force: bool = False) -> None:
     arm = make_arm("rueca")
     if not arm.available()[0]:
         return
-    p = run_path("crossrepo", "rueca")
+    p = org_run_path("crossrepo", "rueca")
     if p.exists() and not force and read_json(p).get("status") == "ok":
         return
     groups = []
@@ -727,16 +1672,7 @@ def _group(arm, g: dict) -> dict:
             return {"consumer": g["consumer"], "status": "error", "error": out.stderr[-500:]}
         edges = json.loads(out.stdout)["edges"]
         lang = g["language"]
-        consumer = roots[g["consumer"]]
-        if lang == "python":
-            libs = [(x["repo"], PyLib(roots[x["repo"]], x["packages"])) for x in g["libraries"]]
-            gold = label_python(consumer, libs)
-        elif lang == "php":
-            libs = [(x["repo"], PhpLib(roots[x["repo"]])) for x in g["libraries"]]
-            gold = label_php(consumer, libs)
-        else:
-            libs = [(x["repo"], JavaLib(roots[x["repo"]])) for x in g["libraries"]]
-            gold = label_java(consumer, libs)
+        gold = LABELERS[lang](roots[g["consumer"]], make_libs(lang, roots, g["libraries"]))
         per_lib = []
         for x in g["libraries"]:
             sub = (
@@ -763,7 +1699,7 @@ def _group(arm, g: dict) -> dict:
 
 
 def score_crossrepo() -> dict:
-    p = run_path("crossrepo", "rueca")
+    p = org_run_path("crossrepo", "rueca")
     if not p.exists():
         return {}
     rec = read_json(p)

@@ -126000,6 +126000,7 @@
   "cbm:java": 45,
   "cbm:php": 45,
   "cbm:python": 45,
+  "cbm:rust": 48,
   "cbm:ts/js": 46,
   "grep:c": 35,
   "grep:cpp": 43,
@@ -126007,6 +126008,7 @@
   "grep:java": 45,
   "grep:php": 45,
   "grep:python": 45,
+  "grep:rust": 48,
   "grep:ts/js": 46,
   "rueca:c": 35,
   "rueca:cpp": 43,
@@ -126014,6 +126016,7 @@
   "rueca:java": 45,
   "rueca:php": 45,
   "rueca:python": 45,
+  "rueca:rust": 48,
   "rueca:ts/js": 46
  },
  "failures": [],

@@ -301,15 +301,17 @@ target ≤ 50% of cbm): with the RFC 0005 responses, `search_symbols` costs
 0.33–0.89× cbm's tokens until the first gold hit (target met for Python,
 TS/JS, PHP and Java) and `trace` 0.88–1.74× cbm's tokens per true call
 edge (target not met; Rueca also returns more true edges). In an
-organization, one ranking over the organization index weighed by
-repository routing keeps the right repository's file in the top 5 for
-65.7% of the calibration issues vs 71.4% when asking that repository alone
-(0.92×; 0.64× without routing) and for 42.9% vs 61.9% of the 21 gated ones
-(0.69×; rank fusion across repositories gave 9.5%); cross-repository edges
-between labelled consumer–library pairs (Flask → Click / Jinja, Laravel →
-Carbon / Monolog / CommonMark, Dubbo and Apollo → Gson) have 99.7%
-precision and 95.3% recall; re-indexing one repository of 21 updates the
-organization layer in 0.5 s, 0.14× the repository's own index time
+organization of 42 pinned repositories (120 gated issues), one ranking
+over the organization index weighed by repository routing keeps the right
+repository's file in the top 5 for 56.7% of the issues vs 66.7% when
+asking that repository alone (0.85×, at the floor with its interval
+crossing it; per-repository rank fusion gives 24.2%; BM25 over the union
+of the repositories 52.5%); it does not yet surface the consumers of a
+changed library symbol (12.5% vs 37.5% for BM25). Cross-repository edges
+on 12 labelled consumer–library pairs have 98.3% precision and 74.9%
+recall (99.8 / 96.2 without the Rust pairs, 94.5 / 53.2 Rust alone);
+re-indexing one repository of 42 updates the organization layer in 0.5 s,
+0.19× the repository's own index time
 ([RFC 0006 §8, §9.2](docs/rfcs/0006-org-graph.md)).
 
 Contributions that move these numbers are very welcome.

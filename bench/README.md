@@ -21,7 +21,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Micro-benchmarks** (part of S3) | the same on hand-labelled snippets, one language feature each | callee F1 |
 | **Health** (S5) | "Does it parse, and is it fast?" | files with parse errors, query latency p95 |
 | **Efficiency** | "How many tokens does a correct answer cost?" (RFC 0005 §8) | reported only |
-| **Org scenarios** | "Does it still find the code in a store of many repositories, and of one repository at two commits?" (RFC 0005 §5–§6) | reported only |
+| **Org scenarios** | "Does it still find the code in a store of many repositories, and of one repository at two commits?" (RFC 0005 §5–§6) | reported; paired vs BM25 with MDE (not a language gate) |
 | **Configuration** (RFC 0003 §3.3) | "Which keys exist, who reads this env var, who sets it?" | key recall, span accuracy, bridge precision / recall |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
@@ -35,7 +35,9 @@ the **scorecard** (RFC 0004 §9): one table per language, *Metric | Rueca
 (95% CI) | Floor | Target | Status | BM25 | cbm*, followed by the language's
 status (`stable` / `preview`) and its failing floors, then a configuration
 card, then the detailed tables of every suite. `bench/results/*.json` holds
-every number (`scorecard.json` is what the CI regression check compares).
+every number (`scorecard.json` is what the CI regression check compares;
+`org.json` is the organization suite, one row per question and arm, compact
+like `s3.json`).
 
 ## Running
 
@@ -57,9 +59,15 @@ uv run --project bench rueca-bench check                 # regression check vs t
   (and scored as misses), never dropped. `--workers` runs S1 repositories
   and S3 sets in parallel; `--prune` deletes each repository clone once its
   runs are done (bounded disk; re-created from the pinned commits on next
-  use). `health` runs the Rueca arm only; `org` (the multi-repository and
-  multi-ref scenarios) runs the Rueca and cbm arms after S1 and is skipped
-  with `--lang`.
+  use). `health` runs the Rueca arm only; `org` (the multi-repository,
+  cross-repository and multi-ref scenarios) is self-contained (it does not
+  read S1 outputs) and is skipped with `--lang`; for `org`, `--only` takes
+  `gated` / `calibration` (the multi-repository splits to run) and / or
+  repositories (a smoke run of the multi-repository scenario restricted to
+  those members, e.g. `--only psf/requests pallets/flask tokio-rs/axum
+  pallets/click`; its outputs record the filter and a full run recomputes
+  them); with `--only` the cross-repository and multi-ref scenarios are not
+  run.
 - `check [--baseline FILE] [--current FILE]` — the regression check
   (below): compares `bench/results/scorecard.json` with the one committed
   at `HEAD`; exit status 1 when a floor metric dropped by more than its
@@ -844,64 +852,184 @@ better.
 
 ### Org scenarios (RFC 0005 §5–§6, `org.py`)
 
-**Multi-repository store.** The first gated S1 instance of the first
-`[org] repos_per_family` (3) gated S1 repositories of every language family
-— 21 repositories, each at that instance's base commit — are indexed
-together. Rueca: **one organization** (RFC 0006), built one repository at a
-time — as each worktree is added, the bench appends it to an organization
-file (`.cache/org/rueca-org.toml`) and runs `rueca index --org <file>
-<root>`, which indexes that repository and adds it to the organization
-layer; cbm: one project per repository. Each instance's keyword query is
-asked of the whole organization: Rueca **native**, one `search_symbols`
-served with `--org` and no `repo` (one ranking over the organization symbol
-index), and, for Rueca and cbm, **per repository**: one search per
-repository, merged by the bench with reciprocal rank fusion (k = 60; one
-item per repository at each rank, ties broken by the raw per-repository
-score) — what an agent without an org query must do; cbm has no
-cross-project search. Scored like S1 (File Acc@5, Function Acc@10) with
-repository-qualified paths and the candidate filter of every language,
-against the same arm's single-repository S1 answer for the same instance;
-tokens of the top-10 answer (per repository: the sum of its calls) and the
-share of the top 10 taken by other repositories. Worktrees are removed after
-indexing (the stores keep what queries need), so disk stays bounded; the S1
-gold of each instance is computed (or read from the cache) on the way.
+**Multi-repository organization.** Members are the manifest's
+`[[org.repos]]`, each pinned to one commit by a deterministic rule (every
+gated S1 repository at the base commit of its first gated
+`[[s1.instances]]` entry, then every calibration S1 repository at the base
+commit of its first calibration entry; `org.derive_pins`, checked by a unit
+test). The **gated organization** is the `split = "gated"` members (42); the
+**calibration organization** is the gated one plus the `split =
+"calibration"` members (8), the gated ones acting as distractors. A member
+without S1 instances (a sibling library) is indexed like the others.
+Instances, per member of a split, in manifest order: the S1 instances whose
+gold is present at the pin — every gold file exists there and, when the
+instance has function gold, at least one gold function exists there by
+qualified name — and whose fix is not already at the pin (`patch_at_pin`
+!= `reverse`, below) — the first `[org] max_instances_per_repo` (3;
+`calibration_max_instances_per_repo`, 5, for the calibration split, which is
+only ever tuned on). Their gold is
+the S1 gold carried to the pin (`gold_at_pin`, cached in
+`.cache/gold/org/<id>.json`): the same files, the functions re-resolved at
+the pin (their lines at the pin), plus `files_same_blob`, the gold files
+whose content at the pin equals the base commit's (a drift signal: when the
+pin is later than an instance's base its fix may already be in). The query
+is the S1 keyword query of the issue (kind **issue**).
+
+**Impact instances** (`impact.py`; kind **impact**): a library's issue
+asked of the organization and scored on the consumers that use what its
+fix changes. A *library member* is a member that a consumer member of the
+same split depends on (`crossrepo.GROUPS` edges between members: tokio for
+axum; carbon, monolog and commonmark for laravel/framework; gson for dubbo
+and apollo; none in the calibration split). Every S1 instance of a library
+member whose gold is at the pin and whose fix is not there (the issue rule
+without the cap) is a candidate; its **library gold symbols** are every
+segment of each gold function's qualified name at the pin (the callable the
+patch touches and the classes / impl types / traits containing it) and,
+for a gold file without function gold, every symbol defined in that file.
+The **consumer side** is every non-test source file of a consumer member
+whose *uses* — the independent cross-repository labeler run over the whole
+consumer with the consumer and its libraries at their organization pins —
+reach one of those symbols under the edge scorer's acceptance rule (the
+symbol, the class owning it, or a library ancestor: base classes, PHP traits
+and interfaces, Rust traits it implements). Candidates with an empty
+consumer side are dropped (today 16 gated: carbon 6, monolog 4, gson 3,
+tokio 3; commonmark's fixes touch parser classes laravel does not use). Uses are
+cached per consumer in `.cache/gold/org/impact/uses/`, records in
+`.cache/gold/org/impact/<id>.json`. The run asks `org_questions(split)`:
+the issue instances plus the impact instances that are not issue instances
+(an id of both kinds is asked once; both kinds are scored from the same
+answer). An impact row adds, to the own-side File Acc@5 / Function
+Acc@10, **consumer hit@10** and **@20** (a consumer gold file of a consumer
+repository among the first 10 / 20 distinct candidate files of the answer)
+and **consumer recall@20** (consumer gold files found in the first 20 /
+min(their number, 20)).
+
+Arms, every member indexed one at a time from a worktree at its pin (removed
+afterwards, so disk stays bounded):
+
+- **Rueca**: **one organization** (RFC 0006), built one repository at a time
+  — the bench appends each worktree to an organization file
+  (`.cache/org/rueca-org.toml`) and runs `rueca index --org <file> <root>`;
+  **native** = one `search_symbols` served with `--org` and no `repo` (one
+  ranking over the organization symbol index); **per repository** = one
+  `repo:`-scoped search per member in the same store, merged by reciprocal
+  rank fusion (k = 60; one item per repository at each rank, ties broken by
+  the raw per-repository score) — what an agent without an org query must
+  do; **single** = the own member's list of that sweep. The calibration
+  organization is a copy of the gated store (copy-on-write on APFS) with
+  the calibration members added the same way.
+- **grep (BM25)**: **native** = one BM25 ranking over the union of the
+  members (`bm25.union_search`: document count, lengths and term
+  frequencies of the union; file documents rank files, function-body
+  documents rank functions, as in S1); **per repository** = each member's
+  own BM25 ranking merged by RRF; **single** = the own member's ranking.
+  Each member's index is restricted to the terms of the run's queries and
+  dropped, so one full index is in memory at a time. No tokens (grep has no
+  rendered answer, as in S1).
+- **cbm**: one project per member; **per repository** = one `search_graph`
+  per project merged by RRF; **single** = the own project's list (cbm has
+  no cross-project search).
+
+Scored like S1 (File Acc@5, Function Acc@10) with repository-qualified
+paths and the candidate filter of every language, against the same arm's
+single answer in the same run (paired per instance); tokens of the top-10
+answer (per repository: the sum of its calls) and the share of the top 10
+taken by other repositories. Raw outputs
+`.cache/runs/org/multirepo-{gated,calibration}-<arm>.json` (shape in the
+`org.py` docstring).
 
 RFC 0006 §8 metrics (Rueca, report table "organization suite"): File Acc@5
-at organization scope over the single-repository S1 value (floor ≥ 0.85×,
-target ≥ 0.95×); **tokens per correct answer** at organization scope — Σ
-tokens of the top-10 answers / number of queries whose top 10 holds a gold
-file of the instance's own repository — against the same ratio of the S1
-single-repository answers (target ≤ 1.2×); **incremental update** — the
-organization-layer time `org_ms` that every `index --org` step reports
-(adding one repository) and, after the 21, of re-indexing the repository
-with the most symbol documents (its part replaced), each over that
-repository's own index time (floor ≤ 2×, target ≤ 1×). An arm not run keeps
-its published numbers (marked carried). Since RFC 0006 phase 2 the native
-answer is weighed by repository routing and the organization-layer times
-include routing profiles, package registries and link sets.
+at organization scope over the single answer (floor ≥ 0.85×, target ≥
+0.95×); **tokens per correct answer** at organization scope — Σ tokens of
+the top-10 answers / number of queries whose top 10 holds a gold file of
+the instance's own repository — against the same ratio of the single
+answers (target ≤ 1.2×); **incremental update** — the organization-layer
+time `org_ms` that every `index --org` step reports (adding one repository)
+and, after the gated members, of re-indexing the repository with the most
+symbol documents (its part replaced), each over that repository's own index
+time (floor ≤ 2×, target ≤ 1×; the per-step row is judged on its maximum).
+Since RFC 0006 phase 2 the native answer is weighed by repository routing
+and the organization-layer times include routing profiles, package
+registries and link sets.
 
-**Routing calibration** (RFC 0004 §7.7; `uv run python -m rueca_bench.org
-calibrate [ROUTE ...] [--force]`, not part of `run`). Repository routing is
-tuned on the calibration split only: every calibration S1 instance (35) is
-asked of an organization made of the 7 calibration repositories (each at
-its first calibration instance's base commit) plus the gated organization's
-21 repositories as distractors — their documents only, none of their
-instances is asked — under each routing setting (`RUECA_ORG_ROUTE`:
-`off`, `prior,alpha=…,mu=…,eps=…`, `top,top=…,ratio=…`, CORI constants,
-profile field weights, `stats=local`), and of each instance's repository
-alone (`repo`, no `--org`) in the same store. Scored like the
-multi-repository scenario (File Acc@5, other-repository share of the top 10,
-tokens per correct answer, organization over single). The store is kept
-between runs (`.cache/org/calib-store`), so a sweep costs ≈ 30 s per
-setting; raw output `.cache/runs/org/calibration-rueca.json`. The chosen
-default (prior, α 2, μ 0.5, ε 0.25, CORI 50 / 150) and the sweep are in
+**Statistics** (`orgstats.py`, per split). Every 0/1 rate carries its
+Wilson 95% interval and n; the organization / single ratio of File Acc@5
+and the tokens-per-correct ratio carry percentile-bootstrap intervals
+(instances resampled). Paired comparisons, A − B over the instances both
+arms answered (paired bootstrap, `[scorecard]` resamples and seed,
+`seeded(base, "org", split, kind, metric, arm_a, mode_a, arm_b, mode_b)`):
+Rueca native − BM25 native, Rueca native − cbm per repository, Rueca native
+− Rueca per repository and BM25 native − BM25 per repository, on File Acc@5
+and Function Acc@10 (instances with function gold) for issue instances and
+on consumer hit@10 and own File Acc@5 for impact instances. Status as RFC
+0004 §6.1 reads a relative floor (✅ the 95% interval ≥ 0, ⚠ it crosses 0,
+❌ it is below 0). Each comparison reports the **discordance** d (share of
+instances where one arm hits and the other misses), the observed
+half-width, and the **minimum detectable effect** at 80% power and
+two-sided α = 0.05 for a paired binary outcome, **MDE ≈ (1.96 + 0.84) ·
+√(d / n)**, next to the MDE the 21-instance scenario would have had with
+the same d (what the larger population bought). The scorecard's `org` block
+(`orgstats.org_block`, gated split only) holds these per arm and mode, the
+comparisons, the impact kind, the RFC 0006 §8 rows with floors, targets and
+statuses, the cross-repository pools (all pairs, without Rust, Rust alone),
+the instance counts per language, kind and `patch_at_pin` stratum, and the
+settings (caps, members, sha256 of the `[[org.repos]]` list); it is not a
+language gate (`rueca-bench check` reads `languages` and `config` only).
+
+**Carrying.** Published multi-repository scores are carried only for the
+same population (`org.population`: sha256 of the members, their pins and
+the instance ids with their kinds): the whole split when nothing was run,
+an arm when that arm was not run. The 21-instance scenario is another
+population and is never carried; an arm without output is *pending*.
+
+**Plugging a new arm into the organization scenario.** An arm (e.g. the
+semantic-search arm of RFC 0007) is added to `org.ORG_ARMS` with a
+`_multirepo_<arm>(arm, pending, insts, gated, extra)` that returns, per
+split in `pending`, `_record(members, insts[split], index, answers, ...)`.
+What it must provide: **index the members one at a time** from
+`add_worktree(repo, pin)` (remove the worktree after indexing; the
+calibration organization is the gated one plus `extra`); for each question
+(`inst["query"]`, `inst["repo"]`) an answer `{native?, per_repo, single}`
+where every list is repository-qualified items `[repo, path, name,
+start_line, label]` (`_items`; top 50) — **native** = one organization
+query returning hits that name their repository (leave it out when the arm
+has none), **per_repo** = one query per member merged with `rrf_merge`,
+**single** = the own member's list; an arm with a separate file ranking
+adds `files: [[repo, path]]`. Tokens come from what an agent reads: `eff`
+= `_eff(arm.search_eff(...))` of the native top-10 answer and of the
+single answer, and `tokens` = the sum over per-member top-10 answers
+(`null` when the arm has no rendered answer, as BM25). Scoring, statistics
+and the report pick the arm up from its raw output
+(`.cache/runs/org/multirepo-<split>-<arm>.json`); add it to
+`orgstats.ARMS` and to `orgstats.COMPARISONS` for its paired rows.
+
+**Routing calibration** (RFC 0004 §7.7; `uv run --project bench python -m
+rueca_bench.org calibrate [ROUTE ...] [--force]`, not part of `run`).
+Repository routing is tuned on the calibration split only: the calibration
+instances of the multi-repository scenario (`org_instances("calibration")`)
+are asked of its calibration organization (the gated members as distractors
+— their documents only, none of their instances is asked — plus the
+calibration members, each at its pin) under each routing setting
+(`RUECA_ORG_ROUTE`: `off`, `prior,alpha=…,mu=…,eps=…`, `top,top=…,ratio=…`,
+CORI constants, profile field weights, `stats=local`), and of each
+instance's repository alone (`repo`, no `--org`) in the same store. Scored
+like the multi-repository scenario (File Acc@5 against the gold at the pin,
+other-repository share of the top 10, tokens per correct answer,
+organization over single). The store is kept between runs
+(`.cache/org/calib-store`), so a sweep costs ≈ 30 s per setting; raw output
+`.cache/runs/org/calibration-rueca.json`. The chosen default (prior, α 2,
+μ 0.5, ε 0.25, CORI 50 / 150) and the sweep that chose it (35 instances of
+the 7 calibration repositories of the time, 21 gated distractors) are in
 [RFC 0006 §9.2](../docs/rfcs/0006-org-graph.md).
 
 **Cross-repository edges** (RFC 0006 §8, `crossrepo.py`, part of `--suite
-org`). Consumers pinned with the libraries they depend on (`crossrepo.GROUPS`):
-Flask 3.1.3 with Click 8.1.8 and Jinja 3.1.6; Laravel (the S1 organization
-commit) with Carbon (its S1 commit), Monolog 3.9.0 and league/commonmark
-2.8.3; Apache Dubbo and Apollo (S1 commits) with Gson 2.15.0. Each group is
+org`). Consumers pinned with the libraries they depend on (`crossrepo.GROUPS`,
+12 pairs): Flask 3.1.3 with Click 8.1.8, Jinja 3.1.6 and Werkzeug 3.1.5;
+Laravel (the S1 organization commit) with Carbon (its S1 commit), Monolog
+3.9.0 and league/commonmark 2.8.3; Apache Dubbo and Apollo (S1 commits)
+with Gson 2.15.0; Axum (its organization pin) with Tokio (its organization
+pin), Hyper 0.14.27 and Tower 0.4.13; Tokio with Mio 1.0.1 (Rust: the Cargo
+labeler of the `crossrepo.py` docstring). Each group is
 indexed as one organization (`rueca index --org`) and its link layer listed
 with `rueca links --org --json`. Gold, labelled from the consumer's source
 by an independent labeler (Python `ast`; PHP and Java regular expressions
@@ -921,7 +1049,9 @@ file names (`Illuminate\Support\Carbon extends Carbon\Carbon`); a gold
 use is found when one of the file's edges hits it that way. Precision =
 correct / predicted, recall = found / gold, pooled; precision is a lower
 bound (a method of an object a library call returned is invisible to the
-labeler). RFC 0006 §8: floor ≥ 90 / 75, target ≥ 97 / 90. Raw output
+labeler). RFC 0006 §8: floor ≥ 90 / 75, target ≥ 97 / 90, judged on the
+pooled counts with Wilson intervals; the report pools all pairs, the pairs
+without Rust and the Rust pairs alone. Raw output
 `.cache/runs/org/crossrepo-rueca.json`.
 
 **Multi-ref.** `[multiref] instance` (psf__requests-2317): the repository at
@@ -1216,6 +1346,20 @@ Rule changes that move published numbers, newest first (the results files
 carry the S3 schema version; rows scored under an older schema are never
 carried forward).
 
+- **2026-11-16 — Organization scenario, larger and self-contained.** The
+  multi-repository scenario moves from 21 instances (one per repository, 21
+  repositories) to pinned `[[org.repos]]` members (42 gated, 8
+  calibration) and up to 3 instances per member whose S1 gold is present at
+  the pin, scored against that gold carried to the pin; the *single* answer
+  is the same arm's own-repository answer in the same run (no longer the S1
+  run at the instance's base commit); grep (BM25 over the union of the
+  members, and per member + RRF) is a new arm; a calibration split is
+  scored separately. Numbers are not comparable with the 21-instance ones,
+  which are no longer carried or published (another population). Impact
+  instances (a library's issue scored on the consumer files that use what
+  its fix changes) are a second kind; every rate carries a Wilson interval,
+  paired comparisons a bootstrap interval, discordance and minimum
+  detectable effect; the scorecard gains an `org` block.
 - **2026-10-26 — S3 schema 4.** (1) Equivalence classes: callables one SCIP
   symbol binds to (and unbound alternatives of one class) are one
   neighbour; class-aware scores are the gated numbers, the old scoring is

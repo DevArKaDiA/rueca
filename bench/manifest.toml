@@ -287,12 +287,384 @@ content = '^\s*(@interface|@implementation|@protocol|#import\s)'
 reason = "not the language (Objective-C)"
 
 # ---------------------------------------------------------------- org scenarios
-# RFC 0005 §8 (org.py): a multi-repository store (the first gated S1
-# instance of the first `repos_per_family` gated S1 repositories of every
-# family) and one repository at two commits (`[multiref] instance`: base
-# commit vs base + gold patch).
+# RFC 0005 §8, RFC 0006 §8 (org.py): a multi-repository organization and one
+# repository at two commits (`[multiref] instance`: base commit vs base +
+# gold patch).
+#
+# `[[org.repos]]` are the organization's members, each pinned to one commit.
+# Pin rule (deterministic; `org.derive_pins` recomputes it and a unit test
+# checks this list against it): every gated S1 repository at the
+# `base_commit` of its first gated `[[s1.instances]]` entry (manifest order),
+# then every calibration S1 repository at the `base_commit` of its first
+# calibration entry. `split = "gated"` members form the gated organization;
+# the calibration organization is the gated one plus the `split =
+# "calibration"` members (RFC 0004 §7.7: tuning happens there only).
+# Instances: per member, its S1 instances in manifest order whose S1 gold is
+# present at the pin (every gold file exists there and, when the instance has
+# function gold, at least one gold function exists by qualified name) and
+# whose fix is not already at the pin (`patch_at_pin` != "reverse"), the
+# first `max_instances_per_repo` of them (`calibration_max_instances_per_repo`
+# for the calibration split: it is only tuned on, so it may be larger).
+#
+# A member without S1 instances (a sibling library: pallets/jinja,
+# pallets/werkzeug, tokio-rs/mio, hyperium/hyper, tower-rs/tower, ...) is
+# simply indexed with the others (a distractor, and a dependency target for
+# the link layer); give it `split = "gated"` to have it in both
+# organizations and `pin` saying where its commit comes from.
 [org]
-repos_per_family = 3
+max_instances_per_repo = 3
+calibration_max_instances_per_repo = 5
+
+[[org.repos]]
+repo = "psf/requests"
+language = "python"
+commit = "091991be0da19de9108dbe5e3752917fea3d7fdc"
+split = "gated"
+pin = "base_commit of psf__requests-2317, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "pallets/flask"
+language = "python"
+commit = "182ce3dd15dfa3537391c3efaf9c3ff407d134d4"
+split = "gated"
+pin = "base_commit of pallets__flask-5063, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "pylint-dev/pylint"
+language = "python"
+commit = "397c1703e8ae6349d33f7b99f45b2ccaf581e666"
+split = "gated"
+pin = "base_commit of pylint-dev__pylint-7114, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "pytest-dev/pytest"
+language = "python"
+commit = "e6e300e729dd33956e5448d8be9a0b1540b4e53a"
+split = "gated"
+pin = "base_commit of pytest-dev__pytest-7432, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "sphinx-doc/sphinx"
+language = "python"
+commit = "b19bce971e82f2497d67fdacdeca8db08ae0ba56"
+split = "gated"
+pin = "base_commit of sphinx-doc__sphinx-8595, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "tailwindlabs/tailwindcss"
+language = "typescript"
+commit = "a63c976dc77137d6b67d718560a4b9847907880c"
+split = "gated"
+pin = "base_commit of tailwindlabs__tailwindcss-553, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "coder/code-server"
+language = "typescript"
+commit = "78658f1cf48a5e019a82cde937cfa8feed8b986b"
+split = "gated"
+pin = "base_commit of coder__code-server-4923, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "vuejs/core"
+language = "typescript"
+commit = "706d4ac1d0210b2d9134b3228280187fe02fc971"
+split = "gated"
+pin = "base_commit of vuejs__core-11899, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "preactjs/preact"
+language = "javascript"
+commit = "66cb6a78776b263a2fe4d1283426e699961095d2"
+split = "gated"
+pin = "base_commit of preactjs__preact-4182, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "axios/axios"
+language = "javascript"
+commit = "65e8d1e28ce829f47a837e45129730e541950d3c"
+split = "gated"
+pin = "base_commit of axios__axios-5316, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "briannesbitt/carbon"
+language = "php"
+commit = "d481d8d69a94dc00e5c1b147ec1f7e7492626b12"
+split = "gated"
+pin = "base_commit of briannesbitt__carbon-3103, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "php-cs-fixer/php-cs-fixer"
+language = "php"
+commit = "18d9e42f276f65ba45da02597191ce555bf23cd0"
+split = "gated"
+pin = "base_commit of php-cs-fixer__php-cs-fixer-7875, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "laravel/framework"
+language = "php"
+commit = "b8ca298a5475497d01b194ed5688441454d8ee34"
+split = "gated"
+pin = "base_commit of laravel__framework-52451, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "phpoffice/phpspreadsheet"
+language = "php"
+commit = "915bfc55cd6217e059b5859b341bab7bdd0874c8"
+split = "gated"
+pin = "base_commit of phpoffice__phpspreadsheet-4214, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "twigphp/Twig"
+language = "php"
+commit = "47f527ef8447640a5ff9d75ee4cf7cfff29fa3be"
+split = "gated"
+pin = "base_commit of twigphp__twig-4500, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "Seldaek/monolog"
+language = "php"
+commit = "a4471eb05bb32400bf408972d5162dccc49f46c5"
+split = "gated"
+pin = "base_commit of seldaek__monolog-1896, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "thephpleague/commonmark"
+language = "php"
+commit = "200869c74b4711d4162d77aa701a613adceedd63"
+split = "gated"
+pin = "base_commit of thephpleague__commonmark-1038, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "caddyserver/caddy"
+language = "go"
+commit = "0a6d3333b2c92553e66c93c14d3258a790aac639"
+split = "gated"
+pin = "base_commit of caddyserver__caddy-5761, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "gin-gonic/gin"
+language = "go"
+commit = "f2bbdfe9f26d84cb994f381050692a9e4553bf75"
+split = "gated"
+pin = "base_commit of gin-gonic__gin-2755, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "prometheus/prometheus"
+language = "go"
+commit = "64fc3e58fec13af55968db89a484b9e0c5425bd6"
+split = "gated"
+pin = "base_commit of prometheus__prometheus-10633, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "gohugoio/hugo"
+language = "go"
+commit = "a322282e70c2935c79f9c0f5c593bfdd032eb964"
+split = "gated"
+pin = "base_commit of gohugoio__hugo-12171, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "hashicorp/terraform"
+language = "go"
+commit = "f2e4cb411ed6dfd36fd4f9960a74d8f29c7b8882"
+split = "gated"
+pin = "base_commit of hashicorp__terraform-34900, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "google/gson"
+language = "java"
+commit = "6d2557d5d1a8ac498f2bcee20e5053c93b33ecce"
+split = "gated"
+pin = "base_commit of google__gson-1703, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "projectlombok/lombok"
+language = "java"
+commit = "9e6f66c557205bff3c87eefb4c7a7631d0b89ff0"
+split = "gated"
+pin = "base_commit of projectlombok__lombok-3326, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "apache/dubbo"
+language = "java"
+commit = "d8e6dfa42a22e9c21697ad37709abec7ae33895b"
+split = "gated"
+pin = "base_commit of apache__dubbo-11255, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "apache/rocketmq"
+language = "java"
+commit = "e5fadc7db7c4a5c098e5f912a19fd71cba3dde3d"
+split = "gated"
+pin = "base_commit of apache__rocketmq-5633, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "apolloconfig/apollo"
+language = "java"
+commit = "63c16c117a869426f2cbbfdaa099de449789fd18"
+split = "gated"
+pin = "base_commit of apolloconfig__apollo-4464, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "redis/redis"
+language = "c"
+commit = "e88f6acb94c77c9a5b81f0b2a8bd132b2a5c3d3c"
+split = "gated"
+pin = "base_commit of redis__redis-10068, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "jqlang/jq"
+language = "c"
+commit = "87e3dfddb80015bd71259a4a295ca73bed398bd2"
+split = "gated"
+pin = "base_commit of jqlang__jq-2728, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "micropython/micropython"
+language = "c"
+commit = "b0ba151102a6c1b2e0e4c419c6482a64677c9b40"
+split = "gated"
+pin = "base_commit of micropython__micropython-15898, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "valkey-io/valkey"
+language = "c"
+commit = "5d97f5133c271313cd5a172617e8af1fe845e0e2"
+split = "gated"
+pin = "base_commit of valkey-io__valkey-928, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "fmtlib/fmt"
+language = "cpp"
+commit = "ece4b4b33a96db77beccca3957505e689cbc4279"
+split = "gated"
+pin = "base_commit of fmtlib__fmt-2317, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "nlohmann/json"
+language = "cpp"
+commit = "e6cafa573aac6ed9227f752a5371c0b3f436307d"
+split = "gated"
+pin = "base_commit of nlohmann__json-4536, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "catchorg/Catch2"
+language = "cpp"
+commit = "979bbf03bb00bc55ca09783791b5091a2247df68"
+split = "gated"
+pin = "base_commit of catchorg__Catch2-1608, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "simdjson/simdjson"
+language = "cpp"
+commit = "e4e89fe27a37a1abf70387d07adfb3b1b9f115ef"
+split = "gated"
+pin = "base_commit of simdjson__simdjson-545, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "tokio-rs/tokio"
+language = "rust"
+commit = "0cbf1a5adae81e8ff86ca6d040aeee67cf888262"
+split = "gated"
+pin = "base_commit of tokio-rs__tokio-6724, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "sharkdp/bat"
+language = "rust"
+commit = "db66e4459bc4e66c03629d7cbc235f59245280c0"
+split = "gated"
+pin = "base_commit of sharkdp__bat-2835, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "tokio-rs/axum"
+language = "rust"
+commit = "6f7ff8556587d51c6919a864926e4b8090f92c3f"
+split = "gated"
+pin = "base_commit of tokio-rs__axum-2096, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "astral-sh/ruff"
+language = "rust"
+commit = "13a6b5600b47489ca6af0b5a13d916bda8e50662"
+split = "gated"
+pin = "base_commit of astral-sh__ruff-15626, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "uutils/coreutils"
+language = "rust"
+commit = "b89a6255a9cb5ee09867707f395d02929273dc45"
+split = "gated"
+pin = "base_commit of uutils__coreutils-6682, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "nushell/nushell"
+language = "rust"
+commit = "cc9f41e553333b1ad0aa4185a912f7a52355a238"
+split = "gated"
+pin = "base_commit of nushell__nushell-12901, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "burntsushi/ripgrep"
+language = "rust"
+commit = "fed4fea217abbc502f2e823465de903c8f2b623d"
+split = "gated"
+pin = "base_commit of burntsushi__ripgrep-2576, its first gated [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "pallets/click"
+language = "python"
+commit = "08ecfd0e7c238a2444886d239de6d0e9d83530ec"
+split = "calibration"
+pin = "base_commit of pallets__click-1964, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "yargs/yargs"
+language = "javascript"
+commit = "c67c257cdf2b79af117cfd1b3938881c8f3e0677"
+split = "calibration"
+pin = "base_commit of yargs__yargs-1600, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "JsonMapper/JsonMapper"
+language = "php"
+commit = "fd0389f56d0f4fab756b2e074eef2ae1d9987324"
+split = "calibration"
+pin = "base_commit of jsonmapper__jsonmapper-135, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "benhoyt/goawk"
+language = "go"
+commit = "59441bef1fca2e9eee1d4b207ca3ef5768b8fc1a"
+split = "calibration"
+pin = "base_commit of benhoyt__goawk-173, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "decorators-squad/eo-yaml"
+language = "java"
+commit = "e75f2e84f8b39422f9fb69f40042ee1a09884e2d"
+split = "calibration"
+pin = "base_commit of decorators-squad__eo-yaml-226, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "nanomsg/nng"
+language = "c"
+commit = "206de0ad6f338c7e375885443836fbb44853550b"
+split = "calibration"
+pin = "base_commit of nanomsg__nng-1305, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "randombit/botan"
+language = "cpp"
+commit = "f02c6027b19f3e992796c157a474720ed3bcf82a"
+split = "calibration"
+pin = "base_commit of randombit__botan-4122, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "tokio-rs/bytes"
+language = "rust"
+commit = "f514bd38dac85695e9053d990b251643e9e4ef92"
+split = "calibration"
+pin = "base_commit of tokio-rs__bytes-543, its first calibration [[s1.instances]] entry"
+
 
 [multiref]
 instance = "psf__requests-2317"

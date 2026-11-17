@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-17 02:14 UTC",
+ "generated": "2026-11-17 06:33 UTC",
  "languages": {
   "python": {
    "label": "python",
@@ -3624,5 +3624,1108 @@
   "min_s1": 30,
   "variant": "kw"
  },
- "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830)"
+ "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830)",
+ "org": {
+  "status": "ok",
+  "split": "gated",
+  "population": "68427744fe8e8b49e586fc2ba8b3ef98999eba7ca0e73531f3745858be92f47a",
+  "instances": {
+   "issue": 120,
+   "impact": 16,
+   "by_language": {
+    "python": {
+     "members": 5,
+     "issue": {
+      "n": 14,
+      "patch_at_pin": {
+       "base": 5,
+       "applies": 4,
+       "neither": 5
+      }
+     }
+    },
+    "ts/js": {
+     "members": 5,
+     "issue": {
+      "n": 15,
+      "patch_at_pin": {
+       "base": 5,
+       "neither": 8,
+       "applies": 2
+      }
+     }
+    },
+    "php": {
+     "members": 7,
+     "issue": {
+      "n": 21,
+      "patch_at_pin": {
+       "base": 7,
+       "neither": 13,
+       "applies": 1
+      }
+     },
+     "impact": {
+      "n": 10,
+      "patch_at_pin": {
+       "base": 2,
+       "neither": 8
+      }
+     }
+    },
+    "go": {
+     "members": 5,
+     "issue": {
+      "n": 15,
+      "patch_at_pin": {
+       "base": 5,
+       "applies": 6,
+       "neither": 4
+      }
+     }
+    },
+    "java": {
+     "members": 5,
+     "issue": {
+      "n": 15,
+      "patch_at_pin": {
+       "base": 5,
+       "neither": 7,
+       "applies": 3
+      }
+     },
+     "impact": {
+      "n": 3,
+      "patch_at_pin": {
+       "neither": 2,
+       "applies": 1
+      }
+     }
+    },
+    "c": {
+     "members": 4,
+     "issue": {
+      "n": 12,
+      "patch_at_pin": {
+       "base": 4,
+       "neither": 4,
+       "applies": 4
+      }
+     }
+    },
+    "cpp": {
+     "members": 4,
+     "issue": {
+      "n": 10,
+      "patch_at_pin": {
+       "base": 4,
+       "applies": 1,
+       "neither": 5
+      }
+     }
+    },
+    "rust": {
+     "members": 7,
+     "issue": {
+      "n": 18,
+      "patch_at_pin": {
+       "base": 7,
+       "neither": 10,
+       "applies": 1
+      }
+     },
+     "impact": {
+      "n": 3,
+      "patch_at_pin": {
+       "neither": 2,
+       "applies": 1
+      }
+     }
+    }
+   }
+  },
+  "arms": {
+   "rueca": {
+    "native": {
+     "status": "ok",
+     "n": 120,
+     "file_acc@5": {
+      "value": 0.5666666666666667,
+      "ci": [
+       0.47729920885539046,
+       0.6518982356221157
+      ],
+      "n": 120
+     },
+     "single_file_acc@5": {
+      "value": 0.6666666666666666,
+      "ci": [
+       0.5783110162063498,
+       0.7446825949874156
+      ],
+      "n": 120
+     },
+     "func_acc@10": {
+      "value": 0.3739130434782609,
+      "ci": [
+       0.29090380155349155,
+       0.4650736133337266
+      ],
+      "n": 115
+     },
+     "single_func_acc@10": {
+      "value": 0.48695652173913045,
+      "ci": [
+       0.39751304197444515,
+       0.5772432423242325
+      ],
+      "n": 115
+     },
+     "file_acc@5_ratio": {
+      "value": 0.85,
+      "ci": [
+       0.7439024390243902,
+       0.9629629629629629
+      ]
+     },
+     "other_repo_top10": 0.11333333333333333,
+     "tokens_median": 355,
+     "single_tokens_median": 347,
+     "tokens_per_correct": 701.4126984126984,
+     "single_tokens_per_correct": 542.4935064935065,
+     "tokens_per_correct_ratio": {
+      "value": 1.2929421090150766,
+      "ci": [
+       1.1323804307425878,
+       1.5019682324261028
+      ]
+     },
+     "found_top10": 63,
+     "single_found_top10": 77
+    },
+    "per_repo": {
+     "status": "ok",
+     "n": 120,
+     "file_acc@5": {
+      "value": 0.24166666666666667,
+      "ci": [
+       0.1738584121753525,
+       0.325501490474311
+      ],
+      "n": 120
+     },
+     "single_file_acc@5": {
+      "value": 0.6666666666666666,
+      "ci": [
+       0.5783110162063498,
+       0.7446825949874156
+      ],
+      "n": 120
+     },
+     "func_acc@10": {
+      "value": 0.11304347826086956,
+      "ci": [
+       0.06726407637851248,
+       0.18383902448226022
+      ],
+      "n": 115
+     },
+     "single_func_acc@10": {
+      "value": 0.48695652173913045,
+      "ci": [
+       0.39751304197444515,
+       0.5772432423242325
+      ],
+      "n": 115
+     },
+     "file_acc@5_ratio": {
+      "value": 0.36250000000000004,
+      "ci": [
+       0.25878151260504206,
+       0.4675324675324675
+      ]
+     },
+     "other_repo_top10": 0.9166666666666666,
+     "tokens_median": 14561,
+     "single_tokens_median": 347,
+     "tokens_per_correct": null,
+     "single_tokens_per_correct": null,
+     "tokens_per_correct_ratio": {
+      "value": null,
+      "ci": null
+     },
+     "found_top10": null,
+     "single_found_top10": null
+    }
+   },
+   "grep": {
+    "native": {
+     "status": "ok",
+     "n": 120,
+     "file_acc@5": {
+      "value": 0.525,
+      "ci": [
+       0.43626995305824834,
+       0.6121790886208165
+      ],
+      "n": 120
+     },
+     "single_file_acc@5": {
+      "value": 0.6333333333333333,
+      "ci": [
+       0.5442242408550699,
+       0.7141706480999424
+      ],
+      "n": 120
+     },
+     "func_acc@10": {
+      "value": 0.2608695652173913,
+      "ci": [
+       0.18927463646034004,
+       0.34792390901541836
+      ],
+      "n": 115
+     },
+     "single_func_acc@10": {
+      "value": 0.40869565217391307,
+      "ci": [
+       0.3232145470922399,
+       0.5000794429985044
+      ],
+      "n": 115
+     },
+     "file_acc@5_ratio": {
+      "value": 0.8289473684210527,
+      "ci": [
+       0.7241265880217786,
+       0.9333333333333333
+      ]
+     },
+     "other_repo_top10": 0.2866666666666667,
+     "tokens_median": null,
+     "single_tokens_median": null,
+     "tokens_per_correct": null,
+     "single_tokens_per_correct": null,
+     "tokens_per_correct_ratio": {
+      "value": null,
+      "ci": null
+     },
+     "found_top10": null,
+     "single_found_top10": null
+    },
+    "per_repo": {
+     "status": "ok",
+     "n": 120,
+     "file_acc@5": {
+      "value": 0.2,
+      "ci": [
+       0.13824476478840256,
+       0.2803667350628196
+      ],
+      "n": 120
+     },
+     "single_file_acc@5": {
+      "value": 0.6333333333333333,
+      "ci": [
+       0.5442242408550699,
+       0.7141706480999424
+      ],
+      "n": 120
+     },
+     "func_acc@10": {
+      "value": 0.10434782608695652,
+      "ci": [
+       0.06070503442056426,
+       0.17356892263932694
+      ],
+      "n": 115
+     },
+     "single_func_acc@10": {
+      "value": 0.40869565217391307,
+      "ci": [
+       0.3232145470922399,
+       0.5000794429985044
+      ],
+      "n": 115
+     },
+     "file_acc@5_ratio": {
+      "value": 0.31578947368421056,
+      "ci": [
+       0.2125,
+       0.4225352112676056
+      ]
+     },
+     "other_repo_top10": 0.9233333333333333,
+     "tokens_median": null,
+     "single_tokens_median": null,
+     "tokens_per_correct": null,
+     "single_tokens_per_correct": null,
+     "tokens_per_correct_ratio": {
+      "value": null,
+      "ci": null
+     },
+     "found_top10": null,
+     "single_found_top10": null
+    }
+   },
+   "cbm": {
+    "per_repo": {
+     "status": "ok",
+     "n": 120,
+     "file_acc@5": {
+      "value": 0.11666666666666667,
+      "ci": [
+       0.0707811780783005,
+       0.18633351617603885
+      ],
+      "n": 120
+     },
+     "single_file_acc@5": {
+      "value": 0.5666666666666667,
+      "ci": [
+       0.47729920885539046,
+       0.6518982356221157
+      ],
+      "n": 120
+     },
+     "func_acc@10": {
+      "value": 0.06086956521739131,
+      "ci": [
+       0.029795116013329806,
+       0.12033312204215384
+      ],
+      "n": 115
+     },
+     "single_func_acc@10": {
+      "value": 0.3130434782608696,
+      "ci": [
+       0.23549389373904994,
+       0.4026795145419976
+      ],
+      "n": 115
+     },
+     "file_acc@5_ratio": {
+      "value": 0.2058823529411765,
+      "ci": [
+       0.11428571428571428,
+       0.30303030303030304
+      ]
+     },
+     "other_repo_top10": 0.9508333333333333,
+     "tokens_median": 18051,
+     "single_tokens_median": 435,
+     "tokens_per_correct": null,
+     "single_tokens_per_correct": null,
+     "tokens_per_correct_ratio": {
+      "value": null,
+      "ci": null
+     },
+     "found_top10": null,
+     "single_found_top10": null
+    }
+   }
+  },
+  "impact": {
+   "rueca": {
+    "native": {
+     "status": "ok",
+     "n": 16,
+     "n_func": 16,
+     "file_acc@5": {
+      "value": 0.8125,
+      "ci": [
+       0.5699111903802586,
+       0.9340840092857187
+      ],
+      "n": 16
+     },
+     "func_acc@10": {
+      "value": 0.375,
+      "ci": [
+       0.18481232558863633,
+       0.6135895945449727
+      ],
+      "n": 16
+     },
+     "consumer_hit@10": {
+      "value": 0.125,
+      "ci": [
+       0.03497748774324047,
+       0.36022827265758695
+      ],
+      "n": 16
+     },
+     "consumer_hit@20": {
+      "value": 0.125,
+      "ci": [
+       0.03497748774324047,
+       0.36022827265758695
+      ],
+      "n": 16
+     },
+     "consumer_recall@20": 0.09375,
+     "other_repo_top10": 0.00625,
+     "consumer_files_median": 2.0
+    },
+    "per_repo": {
+     "status": "ok",
+     "n": 16,
+     "n_func": 16,
+     "file_acc@5": {
+      "value": 0.4375,
+      "ci": [
+       0.23098652405492354,
+       0.6682144360118811
+      ],
+      "n": 16
+     },
+     "func_acc@10": {
+      "value": 0.1875,
+      "ci": [
+       0.06591599071428142,
+       0.4300888096197414
+      ],
+      "n": 16
+     },
+     "consumer_hit@10": {
+      "value": 0.125,
+      "ci": [
+       0.03497748774324047,
+       0.36022827265758695
+      ],
+      "n": 16
+     },
+     "consumer_hit@20": {
+      "value": 0.125,
+      "ci": [
+       0.03497748774324047,
+       0.36022827265758695
+      ],
+      "n": 16
+     },
+     "consumer_recall@20": 0.09375,
+     "other_repo_top10": 0.9125,
+     "consumer_files_median": 2.0
+    }
+   },
+   "grep": {
+    "native": {
+     "status": "ok",
+     "n": 16,
+     "n_func": 16,
+     "file_acc@5": {
+      "value": 0.625,
+      "ci": [
+       0.38641040545502714,
+       0.8151876744113636
+      ],
+      "n": 16
+     },
+     "func_acc@10": {
+      "value": 0.3125,
+      "ci": [
+       0.14164643854782039,
+       0.5559564416525933
+      ],
+      "n": 16
+     },
+     "consumer_hit@10": {
+      "value": 0.375,
+      "ci": [
+       0.18481232558863633,
+       0.6135895945449727
+      ],
+      "n": 16
+     },
+     "consumer_hit@20": {
+      "value": 0.375,
+      "ci": [
+       0.18481232558863633,
+       0.6135895945449727
+      ],
+      "n": 16
+     },
+     "consumer_recall@20": 0.2708333333333333,
+     "other_repo_top10": 0.16875,
+     "consumer_files_median": 2.0
+    },
+    "per_repo": {
+     "status": "ok",
+     "n": 16,
+     "n_func": 16,
+     "file_acc@5": {
+      "value": 0.0625,
+      "ci": [
+       0.01111934476464252,
+       0.28328737570298945
+      ],
+      "n": 16
+     },
+     "func_acc@10": {
+      "value": 0.1875,
+      "ci": [
+       0.06591599071428142,
+       0.4300888096197414
+      ],
+      "n": 16
+     },
+     "consumer_hit@10": {
+      "value": 0.25,
+      "ci": [
+       0.10182067491213048,
+       0.49498316535508774
+      ],
+      "n": 16
+     },
+     "consumer_hit@20": {
+      "value": 0.25,
+      "ci": [
+       0.10182067491213048,
+       0.49498316535508774
+      ],
+      "n": 16
+     },
+     "consumer_recall@20": 0.1388888888888889,
+     "other_repo_top10": 0.9187500000000001,
+     "consumer_files_median": 2.0
+    }
+   },
+   "cbm": {
+    "per_repo": {
+     "status": "ok",
+     "n": 16,
+     "n_func": 16,
+     "file_acc@5": {
+      "value": 0.125,
+      "ci": [
+       0.03497748774324047,
+       0.36022827265758695
+      ],
+      "n": 16
+     },
+     "func_acc@10": {
+      "value": 0.0,
+      "ci": [
+       0.0,
+       0.1936076805344365
+      ],
+      "n": 16
+     },
+     "consumer_hit@10": {
+      "value": 0.125,
+      "ci": [
+       0.03497748774324047,
+       0.36022827265758695
+      ],
+      "n": 16
+     },
+     "consumer_hit@20": {
+      "value": 0.1875,
+      "ci": [
+       0.06591599071428142,
+       0.4300888096197414
+      ],
+      "n": 16
+     },
+     "consumer_recall@20": 0.0763888888888889,
+     "other_repo_top10": 0.9625,
+     "consumer_files_median": 2.0
+    }
+   }
+  },
+  "paired": [
+   {
+    "kind": "issue",
+    "metric": "file_acc@5",
+    "a": "rueca native",
+    "b": "grep native",
+    "n": 120,
+    "diff": 0.041666666666666664,
+    "ci": [
+     -0.041666666666666664,
+     0.125
+    ],
+    "status": "\u26a0",
+    "discordant": 27,
+    "discordance": 0.225,
+    "half_width": 0.08333333333333333,
+    "mde": 0.1212435565298214,
+    "mde_old_n": 0.2898275349237887,
+    "mean_a": 0.5666666666666667,
+    "mean_b": 0.525
+   },
+   {
+    "kind": "issue",
+    "metric": "func_acc@10",
+    "a": "rueca native",
+    "b": "grep native",
+    "n": 115,
+    "diff": 0.11304347826086956,
+    "ci": [
+     0.043478260869565216,
+     0.19130434782608696
+    ],
+    "status": "\u2705",
+    "discordant": 21,
+    "discordance": 0.1826086956521739,
+    "half_width": 0.07391304347826087,
+    "mde": 0.11157575605109872,
+    "mde_old_n": 0.2611013463072879,
+    "mean_a": 0.3739130434782609,
+    "mean_b": 0.2608695652173913
+   },
+   {
+    "kind": "issue",
+    "metric": "file_acc@5",
+    "a": "rueca native",
+    "b": "cbm per_repo",
+    "n": 120,
+    "diff": 0.45,
+    "ci": [
+     0.35833333333333334,
+     0.5416666666666666
+    ],
+    "status": "\u2705",
+    "discordant": 54,
+    "discordance": 0.45,
+    "half_width": 0.09166666666666665,
+    "mde": 0.17146428199482247,
+    "mde_old_n": 0.40987803063838396,
+    "mean_a": 0.5666666666666667,
+    "mean_b": 0.11666666666666667
+   },
+   {
+    "kind": "issue",
+    "metric": "func_acc@10",
+    "a": "rueca native",
+    "b": "cbm per_repo",
+    "n": 115,
+    "diff": 0.3130434782608696,
+    "ci": [
+     0.22608695652173913,
+     0.4
+    ],
+    "status": "\u2705",
+    "discordant": 36,
+    "discordance": 0.3130434782608696,
+    "half_width": 0.08695652173913045,
+    "mde": 0.14608695652173914,
+    "mde_old_n": 0.3418619095737215,
+    "mean_a": 0.3739130434782609,
+    "mean_b": 0.06086956521739131
+   },
+   {
+    "kind": "issue",
+    "metric": "file_acc@5",
+    "a": "rueca native",
+    "b": "rueca per_repo",
+    "n": 120,
+    "diff": 0.325,
+    "ci": [
+     0.23333333333333334,
+     0.4166666666666667
+    ],
+    "status": "\u2705",
+    "discordant": 41,
+    "discordance": 0.3416666666666667,
+    "half_width": 0.09166666666666667,
+    "mde": 0.14940623220676646,
+    "mde_old_n": 0.35714920629276997,
+    "mean_a": 0.5666666666666667,
+    "mean_b": 0.24166666666666667
+   },
+   {
+    "kind": "issue",
+    "metric": "func_acc@10",
+    "a": "rueca native",
+    "b": "rueca per_repo",
+    "n": 115,
+    "diff": 0.2608695652173913,
+    "ci": [
+     0.1826086956521739,
+     0.33934782608695335
+    ],
+    "status": "\u2705",
+    "discordant": 30,
+    "discordance": 0.2608695652173913,
+    "half_width": 0.07836956521738972,
+    "mde": 0.13335853574038825,
+    "mde_old_n": 0.31207579904219757,
+    "mean_a": 0.3739130434782609,
+    "mean_b": 0.11304347826086956
+   },
+   {
+    "kind": "issue",
+    "metric": "file_acc@5",
+    "a": "grep native",
+    "b": "grep per_repo",
+    "n": 120,
+    "diff": 0.325,
+    "ci": [
+     0.24166666666666667,
+     0.4166666666666667
+    ],
+    "status": "\u2705",
+    "discordant": 41,
+    "discordance": 0.3416666666666667,
+    "half_width": 0.08750000000000001,
+    "mde": 0.14940623220676646,
+    "mde_old_n": 0.35714920629276997,
+    "mean_a": 0.525,
+    "mean_b": 0.2
+   },
+   {
+    "kind": "issue",
+    "metric": "func_acc@10",
+    "a": "grep native",
+    "b": "grep per_repo",
+    "n": 115,
+    "diff": 0.1565217391304348,
+    "ci": [
+     0.08695652173913043,
+     0.22608695652173913
+    ],
+    "status": "\u2705",
+    "discordant": 20,
+    "discordance": 0.17391304347826086,
+    "half_width": 0.06956521739130435,
+    "mde": 0.10888678846955496,
+    "mde_old_n": 0.2548088229082424,
+    "mean_a": 0.2608695652173913,
+    "mean_b": 0.10434782608695652
+   },
+   {
+    "kind": "impact",
+    "metric": "consumer_hit@10",
+    "a": "rueca native",
+    "b": "grep native",
+    "n": 16,
+    "diff": -0.25,
+    "ci": [
+     -0.5,
+     -0.0625
+    ],
+    "status": "\u274c",
+    "discordant": 4,
+    "discordance": 0.25,
+    "half_width": 0.21875,
+    "mde": 0.35,
+    "mde_old_n": 0.3055050463303893,
+    "mean_a": 0.125,
+    "mean_b": 0.375
+   },
+   {
+    "kind": "impact",
+    "metric": "file_acc@5",
+    "a": "rueca native",
+    "b": "grep native",
+    "n": 16,
+    "diff": 0.1875,
+    "ci": [
+     0.0,
+     0.375
+    ],
+    "status": "\u2705",
+    "discordant": 3,
+    "discordance": 0.1875,
+    "half_width": 0.1875,
+    "mde": 0.3031088913245535,
+    "mde_old_n": 0.264575131106459,
+    "mean_a": 0.8125,
+    "mean_b": 0.625
+   },
+   {
+    "kind": "impact",
+    "metric": "consumer_hit@10",
+    "a": "rueca native",
+    "b": "cbm per_repo",
+    "n": 16,
+    "diff": 0.0,
+    "ci": [
+     -0.25,
+     0.25
+    ],
+    "status": "\u26a0",
+    "discordant": 4,
+    "discordance": 0.25,
+    "half_width": 0.25,
+    "mde": 0.35,
+    "mde_old_n": 0.3055050463303893,
+    "mean_a": 0.125,
+    "mean_b": 0.125
+   },
+   {
+    "kind": "impact",
+    "metric": "file_acc@5",
+    "a": "rueca native",
+    "b": "cbm per_repo",
+    "n": 16,
+    "diff": 0.6875,
+    "ci": [
+     0.4375,
+     0.875
+    ],
+    "status": "\u2705",
+    "discordant": 11,
+    "discordance": 0.6875,
+    "half_width": 0.21875,
+    "mde": 0.5804093383121949,
+    "mde_old_n": 0.5066228051190221,
+    "mean_a": 0.8125,
+    "mean_b": 0.125
+   },
+   {
+    "kind": "impact",
+    "metric": "consumer_hit@10",
+    "a": "rueca native",
+    "b": "rueca per_repo",
+    "n": 16,
+    "diff": 0.0,
+    "ci": [
+     0.0,
+     0.0
+    ],
+    "status": "\u2705",
+    "discordant": 0,
+    "discordance": 0.0,
+    "half_width": 0.0,
+    "mde": 0.0,
+    "mde_old_n": 0.0,
+    "mean_a": 0.125,
+    "mean_b": 0.125
+   },
+   {
+    "kind": "impact",
+    "metric": "file_acc@5",
+    "a": "rueca native",
+    "b": "rueca per_repo",
+    "n": 16,
+    "diff": 0.375,
+    "ci": [
+     0.125,
+     0.625
+    ],
+    "status": "\u2705",
+    "discordant": 6,
+    "discordance": 0.375,
+    "half_width": 0.25,
+    "mde": 0.4286607049870561,
+    "mde_old_n": 0.3741657386773941,
+    "mean_a": 0.8125,
+    "mean_b": 0.4375
+   },
+   {
+    "kind": "impact",
+    "metric": "consumer_hit@10",
+    "a": "grep native",
+    "b": "grep per_repo",
+    "n": 16,
+    "diff": 0.125,
+    "ci": [
+     0.0,
+     0.3125
+    ],
+    "status": "\u2705",
+    "discordant": 2,
+    "discordance": 0.125,
+    "half_width": 0.15625,
+    "mde": 0.24748737341529164,
+    "mde_old_n": 0.21602468994692867,
+    "mean_a": 0.375,
+    "mean_b": 0.25
+   },
+   {
+    "kind": "impact",
+    "metric": "file_acc@5",
+    "a": "grep native",
+    "b": "grep per_repo",
+    "n": 16,
+    "diff": 0.5625,
+    "ci": [
+     0.3125,
+     0.8125
+    ],
+    "status": "\u2705",
+    "discordant": 9,
+    "discordance": 0.5625,
+    "half_width": 0.25,
+    "mde": 0.5249999999999999,
+    "mde_old_n": 0.45825756949558394,
+    "mean_a": 0.625,
+    "mean_b": 0.0625
+   }
+  ],
+  "rfc0006": [
+   {
+    "key": "file_acc@5_ratio",
+    "label": "File Acc@5, organization scope vs the right repository alone",
+    "value": 0.5666666666666667,
+    "single": 0.6666666666666666,
+    "ratio": 0.85,
+    "ci": [
+     0.7439024390243902,
+     0.9629629629629629
+    ],
+    "n": 120,
+    "floor": 0.85,
+    "target": 0.95,
+    "status": "\u26a0",
+    "target_met": false
+   },
+   {
+    "key": "tokens_per_correct_ratio",
+    "label": "Tokens per correct answer, organization scope vs single repository (top 10)",
+    "value": 701.4126984126984,
+    "single": 542.4935064935065,
+    "ratio": 1.2929421090150766,
+    "ci": [
+     1.1323804307425878,
+     1.5019682324261028
+    ],
+    "found": [
+     63,
+     77
+    ],
+    "floor": null,
+    "target": 1.2,
+    "status": "\u2014",
+    "target_met": false
+   },
+   {
+    "key": "incremental_update",
+    "label": "Incremental update: re-index one repository of the organization (organization layer vs its own index time)",
+    "repo": "micropython/micropython",
+    "docs": 95342,
+    "org_repos": 42,
+    "value": 504,
+    "single": 2681,
+    "first_repo_ms": 5403,
+    "ratio": 0.18798955613577023,
+    "floor": 2.0,
+    "target": 1.0,
+    "status": "\u2705",
+    "target_met": true
+   },
+   {
+    "key": "org_layer_per_step",
+    "label": "Organization layer per added repository (median / max over the index --org steps)",
+    "steps": 42,
+    "value": 273.0,
+    "value_max": 1598,
+    "single": 1023.0,
+    "ratio": 0.30100535126066885,
+    "ratio_max": 3.625,
+    "floor": 2.0,
+    "target": 1.0,
+    "status": "\u274c",
+    "target_met": false
+   }
+  ],
+  "crossrepo": {
+   "all": {
+    "pairs": 12,
+    "counts": {
+     "predicted": 2796,
+     "correct": 2749,
+     "gold": 1055,
+     "found": 790
+    },
+    "precision": {
+     "value": 0.9831902718168812,
+     "ci": [
+      0.9777194926801203,
+      0.9873351504988883
+     ],
+     "n": 2796,
+     "floor": 0.9,
+     "target": 0.97,
+     "status": "\u2705"
+    },
+    "recall": {
+     "value": 0.7488151658767772,
+     "ci": [
+      0.7217742617404215,
+      0.7740506756253
+     ],
+     "n": 1055,
+     "floor": 0.75,
+     "target": 0.9,
+     "status": "\u274c"
+    }
+   },
+   "without_rust": {
+    "pairs": 8,
+    "counts": {
+     "predicted": 2031,
+     "correct": 2026,
+     "gold": 532,
+     "found": 512
+    },
+    "precision": {
+     "value": 0.9975381585425899,
+     "ci": [
+      0.9942497661850114,
+      0.9989480042060459
+     ],
+     "n": 2031,
+     "floor": 0.9,
+     "target": 0.97,
+     "status": "\u2705"
+    },
+    "recall": {
+     "value": 0.9624060150375939,
+     "ci": [
+      0.9426481073470757,
+      0.975533925605017
+     ],
+     "n": 532,
+     "floor": 0.75,
+     "target": 0.9,
+     "status": "\u2705"
+    }
+   },
+   "rust": {
+    "pairs": 4,
+    "counts": {
+     "predicted": 765,
+     "correct": 723,
+     "gold": 523,
+     "found": 278
+    },
+    "precision": {
+     "value": 0.9450980392156862,
+     "ci": [
+      0.9266199433288944,
+      0.9591283370052177
+     ],
+     "n": 765,
+     "floor": 0.9,
+     "target": 0.97,
+     "status": "\u2705"
+    },
+    "recall": {
+     "value": 0.5315487571701721,
+     "ci": [
+      0.4887080658110198,
+      0.5739293736833374
+     ],
+     "n": 523,
+     "floor": 0.75,
+     "target": 0.9,
+     "status": "\u274c"
+    }
+   }
+  },
+  "settings": {
+   "max_instances_per_repo": 3,
+   "calibration_max_instances_per_repo": 5,
+   "members": 42,
+   "calibration_members": 8,
+   "pins_sha256": "3551359fb2c78c7d5947d7b840971439f413b1aa886a2d09f70e2d7dbb974550",
+   "resamples": 10000,
+   "seed": 20261025,
+   "mde": "(1.96 + 0.84) * sqrt(d / n): paired binary outcome, 80% power, two-sided alpha 0.05, d = discordance rate",
+   "mde_old_n": 21
+  }
+ }
 }
