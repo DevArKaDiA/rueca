@@ -88,11 +88,17 @@ fn natural_language_query_with_the_default_model() {
     let warm = index(&["--embed"]);
     assert_eq!((warm["vectors"]["embedded"].as_u64(), warm["vectors"]["publications"].as_u64()), (Some(0), Some(1)));
 
-    let query = |mode: Option<&str>| -> Value {
+    // `rueca status` names the preset that embedded the snapshot.
+    let out = rueca(&store).args(["--json", "status"]).output().unwrap();
+    let st: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(st["roots"][0]["vectors"]["preset"], "qwen3-0.6b-q8", "{st}");
+    let out = rueca(&store).arg("status").output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("VECTORS") && text.contains("qwen3-0.6b-q8"), "{text}");
+
+    let query_with = |extra: Value| -> Value {
         let mut args = json!({"query": QUESTION, "limit": 5, "scores": true, "labels": ["Function"]});
-        if let Some(m) = mode {
-            args["mode"] = json!(m);
-        }
+        args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         let out = rueca(&store)
             .env("RUECA_MODEL_DIR", &models)
             .args(["--root"])
@@ -103,6 +109,7 @@ fn natural_language_query_with_the_default_model() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         serde_json::from_slice(&out.stdout).unwrap()
     };
+    let query = |mode: Option<&str>| query_with(mode.map_or_else(|| json!({}), |m| json!({"mode": m})));
     let (hybrid, semantic, lexical) = (query(None), query(Some("semantic")), query(Some("lexical")));
     let rank = |r: &Value| ranked(r).iter().position(|n| n == "load_settings").map(|i| i + 1);
     eprintln!(
@@ -121,4 +128,17 @@ fn natural_language_query_with_the_default_model() {
     assert!(rank(&hybrid).is_some_and(|r| r <= 5), "hybrid top 5: {:?}", ranked(&hybrid));
     assert!(rank(&semantic).is_some_and(|r| r <= 5), "semantic top 5: {:?}", ranked(&semantic));
     assert!(rank(&lexical).is_none(), "BM25 alone should miss it: {:?}", ranked(&lexical));
+
+    // The reranker stage, when its weights were imported
+    // (`rueca models import qwen3-reranker-0.6b-q8 <file>`).
+    let reranker = models.join("qwen3-reranker-0.6b-q8/Qwen3-Reranker-0.6B-Q8_0.gguf");
+    if !reranker.exists() {
+        eprintln!("reranker part skipped: no qwen3-reranker-0.6b-q8 weights in {}", models.display());
+        return;
+    }
+    let reranked = query_with(json!({"rerank": true, "rerank_k": 20}));
+    let r = &reranked["retrieval"]["reranker"];
+    eprintln!("reranked {:?} ({r})", ranked(&reranked));
+    assert_eq!(r["preset"], "qwen3-reranker-0.6b-q8", "{}", reranked["retrieval"]);
+    assert_eq!(ranked(&reranked)[0], "load_settings", "{:?}", ranked(&reranked));
 }

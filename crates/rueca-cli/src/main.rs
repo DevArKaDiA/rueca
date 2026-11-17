@@ -905,6 +905,14 @@ fn root_row(st: &Store, e: &CatalogEntry, now: u64) -> Value {
             row["edges"] = json!(m.edge_count);
             row["files"] = json!(m.file_count);
             row["bytes"] = json!(m.bytes);
+            if let Some(v) = seg.vectors_meta() {
+                row["vectors"] = json!({
+                    "preset": v.preset,
+                    "model_key": v.model_key.get(..8).unwrap_or(&v.model_key),
+                    "dims": v.dims,
+                    "rows": v.rows,
+                });
+            }
         }
         Err(err) => row["error"] = json!(err.to_string()),
     }
@@ -981,8 +989,8 @@ fn print_roots(rows: &[Value]) {
     let repo = |r: &Value| r["repo"].as_str().unwrap_or_default().to_string();
     let own: Vec<&Value> = rows.iter().filter(|r| !is_ref(r)).collect();
     let refs: Vec<&Value> = rows.iter().filter(|r| is_ref(r)).collect();
-    let table: Vec<[String; 8]> = own.iter().map(|r| table_cells(r)).collect();
-    let header = ["ROOT", "REPO", "REF", "COMMIT", "NODES", "EDGES", "FILES", "AGE"];
+    let table: Vec<[String; 9]> = own.iter().map(|r| table_cells(r)).collect();
+    let header = ["ROOT", "REPO", "REF", "COMMIT", "NODES", "EDGES", "FILES", "VECTORS", "AGE"];
     let mut widths = header.map(str::len);
     for row in &table {
         for (w, cell) in widths.iter_mut().zip(row) {
@@ -1017,8 +1025,9 @@ fn print_roots(rows: &[Value]) {
     }
 }
 
-/// The table cells of a working-tree row.
-fn table_cells(r: &Value) -> [String; 8] {
+/// The table cells of a working-tree row (`VECTORS`: the preset that
+/// embedded the snapshot, `-` for a lexical one).
+fn table_cells(r: &Value) -> [String; 9] {
     let commit = r["commit"].as_str().map(|c| format!("{}{}", short(c), if r["dirty"] == true { "*" } else { "" }));
     let num = |k: &str| r[k].as_u64().map(|n| n.to_string()).unwrap_or_else(|| "?".into());
     [
@@ -1029,6 +1038,7 @@ fn table_cells(r: &Value) -> [String; 8] {
         num("nodes"),
         num("edges"),
         num("files"),
+        r["vectors"]["preset"].as_str().unwrap_or("-").to_string(),
         human_age(r["age_secs"].as_u64().unwrap_or(0)),
     ]
 }
