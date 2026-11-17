@@ -1,0 +1,185 @@
+{
+  "name": "shutdown",
+  "server": "rueca 0.1.0-alpha.2",
+  "description": "stdin is closed at several points: exit status and trailing output.",
+  "sessions": [
+    {
+      "label": "after initialize",
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+              "protocolVersion": "2025-06-18",
+              "capabilities": {},
+              "clientInfo": {
+                "name": "golden",
+                "version": "0"
+              }
+            }
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"golden\",\"version\":\"0\"}}}",
+          "wait": 1,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {
+                  "tools": {}
+                },
+                "serverInfo": {
+                  "name": "rueca",
+                  "title": "Rueca code intelligence",
+                  "version": "0.1.0-alpha.2"
+                },
+                "instructions": "Rueca is a code-intelligence index of this repository: a graph of definitions (functions, methods, classes, …) and the relations between them (calls, inheritance, imports), plus the full text of every indexed file. Prefer it over reading whole files or grepping. Recommended flow: `search_symbols` to find candidates by name → `get_symbol` for details (parent, children, bases, caller/callee counts) or `get_snippet` for the source → `trace` to follow callers and callees (impact analysis). Use `search_code` for literals, messages and config keys, and `get_file_outline` to see a file's structure cheaply. Responses name each snapshot read (`repo@commit (ref)`) and group items by file; an item's id is `repo@commit:path#name`, and its printed name also works as `qualified_name`. Symbol ids returned by any tool can be passed as `id` to the others. Lines are 1-based. Every tool takes `repo` (one, a list, or \"*\" for every indexed repository), `ref` and `budget_tokens` (default 2000); a cut response says `truncated` and how to continue (`cursor`). `ref` reads another indexed ref (a branch, `pr/<n>`, a tag or a commit); a list of refs compares them: a symbol identical in several comes back once with the snapshots it is `in`, one that differs is marked `changed`. When the server serves an organization, omitting `repo` searches every repository of it in one ranking; `list_repositories` lists them and their indexed refs. Results come from the last index (by default of the working tree); edges carry a confidence (0–1) and the strategy used to resolve them."
+              }
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"rueca\",\"title\":\"Rueca code intelligence\",\"version\":\"0.1.0-alpha.2\"},\"instructions\":\"Rueca is a code-intelligence index of this repository: a graph of definitions (functions, methods, classes, …) and the relations between them (calls, inheritance, imports), plus the full text of every indexed file. Prefer it over reading whole files or grepping. Recommended flow: `search_symbols` to find candidates by name → `get_symbol` for details (parent, children, bases, caller/callee counts) or `get_snippet` for the source → `trace` to follow callers and callees (impact analysis). Use `search_code` for literals, messages and config keys, and `get_file_outline` to see a file's structure cheaply. Responses name each snapshot read (`repo@commit (ref)`) and group items by file; an item's id is `repo@commit:path#name`, and its printed name also works as `qualified_name`. Symbol ids returned by any tool can be passed as `id` to the others. Lines are 1-based. Every tool takes `repo` (one, a list, or \\\"*\\\" for every indexed repository), `ref` and `budget_tokens` (default 2000); a cut response says `truncated` and how to continue (`cursor`). `ref` reads another indexed ref (a branch, `pr/<n>`, a tag or a commit); a list of refs compares them: a symbol identical in several comes back once with the snapshots it is `in`, one that differs is marked `changed`. When the server serves an organization, omitting `repo` searches every repository of it in one ranking; `list_repositories` lists them and their indexed refs. Results come from the last index (by default of the working tree); edges carry a confidence (0–1) and the strategy used to resolve them.\"}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
+          "wait": null,
+          "recv": [],
+          "recv_raw": []
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\",\"params\":{}}",
+          "wait": 2,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}"
+          ]
+        }
+      ],
+      "exit": {
+        "code": 0,
+        "trailing": [],
+        "trailing_raw": []
+      }
+    },
+    {
+      "label": "after server/discover (stateless)",
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "server/discover",
+            "params": {
+              "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": {
+                  "name": "golden",
+                  "version": "0"
+                },
+                "io.modelcontextprotocol/clientCapabilities": {}
+              }
+            }
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server/discover\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientInfo\":{\"name\":\"golden\",\"version\":\"0\"},\"io.modelcontextprotocol/clientCapabilities\":{}}}}",
+          "wait": 1,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "resultType": "complete",
+                "supportedVersions": [
+                  "2024-11-05",
+                  "2025-03-26",
+                  "2025-06-18",
+                  "2025-11-25",
+                  "2026-07-28"
+                ],
+                "capabilities": {
+                  "tools": {}
+                },
+                "instructions": "Rueca is a code-intelligence index of this repository: a graph of definitions (functions, methods, classes, …) and the relations between them (calls, inheritance, imports), plus the full text of every indexed file. Prefer it over reading whole files or grepping. Recommended flow: `search_symbols` to find candidates by name → `get_symbol` for details (parent, children, bases, caller/callee counts) or `get_snippet` for the source → `trace` to follow callers and callees (impact analysis). Use `search_code` for literals, messages and config keys, and `get_file_outline` to see a file's structure cheaply. Responses name each snapshot read (`repo@commit (ref)`) and group items by file; an item's id is `repo@commit:path#name`, and its printed name also works as `qualified_name`. Symbol ids returned by any tool can be passed as `id` to the others. Lines are 1-based. Every tool takes `repo` (one, a list, or \"*\" for every indexed repository), `ref` and `budget_tokens` (default 2000); a cut response says `truncated` and how to continue (`cursor`). `ref` reads another indexed ref (a branch, `pr/<n>`, a tag or a commit); a list of refs compares them: a symbol identical in several comes back once with the snapshots it is `in`, one that differs is marked `changed`. When the server serves an organization, omitting `repo` searches every repository of it in one ranking; `list_repositories` lists them and their indexed refs. Results come from the last index (by default of the working tree); edges carry a confidence (0–1) and the strategy used to resolve them.",
+                "ttlMs": 0,
+                "cacheScope": "private",
+                "_meta": {
+                  "io.modelcontextprotocol/serverInfo": {
+                    "name": "rueca",
+                    "title": "Rueca code intelligence",
+                    "version": "0.1.0-alpha.2"
+                  }
+                }
+              }
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"supportedVersions\":[\"2024-11-05\",\"2025-03-26\",\"2025-06-18\",\"2025-11-25\",\"2026-07-28\"],\"capabilities\":{\"tools\":{}},\"instructions\":\"Rueca is a code-intelligence index of this repository: a graph of definitions (functions, methods, classes, …) and the relations between them (calls, inheritance, imports), plus the full text of every indexed file. Prefer it over reading whole files or grepping. Recommended flow: `search_symbols` to find candidates by name → `get_symbol` for details (parent, children, bases, caller/callee counts) or `get_snippet` for the source → `trace` to follow callers and callees (impact analysis). Use `search_code` for literals, messages and config keys, and `get_file_outline` to see a file's structure cheaply. Responses name each snapshot read (`repo@commit (ref)`) and group items by file; an item's id is `repo@commit:path#name`, and its printed name also works as `qualified_name`. Symbol ids returned by any tool can be passed as `id` to the others. Lines are 1-based. Every tool takes `repo` (one, a list, or \\\"*\\\" for every indexed repository), `ref` and `budget_tokens` (default 2000); a cut response says `truncated` and how to continue (`cursor`). `ref` reads another indexed ref (a branch, `pr/<n>`, a tag or a commit); a list of refs compares them: a symbol identical in several comes back once with the snapshots it is `in`, one that differs is marked `changed`. When the server serves an organization, omitting `repo` searches every repository of it in one ranking; `list_repositories` lists them and their indexed refs. Results come from the last index (by default of the working tree); edges carry a confidence (0–1) and the strategy used to resolve them.\",\"ttlMs\":0,\"cacheScope\":\"private\",\"_meta\":{\"io.modelcontextprotocol/serverInfo\":{\"name\":\"rueca\",\"title\":\"Rueca code intelligence\",\"version\":\"0.1.0-alpha.2\"}}}}"
+          ]
+        }
+      ],
+      "exit": {
+        "code": 1,
+        "trailing": [],
+        "trailing_raw": []
+      }
+    },
+    {
+      "label": "before any message",
+      "steps": [],
+      "exit": {
+        "code": 1,
+        "trailing": [],
+        "trailing_raw": []
+      }
+    },
+    {
+      "label": "after a ping only (no initialize)",
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\"params\":{}}",
+          "wait": 1,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}"
+          ]
+        }
+      ],
+      "exit": {
+        "code": 1,
+        "trailing": [],
+        "trailing_raw": []
+      }
+    }
+  ]
+}

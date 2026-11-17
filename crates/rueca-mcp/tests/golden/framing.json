@@ -1,0 +1,432 @@
+{
+  "name": "framing",
+  "server": "rueca 0.1.0-alpha.2",
+  "description": "Malformed and unusual lines; a ping after each checks the server is still alive.",
+  "sessions": [
+    {
+      "label": "framing",
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+              "protocolVersion": "2025-06-18",
+              "capabilities": {},
+              "clientInfo": {
+                "name": "golden",
+                "version": "0"
+              }
+            }
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"golden\",\"version\":\"0\"}}}",
+          "wait": 1,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {
+                  "tools": {}
+                },
+                "serverInfo": {
+                  "name": "rueca",
+                  "title": "Rueca code intelligence",
+                  "version": "0.1.0-alpha.2"
+                },
+                "instructions": "Rueca is a code-intelligence index of this repository: a graph of definitions (functions, methods, classes, …) and the relations between them (calls, inheritance, imports), plus the full text of every indexed file. Prefer it over reading whole files or grepping. Recommended flow: `search_symbols` to find candidates by name → `get_symbol` for details (parent, children, bases, caller/callee counts) or `get_snippet` for the source → `trace` to follow callers and callees (impact analysis). Use `search_code` for literals, messages and config keys, and `get_file_outline` to see a file's structure cheaply. Responses name each snapshot read (`repo@commit (ref)`) and group items by file; an item's id is `repo@commit:path#name`, and its printed name also works as `qualified_name`. Symbol ids returned by any tool can be passed as `id` to the others. Lines are 1-based. Every tool takes `repo` (one, a list, or \"*\" for every indexed repository), `ref` and `budget_tokens` (default 2000); a cut response says `truncated` and how to continue (`cursor`). `ref` reads another indexed ref (a branch, `pr/<n>`, a tag or a commit); a list of refs compares them: a symbol identical in several comes back once with the snapshots it is `in`, one that differs is marked `changed`. When the server serves an organization, omitting `repo` searches every repository of it in one ranking; `list_repositories` lists them and their indexed refs. Results come from the last index (by default of the working tree); edges carry a confidence (0–1) and the strategy used to resolve them."
+              }
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"rueca\",\"title\":\"Rueca code intelligence\",\"version\":\"0.1.0-alpha.2\"},\"instructions\":\"Rueca is a code-intelligence index of this repository: a graph of definitions (functions, methods, classes, …) and the relations between them (calls, inheritance, imports), plus the full text of every indexed file. Prefer it over reading whole files or grepping. Recommended flow: `search_symbols` to find candidates by name → `get_symbol` for details (parent, children, bases, caller/callee counts) or `get_snippet` for the source → `trace` to follow callers and callees (impact analysis). Use `search_code` for literals, messages and config keys, and `get_file_outline` to see a file's structure cheaply. Responses name each snapshot read (`repo@commit (ref)`) and group items by file; an item's id is `repo@commit:path#name`, and its printed name also works as `qualified_name`. Symbol ids returned by any tool can be passed as `id` to the others. Lines are 1-based. Every tool takes `repo` (one, a list, or \\\"*\\\" for every indexed repository), `ref` and `budget_tokens` (default 2000); a cut response says `truncated` and how to continue (`cursor`). `ref` reads another indexed ref (a branch, `pr/<n>`, a tag or a commit); a list of refs compares them: a symbol identical in several comes back once with the snapshots it is `in`, one that differs is marked `changed`. When the server serves an organization, omitting `repo` searches every repository of it in one ranking; `list_repositories` lists them and their indexed refs. Results come from the last index (by default of the working tree); edges carry a confidence (0–1) and the strategy used to resolve them.\"}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
+          "wait": null,
+          "recv": [],
+          "recv_raw": []
+        },
+        {
+          "send": "{not json",
+          "send_raw": "{not json",
+          "wait": null,
+          "note": "malformed JSON",
+          "recv": [],
+          "recv_raw": []
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\",\"params\":{}}",
+          "wait": 2,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}"
+          ]
+        },
+        {
+          "send": [
+            {
+              "jsonrpc": "2.0",
+              "id": 3,
+              "method": "ping",
+              "params": {}
+            },
+            {
+              "jsonrpc": "2.0",
+              "id": 4,
+              "method": "ping",
+              "params": {}
+            }
+          ],
+          "send_raw": "[{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"ping\",\"params\":{}},{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"ping\",\"params\":{}}]",
+          "wait": null,
+          "note": "JSON array batch",
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "error": {
+                "code": -32600,
+                "message": "Invalid request"
+              }
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid request\"}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"ping\",\"params\":{}}",
+          "wait": 5,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 5,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{}}"
+          ]
+        },
+        {
+          "send": "",
+          "send_raw": "",
+          "wait": null,
+          "note": "empty line",
+          "recv": [],
+          "recv_raw": []
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"ping\",\"params\":{}}",
+          "wait": 6,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 6,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":{}}"
+          ]
+        },
+        {
+          "send": "\"hi\"",
+          "send_raw": "\"hi\"",
+          "wait": null,
+          "note": "a JSON string",
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "error": {
+                "code": -32600,
+                "message": "Invalid request"
+              }
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid request\"}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\",\"params\":{}}",
+          "wait": 7,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 7,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "result": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":99,\"result\":{}}",
+          "wait": null,
+          "note": "response-shaped message from the client",
+          "recv": [],
+          "recv_raw": []
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"ping\",\"params\":{}}",
+          "wait": 8,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 8,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":8,\"result\":{}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "1.0",
+            "id": 9,
+            "method": "ping"
+          },
+          "send_raw": "{\"jsonrpc\":\"1.0\",\"id\":9,\"method\":\"ping\"}",
+          "wait": null,
+          "note": "jsonrpc 1.0",
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "error": {
+                "code": -32600,
+                "message": "Invalid request"
+              }
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid request\"}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"ping\",\"params\":{}}",
+          "wait": 10,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 10,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":10,\"result\":{}}"
+          ]
+        },
+        {
+          "send": {
+            "id": 11,
+            "method": "ping"
+          },
+          "send_raw": "{\"id\":11,\"method\":\"ping\"}",
+          "wait": null,
+          "note": "no jsonrpc member",
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "error": {
+                "code": -32600,
+                "message": "Invalid request"
+              }
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid request\"}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"ping\",\"params\":{}}",
+          "wait": 12,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 12,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":12,\"result\":{}}"
+          ]
+        },
+        {
+          "send": "   ",
+          "send_raw": "   ",
+          "wait": null,
+          "note": "whitespace-only line",
+          "recv": [],
+          "recv_raw": []
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"ping\",\"params\":{}}",
+          "wait": 13,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 13,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":13,\"result\":{}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "ping",
+            "extra": true
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"ping\",\"extra\":true}",
+          "wait": 14,
+          "note": "extra top-level member",
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 14,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":14,\"result\":{}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1.5,
+            "method": "ping"
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":1.5,\"method\":\"ping\"}",
+          "wait": null,
+          "note": "fractional id",
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "error": {
+                "code": -32600,
+                "message": "Invalid request"
+              }
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid request\"}}"
+          ]
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 15,
+            "method": "ping",
+            "params": {}
+          },
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"ping\",\"params\":{}}",
+          "wait": 15,
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 15,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":15,\"result\":{}}"
+          ]
+        },
+        {
+          "send": "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"ping\"}\r",
+          "send_raw": "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"ping\"}\r",
+          "wait": null,
+          "note": "CRLF line ending",
+          "recv": [
+            {
+              "jsonrpc": "2.0",
+              "id": 16,
+              "result": {}
+            }
+          ],
+          "recv_raw": [
+            "{\"jsonrpc\":\"2.0\",\"id\":16,\"result\":{}}"
+          ]
+        }
+      ],
+      "exit": {
+        "code": 0,
+        "trailing": [],
+        "trailing_raw": []
+      }
+    }
+  ]
+}
