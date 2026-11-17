@@ -599,12 +599,16 @@ impl ContentSource for WorktreeContent<'_> {
 // Snapshot info
 // ---------------------------------------------------------------------------
 
-/// The repository id of the working tree at `root` (canonical), as
+/// The repository id of the working tree at `root` (any path to it; it is
+/// canonicalized), as
 /// [`index_worktree`] records it: `repo_override`, else the normalized
 /// `remote.origin.url` of the enclosing git repository, else
 /// `local/<dirname>`.
 pub fn repo_id(root: &Path, repo_override: Option<&str>) -> String {
-    repo_override.map(str::to_string).or_else(|| git::origin_repo_id(root)).unwrap_or_else(|| local_repo_id(root))
+    // Canonical, like `index_worktree`'s root: a path through a symbolic
+    // link derives the same id as its target.
+    let root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    repo_override.map(str::to_string).or_else(|| git::origin_repo_id(&root)).unwrap_or_else(|| local_repo_id(&root))
 }
 
 /// `local/<dirname>` of a root outside a hosted repository.

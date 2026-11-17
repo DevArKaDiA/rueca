@@ -43,11 +43,14 @@ pub(crate) struct GitInfo {
     pub submodules: BTreeSet<String>,
 }
 
-/// The repository containing `root` (canonical) and the root's path inside
-/// its working tree (`/` separators, empty at the top). `None` when `root`
-/// is not inside a git working tree.
+/// The repository containing `root` and the root's path inside its working
+/// tree (`/` separators, empty at the top). `root` is canonicalized first,
+/// so a path through a symbolic link (macOS `/tmp` → `/private/tmp`) finds
+/// the same repository and prefix as its target. `None` when `root` is not
+/// inside a git working tree.
 pub(crate) fn discover(root: &Path) -> Option<(gix::Repository, String)> {
-    let repo = gix::discover(root).ok()?;
+    let root = std::fs::canonicalize(root).ok()?;
+    let repo = gix::discover(&root).ok()?;
     let workdir = std::fs::canonicalize(repo.workdir()?).ok()?;
     let prefix = root.strip_prefix(&workdir).ok()?;
     let prefix: Vec<String> =

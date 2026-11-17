@@ -302,7 +302,8 @@ pub fn index_org(opts: &OrgIndexOptions) -> anyhow::Result<OrgIndexReport> {
     }
     let refs_ms = t.elapsed().as_millis() as u64;
     let t = Instant::now();
-    let update = update_org(opts)?;
+    let mut update = update_org(opts)?;
+    report_unowned(opts, &sync.reports, &mut update)?;
     let org_ms = t.elapsed().as_millis() as u64;
     Ok(OrgIndexReport {
         org: cfg.name.clone(),
@@ -459,6 +460,10 @@ pub fn index_org_ref(opts: &OrgIndexOptions, name: &str, remove: bool) -> anyhow
     {
         sync_clone(u, root).with_context(|| format!("cloning {u}"))?;
     }
+    // Canonical, so the id, the prefix and the export match a plain
+    // `rueca index` of the same directory (a member path may go through a
+    // symbolic link).
+    let root = &std::fs::canonicalize(root).with_context(|| format!("cannot access {}", root.display()))?;
     let repo = crate::repo_id(root, r.id.as_deref());
     let (indexed, removed) = if remove {
         (None, Some(refs::remove_ref(&opts.store, &repo, &refs::root_prefix(root), name)?))
@@ -467,7 +472,8 @@ pub fn index_org_ref(opts: &OrgIndexOptions, name: &str, remove: bool) -> anyhow
     };
     let ref_ms = started.elapsed().as_millis() as u64;
     let t = Instant::now();
-    let update = update_org(opts)?;
+    let mut update = update_org(opts)?;
+    report_unowned(opts, indexed.iter(), &mut update)?;
     Ok(OrgRefReport {
         org: cfg.name.clone(),
         repo,
@@ -478,6 +484,27 @@ pub fn index_org_ref(opts: &OrgIndexOptions, name: &str, remove: bool) -> anyhow
         org_ms: t.elapsed().as_millis() as u64,
         duration_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+/// Records in `update.unowned_refs` (and logs) every ref snapshot of
+/// `reports` whose repository is no member of the generation just
+/// published: the organization leaves it out, which must not go unnoticed
+/// (an export recorded under another id than its member's default).
+fn report_unowned<'a>(
+    opts: &OrgIndexOptions,
+    reports: impl IntoIterator<Item = &'a RefIndexReport>,
+    update: &mut OrgUpdate,
+) -> anyhow::Result<()> {
+    let name = &opts.config.name;
+    let g = org::current_generation(&opts.store, name)?;
+    for r in reports {
+        if g.as_ref().is_none_or(|g| g.repo_index(&r.repo).is_none()) {
+            let msg = format!("ref {} of {} belongs to no indexed member of organization `{name}`", r.ref_name, r.repo);
+            warn!(org = %name, "{msg}; left out");
+            update.unowned_refs.push(msg);
+        }
+    }
+    Ok(())
 }
 
 /// The members of generation `g` as an update sees them (no configured

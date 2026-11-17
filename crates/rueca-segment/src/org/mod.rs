@@ -289,6 +289,11 @@ pub struct OrgUpdate {
     /// Member roots that have no segment in the store yet (left out), and
     /// configured refs (`repo@ref`) not indexed.
     pub missing: Vec<String>,
+    /// Ref snapshots just indexed for the organization whose repository id
+    /// is no member's (left out), as text: filled by the indexer that
+    /// indexed them (`rueca_index::org`), empty from [`update_org`] alone.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unowned_refs: Vec<String>,
     /// Bytes of tantivy segment files copied into the organization index.
     pub bytes_copied: u64,
     /// Entries whose profile (routing document, packages) was computed

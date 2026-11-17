@@ -516,6 +516,9 @@ fn print_org_update(u: &rueca_segment::org::OrgUpdate) {
     if !u.missing.is_empty() {
         println!("  not indexed yet (left out): {}", u.missing.join(", "));
     }
+    for r in &u.unowned_refs {
+        println!("  left out: {r}");
+    }
 }
 
 /// The default root for `query`/`mcp`: `--root`, else the current directory

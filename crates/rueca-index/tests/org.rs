@@ -381,3 +381,90 @@ fn refs_in_an_organization() {
     assert_eq!(r.ref_errors.len(), 1, "{:?}", r.ref_errors);
     assert!(r.update.missing.contains(&"local/billing@missing/branch".to_string()), "{:?}", r.update.missing);
 }
+
+/// A member path through a symbolic link (macOS `/tmp` → `/private/tmp`)
+/// derives the git id of its target for the default and its refs alike,
+/// so the organization lists the ref.
+#[cfg(unix)]
+#[test]
+fn symlinked_members_keep_their_git_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = fs::canonicalize(dir.path()).unwrap();
+    let real = base.join("real/click");
+    if repo_with_branch(
+        &real,
+        &[("click/core.py", "def main():\n    return 1\n")],
+        "feature",
+        ("x.py", "def x():\n    return 2\n"),
+    )
+    .is_none()
+    {
+        return;
+    }
+    assert!(git(&real, &["remote", "add", "origin", "https://github.com/pallets/click.git"]));
+    std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
+    let linked = base.join("link/click");
+    assert_eq!(rueca_index::repo_id(&linked, None), "github.com/pallets/click");
+    assert_eq!(refs::root_prefix(&linked), "");
+    let file = base.join("rueca-org.toml");
+    fs::write(&file, format!("name = \"acme\"\n[[repo]]\npath = \"{}\"\n", linked.display())).unwrap();
+    let opts = OrgIndexOptions {
+        config: OrgConfig::load(&file).unwrap(),
+        store: base.join("store"),
+        budget: Default::default(),
+        threads: Some(1),
+        only: None,
+    };
+    let r = index_org(&opts).unwrap();
+    assert_eq!(r.update.added, ["github.com/pallets/click"]);
+    let one = OrgIndexOptions { only: Some(linked.clone()), ..opts.clone() };
+    let r = index_org_ref(&one, "feature", false).unwrap();
+    assert_eq!(r.repo, "github.com/pallets/click");
+    assert_eq!(r.update.refs_added, ["github.com/pallets/click@feature"], "{:?}", r.update);
+    assert!(r.update.unowned_refs.is_empty(), "{:?}", r.update.unowned_refs);
+    // Removing it through the link finds the same export.
+    let r = index_org_ref(&one, "feature", true).unwrap();
+    assert_eq!(r.update.refs_removed, ["github.com/pallets/click@feature"]);
+}
+
+/// A ref the organization cannot list (its member's default was never
+/// indexed) is reported, not dropped silently.
+#[test]
+fn refs_of_no_member_are_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = fs::canonicalize(dir.path()).unwrap();
+    let root = base.join("click");
+    if repo_with_branch(
+        &root,
+        &[("core.py", "def main():\n    return 1\n")],
+        "feature",
+        ("x.py", "def x():\n    return 2\n"),
+    )
+    .is_none()
+    {
+        return;
+    }
+    let file = base.join("rueca-org.toml");
+    fs::write(&file, "name = \"acme\"\n[[repo]]\npath = \"click\"\n").unwrap();
+    let opts = OrgIndexOptions {
+        config: OrgConfig::load(&file).unwrap(),
+        store: base.join("store"),
+        budget: Default::default(),
+        threads: Some(1),
+        only: Some(root.clone()),
+    };
+    let r = index_org_ref(&opts, "feature", false).unwrap();
+    assert!(r.update.refs_added.is_empty());
+    assert_eq!(
+        r.update.unowned_refs,
+        ["ref feature of local/click belongs to no indexed member of organization `acme`"],
+        "{:?}",
+        r.update
+    );
+    let json = serde_json::to_value(&r.update).unwrap();
+    assert_eq!(json["unowned_refs"][0], r.update.unowned_refs[0]);
+    // Once the member is indexed, the ref is listed and nothing is reported.
+    let r = index_org(&opts).unwrap();
+    assert_eq!(r.update.refs_added, ["local/click@feature"]);
+    assert!(r.update.unowned_refs.is_empty(), "{:?}", r.update.unowned_refs);
+}

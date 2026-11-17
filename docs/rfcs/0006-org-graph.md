@@ -526,7 +526,10 @@ Choices and deviations:
   OrgEntry, refs: [OrgRef {ref_name, entry}]}` with `default` flattened
   into the repository object, so `format` 1 generations read and write as
   before. A ref export belongs to the member whose repository id it
-  carries. Entries are reused by (root, segment); `OrgUpdate` reports
+  carries (member roots are canonicalized first, so a path through a
+  symbolic link derives the same id); a ref `rueca index --org` indexed
+  whose id is no indexed member's is reported in `OrgUpdate::unowned_refs`
+  and the CLI summary, not dropped silently. Entries are reused by (root, segment); `OrgUpdate` reports
   `refs_added` / `refs_replaced` / `refs_removed` / `refs_unchanged` and,
   per entry, the copy, profile and link costs.
 - **Link sets per ref, against the defaults.** A ref's outgoing link set is
