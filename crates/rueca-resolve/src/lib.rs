@@ -280,9 +280,10 @@
 //! items attached to the type their block is for wherever it is declared
 //! (`IMPLEMENTS` type → trait, `OVERRIDES` item → trait item,
 //! `type_resolved` 0.90), blanket impls, open types (a missing member is
-//! external), by-name method calls that count a trait method's
-//! implementations as the trait method (`heuristic` 0.5; two or three
-//! candidates × 0.8; common standard-library method names external), and
+//! external), `$ret:` receivers typed from the callee's declared return
+//! type (`type_resolved` 0.85), by-name method calls that count a trait
+//! method's implementations as the trait method (`heuristic` 0.5, unique
+//! only; common standard-library method names external), and
 //! macros by name (`unique_name` 0.6) are the `rust` module; `$self`,
 //! `$type:` and `$member:` are the hooks above.
 //!
@@ -2372,9 +2373,13 @@ impl<'a> Resolver<'a> {
         if selfs.contains(&receiver) {
             return self.self_receiver_member(f, item, scope, receiver);
         }
-        // 5. Typed receiver: `$type:T` (declared type known in the file).
+        // 5. Typed receiver: `$type:T` (declared type known in the file);
+        // Rust `$ret:` (the result of a call, typed from its signature).
         if let Some(ty) = receiver.strip_prefix(TYPE_RECEIVER_PREFIX) {
             return self.resolve_typed(f, item, scope, ty);
+        }
+        if let Some(spec) = receiver.strip_prefix(rust::RET_RECEIVER_PREFIX) {
+            return self.rust_resolve_ret(f, item, scope, spec);
         }
         // C++ namespace-qualified name: `$ns:a::b`.
         if let Some(path) = receiver.strip_prefix(NAMESPACE_RECEIVER_PREFIX) {
@@ -2620,11 +2625,7 @@ impl<'a> Resolver<'a> {
         let Some((target, strategy, confidence)) = self.count_outcome(f, item, plan.outcome) else { return };
         // Declarations → their body; overloads → by arity (RFC 0003 §10).
         let target = self.prefer_body(target);
-        let targets = match self.rust_ambiguous(f, item, target, strategy, confidence) {
-            Some(all) => all,
-            None => self.expand_overloads(f, caller, item, target, strategy, confidence),
-        };
-        for (target, strategy, confidence) in targets {
+        for (target, strategy, confidence) in self.expand_overloads(f, caller, item, target, strategy, confidence) {
             let meta = EdgeMeta { confidence, strategy, evidence: Some((f, item.span)) };
             match plan.kind {
                 EdgeKind::Decorates => {

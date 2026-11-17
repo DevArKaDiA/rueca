@@ -1,5 +1,39 @@
 # Decisions log
 
+## 2026-11-16 — Rust: call results typed from signatures; methods by name only when unique
+
+Dogfooding showed name-matched edges where the receiver's type was
+knowable: `let store = Store::open(p).context(…)?; store.register(…)` and
+`Index::open(dir).map_err(…)?.tokenizers().register(…)` bound the only
+project trait method named `register`. The pack now writes such receivers
+as `$ret:<receiver>#<name>` (`?` when unwrapped by `?`, `unwrap()`,
+`expect()`; `.context()`, `.map_err()`, `.clone()` seen through), also for
+`let` bindings, and the resolver resolves the callee like a call, reads the
+return type of its signature (`Self` → its impl's type or trait,
+`Result<T, _>` / `Option<T>` → `T` when unwrapped, references and smart
+pointers seen through), resolves it in the callee's file and looks the
+member up there (`type_resolved` 0.85); a callee or return type outside
+the project (tantivy's `Index::open`) makes the call external. Same-file
+inference also learned `HashMap` / `BTreeMap` `get` / `values` / `keys`.
+
+By-name method calls on receivers of unknown type now bind a **unique**
+candidate only (a trait method's implementations still count as it), as
+the Go and C/C++ unique-method rung does; the fan-out to two or three
+candidates at × 0.8 of the first Rust entry is gone. An impl on `&mut T` /
+`&T` / `Box<T>` forwards to `T`'s impl and counts as the trait's item
+instead of attracting every call of its names (ripgrep's `impl Sink for
+&mut S`), and `context` / `with_context` (anyhow) joined the
+standard-library method names that never match by name.
+
+Measured with the Rust S3 suite (macro precision / recall): ripgrep
+callers 95.5 / 89.6 → 99.5 / 89.9, callees 93.3 / 93.4 → 99.4 / 91.4;
+serde_json callers 94.8 / 83.6 → 95.3 / 81.1, callees 92.6 / 81.7 →
+95.4 / 80.5; micro-benchmark unchanged (callers 99.6 / 97.5). Most
+remaining false edges on serde_json point into code behind
+`#[cfg(feature = …)]` features off by default, which rust-analyzer does
+not analyze and Rueca indexes (`#[cfg]` is not evaluated); a type with
+several `impl From<X>` binds the first `from` it sees.
+
 ## 2026-11-16 — Rust pack: module paths, `Type.method`, impl items outside their type
 
 Rust (`rueca-lang-rust`, `tree-sitter-rust` 0.24.2, vendored
@@ -84,7 +118,8 @@ unknown receiver, the implementations of one trait method count as that
 method: a name that only one trait declares binds the trait's method
 (`heuristic` 0.50) however many types implement it; two or three distinct
 candidates are all linked at × 0.8, as C++ overloads the arguments cannot
-tell apart; more is no edge. A blanket impl (`impl<T: Bound> Tr for T`,
+tell apart; more is no edge (amended the same day: a unique candidate
+only, see the entry on call results above). A blanket impl (`impl<T: Bound> Tr for T`,
 items named `T.m`) applies to every type, so its items are the by-name
 targets. Rust types are open: a member missing from a project type comes
 from a derive or a blanket implementation outside the project

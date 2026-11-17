@@ -100,6 +100,9 @@ pub(crate) struct Binding {
     /// Declared or inferred type (for a generic parameter: its first trait
     /// bound).
     pub(crate) ty: Option<Ty>,
+    /// For an untyped `let` whose value is a call: the `$ret:` receiver of
+    /// that call's result (see `returns.rs`), typed by the resolver.
+    pub(crate) ret: Option<String>,
 }
 
 /// Per-file local-scope table.
@@ -309,7 +312,15 @@ pub(crate) fn build(tree: &Tree, source: &[u8], time_budget: Duration) -> Result
         }
         let Some((start, end, visible_from)) = binding_range(node, kind, name, &scopes) else { continue };
         let id = locals.bindings.len();
-        locals.bindings.push(Binding { kind, start, end, visible_from, pos: node.start_byte() as u32, ty: None });
+        locals.bindings.push(Binding {
+            kind,
+            start,
+            end,
+            visible_from,
+            pos: node.start_byte() as u32,
+            ty: None,
+            ret: None,
+        });
         locals.by_name.entry(name.to_string()).or_default().push(id);
     }
     Ok(locals)

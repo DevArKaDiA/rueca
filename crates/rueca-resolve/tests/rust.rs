@@ -246,10 +246,13 @@ fn receivers_impls_and_traits() {
     g.has(&q(CORE, "Priced.label"), &q(CORE, "Priced.price"), Calls, TypeResolved, 0.9);
     g.has(&q(CORE, "Priced.label"), &q(MODEL, "Price.cents"), Calls, TypeResolved, 0.85);
     g.has("shop_core::store::Store.save_all", "shop_core::store::Store.save", Calls, TypeResolved, 0.9);
-    // An unknown receiver (a value returned from another file): the one
-    // trait declaring `save` stands for its implementations.
-    g.has(&main, "shop_core::store::Store.save", Calls, Heuristic, 0.5);
-    g.lacks(&main, &q(MEMORY, "MemoryStore.save"), Calls);
+    // A value returned by a function of another file (`$ret:`), typed from
+    // its signature: `shop_core::open_store() -> MemoryStore`.
+    g.has(&main, &q(MEMORY, "MemoryStore.save"), Calls, TypeResolved, 0.85);
+    g.lacks(&main, "shop_core::store::Store.save", Calls);
+    g.has("basic::item_label", &q(MEMORY, "MemoryStore.save"), Calls, TypeResolved, 0.85);
+    // A constructor of another file returning `io::Result<Self>`, through `?`.
+    g.has(&q(APP, "reopen"), &q(MEMORY, "MemoryStore.len"), Calls, TypeResolved, 0.85);
 }
 
 #[test]

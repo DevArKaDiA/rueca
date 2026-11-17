@@ -260,7 +260,9 @@ impl Extractor<'_> {
         }
         for i in values {
             let ty = self.binding_type(root, i);
+            let ret = if ty.is_none() { self.binding_ret(root, i) } else { None };
             self.locals.bindings[i].ty = ty;
+            self.locals.bindings[i].ret = ret;
         }
     }
 
@@ -441,7 +443,9 @@ impl Extractor<'_> {
             "unwrap" | "expect" | "unwrap_or" | "unwrap_or_default" | "unwrap_or_else" | "unwrap_unchecked" => {
                 return recv.unwrapped();
             }
-            "clone" | "to_owned" | "as_ref" | "as_mut" | "by_ref" => return Some(recv),
+            "clone" | "to_owned" | "as_ref" | "as_mut" | "by_ref" | "context" | "with_context" | "map_err" => {
+                return Some(recv);
+            }
             _ => {}
         }
         match (recv.head(), m) {
@@ -456,6 +460,17 @@ impl Extractor<'_> {
             }
             ("Vec" | "[]" | "VecDeque" | "Iter", "first" | "last" | "get" | "get_mut" | "pop" | "next") => {
                 Some(Ty { path: vec!["Option".into()], args: recv.args.into_iter().take(1).collect() })
+            }
+            ("HashMap" | "BTreeMap", "get" | "get_mut" | "remove") => {
+                Some(Ty { path: vec!["Option".into()], args: recv.args.into_iter().skip(1).take(1).collect() })
+            }
+            ("HashMap" | "BTreeMap", "values" | "values_mut" | "into_values") => {
+                Some(Ty { path: vec!["Iter".into()], args: recv.args.into_iter().skip(1).take(1).collect() })
+            }
+            ("HashMap" | "BTreeMap" | "HashSet" | "BTreeSet", "keys" | "iter" | "into_keys")
+                if recv.args.len() == 1 =>
+            {
+                Some(Ty { path: vec!["Iter".into()], args: recv.args })
             }
             (head, _) => self.file.methods.get(&(head.to_string(), m.to_string())).cloned(),
         }
@@ -583,6 +598,9 @@ impl Extractor<'_> {
         }
         if let Some(t) = self.expr_type(cx, value, 0) {
             return self.type_receiver(cx, &t.deref(), value);
+        }
+        if let Some(spec) = self.ret_receiver(cx, value, 0) {
+            return spec;
         }
         match value.kind() {
             "field_expression" => match self_chain(cx, value) {

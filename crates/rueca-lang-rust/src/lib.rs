@@ -59,7 +59,8 @@
 //!   `OVERRIDES` method → trait method. When the file declares the type,
 //!   the trait is also in the type's own `implements` (an `impl Tr for T
 //!   {}` without items has no other trace). Items of a blanket impl
-//!   (`impl<T: Bound> Tr for T`) are `T.m` with the base `<T>`.
+//!   (`impl<T: Bound> Tr for T`) are `T.m` with the base `<T>` (`<&T>` for
+//!   an impl on `&T`, `&mut T` or `Box<T>`, which forwards to `T`'s impl).
 //!   Associated types of an `impl` are not definitions.
 //! - Items inside function bodies (functions, types, `impl` blocks) are
 //!   children of the function (`outer.inner`, `outer.Local.m`). Closures
@@ -132,6 +133,7 @@
 //! | a unit struct of the file used as a value (`Local.m()`) | `$type:Local` |
 //! | `<T as Tr>::f()` | `$type:T`, or `$type:Tr` when `T` is generic or `Self` |
 //! | `self.a.b` with `a` not typed in the file | `$member:a.b` |
+//! | the result of a call the file cannot type (`let s = Store::open(p)?; s.m()`, `make().build()`) | `$ret:<receiver>#<name>`, `?` appended when unwrapped (`returns.rs`; typed by the resolver from the callee's signature) |
 //! | an untyped local | `(x)` (never bound to an item named like it) |
 //! | anything else | `(…)` (the unique-method rung) |
 //!
@@ -187,6 +189,7 @@ mod macros;
 pub mod modules;
 mod receivers;
 mod refs;
+mod returns;
 mod types;
 mod uses;
 

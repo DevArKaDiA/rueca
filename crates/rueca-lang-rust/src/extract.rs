@@ -676,7 +676,10 @@ impl<'s> Extractor<'s> {
         // `impl<T: Bound> Tr for T`: a blanket impl, marked `<T>`.
         let blanket = self_ty.path.len() == 1 && generic_params(node, self.src).contains(&head);
         let self_path = if blanket {
-            format!("<{head}>")
+            // `for T` applies to every type; `for &mut T` / `for Box<T>`
+            // forward to `T`'s own impl.
+            let bare = type_node.kind() == "type_identifier";
+            if bare { format!("<{head}>") } else { format!("<&{head}>") }
         } else {
             self.within(c.parent, c.clone(), |ex| ex.base_text(cx, &self_ty.path, type_node))
         };

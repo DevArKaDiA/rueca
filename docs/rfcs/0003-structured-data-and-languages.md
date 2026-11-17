@@ -893,11 +893,11 @@ release work, and is designed here in the form of §10.2–§10.4.
 | Module model | crates from every `Cargo.toml` `[package]` (library, binaries, `tests/` / `examples/` / `benches/` crates, `build.rs`); module = file (or inline `mod`), module name = module path, crate name first (`rueca_index::link`); `mod x;` → `x.rs` / `x/mod.rs` of the declaring module's directory, `#[path]` honoured; crates by name through the package's dependencies (renames, `path`, `workspace = true`), else any crate of the snapshot with that name |
 | Imports | `use` trees flattened to one import per leaf (aliases, `self`, globs, `pub use` re-exports), `extern crate`, `mod` declarations; the resolver walks `use` paths itself (module files, inline modules, types, re-exports); path anchors in code (`crate::`, `super::`, a crate name) get synthetic imports |
 | Qualified names | module path + `::` + local name joined with `.`: `f`, `outer.inner`, `m.f` (inline module), `Tr.m`, `Type.m` for `impl` items (last segment of the self type) |
-| Receivers | `self` → `$self`; `$type:` from annotations, constructions (`T { … }`, `T(…)`, `T::new()`), return types of the file's functions and methods, `?` / `unwrap()`, fields, `for` elements, `Some(x)` patterns, generic bounds, `impl Tr` / `dyn Tr`; `$member:a.b` for fields declared in another file |
+| Receivers | `self` → `$self`; `$ret:` for call results typed from the callee's signature by the resolver; `$type:` from annotations, constructions (`T { … }`, `T(…)`, `T::new()`), return types of the file's functions and methods, `?` / `unwrap()`, fields, `for` elements, `Some(x)` patterns, generic bounds, `impl Tr` / `dyn Tr`; `$member:a.b` for fields declared in another file |
 | Traits | `impl Tr for T` → `IMPLEMENTS` and `OVERRIDES` (resolver, wherever `T` is declared); trait default methods found through `T`; generic and `dyn` receivers bind the trait method |
 | Macros | `macro_rules!` → callable `Function`; invocations are calls; macro **arguments** re-parsed as code at their real positions; rule bodies and token builders (`quote!`) are not code |
 | Tests | `#[test]`, `#[tokio::test]` and other test attributes, `#[cfg(test)]` modules, `tests/` and `benches/` |
-| Heuristic | methods on receivers of unknown type by name (a trait method's implementations count as it; ≤ 3 candidates × 0.8), macros by name (`#[macro_use]`) |
+| Heuristic | methods on receivers of unknown type by name (a trait method's implementations count as it; a unique candidate only), macros by name (`#[macro_use]`) |
 | Precision | rust-analyzer `scip` (MIT OR Apache-2.0) |
 | Bench | S1: SWE-bench Multilingual Rust; S3: rust-analyzer gold on serde_json and ripgrep, and the `bench/micro/rust` micro-benchmarks |
 

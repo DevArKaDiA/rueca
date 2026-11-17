@@ -234,7 +234,10 @@ What packs deliberately do and don't do:
   functions and methods, `?` / `unwrap()`, `for` elements, `Some(x)`
   patterns, struct fields, a generic parameter's bound, `impl Tr` / `dyn
   Tr`, smart pointers seen through); `self.a.b.m()` with `a` declared in
-  another file is `$member:a.b`. **Macro arguments are code**: a macro's
+  another file is `$member:a.b`, and the result of a call the file cannot
+  type (a function or method of another file) is `$ret:<receiver>#<name>`
+  (`?` when unwrapped), which the resolver types from the callee's
+  signature. **Macro arguments are code**: a macro's
   argument list is a flat token tree to tree-sitter, so the pack parses it
   again on its own — wrapped as a tuple, an array or a block, the text copied
   byte for byte so every node maps back to the file by one offset — and
@@ -702,7 +705,8 @@ by synthetic imports the pack adds for them.
 | `self.m()`, `Self::f()`, `self.field` in an `impl` (the type may be declared in another file) | self receiver (`type_resolved`) | 0.90 |
 | `x.m()` with `x` typed from the file (`$type:T`), `self.a.m()` through declared field types (`$member:a`); trait default methods through the type | typed receiver (`type_resolved`) | 0.85 |
 | `x.m()` on a generic `T: Tr`, `impl Tr` or `dyn Tr` | the trait's method (`type_resolved`) | 0.85 |
-| `x.m()` with an unknown receiver: one trait method (its implementations count as it), or one method, of that name | `heuristic` | 0.50; two or three candidates × 0.8 each |
+| `x.m()` where `x` holds the result of a call the file cannot type (`let s = Store::open(p)?;`, `make().build()`): the callee's declared return type, `Self` and `Result<Self>` / `Option<Self>` through `?` / `unwrap()` included (`$ret:`) | typed receiver (`type_resolved`) | 0.85 |
+| `x.m()` with an unknown receiver: one trait method (its implementations count as it), or one method, of that name | `heuristic` | 0.50; several candidates: no edge |
 | `my_macro!()` with no import (`#[macro_use]`): the only `macro_rules!` of that name | `unique_name` | 0.60 |
 
 Items of an `impl` block are attached to the type their self type names

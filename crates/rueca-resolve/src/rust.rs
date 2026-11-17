@@ -38,13 +38,21 @@
 //!   `Iterator` adaptor on a type implementing `Iterator`).
 //! - **Blanket impls** (`impl<T: Bound> Tr for T`, base `<T>`): the items
 //!   override the trait's and are the targets of by-name calls of their
-//!   name (they apply to every type).
+//!   name (they apply to every type). An impl on `&T`, `&mut T` or `Box<T>`
+//!   (base `<&T>`) forwards to `T`'s impl and counts as the trait's item.
+//! - **Call results** (`$ret:<receiver>#<name>[?]`, the value a call
+//!   returns, see `rueca-lang-rust`): the callee is resolved like a call,
+//!   its signature's return type (`Self` = its impl's type or trait;
+//!   `Result<T, _>` / `Option<T>` → `T` when unwrapped by `?`, `unwrap()`,
+//!   `expect()`; references and smart pointers seen through) is resolved
+//!   in the callee's file, and the member is looked up in it
+//!   (`type_resolved` 0.85). A callee or return type outside the project
+//!   makes the call external.
 //! - **Methods by name** (a call whose receiver type is unknown): the
 //!   implementations of one trait method count as that trait method, so a
 //!   name that only one trait declares (implemented anywhere) resolves to
-//!   the trait's method (`heuristic` 0.50); two or three distinct
-//!   candidates are all linked at 0.50 × 0.8, as C++ overloads that the
-//!   arguments cannot tell apart are; more is no edge. Names of common
+//!   the trait's method (`heuristic` 0.50); several distinct candidates are
+//!   no edge (as the Go and C/C++ unique-method rung). Names of common
 //!   standard-library methods (`unwrap`, `iter`, `insert`, …) never match by
 //!   name: such calls are far more often on standard types, and are counted
 //!   as external.
@@ -59,12 +67,11 @@
 //!   0.60.
 
 use super::*;
+use crate::hooks::TypeLookup;
 
-/// Fan-out factor of ambiguous by-name method calls (as overloads).
-const AMBIGUOUS_FANOUT: f32 = 0.8;
-
-/// Most candidates a by-name method call fans out to.
-const MAX_AMBIGUOUS: usize = 3;
+/// Prefix of a call-result receiver (`rueca-lang-rust`, `returns.rs`):
+/// `$ret:<receiver>#<name>[?]`.
+pub(crate) const RET_RECEIVER_PREFIX: &str = "$ret:";
 
 /// Deepest nesting of Rust module lookups (re-exports of re-exports through
 /// inline modules can form cycles that the per-lookup `visited` list of a
@@ -585,13 +592,21 @@ impl Resolver<'_> {
     /// attach to; it overrides the trait's item and stands for it in
     /// by-name calls.
     fn rust_blanket_item(&mut self, fid: FileId, scope: Option<LocalDefId>, item: NodeId, d: &Definition) {
-        self.rust_blanket.insert(item);
+        // `impl<T> Tr for &mut T` forwards to `T`'s impl: it stands for the
+        // trait's item like any other implementation.
+        let forwarding = d.bases[0].starts_with("<&");
+        if !forwarding {
+            self.rust_blanket.insert(item);
+        }
         let Some((tr, _, _)) = d.implements.first().and_then(|t| self.rust_type_of_path(fid, scope, t)) else { return };
         let want = if d.label.is_callable() { Want::Call } else { Want::Value };
         if let Some((m, _)) = self.find_member(tr, &d.name, want).filter(|(m, _)| *m != item) {
             let meta =
                 EdgeMeta { confidence: 0.9, strategy: Strategy::TypeResolved, evidence: Some((fid, d.name_span)) };
             self.add_edge(item, m, EdgeKind::Overrides, meta);
+            if forwarding {
+                self.rust_overrides.insert(item, m);
+            }
         }
     }
 
@@ -606,6 +621,86 @@ impl Resolver<'_> {
             cur = self.parents[f as usize][a as usize];
         }
         None
+    }
+
+    // -- call results ---------------------------------------------------------
+
+    /// A call on a `$ret:` receiver: the member of the type the callee
+    /// returns (`type_resolved` 0.85); external when the callee or its
+    /// return type is outside the project; by name when unknown.
+    pub(crate) fn rust_resolve_ret(
+        &self,
+        f: FileId,
+        item: &RefItem<'_>,
+        scope: Option<LocalDefId>,
+        spec: &str,
+    ) -> Outcome {
+        let ty = self.rust_nested(|| Some(self.rust_ret_type(f, scope, spec))).unwrap_or(TypeLookup::Unknown);
+        match ty {
+            TypeLookup::Found(t) => match self.find_member(t, item.name, Want::of(item.kind)) {
+                Some((n, _)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+                None if self.type_is_open(t) => Outcome::External,
+                None => Outcome::Miss,
+            },
+            TypeLookup::External => Outcome::External,
+            TypeLookup::Unknown => self.unique_name(f, item.kind, item.name, true),
+        }
+    }
+
+    /// The type a `$ret:` spec (without the prefix) evaluates to.
+    fn rust_ret_type(&self, f: FileId, scope: Option<LocalDefId>, spec: &str) -> TypeLookup {
+        let unwrap = spec.ends_with('?');
+        let Some((recv, name)) = spec.trim_end_matches('?').rsplit_once('#') else { return TypeLookup::Unknown };
+        let call = RefItem {
+            kind: RefKind::Call,
+            name,
+            receiver: (!recv.is_empty()).then_some(recv),
+            enclosing: scope,
+            span: Span::default(),
+            decorated: None,
+            arity: None,
+            arg_types: None,
+        };
+        match self.resolve_item(f, &call, scope) {
+            Outcome::Hit(callee, _, _) => self.rust_return_type(callee, unwrap),
+            Outcome::External => TypeLookup::External,
+            Outcome::Miss => TypeLookup::Unknown,
+        }
+    }
+
+    /// The type a Rust callable's signature declares it returns (`Self` is
+    /// its impl's type or trait; `Result<T, _>` / `Option<T>` are `T` when
+    /// `unwrap`; smart pointers and references are seen through), resolved
+    /// in the callee's file.
+    fn rust_return_type(&self, callee: NodeId, unwrap: bool) -> TypeLookup {
+        let node = &self.nodes[callee as usize];
+        let (Some(file), Some(sig)) = (node.file, node.signature.as_deref()) else { return TypeLookup::Unknown };
+        if node.language.map(Language::family) != Some(LanguageFamily::Rust) {
+            return TypeLookup::Unknown;
+        }
+        let Some(ret) = return_text(sig) else { return TypeLookup::Unknown };
+        let Some(ty) = value_type(ret, unwrap) else { return TypeLookup::External };
+        if ty == "Self" {
+            return self.rust_self_type(callee).map_or(TypeLookup::Unknown, TypeLookup::Found);
+        }
+        let scope = self.def_parent(file, callee);
+        self.resolve_type_text(file, scope, &ty.replace("::", "."))
+    }
+
+    /// The type `Self` stands for in callable `n`: its impl's type, else
+    /// the trait it is declared in.
+    fn rust_self_type(&self, n: NodeId) -> Option<NodeId> {
+        if let Some(&t) = self.rust_impl_type.get(&n) {
+            return Some(t);
+        }
+        let (owner, _) = self.nodes[n as usize].qualified_name.rsplit_once('.')?;
+        self.nodes_by_qn().get(owner)?.iter().copied().find(|&t| self.nodes[t as usize].label.is_type())
+    }
+
+    /// The parent definition (local id) of node `n` in file `f`.
+    fn def_parent(&self, f: FileId, n: NodeId) -> Option<LocalDefId> {
+        let j = self.def_node[f as usize].iter().position(|&x| x == n)?;
+        self.parents[f as usize][j]
     }
 
     // -- methods by name -----------------------------------------------------
@@ -649,10 +744,8 @@ impl Resolver<'_> {
             // the project.
             return Outcome::External;
         }
-        let keys = self.rust_method_candidates(f, kind, name);
-        match keys.len() {
-            1 => Outcome::Hit(keys[0], Strategy::Heuristic, 0.5),
-            2..=MAX_AMBIGUOUS => Outcome::Hit(keys[0], Strategy::Heuristic, 0.5 * AMBIGUOUS_FANOUT),
+        match self.rust_method_candidates(f, kind, name).as_slice() {
+            [only] => Outcome::Hit(*only, Strategy::Heuristic, 0.5),
             _ => Outcome::Miss,
         }
     }
@@ -711,32 +804,123 @@ impl Resolver<'_> {
             }
         }
     }
+}
 
-    /// The other candidates of an ambiguous by-name Rust method call (see
-    /// [`Self::rust_unique_method`]), each at the fan-out confidence.
-    pub(crate) fn rust_ambiguous(
-        &self,
-        from: FileId,
-        item: &RefItem<'_>,
-        target: NodeId,
-        strategy: Strategy,
-        confidence: f32,
-    ) -> Option<Vec<(NodeId, Strategy, f32)>> {
-        let ambiguous = strategy == Strategy::Heuristic && confidence < 0.5 && item.receiver.is_some();
-        if !ambiguous || !self.is_rust(from) {
-            return None;
+/// The return type written in a one-line Rust signature (after the
+/// top-level `->`, before a `where` clause).
+fn return_text(sig: &str) -> Option<&str> {
+    let bytes = sig.as_bytes();
+    let mut depth = 0i32;
+    let mut at = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'(' | b'[' | b'<' => depth += 1,
+            b')' | b']' => depth -= 1,
+            b'>' if i > 0 && bytes[i - 1] != b'-' => depth -= 1,
+            b'-' if depth == 0 && bytes.get(i + 1) == Some(&b'>') => at = Some(i + 2),
+            _ => {}
         }
-        let keys = self.rust_method_candidates(from, item.kind, item.name);
-        if !keys.contains(&target) {
-            return None;
-        }
-        Some(keys.into_iter().map(|k| (k, strategy, confidence)).collect())
     }
+    let ret = sig[at?..].trim();
+    let ret = ret.split(" where ").next().unwrap_or(ret).trim();
+    (!ret.is_empty()).then_some(ret)
+}
+
+/// The type a value of declared type `ret` has, as a path (`a::B`): through
+/// references, `impl` / `dyn`, smart pointers and, when `unwrap`, the first
+/// argument of a `…Result` / `Option` / `Poll`. `None` for types outside
+/// any project (a `Result` not unwrapped, tuples, slices, `!`).
+fn value_type(ret: &str, unwrap: bool) -> Option<String> {
+    let mut t = ret.trim();
+    let mut unwrap = unwrap;
+    for _ in 0..8 {
+        t = strip_prefixes(t);
+        let (head, first) = split_generic(t);
+        let last = head.rsplit("::").next().unwrap_or(head);
+        let peel = match last {
+            "Box" | "Rc" | "Arc" | "Cow" | "Pin" | "RefCell" | "Mutex" | "RwLock" => true,
+            "Result" | "Option" | "Poll" if unwrap => {
+                unwrap = false;
+                true
+            }
+            _ => false,
+        };
+        match (peel, first) {
+            (true, Some(inner)) => t = inner,
+            _ => return value_head(head),
+        }
+    }
+    None
+}
+
+/// `&`, `&'a mut`, `mut`, `impl `, `dyn ` removed from the front.
+fn strip_prefixes(t: &str) -> &str {
+    let mut t = t.trim();
+    loop {
+        let before = t;
+        t = t.trim_start_matches('&').trim_start();
+        if let Some(rest) = t.strip_prefix('\'') {
+            t = rest.trim_start_matches(|c: char| c.is_alphanumeric() || c == '_').trim_start();
+        }
+        for p in ["mut ", "impl ", "dyn "] {
+            t = t.strip_prefix(p).unwrap_or(t).trim_start();
+        }
+        if t == before {
+            return t;
+        }
+    }
+}
+
+/// The path of a type and its first generic argument (`Result<T, E>` →
+/// (`Result`, `T`)).
+fn split_generic(t: &str) -> (&str, Option<&str>) {
+    let Some(open) = t.find('<') else { return (t.trim(), None) };
+    let inner = &t[open + 1..t.rfind('>').unwrap_or(t.len())];
+    let mut depth = 0i32;
+    let end = inner
+        .char_indices()
+        .find(|&(_, c)| {
+            match c {
+                '<' | '(' | '[' => depth += 1,
+                '>' | ')' | ']' => depth -= 1,
+                _ => {}
+            }
+            c == ',' && depth == 0
+        })
+        .map_or(inner.len(), |(i, _)| i);
+    (t[..open].trim(), Some(inner[..end].trim()))
+}
+
+/// A named type's path, `None` for what no project defines (`Result`,
+/// `Option`, tuples, slices, primitives are left to the caller's
+/// resolution, which knows the builtins).
+fn value_head(head: &str) -> Option<String> {
+    let h = head.trim().trim_end_matches(|c: char| c == '+' || c.is_whitespace());
+    let h = h.split(" + ").next().unwrap_or(h).trim();
+    let ok = !h.is_empty() && h.chars().all(|c| c.is_alphanumeric() || c == '_' || c == ':');
+    let last = h.rsplit("::").next().unwrap_or(h);
+    (ok && !matches!(last, "Result" | "Option" | "Poll")).then(|| h.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn return_types_of_signatures() {
+        assert_eq!(return_text("pub fn open(p: &Path) -> Result<Store>"), Some("Result<Store>"));
+        assert_eq!(return_text("fn f(g: impl Fn() -> u8) -> &mut B where B: X"), Some("&mut B"));
+        assert_eq!(return_text("fn f(&self)"), None);
+        assert_eq!(value_type("Result<Store>", true).as_deref(), Some("Store"));
+        assert_eq!(value_type("io::Result<Self>", true).as_deref(), Some("Self"));
+        assert_eq!(value_type("anyhow::Result<Option<Box<a::Engine>>>", true), None);
+        assert_eq!(value_type("Option<Box<a::Engine>>", true).as_deref(), Some("a::Engine"));
+        assert_eq!(value_type("Result<Store>", false), None);
+        assert_eq!(value_type("&'a mut JSONBuilder", false).as_deref(), Some("JSONBuilder"));
+        assert_eq!(value_type("impl Iterator<Item = u8> + 'a", false).as_deref(), Some("Iterator"));
+        assert_eq!(value_type("Arc<Mutex<Cache>>", false).as_deref(), Some("Cache"));
+        assert_eq!(value_type("(u8, u8)", false), None);
+    }
 
     #[test]
     fn std_methods_are_sorted() {

@@ -18,6 +18,12 @@ fn main() {
     cli::run(&mut store);
     let raw = serde_json::to_string(&total);
     let _ = raw;
+    let _ = reopen();
+}
+
+fn reopen() -> std::io::Result<usize> {
+    let store = shop_core::MemoryStore::open("shop.db")?;
+    Ok(store.len())
 }
 
 fn compute(p: Price) -> u64 {
