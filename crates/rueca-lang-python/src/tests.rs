@@ -768,7 +768,7 @@ fn builtins() {
     }
     assert!(builtins::BUILTINS.windows(2).all(|w| w[0] < w[1]), "builtins must be sorted");
     assert_eq!(p.self_receivers(), &["self", "cls"]);
-    assert_eq!(p.extractor_version(), 3);
+    assert_eq!(p.extractor_version(), 4);
 }
 
 // ---------------------------------------------------------------------------

@@ -467,7 +467,7 @@ impl<'t> Walk<'t> {
 }
 
 /// The `Key` definition of a mapping entry.
-fn key_def(out: &Out<'_>, e: &Entry, name: String, qn: String, owner: Option<LocalDefId>) -> Def {
+pub(crate) fn key_def(out: &Out<'_>, e: &Entry, name: String, qn: String, owner: Option<LocalDefId>) -> Def {
     let scalar = matches!(e.value.value, Value::Scalar(_) | Value::Alias(_));
     let after = if scalar { e.value.span.end } else { e.key_span.end };
     Def {

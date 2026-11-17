@@ -129,6 +129,14 @@
 //!   reads. The resolver links them with `READS` (see `rueca-resolve`).
 //! - At most 20,000 references per file.
 //!
+//! # Contract hints
+//!
+//! `FileFacts::contracts` (RFC 0006 phase 4): HTTP routes (express-style
+//! routers, fastify / hapi route objects, NestJS controllers), HTTP client
+//! calls (with one hop through a wrapper whose URL interpolates its
+//! parameter), `@grpc/grpc-js` clients and services; the patterns and their
+//! evidence are listed in the `contracts` module docs.
+//!
 //! # Imports
 //!
 //! `module` is the raw specifier, `relative_level` is always 0.
@@ -203,6 +211,7 @@
 
 mod bridge;
 mod builtins;
+mod contracts;
 mod extract;
 mod locals;
 mod resolve;
@@ -229,8 +238,9 @@ impl LanguagePack for TypeScriptPack {
         // 3: env var / config key reads (RFC 0003 §7.2); 4: `$type:`
         // receivers from declarations and assignments; 5: object-literal
         // methods and assigned functions as definitions, `super(…)`,
-        // bounds / elements / return types for receivers, local callees.
-        5
+        // bounds / elements / return types for receivers, local callees; 6:
+        // contract hints (RFC 0006 phase 4).
+        6
     }
 
     fn extract(
@@ -246,6 +256,7 @@ impl LanguagePack for TypeScriptPack {
         let root = tree.root_node();
         let locals = locals::Locals::compute(query, root, source, Instant::now() + budget.max_parse_time);
         let mut facts = extract::extract_tree(root, source, path, budget.max_depth, &locals);
+        facts.contracts = contracts::extract(root, source, &facts.definitions, budget.max_depth);
         facts.parse_errors = count_errors(&tree);
         facts.line_count = line_count(source);
         Ok(facts)

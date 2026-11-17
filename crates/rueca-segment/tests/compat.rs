@@ -197,7 +197,7 @@ fn graph() -> (ResolvedGraph, Mem) {
         indexed_at: 0,
         rueca_version: "0.1.0-alpha.1".into(),
     };
-    (ResolvedGraph { snapshot, nodes, edges, files, modules: vec![] }, Mem(contents))
+    (ResolvedGraph { snapshot, nodes, edges, files, modules: vec![], contracts: vec![] }, Mem(contents))
 }
 
 fn fixture_dir() -> PathBuf {
@@ -245,6 +245,7 @@ fn segment_written_before_wave_r_opens_unchanged() {
     assert_eq!(seg.nodes(), graph.nodes.as_slice(), "node table (labels, languages) decodes identically");
     assert_eq!(seg.files(), graph.files.as_slice());
     assert_eq!(seg.module_of(0), None, "no files.modules component before wave R");
+    assert!(seg.contracts().is_empty(), "no contracts component before RFC 0006 phase 4");
     assert_eq!(seg.meta().edge_count as usize, graph.edges.len());
     for e in &graph.edges {
         let out = seg.out_edges(e.src, Some(e.kind));

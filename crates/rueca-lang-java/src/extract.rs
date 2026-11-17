@@ -89,6 +89,7 @@ pub(crate) fn extract(source: &[u8], budget: &Budget) -> Result<FileFacts, Extra
     ex.prescan(root, 0);
     ex.visit_children(root, 0);
     ex.bind_static_on_demand();
+    let contracts = crate::contracts::hints(root, source, &ex.defs, budget.max_depth);
 
     Ok(FileFacts {
         definitions: ex.defs,
@@ -96,6 +97,7 @@ pub(crate) fn extract(source: &[u8], budget: &Budget) -> Result<FileFacts, Extra
         imports: ex.imports,
         parse_errors: count_errors(&tree),
         line_count: line_count(source),
+        contracts,
     })
 }
 

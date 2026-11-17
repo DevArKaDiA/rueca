@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rueca_model::{
-    Edge, EdgeKind, EdgeMeta, FileEntry, Label, Language, Node, ResolvedGraph, SnapshotInfo, Span, Strategy,
-    git_blob_sha,
+    ContractKind, ContractRow, ContractSide, Edge, EdgeKind, EdgeMeta, FileEntry, Label, Language, Node, ResolvedGraph,
+    SnapshotInfo, Span, Strategy, git_blob_sha,
 };
 use rueca_segment::{
     ContentQuery, ContentSource, FORMAT_VERSION, Segment, SegmentError, Store, SymbolQuery, write_segment,
@@ -156,6 +156,7 @@ fn fixture() -> (ResolvedGraph, Mem) {
         edges,
         files,
         modules: vec![],
+        contracts: vec![],
     };
     graph.validate().unwrap();
     let mem = Mem {
@@ -809,7 +810,14 @@ fn symbol_field_boost_order() {
     }
     nodes[2].doc = Some("Run the parse step on the input".into());
     nodes[4].signature = Some("def u(parse)".into());
-    let graph = ResolvedGraph { snapshot: fixture().0.snapshot, nodes, edges: vec![], files, modules: vec![] };
+    let graph = ResolvedGraph {
+        snapshot: fixture().0.snapshot,
+        nodes,
+        edges: vec![],
+        files,
+        modules: vec![],
+        contracts: vec![],
+    };
     let mem = Mem {
         by_path: files_src.iter().map(|(p, c)| (p.to_string(), c.to_vec())).collect(),
         calls: AtomicUsize::new(0),
@@ -890,4 +898,43 @@ fn store_housekeeping() {
     // A corrupt catalog is reported, not silently reset.
     std::fs::write(dir.path().join("catalog.json"), b"{not json").unwrap();
     assert!(matches!(store.entries(), Err(SegmentError::Corrupt(_))));
+}
+
+/// The contract table round-trips through the optional `contracts`
+/// component; a graph without rows writes no component and reads empty.
+#[test]
+fn contract_table_round_trip() {
+    let (_dir, graph, seg) = open_fixture();
+    assert!(graph.contracts.is_empty() && seg.contracts().is_empty());
+    assert!(seg.contracts_of(0).is_empty());
+
+    let dir = tempfile::tempdir().unwrap();
+    let (mut graph, mem) = fixture();
+    let row = |node: u32, side, key: &str, file: u32, framework: &str| ContractRow {
+        node,
+        side,
+        kind: ContractKind::Http,
+        key: key.into(),
+        raw: format!("raw {key}"),
+        file,
+        span: span(node),
+        framework: framework.into(),
+    };
+    graph.contracts = vec![
+        row(8, ContractSide::Provides, "GET /users/{}", 1, "express"),
+        row(6, ContractSide::Consumes, "GET /users/{}", 0, "requests"),
+        row(8, ContractSide::Consumes, "* /x", 1, "fetch"),
+    ];
+    graph.validate().unwrap();
+    let meta = write_segment(&graph, &mem, dir.path()).unwrap();
+    let seg = Store::open(dir.path()).unwrap().open_segment(&meta.id).unwrap();
+    assert_eq!(seg.contracts(), graph.contracts.as_slice());
+    let of8: Vec<&ContractRow> = seg.contracts_of(8);
+    assert_eq!(of8, vec![&graph.contracts[0], &graph.contracts[2]]);
+    assert_eq!(seg.contracts_of(6), vec![&graph.contracts[1]]);
+    assert!(seg.contracts_of(7).is_empty() && seg.contracts_of(u32::MAX).is_empty());
+
+    // Out-of-range rows are rejected at write (graph validation).
+    graph.contracts[0].node = graph.nodes.len() as u32;
+    assert!(write_segment(&graph, &mem, dir.path()).is_err());
 }

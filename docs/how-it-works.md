@@ -135,7 +135,7 @@ such edges disappear. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-markdown`, `rueca-lang-data`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -418,7 +418,10 @@ INI, `.properties` and Dockerfile:
   data files over 256 KiB that are not a known kind (`data-size`), and
   data dumps — long root arrays, more than 5,000 keys, mostly array
   elements (`data-shape`). Inside a file, keys stop at depth 32, arrays at
-  64 mapping elements and files at 5,000 keys (`partial`).
+  64 mapping elements and files at 5,000 keys (`partial`). An OpenAPI /
+  Swagger document is a known kind wherever its root `openapi` / `swagger`
+  key sits (JSON emitters that sort keys write it last), and its operations
+  stay `Route`s past the key cap.
 
 **Env var and config reads in code** (the code side of the bridge) are
 facts of the code packs, recognized only with file-local evidence and
@@ -434,6 +437,71 @@ literal names: Python `os.environ["X"]`, `os.environ.get("X")`,
 the array a `config/<file>.php` returns becomes `Key`s (`name`,
 `providers.cache.driver`), and `env()` calls inside an entry are reads by
 that key.
+
+**Contract hints in code** (`FileFacts::contracts`, §4.4 *Contracts*) are
+found by each code pack in one pass after its definitions, so a provider
+names its handler and a consumer its enclosing definition. A URL is
+rendered from literals, interpolations and concatenations (a gap is a
+hole; a leading interpolated base URL is dropped by the key), and from a
+local assigned once in the function. **Python**: Flask / FastAPI /
+aiohttp route decorators (composed with a `Blueprint` / `APIRouter`
+prefix of the file), `add_url_rule`, Django `path()` / `re_path()`
+(method `*`), aiohttp and Starlette route tables provide; calls whose
+callee is an HTTP verb (`get`, `_post`, `get_api_list`) or `request` /
+`_request` / `urlopen` with a path-like argument consume (method from the
+callee, a literal method argument or `method=self._conn.get`); `x.Method`
+on a name the file binds to a `<mod>.XStub` (assignment, annotation,
+parameter, return type) consumes `X/Method` (`*/Method` on an unbound
+holder named `…stub`, a stub handed in as a parameter), and the PascalCase
+methods of a `…XServicer` subclass provide it; kafka producers' `send("t")` consume
+and consumers' topics provide a topic. **TS / JS**: `app.get("/x", h)`,
+`app.route("/x").get(h)`, `fastify.route({…})` (in a file importing a
+server framework, or on `app` / `router` / `server` with an inline
+handler) and NestJS `@Controller` + `@Get` (composed) provide; `fetch`,
+`axios`, `got`, verb wrappers and `request` with a path-like argument
+consume, and a wrapper whose URL interpolates its own parameter
+(`` `${host}/api/${endpoint}` ``) adds a consumer at each caller passing a
+literal there (one hop); `new GreeterClient(…)` from generated gRPC code
+and `server.addService(GreeterService, {…})` give `Greeter/SayHello`.
+**PHP**: Laravel `Route::get(…)` (also chained, `match`, `any`,
+`resource`, inside `Route::prefix(…)->group(…)` closures), Symfony
+`#[Route]` attributes (class prefix composed) and Slim / Lumen
+`$app->get('/x', handler)` provide; Guzzle-style `->get('/x')` /
+`->request('POST', …)`, the `Http::` facade and `CURLOPT_URL` consume.
+**Go** (router or client imported in the file; generated files skipped):
+`net/http` `HandleFunc` / `Handle("GET /x")`, gin / echo `r.GET`, chi /
+fiber `r.Get`, gorilla `.HandleFunc(…).Methods(…)` provide (group,
+sub-router and chi `Route` prefixes of the file composed; the handler is
+the last function value among the arguments, looked for inside wrapping
+calls), `http.Get` / `http.NewRequest`, resty and SDK wrappers called with
+a method then a path (`c.do(ctx, http.MethodPost, "/api/generate")`)
+consume; a type embedding `pb.Unimplemented<S>Server` or the server
+interface `pb.<S>Server` (a delegating wrapper), or registered with
+`pb.Register<S>Server(s, x)` (`x` a `&T{}`, the method's receiver or a
+local assigned `&T{}`), provides `S/Method` for its handler-shaped methods
+(a context and a pointer, or a stream) — in the file, and through a
+service marker `S/*` on the type that the resolver expands over its
+methods in the other files of the package — a stream parameter
+`pb.<S>_<M>Server` gives `S/M`, and a unary server signature taking
+`*pb.<M>Request` (a version suffix may be dropped or follow `Request`)
+gives `*/M` (service unknown in the file), while
+calls on names bound to `pb.<S>Client` consume `S/M` (`*/M` through a
+`protoClient` field typed in another file). **Java**: Spring
+`@GetMapping` / `@RequestMapping`, JAX-RS `@GET` + `@Path` and Micronaut
+`@Get` provide (class prefix composed) — consume on a `@FeignClient` /
+`@RegisterRestClient` / Micronaut `@Client` type, for `@GetExchange` and
+Feign `@RequestLine` — and `RestTemplate`, `WebClient` / `RestClient`,
+`HttpRequest.newBuilder` and OkHttp `Request.Builder` consume; a class
+extending `XGrpc.XImplBase` provides `X/Method` for its public
+`StreamObserver` methods and calls on `XGrpc` stubs consume it.
+**Rust**: actix-web / rocket `#[get("/x")]` attributes (prefixed by the
+file's `web::scope` registering the function), actix `.route("/x",
+web::get().to(h))` / `web::resource`, and axum `.route("/x",
+get(h).post(g))` (with `.nest` of a router built in the same expression)
+provide, `reqwest` calls consume; the methods of a tonic service trait
+impl (`impl Points for S`, `Request<…>` → `Response<…>`) provide
+`Points/Upsert` (snake_case back to the proto's PascalCase) and calls on
+names bound to a `PointsClient` consume it.
 
 Facts are cached at
 `<store>/facts/<sha>-<lang>-v<extractor version>-f<facts format>.bin`.
@@ -770,6 +838,26 @@ be fuzzy-matched to a code symbol.
   `extends`, Dockerfile `FROM <stage>`) resolve the same way into
   `INHERITS`.
 
+**Contracts** ([RFC 0006](rfcs/0006-org-graph.md) phase 4). Packs also
+emit contract hints (`FileFacts::contracts`): a route or spec operation a
+file *provides* (an OpenAPI `Route`, a `.proto` `rpc`), an endpoint it
+*consumes* (an HTTP or RPC call), each with a canonical key
+(`rueca_model::contract`: `GET /users/{}` — every parameter segment `{}`,
+host, query and trailing `/` dropped — or `pkg.Service/Method`). Every hint
+becomes a row of the segment's contract table on its owner's node (the
+handler, `Route` or `RpcMethod`; else the file), and keys that match within
+the snapshot become `contract` edges: consumer → provider `CALLS`, code
+provider → spec provider `IMPLEMENTS`, at 0.9 (same key), 0.85 (a provider
+`{}` segment stands for a literal one, or an RPC key without package) or
+0.7 (a `*` method, or an RPC key `*/Method` whose service the code does not
+name), 0.5 each when several providers tie. Code-to-code and
+spec-to-spec providers never link; unmatched consumers stay in the table
+(dangling). Providers that are tests or in test files (a test path, or a
+Go `_test.go` file: `rueca_model::contract::is_test_source`) keep their
+rows but are never match candidates, here and across repositories, so a
+fake sidecar does not take a client's calls from the real server. A
+`*/M` provider row of a node that also provides `S/M` is dropped.
+
 Duplicate edges `(src, dst, kind)` are merged keeping the best strategy, the
 highest confidence and the first evidence. **Evidence** is the file and span
 of the reference: this is what `trace` returns as `call_site`.
@@ -786,6 +874,7 @@ component exists because a tool needs it:
 | edge metadata | confidence, strategy, evidence span per edge | `trace` |
 | name indexes | node ids sorted by qualified name and by name | symbol lookup (`get_symbol`, `get_snippet`, `trace`) |
 | file → symbols | symbol nodes per file, sorted by position | `get_file_outline`, `search_code` (enclosing symbol) |
+| contract table | every contract hint on its node: side, kind, canonical key, raw text, span, framework (optional component `contracts`) | the organization linker, `list_contracts` |
 | tantivy symbol index | BM25 over name, qualified name, signature, path, docstring and the symbol's source (`body`, from the content packs) | `search_symbols` |
 | bodiless set | C/C++ functions and methods whose source has no body (prototypes, in-class declarations), for the declaration prior | `search_symbols` |
 | trigram index | which files contain each 3-byte sequence | `search_code` |
@@ -897,6 +986,26 @@ index**, so a question asked of the whole organization gets one ranking.
   edges between a consumer node and a dependency node, never through the
   name-matching rungs (`unique_name`, `heuristic`), never into a
   dependency's tests or into a name the consumer defines itself.
+- **The link layer: contracts** (RFC 0006 phase 4). The analysis also
+  records the distinct keys of each repository's **contract table** (the
+  routes, OpenAPI operations and `.proto` RPC methods it provides, the HTTP
+  and RPC calls it makes; §4.4, *Contracts*). A repository depends on
+  another when one of its consumed keys matches a key the other provides,
+  or its server code provides a key matching a spec the other publishes;
+  such a dependency is not mounted for the joint resolve (no packages are
+  involved): its edges come from the contract tables alone, with the same
+  matcher as inside one snapshot (`rueca_model::contract::best_matches`).
+  The calling definition gets `CALLS` to the handler and to the spec
+  operation, a server handler `IMPLEMENTS` to the spec operation of another
+  repository, all `strategy: contract` with the call site as evidence, in
+  the **same link set** as the package edges — so versioning, recompute on
+  change, refs, the remap of incoming edges at a ref and visibility apply
+  unchanged. Ambiguity is decided over the caller's own providers and every
+  dependency's: two handlers matching equally well, one in the caller's
+  repository and one in another, give the cross-repository edge 0.5; a
+  better match in its own repository leaves none. Calls matched by no
+  visible provider are **dangling**: `list_contracts` computes them per
+  query, nothing is stored.
 - **Link sets are versioned with the generation.** A consumer's edges are
   stored as one file (`orgs/<name>/links/<segment>-<hash>.bin`), keyed by
   its segment and its dependencies' segments; the generation records the
@@ -934,11 +1043,15 @@ index**, so a question asked of the whole organization gets one ranking.
   other repositories, each node carrying its snapshot (`s`). A link edge is
   returned only when both repositories are visible to the caller.
   `list_repositories` names each repository's packages and the
-  repositories it depends on; `rueca links --org <org>` lists every edge.
+  repositories it depends on; `list_contracts` lists the contract tables
+  with each row's counterparts in the visible repositories (and the
+  dangling calls); `rueca links --org <org>` lists every edge, contract
+  edges marked `via: contract`.
 
 The repository graph stays the unit of work: `get_symbol`, `get_snippet`
 and outlines read the repository segment of the id they are given; only
-`trace` (and routing) look across repositories.
+`trace`, `list_contracts` (counterparts) and routing look across
+repositories.
 
 ## 5. The graph schema
 
@@ -958,6 +1071,7 @@ and outlines read the repository segment of the id they are given; only
 | `Key`, `Document` | structured-data keys at any depth (key path = local name), Laravel `config/*.php` keys, and documents of multi-document YAML streams |
 | `Resource`, `Image` | deployable / infrastructure objects (Kubernetes objects, compose services, Terraform resources, data sources and modules) and container images (Dockerfile stages, compose `build`) |
 | `Route`, `Variable` (data) | OpenAPI operations (`GET /users/{id}`); Terraform `var.x` / `local.x` and Dockerfile `ARG` |
+| `Interface`, `RpcMethod`, `Struct`, `Field`, `Enum`, `Constant` (proto) | `.proto` services (`helloworld.Greeter`), their `rpc`s (`helloworld.Greeter.SayHello`), messages and fields, enums and values |
 
 Every symbol node carries: name, qualified name, file, span, language,
 signature, docstring, `exported`, `is_test`. Canonical env vars have no
@@ -981,7 +1095,8 @@ Python, ECMAScript, PHP and Java reads of ordinary names stay `REFERENCES`.
 span of the reference that produced it; absent for structural edges).
 Strategies: `syntactic`, `scip`, `type_resolved`, `import_resolved`,
 `same_module`, `unique_name`, `heuristic`, and `contract` (the code ↔
-config bridge).
+config bridge, and the HTTP / RPC contract edges `CALLS` and `IMPLEMENTS`
+of §4.4 and §7).
 
 ## 6. How each tool uses the graph
 
@@ -1021,6 +1136,7 @@ candidate.
 | `get_snippet` | lookup → node span → content packs | none |
 | `trace` | lookup → adjacency + edge metadata | breadth-first, N hops |
 | `get_file_outline` | file → symbols → `DEFINES` | containment tree |
+| `list_contracts` | contract tables of the selected and visible snapshots | none (keys matched by bucket) |
 
 ### `search_symbols` — "where is the thing called…?" / "where is the code that…?"
 
@@ -1146,6 +1262,18 @@ Takes the file's symbols (already sorted by position) and nests them by
 line. No content is read; signatures come from the node table. For a
 Markdown file the outline is its heading tree.
 
+### `list_contracts` — "which endpoints exist, who calls them, what calls nothing?"
+
+Reads the contract table of every selected snapshot (one row per route,
+spec operation, RPC method or call, on its definition's node) and, to count
+counterparts, the tables of every visible repository at the entry the call
+reads. Rows are bucketed by kind and shape (HTTP: segment count; RPC: method
+name) and matched with the key matcher of §4.4, so `matches` is the number
+of providers a call reaches (code and spec) or of calls a route receives;
+`side: "dangling"` keeps the calls with none. A flat list sorted by key,
+paged by entry offset; nothing walks the graph. From an entry, `trace` (by
+its `id`) follows the contract edges themselves.
+
 ### Responses: the envelope, grouping and the budget
 
 The tools compute their results as before (the `format: "verbose"` alpha
@@ -1214,6 +1342,7 @@ versions and the transport seam for HTTP are specified in
 |---|---|---|
 | 1.0 | `syntactic`, `import_resolved` (IMPORTS) | Structure or a resolved import. Certain. |
 | 0.90–0.95 | `contract` | An env var or config key read resolved through a known namespace (the code ↔ config bridge). |
+| 0.5–0.9 | `contract` | An HTTP / RPC call or handler matched to a route or spec operation by canonical key: 0.9 same key, 0.85 template, 0.7 method (or RPC service) wildcard, 0.5 ambiguous (§4.4, *Contracts*). |
 | 0.85–0.95 | `type_resolved`, `import_resolved`, `same_module` | Resolved through scope, `self`, or an import. Wrong only with dynamic tricks (monkey-patching, `getattr`, re-assigned names). |
 | 0.60 | `unique_name` | A bare name that matched the only compatible definition in the project. Usually right in small/medium code bases; can be wrong when a third-party symbol shadows it. |
 | 0.50 | `heuristic` | Method call on an untyped receiver matched by name alone. Useful for exploration; verify before relying on it. |
@@ -1289,7 +1418,7 @@ gaps show up on real repositories.
 
 | Step | Crate | Start reading at |
 |---|---|---|
-| Data model (labels, edge kinds, facts, ids) | `rueca-model` | `src/lib.rs` |
+| Data model (labels, edge kinds, facts, ids) | `rueca-model` | `src/lib.rs`; `src/contract.rs` (contract keys and matching) |
 | Language-pack contract, budgeted parsing | `rueca-extract` | `LanguagePack` (crate docs list the RFC 0003 hooks) |
 | Python extraction, module names, imports | `rueca-lang-python` | crate docs, `queries/locals.scm` |
 | TS/TSX/JS extraction, `oxc_resolver` | `rueca-lang-typescript` | crate docs, `src/resolve.rs` |
@@ -1300,8 +1429,9 @@ gaps show up on real repositories.
 | Java extraction, packages, Maven / Gradle source roots | `rueca-lang-java` | crate docs, `src/extract.rs`, `src/project.rs`, `queries/locals.scm` |
 | C/C++ extraction, preprocessing (masking, conditionals, repairs), include directories | `rueca-lang-cpp` | crate docs, `src/extract.rs`, `src/preprocess.rs`, `src/mask.rs`, `src/cond.rs`, `src/repair.rs`, `src/includes.rs` |
 | Rust extraction, receivers, macro arguments, Cargo module model | `rueca-lang-rust` | crate docs, `src/extract.rs`, `src/receivers.rs`, `src/macros.rs`, `src/modules.rs` |
+| `.proto` services, RPC methods, messages (`protox-parse`) | `rueca-lang-proto` | crate docs, `src/extract.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
-| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods) |
+| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/contracts.rs` (contract table and edges) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
 | Organization index, generations, visibility | `rueca-segment` | `src/org.rs` (module docs) |
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |

@@ -248,6 +248,7 @@
 //! - `module-info.java` is parsed but produces no definitions.
 
 mod builtins;
+mod contracts;
 mod extract;
 mod locals;
 mod project;
@@ -294,7 +295,8 @@ impl LanguagePack for JavaPack {
         &[Language::Java]
     }
     fn extractor_version(&self) -> u32 {
-        2
+        // 3: contract hints (HTTP routes and calls, gRPC; RFC 0006 phase 4).
+        3
     }
     fn extract(
         &self,

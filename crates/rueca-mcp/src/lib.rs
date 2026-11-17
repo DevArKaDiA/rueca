@@ -94,7 +94,9 @@ continue (`cursor`). `ref` reads another indexed ref (a branch, `pr/<n>`, a tag 
 of refs compares them: a symbol identical in several comes back once with the snapshots it is `in`, \
 one that differs is marked `changed`. When the server serves an organization, omitting `repo` \
 searches every repository of it in one ranking; `list_repositories` lists them and their indexed \
-refs. Results come from the last index (by default of the working tree); edges carry a confidence \
+refs. `list_contracts` lists the HTTP routes, spec operations and RPC methods repositories provide and \
+the calls to them (`side: \"dangling\"`: calls nothing provides); `trace` follows those calls across \
+repositories. Results come from the last index (by default of the working tree); edges carry a confidence \
 (0–1) and the strategy used to resolve them.";
 
 /// The MCP server: a shared engine plus the advertised tool list. Cheap to

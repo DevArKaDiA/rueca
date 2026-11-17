@@ -200,7 +200,8 @@ impl LanguagePack for DataPack {
     }
 
     fn extractor_version(&self) -> u32 {
-        1
+        // 2: OpenAPI routes provide HTTP contracts (`FileFacts::contracts`).
+        2
     }
 
     fn extract(

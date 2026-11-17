@@ -1,0 +1,7477 @@
+{
+ "status": "ok",
+ "version": "rueca 0.1.0-alpha.2 (binary sha256 636c8012ccf9, rfc0005 contract, feat/org-contracts)",
+ "groups": [
+  {
+   "name": "ollama",
+   "split": "gated",
+   "kinds": [
+    "http-code",
+    "http-spec"
+   ],
+   "repos": [
+    {
+     "repo": "ollama/ollama",
+     "commit": "b8db8d5b5c8daedbbef7bb9ace2221a38bc384c2"
+    },
+    {
+     "repo": "ollama/ollama-python",
+     "commit": "35d9667e84ebbd9d792826868d050027f75c1cc1"
+    },
+    {
+     "repo": "ollama/ollama-js",
+     "commit": "c276d078eee37a0df003b9ee2120ec70327f32e9"
+    }
+   ],
+   "status": "ok",
+   "org_ms": 579,
+   "link_ms": 214,
+   "index_seconds": 4.052436000027228,
+   "edges_total": 107,
+   "contract_edges": 98,
+   "dangling": 32,
+   "dangling_error": null,
+   "gold_counts": {
+    "http-code": 30,
+    "http-spec": 26
+   },
+   "gold_dangling": 11,
+   "gold_intra": {
+    "http-code": 26,
+    "http-spec": 1
+   },
+   "gold_other_kinds": {},
+   "openapi": [
+    {
+     "repo": "ollama/ollama",
+     "path": "docs/openapi.yaml",
+     "bytes": 87400,
+     "operations": 17,
+     "over_budget": false
+    }
+   ],
+   "score": {
+    "by_kind": {
+     "http-code": {
+      "predicted": 49,
+      "correct": 47,
+      "gold": 30,
+      "found": 28
+     },
+     "http-spec": {
+      "predicted": 39,
+      "correct": 39,
+      "gold": 26,
+      "found": 26
+     }
+    },
+    "items": [
+     [
+      "http-code",
+      "ollama/ollama-js",
+      "src/browser.ts",
+      17,
+      17,
+      15,
+      14
+     ],
+     [
+      "http-code",
+      "ollama/ollama-python",
+      "ollama/_client.py",
+      32,
+      30,
+      15,
+      14
+     ],
+     [
+      "http-spec",
+      "ollama/ollama-js",
+      "src/browser.ts",
+      13,
+      13,
+      13,
+      13
+     ],
+     [
+      "http-spec",
+      "ollama/ollama-python",
+      "ollama/_client.py",
+      26,
+      26,
+      13,
+      13
+     ]
+    ],
+    "out_of_scope": 10,
+    "unscored": {},
+    "missed": [
+     {
+      "kind": "http-code",
+      "src": [
+       "ollama/ollama-js",
+       "src/browser.ts",
+       "Ollama.create"
+      ],
+      "src_accept": [],
+      "dst": [
+       "ollama/ollama",
+       "server/create.go",
+       "Server.CreateHandler"
+      ],
+      "dst_accept": [
+       "CreateHandler"
+      ],
+      "key": "POST /api/create",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 191,
+        "symbol": "Ollama.create",
+        "key": "POST /api/create",
+        "raw": "return this.processStreamableRequest<ProgressResponse>('create', {",
+        "framework": "ts-http via processStreamableRequest",
+        "provider_line": 72,
+        "provider_raw": "server/routes.go:2420: r.POST(\"/api/create\", s.CreateHandler)"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "http-code",
+      "src": [
+       "ollama/ollama-python",
+       "ollama/_client.py",
+       "Client.create"
+      ],
+      "src_accept": [],
+      "dst": [
+       "ollama/ollama",
+       "server/create.go",
+       "Server.CreateHandler"
+      ],
+      "dst_accept": [
+       "CreateHandler"
+      ],
+      "key": "POST /api/create",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 620,
+        "symbol": "Client.create",
+        "key": "POST /api/create",
+        "raw": "return self._request(",
+        "framework": "python-http",
+        "provider_line": 72,
+        "provider_raw": "server/routes.go:2420: r.POST(\"/api/create\", s.CreateHandler)"
+       },
+       {
+        "line": 1281,
+        "symbol": "AsyncClient.create",
+        "key": "POST /api/create",
+        "raw": "return await self._request(",
+        "framework": "python-http",
+        "provider_line": 72,
+        "provider_raw": "server/routes.go:2420: r.POST(\"/api/create\", s.CreateHandler)"
+       }
+      ],
+      "evidence_count": 2
+     }
+    ],
+    "missed_count": 2,
+    "wrong": [
+     {
+      "kind": "http-code",
+      "src": [
+       "ollama/ollama-python",
+       "ollama/_client.py",
+       "ollama._client.Client.create"
+      ],
+      "dst": [
+       "ollama/ollama",
+       "server/routes.go",
+       "github.com/ollama/ollama/server.Server.GenerateRoutes"
+      ],
+      "confidence": 0.9
+     },
+     {
+      "kind": "http-code",
+      "src": [
+       "ollama/ollama-python",
+       "ollama/_client.py",
+       "ollama._client.AsyncClient.create"
+      ],
+      "dst": [
+       "ollama/ollama",
+       "server/routes.go",
+       "github.com/ollama/ollama/server.Server.GenerateRoutes"
+      ],
+      "confidence": 0.9
+     }
+    ],
+    "wrong_count": 2
+   },
+   "score_high": {
+    "by_kind": {
+     "http-code": {
+      "predicted": 35,
+      "correct": 33,
+      "gold": 30,
+      "found": 22
+     },
+     "http-spec": {
+      "predicted": 39,
+      "correct": 39,
+      "gold": 26,
+      "found": 26
+     }
+    },
+    "items": [
+     [
+      "http-code",
+      "ollama/ollama-js",
+      "src/browser.ts",
+      11,
+      11,
+      15,
+      11
+     ],
+     [
+      "http-code",
+      "ollama/ollama-python",
+      "ollama/_client.py",
+      24,
+      22,
+      15,
+      11
+     ],
+     [
+      "http-spec",
+      "ollama/ollama-js",
+      "src/browser.ts",
+      13,
+      13,
+      13,
+      13
+     ],
+     [
+      "http-spec",
+      "ollama/ollama-python",
+      "ollama/_client.py",
+      26,
+      26,
+      13,
+      13
+     ]
+    ]
+   }
+  },
+  {
+   "name": "qdrant",
+   "split": "gated",
+   "kinds": [
+    "http-code",
+    "rpc-spec-client",
+    "rpc-code"
+   ],
+   "repos": [
+    {
+     "repo": "qdrant/qdrant",
+     "commit": "23065a0bf6857c3e5da45f6c8939cc746cc0580e"
+    },
+    {
+     "repo": "qdrant/qdrant-client",
+     "commit": "1b5bb8589e5a8c124bcf80164736c7c92370c871"
+    }
+   ],
+   "status": "ok",
+   "org_ms": 3957,
+   "link_ms": 2767,
+   "index_seconds": 15.079250875016442,
+   "edges_total": 2612,
+   "contract_edges": 2555,
+   "dangling": 11,
+   "dangling_error": null,
+   "gold_counts": {
+    "http-code": 69,
+    "rpc-code": 144,
+    "rpc-spec-client": 87
+   },
+   "gold_dangling": 0,
+   "gold_intra": {
+    "http-spec": 298,
+    "http-code": 7,
+    "rpc-spec-server": 148,
+    "rpc-spec-client": 95
+   },
+   "gold_other_kinds": {
+    "rpc-spec-server": 87,
+    "http-spec": 2054
+   },
+   "openapi": [
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/master/openapi.json",
+     "bytes": 537471,
+     "operations": 69,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.10.0/openapi.json",
+     "bytes": 163994,
+     "operations": 32,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.10.1/openapi.json",
+     "bytes": 161856,
+     "operations": 32,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.10.2/openapi.json",
+     "bytes": 161874,
+     "operations": 32,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.10.3/openapi.json",
+     "bytes": 164618,
+     "operations": 32,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.10.4/openapi.json",
+     "bytes": 164618,
+     "operations": 32,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.10.5/openapi.json",
+     "bytes": 164618,
+     "operations": 32,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.11.0/openapi.json",
+     "bytes": 173539,
+     "operations": 34,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.11.1/openapi.json",
+     "bytes": 173538,
+     "operations": 34,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.11.2/openapi.json",
+     "bytes": 173539,
+     "operations": 34,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.11.3/openapi.json",
+     "bytes": 176305,
+     "operations": 35,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.11.4/openapi.json",
+     "bytes": 177937,
+     "operations": 35,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.11.5/openapi.json",
+     "bytes": 182110,
+     "operations": 36,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.11.6/openapi.json",
+     "bytes": 183253,
+     "operations": 36,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.11.7/openapi.json",
+     "bytes": 183253,
+     "operations": 36,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.4.2/openapi.json",
+     "bytes": 70458,
+     "operations": 9,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.5.0/openapi.json",
+     "bytes": 108456,
+     "operations": 20,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.5.1/openapi.json",
+     "bytes": 110880,
+     "operations": 20,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.6.0/openapi.json",
+     "bytes": 111699,
+     "operations": 20,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.7.0/openapi.json",
+     "bytes": 108113,
+     "operations": 20,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.8.0/openapi.json",
+     "bytes": 101157,
+     "operations": 19,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.8.1/openapi.json",
+     "bytes": 101538,
+     "operations": 19,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.8.2/openapi.json",
+     "bytes": 101691,
+     "operations": 19,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.8.3/openapi.json",
+     "bytes": 102307,
+     "operations": 19,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.8.4/openapi.json",
+     "bytes": 112378,
+     "operations": 23,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.8.5/openapi.json",
+     "bytes": 139588,
+     "operations": 28,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.8.6/openapi.json",
+     "bytes": 139588,
+     "operations": 28,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.9.0/openapi.json",
+     "bytes": 151101,
+     "operations": 30,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v0.9.1/openapi.json",
+     "bytes": 151101,
+     "operations": 30,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.0.1/openapi.json",
+     "bytes": 198454,
+     "operations": 40,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.0.2/openapi.json",
+     "bytes": 198454,
+     "operations": 40,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.0.3/openapi.json",
+     "bytes": 198454,
+     "operations": 40,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.1.0/openapi.json",
+     "bytes": 206247,
+     "operations": 42,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.1.1/openapi.json",
+     "bytes": 217070,
+     "operations": 43,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.1.2/openapi.json",
+     "bytes": 217010,
+     "operations": 43,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.1.3/openapi.json",
+     "bytes": 217010,
+     "operations": 43,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.10.x/openapi.json",
+     "bytes": 354746,
+     "operations": 67,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.11.x/openapi.json",
+     "bytes": 376669,
+     "operations": 68,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.12.x/openapi.json",
+     "bytes": 394454,
+     "operations": 71,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.13.x/openapi.json",
+     "bytes": 434914,
+     "operations": 71,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.14.x/openapi.json",
+     "bytes": 453391,
+     "operations": 71,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.15.x/openapi.json",
+     "bytes": 465747,
+     "operations": 71,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.16.x/openapi.json",
+     "bytes": 475799,
+     "operations": 69,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.17.x/openapi.json",
+     "bytes": 517322,
+     "operations": 73,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.18.x/openapi.json",
+     "bytes": 535348,
+     "operations": 75,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.19.x/openapi.json",
+     "bytes": 516834,
+     "operations": 69,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.2.x/openapi.json",
+     "bytes": 239641,
+     "operations": 47,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.20.x/openapi.json",
+     "bytes": 534510,
+     "operations": 69,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.3.x/openapi.json",
+     "bytes": 242537,
+     "operations": 47,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.4.x/openapi.json",
+     "bytes": 245823,
+     "operations": 47,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.5.x/openapi.json",
+     "bytes": 277484,
+     "operations": 57,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.6.x/openapi.json",
+     "bytes": 281586,
+     "operations": 57,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.7.x/openapi.json",
+     "bytes": 312621,
+     "operations": 61,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.8.x/openapi.json",
+     "bytes": 325894,
+     "operations": 63,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "docs/redoc/v1.9.x/openapi.json",
+     "bytes": 328886,
+     "operations": 63,
+     "over_budget": false
+    },
+    {
+     "repo": "qdrant/qdrant",
+     "path": "openapi/openapi-main.ytt.yaml",
+     "bytes": 16327,
+     "operations": 8,
+     "over_budget": false
+    }
+   ],
+   "score": {
+    "by_kind": {
+     "http-code": {
+      "predicted": 69,
+      "correct": 69,
+      "gold": 69,
+      "found": 69
+     },
+     "rpc-code": {
+      "predicted": 144,
+      "correct": 144,
+      "gold": 144,
+      "found": 144
+     },
+     "rpc-spec-client": {
+      "predicted": 88,
+      "correct": 87,
+      "gold": 87,
+      "found": 87
+     }
+    },
+    "items": [
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/aliases_api.py",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/beta_api.py",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/collections_api.py",
+      9,
+      9,
+      9,
+      9
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/distributed_api.py",
+      9,
+      9,
+      9,
+      9
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/indexes_api.py",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/points_api.py",
+      14,
+      14,
+      14,
+      14
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/quotas_api.py",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/search_api.py",
+      5,
+      5,
+      5,
+      5
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/service_api.py",
+      6,
+      6,
+      6,
+      6
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/snapshots_api.py",
+      17,
+      17,
+      17,
+      17
+     ],
+     [
+      "rpc-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/async_qdrant_remote.py",
+      71,
+      71,
+      71,
+      71
+     ],
+     [
+      "rpc-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/qdrant_remote.py",
+      71,
+      71,
+      71,
+      71
+     ],
+     [
+      "rpc-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/uploader/grpc_uploader.py",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "qdrant/qdrant",
+      "lib/collection/src/shards/remote_shard.rs",
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      "rpc-spec-client",
+      "qdrant/qdrant-client",
+      "qdrant_client/async_qdrant_remote.py",
+      43,
+      43,
+      43,
+      43
+     ],
+     [
+      "rpc-spec-client",
+      "qdrant/qdrant-client",
+      "qdrant_client/qdrant_remote.py",
+      43,
+      43,
+      43,
+      43
+     ],
+     [
+      "rpc-spec-client",
+      "qdrant/qdrant-client",
+      "qdrant_client/uploader/grpc_uploader.py",
+      1,
+      1,
+      1,
+      1
+     ]
+    ],
+    "out_of_scope": 113,
+    "unscored": {
+     "http-spec": 2054,
+     "rpc-spec-server": 87
+    },
+    "missed": [],
+    "missed_count": 0,
+    "wrong": [
+     {
+      "kind": "rpc-spec-client",
+      "src": [
+       "qdrant/qdrant",
+       "lib/collection/src/shards/remote_shard.rs",
+       "collection::shards::remote_shard::RemoteShard.health_check"
+      ],
+      "dst": [
+       "qdrant/qdrant-client",
+       "qdrant_client/proto/qdrant.proto",
+       "qdrant.Qdrant.HealthCheck"
+      ],
+      "confidence": 0.5
+     }
+    ],
+    "wrong_count": 1
+   },
+   "score_high": {
+    "by_kind": {
+     "http-code": {
+      "predicted": 69,
+      "correct": 69,
+      "gold": 69,
+      "found": 69
+     },
+     "rpc-code": {
+      "predicted": 30,
+      "correct": 30,
+      "gold": 144,
+      "found": 30
+     },
+     "rpc-spec-client": {
+      "predicted": 0,
+      "correct": 0,
+      "gold": 87,
+      "found": 0
+     }
+    },
+    "items": [
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/aliases_api.py",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/beta_api.py",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/collections_api.py",
+      9,
+      9,
+      9,
+      9
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/distributed_api.py",
+      9,
+      9,
+      9,
+      9
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/indexes_api.py",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/points_api.py",
+      14,
+      14,
+      14,
+      14
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/quotas_api.py",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/search_api.py",
+      5,
+      5,
+      5,
+      5
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/service_api.py",
+      6,
+      6,
+      6,
+      6
+     ],
+     [
+      "http-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/http/api/snapshots_api.py",
+      17,
+      17,
+      17,
+      17
+     ],
+     [
+      "rpc-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/async_qdrant_remote.py",
+      15,
+      15,
+      71,
+      15
+     ],
+     [
+      "rpc-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/qdrant_remote.py",
+      15,
+      15,
+      71,
+      15
+     ],
+     [
+      "rpc-code",
+      "qdrant/qdrant-client",
+      "qdrant_client/uploader/grpc_uploader.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "rpc-spec-client",
+      "qdrant/qdrant-client",
+      "qdrant_client/async_qdrant_remote.py",
+      0,
+      0,
+      43,
+      0
+     ],
+     [
+      "rpc-spec-client",
+      "qdrant/qdrant-client",
+      "qdrant_client/qdrant_remote.py",
+      0,
+      0,
+      43,
+      0
+     ],
+     [
+      "rpc-spec-client",
+      "qdrant/qdrant-client",
+      "qdrant_client/uploader/grpc_uploader.py",
+      0,
+      0,
+      1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "dapr",
+   "split": "gated",
+   "kinds": [
+    "rpc-spec-client",
+    "rpc-spec-server",
+    "rpc-code"
+   ],
+   "repos": [
+    {
+     "repo": "dapr/dapr",
+     "commit": "2707e0a96ccb8d89c672f6b47ddf27de5c7fceef"
+    },
+    {
+     "repo": "dapr/python-sdk",
+     "commit": "6bc75f12947f79a13d22baf08c64a44125033a53"
+    },
+    {
+     "repo": "dapr/go-sdk",
+     "commit": "012f725a57b7ca65df3c15261bee5d0512b14015"
+    }
+   ],
+   "status": "ok",
+   "org_ms": 1821,
+   "link_ms": 1144,
+   "index_seconds": 7.410551834007492,
+   "edges_total": 1140,
+   "contract_edges": 474,
+   "dangling": 185,
+   "dangling_error": null,
+   "gold_counts": {
+    "rpc-code": 133,
+    "rpc-spec-client": 119,
+    "rpc-spec-server": 20
+   },
+   "gold_dangling": 10,
+   "gold_intra": {
+    "rpc-spec-client": 53,
+    "rpc-code": 47,
+    "rpc-spec-server": 135
+   },
+   "gold_other_kinds": {},
+   "openapi": [
+    {
+     "repo": "dapr/dapr",
+     "path": "swagger/swagger.json",
+     "bytes": 15275,
+     "operations": 4,
+     "over_budget": false
+    }
+   ],
+   "score": {
+    "by_kind": {
+     "rpc-code": {
+      "predicted": 131,
+      "correct": 122,
+      "gold": 133,
+      "found": 120
+     },
+     "rpc-spec-client": {
+      "predicted": 125,
+      "correct": 121,
+      "gold": 119,
+      "found": 119
+     },
+     "rpc-spec-server": {
+      "predicted": 18,
+      "correct": 18,
+      "gold": 20,
+      "found": 18
+     }
+    },
+    "items": [
+     [
+      "rpc-code",
+      "dapr/dapr",
+      "pkg/channel/grpc/grpc_channel.go",
+      5,
+      5,
+      6,
+      5
+     ],
+     [
+      "rpc-code",
+      "dapr/dapr",
+      "pkg/runtime/processor/binding/send.go",
+      4,
+      4,
+      4,
+      4
+     ],
+     [
+      "rpc-code",
+      "dapr/dapr",
+      "pkg/runtime/pubsub/subscriptions.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/dapr",
+      "pkg/runtime/subscription/postman/grpc/grpc.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/actor.go",
+      7,
+      7,
+      7,
+      7
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/actor_subscribe.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/binding.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/client.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/configuration.go",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/conversation.go",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/crypto.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/invoke.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/jobs.go",
+      6,
+      6,
+      6,
+      6
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/lock.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/metadata.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/pubsub.go",
+      1,
+      1,
+      3,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/secret.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/state.go",
+      7,
+      7,
+      7,
+      7
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/subscribe.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/actor/runtime/grpc_host.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/aio/clients/grpc/client.py",
+      30,
+      30,
+      33,
+      29
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/aio/clients/grpc/subscription.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/_response.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/client.py",
+      30,
+      30,
+      33,
+      29
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/dapr_actor_grpc_client.py",
+      8,
+      8,
+      8,
+      8
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/subscription.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/ext/workflow/_durabletask/client.py",
+      8,
+      0,
+      0,
+      0
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/ext/workflow/_durabletask/worker.py",
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/actor.go",
+      7,
+      7,
+      7,
+      7
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/actor_subscribe.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/binding.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/client.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/configuration.go",
+      4,
+      3,
+      3,
+      3
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/conversation.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/crypto.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/invoke.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/jobs.go",
+      9,
+      6,
+      6,
+      6
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/lock.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/metadata.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/pubsub.go",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/secret.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/state.go",
+      7,
+      7,
+      7,
+      7
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/subscribe.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/actor/runtime/grpc_host.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/aio/clients/grpc/client.py",
+      34,
+      34,
+      33,
+      33
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/aio/clients/grpc/subscription.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/_response.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/client.py",
+      34,
+      34,
+      33,
+      33
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/dapr_actor_grpc_client.py",
+      8,
+      8,
+      8,
+      8
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/subscription.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/binding.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/health_check.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/invoke.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/scheduling.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/topic.go",
+      4,
+      4,
+      4,
+      4
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/python-sdk",
+      "dapr/ext/grpc/_health_servicer.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/python-sdk",
+      "dapr/ext/grpc/_servicer.py",
+      7,
+      7,
+      9,
+      7
+     ]
+    ],
+    "out_of_scope": 200,
+    "unscored": {},
+    "missed": [
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/dapr",
+       "pkg/channel/grpc/grpc_channel.go",
+       "Channel.sendJob"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/python-sdk",
+       "dapr/ext/grpc/_servicer.py",
+       "_CallbackServicer.OnJobEventAlpha1"
+      ],
+      "dst_accept": [
+       "OnJobEventAlpha1"
+      ],
+      "key": "dapr.proto.runtime.v1.AppCallbackAlpha/OnJobEventAlpha1",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 178,
+        "symbol": "Channel.sendJob",
+        "key": "dapr.proto.runtime.v1.AppCallbackAlpha/OnJobEventAlpha1",
+        "raw": "_, err = runtimev1pb.NewAppCallbackAlphaClient(conn).OnJobEventAlpha1(ctx, req, callOpts...) //nolint:staticcheck",
+        "framework": "grpc-go",
+        "provider_line": 332,
+        "provider_raw": "def OnJobEventAlpha1(self, request: JobEventRequest, context):"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/go-sdk",
+       "client/conversation.go",
+       "GRPCClient.ConverseAlpha1"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/universal/conversation.go",
+       "Universal.ConverseAlpha1"
+      ],
+      "dst_accept": [
+       "ConverseAlpha1"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha1",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 155,
+        "symbol": "GRPCClient.ConverseAlpha1",
+        "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha1",
+        "raw": "resp, err := c.protoClient.ConverseAlpha1(ctx, &request)",
+        "framework": "grpc-go",
+        "provider_line": 54,
+        "provider_raw": "func (a *Universal) ConverseAlpha1(ctx context.Context, req *runtimev1pb.ConversationRequest) (*runtimev1pb.ConversationResponse, error) { //nolint:staticcheck component, ok := a.compStore.GetConvers\u2026"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/go-sdk",
+       "client/conversation.go",
+       "GRPCClient.ConverseAlpha2"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/universal/conversation.go",
+       "Universal.ConverseAlpha2"
+      ],
+      "dst_accept": [
+       "ConverseAlpha2"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha2",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 581,
+        "symbol": "GRPCClient.ConverseAlpha2",
+        "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha2",
+        "raw": "resp, err := c.protoClient.ConverseAlpha2(ctx, &req)",
+        "framework": "grpc-go",
+        "provider_line": 179,
+        "provider_raw": "func (a *Universal) ConverseAlpha2(ctx context.Context, req *runtimev1pb.ConversationRequestAlpha2) (*runtimev1pb.ConversationResponseAlpha2, error) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/go-sdk",
+       "client/pubsub.go",
+       "GRPCClient.PublishEvents"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/grpc/grpc.go",
+       "api.BulkPublishEvent"
+      ],
+      "dst_accept": [
+       "BulkPublishEvent"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEvent",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 175,
+        "symbol": "GRPCClient.PublishEvents",
+        "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEvent",
+        "raw": "res, err := c.protoClient.BulkPublishEvent(ctx, request)",
+        "framework": "grpc-go",
+        "provider_line": 417,
+        "provider_raw": "func (a *api) BulkPublishEvent(ctx context.Context, in *runtimev1pb.BulkPublishRequest) (*runtimev1pb.BulkPublishResponse, error) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/go-sdk",
+       "client/pubsub.go",
+       "GRPCClient.PublishEvents"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/grpc/grpc.go",
+       "api.BulkPublishEventAlpha1"
+      ],
+      "dst_accept": [
+       "BulkPublishEventAlpha1"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEventAlpha1",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 178,
+        "symbol": "GRPCClient.PublishEvents",
+        "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEventAlpha1",
+        "raw": "res, err = c.protoClient.BulkPublishEventAlpha1(ctx, request)",
+        "framework": "grpc-go",
+        "provider_line": 413,
+        "provider_raw": "func (a *api) BulkPublishEventAlpha1(ctx context.Context, in *runtimev1pb.BulkPublishRequest) (*runtimev1pb.BulkPublishResponse, error) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/aio/clients/grpc/client.py",
+       "DaprGrpcClientAsync.publish_events"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/grpc/grpc.go",
+       "api.BulkPublishEvent"
+      ],
+      "dst_accept": [
+       "BulkPublishEvent"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEvent",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 528,
+        "symbol": "DaprGrpcClientAsync.publish_events",
+        "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEvent",
+        "raw": "call = self._stub.BulkPublishEvent(req)",
+        "framework": "grpc-python",
+        "provider_line": 417,
+        "provider_raw": "func (a *api) BulkPublishEvent(ctx context.Context, in *runtimev1pb.BulkPublishRequest) (*runtimev1pb.BulkPublishResponse, error) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/aio/clients/grpc/client.py",
+       "DaprGrpcClientAsync.publish_events"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/grpc/grpc.go",
+       "api.BulkPublishEventAlpha1"
+      ],
+      "dst_accept": [
+       "BulkPublishEventAlpha1"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEventAlpha1",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 533,
+        "symbol": "DaprGrpcClientAsync.publish_events",
+        "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEventAlpha1",
+        "raw": "call = self._stub.BulkPublishEventAlpha1(req)",
+        "framework": "grpc-python",
+        "provider_line": 413,
+        "provider_raw": "func (a *api) BulkPublishEventAlpha1(ctx context.Context, in *runtimev1pb.BulkPublishRequest) (*runtimev1pb.BulkPublishResponse, error) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/aio/clients/grpc/client.py",
+       "DaprGrpcClientAsync.converse_alpha1"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/universal/conversation.go",
+       "Universal.ConverseAlpha1"
+      ],
+      "dst_accept": [
+       "ConverseAlpha1"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha1",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 1629,
+        "symbol": "DaprGrpcClientAsync.converse_alpha1",
+        "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha1",
+        "raw": "response = await self._stub.ConverseAlpha1(request)",
+        "framework": "grpc-python",
+        "provider_line": 54,
+        "provider_raw": "func (a *Universal) ConverseAlpha1(ctx context.Context, req *runtimev1pb.ConversationRequest) (*runtimev1pb.ConversationResponse, error) { //nolint:staticcheck component, ok := a.compStore.GetConvers\u2026"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/aio/clients/grpc/client.py",
+       "DaprGrpcClientAsync.converse_alpha2"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/universal/conversation.go",
+       "Universal.ConverseAlpha2"
+      ],
+      "dst_accept": [
+       "ConverseAlpha2"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha2",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 1736,
+        "symbol": "DaprGrpcClientAsync.converse_alpha2",
+        "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha2",
+        "raw": "self._stub.ConverseAlpha2, request",
+        "framework": "grpc-python",
+        "provider_line": 179,
+        "provider_raw": "func (a *Universal) ConverseAlpha2(ctx context.Context, req *runtimev1pb.ConversationRequestAlpha2) (*runtimev1pb.ConversationResponseAlpha2, error) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/clients/grpc/client.py",
+       "DaprGrpcClient.publish_events"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/grpc/grpc.go",
+       "api.BulkPublishEvent"
+      ],
+      "dst_accept": [
+       "BulkPublishEvent"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEvent",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 575,
+        "symbol": "DaprGrpcClient.publish_events",
+        "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEvent",
+        "raw": "response, call = self.retry_policy.run_rpc(self._stub.BulkPublishEvent.with_call, req)",
+        "framework": "grpc-python",
+        "provider_line": 417,
+        "provider_raw": "func (a *api) BulkPublishEvent(ctx context.Context, in *runtimev1pb.BulkPublishRequest) (*runtimev1pb.BulkPublishResponse, error) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/clients/grpc/client.py",
+       "DaprGrpcClient.publish_events"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/grpc/grpc.go",
+       "api.BulkPublishEventAlpha1"
+      ],
+      "dst_accept": [
+       "BulkPublishEventAlpha1"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEventAlpha1",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 580,
+        "symbol": "DaprGrpcClient.publish_events",
+        "key": "dapr.proto.runtime.v1.Dapr/BulkPublishEventAlpha1",
+        "raw": "self._stub.BulkPublishEventAlpha1.with_call, req",
+        "framework": "grpc-python",
+        "provider_line": 413,
+        "provider_raw": "func (a *api) BulkPublishEventAlpha1(ctx context.Context, in *runtimev1pb.BulkPublishRequest) (*runtimev1pb.BulkPublishResponse, error) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/clients/grpc/client.py",
+       "DaprGrpcClient.converse_alpha1"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/universal/conversation.go",
+       "Universal.ConverseAlpha1"
+      ],
+      "dst_accept": [
+       "ConverseAlpha1"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha1",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 1684,
+        "symbol": "DaprGrpcClient.converse_alpha1",
+        "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha1",
+        "raw": "response, call = self.retry_policy.run_rpc(self._stub.ConverseAlpha1.with_call, request)",
+        "framework": "grpc-python",
+        "provider_line": 54,
+        "provider_raw": "func (a *Universal) ConverseAlpha1(ctx context.Context, req *runtimev1pb.ConversationRequest) (*runtimev1pb.ConversationResponse, error) { //nolint:staticcheck component, ok := a.compStore.GetConvers\u2026"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/clients/grpc/client.py",
+       "DaprGrpcClient.converse_alpha2"
+      ],
+      "src_accept": [],
+      "dst": [
+       "dapr/dapr",
+       "pkg/api/universal/conversation.go",
+       "Universal.ConverseAlpha2"
+      ],
+      "dst_accept": [
+       "ConverseAlpha2"
+      ],
+      "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha2",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 1790,
+        "symbol": "DaprGrpcClient.converse_alpha2",
+        "key": "dapr.proto.runtime.v1.Dapr/ConverseAlpha2",
+        "raw": "response, call = self.retry_policy.run_rpc(self._stub.ConverseAlpha2.with_call, request)",
+        "framework": "grpc-python",
+        "provider_line": 179,
+        "provider_raw": "func (a *Universal) ConverseAlpha2(ctx context.Context, req *runtimev1pb.ConversationRequestAlpha2) (*runtimev1pb.ConversationResponseAlpha2, error) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-spec-server",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/grpc/_servicer.py",
+       "_CallbackServicer.OnBulkTopicEventAlpha1"
+      ],
+      "src_accept": [
+       "OnBulkTopicEventAlpha1"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "dapr/proto/runtime/v1/appcallback.proto",
+       "dapr.proto.runtime.v1.AppCallbackAlpha.OnBulkTopicEventAlpha1"
+      ],
+      "dst_accept": [
+       "AppCallbackAlpha.OnBulkTopicEventAlpha1"
+      ],
+      "key": "dapr.proto.runtime.v1.AppCallbackAlpha/OnBulkTopicEventAlpha1",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 443,
+        "symbol": "_CallbackServicer.OnBulkTopicEventAlpha1",
+        "key": "dapr.proto.runtime.v1.AppCallbackAlpha/OnBulkTopicEventAlpha1",
+        "raw": "def OnBulkTopicEventAlpha1(self, request: TopicEventBulkRequest, context):",
+        "framework": "grpc-python",
+        "provider_line": 68,
+        "provider_raw": "rpc OnBulkTopicEventAlpha1(TopicEventBulkRequest) returns (TopicEventBulkResponse) {"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "rpc-spec-server",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/grpc/_servicer.py",
+       "_CallbackServicer.OnJobEventAlpha1"
+      ],
+      "src_accept": [
+       "OnJobEventAlpha1"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "dapr/proto/runtime/v1/appcallback.proto",
+       "dapr.proto.runtime.v1.AppCallbackAlpha.OnJobEventAlpha1"
+      ],
+      "dst_accept": [
+       "AppCallbackAlpha.OnJobEventAlpha1"
+      ],
+      "key": "dapr.proto.runtime.v1.AppCallbackAlpha/OnJobEventAlpha1",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 332,
+        "symbol": "_CallbackServicer.OnJobEventAlpha1",
+        "key": "dapr.proto.runtime.v1.AppCallbackAlpha/OnJobEventAlpha1",
+        "raw": "def OnJobEventAlpha1(self, request: JobEventRequest, context):",
+        "framework": "grpc-python",
+        "provider_line": 73,
+        "provider_raw": "rpc OnJobEventAlpha1 (JobEventRequest) returns (JobEventResponse) {"
+       }
+      ],
+      "evidence_count": 1
+     }
+    ],
+    "missed_count": 15,
+    "wrong": [
+     {
+      "kind": "rpc-spec-client",
+      "src": [
+       "dapr/go-sdk",
+       "client/configuration.go",
+       "github.com/dapr/go-sdk/client.GRPCClient.GetConfigurationItems"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "dapr/proto/operator/v1/operator.proto",
+       "dapr.proto.operator.v1.Operator.GetConfiguration"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-spec-client",
+      "src": [
+       "dapr/go-sdk",
+       "client/jobs.go",
+       "github.com/dapr/go-sdk/client.GRPCClient.ScheduleJob"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "dapr/proto/scheduler/v1/scheduler.proto",
+       "dapr.proto.scheduler.v1.Scheduler.ScheduleJob"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-spec-client",
+      "src": [
+       "dapr/go-sdk",
+       "client/jobs.go",
+       "github.com/dapr/go-sdk/client.GRPCClient.GetJob"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "dapr/proto/scheduler/v1/scheduler.proto",
+       "dapr.proto.scheduler.v1.Scheduler.GetJob"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-spec-client",
+      "src": [
+       "dapr/go-sdk",
+       "client/jobs.go",
+       "github.com/dapr/go-sdk/client.GRPCClient.DeleteJob"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "dapr/proto/scheduler/v1/scheduler.proto",
+       "dapr.proto.scheduler.v1.Scheduler.DeleteJob"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/workflow/_durabletask/client.py",
+       "workflow._durabletask.client.TaskHubGrpcClient.schedule_new_orchestration_with_result"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "pkg/runtime/wfengine/fallbackserver.go",
+       "github.com/dapr/dapr/pkg/runtime/wfengine.fallbackAwareServer.StartInstance"
+      ],
+      "confidence": 0.9
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/workflow/_durabletask/client.py",
+       "workflow._durabletask.client.TaskHubGrpcClient.raise_orchestration_event_with_result"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "pkg/runtime/wfengine/fallbackserver.go",
+       "github.com/dapr/dapr/pkg/runtime/wfengine.fallbackAwareServer.RaiseEvent"
+      ],
+      "confidence": 0.9
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/workflow/_durabletask/client.py",
+       "workflow._durabletask.client.TaskHubGrpcClient.terminate_orchestration_with_result"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "pkg/runtime/wfengine/fallbackserver.go",
+       "github.com/dapr/dapr/pkg/runtime/wfengine.fallbackAwareServer.TerminateInstance"
+      ],
+      "confidence": 0.9
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/workflow/_durabletask/client.py",
+       "workflow._durabletask.client.TaskHubGrpcClient.suspend_orchestration_with_result"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "pkg/runtime/wfengine/fallbackserver.go",
+       "github.com/dapr/dapr/pkg/runtime/wfengine.fallbackAwareServer.SuspendInstance"
+      ],
+      "confidence": 0.9
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/workflow/_durabletask/client.py",
+       "workflow._durabletask.client.TaskHubGrpcClient.resume_orchestration_with_result"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "pkg/runtime/wfengine/fallbackserver.go",
+       "github.com/dapr/dapr/pkg/runtime/wfengine.fallbackAwareServer.ResumeInstance"
+      ],
+      "confidence": 0.9
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/workflow/_durabletask/client.py",
+       "workflow._durabletask.client.TaskHubGrpcClient.list_instance_ids"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "pkg/runtime/wfengine/backends/actors/actors.go",
+       "github.com/dapr/dapr/pkg/runtime/wfengine/backends/actors.Actors.ListInstanceIDs"
+      ],
+      "confidence": 0.7
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/workflow/_durabletask/client.py",
+       "workflow._durabletask.client.TaskHubGrpcClient.get_instance_history"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "pkg/runtime/wfengine/backends/actors/actors.go",
+       "github.com/dapr/dapr/pkg/runtime/wfengine/backends/actors.Actors.GetInstanceHistory"
+      ],
+      "confidence": 0.7
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/workflow/_durabletask/client.py",
+       "workflow._durabletask.client.TaskHubGrpcClient.rerun_orchestration_from_event_with_result"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "pkg/runtime/wfengine/fallbackserver.go",
+       "github.com/dapr/dapr/pkg/runtime/wfengine.fallbackAwareServer.RerunWorkflowFromEvent"
+      ],
+      "confidence": 0.9
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "dapr/python-sdk",
+       "dapr/ext/workflow/_durabletask/worker.py",
+       "workflow._durabletask.worker.TaskHubGrpcWorker._resolve_history"
+      ],
+      "dst": [
+       "dapr/dapr",
+       "pkg/runtime/wfengine/backends/actors/actors.go",
+       "github.com/dapr/dapr/pkg/runtime/wfengine/backends/actors.Actors.GetInstanceHistory"
+      ],
+      "confidence": 0.7
+     }
+    ],
+    "wrong_count": 13
+   },
+   "score_high": {
+    "by_kind": {
+     "rpc-code": {
+      "predicted": 119,
+      "correct": 110,
+      "gold": 133,
+      "found": 108
+     },
+     "rpc-spec-client": {
+      "predicted": 117,
+      "correct": 117,
+      "gold": 119,
+      "found": 115
+     },
+     "rpc-spec-server": {
+      "predicted": 18,
+      "correct": 18,
+      "gold": 20,
+      "found": 18
+     }
+    },
+    "items": [
+     [
+      "rpc-code",
+      "dapr/dapr",
+      "pkg/channel/grpc/grpc_channel.go",
+      1,
+      1,
+      6,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/dapr",
+      "pkg/runtime/processor/binding/send.go",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "rpc-code",
+      "dapr/dapr",
+      "pkg/runtime/pubsub/subscriptions.go",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "rpc-code",
+      "dapr/dapr",
+      "pkg/runtime/subscription/postman/grpc/grpc.go",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/actor.go",
+      7,
+      7,
+      7,
+      7
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/actor_subscribe.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/binding.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/client.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/configuration.go",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/conversation.go",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/crypto.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/invoke.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/jobs.go",
+      6,
+      6,
+      6,
+      6
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/lock.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/metadata.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/pubsub.go",
+      1,
+      1,
+      3,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/secret.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/state.go",
+      7,
+      7,
+      7,
+      7
+     ],
+     [
+      "rpc-code",
+      "dapr/go-sdk",
+      "client/subscribe.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/actor/runtime/grpc_host.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/aio/clients/grpc/client.py",
+      30,
+      30,
+      33,
+      29
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/aio/clients/grpc/subscription.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/_response.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/client.py",
+      30,
+      30,
+      33,
+      29
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/dapr_actor_grpc_client.py",
+      8,
+      8,
+      8,
+      8
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/subscription.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/ext/workflow/_durabletask/client.py",
+      8,
+      0,
+      0,
+      0
+     ],
+     [
+      "rpc-code",
+      "dapr/python-sdk",
+      "dapr/ext/workflow/_durabletask/worker.py",
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/actor.go",
+      7,
+      7,
+      7,
+      7
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/actor_subscribe.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/binding.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/client.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/configuration.go",
+      2,
+      2,
+      3,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/conversation.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/crypto.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/invoke.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/jobs.go",
+      3,
+      3,
+      6,
+      3
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/lock.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/metadata.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/pubsub.go",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/secret.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/state.go",
+      7,
+      7,
+      7,
+      7
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/go-sdk",
+      "client/subscribe.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/actor/runtime/grpc_host.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/aio/clients/grpc/client.py",
+      34,
+      34,
+      33,
+      33
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/aio/clients/grpc/subscription.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/_response.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/client.py",
+      34,
+      34,
+      33,
+      33
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/dapr_actor_grpc_client.py",
+      8,
+      8,
+      8,
+      8
+     ],
+     [
+      "rpc-spec-client",
+      "dapr/python-sdk",
+      "dapr/clients/grpc/subscription.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/binding.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/health_check.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/invoke.go",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/scheduling.go",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/go-sdk",
+      "service/grpc/topic.go",
+      4,
+      4,
+      4,
+      4
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/python-sdk",
+      "dapr/ext/grpc/_health_servicer.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "rpc-spec-server",
+      "dapr/python-sdk",
+      "dapr/ext/grpc/_servicer.py",
+      7,
+      7,
+      9,
+      7
+     ]
+    ]
+   }
+  },
+  {
+   "name": "weaviate",
+   "split": "gated",
+   "kinds": [
+    "http-spec",
+    "rpc-spec-client",
+    "rpc-code"
+   ],
+   "repos": [
+    {
+     "repo": "weaviate/weaviate",
+     "commit": "a33c0ef138d41eef14247aba4fd70d63c007ee88"
+    },
+    {
+     "repo": "weaviate/weaviate-python-client",
+     "commit": "2ec127a3afcce49400df27d18dea3d04cea3e0d2"
+    }
+   ],
+   "status": "ok",
+   "org_ms": 2554,
+   "link_ms": 1072,
+   "index_seconds": 13.461377250001533,
+   "edges_total": 1627,
+   "contract_edges": 166,
+   "dangling": 136,
+   "dangling_error": null,
+   "gold_counts": {
+    "http-spec": 84,
+    "rpc-code": 6,
+    "rpc-spec-client": 6
+   },
+   "gold_dangling": 12,
+   "gold_intra": {
+    "rpc-spec-client": 15,
+    "rpc-code": 18,
+    "rpc-spec-server": 47
+   },
+   "gold_other_kinds": {},
+   "openapi": [
+    {
+     "repo": "weaviate/weaviate",
+     "path": "openapi-specs/schema.json",
+     "bytes": 493197,
+     "operations": 131,
+     "over_budget": false
+    }
+   ],
+   "score": {
+    "by_kind": {
+     "http-spec": {
+      "predicted": 92,
+      "correct": 92,
+      "gold": 84,
+      "found": 84
+     },
+     "rpc-code": {
+      "predicted": 15,
+      "correct": 11,
+      "gold": 6,
+      "found": 6
+     },
+     "rpc-spec-client": {
+      "predicted": 15,
+      "correct": 11,
+      "gold": 6,
+      "found": 6
+     }
+    },
+    "items": [
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/aliases/executor.py",
+      6,
+      6,
+      5,
+      5
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/backup/executor.py",
+      6,
+      6,
+      6,
+      6
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/client_executor.py",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/cluster/base.py",
+      4,
+      4,
+      4,
+      4
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/cluster/replicate/executor.py",
+      6,
+      6,
+      5,
+      5
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/aggregations/base_executor.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/batch/base.py",
+      2,
+      2,
+      1,
+      1
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/batch/rest.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/collections/executor.py",
+      5,
+      5,
+      4,
+      4
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/config/executor.py",
+      6,
+      6,
+      5,
+      5
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/data/executor.py",
+      8,
+      8,
+      8,
+      8
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/tenants/executor.py",
+      6,
+      6,
+      6,
+      6
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/connect/v4.py",
+      5,
+      5,
+      3,
+      3
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/debug/executor.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/export/executor.py",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/groups/base.py",
+      4,
+      4,
+      4,
+      4
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/rbac/executor.py",
+      11,
+      11,
+      10,
+      10
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/tokenization/executor.py",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/users/base.py",
+      12,
+      12,
+      12,
+      12
+     ],
+     [
+      "rpc-code",
+      "weaviate/weaviate-python-client",
+      "weaviate/connect/v4.py",
+      15,
+      11,
+      6,
+      6
+     ],
+     [
+      "rpc-spec-client",
+      "weaviate/weaviate-python-client",
+      "weaviate/connect/v4.py",
+      15,
+      11,
+      6,
+      6
+     ]
+    ],
+    "out_of_scope": 41,
+    "unscored": {
+     "http-code": 3
+    },
+    "missed": [],
+    "missed_count": 0,
+    "wrong": [
+     {
+      "kind": "rpc-code",
+      "src": [
+       "weaviate/weaviate-python-client",
+       "weaviate/connect/v4.py",
+       "weaviate.connect.v4.ConnectionSync.grpc_search"
+      ],
+      "dst": [
+       "weaviate/weaviate",
+       "adapters/handlers/grpc/v0/service.go",
+       "github.com/weaviate/weaviate/adapters/handlers/grpc/v0.Service.Search"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-spec-client",
+      "src": [
+       "weaviate/weaviate-python-client",
+       "weaviate/connect/v4.py",
+       "weaviate.connect.v4.ConnectionSync.grpc_search"
+      ],
+      "dst": [
+       "weaviate/weaviate",
+       "grpc/proto/v0/weaviate.proto",
+       "weaviategrpc.Weaviate.Search"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "weaviate/weaviate-python-client",
+       "weaviate/connect/v4.py",
+       "weaviate.connect.v4.ConnectionSync.grpc_batch_objects"
+      ],
+      "dst": [
+       "weaviate/weaviate",
+       "adapters/handlers/grpc/v0/service.go",
+       "github.com/weaviate/weaviate/adapters/handlers/grpc/v0.Service.BatchObjects"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-spec-client",
+      "src": [
+       "weaviate/weaviate-python-client",
+       "weaviate/connect/v4.py",
+       "weaviate.connect.v4.ConnectionSync.grpc_batch_objects"
+      ],
+      "dst": [
+       "weaviate/weaviate",
+       "grpc/proto/v0/weaviate.proto",
+       "weaviategrpc.Weaviate.BatchObjects"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "weaviate/weaviate-python-client",
+       "weaviate/connect/v4.py",
+       "weaviate.connect.v4.ConnectionAsync.grpc_search"
+      ],
+      "dst": [
+       "weaviate/weaviate",
+       "adapters/handlers/grpc/v0/service.go",
+       "github.com/weaviate/weaviate/adapters/handlers/grpc/v0.Service.Search"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-spec-client",
+      "src": [
+       "weaviate/weaviate-python-client",
+       "weaviate/connect/v4.py",
+       "weaviate.connect.v4.ConnectionAsync.grpc_search"
+      ],
+      "dst": [
+       "weaviate/weaviate",
+       "grpc/proto/v0/weaviate.proto",
+       "weaviategrpc.Weaviate.Search"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-code",
+      "src": [
+       "weaviate/weaviate-python-client",
+       "weaviate/connect/v4.py",
+       "weaviate.connect.v4.ConnectionAsync.grpc_batch_objects"
+      ],
+      "dst": [
+       "weaviate/weaviate",
+       "adapters/handlers/grpc/v0/service.go",
+       "github.com/weaviate/weaviate/adapters/handlers/grpc/v0.Service.BatchObjects"
+      ],
+      "confidence": 0.5
+     },
+     {
+      "kind": "rpc-spec-client",
+      "src": [
+       "weaviate/weaviate-python-client",
+       "weaviate/connect/v4.py",
+       "weaviate.connect.v4.ConnectionAsync.grpc_batch_objects"
+      ],
+      "dst": [
+       "weaviate/weaviate",
+       "grpc/proto/v0/weaviate.proto",
+       "weaviategrpc.Weaviate.BatchObjects"
+      ],
+      "confidence": 0.5
+     }
+    ],
+    "wrong_count": 8
+   },
+   "score_high": {
+    "by_kind": {
+     "http-spec": {
+      "predicted": 92,
+      "correct": 92,
+      "gold": 84,
+      "found": 84
+     },
+     "rpc-code": {
+      "predicted": 7,
+      "correct": 7,
+      "gold": 6,
+      "found": 4
+     },
+     "rpc-spec-client": {
+      "predicted": 7,
+      "correct": 7,
+      "gold": 6,
+      "found": 4
+     }
+    },
+    "items": [
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/aliases/executor.py",
+      6,
+      6,
+      5,
+      5
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/backup/executor.py",
+      6,
+      6,
+      6,
+      6
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/client_executor.py",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/cluster/base.py",
+      4,
+      4,
+      4,
+      4
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/cluster/replicate/executor.py",
+      6,
+      6,
+      5,
+      5
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/aggregations/base_executor.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/batch/base.py",
+      2,
+      2,
+      1,
+      1
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/batch/rest.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/collections/executor.py",
+      5,
+      5,
+      4,
+      4
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/config/executor.py",
+      6,
+      6,
+      5,
+      5
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/data/executor.py",
+      8,
+      8,
+      8,
+      8
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/collections/tenants/executor.py",
+      6,
+      6,
+      6,
+      6
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/connect/v4.py",
+      5,
+      5,
+      3,
+      3
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/debug/executor.py",
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/export/executor.py",
+      3,
+      3,
+      3,
+      3
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/groups/base.py",
+      4,
+      4,
+      4,
+      4
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/rbac/executor.py",
+      11,
+      11,
+      10,
+      10
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/tokenization/executor.py",
+      2,
+      2,
+      2,
+      2
+     ],
+     [
+      "http-spec",
+      "weaviate/weaviate-python-client",
+      "weaviate/users/base.py",
+      12,
+      12,
+      12,
+      12
+     ],
+     [
+      "rpc-code",
+      "weaviate/weaviate-python-client",
+      "weaviate/connect/v4.py",
+      7,
+      7,
+      6,
+      4
+     ],
+     [
+      "rpc-spec-client",
+      "weaviate/weaviate-python-client",
+      "weaviate/connect/v4.py",
+      7,
+      7,
+      6,
+      4
+     ]
+    ]
+   }
+  },
+  {
+   "name": "openai",
+   "split": "diagnostic",
+   "kinds": [
+    "http-spec"
+   ],
+   "repos": [
+    {
+     "repo": "openai/openai-openapi",
+     "commit": "7a212a7e954ef487a2ac35cc4a969d1a50d5d635"
+    },
+    {
+     "repo": "openai/openai-python",
+     "commit": "311924f055110122991cc23b988a1836793551a1"
+    }
+   ],
+   "status": "ok",
+   "org_ms": 341,
+   "link_ms": 0,
+   "index_seconds": 3.1220069580012932,
+   "edges_total": 0,
+   "contract_edges": 0,
+   "dangling": 1157,
+   "dangling_error": null,
+   "gold_counts": {
+    "http-spec": 804
+   },
+   "gold_dangling": 37,
+   "gold_intra": {
+    "http-spec": 806
+   },
+   "gold_other_kinds": {},
+   "openapi": [
+    {
+     "repo": "openai/openai-openapi",
+     "path": "openapi.json",
+     "bytes": 5124174,
+     "operations": 388,
+     "over_budget": true
+    },
+    {
+     "repo": "openai/openai-openapi",
+     "path": "openapi.yaml",
+     "bytes": 4323434,
+     "operations": 388,
+     "over_budget": true
+    },
+    {
+     "repo": "openai/openai-python",
+     "path": "api_reference/openapi.transformed.yml",
+     "bytes": 4129187,
+     "operations": 388,
+     "over_budget": true
+    }
+   ],
+   "score": {
+    "by_kind": {
+     "http-spec": {
+      "predicted": 0,
+      "correct": 0,
+      "gold": 804,
+      "found": 0
+     }
+    },
+    "items": [
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/lib/_assistants_runs.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/lib/_assistants_threads.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/lib/_chat_completion_resources.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/lib/_response_resources.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/admin_api_keys.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/audit_logs.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/certificates.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/data_retention.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/external_keys.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/external_storage.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/groups/groups.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/groups/roles.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/groups/users.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/invites.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/api_keys.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/certificates.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/data_retention.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/groups/groups.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/groups/roles.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/hosted_tool_permissions.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/model_permissions.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/projects.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/rate_limits.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/roles.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/service_accounts/api_keys.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/service_accounts/service_accounts.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/service_tier_settings.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/spend_alerts.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/spend_limit.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/users/roles.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/users/users.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/roles.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/spend_alerts.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/spend_limit.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/usage.py",
+      0,
+      0,
+      24,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/users/roles.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/users/users.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/workload_identity_providers/federation_rules.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/workload_identity_providers/workload_identity_providers.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/speech.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/transcriptions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/translations.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/voice_consents.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/voices.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/batches.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/agents.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/automations/automations.py",
+      0,
+      0,
+      14,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/automations/invocations.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/environments/environments.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/environments/files.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/environments/templates.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/artifacts.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/events.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/items.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/sessions.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/subagents/items.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/subagents/subagents.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/subagents/turns/items.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/subagents/turns/turns.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/traces.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/turns/items.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/turns/turns.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/vaults/credentials.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/vaults/vaults.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/assistants.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/chatkit/sessions.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/chatkit/threads.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/realtime/sessions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/realtime/transcription_sessions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/responses/input_items.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/responses/input_tokens.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/responses/responses.py",
+      0,
+      0,
+      20,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/threads/messages.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/threads/runs/runs.py",
+      0,
+      0,
+      12,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/threads/runs/steps.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/threads/threads.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/chat/completions/completions.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/chat/completions/messages.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/completions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/containers/containers.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/containers/files/content.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/containers/files/files.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/content_provenance_checks.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/conversations/conversations.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/conversations/items.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/decisions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/embeddings.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/evals/evals.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/evals/runs/output_items.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/evals/runs/runs.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/files.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/fine_tuning/alpha/graders.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/fine_tuning/checkpoints/permissions.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/fine_tuning/jobs/checkpoints.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/fine_tuning/jobs/jobs.py",
+      0,
+      0,
+      14,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/images.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/live/live.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/live/sessions.py",
+      0,
+      0,
+      12,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/models.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/moderations.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/realtime/calls.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/realtime/client_secrets.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/realtime/translations/client_secrets.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/responses/input_items.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/responses/input_tokens.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/responses/responses.py",
+      0,
+      0,
+      20,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/safety/alerts.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/safety/cases.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/skills/content.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/skills/skills.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/skills/versions/content.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/skills/versions/versions.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/uploads/parts.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/uploads/uploads.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/vector_stores/file_batches.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/vector_stores/files.py",
+      0,
+      0,
+      12,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/vector_stores/vector_stores.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/videos.py",
+      0,
+      0,
+      20,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/webhooks/event_types.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/webhooks/webhooks.py",
+      0,
+      0,
+      14,
+      0
+     ]
+    ],
+    "out_of_scope": 0,
+    "unscored": {},
+    "missed": [
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_assistants_runs.py",
+       "async_runs_create_and_stream"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /threads/{thread_id}/runs"
+      ],
+      "dst_accept": [
+       "POST /threads/{}/runs"
+      ],
+      "key": "POST /threads/{}/runs",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 516,
+        "symbol": "async_runs_create_and_stream",
+        "key": "POST /threads/{}/runs",
+        "raw": "request = self._post(",
+        "framework": "python-http",
+        "provider_line": 20339,
+        "provider_raw": "POST /threads/{thread_id}/runs"
+       },
+       {
+        "line": 638,
+        "symbol": "async_runs_stream",
+        "key": "POST /threads/{}/runs",
+        "raw": "request = self._post(",
+        "framework": "python-http",
+        "provider_line": 20339,
+        "provider_raw": "POST /threads/{thread_id}/runs"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_assistants_runs.py",
+       "async_runs_submit_tool_outputs_stream"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /threads/{thread_id}/runs/{run_id}/submit_tool_outputs"
+      ],
+      "dst_accept": [
+       "POST /threads/{}/runs/{}/submit_tool_outputs"
+      ],
+      "key": "POST /threads/{}/runs/{}/submit_tool_outputs",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 748,
+        "symbol": "async_runs_submit_tool_outputs_stream",
+        "key": "POST /threads/{}/runs/{}/submit_tool_outputs",
+        "raw": "request = self._post(",
+        "framework": "python-http",
+        "provider_line": 20891,
+        "provider_raw": "POST /threads/{thread_id}/runs/{run_id}/submit_tool_outputs"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_assistants_runs.py",
+       "async_runs_create_and_stream"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /threads/{thread_id}/runs"
+      ],
+      "dst_accept": [
+       "POST /threads/{}/runs"
+      ],
+      "key": "POST /threads/{}/runs",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 516,
+        "symbol": "async_runs_create_and_stream",
+        "key": "POST /threads/{}/runs",
+        "raw": "request = self._post(",
+        "framework": "python-http",
+        "provider_line": 24665,
+        "provider_raw": "POST /threads/{thread_id}/runs"
+       },
+       {
+        "line": 638,
+        "symbol": "async_runs_stream",
+        "key": "POST /threads/{}/runs",
+        "raw": "request = self._post(",
+        "framework": "python-http",
+        "provider_line": 24665,
+        "provider_raw": "POST /threads/{thread_id}/runs"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_assistants_runs.py",
+       "async_runs_submit_tool_outputs_stream"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /threads/{thread_id}/runs/{run_id}/submit_tool_outputs"
+      ],
+      "dst_accept": [
+       "POST /threads/{}/runs/{}/submit_tool_outputs"
+      ],
+      "key": "POST /threads/{}/runs/{}/submit_tool_outputs",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 748,
+        "symbol": "async_runs_submit_tool_outputs_stream",
+        "key": "POST /threads/{}/runs/{}/submit_tool_outputs",
+        "raw": "request = self._post(",
+        "framework": "python-http",
+        "provider_line": 25836,
+        "provider_raw": "POST /threads/{thread_id}/runs/{run_id}/submit_tool_outputs"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_assistants_threads.py",
+       "async_threads_create_and_run_stream"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /threads/runs"
+      ],
+      "dst_accept": [
+       "POST /threads/runs"
+      ],
+      "key": "POST /threads/runs",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 253,
+        "symbol": "async_threads_create_and_run_stream",
+        "key": "POST /threads/runs",
+        "raw": "request = self._post(",
+        "framework": "python-http",
+        "provider_line": 19788,
+        "provider_raw": "POST /threads/runs"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_assistants_threads.py",
+       "async_threads_create_and_run_stream"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /threads/runs"
+      ],
+      "dst_accept": [
+       "POST /threads/runs"
+      ],
+      "key": "POST /threads/runs",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 253,
+        "symbol": "async_threads_create_and_run_stream",
+        "key": "POST /threads/runs",
+        "raw": "request = self._post(",
+        "framework": "python-http",
+        "provider_line": 23544,
+        "provider_raw": "POST /threads/runs"
+       }
+      ],
+      "evidence_count": 1
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_chat_completion_resources.py",
+       "parse"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /chat/completions"
+      ],
+      "dst_accept": [
+       "POST /chat/completions"
+      ],
+      "key": "POST /chat/completions",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 101,
+        "symbol": "parse",
+        "key": "POST /chat/completions",
+        "raw": "return resource._post(",
+        "framework": "python-http",
+        "provider_line": 1633,
+        "provider_raw": "POST /chat/completions"
+       },
+       {
+        "line": 220,
+        "symbol": "async_parse",
+        "key": "POST /chat/completions",
+        "raw": "return await resource._post(",
+        "framework": "python-http",
+        "provider_line": 1633,
+        "provider_raw": "POST /chat/completions"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_chat_completion_resources.py",
+       "parse"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /chat/completions"
+      ],
+      "dst_accept": [
+       "POST /chat/completions"
+      ],
+      "key": "POST /chat/completions",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 101,
+        "symbol": "parse",
+        "key": "POST /chat/completions",
+        "raw": "return resource._post(",
+        "framework": "python-http",
+        "provider_line": 2389,
+        "provider_raw": "POST /chat/completions"
+       },
+       {
+        "line": 220,
+        "symbol": "async_parse",
+        "key": "POST /chat/completions",
+        "raw": "return await resource._post(",
+        "framework": "python-http",
+        "provider_line": 2389,
+        "provider_raw": "POST /chat/completions"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_response_resources.py",
+       "parse"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /responses"
+      ],
+      "dst_accept": [
+       "POST /responses"
+      ],
+      "key": "POST /responses",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 139,
+        "symbol": "parse",
+        "key": "POST /responses",
+        "raw": "return resource._post(",
+        "framework": "python-http",
+        "provider_line": 19251,
+        "provider_raw": "POST /responses"
+       },
+       {
+        "line": 264,
+        "symbol": "async_parse",
+        "key": "POST /responses",
+        "raw": "return await resource._post(",
+        "framework": "python-http",
+        "provider_line": 19251,
+        "provider_raw": "POST /responses"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_response_resources.py",
+       "parse"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /responses?beta=true"
+      ],
+      "dst_accept": [
+       "POST /responses"
+      ],
+      "key": "POST /responses",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 139,
+        "symbol": "parse",
+        "key": "POST /responses",
+        "raw": "return resource._post(",
+        "framework": "python-http",
+        "provider_line": 35273,
+        "provider_raw": "POST /responses?beta=true"
+       },
+       {
+        "line": 264,
+        "symbol": "async_parse",
+        "key": "POST /responses",
+        "raw": "return await resource._post(",
+        "framework": "python-http",
+        "provider_line": 35273,
+        "provider_raw": "POST /responses?beta=true"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_response_resources.py",
+       "parse"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /responses"
+      ],
+      "dst_accept": [
+       "POST /responses"
+      ],
+      "key": "POST /responses",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 139,
+        "symbol": "parse",
+        "key": "POST /responses",
+        "raw": "return resource._post(",
+        "framework": "python-http",
+        "provider_line": 21624,
+        "provider_raw": "POST /responses"
+       },
+       {
+        "line": 264,
+        "symbol": "async_parse",
+        "key": "POST /responses",
+        "raw": "return await resource._post(",
+        "framework": "python-http",
+        "provider_line": 21624,
+        "provider_raw": "POST /responses"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/lib/_response_resources.py",
+       "parse"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /responses?beta=true"
+      ],
+      "dst_accept": [
+       "POST /responses"
+      ],
+      "key": "POST /responses",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 139,
+        "symbol": "parse",
+        "key": "POST /responses",
+        "raw": "return resource._post(",
+        "framework": "python-http",
+        "provider_line": 38604,
+        "provider_raw": "POST /responses?beta=true"
+       },
+       {
+        "line": 264,
+        "symbol": "async_parse",
+        "key": "POST /responses",
+        "raw": "return await resource._post(",
+        "framework": "python-http",
+        "provider_line": 38604,
+        "provider_raw": "POST /responses?beta=true"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/admin_api_keys.py",
+       "AdminAPIKeys.delete"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "DELETE /organization/admin_api_keys/{key_id}"
+      ],
+      "dst_accept": [
+       "DELETE /organization/admin_api_keys/{}"
+      ],
+      "key": "DELETE /organization/admin_api_keys/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 210,
+        "symbol": "AdminAPIKeys.delete",
+        "key": "DELETE /organization/admin_api_keys/{}",
+        "raw": "return self._delete(",
+        "framework": "python-http",
+        "provider_line": 7309,
+        "provider_raw": "DELETE /organization/admin_api_keys/{key_id}"
+       },
+       {
+        "line": 407,
+        "symbol": "AsyncAdminAPIKeys.delete",
+        "key": "DELETE /organization/admin_api_keys/{}",
+        "raw": "return await self._delete(",
+        "framework": "python-http",
+        "provider_line": 7309,
+        "provider_raw": "DELETE /organization/admin_api_keys/{key_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/admin_api_keys.py",
+       "AdminAPIKeys.list"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "GET /organization/admin_api_keys"
+      ],
+      "dst_accept": [
+       "GET /organization/admin_api_keys"
+      ],
+      "key": "GET /organization/admin_api_keys",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 162,
+        "symbol": "AdminAPIKeys.list",
+        "key": "GET /organization/admin_api_keys",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 7131,
+        "provider_raw": "GET /organization/admin_api_keys"
+       },
+       {
+        "line": 359,
+        "symbol": "AsyncAdminAPIKeys.list",
+        "key": "GET /organization/admin_api_keys",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 7131,
+        "provider_raw": "GET /organization/admin_api_keys"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/admin_api_keys.py",
+       "AdminAPIKeys.retrieve"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "GET /organization/admin_api_keys/{key_id}"
+      ],
+      "dst_accept": [
+       "GET /organization/admin_api_keys/{}"
+      ],
+      "key": "GET /organization/admin_api_keys/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 119,
+        "symbol": "AdminAPIKeys.retrieve",
+        "key": "GET /organization/admin_api_keys/{}",
+        "raw": "return self._get(",
+        "framework": "python-http",
+        "provider_line": 7309,
+        "provider_raw": "GET /organization/admin_api_keys/{key_id}"
+       },
+       {
+        "line": 316,
+        "symbol": "AsyncAdminAPIKeys.retrieve",
+        "key": "GET /organization/admin_api_keys/{}",
+        "raw": "return await self._get(",
+        "framework": "python-http",
+        "provider_line": 7309,
+        "provider_raw": "GET /organization/admin_api_keys/{key_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/admin_api_keys.py",
+       "AdminAPIKeys.create"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /organization/admin_api_keys"
+      ],
+      "dst_accept": [
+       "POST /organization/admin_api_keys"
+      ],
+      "key": "POST /organization/admin_api_keys",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 73,
+        "symbol": "AdminAPIKeys.create",
+        "key": "POST /organization/admin_api_keys",
+        "raw": "return self._post(",
+        "framework": "python-http",
+        "provider_line": 7131,
+        "provider_raw": "POST /organization/admin_api_keys"
+       },
+       {
+        "line": 270,
+        "symbol": "AsyncAdminAPIKeys.create",
+        "key": "POST /organization/admin_api_keys",
+        "raw": "return await self._post(",
+        "framework": "python-http",
+        "provider_line": 7131,
+        "provider_raw": "POST /organization/admin_api_keys"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/admin_api_keys.py",
+       "AdminAPIKeys.delete"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "DELETE /organization/admin_api_keys/{key_id}"
+      ],
+      "dst_accept": [
+       "DELETE /organization/admin_api_keys/{}"
+      ],
+      "key": "DELETE /organization/admin_api_keys/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 210,
+        "symbol": "AdminAPIKeys.delete",
+        "key": "DELETE /organization/admin_api_keys/{}",
+        "raw": "return self._delete(",
+        "framework": "python-http",
+        "provider_line": 11175,
+        "provider_raw": "DELETE /organization/admin_api_keys/{key_id}"
+       },
+       {
+        "line": 407,
+        "symbol": "AsyncAdminAPIKeys.delete",
+        "key": "DELETE /organization/admin_api_keys/{}",
+        "raw": "return await self._delete(",
+        "framework": "python-http",
+        "provider_line": 11175,
+        "provider_raw": "DELETE /organization/admin_api_keys/{key_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/admin_api_keys.py",
+       "AdminAPIKeys.list"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "GET /organization/admin_api_keys"
+      ],
+      "dst_accept": [
+       "GET /organization/admin_api_keys"
+      ],
+      "key": "GET /organization/admin_api_keys",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 162,
+        "symbol": "AdminAPIKeys.list",
+        "key": "GET /organization/admin_api_keys",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 11006,
+        "provider_raw": "GET /organization/admin_api_keys"
+       },
+       {
+        "line": 359,
+        "symbol": "AsyncAdminAPIKeys.list",
+        "key": "GET /organization/admin_api_keys",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 11006,
+        "provider_raw": "GET /organization/admin_api_keys"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/admin_api_keys.py",
+       "AdminAPIKeys.retrieve"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "GET /organization/admin_api_keys/{key_id}"
+      ],
+      "dst_accept": [
+       "GET /organization/admin_api_keys/{}"
+      ],
+      "key": "GET /organization/admin_api_keys/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 119,
+        "symbol": "AdminAPIKeys.retrieve",
+        "key": "GET /organization/admin_api_keys/{}",
+        "raw": "return self._get(",
+        "framework": "python-http",
+        "provider_line": 11175,
+        "provider_raw": "GET /organization/admin_api_keys/{key_id}"
+       },
+       {
+        "line": 316,
+        "symbol": "AsyncAdminAPIKeys.retrieve",
+        "key": "GET /organization/admin_api_keys/{}",
+        "raw": "return await self._get(",
+        "framework": "python-http",
+        "provider_line": 11175,
+        "provider_raw": "GET /organization/admin_api_keys/{key_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/admin_api_keys.py",
+       "AdminAPIKeys.create"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /organization/admin_api_keys"
+      ],
+      "dst_accept": [
+       "POST /organization/admin_api_keys"
+      ],
+      "key": "POST /organization/admin_api_keys",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 73,
+        "symbol": "AdminAPIKeys.create",
+        "key": "POST /organization/admin_api_keys",
+        "raw": "return self._post(",
+        "framework": "python-http",
+        "provider_line": 11006,
+        "provider_raw": "POST /organization/admin_api_keys"
+       },
+       {
+        "line": 270,
+        "symbol": "AsyncAdminAPIKeys.create",
+        "key": "POST /organization/admin_api_keys",
+        "raw": "return await self._post(",
+        "framework": "python-http",
+        "provider_line": 11006,
+        "provider_raw": "POST /organization/admin_api_keys"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/audit_logs.py",
+       "AuditLogs.list"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "GET /organization/audit_logs"
+      ],
+      "dst_accept": [
+       "GET /organization/audit_logs"
+      ],
+      "key": "GET /organization/audit_logs",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 266,
+        "symbol": "AuditLogs.list",
+        "key": "GET /organization/audit_logs",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 7458,
+        "provider_raw": "GET /organization/audit_logs"
+       },
+       {
+        "line": 537,
+        "symbol": "AsyncAuditLogs.list",
+        "key": "GET /organization/audit_logs",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 7458,
+        "provider_raw": "GET /organization/audit_logs"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/audit_logs.py",
+       "AuditLogs.list"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "GET /organization/audit_logs"
+      ],
+      "dst_accept": [
+       "GET /organization/audit_logs"
+      ],
+      "key": "GET /organization/audit_logs",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 266,
+        "symbol": "AuditLogs.list",
+        "key": "GET /organization/audit_logs",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 11299,
+        "provider_raw": "GET /organization/audit_logs"
+       },
+       {
+        "line": 537,
+        "symbol": "AsyncAuditLogs.list",
+        "key": "GET /organization/audit_logs",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 11299,
+        "provider_raw": "GET /organization/audit_logs"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.delete"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "DELETE /organization/certificates/{certificate_id}"
+      ],
+      "dst_accept": [
+       "DELETE /organization/certificates/{}"
+      ],
+      "key": "DELETE /organization/certificates/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 276,
+        "symbol": "Certificates.delete",
+        "key": "DELETE /organization/certificates/{}",
+        "raw": "return self._delete(",
+        "framework": "python-http",
+        "provider_line": 7983,
+        "provider_raw": "DELETE /organization/certificates/{certificate_id}"
+       },
+       {
+        "line": 616,
+        "symbol": "AsyncCertificates.delete",
+        "key": "DELETE /organization/certificates/{}",
+        "raw": "return await self._delete(",
+        "framework": "python-http",
+        "provider_line": 7983,
+        "provider_raw": "DELETE /organization/certificates/{certificate_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.list"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "GET /organization/certificates"
+      ],
+      "dst_accept": [
+       "GET /organization/certificates"
+      ],
+      "key": "GET /organization/certificates",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 228,
+        "symbol": "Certificates.list",
+        "key": "GET /organization/certificates",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 7642,
+        "provider_raw": "GET /organization/certificates"
+       },
+       {
+        "line": 568,
+        "symbol": "AsyncCertificates.list",
+        "key": "GET /organization/certificates",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 7642,
+        "provider_raw": "GET /organization/certificates"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.retrieve"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "GET /organization/certificates/{certificate_id}"
+      ],
+      "dst_accept": [
+       "GET /organization/certificates/{}"
+      ],
+      "key": "GET /organization/certificates/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 137,
+        "symbol": "Certificates.retrieve",
+        "key": "GET /organization/certificates/{}",
+        "raw": "return self._get(",
+        "framework": "python-http",
+        "provider_line": 7983,
+        "provider_raw": "GET /organization/certificates/{certificate_id}"
+       },
+       {
+        "line": 475,
+        "symbol": "AsyncCertificates.retrieve",
+        "key": "GET /organization/certificates/{}",
+        "raw": "return await self._get(",
+        "framework": "python-http",
+        "provider_line": 7983,
+        "provider_raw": "GET /organization/certificates/{certificate_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.create"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /organization/certificates"
+      ],
+      "dst_accept": [
+       "POST /organization/certificates"
+      ],
+      "key": "POST /organization/certificates",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 87,
+        "symbol": "Certificates.create",
+        "key": "POST /organization/certificates",
+        "raw": "return self._post(",
+        "framework": "python-http",
+        "provider_line": 7642,
+        "provider_raw": "POST /organization/certificates"
+       },
+       {
+        "line": 425,
+        "symbol": "AsyncCertificates.create",
+        "key": "POST /organization/certificates",
+        "raw": "return await self._post(",
+        "framework": "python-http",
+        "provider_line": 7642,
+        "provider_raw": "POST /organization/certificates"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.update"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /organization/certificates/{certificate_id}"
+      ],
+      "dst_accept": [
+       "POST /organization/certificates/{}"
+      ],
+      "key": "POST /organization/certificates/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 179,
+        "symbol": "Certificates.update",
+        "key": "POST /organization/certificates/{}",
+        "raw": "return self._post(",
+        "framework": "python-http",
+        "provider_line": 7983,
+        "provider_raw": "POST /organization/certificates/{certificate_id}"
+       },
+       {
+        "line": 519,
+        "symbol": "AsyncCertificates.update",
+        "key": "POST /organization/certificates/{}",
+        "raw": "return await self._post(",
+        "framework": "python-http",
+        "provider_line": 7983,
+        "provider_raw": "POST /organization/certificates/{certificate_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.delete"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "DELETE /organization/certificates/{certificate_id}"
+      ],
+      "dst_accept": [
+       "DELETE /organization/certificates/{}"
+      ],
+      "key": "DELETE /organization/certificates/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 276,
+        "symbol": "Certificates.delete",
+        "key": "DELETE /organization/certificates/{}",
+        "raw": "return self._delete(",
+        "framework": "python-http",
+        "provider_line": 11863,
+        "provider_raw": "DELETE /organization/certificates/{certificate_id}"
+       },
+       {
+        "line": 616,
+        "symbol": "AsyncCertificates.delete",
+        "key": "DELETE /organization/certificates/{}",
+        "raw": "return await self._delete(",
+        "framework": "python-http",
+        "provider_line": 11863,
+        "provider_raw": "DELETE /organization/certificates/{certificate_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.list"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "GET /organization/certificates"
+      ],
+      "dst_accept": [
+       "GET /organization/certificates"
+      ],
+      "key": "GET /organization/certificates",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 228,
+        "symbol": "Certificates.list",
+        "key": "GET /organization/certificates",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 11508,
+        "provider_raw": "GET /organization/certificates"
+       },
+       {
+        "line": 568,
+        "symbol": "AsyncCertificates.list",
+        "key": "GET /organization/certificates",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 11508,
+        "provider_raw": "GET /organization/certificates"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.retrieve"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "GET /organization/certificates/{certificate_id}"
+      ],
+      "dst_accept": [
+       "GET /organization/certificates/{}"
+      ],
+      "key": "GET /organization/certificates/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 137,
+        "symbol": "Certificates.retrieve",
+        "key": "GET /organization/certificates/{}",
+        "raw": "return self._get(",
+        "framework": "python-http",
+        "provider_line": 11863,
+        "provider_raw": "GET /organization/certificates/{certificate_id}"
+       },
+       {
+        "line": 475,
+        "symbol": "AsyncCertificates.retrieve",
+        "key": "GET /organization/certificates/{}",
+        "raw": "return await self._get(",
+        "framework": "python-http",
+        "provider_line": 11863,
+        "provider_raw": "GET /organization/certificates/{certificate_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.create"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /organization/certificates"
+      ],
+      "dst_accept": [
+       "POST /organization/certificates"
+      ],
+      "key": "POST /organization/certificates",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 87,
+        "symbol": "Certificates.create",
+        "key": "POST /organization/certificates",
+        "raw": "return self._post(",
+        "framework": "python-http",
+        "provider_line": 11508,
+        "provider_raw": "POST /organization/certificates"
+       },
+       {
+        "line": 425,
+        "symbol": "AsyncCertificates.create",
+        "key": "POST /organization/certificates",
+        "raw": "return await self._post(",
+        "framework": "python-http",
+        "provider_line": 11508,
+        "provider_raw": "POST /organization/certificates"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/certificates.py",
+       "Certificates.update"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /organization/certificates/{certificate_id}"
+      ],
+      "dst_accept": [
+       "POST /organization/certificates/{}"
+      ],
+      "key": "POST /organization/certificates/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 179,
+        "symbol": "Certificates.update",
+        "key": "POST /organization/certificates/{}",
+        "raw": "return self._post(",
+        "framework": "python-http",
+        "provider_line": 11863,
+        "provider_raw": "POST /organization/certificates/{certificate_id}"
+       },
+       {
+        "line": 519,
+        "symbol": "AsyncCertificates.update",
+        "key": "POST /organization/certificates/{}",
+        "raw": "return await self._post(",
+        "framework": "python-http",
+        "provider_line": 11863,
+        "provider_raw": "POST /organization/certificates/{certificate_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/data_retention.py",
+       "DataRetention.retrieve"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "GET /organization/data_retention"
+      ],
+      "dst_accept": [
+       "GET /organization/data_retention"
+      ],
+      "key": "GET /organization/data_retention",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 53,
+        "symbol": "DataRetention.retrieve",
+        "key": "GET /organization/data_retention",
+        "raw": "return self._get(",
+        "framework": "python-http",
+        "provider_line": 8420,
+        "provider_raw": "GET /organization/data_retention"
+       },
+       {
+        "line": 142,
+        "symbol": "AsyncDataRetention.retrieve",
+        "key": "GET /organization/data_retention",
+        "raw": "return await self._get(",
+        "framework": "python-http",
+        "provider_line": 8420,
+        "provider_raw": "GET /organization/data_retention"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/data_retention.py",
+       "DataRetention.update"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /organization/data_retention"
+      ],
+      "dst_accept": [
+       "POST /organization/data_retention"
+      ],
+      "key": "POST /organization/data_retention",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 95,
+        "symbol": "DataRetention.update",
+        "key": "POST /organization/data_retention",
+        "raw": "return self._post(",
+        "framework": "python-http",
+        "provider_line": 8420,
+        "provider_raw": "POST /organization/data_retention"
+       },
+       {
+        "line": 184,
+        "symbol": "AsyncDataRetention.update",
+        "key": "POST /organization/data_retention",
+        "raw": "return await self._post(",
+        "framework": "python-http",
+        "provider_line": 8420,
+        "provider_raw": "POST /organization/data_retention"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/data_retention.py",
+       "DataRetention.retrieve"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "GET /organization/data_retention"
+      ],
+      "dst_accept": [
+       "GET /organization/data_retention"
+      ],
+      "key": "GET /organization/data_retention",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 53,
+        "symbol": "DataRetention.retrieve",
+        "key": "GET /organization/data_retention",
+        "raw": "return self._get(",
+        "framework": "python-http",
+        "provider_line": 12236,
+        "provider_raw": "GET /organization/data_retention"
+       },
+       {
+        "line": 142,
+        "symbol": "AsyncDataRetention.retrieve",
+        "key": "GET /organization/data_retention",
+        "raw": "return await self._get(",
+        "framework": "python-http",
+        "provider_line": 12236,
+        "provider_raw": "GET /organization/data_retention"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/data_retention.py",
+       "DataRetention.update"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.yaml",
+       "POST /organization/data_retention"
+      ],
+      "dst_accept": [
+       "POST /organization/data_retention"
+      ],
+      "key": "POST /organization/data_retention",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 95,
+        "symbol": "DataRetention.update",
+        "key": "POST /organization/data_retention",
+        "raw": "return self._post(",
+        "framework": "python-http",
+        "provider_line": 12236,
+        "provider_raw": "POST /organization/data_retention"
+       },
+       {
+        "line": 184,
+        "symbol": "AsyncDataRetention.update",
+        "key": "POST /organization/data_retention",
+        "raw": "return await self._post(",
+        "framework": "python-http",
+        "provider_line": 12236,
+        "provider_raw": "POST /organization/data_retention"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/external_keys.py",
+       "ExternalKeys.delete"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "DELETE /organization/external_keys/{external_key_id}"
+      ],
+      "dst_accept": [
+       "DELETE /organization/external_keys/{}"
+      ],
+      "key": "DELETE /organization/external_keys/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 434,
+        "symbol": "ExternalKeys.delete",
+        "key": "DELETE /organization/external_keys/{}",
+        "raw": "return self._delete(",
+        "framework": "python-http",
+        "provider_line": 23316,
+        "provider_raw": "DELETE /organization/external_keys/{external_key_id}"
+       },
+       {
+        "line": 893,
+        "symbol": "AsyncExternalKeys.delete",
+        "key": "DELETE /organization/external_keys/{}",
+        "raw": "return await self._delete(",
+        "framework": "python-http",
+        "provider_line": 23316,
+        "provider_raw": "DELETE /organization/external_keys/{external_key_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/external_keys.py",
+       "ExternalKeys.list"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "GET /organization/external_keys"
+      ],
+      "dst_accept": [
+       "GET /organization/external_keys"
+      ],
+      "key": "GET /organization/external_keys",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 387,
+        "symbol": "ExternalKeys.list",
+        "key": "GET /organization/external_keys",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 23215,
+        "provider_raw": "GET /organization/external_keys"
+       },
+       {
+        "line": 846,
+        "symbol": "AsyncExternalKeys.list",
+        "key": "GET /organization/external_keys",
+        "raw": "return self._get_api_list(",
+        "framework": "python-http",
+        "provider_line": 23215,
+        "provider_raw": "GET /organization/external_keys"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/external_keys.py",
+       "ExternalKeys.retrieve"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "GET /organization/external_keys/{external_key_id}"
+      ],
+      "dst_accept": [
+       "GET /organization/external_keys/{}"
+      ],
+      "key": "GET /organization/external_keys/{}",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 347,
+        "symbol": "ExternalKeys.retrieve",
+        "key": "GET /organization/external_keys/{}",
+        "raw": "return self._get(",
+        "framework": "python-http",
+        "provider_line": 23316,
+        "provider_raw": "GET /organization/external_keys/{external_key_id}"
+       },
+       {
+        "line": 806,
+        "symbol": "AsyncExternalKeys.retrieve",
+        "key": "GET /organization/external_keys/{}",
+        "raw": "return await self._get(",
+        "framework": "python-http",
+        "provider_line": 23316,
+        "provider_raw": "GET /organization/external_keys/{external_key_id}"
+       }
+      ],
+      "evidence_count": 2
+     },
+     {
+      "kind": "http-spec",
+      "src": [
+       "openai/openai-python",
+       "src/openai/resources/admin/organization/external_keys.py",
+       "ExternalKeys.create"
+      ],
+      "src_accept": [],
+      "dst": [
+       "openai/openai-openapi",
+       "openapi.json",
+       "POST /organization/external_keys"
+      ],
+      "dst_accept": [
+       "POST /organization/external_keys"
+      ],
+      "key": "POST /organization/external_keys",
+      "quality": "exact",
+      "evidence": [
+       {
+        "line": 282,
+        "symbol": "ExternalKeys.create",
+        "key": "POST /organization/external_keys",
+        "raw": "return self._post(",
+        "framework": "python-http",
+        "provider_line": 23215,
+        "provider_raw": "POST /organization/external_keys"
+       },
+       {
+        "line": 741,
+        "symbol": "AsyncExternalKeys.create",
+        "key": "POST /organization/external_keys",
+        "raw": "return await self._post(",
+        "framework": "python-http",
+        "provider_line": 23215,
+        "provider_raw": "POST /organization/external_keys"
+       }
+      ],
+      "evidence_count": 2
+     }
+    ],
+    "missed_count": 804,
+    "wrong": [],
+    "wrong_count": 0
+   },
+   "score_high": {
+    "by_kind": {
+     "http-spec": {
+      "predicted": 0,
+      "correct": 0,
+      "gold": 804,
+      "found": 0
+     }
+    },
+    "items": [
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/lib/_assistants_runs.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/lib/_assistants_threads.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/lib/_chat_completion_resources.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/lib/_response_resources.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/admin_api_keys.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/audit_logs.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/certificates.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/data_retention.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/external_keys.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/external_storage.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/groups/groups.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/groups/roles.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/groups/users.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/invites.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/api_keys.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/certificates.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/data_retention.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/groups/groups.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/groups/roles.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/hosted_tool_permissions.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/model_permissions.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/projects.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/rate_limits.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/roles.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/service_accounts/api_keys.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/service_accounts/service_accounts.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/service_tier_settings.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/spend_alerts.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/spend_limit.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/users/roles.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/projects/users/users.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/roles.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/spend_alerts.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/spend_limit.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/usage.py",
+      0,
+      0,
+      24,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/users/roles.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/users/users.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/workload_identity_providers/federation_rules.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/admin/organization/workload_identity_providers/workload_identity_providers.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/speech.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/transcriptions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/translations.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/voice_consents.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/audio/voices.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/batches.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/agents.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/automations/automations.py",
+      0,
+      0,
+      14,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/automations/invocations.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/environments/environments.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/environments/files.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/environments/templates.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/artifacts.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/events.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/items.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/sessions.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/subagents/items.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/subagents/subagents.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/subagents/turns/items.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/subagents/turns/turns.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/traces.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/turns/items.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/sessions/turns/turns.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/vaults/credentials.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/agents/vaults/vaults.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/assistants.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/chatkit/sessions.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/chatkit/threads.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/realtime/sessions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/realtime/transcription_sessions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/responses/input_items.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/responses/input_tokens.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/responses/responses.py",
+      0,
+      0,
+      20,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/threads/messages.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/threads/runs/runs.py",
+      0,
+      0,
+      12,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/threads/runs/steps.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/beta/threads/threads.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/chat/completions/completions.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/chat/completions/messages.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/completions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/containers/containers.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/containers/files/content.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/containers/files/files.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/content_provenance_checks.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/conversations/conversations.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/conversations/items.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/decisions.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/embeddings.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/evals/evals.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/evals/runs/output_items.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/evals/runs/runs.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/files.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/fine_tuning/alpha/graders.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/fine_tuning/checkpoints/permissions.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/fine_tuning/jobs/checkpoints.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/fine_tuning/jobs/jobs.py",
+      0,
+      0,
+      14,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/images.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/live/live.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/live/sessions.py",
+      0,
+      0,
+      12,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/models.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/moderations.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/realtime/calls.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/realtime/client_secrets.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/realtime/translations/client_secrets.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/responses/input_items.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/responses/input_tokens.py",
+      0,
+      0,
+      4,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/responses/responses.py",
+      0,
+      0,
+      20,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/safety/alerts.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/safety/cases.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/skills/content.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/skills/skills.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/skills/versions/content.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/skills/versions/versions.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/uploads/parts.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/uploads/uploads.py",
+      0,
+      0,
+      6,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/vector_stores/file_batches.py",
+      0,
+      0,
+      8,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/vector_stores/files.py",
+      0,
+      0,
+      12,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/vector_stores/vector_stores.py",
+      0,
+      0,
+      10,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/videos.py",
+      0,
+      0,
+      20,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/webhooks/event_types.py",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "http-spec",
+      "openai/openai-python",
+      "src/openai/resources/webhooks/webhooks.py",
+      0,
+      0,
+      14,
+      0
+     ]
+    ]
+   }
+  }
+ ],
+ "summary": {
+  "http-code": {
+   "predicted": 118,
+   "correct": 116,
+   "gold": 99,
+   "found": 97,
+   "files": 12,
+   "precision": 0.9830508474576272,
+   "precision_ci": [
+    0.9607843137254902,
+    1.0
+   ],
+   "recall": 0.9797979797979798,
+   "recall_ci": [
+    0.957983193277311,
+    1.0
+   ]
+  },
+  "http-spec": {
+   "predicted": 131,
+   "correct": 131,
+   "gold": 110,
+   "found": 110,
+   "files": 21,
+   "precision": 1.0,
+   "precision_ci": [
+    1.0,
+    1.0
+   ],
+   "recall": 1.0,
+   "recall_ci": [
+    1.0,
+    1.0
+   ]
+  },
+  "rpc-spec-client": {
+   "predicted": 228,
+   "correct": 219,
+   "gold": 212,
+   "found": 212,
+   "files": 27,
+   "precision": 0.9605263157894737,
+   "precision_ci": [
+    0.8911891448212178,
+    0.9956521739130435
+   ],
+   "recall": 1.0,
+   "recall_ci": [
+    1.0,
+    1.0
+   ]
+  },
+  "rpc-spec-server": {
+   "predicted": 18,
+   "correct": 18,
+   "gold": 20,
+   "found": 18,
+   "files": 7,
+   "precision": 1.0,
+   "precision_ci": [
+    1.0,
+    1.0
+   ],
+   "recall": 0.9,
+   "recall_ci": [
+    0.8181818181818182,
+    1.0
+   ]
+  },
+  "rpc-code": {
+   "predicted": 290,
+   "correct": 277,
+   "gold": 283,
+   "found": 270,
+   "files": 32,
+   "precision": 0.9551724137931035,
+   "precision_ci": [
+    0.8481626751096647,
+    1.0
+   ],
+   "recall": 0.9540636042402827,
+   "recall_ci": [
+    0.8895326925324296,
+    0.9897959183673469
+   ]
+  },
+  "all": {
+   "predicted": 785,
+   "correct": 761,
+   "gold": 724,
+   "found": 707,
+   "files": 99,
+   "precision": 0.9694267515923567,
+   "precision_ci": [
+    0.9375,
+    0.9916555830374886
+   ],
+   "recall": 0.9765193370165746,
+   "recall_ci": [
+    0.9559316938962671,
+    0.9920887639465652
+   ]
+  }
+ },
+ "high_confidence": 0.7,
+ "summary_high": {
+  "http-code": {
+   "predicted": 104,
+   "correct": 102,
+   "gold": 99,
+   "found": 91,
+   "files": 12,
+   "precision": 0.9807692307692307,
+   "precision_ci": [
+    0.9523809523809523,
+    1.0
+   ],
+   "recall": 0.9191919191919192,
+   "recall_ci": [
+    0.8319327731092437,
+    1.0
+   ]
+  },
+  "http-spec": {
+   "predicted": 131,
+   "correct": 131,
+   "gold": 110,
+   "found": 110,
+   "files": 21,
+   "precision": 1.0,
+   "precision_ci": [
+    1.0,
+    1.0
+   ],
+   "recall": 1.0,
+   "recall_ci": [
+    1.0,
+    1.0
+   ]
+  },
+  "rpc-spec-client": {
+   "predicted": 124,
+   "correct": 124,
+   "gold": 212,
+   "found": 119,
+   "files": 26,
+   "precision": 1.0,
+   "precision_ci": [
+    1.0,
+    1.0
+   ],
+   "recall": 0.5613207547169812,
+   "recall_ci": [
+    0.24489619985925404,
+    0.9701529481306339
+   ]
+  },
+  "rpc-spec-server": {
+   "predicted": 18,
+   "correct": 18,
+   "gold": 20,
+   "found": 18,
+   "files": 7,
+   "precision": 1.0,
+   "precision_ci": [
+    1.0,
+    1.0
+   ],
+   "recall": 0.9,
+   "recall_ci": [
+    0.8181818181818182,
+    1.0
+   ]
+  },
+  "rpc-code": {
+   "predicted": 156,
+   "correct": 147,
+   "gold": 283,
+   "found": 142,
+   "files": 32,
+   "precision": 0.9423076923076923,
+   "precision_ci": [
+    0.7950767129045817,
+    1.0
+   ],
+   "recall": 0.5017667844522968,
+   "recall_ci": [
+    0.31934528773978316,
+    0.8367346938775511
+   ]
+  },
+  "all": {
+   "predicted": 533,
+   "correct": 522,
+   "gold": 724,
+   "found": 480,
+   "files": 98,
+   "precision": 0.9793621013133208,
+   "precision_ci": [
+    0.9423059566787003,
+    1.0
+   ],
+   "recall": 0.6629834254143646,
+   "recall_ci": [
+    0.5063287143587777,
+    0.8606878441983539
+   ]
+  }
+ },
+ "complete": true
+}

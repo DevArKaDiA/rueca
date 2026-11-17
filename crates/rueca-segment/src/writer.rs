@@ -11,7 +11,9 @@ use rueca_model::{ResolvedGraph, SnapshotInfo, git_blob_sha};
 
 use crate::bundle::BundleWriter;
 use crate::packs::{BlobIndex, BlobLoc, PackReader, PackWriter, Sha, compress, parse_sha};
-use crate::{ContentSource, FORMAT_VERSION, Result, SegmentError, SegmentMeta, graph, ngram, priors, store, symbols};
+use crate::{
+    ContentSource, FORMAT_VERSION, Result, SegmentError, SegmentMeta, contracts, graph, ngram, priors, store, symbols,
+};
 
 pub(crate) fn slug(s: &str, max: usize) -> String {
     let mut out = String::new();
@@ -327,6 +329,7 @@ fn write_bundle(
     let mut w = BundleWriter::create(tmp_path, FORMAT_VERSION)?;
     w.add("meta", &serde_json::to_vec(meta).map_err(|e| SegmentError::Other(e.to_string()))?)?;
     graph::write_graph(&mut w, graph)?;
+    contracts::write_contracts(&mut w, graph)?;
     let scratch = tempfile::Builder::new().prefix("tantivy-").tempdir_in(tmp_dir)?;
     symbols::write_symbols(&mut w, &graph.nodes, &graph.files, &merged.bodies, scratch.path())?;
     drop(scratch);

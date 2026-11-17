@@ -183,6 +183,7 @@
 //!   (see `rueca-resolve`, *Rust*).
 
 mod builtins;
+mod contracts;
 mod extract;
 mod locals;
 mod macros;
@@ -217,7 +218,8 @@ impl LanguagePack for RustPack {
         &[Language::Rust]
     }
     fn extractor_version(&self) -> u32 {
-        1
+        // 2: contract hints (HTTP routes and calls, tonic; RFC 0006 phase 4).
+        2
     }
     fn extract(
         &self,

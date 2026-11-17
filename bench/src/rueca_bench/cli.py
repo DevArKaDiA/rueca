@@ -1,8 +1,8 @@
 """rueca-bench command line.
 
   rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
-  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,data,health,org,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
-  rueca-bench report
+  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,data,health,org,s2,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
+  rueca-bench report [--s2-only]
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
 
@@ -17,6 +17,7 @@ import shutil
 import sys
 
 from . import check as check_mod
+from . import contracts as contracts_mod
 from . import data as data_mod
 from . import health as health_mod
 from . import org as org_mod
@@ -55,14 +56,15 @@ def main(argv: list[str] | None = None) -> int:
 
     rp = sub.add_parser("run", help="run arms on suites (resumable)")
     rp.add_argument("--arm", default="all")
-    rp.add_argument("--suite", default="all", help="s1, s3, data, health, org, all, or a comma list")
+    rp.add_argument("--suite", default="all", help="s1, s3, data, health, org, s2, all, or a comma list")
     rp.add_argument("--only", nargs="*", help="instance ids / repos (s1), suite names (s3), or for org: gated / calibration and/or repositories (a smoke run of the multi-repository scenario)")
     rp.add_argument("--workers", type=int, default=2, help="S1 repositories / S3 sets processed in parallel")
     rp.add_argument("--force", action="store_true", help="ignore cached arm outputs")
     rp.add_argument("--lang", nargs="*", help="language families to run (default: all)")
     rp.add_argument("--prune", action="store_true", help="delete each repository clone once its runs are done (bounded disk, e.g. CI)")
 
-    sub.add_parser("report", help="score cached outputs; write bench/results/*.json and docs/bench/alpha-results.md")
+    pr = sub.add_parser("report", help="score cached outputs; write bench/results/*.json and docs/bench/alpha-results.md")
+    pr.add_argument("--s2-only", action="store_true", help="publish S2 alone: s2.json, the contracts family of scorecard.json, the S2 rows of alpha-results.md")
 
     kp = sub.add_parser("check", help="regression check (RFC 0004 §7.8): compare a scorecard with the committed one")
     kp.add_argument("--baseline", default=None, help="committed scorecard (default: bench/results/scorecard.json at git HEAD)")
@@ -88,8 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         run_code = not langs or bool(code_langs)
         wanted = {x.strip() for x in a.suite.split(",") if x.strip()}
         if "all" in wanted:
-            wanted = {"s1", "s3", "data", "health", "org"}
-        unknown = wanted - {"s1", "s3", "data", "health", "org"}
+            wanted = {"s1", "s3", "data", "health", "org", "s2"}
+        unknown = wanted - {"s1", "s3", "data", "health", "org", "s2"}
         if unknown:
             raise SystemExit(f"unknown suite(s) {sorted(unknown)}")
         if "health" in wanted and run_code and "rueca" in arms:
@@ -103,8 +105,13 @@ def main(argv: list[str] | None = None) -> int:
         if "org" in wanted and not langs:
             # self-contained: the single-repository answers come from the same org run
             org_mod.run_all(arms, force=a.force, only=a.only)
+        if "s2" in wanted and not langs:
+            contracts_mod.run(arms, force=a.force)  # cross-service edges (S2): one organization per group
     elif a.cmd == "report":
-        report_mod.report()
+        if a.s2_only:
+            report_mod.publish_s2()
+        else:
+            report_mod.report()
     elif a.cmd == "check":
         return check_mod.main(a.baseline, a.current)
     elif a.cmd == "clean":

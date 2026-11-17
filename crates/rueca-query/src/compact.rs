@@ -668,6 +668,43 @@ pub(crate) fn list_repositories(
     })
 }
 
+/// `list_contracts`: one flat item per contract row, `{s, repo, path, line,
+/// symbol, id, label, kind, side, key, framework, raw, matches}`, in the
+/// tool's order (the listing is sorted by key, not grouped by file).
+pub(crate) fn list_contracts(
+    snaps: &[&SnapshotDesc],
+    entries: &[(usize, ContractEntry)],
+    offset: usize,
+    more: bool,
+    budget: usize,
+) -> Response {
+    let n = entries.len();
+    fit(n.min(1), n, budget, |k| {
+        let (listed, remap) = touched(snaps, entries[..k].iter().map(|(s, _)| *s));
+        let items: Vec<Value> = entries[..k].iter().map(|(s, e)| contract_item(remap[s], e)).collect();
+        let (truncated, cursor) = next(offset, k, n, more);
+        with_text("list_contracts", envelope(&listed, Value::Array(items), truncated, cursor, vec![]))
+    })
+}
+
+fn contract_item(s: usize, e: &ContractEntry) -> Value {
+    let mut m = Map::new();
+    put(&mut m, "s", s);
+    put(&mut m, "repo", e.repo.clone());
+    put(&mut m, "path", e.path.clone());
+    put(&mut m, "line", e.line);
+    put(&mut m, "symbol", e.symbol.clone());
+    put(&mut m, "id", e.id.clone());
+    put(&mut m, "label", e.label.clone());
+    put(&mut m, "kind", e.kind.clone());
+    put(&mut m, "side", e.side.clone());
+    put(&mut m, "key", e.key.clone());
+    put(&mut m, "framework", e.framework.clone());
+    put(&mut m, "raw", e.raw.clone());
+    put(&mut m, "matches", e.matches);
+    Value::Object(m)
+}
+
 // ---------------------------------------------------------------------------
 // Text rendering
 // ---------------------------------------------------------------------------
@@ -701,6 +738,7 @@ pub fn render_text(tool: &str, v: &Value) -> String {
         "trace" => text_trace(&mut out, r),
         "get_file_outline" => text_outline(&mut out, r),
         "list_repositories" => text_repositories(&mut out, r, multi),
+        "list_contracts" => text_contracts(&mut out, r, multi),
         _ => out.push_str(&r.to_string()),
     }
     if let Some(o) = v.get("omitted").and_then(Value::as_object) {
@@ -1048,6 +1086,30 @@ fn text_repositories(out: &mut String, r: &Value, multi: bool) {
             let _ = write!(out, "  ({score})");
         }
         out.push('\n');
+    }
+}
+
+/// `key  side  framework  repo:path#symbol L12  (n)` per contract entry
+/// (`[s] ` first with several snapshots; `#symbol` is the local name of the
+/// symbol id, absent for file-level code).
+fn text_contracts(out: &mut String, r: &Value, multi: bool) {
+    for e in r.as_array().into_iter().flatten() {
+        if multi {
+            let _ = write!(out, "[{}] ", e["s"]);
+        }
+        let _ = write!(
+            out,
+            "{}  {}  {}  {}:{}",
+            str_of(e, "key"),
+            str_of(e, "side"),
+            str_of(e, "framework"),
+            str_of(e, "repo"),
+            e.get("path").and_then(Value::as_str).unwrap_or("(no file)")
+        );
+        if let Some((_, local)) = str_of(e, "id").split_once('#').filter(|(_, l)| !l.is_empty()) {
+            let _ = write!(out, "#{local}");
+        }
+        let _ = writeln!(out, " L{}  ({})", e["line"], e["matches"]);
     }
 }
 

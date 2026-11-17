@@ -3160,5 +3160,6 @@ pub(crate) fn extract(source: &[u8], language: Language, budget: &Budget) -> Res
         imports: x.imports,
         parse_errors,
         line_count: line_count(source),
+        contracts: Vec::new(),
     })
 }

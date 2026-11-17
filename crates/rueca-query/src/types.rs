@@ -247,7 +247,8 @@ pub struct RepositorySummary {
     /// Packages the repository publishes (organization mode).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub packages: Vec<String>,
-    /// Repositories of the organization it depends on (it imports packages they publish).
+    /// Repositories of the organization it depends on (it imports packages they publish, or calls
+    /// contracts they provide).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
     /// Relevance for `query` (0–1, 1 = the best repository).
@@ -260,6 +261,45 @@ pub struct ListRepositoriesResult {
     /// Organization served, if any.
     pub org: Option<String>,
     pub repositories: Vec<RepositorySummary>,
+}
+
+/// One row of a contract table (`list_contracts`): a route, spec operation
+/// or RPC method a symbol provides, or a call to one.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ContractEntry {
+    pub repo: String,
+    /// The ref of the snapshot it comes from.
+    #[serde(rename = "ref")]
+    pub ref_name: String,
+    /// Repository-relative path of the file holding the declaration or call.
+    pub path: Option<String>,
+    /// 1-based line of the declaration or call.
+    pub line: u32,
+    /// Qualified name of the providing / calling symbol (the file for file-level code).
+    pub symbol: String,
+    /// Symbol id of that symbol.
+    pub id: String,
+    pub label: String,
+    /// `http`, `rpc` or `topic`.
+    pub kind: String,
+    /// `provides` or `consumes`.
+    pub side: String,
+    /// Canonical key: `GET /users/{}`, `pkg.Service/Method`, a topic.
+    pub key: String,
+    /// Framework or spec: `flask`, `requests`, `openapi`, `proto`, …
+    pub framework: String,
+    /// The text as written (route, URL expression, `rpc` line).
+    pub raw: String,
+    /// Counterpart rows in the visible repositories: providers matching a consumed key, consumers
+    /// of a provided one.
+    pub matches: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ListContractsResult {
+    pub contracts: Vec<ContractEntry>,
+    pub truncated: bool,
+    pub next_offset: Option<u64>,
 }
 
 /// Converts an `f32` to the `f64` with the same shortest decimal form, so

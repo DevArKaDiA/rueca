@@ -10,6 +10,8 @@
 //! rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
 //! rueca status [--store DIR] [--json]
 //! rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
+//! rueca contracts [--org FILE|NAME | --root PATH] [--repo ID [--ref NAME]] [--side provided|consumed|dangling]
+//!                 [--kind http|rpc|topic] [--query TEXT] [--limit N] [--store DIR] [--json | --text]
 //! ```
 //!
 //! `--store`, `--root`, `--org`, `-v`, `--json` and `--pretty` are global
@@ -25,7 +27,11 @@
 //! PATH --ref NAME` does it for one member of the file (PATH: its path, `id`
 //! or `url`), and `index --org FILE` syncs every member's `refs`. `status`
 //! lists ref snapshots under their repository and each organization's refs;
-//! `links --ref` prints one ref entry's link set. JSON output is compact unless `--pretty`.
+//! `links --ref` prints one ref entry's link set; contract edges are marked
+//! (`via: "contract"`, RFC 0006 phase 4). `contracts` lists the contract
+//! tables (the `list_contracts` tool, every page: `--limit` caps the
+//! entries) of an organization or, with `--root`, of a local root. JSON
+//! output is compact unless `--pretty`.
 //! Logs go to stderr (`-v` debug, `-vv` trace, or `RUECA_LOG=<filter>`).
 //! `query` prints the tool's JSON result to stdout (with `--text`, the
 //! compact text rendering an MCP client gets as text content); on error it
@@ -42,6 +48,8 @@ use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+mod contracts;
 
 use clap::{Parser, Subcommand};
 use rueca_segment::org::OrgGeneration;
@@ -107,7 +115,8 @@ enum Command {
     },
     /// Run one tool and print its JSON result. Same semantics as MCP.
     #[command(
-        after_help = "Tools: search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline, list_repositories\n\
+        after_help = "Tools: search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline, list_repositories, \
+list_contracts\n\
 Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\"}'"
     )]
     Query {
@@ -130,7 +139,8 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
     Status,
     /// List the cross-repository edges of an organization (--org): the link
     /// layer of RFC 0006 (imports of packages published by another
-    /// repository, and the calls, inheritance and references through them).
+    /// repository, and the calls, inheritance and references through them;
+    /// calls to HTTP routes and RPC methods another repository provides).
     Links {
         /// Only edges leaving this repository (id).
         #[arg(long, value_name = "ID")]
@@ -139,6 +149,32 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         /// (its edges into its dependencies' default refs).
         #[arg(long = "ref", value_name = "NAME", requires = "repo")]
         ref_name: Option<String>,
+    },
+    /// List the contracts of an organization (--org) or of a local root
+    /// (--root): HTTP routes, spec operations and RPC methods provided, the
+    /// calls to them, and the calls nothing provides (`--side dangling`).
+    Contracts {
+        /// Only this repository (id or indexed root path).
+        #[arg(long, value_name = "ID")]
+        repo: Option<String>,
+        /// With --repo: read the repository at this ref.
+        #[arg(long = "ref", value_name = "NAME", requires = "repo")]
+        ref_name: Option<String>,
+        /// `provided`, `consumed` or `dangling` (default: provided and consumed).
+        #[arg(long, value_name = "SIDE")]
+        side: Option<String>,
+        /// `http`, `rpc` or `topic`.
+        #[arg(long, value_name = "KIND")]
+        kind: Option<String>,
+        /// Keep entries whose key, raw text or symbol contains this text.
+        #[arg(long, value_name = "TEXT")]
+        query: Option<String>,
+        /// At most this many entries (default: all).
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
+        /// Print the compact text rendering (the default without --json).
+        #[arg(long)]
+        text: bool,
     },
 }
 
@@ -171,6 +207,12 @@ fn main() -> ExitCode {
             }
             None => Err(anyhow::anyhow!("`links` needs --org <file|name>")),
         },
+        Command::Contracts { repo, ref_name, side, kind, query, limit, text } => {
+            let out = Output { json: cli.json && !text, pretty: cli.pretty };
+            let filters = contracts::Filters { repo, ref_name, side, kind, query, limit };
+            let engine = query_engine(&store, cli.root, cli.org.as_deref());
+            engine.and_then(|e| contracts::cmd_contracts(&e, &filters, out.json, out.pretty))
+        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -582,11 +624,16 @@ fn run_query(
     if !rueca_query::TOOL_NAMES.contains(&tool) {
         anyhow::bail!("unknown tool `{tool}` (available: {})", rueca_query::TOOL_NAMES.join(", "));
     }
-    let engine = match org {
-        Some(o) => rueca_query::Engine::for_org(store.to_path_buf(), &org_arg(o)?.0)?,
-        None => rueca_query::Engine::new(store.to_path_buf(), default_root(store, root))?,
-    };
-    engine.respond(tool, args)
+    query_engine(store, root, org)?.respond(tool, args)
+}
+
+/// The engine of `query` and `contracts`: the organization `org` (a file or
+/// a built name), else the default root.
+fn query_engine(store: &Path, root: Option<PathBuf>, org: Option<&str>) -> anyhow::Result<rueca_query::Engine> {
+    match org {
+        Some(o) => rueca_query::Engine::for_org(store.to_path_buf(), &org_arg(o)?.0),
+        None => rueca_query::Engine::new(store.to_path_buf(), default_root(store, root)),
+    }
 }
 
 fn render(v: &Value, pretty: bool) -> String {
@@ -646,8 +693,12 @@ fn cmd_links(store: &Path, org: &str, cmd: LinksCmd<'_>, out: Output) -> anyhow:
         return Ok(());
     }
     for e in &edges {
+        let via = match e["via"].as_str() {
+            Some("contract") => format!("  [contract {}]", e["key"].as_str().unwrap_or_default()),
+            _ => String::new(),
+        };
         println!(
-            "{} {}  →  {} {}  {} {} {}",
+            "{} {}  →  {} {}  {} {} {}{via}",
             e["src_repo"].as_str().unwrap_or_default(),
             e["src"].as_str().unwrap_or_default(),
             e["dst_repo"].as_str().unwrap_or_default(),
@@ -678,38 +729,77 @@ fn link_rows(
             segs.insert(s, st.open_segment(&e.segment_id)?);
         }
     }
-    let label = |s: OrgSlot| match s.ref_idx {
-        None => g.repos[s.repo].repo.clone(),
-        Some(_) => format!("{}@{}", g.repos[s.repo].repo, g.ref_name(s).unwrap_or_default()),
-    };
-    let path_of =
-        |seg: &rueca_segment::Segment, n: u32| -> Option<String> { seg.node(n).file.map(|f| seg.file(f).path.clone()) };
+    let rows = LinkRows { g, segs: &segs };
     let mut edges = Vec::new();
     for &at in slots {
-        let seg = &segs[&at];
-        for n in 0..seg.nodes().len() as u32 {
+        for n in 0..segs[&at].nodes().len() as u32 {
             for e in idx.link_edges(at, n, LinkDir::Out, None, &all, view)? {
-                let dst = &segs[&e.slot];
-                edges.push(json!({
-                    "consumer": label(e.evidence),
-                    "src_repo": label(at),
-                    "src": seg.node(n).qualified_name,
-                    "src_label": seg.node(n).label.as_str(),
-                    "src_path": path_of(seg, n),
-                    "dst_repo": label(e.slot),
-                    "dst": dst.node(e.node).qualified_name,
-                    "dst_label": dst.node(e.node).label.as_str(),
-                    "dst_path": path_of(dst, e.node),
-                    "kind": e.kind.as_str(),
-                    "strategy": e.meta.strategy.as_str(),
-                    "confidence": e.meta.confidence,
-                    "path": e.meta.evidence.map(|(f, _)| segs[&e.evidence].file(f).path.clone()),
-                    "line": e.meta.evidence.map(|(_, s)| s.start_line + 1),
-                }));
+                edges.push(rows.row(at, n, &e));
             }
         }
     }
     Ok(edges)
+}
+
+/// What a `rueca links` row reads: the generation and every entry's
+/// segment.
+struct LinkRows<'a> {
+    g: &'a OrgGeneration,
+    segs: &'a std::collections::HashMap<rueca_segment::org::OrgSlot, rueca_segment::Segment>,
+}
+
+impl LinkRows<'_> {
+    /// `repo`, or `repo@ref` for a ref entry.
+    fn label(&self, s: rueca_segment::org::OrgSlot) -> String {
+        match s.ref_idx {
+            None => self.g.repos[s.repo].repo.clone(),
+            Some(_) => format!("{}@{}", self.g.repos[s.repo].repo, self.g.ref_name(s).unwrap_or_default()),
+        }
+    }
+
+    /// The JSON row of link edge `e` leaving node `n` of entry `at`.
+    fn row(&self, at: rueca_segment::org::OrgSlot, n: u32, e: &rueca_segment::org::LinkRef) -> Value {
+        let path_of = |seg: &rueca_segment::Segment, n: u32| seg.node(n).file.map(|f| seg.file(f).path.clone());
+        let (seg, dst, ev) = (&self.segs[&at], &self.segs[&e.slot], &self.segs[&e.evidence]);
+        let contract = e.meta.strategy.as_str() == "contract";
+        let mut row = json!({
+            "consumer": self.label(e.evidence),
+            "src_repo": self.label(at),
+            "src": seg.node(n).qualified_name,
+            "src_label": seg.node(n).label.as_str(),
+            "src_path": path_of(seg, n),
+            "dst_repo": self.label(e.slot),
+            "dst": dst.node(e.node).qualified_name,
+            "dst_name": dst.node(e.node).name,
+            "dst_label": dst.node(e.node).label.as_str(),
+            "dst_path": path_of(dst, e.node),
+            "kind": e.kind.as_str(),
+            "strategy": e.meta.strategy.as_str(),
+            "confidence": shortest(e.meta.confidence),
+            "path": e.meta.evidence.map(|(f, _)| ev.file(f).path.clone()),
+            "line": e.meta.evidence.map(|(_, s)| s.start_line + 1),
+            "via": if contract { "contract" } else { "package" },
+        });
+        if let Some(k) = contract.then(|| contract_key(ev, n, e)).flatten() {
+            row["key"] = json!(k);
+        }
+        row
+    }
+}
+
+/// `x` as the `f64` with its shortest decimal form (`0.9`, not
+/// `0.8999999761581421`).
+fn shortest(x: f32) -> f64 {
+    format!("{x}").parse().unwrap_or(f64::from(x))
+}
+
+/// The contract key of contract link edge `e` leaving node `node`: its
+/// consumer row's (the row of `consumer` on that node at the edge's
+/// evidence).
+fn contract_key(consumer: &rueca_segment::Segment, node: u32, e: &rueca_segment::org::LinkRef) -> Option<String> {
+    let (file, span) = e.meta.evidence?;
+    let rows = consumer.contracts_of(node);
+    rows.iter().find(|r| r.file == file && r.span == span).map(|r| r.key.clone())
 }
 
 /// The `status` row of an indexed root (its segment's counts, or the error

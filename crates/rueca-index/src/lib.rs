@@ -70,6 +70,7 @@ use rueca_resolve::FileInput;
 use rueca_segment::{ContentSource, SegmentMeta, Store};
 use tracing::{debug, info, warn};
 
+mod contract_link;
 mod git;
 #[cfg(test)]
 mod golden;
@@ -166,6 +167,7 @@ pub fn default_registry() -> Registry {
     r.register(Box::new(rueca_lang_cpp::CppPack::default()));
     r.register(Box::new(rueca_lang_go::GoPack::default()));
     r.register(Box::new(rueca_lang_rust::RustPack::default()));
+    r.register(Box::new(rueca_lang_proto::ProtoPack));
     r.register(Box::new(rueca_lang_data::DataPack));
     r
 }

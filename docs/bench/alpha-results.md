@@ -17,6 +17,7 @@ Floors and targets are RFC 0004 §6, read from `bench/manifest.toml` `[scorecard
 | cpp | `stable` | — |
 | rust | `stable` | — |
 | configuration | `stable` | — |
+| cross-service edges (S2) | `stable` | — |
 
 ### python — `stable`
 
@@ -1008,6 +1009,38 @@ RFC 0006 §8 cross-repository edges (packages), imports and uses pooled (floor �
 | Rust alone | 4 | 94.5 (92.7–95.9) (723/765) | ✅ | 53.2 (48.9–57.4) (278/523) | ❌ |
 
 Rust gaps (findings about Rueca, not labeler noise): attribute macros (`#[tokio::main]`, `#[tokio::test]`) are uses the link layer does not record — a large share of the axum → tokio uses it misses; bodies of macro invocations are not extracted, so uses inside them are invisible; and cross-repository method resolution by type name can pick a same-named type of another crate (the wrong tokio → mio edges).
+
+### Cross-service edges (S2, contracts)
+
+Public services pinned with their clients, each group one organization (`rueca index --org`); contract edges from `rueca links --org` (`strategy: contract`). Gold from independent labelers (`contracts.py`, `contracts_gold/`): HTTP client calls, gin / echo / actix routes, OpenAPI operations, `.proto` rpcs, gRPC stubs and servers (Go, Python, Rust), keys canonicalized like `rueca_model::contract`; cross-repository pairs only; tests and generated stubs out of scope. Precision / recall pooled over the gated groups, bootstrap intervals over source files.
+
+| Group | Split | Repositories | Gold pairs | Contract edges | Dangling (Rueca / labelers) | Index s | Link ms |
+|---|---|---|---|---:|---:|---:|---:|
+| ollama | gated | ollama/ollama `b8db8d5b5c`, ollama/ollama-python `35d9667e84`, ollama/ollama-js `c276d078ee` | http-code 30, http-spec 26 | 98 | 32 / 11 | 4.1 | 214 |
+| qdrant | gated | qdrant/qdrant `23065a0bf6`, qdrant/qdrant-client `1b5bb8589e` | http-code 69, rpc-code 144, rpc-spec-client 87 | 2555 | 11 / 0 | 15.1 | 2767 |
+| dapr | gated | dapr/dapr `2707e0a96c`, dapr/python-sdk `6bc75f1294`, dapr/go-sdk `012f725a57` | rpc-code 133, rpc-spec-client 119, rpc-spec-server 20 | 474 | 185 / 10 | 7.4 | 1144 |
+| weaviate | gated | weaviate/weaviate `a33c0ef138`, weaviate/weaviate-python-client `2ec127a3af` | http-spec 84, rpc-code 6, rpc-spec-client 6 | 166 | 136 / 12 | 13.5 | 1072 |
+| openai | diagnostic | openai/openai-openapi `7a212a7e95`, openai/openai-python `311924f055` | http-spec 804 | 0 | 1157 / 37 | 3.1 | — |
+
+| Kind | Gold | Predicted | Precision (95% CI) | Recall (95% CI) | Floor P / R | Target P / R | Status P / R |
+|---|---:|---:|---|---|---|---|---|
+| http-code | 99 | 118 | 98.3 (96.1–100.0) (116/118) | 98.0 (95.8–100.0) (97/99) | ≥ 90 / 75 | ≥ 97 / 90 | ✅ / ✅ |
+| http-spec | 110 | 131 | 100.0 (100.0–100.0) (131/131) | 100.0 (100.0–100.0) (110/110) | ≥ 90 / 75 | ≥ 97 / 90 | ✅ / ✅ |
+| rpc-spec-client | 212 | 228 | 96.1 (89.1–99.6) (219/228) | 100.0 (100.0–100.0) (212/212) | ≥ 90 / 75 | ≥ 97 / 90 | ⚠ / ✅ |
+| rpc-spec-server | 20 | 18 | 100.0 (100.0–100.0) (18/18) | 90.0 (81.8–100.0) (18/20) | ≥ 90 / 75 | ≥ 97 / 90 | ✅ / ✅ |
+| rpc-code | 283 | 290 | 95.5 (84.8–100.0) (277/290) | 95.4 (89.0–99.0) (270/283) | ≥ 90 / 75 | ≥ 97 / 90 | ⚠ / ✅ |
+| **all** | 724 | 785 | 96.9 (93.8–99.2) (761/785) | 97.7 (95.6–99.2) (707/724) | ≥ 90 / 75 | ≥ 97 / 90 | ✅ / ✅ |
+
+At confidence ≥ 0.7 (not gated: what an agent that drops ambiguous 0.5 edges keeps):
+
+| Kind | Predicted | Precision (95% CI) | Recall (95% CI) |
+|---|---:|---|---|
+| http-code | 104 | 98.1 (95.2–100.0) (102/104) | 91.9 (83.2–100.0) (91/99) |
+| http-spec | 131 | 100.0 (100.0–100.0) (131/131) | 100.0 (100.0–100.0) (110/110) |
+| rpc-spec-client | 124 | 100.0 (100.0–100.0) (124/124) | 56.1 (24.5–97.0) (119/212) |
+| rpc-spec-server | 18 | 100.0 (100.0–100.0) (18/18) | 90.0 (81.8–100.0) (18/20) |
+| rpc-code | 156 | 94.2 (79.5–100.0) (147/156) | 50.2 (31.9–83.7) (142/283) |
+| **all** | 533 | 97.9 (94.2–100.0) (522/533) | 66.3 (50.6–86.1) (480/724) |
 
 ### Multi-ref (one repository at two commits)
 

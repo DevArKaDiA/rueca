@@ -1,9 +1,14 @@
 # Golden MCP transcripts
 
-What the `rmcp`-based server (`rmcp` 3.10.0, Rueca at commit `c820290`,
-`rueca 0.1.0-alpha.2`) writes on stdout for scripted client input. They are
-the reference a replacement of the MCP layer must reproduce byte for byte
-(`recv_raw`), except where a difference is decided on purpose.
+What Rueca's own MCP layer (`rueca 0.1.0-alpha.2`, the eight tools of
+RFC 0006 phase 4 with `list_contracts`) writes on stdout for scripted
+client input: the reference every change of the layer must reproduce byte
+for byte (`recv_raw`). They were first recorded from the `rmcp`-based
+server (`rmcp` 3.10.0, commit `c820290`) and replayed with the differences
+of [`docs/mcp-protocol.md`](../../../../docs/mcp-protocol.md) §9 spelled
+out in the test; the capture of the own layer made those differences part
+of the files (the server now exits 0 at end of input in every session,
+malformed `tools/call` params get -32602) and dropped the overrides.
 
 The server is `rueca mcp --store <fresh tmp> --root <tmp>/golden-repo`, run on
 a copy of [`../fixtures/golden-repo`](../fixtures/golden-repo) (Python,
@@ -16,15 +21,14 @@ TypeScript, Markdown; 55 lines), indexed by the server itself on start-up
 | `legacy-2025-11-25.json`, `legacy-2025-03-26.json`, `legacy-2024-11-05.json` | 1 | 4 | `initialize` at that version, `tools/list`, one `tools/call` |
 | `initialize-unknown-version.json` | 3 | 6 | `initialize` naming 1999-01-01, 2026-07-28 and 2030-01-01 (answered with 2025-11-25) |
 | `stateless-2026-07-28.json` | 1 | 16 | no `initialize`: `server/discover` and per-request `_meta`; errors for missing `_meta`, unsupported version, `ping` in the stateless lifecycle |
-| `pre-init.json` | 7 | 27 | messages before any lifecycle: requests without `_meta`, a notification or a response as the first message (the server exits 1), invalid lines, stateless bootstrap errors |
+| `pre-init.json` | 7 | 27 | messages before any lifecycle: requests without `_meta`, a notification or a response as the first message (ignored; the server stays up), invalid lines, stateless bootstrap errors |
 | `framing.json` | 1 | 22 | malformed JSON, a batch array, empty and whitespace lines, a JSON string, a client response, `jsonrpc` 1.0, no `jsonrpc`, an extra member, a fractional id, CRLF; a `ping` after each |
 | `shutdown.json` | 4 | 5 | stdin closed after `initialize`, after `server/discover`, before any message, after a `ping` only |
 
-`../golden.rs` replays every session against Rueca's own MCP layer (in
-process, over pipes) and compares every line byte for byte. The differences
-decided on purpose ([`docs/mcp-protocol.md`](../../../../docs/mcp-protocol.md)
-§9) are spelled out there (`OVERRIDES`, `EXIT_1_IN_RMCP`); these files stay
-as rmcp wrote them.
+`../golden.rs` replays every session against the layer (in process, over
+pipes) and compares every line byte for byte, with no override: a change
+of the protocol, the instructions or the tool list is re-captured on
+purpose (below) and reviewed in the diff.
 
 ## Format
 

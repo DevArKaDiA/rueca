@@ -5,11 +5,12 @@
 use std::collections::HashMap;
 
 use rueca_model::{
-    EdgeKind, EdgeMeta, FileEntry, Label, Language, Node, ResolvedGraph, SnapshotInfo, Span, Strategy, git_blob_sha,
+    ContractKind, ContractRow, ContractSide, EdgeKind, EdgeMeta, FileEntry, Label, Language, Node, ResolvedGraph,
+    SnapshotInfo, Span, Strategy, git_blob_sha,
 };
 use rueca_segment::org::{
-    self, LinkDir, LinkEdge, LinkInput, OrgIndex, OrgLinker, OrgMember, OrgScope, OrgSelection, OrgSlot, Package,
-    RepoDeps,
+    self, ContractKey, LinkDir, LinkEdge, LinkInput, OrgIndex, OrgLinker, OrgMember, OrgScope, OrgSelection, OrgSlot,
+    Package, RepoDeps,
 };
 use rueca_segment::{ContentSource, Segment, Store, SymbolQuery, search_symbols_merged, write_segment};
 
@@ -38,6 +39,7 @@ fn graph(repo: &str, commit: &str, root: &str, files: &[(&str, &str)]) -> (Resol
         edges: vec![],
         files: vec![],
         modules: vec![],
+        contracts: vec![],
     };
     let mut mem = HashMap::new();
     for (path, src) in files {
@@ -547,4 +549,160 @@ fn ref_entries_selection_and_remapped_link_edges() {
     // The replaced keep entry's link file is not one (payments has none),
     // but billing@feat's link file is still named and kept.
     assert!(dir.join("links").join(feat_links.file.unwrap()).exists());
+}
+
+/// A linker that knows contracts only: keys from the segment's contract
+/// table, one edge per consumer row to the first matching provider row of
+/// a dependency. Records which consumers it links.
+struct ContractStub(std::sync::Mutex<Vec<String>>);
+
+impl OrgLinker for ContractStub {
+    fn version(&self) -> u32 {
+        7
+    }
+    fn analyze(&self, _: &Store, seg: &Segment) -> rueca_segment::Result<RepoDeps> {
+        Ok(RepoDeps { contracts: ContractKey::of_rows(seg.contracts()), ..Default::default() })
+    }
+    fn link(
+        &self,
+        _: &Store,
+        consumer: &LinkInput<'_>,
+        deps: &[LinkInput<'_>],
+    ) -> rueca_segment::Result<Vec<LinkEdge>> {
+        self.0.lock().unwrap().push(consumer.repo.repo.clone());
+        let mut out = Vec::new();
+        for c in consumer.segment.contracts().iter().filter(|r| r.side == ContractSide::Consumes) {
+            for (k, d) in deps.iter().enumerate() {
+                let hit = d.segment.contracts().iter().find(|p| {
+                    p.side == ContractSide::Provides
+                        && rueca_model::contract::match_keys(c.kind, &p.key, &c.key).is_some()
+                });
+                if let Some(p) = hit {
+                    let meta =
+                        EdgeMeta { confidence: 0.9, strategy: Strategy::Contract, evidence: Some((c.file, c.span)) };
+                    out.push(LinkEdge {
+                        src: c.node,
+                        dep: k as u32,
+                        dst: p.node,
+                        kind: EdgeKind::Calls,
+                        meta,
+                        reversed: false,
+                    });
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// `files` as a graph with contract rows `(qualified name, side, key)` on
+/// those functions.
+fn contract_graph(
+    repo: &str,
+    commit: &str,
+    root: &str,
+    files: &[(&str, &str)],
+    rows: &[(&str, ContractSide, &str)],
+) -> (ResolvedGraph, Mem) {
+    let (mut g, mem) = graph(repo, commit, root, files);
+    for &(qn, side, key) in rows {
+        let node = g.nodes.iter().position(|n| n.qualified_name == qn).unwrap() as u32;
+        let file = g.nodes[node as usize].file.unwrap();
+        g.contracts.push(ContractRow {
+            node,
+            side,
+            kind: ContractKind::Http,
+            key: key.into(),
+            raw: key.into(),
+            file,
+            span: g.nodes[node as usize].span.unwrap(),
+            framework: if side == ContractSide::Provides { "flask".into() } else { "requests".into() },
+        });
+    }
+    g.validate().unwrap();
+    (g, mem)
+}
+
+#[test]
+fn contract_dependencies_link_and_recompute() {
+    let o = org3();
+    let index = |i: usize, repo: &str, commit: &str, files: &[(&str, &str)], rows: &[(&str, ContractSide, &str)]| {
+        let (g, mem) = contract_graph(repo, commit, o.root(i), files, rows);
+        let meta = write_segment(&g, &mem, &o.store.dir).unwrap();
+        o.store.register(o.root(i), &meta).unwrap();
+    };
+    // billing calls payments' `GET /charges/{}` route; shipping provides an
+    // unrelated route. No packages anywhere.
+    index(
+        0,
+        "acme/billing",
+        "c1",
+        BILLING,
+        &[("billing.invoice.issue_invoice", ContractSide::Consumes, "GET /charges/42")],
+    );
+    index(
+        1,
+        "acme/payments",
+        "c2",
+        PAYMENTS,
+        &[("payments.charge.charge_card", ContractSide::Provides, "GET /charges/{}")],
+    );
+    index(
+        2,
+        "acme/shipping",
+        "c3",
+        SHIPPING,
+        &[("shipping.label.print_label", ContractSide::Provides, "GET /labels/{}")],
+    );
+    let linker = ContractStub(Default::default());
+    let up = org::update_org_with(&o.store, "acme", &o.members(&[0, 1, 2]), &linker).unwrap();
+    assert_eq!(up.linked, [("acme/billing".to_string(), 1)]);
+    let idx = OrgIndex::open(&o.store.dir, "acme").unwrap();
+    let g = idx.generation();
+    let deps: Vec<&str> = g.repos[0].default.links.as_ref().unwrap().deps.iter().map(|d| d.repo.as_str()).collect();
+    assert_eq!(deps, ["acme/payments"], "depends through the contract only");
+    assert!(g.repos[1].default.links.is_none() && g.repos[2].default.links.is_none());
+    let keys = &idx.profile(0).unwrap().deps.contracts;
+    assert_eq!((keys.len(), keys[0].side, keys[0].key.as_str()), (1, ContractSide::Consumes, "GET /charges/42"));
+    let segs = o.segments(&idx);
+    let src = segs[0].nodes_by_qualified_name("billing.invoice.issue_invoice")[0];
+    let e =
+        idx.link_edges(OrgSlot::default_of(0), src, LinkDir::Out, None, &[0, 1, 2], &OrgSelection::default()).unwrap();
+    assert_eq!(e.len(), 1);
+    assert_eq!(
+        (e[0].repo, qn(&segs[1], e[0].node), e[0].meta.strategy),
+        (1, "payments.charge.charge_card", Strategy::Contract)
+    );
+
+    // Re-indexing the provider re-links its consumer only; re-indexing the
+    // unrelated provider links nothing.
+    linker.0.lock().unwrap().clear();
+    let mut payments = PAYMENTS.to_vec();
+    payments.push(("payments/aaa.py", "def audit(x):\n    return x\n"));
+    index(
+        1,
+        "acme/payments",
+        "c2b",
+        &payments,
+        &[("payments.charge.charge_card", ContractSide::Provides, "GET /charges/{}")],
+    );
+    let up = org::update_org_with(&o.store, "acme", &o.members(&[0, 1, 2]), &linker).unwrap();
+    assert_eq!(up.linked, [("acme/billing".to_string(), 1)]);
+    assert_eq!(*linker.0.lock().unwrap(), ["acme/billing"]);
+    linker.0.lock().unwrap().clear();
+    index(
+        2,
+        "acme/shipping",
+        "c3b",
+        SHIPPING,
+        &[("shipping.label.print_label", ContractSide::Provides, "GET /labels/{}")],
+    );
+    let up = org::update_org_with(&o.store, "acme", &o.members(&[0, 1, 2]), &linker).unwrap();
+    assert!(up.linked.is_empty() && linker.0.lock().unwrap().is_empty(), "{:?}", up.linked);
+    // The provider drops the route: the consumer no longer depends on it.
+    index(1, "acme/payments", "c2c", PAYMENTS, &[]);
+    let up = org::update_org_with(&o.store, "acme", &o.members(&[0, 1, 2]), &linker).unwrap();
+    assert!(up.linked.is_empty(), "{:?}", up.linked);
+    let g = org::current_generation(&o.store.dir, "acme").unwrap().unwrap();
+    assert!(g.repos[0].default.links.is_none());
 }

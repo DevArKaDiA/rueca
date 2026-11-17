@@ -472,6 +472,69 @@ fn openapi_and_json_schema() {
 }
 
 #[test]
+fn large_sorted_swagger_keeps_its_operations() {
+    // A JSON emitter that sorts keys: `definitions` (past the key cap)
+    // before `paths`, `swagger` near the end, the file above the data-file
+    // budget. The operations still become routes with contract hints.
+    let defs: Vec<String> =
+        (0..MAX_KEYS + 500).map(|i| format!("\"D{i}\": {{\"description\": \"{}\"}}", "x".repeat(40))).collect();
+    let spec = format!(
+        "{{\"basePath\": \"/v1\", \"definitions\": {{{}}}, \"paths\": {{\"/aliases/{{aliasName}}\": {{\"delete\": {{\"operationId\": \"aliases.delete\"}}, \"get\": {{}}}}}}, \"swagger\": \"2.0\"}}",
+        defs.join(", ")
+    );
+    assert!(spec.len() > MAX_DATA_FILE_BYTES && !spec[..4096].contains("swagger"));
+    let f = run("openapi-specs/schema.json", &spec);
+    let routes: Vec<&str> =
+        f.definitions.iter().filter(|d| d.label == Label::Route).map(|d| d.qualified_name.as_str()).collect();
+    assert_eq!(routes, ["paths./aliases/{aliasName}.delete", "paths./aliases/{aliasName}.get"]);
+    let keys: Vec<&str> = f.contracts.iter().map(|h| h.key.as_str()).collect();
+    assert_eq!(keys, ["DELETE /aliases/{}", "GET /aliases/{}"]);
+    // The version key must be a key: a mention in a value is not one.
+    let mention = format!("{{\"items\": \"{}\", \"note\": \"swagger\"}}", "x".repeat(MAX_DATA_FILE_BYTES));
+    assert_eq!(skipped("data/big.json", mention.as_bytes()), "data-size");
+}
+
+#[test]
+fn openapi_contract_hints() {
+    use rueca_model::{ContractKind, ContractSide};
+    let f = fixture("api/openapi.yaml");
+    let route = f.definitions.iter().position(|d| d.qualified_name == "paths./users/{id}.get").unwrap() as u32;
+    assert_eq!(f.contracts.len(), 1, "{:?}", f.contracts);
+    let h = &f.contracts[0];
+    assert_eq!((h.side, h.kind), (ContractSide::Provides, ContractKind::Http));
+    assert_eq!(h.key, "GET /users/{}");
+    assert_eq!(h.raw, "GET /users/{id} (getUser)");
+    assert_eq!(h.framework, "openapi");
+    assert_eq!(h.owner, Some(route));
+    assert_eq!(h.span, f.definitions[route as usize].span);
+    // JSON, several methods per path, a Flask-style parameter, a non-method
+    // key (`parameters`) and a non-OpenAPI file.
+    let f = run(
+        "api/spec.json",
+        r#"{"swagger": "2.0", "paths": {
+            "/orders/{orderId}/items": {"parameters": [], "get": {"responses": {}}, "post": {"operationId": "addItem"}},
+            "/health/": {"head": {}}
+        }}"#,
+    );
+    let keys: Vec<(&str, &str)> = f.contracts.iter().map(|h| (h.key.as_str(), h.raw.as_str())).collect();
+    assert_eq!(
+        keys,
+        [
+            ("GET /orders/{}/items", "GET /orders/{orderId}/items"),
+            ("POST /orders/{}/items", "POST /orders/{orderId}/items (addItem)"),
+            ("HEAD /health", "HEAD /health/"),
+        ]
+    );
+    for h in &f.contracts {
+        let d = &f.definitions[h.owner.unwrap() as usize];
+        assert_eq!(d.label, Label::Route);
+        assert_eq!(h.span, d.span);
+    }
+    assert!(run("api/spec.json", "{}").contracts.is_empty());
+    assert!(run("k8s/x.yaml", "paths:\n  /a:\n    get: {}\n").contracts.is_empty());
+}
+
+#[test]
 fn spring_config() {
     let f = fixture("src/main/resources/application.yml");
     // Dotted YAML keys are split like `.properties` keys.

@@ -1,6 +1,6 @@
 # RFC 0006 — The organization graph
 
-- Status: Draft; phases 1–3 (§9) are implemented
+- Status: Draft; phases 1–4 (§9) are implemented
 - Created: 2026-10-26
 - Depends on: RFC 0001 (§8 storage, §10 org linker, §11 query engine,
   §13 permissions), RFC 0005 (responses, `repo` / `ref`)
@@ -101,13 +101,22 @@ Cross-repository edges, stored as edges between pinned symbol ids (or
    through the normal strategy ladder, `CALLS` / `INHERITS` / … edges into A.
    These edges carry the strategy and confidence they would have inside one
    repository, plus the evidence.
-2. **Contracts (later).** HTTP routes, RPC methods, topics, env vars and
+2. **Contracts.** HTTP routes, RPC methods, topics, env vars and
    config keys (RFC 0001 §9.4, RFC 0003 §7) matched across repositories: the
-   original org linker, now one producer of the link layer.
+   original org linker, now one producer of the link layer. Implemented
+   (§9.4) for HTTP routes and calls, OpenAPI operations and protobuf /
+   gRPC services (topics: Kafka clients in Python only): every segment
+   keeps a contract table of canonical keys; a repository that calls a key
+   another one provides, or whose server code implements a spec another
+   one publishes, depends on it, and the `CALLS` / `IMPLEMENTS` edges
+   between them (strategy `contract`) go into the same link sets as the
+   package edges. Env vars and config keys stay within one repository (the
+   code ↔ config bridge).
 
 The link layer is recomputed only for repositories whose snapshot changed
 and for their reverse dependencies (repositories that import a package
-they publish), kept in the org catalog.
+they publish, or call or implement a contract they provide), kept in the
+org catalog.
 
 ### 3.4 Organization catalog and generations
 
@@ -161,6 +170,9 @@ visible.
 - A new tool, **`list_repositories`** (RFC 0001 §11.4), lists the
   organization's repositories, their default refs, indexed refs and
   languages, so an agent can narrow the scope when it wants to.
+- Phase 4 adds **`list_contracts`** (RFC 0001 §11.4): the routes, spec
+  operations and RPC methods the selected repositories provide, the calls
+  they make, and the calls no visible repository provides (§9.4).
 
 RFC 0005 §5's rank fusion across repositories is removed; a single ranking
 comes from the organization index. Rank fusion remains only where scores
@@ -241,7 +253,7 @@ alone.
    RFC 0005 §6.
 4. **Contracts** in the link layer (the original org linker; suite S2).
 
-Phases 1–3 are implemented (§9.1–§9.3); phase 4 is next.
+Phases 1–4 are implemented (§9.1–§9.4).
 
 ### 9.1 Phase 1 — implemented
 
@@ -708,11 +720,228 @@ new default segments, which replaces every default entry and re-links
 every consumer ref (1.7 s of organization layer for two repositories and
 five refs).
 
+### 9.4 Phase 4 — implemented
+
+Contracts landed in `rueca-model` (`contract`: hints, canonical keys,
+matchers), a new pack `rueca-lang-proto`, a `contracts` module in every
+code pack, `rueca-lang-data` (OpenAPI operations provide), `rueca-resolve`
+(`contracts`: the table and the edges inside one snapshot),
+`rueca-segment` (the `contracts` component; `org::link`: `ContractKey`),
+`rueca-index` (`contract_link`), `rueca-query` (`list_contracts`) and the
+CLI (`rueca contracts`, contract edges in `rueca links`). What was built:
+
+- **Contract hints are facts**, as RFC 0001 §6.4 planned. A pack emits a
+  `ContractHint { side, kind, key, raw, span, owner, framework }` per route
+  declaration, spec operation or call site: `side` `Provides` /
+  `Consumes`, `kind` `Http` / `Rpc` / `Topic`, `key` the canonical key,
+  `raw` the text as written (≤ 200 characters, the evidence), `owner` the
+  handler, `Route` or `RpcMethod` of a provider and the enclosing
+  definition of a consumer (none: file level), `framework` a short name
+  (`flask`, `requests`, `openapi`, `proto`, `grpc-go`, …).
+  `FileFacts.contracts` is appended last; `FACTS_FORMAT` 2 → 3 invalidates
+  every facts-cache entry once, and every pack that emits hints bumped its
+  extractor version.
+- **Canonical keys** (`rueca_model::contract`, pure functions). HTTP:
+  `METHOD /path`, the method upper-cased, `*` when it is unknown, not a
+  literal or not an HTTP method. The scheme, host and port of an absolute
+  URL are dropped, and so is anything before the first `/` that looks like
+  a base URL (an interpolation, or text with `.` or `:`: `${host}/api/x` →
+  `/api/x`; `f"{base}/x"` and `localhost:8080/x` → `/x`), so a client's
+  base URL never becomes a segment; the query string, fragment, empty segments and a
+  trailing `/` are dropped. Every parameter segment becomes `{}`: `:id`,
+  `{id}`, `<id>`, `<int:id>`, `[id]`, `${x}`, `%s` / `%d`, `*` / `**`,
+  a concatenation or interpolation gap, and a segment only partly a
+  parameter (`sha256:{digest}`). Literal segments stay literal (`GET
+  /users/42`), keys are case-sensitive, and a path made only of gaps has
+  no key. RPC: `pkg.Service/Method` from `.proto`; code that does not know
+  the package writes `Service/Method`, and code that knows only the method
+  writes `*/Method` (a Go unary server method taking `*pb.<Method>Request`,
+  a call through a client field typed in another file). Topic: the name.
+- **Matching** (`match_keys`, `best_matches`, shared by the resolver, the
+  linker and `list_contracts`): exact (the same key; `{}` against `{}` is
+  exact) > template (a provider `{}` segment stands for a literal consumer
+  segment; for RPC, a key without a package on either side) > method
+  wildcard (either HTTP method `*`, either RPC service `*`). Segment counts
+  must be equal and a consumer's `{}` never matches a provider's literal
+  segment (`GET /users/{}` does not reach `GET /users/me`). Confidence 0.9 /
+  0.85 / 0.7; when several distinct providers share the best quality, 0.5
+  each (`AMBIGUOUS_CONFIDENCE`). Providers are bucketed by kind and shape
+  (HTTP: segment count; RPC: method name; topic: the name), so a call is
+  compared with one bucket, not with every provider.
+- **The segment contract table.** Every hint is a row `(node, side, kind,
+  key, raw, file, span, framework)` on its owner's node, else the file
+  node, stored in an optional bundle component `contracts` (written when
+  there are rows; an older segment reads as an empty table; the segment
+  format stays 2). The linker and `list_contracts` read the table; nothing
+  parses files again.
+- **Edges inside one snapshot** (`rueca-resolve` `contracts`, like the
+  bridge of RFC 0003 §7): consumer → code provider (the handler) `CALLS`,
+  consumer → spec provider (an OpenAPI `Route`, a `.proto` `RpcMethod`)
+  `CALLS`, code provider → spec provider with a matching key `IMPLEMENTS`;
+  all `Strategy::Contract`, with the consumer's span as evidence (the
+  handler's hint for `IMPLEMENTS`). Code and spec providers are matched
+  separately, so a call that reaches a handler and the operation it
+  implements is not ambiguous; spec-to-spec and code-to-code providers
+  never link, a node never links to itself, and a consumer that matches
+  nothing gets no edge and stays in the table.
+- **Specifications.** OpenAPI 3 and Swagger 2 operations
+  (`paths.<path>.<method>`) were already `Route` nodes named `GET
+  /users/{id}`; each also provides its key now (framework `openapi`).
+  `.proto` files are a language of their own (`Language::Proto`, not a
+  data file kind), read by `rueca-lang-proto` over
+  `protox-parse` 0.10 — pure Rust, no `protoc`, MIT OR Apache-2.0; types
+  are not resolved and imported files are not read: `service` →
+  `Interface` `pkg.Service`, `rpc` → `RpcMethod` `pkg.Service.Method` with
+  signature `rpc Method(Req) returns (Resp)`, messages → `Struct` with
+  `Field`s, enums → `Enum` with `Constant`s, `import` → `IMPORTS`. Every
+  `rpc` provides `pkg.Service/Method` (framework `proto`).
+- **What the packs recognize**, from file-local evidence (the router,
+  client or stub module the file imports or binds; prefixes composed when
+  the file builds them):
+
+  | Language | HTTP providers | HTTP consumers | gRPC (framework); topics |
+  |---|---|---|---|
+  | Python | Flask, Quart, FastAPI, aiohttp, Sanic, Litestar decorators (with a `Blueprint` / `APIRouter` prefix of the file); `add_url_rule`; Django `path()` / `re_path()` / `url()` (method `*`); aiohttp `add_get` / `add_route` / `web.get`; Starlette `Route` | calls whose callee is an HTTP verb (`get`, `_post`, `get_api_list`) or `request` / `_request` / `urlopen` with a path-like argument; method from the callee, a literal argument or `method=` | `x.Method` on a name bound to `<mod>.XStub` consumes, the PascalCase methods of an `XServicer` subclass provide (`grpc-python`); Kafka topics (kafka-python, aiokafka) |
+  | TS / JS | express, koa-router, fastify, hono, restify, hapi routes in a file importing the framework (or on `app` / `router` / `server` with an inline handler); `app.route("/x").get(h)`; NestJS `@Controller` + `@Get` | `fetch`, axios, got and other clients, verb wrappers and `request` with a path-like argument; the one-hop wrapper rule | `new GreeterClient(…)` calls consume, `server.addService(GreeterService, {…})` provides (`grpc-node`) |
+  | PHP | Laravel `Route::` (chained, `match`, `any`, `resource`, `prefix` / `group` closures); Symfony `#[Route]` (class prefix); Slim / Lumen `$app->get` | Guzzle-style `->get('/x')` / `->request('POST', …)`, the `Http::` facade, `CURLOPT_URL` | — |
+  | Go | `net/http` `HandleFunc` / `Handle("GET /x")`, gin, echo, chi, gorilla/mux, fiber (group, sub-router and `Route` prefixes of the file) | `net/http`, resty, SDK wrappers called with a method then a path | types embedding `pb.Unimplemented<S>Server` or registered with `pb.Register<S>Server`, stream parameters `pb.<S>_<M>Server`, unary signatures taking `*pb.<M>Request` (`*/M`) provide; calls on `pb.<S>Client` consume (`grpc-go`); generated files have no hints |
+  | Java | Spring `@GetMapping` / `@RequestMapping`, JAX-RS `@GET` + `@Path`, Micronaut `@Get` (class prefix) | the same annotations on `@FeignClient` / `@RegisterRestClient` / Micronaut `@Client` types, `@GetExchange`, Feign `@RequestLine`; `RestTemplate`, `WebClient` / `RestClient`, `HttpRequest`, OkHttp | `XGrpc.XImplBase` / `AsyncService` subclasses provide, calls on `XGrpc` stubs consume (`grpc-java`) |
+  | Rust | actix-web / rocket attributes, actix `.route` / `web::resource`, axum `.route` (with `web::scope` / `.nest` prefixes) | reqwest | the methods of `impl <Service> for <Type>` provide (snake_case back to the proto's PascalCase), calls on `<S>Client` consume (`tonic`) |
+  | OpenAPI 3 / Swagger 2 | every operation (`openapi`) | — | — |
+  | `.proto` | — | — | every `rpc` (`proto`) |
+
+- **The organization linker.** `RepoDeps`, the analysis stored with each
+  profile, gains `contracts: [ContractKey {side, kind, key, spec}]`, the
+  distinct keys of the contract table (serde default: an older profile has
+  none). `RepoDeps::depends_on` adds `depends_on_contracts`: a repository
+  depends on another when one of its consumed keys matches a key the other
+  provides, or one of its code-provided keys matches a spec key of the
+  other (a server implementing a spec published elsewhere); a provider
+  never depends on a consumer, and two servers or two specs never depend
+  on each other. A consumer's contract edges come from the contract tables
+  alone (`rueca-index` `contract_link`), without the joint resolve of
+  §9.2: a dependency reached only through contracts is not mounted, and
+  contract edges of the joint graph are dropped there, so they are not
+  counted twice. Each row of the consumer is matched against the provider
+  rows of its dependencies' default entries and of its own segment, with
+  the matcher of the resolver; only edges into a dependency are kept. They
+  go into the **same link set** as the package edges (`LinkEdge`,
+  `meta.strategy = Contract`), so versioning, recomputing reverse
+  dependencies, refs, the remap of incoming edges and visibility apply
+  unchanged. `LINKER_VERSION` 1 → 2 recomputes every profile and link set
+  once.
+- **Ambiguity across repositories.** The best quality and the number of
+  providers sharing it are counted over the consumer's own providers and
+  every dependency's: a call that a handler of its own repository and one
+  of another repository match equally well gets a 0.5 link edge, and a
+  better match in its own repository (an exact route against the other's
+  template) leaves no link edge. The in-snapshot edge keeps the confidence
+  its resolver gave it, which cannot see other repositories. A provider
+  that is a test or sits in a test file is not a link target.
+- **Refs.** A ref's contract edges are part of its link set, computed when
+  it is indexed from its own contract table against its dependencies'
+  defaults (§9.3). On a view that reads a provider at a ref, incoming
+  contract edges are remapped like package edges, by node (label,
+  qualified name, path): an edge whose handler, `Route` or `RpcMethod` the
+  ref no longer has is dropped, and a handler kept under a changed route
+  keeps its edge until the consumer's link set is recomputed.
+- **Surfaces.** `trace` follows contract link edges like any link edge
+  (`edge_types: ["CALLS", "IMPLEMENTS"]`), strategy `contract`, the call
+  site as `call_site`. `list_contracts` (MCP) and `rueca contracts` (CLI,
+  every page merged) list the contract tables of the selected repositories
+  with `side` `provided` / `consumed` / `dangling`, `kind`, `query` and
+  `limit`; each entry carries `matches`, its counterparts among the visible
+  repositories, and a dangling entry is a consumed row with none, computed
+  per query and not stored. `rueca links --org` ends contract edges with
+  `[contract <key>]`; its JSON adds `via` (`package` / `contract`), `key`
+  (the calling row's key) and `dst_name` (the target's name, an OpenAPI
+  operation's `GET /users/{id}`). `list_repositories`' `depends_on` names
+  contract dependencies too.
+- **RFC 0001 §10 as built.** There is no org-link segment of `CROSS_*`
+  edges: contract edges are the normal edge kinds (`CALLS`, `IMPLEMENTS`)
+  in the link sets, and dangling contracts are computed at query time, not
+  stored. RFC 0001 §6.3's systems edges (`HANDLES`, `CALLS_ROUTE`,
+  `CALLS_RPC`) are not produced.
+
+Choices and deviations:
+
+- **Hints on definitions, not route nodes.** A code route is a row on its
+  handler, not a node of its own with `HANDLES` (RFC 0001 §6.3): the
+  handler is the code an agent reads, so `trace` from a client reaches it
+  in one hop, and a route node would be a second hop with no source of its
+  own. Spec operations were nodes already, since the spec file is their
+  source. The row keeps the raw text and the framework for
+  `list_contracts`.
+- **Spec and code providers both get `CALLS`.** A client of a service that
+  publishes a spec reaches both the handler (the behaviour) and the
+  operation (the documented contract). As competing providers, every call
+  into a specified service would be ambiguous (0.5); matched separately,
+  each keeps its confidence, and `IMPLEMENTS` ties the handler to the
+  operation.
+- **No suffix- or prefix-tolerant matching.** A tolerant match
+  (`/api/v1/users/{}` against `/users/{}`) would recover the mount
+  prefixes the packs do not compose, but it makes every short route (`GET
+  /health`, `GET /{}`) a provider for many calls, against the
+  precision-first rule (RFC 0004 §3.4). The gap is recorded below and
+  shows as recall.
+- **`spec` in `ContractKey`.** Dependencies are decided from keys, before
+  any row is read, and whether a provided key comes from a spec decides
+  whether a server depends on that repository (`IMPLEMENTS` goes code →
+  spec only). The field is serialized only when true.
+- **Test doubles.** A mock server or fake handler in a test (a test
+  definition, a test path, a Go `_test.go` file:
+  `rueca_model::contract::is_test_source`) is never a match candidate,
+  inside one snapshot or across repositories, as package edges never
+  point into a dependency's tests; measured on dapr's Python SDK, 83 of
+  99 stub calls would otherwise have matched `FakeDaprSidecar`. The rows
+  stay in the contract table, and `list_contracts` still counts them as
+  counterparts, so a call matched only by a test double is not listed as
+  dangling (open question 18).
+- **`*` for an unknown method or service.** A call whose method is not a
+  literal (`http.NewRequest(method, …)`), Django and `app.all` routes, and
+  a Go server method whose service its file does not name get `*` and
+  match at 0.7: dropping them loses the edge, guessing makes it wrong.
+- **The one-hop wrapper rule** (TS / JS). Client libraries call through
+  one function that interpolates its parameter into the URL
+  (`` `${host}/api/${endpoint}` ``); every call of that function in the
+  same file that passes a string literal there is a consumer too, at the
+  caller, with the literal in place. One hop, same file. Go and Python reach the same shape at the call site: an
+  SDK wrapper called with a method and a path (`c.do(ctx,
+  http.MethodPost, "/api/generate")`, `self._request("POST",
+  "/api/generate")`).
+- **Not composed**: mount prefixes across files (a router mounted under
+  `/api` in another file, `include_router(prefix=…)` elsewhere, an
+  OpenAPI `servers` path or a Swagger `basePath`); routes registered from
+  runtime tables (dapr's HTTP API, go-swagger's generated handlers);
+  Next.js file routes (`[id]` canonicalizes, but files are not routes);
+  route registrations inside Rust macros. Topics come only from
+  kafka-python / aiokafka; no other broker client or language emits them.
+
+Measured (bench S2, `bench/README.md`, *Cross-service edges*: groups
+ollama, qdrant, dapr and weaviate gated, openai diagnostic; precision /
+recall pooled over the gated groups per kind, the *all* row shown, not
+gated; RFC 0004 §5):
+
+| Kind | Measured (precision / recall) | Floor | Target |
+|---|---|---|---|
+| http-code | 98.3 / 98.0 (n=118 predicted, 99 gold) | ≥ 90 / 75 | ≥ 97 / 90 |
+| http-spec | 100.0 / 100.0 (n=131 predicted, 110 gold) | ≥ 90 / 75 | ≥ 97 / 90 |
+| rpc-spec-client | 96.1 / 100.0 (n=228 predicted, 212 gold) | ≥ 90 / 75 | ≥ 97 / 90 |
+| rpc-spec-server | 100.0 / 90.0 (n=18 predicted, 20 gold) | ≥ 90 / 75 | ≥ 97 / 90 |
+| rpc-code | 95.5 / 95.4 (n=290 predicted, 283 gold) | ≥ 90 / 75 | ≥ 97 / 90 |
+| all (not gated) | 96.9 / 97.7 (n=785 predicted, 724 gold) | — | — |
+| Organization layer time per group | ollama 579 ms (links 214 ms), qdrant 3,957 ms (links 2,767 ms), dapr 1,821 ms (links 1,144 ms), weaviate 2,554 ms (links 1,072 ms) | — | — |
+| Dangling consumers per group | ollama 32 (labelers 11), qdrant 11 (labelers 0), dapr 185 (labelers 10), weaviate 136 (labelers 12) | — | — |
+
 ## 10. Amendments
 
 - **RFC 0001 §10** — the org linker becomes the contract producer of the
-  link layer (§3.3); §11.1 views become "organization generation + optional
-  ref replacement" (§4).
+  link layer (§3.3); as built (§9.4) it writes no org-link segment and no
+  `CROSS_*` edges (nor RFC 0001 §6.3's `HANDLES` / `CALLS_ROUTE` /
+  `CALLS_RPC`): contract edges are normal edge kinds (`CALLS`,
+  `IMPLEMENTS`, strategy `contract`) in the link sets, and dangling
+  contracts are computed at query time, not stored; §11.1 views become
+  "organization generation + optional ref replacement" (§4).
 - **RFC 0005 §5** — remove rank fusion across repositories; `repo` semantics
   per §6.
 - **2026-11-16 — organization suite** (§8, §9.2). The 21-instance
@@ -791,3 +1020,27 @@ five refs).
    and graph signals from the link layer (callers of the matched library
    symbols across repositories) — is the question the impact kind
    measures.
+12. Contract version pinning across refs: a client pinned to a version of
+    a service (a lockfile, a generated client's spec version) linked to the
+    provider's matching ref instead of its default, as open question 2
+    asks for packages (§9.4 links every ref against the defaults).
+13. Mount prefixes across files: a resolver pass over the rows' `raw` text
+    and the files that mount a router (`app.use("/api", router)`,
+    `include_router(prefix=…)`, an OpenAPI `servers` path, a Swagger
+    `basePath`) that composes the prefix into the keys before matching,
+    rather than a prefix-tolerant matcher (§9.4).
+14. Topics beyond kafka-python / aiokafka: other clients and languages,
+    the broker in the key, topic names from constants (RFC 0001 §9.4).
+15. An `ambiguous` marker in the evidence: today confidence 0.5 is the only
+    signal; RFC 0001 §10 asked for a match explanation per edge (exact,
+    template, ambiguous), which the edge metadata has no field for.
+16. Remap at refs by key as well as by node, so that a route moved to
+    another handler at the ref keeps its callers and a handler whose route
+    changed loses them (§9.4 remaps by node).
+17. GraphQL: schema fields as spec providers, resolvers as code providers
+    and client operations as consumers.
+18. Test doubles and `list_contracts`: `matches` counts test providers as
+    counterparts although they are never match candidates, so a call that
+    only a test double answers is neither linked nor listed as dangling;
+    count counterparts with the same filter, or list the test match as
+    such.

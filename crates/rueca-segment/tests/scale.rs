@@ -135,6 +135,7 @@ fn synth(files_n: usize, syms_per_file: usize, edges_n: usize) -> (ResolvedGraph
         edges,
         files,
         modules: vec![],
+        contracts: vec![],
     };
     (graph, Mem(contents))
 }

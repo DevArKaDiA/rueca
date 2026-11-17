@@ -1,0 +1,18 @@
+[package]
+name = "rueca-lang-proto"
+description = "Protocol Buffers language pack for Rueca: services, RPC methods, messages, enums and RPC contracts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rueca-extract.workspace = true
+rueca-model.workspace = true
+# Pure-Rust `.proto` parser (MIT OR Apache-2.0): a `FileDescriptorProto`
+# with source locations, no `protoc`.
+protox-parse = "0.10"
+# The descriptor types `protox-parse` returns (same version it depends on).
+prost-types = "0.14"

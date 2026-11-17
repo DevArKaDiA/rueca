@@ -657,7 +657,7 @@
 590 {"label":"EnvVar","name":"QUEUE","qualified_name":"$env:QUEUE","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":true,"is_test":false}
 591 {"label":"EnvVar","name":"REDIS_URL","qualified_name":"$env:REDIS_URL","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":true,"is_test":false}
 592 {"label":"EnvVar","name":"SENTRY_DSN","qualified_name":"$env:SENTRY_DSN","file":null,"span":null,"language":null,"signature":null,"doc":null,"exported":true,"is_test":false}
-# edges 781
+# edges 783
 {"src":0,"dst":1,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
 {"src":0,"dst":23,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
 {"src":0,"dst":25,"kind":"Contains","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
@@ -1344,6 +1344,7 @@
 {"src":496,"dst":461,"kind":"Tests","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[54,{"start_byte":216,"end_byte":223,"start_line":10,"start_col":28,"end_line":10,"end_col":35}]}}
 {"src":497,"dst":459,"kind":"Calls","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[54,{"start_byte":332,"end_byte":339,"start_line":13,"start_col":66,"end_line":13,"end_col":73}]}}
 {"src":497,"dst":459,"kind":"Tests","meta":{"confidence":0.5,"strategy":"Heuristic","evidence":[54,{"start_byte":332,"end_byte":339,"start_line":13,"start_col":66,"end_line":13,"end_col":73}]}}
+{"src":498,"dst":99,"kind":"Calls","meta":{"confidence":0.9,"strategy":"Contract","evidence":[54,{"start_byte":395,"end_byte":415,"start_line":17,"start_col":4,"end_line":17,"end_col":24}]}}
 {"src":500,"dst":501,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
 {"src":500,"dst":502,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
 {"src":500,"dst":503,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
@@ -1416,6 +1417,7 @@
 {"src":547,"dst":551,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
 {"src":548,"dst":564,"kind":"References","meta":{"confidence":0.95,"strategy":"ImportResolved","evidence":[62,{"start_byte":246,"end_byte":257,"start_line":6,"start_col":38,"end_line":6,"end_col":49}]}}
 {"src":550,"dst":570,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[62,{"start_byte":325,"end_byte":348,"start_line":10,"start_col":11,"end_line":10,"end_col":34}]}}
+{"src":550,"dst":170,"kind":"Implements","meta":{"confidence":0.9,"strategy":"Contract","evidence":[62,{"start_byte":265,"end_byte":276,"start_line":8,"start_col":2,"end_line":8,"end_col":13}]}}
 {"src":551,"dst":571,"kind":"Calls","meta":{"confidence":0.85,"strategy":"TypeResolved","evidence":[62,{"start_byte":415,"end_byte":437,"start_line":15,"start_col":11,"end_line":15,"end_col":33}]}}
 {"src":553,"dst":554,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}
 {"src":553,"dst":555,"kind":"Defines","meta":{"confidence":1.0,"strategy":"Syntactic","evidence":null}}

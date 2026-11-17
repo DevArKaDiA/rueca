@@ -1,5 +1,5 @@
-//! The organization link layer, packages (RFC 0006 §3.3.1): package
-//! registries from manifests and cross-repository edges, the
+//! The organization link layer (RFC 0006 §3.3): package registries from
+//! manifests, contract keys, and cross-repository edges — the
 //! [`OrgLinker`] of `rueca index --org`.
 //!
 //! Everything is computed from the store: a segment's file table names each
@@ -32,10 +32,19 @@
 //!   dependencies, Maven dependencies, Cargo dependency tables), for
 //!   languages whose code can use a package without an import statement
 //!   (PHP fully qualified names, Rust paths through the extern prelude).
+//! - **Contracts**: the distinct keys of the segment's contract table
+//!   (`RepoDeps::contracts`), which make a consumer depend on the
+//!   repositories providing what it calls (RFC 0006 phase 4).
 //!
 //! # Links ([`PackageLinker::link`])
 //!
-//! The consumer and its dependencies are resolved **together** by the
+//! Contract edges into every dependency come from the contract tables
+//! alone (`contract_link`: consumer → provider `CALLS`, server code → spec
+//! `IMPLEMENTS`, `Strategy::Contract`). Package edges come from a joint
+//! resolve with the dependencies whose packages the consumer uses (a
+//! dependency through contracts only is not mounted):
+//!
+//! The consumer and those dependencies are resolved **together** by the
 //! normal resolver: the dependencies' files are mounted under
 //! `@rueca-org/<k>/`, and every language pack is wrapped so that
 //!
@@ -73,14 +82,15 @@ use rueca_model::{
     EdgeKind, FileFacts, FileId, Import, Label, Language, LanguageFamily, NodeId, Strategy, git_blob_sha,
 };
 use rueca_resolve::FileInput;
-use rueca_segment::org::{LinkEdge, LinkInput, OrgLinker, Package, RepoDeps};
+use rueca_segment::org::{ContractKey, LinkEdge, LinkInput, OrgLinker, Package, RepoDeps};
 use rueca_segment::{Segment, SegmentError, Store};
 
 use crate::default_registry;
 
 /// Version of the analysis and link output (part of every profile and link
-/// set; bumping it recomputes them).
-pub const LINKER_VERSION: u32 = 1;
+/// set; bumping it recomputes them). 2: contract keys in the analysis and
+/// contract edges in the link sets (RFC 0006 phase 4).
+pub const LINKER_VERSION: u32 = 2;
 
 /// Path prefix of mounted dependencies in a link resolution.
 const MOUNT: &str = "@rueca-org/";
@@ -644,7 +654,7 @@ pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String>
         LanguageFamily::Java => Some(format!("java:{m}")),
         LanguageFamily::Php => Some(format!("php:{}", m.trim_start_matches('\\'))),
         LanguageFamily::C => Some(format!("c:{}", m.trim_start_matches("./"))),
-        LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Rust => None,
+        LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Rust | LanguageFamily::Proto => None,
     }
 }
 
@@ -702,15 +712,41 @@ impl OrgLinker for PackageLinker {
         if resolved.is_err() {
             return Err(other("a language pack panicked while resolving imports"));
         }
-        Ok(RepoDeps { packages, imports: imports.into_iter().collect(), requires })
+        let contracts = ContractKey::of_rows(seg.contracts());
+        Ok(RepoDeps { packages, imports: imports.into_iter().collect(), requires, contracts })
     }
 
+    /// Package edges into the dependencies whose packages the consumer
+    /// uses (a joint resolve, see the module docs), then contract edges into
+    /// every dependency (`contract_link`).
     fn link(
         &self,
         _store: &Store,
         consumer: &LinkInput<'_>,
         deps: &[LinkInput<'_>],
     ) -> rueca_segment::Result<Vec<LinkEdge>> {
+        let by_package: Vec<usize> =
+            (0..deps.len()).filter(|&k| consumer.deps.depends_on_packages(&deps[k].deps.packages)).collect();
+        let mut edges = Vec::new();
+        if !by_package.is_empty() {
+            let picked: Vec<LinkInput<'_>> = by_package
+                .iter()
+                .map(|&k| LinkInput { repo: deps[k].repo, segment: deps[k].segment, deps: deps[k].deps })
+                .collect();
+            edges = self.package_edges(consumer, &picked)?;
+            for e in &mut edges {
+                e.dep = by_package[e.dep as usize] as u32;
+            }
+        }
+        edges.extend(crate::contract_link::contract_edges(consumer.segment, deps));
+        Ok(edges)
+    }
+}
+
+impl PackageLinker {
+    /// The package edges of `consumer` into `deps` (every one publishing a
+    /// package it uses): the joint resolve.
+    fn package_edges(&self, consumer: &LinkInput<'_>, deps: &[LinkInput<'_>]) -> rueca_segment::Result<Vec<LinkEdge>> {
         let registry = default_registry();
         let own = self.load(consumer.segment, &registry);
         let mut mounts = Vec::with_capacity(deps.len());
@@ -776,8 +812,10 @@ fn crossing_edges(
         .collect();
     let mut best: BTreeMap<(NodeId, u32, NodeId, EdgeKind, bool), LinkEdge> = BTreeMap::new();
     for e in &graph.edges {
+        // Contract edges of the joint graph are left to the contract
+        // linker, which sees every dependency (not only package ones).
         if matches!(e.kind, EdgeKind::Contains | EdgeKind::Defines)
-            || matches!(e.meta.strategy, Strategy::UniqueName | Strategy::Heuristic)
+            || matches!(e.meta.strategy, Strategy::UniqueName | Strategy::Heuristic | Strategy::Contract)
         {
             continue;
         }

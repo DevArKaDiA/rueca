@@ -74,6 +74,7 @@
 //! | `nodes` | postcard `Vec<Node>` | node table, index = [`NodeId`] |
 //! | `files` | postcard `Vec<FileEntry>` | file table, index = [`FileId`] |
 //! | `files.modules` (optional) | postcard `Vec<String>` | module name per file as its pack computed it (`""` = none); absent in segments written before RFC 0003 wave R ([`Segment::module_of`] returns `None`) |
+//! | `contracts` (optional) | postcard `Vec<ContractRow>` | the contract table (RFC 0006 phase 4): one row per contract hint — node, side, kind, canonical key, raw text, file, span, framework — in `ResolvedGraph::contracts` order; written only when non-empty, absent = no contracts ([`Segment::contracts`]) |
 //! | `edge_meta` | `[EdgeMetaRec; E]`, 36 B each | `f32 confidence, u8 strategy, u8 has_evidence, [u8;2] pad, u32 evidence_file, [u32;6] evidence span` (start_byte, end_byte, start_line, start_col, end_line, end_col); strategy = `Strategy` declaration order (0 `syntactic` … 6 `heuristic`, 7 `contract`) |
 //! | `adj.out.offsets` | `[u32; N+1]` | CSR row offsets by source node |
 //! | `adj.out.targets` | `[u32; E]` | destination node per entry; rows sorted by (kind, dst, edge index) |
@@ -258,6 +259,7 @@
 compile_error!("rueca-segment format v2 reads little-endian arrays zero-copy; big-endian hosts are unsupported");
 
 mod bundle;
+mod contracts;
 mod graph;
 mod ngram;
 pub mod org;
@@ -271,7 +273,9 @@ mod writer;
 
 use std::path::{Path, PathBuf};
 
-use rueca_model::{EdgeKind, EdgeMeta, FileEntry, FileId, Label, Language, Node, NodeId, ResolvedGraph, SnapshotInfo};
+use rueca_model::{
+    ContractRow, EdgeKind, EdgeMeta, FileEntry, FileId, Label, Language, Node, NodeId, ResolvedGraph, SnapshotInfo,
+};
 use serde::{Deserialize, Serialize};
 
 /// Whether `path` looks like test code (a `test`, `tests`, `__tests__`,
@@ -561,6 +565,17 @@ impl Segment {
     /// component or the file id is out of range.
     pub fn module_of(&self, file: FileId) -> Option<&str> {
         self.inner.modules.as_ref()?.get(file as usize).map(String::as_str)
+    }
+    /// The contract table (RFC 0006 phase 4): every contract hint of the
+    /// snapshot on its node, in file then hint order
+    /// (`ResolvedGraph::contracts`). Empty for segments written before the
+    /// `contracts` component and for snapshots without contracts.
+    pub fn contracts(&self) -> &[ContractRow] {
+        &self.inner.contracts.rows
+    }
+    /// The rows of [`Segment::contracts`] placed on `node`, in table order.
+    pub fn contracts_of(&self, node: NodeId) -> Vec<&ContractRow> {
+        self.inner.contracts.of(node)
     }
     /// Outgoing edges of `node`, optionally filtered by kind, in stable order.
     ///

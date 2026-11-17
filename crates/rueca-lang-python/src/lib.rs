@@ -87,6 +87,13 @@
 //!   `$env:NAME` node with `READS`.
 //! - At most 20,000 references per file.
 //!
+//! # Contract hints
+//!
+//! `FileFacts::contracts` (RFC 0006 phase 4): HTTP routes (Flask, FastAPI,
+//! aiohttp, Starlette, Django `urls.py`) and client calls, gRPC stub calls
+//! and servicers, kafka topics; the patterns and their evidence are listed
+//! in the `contracts` module docs.
+//!
 //! # Local bindings (vendored `queries/locals.scm`)
 //!
 //! Which identifiers are locals is decided by a tree-sitter locals query,
@@ -159,6 +166,7 @@
 
 mod bridge;
 mod builtins;
+mod contracts;
 mod extract;
 mod locals;
 mod modules;
@@ -186,8 +194,9 @@ impl LanguagePack for PythonPack {
     }
     fn extractor_version(&self) -> u32 {
         // 2: env var reads (`EnvVar` references, RFC 0003 §7.2); 3:
-        // `$type:` receivers from annotations and assignments.
-        3
+        // `$type:` receivers from annotations and assignments; 4: contract
+        // hints (RFC 0006 phase 4).
+        4
     }
     fn extract(
         &self,
