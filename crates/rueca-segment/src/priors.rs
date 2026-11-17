@@ -60,18 +60,9 @@ pub(crate) fn is_bodiless(node: &Node, body: &str) -> bool {
     is_c_family(node.language) && matches!(node.label, Label::Function | Label::Method) && !body.contains('{')
 }
 
-/// Test files by path: a `test`, `tests`, `__tests__`, `spec`, `specs`,
-/// `testing` or `e2e` directory, or a `test_*.py`, `*_test.py`, `conftest.py`,
-/// `*.test.*` or `*.spec.*` file name.
+/// Test files by path ([`rueca_model::is_test_path`]).
 pub(crate) fn is_test_path(path: &str) -> bool {
-    let mut segs: Vec<&str> = path.split('/').collect();
-    let name = segs.pop().unwrap_or("");
-    if segs.iter().any(|s| matches!(*s, "test" | "tests" | "__tests__" | "spec" | "specs" | "testing" | "e2e")) {
-        return true;
-    }
-    let stem = name.split('.').next().unwrap_or(name);
-    (name.ends_with(".py") && (stem.starts_with("test_") || stem.ends_with("_test") || stem == "conftest"))
-        || name.split('.').skip(1).any(|p| p == "test" || p == "spec")
+    rueca_model::is_test_path(path)
 }
 
 /// A path under a vendored directory (see [`VENDORED_DIRS`]).

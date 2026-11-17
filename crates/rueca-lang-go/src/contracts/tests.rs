@@ -338,9 +338,67 @@ func Serve(s *grpc.Server) {
             ("Greeter/SayHello", "server.SayHello"),
             ("Greeter/RouteChat", "server.RouteChat"),
             ("Health/Ping", "other.Ping"),
+            // Service markers on the server types (expanded by the resolver
+            // over the methods of every file of the package).
+            ("Greeter/*", "server"),
+            ("Health/*", "other"),
         ])
     );
     assert!(hints(src).iter().all(|h| h.4 == "grpc-go"));
+}
+
+#[test]
+fn grpc_wrapper_servers_embed_the_server_interface() {
+    let src = r#"package x
+import (
+    "context"
+    "github.com/dapr/durabletask-go/api/protos"
+)
+type fallback struct {
+    protos.TaskHubSidecarServiceServer
+}
+type stream struct {
+    protos.TaskHubSidecarService_GetWorkItemsServer
+}
+type plain struct {
+    other.ThingServer
+}
+func (s fallback) RaiseEvent(ctx context.Context, req *protos.RaiseEventRequest) (*protos.RaiseEventResponse, error) { return nil, nil }
+"#;
+    // The embedded server interface makes `fallback` a server (its
+    // methods here and, through the marker, in other files); a stream type
+    // and a non-proto interface do not.
+    assert_eq!(
+        rpc(src, ContractSide::Provides),
+        pairs(&[("TaskHubSidecarService/RaiseEvent", "fallback.RaiseEvent"), ("TaskHubSidecarService/*", "fallback")])
+    );
+}
+
+#[test]
+fn grpc_registration_through_variables_and_receivers() {
+    let src = r#"package x
+import (
+    "google.golang.org/grpc"
+    pb "example.com/helloworld/proto"
+)
+type Server struct{}
+type Scheduler struct{}
+func newService(gs *grpc.Server) *Server {
+    s := &Server{}
+    pb.RegisterAppCallbackAlphaServer(gs, s)
+    return s
+}
+func (sch *Scheduler) Run(gs *grpc.Server) {
+    pb.RegisterSchedulerServer(gs, sch)
+}
+func register(gs *grpc.Server, unknown any) {
+    pb.RegisterGreeterServer(gs, unknown)
+}
+"#;
+    assert_eq!(
+        rpc(src, ContractSide::Provides),
+        pairs(&[("AppCallbackAlpha/*", "Server"), ("Scheduler/*", "Scheduler")])
+    );
 }
 
 #[test]
@@ -357,6 +415,8 @@ func (a *api) GetConfigurationAlpha1(ctx context.Context, in *runtimev1pb.GetCon
 func (a *api) SaveState(ctx context.Context, in *runtimev1pb.SaveStateRequest) (*emptypb.Empty, error) { return nil, nil }
 func (a *api) SubscribeTopicEventsAlpha1(stream runtimev1pb.Dapr_SubscribeTopicEventsAlpha1Server) error { return nil }
 func (a *api) Other(ctx context.Context, in *runtimev1pb.SaveStateRequest) (*runtimev1pb.X, error) { return nil, nil }
+func (a *api) DeleteBinaryFileAlpha1(ctx context.Context, req *runtimev1pb.DeleteBinaryFileRequestAlpha1) (*runtimev1pb.DeleteBinaryFileResponseAlpha1, error) { return nil, nil }
+func (a *api) GetAlpha1(ctx context.Context, req *runtimev1pb.GetRequestBeta1) (*runtimev1pb.X, error) { return nil, nil }
 func (a *api) Mismatch(ctx context.Context, in *runtimev1pb.MismatchRequest) (int, error) { return 0, nil }
 func (c *client) InvokeService(ctx context.Context, in *runtimev1pb.InvokeServiceRequest, opts ...grpc.CallOption) (*runtimev1pb.InvokeResponse, error) { return nil, nil }
 "#;
@@ -367,14 +427,16 @@ func (c *client) InvokeService(ctx context.Context, in *runtimev1pb.InvokeServic
             ("*/GetConfigurationAlpha1", "api.GetConfigurationAlpha1"),
             ("*/SaveState", "api.SaveState"),
             ("Dapr/SubscribeTopicEventsAlpha1", "api.SubscribeTopicEventsAlpha1"),
+            ("*/DeleteBinaryFileAlpha1", "api.DeleteBinaryFileAlpha1"),
         ])
     );
-    // Without a gRPC import the unary shape is not enough.
-    let no_grpc = src.replace("\"google.golang.org/grpc\"\n", "").replace("opts ...grpc.CallOption", "");
-    assert_eq!(
-        rpc(&no_grpc, ContractSide::Provides),
-        pairs(&[("Dapr/SubscribeTopicEventsAlpha1", "api.SubscribeTopicEventsAlpha1")])
-    );
+    // The shape does not need a gRPC import (a shared implementation
+    // package such as dapr's `universal` imports only the proto package);
+    // without a proto import nothing is a handler.
+    let no_grpc = src.replace("\"google.golang.org/grpc\"\n", "");
+    assert_eq!(rpc(&no_grpc, ContractSide::Provides).len(), 5);
+    let no_proto = src.replace("runtimev1pb \"github.com/dapr/dapr/pkg/proto/runtime/v1\"\n", "");
+    assert!(rpc(&no_proto, ContractSide::Provides).is_empty());
 }
 
 #[test]

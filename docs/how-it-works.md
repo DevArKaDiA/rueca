@@ -418,7 +418,10 @@ INI, `.properties` and Dockerfile:
   data files over 256 KiB that are not a known kind (`data-size`), and
   data dumps — long root arrays, more than 5,000 keys, mostly array
   elements (`data-shape`). Inside a file, keys stop at depth 32, arrays at
-  64 mapping elements and files at 5,000 keys (`partial`).
+  64 mapping elements and files at 5,000 keys (`partial`). An OpenAPI /
+  Swagger document is a known kind wherever its root `openapi` / `swagger`
+  key sits (JSON emitters that sort keys write it last), and its operations
+  stay `Route`s past the key cap.
 
 **Env var and config reads in code** (the code side of the bridge) are
 facts of the code packs, recognized only with file-local evidence and
@@ -448,8 +451,9 @@ callee is an HTTP verb (`get`, `_post`, `get_api_list`) or `request` /
 `_request` / `urlopen` with a path-like argument consume (method from the
 callee, a literal method argument or `method=self._conn.get`); `x.Method`
 on a name the file binds to a `<mod>.XStub` (assignment, annotation,
-parameter, return type) consumes `X/Method`, and the PascalCase methods of
-a `…XServicer` subclass provide it; kafka producers' `send("t")` consume
+parameter, return type) consumes `X/Method` (`*/Method` on an unbound
+holder named `…stub`, a stub handed in as a parameter), and the PascalCase
+methods of a `…XServicer` subclass provide it; kafka producers' `send("t")` consume
 and consumers' topics provide a topic. **TS / JS**: `app.get("/x", h)`,
 `app.route("/x").get(h)`, `fastify.route({…})` (in a file importing a
 server framework, or on `app` / `router` / `server` with an inline
@@ -471,10 +475,16 @@ sub-router and chi `Route` prefixes of the file composed; the handler is
 the last function value among the arguments, looked for inside wrapping
 calls), `http.Get` / `http.NewRequest`, resty and SDK wrappers called with
 a method then a path (`c.do(ctx, http.MethodPost, "/api/generate")`)
-consume; a type embedding `pb.Unimplemented<S>Server` (or registered with
-`pb.Register<S>Server`) provides `S/Method` for its methods, a stream
-parameter `pb.<S>_<M>Server` gives `S/M`, and a unary server signature
-taking `*pb.<M>Request` gives `*/M` (service unknown in the file), while
+consume; a type embedding `pb.Unimplemented<S>Server` or the server
+interface `pb.<S>Server` (a delegating wrapper), or registered with
+`pb.Register<S>Server(s, x)` (`x` a `&T{}`, the method's receiver or a
+local assigned `&T{}`), provides `S/Method` for its handler-shaped methods
+(a context and a pointer, or a stream) — in the file, and through a
+service marker `S/*` on the type that the resolver expands over its
+methods in the other files of the package — a stream parameter
+`pb.<S>_<M>Server` gives `S/M`, and a unary server signature taking
+`*pb.<M>Request` (a version suffix may be dropped or follow `Request`)
+gives `*/M` (service unknown in the file), while
 calls on names bound to `pb.<S>Client` consume `S/M` (`*/M` through a
 `protoClient` field typed in another file). **Java**: Spring
 `@GetMapping` / `@RequestMapping`, JAX-RS `@GET` + `@Path` and Micronaut
@@ -842,7 +852,11 @@ provider → spec provider `IMPLEMENTS`, at 0.9 (same key), 0.85 (a provider
 0.7 (a `*` method, or an RPC key `*/Method` whose service the code does not
 name), 0.5 each when several providers tie. Code-to-code and
 spec-to-spec providers never link; unmatched consumers stay in the table
-(dangling).
+(dangling). Providers that are tests or in test files (a test path, or a
+Go `_test.go` file: `rueca_model::contract::is_test_source`) keep their
+rows but are never match candidates, here and across repositories, so a
+fake sidecar does not take a client's calls from the real server. A
+`*/M` provider row of a node that also provides `S/M` is dropped.
 
 Duplicate edges `(src, dst, kind)` are merged keeping the best strategy, the
 highest confidence and the first evidence. **Evidence** is the file and span
@@ -1081,7 +1095,8 @@ Python, ECMAScript, PHP and Java reads of ordinary names stay `REFERENCES`.
 span of the reference that produced it; absent for structural edges).
 Strategies: `syntactic`, `scip`, `type_resolved`, `import_resolved`,
 `same_module`, `unique_name`, `heuristic`, and `contract` (the code ↔
-config bridge).
+config bridge, and the HTTP / RPC contract edges `CALLS` and `IMPLEMENTS`
+of §4.4 and §7).
 
 ## 6. How each tool uses the graph
 

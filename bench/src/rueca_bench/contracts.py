@@ -52,12 +52,15 @@ for *rpc-spec-server*), same target repository and file, and a target name
 the pair accepts (handler / method name, `Service.Method`, the operation's
 canonical key). Precision = correct / predicted, recall = found / gold,
 pooled over the gated groups, per kind and overall, with percentile
-bootstrap intervals over source files. Floors ≥ 90 / 75, targets ≥ 97 / 90,
+bootstrap intervals over source files, at every confidence (gated) and at
+confidence ≥ `HIGH_CONFIDENCE` (`summary_high`, shown: ambiguous 0.5 edges
+dropped). Floors ≥ 90 / 75, targets ≥ 97 / 90,
 like every edge metric. Dangling consumers come from `rueca contracts
 --side dangling` (reported with the labelers' own count).
 
 Raw outputs: .cache/runs/org/contracts-rueca.json (and contracts-gold.json
-from `python -m rueca_bench.contracts gold`); results bench/results/s2.json.
+from `python -m rueca_bench.contracts gold`); results bench/results/s2.json,
+published alone with `rueca-bench report --s2-only`.
 """
 
 from __future__ import annotations
@@ -73,7 +76,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .arms import make_arm
-from .common import CACHE, RESULTS_DIR, log, read_json, run, scorecard_spec, write_json
+from .common import CACHE, RESULTS_DIR, log, read_json, scorecard_spec, write_json
+from .common import run as run_cmd
 from .contracts_gold import KINDS, GoldPair, build_gold
 from .contracts_gold.keys import canonical_http
 from .contracts_gold.model import in_scope, symbol_tokens
@@ -85,6 +89,7 @@ from .stats import bootstrap_ratio, seeded
 SUITE = "contracts"
 FAMILY = "Cross-service edges"
 FLOORS = {"precision": (0.90, 0.97), "recall": (0.75, 0.90)}  # (floor, target), RFC 0004 §6 edge metrics
+HIGH_CONFIDENCE = 0.7  # the second, not gated, row: edges an agent filtering by confidence keeps (ambiguous 0.5 edges dropped)
 AUDIT_SAMPLE = 15
 
 GROUPS = [
@@ -261,15 +266,17 @@ def _settings() -> tuple[int, int]:
     return int(sc.get("bootstrap_resamples", 10000)), int(sc.get("bootstrap_seed", 20261025))
 
 
-def pooled(groups: list[dict], kinds: tuple[str, ...] = KINDS) -> dict:
+def pooled(groups: list[dict], kinds: tuple[str, ...] = KINDS, score_key: str = "score") -> dict:
     """Per kind and `all`: counts, precision, recall and their bootstrap
-    intervals over source files, pooled over the gated groups that ran."""
+    intervals over source files, pooled over the gated groups that ran
+    (`score_key`: `score` = every edge, `score_high` = confidence ≥
+    `HIGH_CONFIDENCE`)."""
     resamples, seed = _settings()
     rows: dict[str, list[list[int]]] = {k: [] for k in (*kinds, "all")}
     for g in groups:
-        if g.get("status") != "ok" or g.get("split") != "gated" or not g.get("score"):
+        if g.get("status") != "ok" or g.get("split") != "gated" or not g.get(score_key):
             continue
-        for kind, _, _, npred, ncorr, ngold, nfound in g["score"]["items"]:
+        for kind, _, _, npred, ncorr, ngold, nfound in g[score_key]["items"]:
             if kind in rows:
                 rows[kind].append([npred, ncorr, ngold, nfound])
                 rows["all"].append([npred, ncorr, ngold, nfound])
@@ -404,9 +411,9 @@ def _entries(doc: dict | None) -> list[dict] | None:
 
 def contracts_list(arm, org_file: Path, store: Path, side: str) -> tuple[list[dict] | None, str | None]:
     base = [arm.bin, "contracts", "--org", str(org_file), "--store", str(store), "--json", "--side", side]
-    res = run([*base, "--limit", "100000"], timeout=600)
+    res = run_cmd([*base, "--limit", "100000"], timeout=600)
     if res.rc != 0:
-        res = run(base, timeout=600)
+        res = run_cmd(base, timeout=600)
     return _entries(_json(res)), (None if res.rc == 0 else res.stderr[-300:])
 
 
@@ -428,13 +435,13 @@ def _group(arm, g: dict) -> dict:
     try:
         roots = _roots(g, "s2")
         write_org_file(org_file, list(roots.values()), name=f"s2-{g['name']}")
-        idx = run([arm.bin, "index", "--org", str(org_file), "--store", str(store), "--json"], timeout=arm.index_timeout)
+        idx = run_cmd([arm.bin, "index", "--org", str(org_file), "--store", str(store), "--json"], timeout=arm.index_timeout)
         report = _json(idx)
         if report is None:
             return {**_meta(g), "status": "error", "error": idx.stderr[-500:]}
         ids = {Path(x["root"]).resolve(): x["segment"]["snapshot"]["repo"] for x in report["indexed"]}
         names = {ids[root.resolve()]: repo for repo, root in roots.items() if root.resolve() in ids}
-        links = _json(run([arm.bin, "links", "--org", str(org_file), "--store", str(store), "--json"], timeout=600))
+        links = _json(run_cmd([arm.bin, "links", "--org", str(org_file), "--store", str(store), "--json"], timeout=600))
         edges = (links or {}).get("edges", [])
         dangling, dangling_err = contracts_list(arm, org_file, store, "dangling")
         provided, _ = contracts_list(arm, org_file, store, "provided")
@@ -470,14 +477,19 @@ def score_record(rec: dict) -> dict:
             continue
         names = {rid: repo for repo, rid in (g.get("repo_ids") or {}).items()}
         provided = {tuple(x[:3]): x[3] for x in g.get("provided") or []}
-        sc = score_group(g["edges"], pairs_of(g["gold"]), names, tuple(g["kinds"]), provided)
-        groups.append({**_group_view(g), "score": sc})
+        pairs = pairs_of(g["gold"])
+        sc = score_group(g["edges"], pairs, names, tuple(g["kinds"]), provided)
+        high = [e for e in g["edges"] if (e.get("confidence") or 0) >= HIGH_CONFIDENCE]
+        sh = score_group(high, pairs, names, tuple(g["kinds"]), provided)
+        groups.append({**_group_view(g), "score": sc, "score_high": {"by_kind": sh["by_kind"], "items": sh["items"]}})
     gated_ok = [g for g in groups if g.get("status") == "ok" and g.get("split") == "gated"]
     return {
         "status": "ok",
         "version": rec.get("arm_version"),
         "groups": groups,
         "summary": pooled(groups),
+        "high_confidence": HIGH_CONFIDENCE,
+        "summary_high": pooled(groups, score_key="score_high"),
         "complete": len(gated_ok) == sum(1 for g in GROUPS if g["split"] == "gated"),
     }
 
@@ -626,6 +638,25 @@ def _render_kinds(L: list[str], s2: dict, judge: Callable) -> None:
         L.append(
             f"| {label} | {row['gold']} | {row['predicted']} | {_with_ci(row.get('precision'), row.get('precision_ci'))} ({row['correct']}/{row['predicted']}) | "
             f"{_with_ci(row.get('recall'), row.get('recall_ci'))} ({row['found']}/{row['gold']}) | ≥ 90 / 75 | ≥ 97 / 90 | {st[0]} / {st[1]} |"
+        )
+    L.append("")
+    _render_high(L, s2)
+
+
+def _render_high(L: list[str], s2: dict) -> None:
+    high = s2.get("summary_high") or {}
+    if not high:
+        return
+    cut = s2.get("high_confidence", HIGH_CONFIDENCE)
+    L.append(f"At confidence ≥ {cut} (not gated: what an agent that drops ambiguous 0.5 edges keeps):")
+    L.append("")
+    L.append("| Kind | Predicted | Precision (95% CI) | Recall (95% CI) |")
+    L.append("|---|---:|---|---|")
+    for kind, row in high.items():
+        label = f"**{kind}**" if kind == "all" else kind
+        L.append(
+            f"| {label} | {row['predicted']} | {_with_ci(row.get('precision'), row.get('precision_ci'))} ({row['correct']}/{row['predicted']}) | "
+            f"{_with_ci(row.get('recall'), row.get('recall_ci'))} ({row['found']}/{row['gold']}) |"
         )
     L.append("")
 

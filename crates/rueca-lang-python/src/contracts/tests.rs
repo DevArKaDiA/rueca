@@ -327,6 +327,32 @@ def serve():
 }
 
 #[test]
+fn grpc_unbound_stub_holders() {
+    // A stub handed in as a parameter: the service is unknown, the method
+    // is not; a name bound to a non-stub class or not named `…stub` is no
+    // stub.
+    let src = r#"
+class _FakeStub:
+    def Call(self): ...
+
+class Subscription:
+    def __init__(self, stub, other):
+        self._stub = stub
+        self._other = other
+        self._fake_stub = _FakeStub()
+
+    def start(self):
+        return self._stub.SubscribeTopicEventsAlpha1(iter([]))
+
+    def close(self):
+        self._other.Close()
+        self._fake_stub.Call()
+        self._stub.close()
+"#;
+    assert_eq!(keys(src, Consumes, Rpc), pairs(&[("*/SubscribeTopicEventsAlpha1", "Subscription.start")]));
+}
+
+#[test]
 fn kafka_topics() {
     let src = r#"
 from kafka import KafkaConsumer, KafkaProducer

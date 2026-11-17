@@ -1,9 +1,12 @@
 //! gRPC (grpcio): stub calls (consumers) and servicer implementations
 //! (providers), keyed `Service/Method` (the proto package is not in code).
+//! A holder named `…stub` that the file does not bind (a stub passed in
+//! as a parameter, `self._stub = stub`) calls `*/Method`
+//! (`rueca_model::contract::ANY_SERVICE`): the method of any service.
 
 use rueca_extract::tree_sitter::Node;
 use rueca_extract::{first_line, text_of};
-use rueca_model::contract::rpc_key;
+use rueca_model::contract::{ANY_SERVICE, rpc_key};
 use rueca_model::{ContractKind, ContractSide};
 
 use super::{Ctx, last_name, root_name};
@@ -62,9 +65,21 @@ pub(super) fn scan_assignment(cx: &mut Ctx<'_, '_>, n: Node<'_>) {
         .and_then(|r| r.child_by_field_name("function"))
         .and_then(|f| cx.stub_service(f));
     let svc = from_value.or_else(|| n.child_by_field_name("type").and_then(|t| cx.stub_service(t)));
-    if let (Some(svc), Some(name)) = (svc, last_name(left, cx.src)) {
-        cx.bind_stub(&name, svc);
+    let Some(name) = last_name(left, cx.src) else { return };
+    match svc {
+        Some(svc) => cx.bind_stub(&name, svc),
+        None if built_from_local_class(cx, n) => {
+            cx.stubs.insert(name.trim_start_matches('_').to_string(), None);
+        }
+        None => {}
     }
+}
+
+/// `x = Fake…()` with a class of this file: the holder is no stub.
+fn built_from_local_class(cx: &Ctx<'_, '_>, n: Node<'_>) -> bool {
+    let callee =
+        n.child_by_field_name("right").filter(|r| r.kind() == "call").and_then(|r| r.child_by_field_name("function"));
+    callee.and_then(|f| last_name(f, cx.src)).is_some_and(|c| cx.local_classes.contains(&c))
 }
 
 /// `def grpc_points(self) -> grpc.PointsStub` (a property returning a stub).
@@ -97,7 +112,7 @@ pub(super) fn stub_call<'t>(cx: &mut Ctx<'t, '_>, node: Node<'t>) {
         return;
     }
     let Some(holder) = last_name(obj, cx.src) else { return };
-    let Some(Some(svc)) = cx.stubs.get(holder.trim_start_matches('_')).cloned() else { return };
+    let Some(svc) = holder_service(cx, &holder) else { return };
     if !cx.rpc_seen.insert((node.start_position().row as u32, method.clone())) {
         return;
     }
@@ -107,6 +122,17 @@ pub(super) fn stub_call<'t>(cx: &mut Ctx<'t, '_>, node: Node<'t>) {
         .unwrap_or(node);
     let owner = cx.enclosing(site);
     cx.push(ContractSide::Consumes, ContractKind::Rpc, rpc_key("", &svc, &method), site, owner, FRAMEWORK);
+}
+
+/// The service of a stub holder: bound in the file, else [`ANY_SERVICE`]
+/// for an unbound name ending in `stub`; `None` for anything else (a name
+/// bound to a class that is not a stub).
+fn holder_service(cx: &Ctx<'_, '_>, holder: &str) -> Option<String> {
+    let name = holder.trim_start_matches('_');
+    match cx.stubs.get(name) {
+        Some(bound) => bound.clone(),
+        None => name.to_ascii_lowercase().ends_with("stub").then(|| ANY_SERVICE.to_string()),
+    }
 }
 
 /// `class Impl(pb2_grpc.GreeterServicer)`: every public PascalCase method

@@ -472,6 +472,29 @@ fn openapi_and_json_schema() {
 }
 
 #[test]
+fn large_sorted_swagger_keeps_its_operations() {
+    // A JSON emitter that sorts keys: `definitions` (past the key cap)
+    // before `paths`, `swagger` near the end, the file above the data-file
+    // budget. The operations still become routes with contract hints.
+    let defs: Vec<String> =
+        (0..MAX_KEYS + 500).map(|i| format!("\"D{i}\": {{\"description\": \"{}\"}}", "x".repeat(40))).collect();
+    let spec = format!(
+        "{{\"basePath\": \"/v1\", \"definitions\": {{{}}}, \"paths\": {{\"/aliases/{{aliasName}}\": {{\"delete\": {{\"operationId\": \"aliases.delete\"}}, \"get\": {{}}}}}}, \"swagger\": \"2.0\"}}",
+        defs.join(", ")
+    );
+    assert!(spec.len() > MAX_DATA_FILE_BYTES && !spec[..4096].contains("swagger"));
+    let f = run("openapi-specs/schema.json", &spec);
+    let routes: Vec<&str> =
+        f.definitions.iter().filter(|d| d.label == Label::Route).map(|d| d.qualified_name.as_str()).collect();
+    assert_eq!(routes, ["paths./aliases/{aliasName}.delete", "paths./aliases/{aliasName}.get"]);
+    let keys: Vec<&str> = f.contracts.iter().map(|h| h.key.as_str()).collect();
+    assert_eq!(keys, ["DELETE /aliases/{}", "GET /aliases/{}"]);
+    // The version key must be a key: a mention in a value is not one.
+    let mention = format!("{{\"items\": \"{}\", \"note\": \"swagger\"}}", "x".repeat(MAX_DATA_FILE_BYTES));
+    assert_eq!(skipped("data/big.json", mention.as_bytes()), "data-size");
+}
+
+#[test]
 fn openapi_contract_hints() {
     use rueca_model::{ContractKind, ContractSide};
     let f = fixture("api/openapi.yaml");

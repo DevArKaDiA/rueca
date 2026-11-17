@@ -158,6 +158,14 @@ impl<'s> File<'s> {
             .map(|i| i as LocalDefId)
     }
 
+    /// The struct or other type of this file named `name` (the first one).
+    fn type_named(&self, name: &str) -> Option<LocalDefId> {
+        self.defs
+            .iter()
+            .position(|d| d.name == name && d.parent.is_none() && d.label.is_type())
+            .map(|i| i as LocalDefId)
+    }
+
     /// The definition whose name identifier is `name_node`.
     fn def_at(&self, name_node: Node<'_>) -> Option<LocalDefId> {
         let start = name_node.start_byte() as u32;

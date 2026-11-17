@@ -47,6 +47,41 @@ Saved: no async runtime in the server (`tokio`, `futures`, `sha2`, `chrono`,
 distinct crates in `rueca`'s tree, and a release binary 1.67 MB smaller.
 The behaviour reference is [`docs/mcp-protocol.md`](mcp-protocol.md).
 
+## 2026-11-17 — Contracts in the organization link layer (RFC 0006 phase 4)
+
+RFC 0006 phase 4. Contracts are **facts**, as RFC 0001 §6.4 planned: each
+pack emits `ContractHint`s (provides / consumes, HTTP / RPC / topic, a
+canonical key, the raw text, the owner definition, the framework), and
+`FACTS_FORMAT` goes to 3. Keys are canonical so matching is string work:
+HTTP `METHOD /path` with parameter segments as `{}`, the base URL
+stripped and `*` for an unknown method; RPC `pkg.Service/Method`, with
+package-less and `*/Method` keys from code that knows less. A code route
+is a row on its handler, not a route node: the handler is what an agent
+reads, one hop from the client. `.proto` files get a pack over
+`protox-parse` 0.10 (pure Rust, no `protoc` to install; MIT OR
+Apache-2.0, in the `deny.toml` allow list); OpenAPI operations, already
+`Route` nodes, provide their keys. Spec and code providers are both `CALLS` targets and
+are matched separately, so a call into a specified service is not
+ambiguous between the handler and the operation it implements; the
+handler gets `IMPLEMENTS` to the operation. Matching requires equal
+segment counts, with no prefix- or suffix-tolerant fallback: it would
+recover mount prefixes composed in other files, at the price of turning
+short routes into providers for many calls; the gap is recorded and
+measured as recall. Providers that are tests or in test files are never
+match candidates, inside one snapshot or across repositories, as package
+edges never point into a dependency's tests.
+Across repositories, contract keys go into each repository's `RepoDeps`,
+a match makes a dependency, and the edges come from the segments' contract
+tables alone (no joint resolve) into the same link sets as package edges,
+so refs, versioning, recomputation and visibility needed nothing new
+(`LINKER_VERSION` 2). S2 (*Cross-service edges*) is a gated suite with the
+edge floors, precision ≥ 90 / recall ≥ 75, targets 97 / 90, per kind, on
+ollama, qdrant, dapr and weaviate (openai diagnostic: its specs exceed the
+2 MiB extraction budget). `list_contracts` (CLI `rueca contracts`) is the
+eighth tool: RFC 0001 §11.4 lists it (provided / consumed / dangling), and
+dangling calls — the question "what calls an endpoint nobody provides" —
+cannot be asked of `trace`, which only follows edges that exist.
+
 ## 2026-11-16 — Refs are snapshots of their own, exported from the object database
 
 RFC 0006 phase 3. A branch, pull request, tag or commit indexed with

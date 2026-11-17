@@ -2,7 +2,7 @@
 
   rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
   rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,data,health,org,s2,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
-  rueca-bench report
+  rueca-bench report [--s2-only]
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
 
@@ -63,7 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--lang", nargs="*", help="language families to run (default: all)")
     rp.add_argument("--prune", action="store_true", help="delete each repository clone once its runs are done (bounded disk, e.g. CI)")
 
-    sub.add_parser("report", help="score cached outputs; write bench/results/*.json and docs/bench/alpha-results.md")
+    pr = sub.add_parser("report", help="score cached outputs; write bench/results/*.json and docs/bench/alpha-results.md")
+    pr.add_argument("--s2-only", action="store_true", help="publish S2 alone: s2.json, the contracts family of scorecard.json, the S2 rows of alpha-results.md")
 
     kp = sub.add_parser("check", help="regression check (RFC 0004 §7.8): compare a scorecard with the committed one")
     kp.add_argument("--baseline", default=None, help="committed scorecard (default: bench/results/scorecard.json at git HEAD)")
@@ -107,7 +108,10 @@ def main(argv: list[str] | None = None) -> int:
         if "s2" in wanted and not langs:
             contracts_mod.run(arms, force=a.force)  # cross-service edges (S2): one organization per group
     elif a.cmd == "report":
-        report_mod.report()
+        if a.s2_only:
+            report_mod.publish_s2()
+        else:
+            report_mod.report()
     elif a.cmd == "check":
         return check_mod.main(a.baseline, a.current)
     elif a.cmd == "clean":

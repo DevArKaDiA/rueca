@@ -126,8 +126,9 @@ def http_call(call: ast.Call, local: dict[str, ast.AST]) -> tuple[str, str] | No
                 return method, s
         return None
     verb = VERBS.get(_callee_name(call).lstrip("_"))
-    if verb and call.args:
-        s = render(call.args[0], local)
+    target = call.args[0] if call.args else (kw[0] if kw else None)
+    if verb and target is not None:
+        s = render(target, local)
         if looks_like_path(s):
             return verb, s
     return None
@@ -221,13 +222,18 @@ def _qualified(svc: str, qualifier: str, imports: dict[str, str], packages: dict
     """`pkg.Service` when the stub / servicer module is a generated module
     whose package is known — by its dotted name, else (a package that picks
     its generated modules at run time) every generated module of that file
-    name agreeing on the package — else `Service`."""
+    name agreeing on the package, else (a module re-exporting a generated
+    one under another name, `from dapr.proto import appcallback_service_v1`)
+    every generated module of the repository that declares the service
+    agreeing on the package — else `Service`."""
     module = imports.get(qualifier, "")
     if module in packages:
         pkg = packages[module].get(svc)
     else:
         base = "." + module.rsplit(".", 1)[-1]
         found = {v.get(svc) for k, v in packages.items() if k.endswith(base)} - {None}
+        if not found and module:
+            found = {v.get(svc) for v in packages.values()} - {None}
         pkg = found.pop() if len(found) == 1 else None
     return f"{pkg}.{svc}" if pkg else svc
 

@@ -44,6 +44,13 @@
 //! [`MatchQuality::confidence`] gives the edge confidence; when several
 //! providers match one consumer with the same best quality, each edge gets
 //! [`AMBIGUOUS_CONFIDENCE`].
+//!
+//! # Test providers
+//!
+//! A provider that is a test, or that is defined in a test file
+//! ([`is_test_source`]), is a test double (a fake sidecar, a mock server):
+//! it keeps its row but is never a match candidate, in one snapshot or
+//! across repositories.
 
 use std::fmt;
 
@@ -182,6 +189,14 @@ pub const SPEC_FRAMEWORKS: &[&str] = &["openapi", "proto"];
 /// Whether `framework` names a specification ([`SPEC_FRAMEWORKS`]).
 pub fn is_spec_framework(framework: &str) -> bool {
     SPEC_FRAMEWORKS.contains(&framework)
+}
+
+/// Whether a provider in the file at `path` is test code: a test path of
+/// the ranking prior ([`crate::is_test_path`]) or a Go `_test.go` file
+/// (the Go pack flags only `Test…` / `Benchmark…` functions as tests, so
+/// the fake servers and handlers of a `_test.go` file are not).
+pub fn is_test_source(path: &str) -> bool {
+    crate::is_test_path(path) || path.ends_with("_test.go")
 }
 
 /// Maximum length of [`ContractHint::raw`], in characters.
@@ -423,6 +438,14 @@ fn canonical_segment(seg: &[Tok]) -> String {
 /// any service, at [`MatchQuality::MethodWildcard`].
 pub const ANY_SERVICE: &str = "*";
 
+/// Method of a service-marker key `"<Service>/*"`: a `Provides` hint whose
+/// owner is a type that serves `<Service>` (a Go struct embedding
+/// `Unimplemented<Service>Server`) while its methods may be declared in
+/// other files. The resolver turns the marker into one row per method of
+/// the type shaped like an RPC handler, `"<Service>/<Method>"`; the marker
+/// itself is never a row.
+pub const ANY_METHOD: &str = "*";
+
 /// Canonical RPC key: `pkg.Service/Method`, or `Service/Method` when
 /// `package` is empty.
 pub fn rpc_key(package: &str, service: &str, method: &str) -> String {
@@ -563,6 +586,16 @@ mod tests {
 
     fn k(method: Option<&str>, raw: &str) -> Option<String> {
         http_key(method, raw)
+    }
+
+    #[test]
+    fn test_sources() {
+        for p in ["tests/clients/fake_dapr_server.py", "client/client_test.go", "src/__tests__/a.ts", "x.spec.ts"] {
+            assert!(is_test_source(p), "{p}");
+        }
+        for p in ["client/client.go", "pkg/testing_utils.go", "server/routes.go", "latest.go"] {
+            assert!(!is_test_source(p), "{p}");
+        }
     }
 
     #[test]

@@ -19,6 +19,20 @@ pub mod contract;
 
 pub use contract::{ContractHint, ContractKind, ContractRow, ContractSide};
 
+/// Test files by path: a `test`, `tests`, `__tests__`, `spec`, `specs`,
+/// `testing` or `e2e` directory, or a `test_*.py`, `*_test.py`, `conftest.py`,
+/// `*.test.*` or `*.spec.*` file name.
+pub fn is_test_path(path: &str) -> bool {
+    let mut segs: Vec<&str> = path.split('/').collect();
+    let name = segs.pop().unwrap_or("");
+    if segs.iter().any(|s| matches!(*s, "test" | "tests" | "__tests__" | "spec" | "specs" | "testing" | "e2e")) {
+        return true;
+    }
+    let stem = name.split('.').next().unwrap_or(name);
+    (name.ends_with(".py") && (stem.starts_with("test_") || stem.ends_with("_test") || stem == "conftest"))
+        || name.split('.').skip(1).any(|p| p == "test" || p == "spec")
+}
+
 // ---------------------------------------------------------------------------
 // Languages
 // ---------------------------------------------------------------------------

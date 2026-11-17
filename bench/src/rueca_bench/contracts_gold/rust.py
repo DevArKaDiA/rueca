@@ -13,7 +13,7 @@ from .specs import ProtoSet
 
 _ROUTE_ATTR = re.compile(r'#\[(get|post|put|patch|delete|head|options)\(\s*"([^"]*)"')
 _FN = re.compile(r"\bfn\s+(\w+)")
-_IMPL = re.compile(r"(?m)^\s*impl(?:<[^>]*>)?\s+(?:[\w:]+::)?(\w+)\s+for\s+(\w+)\s*\{")
+_IMPL = re.compile(r"(?m)^\s*impl(?:<[^>]*>)?\s+(?:[\w:]+::)?(\w+)\s+for\s+(\w+)(?:<[^{;]*>)?\s*(?:where\b[^{;]*)?\{")
 _ASYNC_FN = re.compile(r"\basync\s+fn\s+(\w+)\s*[(<]")
 
 

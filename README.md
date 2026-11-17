@@ -185,7 +185,11 @@ repository's results by that relevance. Repositories that import a package
 another one publishes (npm, PyPI, Go modules, Composer, Maven / Gradle,
 C / C++ headers, Cargo) are linked: imports, calls, inheritance and references
 across repositories, resolved with the publishing repository's own module
-model, which `trace` follows. A ref of one repository (`repo: A, ref:
+model, which `trace` follows. So are a client's HTTP calls and gRPC stub
+calls and the routes, OpenAPI operations or `.proto` RPC methods another
+repository provides, matched by canonical key (`GET /users/{}`,
+`pkg.Service/Method`); `rueca contracts` lists them and the calls nothing
+provides. A ref of one repository (`repo: A, ref:
 "pr/7"`) is the organization with A replaced by A at that ref; `ref`
 alone reads every repository that has it (a release branch across
 repositories) and the others at their default, and the cross-repository
@@ -336,7 +340,7 @@ absolute floors and aspirational targets).
 | **Retrieval** | Semantic search (RFC 0007, design next): default embeddings Qwen3-Embedding-0.6B int4 among presets (0.6B q8 / f16, 4B, 8B, other local models, a remote API); vectors keyed by content hash, reused across branches and repositories; two stages — BM25 + vectors + graph signals, then Qwen3-Reranker-0.6B — measured on CoIR, the S1 localization suite and the organization scenario | 🗺️ next (design) |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
 | **Service mode** | One container, segments in object storage, MCP over HTTP, organization-wide indexing with GPU for embeddings | 🗺️ planned |
-| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 phases 1–3 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges, Cargo included; refs / branches / PRs over the organization with `--ref` and `refs = [...]`, collapse across refs); next: phase 4 contracts (HTTP / OpenAPI / protobuf) |
+| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | ✅ phases 1–4 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges, Cargo included; refs / branches / PRs over the organization with `--ref` and `refs = [...]`, collapse across refs; contracts: HTTP / OpenAPI / protobuf-gRPC edges across repositories, `list_contracts`) |
 | **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
 | **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |
 

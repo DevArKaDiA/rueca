@@ -149,6 +149,47 @@ def gin_routes(go: GoRepo) -> tuple[list[Site], list[dict]]:
     return sites, unresolved
 
 
+_MUX = re.compile(r"\b(\w+)\.(Handle|HandleFunc)\(\s*\"([^\"]*)\"\s*,")
+_MUX_PATTERN = re.compile(r"^(?:([A-Z]+)\s+)?[^/\s]*(/\S*)$")  # `[METHOD ][host]/path` (Go 1.22 ServeMux)
+_ANY_REF = re.compile(r"\b(?:\w+\.)?([A-Za-z_]\w*)\b(?!\s*[({.])")
+
+
+def _mux_handler(go: GoRepo, rel: str, line: int, args: str) -> tuple[str, str, int, tuple[str, ...]] | None:
+    """Like `_handler`, for `net/http` (handlers are often unexported)."""
+    if "func(" in args:
+        return _handler(go, rel, line, args)
+    for name in reversed(_ANY_REF.findall(args)):
+        d = go.define(name, rel)
+        if d is not None:
+            return d.path, d.qualname, d.start, (d.name,)
+    return None
+
+
+def nethttp_routes(go: GoRepo) -> tuple[list[Site], list[dict]]:
+    """`net/http` ServeMux registrations with a literal pattern
+    (`mux.Handle("GET /api/tags", h)`, `http.HandleFunc("/x", f)`);
+    (sites, unresolved handlers)."""
+    sites: list[Site] = []
+    unresolved: list[dict] = []
+    for rel, text in go.text.items():
+        if '"net/http"' not in text:
+            continue
+        lines = text.splitlines()
+        for m in _MUX.finditer(text):
+            pm = _MUX_PATTERN.match(m.group(3))
+            if pm is None:
+                continue
+            line = _line_of(text, m.start())
+            key = canonical_http(pm.group(1) or "*", pm.group(2))
+            h = _mux_handler(go, rel, line, call_args(text, m.end()))
+            if h is None:
+                unresolved.append({"repo": go.repo, "path": rel, "line": line, "key": key})
+                continue
+            raw = clip(f"{rel}:{line}: {lines[line - 1]}")
+            sites.append(Site("http", HANDLER, key, go.repo, h[0], h[1], h[2], raw, "net/http", h[3]))
+    return sites, unresolved
+
+
 # --- gRPC ----------------------------------------------------------------------------------
 
 _CLIENT_TYPED = re.compile(r"\b(\w+)[ \t]+\*?(?:(\w+)\.)?(\w+)Client\b")

@@ -81,7 +81,7 @@ it on nine languages showed four problems:
 | Suite | Name in reports | Status in this RFC |
 |---|---|---|
 | S1 | **Localization** | kept, fixed (§7) |
-| S2 | Cross-service edges | roadmap (§11) |
+| S2 | **Cross-service edges** | gated (RFC 0006 §9.4) |
 | S3 | **Structure** | kept, rebuilt (§7) |
 | S4 | Agent end-to-end | roadmap (§11) |
 | S5 | **Health** (operational) | promoted to a gated suite |
@@ -137,6 +137,40 @@ callees (precision and recall shown).
 a reference parser; env-var bridge precision / recall against the labeled
 set.
 
+**Cross-service edges (S2)** (RFC 0006 §9.4), population = the
+cross-repository contract pairs of public services pinned to commits with
+their clients, each group indexed as one organization: ollama, qdrant, dapr
+and weaviate gated; openai diagnostic (its 4–5 MB specs are above the
+2 MiB per-file extraction budget):
+
+- **Gold** — computed from the checkouts by labelers independent of
+  Rueca (Python `ast`, tree-sitter for TypeScript, regular expressions for
+  Go and Rust routes and gRPC servers, `.proto` and OpenAPI / Swagger
+  documents), keys canonicalized like Rueca's; cross-repository pairs at
+  (source file → target file and symbol), one kind each: *http-code*
+  (client → handler), *http-spec* (client → OpenAPI operation),
+  *rpc-spec-client* (stub call → `.proto` rpc), *rpc-spec-server* (server
+  method → `.proto` rpc, an `IMPLEMENTS` edge), *rpc-code* (stub call →
+  server method). Tests and generated stubs are out of scope for the gold
+  and for the predictions.
+- **Precision** — of the contract edges the link layer returns
+  (`strategy: contract`), the fraction that hit a gold pair of their kind;
+  **recall** — of the gold pairs, the fraction found. Pooled over the
+  gated groups, per kind, with percentile bootstrap intervals over source
+  files; the row pooling every kind is shown, not gated. Edges count at
+  every confidence (an ambiguous 0.5 edge is a prediction like any other);
+  the same metrics at confidence ≥ 0.7 are shown next to them, not gated.
+  S2 is published with `rueca-bench report --s2-only`, which splices its
+  rows into the scorecard and `docs/bench/alpha-results.md` and leaves
+  every other suite's numbers as last published.
+- Diagnostic: per-group counts, the openai group, and dangling consumers
+  (`list_contracts`, `side: dangling`) next to the labelers' count.
+
+§7.2's minimum populations do not apply to S2: a kind's population is
+what its groups contain, reported as `n` in every cell, and a small kind
+shows it as a wide interval, marked ⚠ when the interval crosses the floor
+(§6.1). More groups are how a kind's population grows.
+
 **Health (S5)**: parse-error rate (files with ERROR / MISSING nodes over
 extracted files of the language, across the smoke and corpus repositories);
 query latency p95 (warm segment, every S1/S3 query); index throughput.
@@ -157,6 +191,7 @@ only; the cheapest signal of agent cost that needs no agent.
 | Micro | Callee F1 | ≥ 90% | ≥ 98% |
 | Configuration | Key recall, span accuracy | ≥ 95% | 100% |
 | Configuration | Bridge precision / recall | ≥ 95% / ≥ 75% | ≥ 99% / ≥ 90% |
+| Cross-service edges | Precision / recall, per kind | ≥ 90% / ≥ 75% | ≥ 97% / ≥ 90% |
 | Health | Files with parse errors | ≤ 2% | ≤ 0.5% |
 | Health | Query latency p95 | ≤ 100 ms | ≤ 20 ms |
 | Efficiency | Tokens per answer | — (reported) | ≤ 50% of cbm |
@@ -170,9 +205,10 @@ an issue says about the code; beating free text search is the minimum.
 
 ### 6.1 How a floor is checked
 
-- **Absolute floors** (structure, micro, configuration, health): the point
-  estimate must meet the floor, and the population must reach the minimum
-  size of §7.2. When the 95% interval crosses the floor the report marks the
+- **Absolute floors** (structure, micro, configuration, cross-service
+  edges, health): the point estimate must meet the floor, and the
+  population must reach the minimum size of §7.2 (none for cross-service
+  edges, §5). When the 95% interval crosses the floor the report marks the
   cell ⚠ (met, but not with confidence).
 - **Relative-to-baseline floors** (localization): a paired bootstrap over
   instances (10,000 resamples, fixed seed) of `Rueca − BM25`; the floor is
@@ -288,7 +324,6 @@ line per language: status and the floors that are not met.
 - **Agent end-to-end (S4)** when there is a budget for a representative
   sample: same agent and model with and without Rueca; answer quality,
   tokens, tool calls.
-- **Cross-service edges (S2)** with the org mode.
 
 ## 12. Alternatives considered
 

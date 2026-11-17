@@ -489,7 +489,8 @@ pub fn resolve(
     r.expand_macro_calls();
     r.env_provider_edges();
     let contracts = r.contract_rows();
-    for (src, dst, kind, meta) in contracts::contract_edges(&contracts) {
+    let test_rows = r.contract_test_rows(&contracts);
+    for (src, dst, kind, meta) in contracts::contract_edges(&contracts, &test_rows) {
         r.add_edge(src, dst, kind, meta);
     }
     r.tests_edges();

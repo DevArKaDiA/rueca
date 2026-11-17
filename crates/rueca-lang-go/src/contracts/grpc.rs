@@ -3,13 +3,21 @@
 //!
 //! Providers are exported methods declared in the file:
 //! - on a type the file declares as a server: it embeds
-//!   `pb.Unimplemented<S>Server` / `pb.Unsafe<S>Server`, or the file
-//!   registers it with `pb.Register<S>Server(s, &T{})` → `S/Method`;
+//!   `pb.Unimplemented<S>Server` / `pb.Unsafe<S>Server` or the server
+//!   interface `pb.<S>Server` (a delegating wrapper), or the file
+//!   registers it with `pb.Register<S>Server(s, x)` where `x` is `&T{}`,
+//!   the receiver of the enclosing method `func (x *T)`, or a variable of
+//!   the enclosing function assigned `&T{…}` → `S/Method`;
 //! - taking a stream `pb.<S>_<Method>Server` → `S/Method`;
 //! - shaped like a unary server method, `(ctx context.Context, in
 //!   *pb.<Method>Request) (*pb.<Resp>, error)` (a trailing `Alpha1` /
-//!   `Beta2` / `V2` of the method may be absent from the request type),
-//!   in a file importing `google.golang.org/grpc…` → `*/Method`.
+//!   `Beta2` / `V2` of the method may be absent from the request type or
+//!   follow `Request`: `DeleteFileRequestAlpha1`) → `*/Method`.
+//!
+//! A server type declared in the file (embedding or registration) also
+//! gets a service marker `S/*` (`rueca_model::contract::ANY_METHOD`) owned
+//! by the type: the resolver expands it to the type's handler-shaped
+//! methods in every file of the package (methods split over files).
 //!
 //! `pb` is a proto package: an import whose binding name ends in `pb` or
 //! whose path has a `proto` / `protos` / `protocol` / `*pb` segment
@@ -28,7 +36,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rueca_extract::tree_sitter::Node;
-use rueca_model::contract::{ANY_SERVICE, rpc_key};
+use rueca_model::contract::{ANY_METHOD, ANY_SERVICE, rpc_key};
 use rueca_model::{ContractKind, ContractSide};
 
 use super::http::{selector_call, selector_parts};
@@ -43,21 +51,21 @@ const GLOBAL: usize = usize::MAX;
 pub(crate) struct Bindings {
     /// Server type → service.
     servers: HashMap<String, String>,
+    /// Every (server type, service) the file declares, with the evidence
+    /// node's byte range, in order.
+    served: Vec<(String, String, (usize, usize))>,
     /// Names typed or built as `<S>Client` → `S`, by scope: struct fields
     /// and package-level variables in [`GLOBAL`], parameters and locals in
     /// their top-level declaration (its start byte).
     clients: HashMap<(usize, String), String>,
     /// Binding names of proto packages.
     proto: HashSet<String>,
-    /// The file imports `google.golang.org/grpc` or a sub-package.
-    grpc: bool,
 }
 
 impl Bindings {
     pub(crate) fn collect(file: &File<'_>, root: Node<'_>) -> Bindings {
         let proto = file.imports.iter().filter(|(a, p)| is_proto_import(a, p)).map(|(a, _)| a.clone()).collect();
-        let grpc = file.imports_path("google.golang.org/grpc");
-        let mut b = Bindings { servers: HashMap::new(), clients: HashMap::new(), proto, grpc };
+        let mut b = Bindings { servers: HashMap::new(), served: Vec::new(), clients: HashMap::new(), proto };
         b.visit(file, root, 0);
         b
     }
@@ -89,10 +97,21 @@ impl Bindings {
         let fields = named_children(ty).into_iter().flat_map(named_children);
         let embedded = fields.filter(|f| f.kind() == "field_declaration" && f.child_by_field_name("name").is_none());
         for f in embedded {
-            if let Some(svc) = f.child_by_field_name("type").and_then(|t| server_service(type_name(t, file.src))) {
-                self.servers.insert(file.text(name).to_string(), svc.to_string());
+            let Some(t) = f.child_by_field_name("type") else { continue };
+            if let Some(svc) = server_service(type_name(t, file.src)).or_else(|| self.server_interface(file, t)) {
+                self.serve(file.text(name), svc, (spec.start_byte(), spec.end_byte()));
             }
         }
+    }
+
+    /// `S` of an embedded server interface `pb.<S>Server` (a wrapper that
+    /// delegates to the server it embeds).
+    fn server_interface<'s>(&self, file: &File<'s>, ty: Node<'_>) -> Option<&'s str> {
+        let ty = if ty.kind() == "pointer_type" { *named_children(ty).first()? } else { ty };
+        if ty.kind() != "qualified_type" || !self.proto.contains(file.text(ty.child_by_field_name("package")?)) {
+            return None;
+        }
+        file.text(ty.child_by_field_name("name")?).strip_suffix("Server").filter(|s| is_service_name(s))
     }
 
     /// Fields, parameters and variables typed `pb.<S>Client`.
@@ -134,9 +153,15 @@ impl Bindings {
             return;
         }
         let args = call.child_by_field_name("arguments").map(named_children).unwrap_or_default();
-        if let Some(t) = args.get(1).and_then(|a| constructed_type(*a, file.src)) {
-            self.servers.insert(t.to_string(), svc.to_string());
+        let ty = args.get(1).and_then(|a| constructed_type(*a, file.src).or_else(|| variable_type(*a, file.src)));
+        if let Some(t) = ty {
+            self.serve(t, svc, (call.start_byte(), call.end_byte()));
         }
+    }
+
+    fn serve(&mut self, ty: &str, svc: &str, at: (usize, usize)) {
+        self.servers.insert(ty.to_string(), svc.to_string());
+        self.served.push((ty.to_string(), svc.to_string(), at));
     }
 
     /// `S` of a type `pb.<S>Client` / `*pb.<S>Client`.
@@ -175,6 +200,27 @@ impl Bindings {
                 file.push(ContractSide::Provides, ContractKind::Rpc, key, decl, owner, FRAMEWORK);
             }
         }
+        self.service_markers(file, root);
+    }
+
+    /// One `S/*` marker per (server type of this file, service), on the
+    /// type's definition; the evidence is the embedding type or the
+    /// registration call.
+    fn service_markers(&self, file: &mut File<'_>, root: Node<'_>) {
+        for (ty, svc, (start, end)) in &self.served {
+            let (Some(owner), Some(evidence)) = (file.type_named(ty), root.descendant_for_byte_range(*start, *end))
+            else {
+                continue;
+            };
+            file.push(
+                ContractSide::Provides,
+                ContractKind::Rpc,
+                rpc_key("", svc, ANY_METHOD),
+                evidence,
+                Some(owner),
+                FRAMEWORK,
+            );
+        }
     }
 
     fn provider_key(&self, file: &File<'_>, decl: Node<'_>, method: &str) -> Option<String> {
@@ -185,9 +231,7 @@ impl Bindings {
         }
         let recv = decl.child_by_field_name("receiver").and_then(|r| receiver_type(r, file.src));
         if let Some(svc) = recv.and_then(|r| self.servers.get(r)) {
-            let shaped =
-                types.iter().any(|t| t.starts_with('*') || t.ends_with("Server") || t.contains("StreamingServer["));
-            return shaped.then(|| rpc_key("", svc, method));
+            return handler_params(&types, method).then(|| rpc_key("", svc, method));
         }
         if let Some(svc) = types.iter().find_map(|t| self.stream_service(t, method)) {
             return Some(rpc_key("", svc, method));
@@ -203,15 +247,13 @@ impl Bindings {
         (!svc.is_empty() && self.proto.contains(qualifier)).then_some(svc)
     }
 
-    /// `(ctx context.Context, in *pb.<Method>Request) (*pb.X, error)` in a
-    /// file importing gRPC.
+    /// `(ctx context.Context, in *pb.<Method>Request) (*pb.X, error)`.
     fn unary_shaped(&self, types: &[String], result: &str, method: &str) -> bool {
         let [ctx, req] = types else { return false };
         let Some((qualifier, name)) = req.strip_prefix('*').and_then(|r| r.split_once('.')) else { return false };
         let proto_result = result.contains("error") && self.proto.iter().any(|p| result.contains(&format!("*{p}.")));
         let empty_result = result.contains("emptypb.Empty") || result.contains("empty.Empty");
-        self.grpc
-            && ctx == "context.Context"
+        ctx == "context.Context"
             && self.proto.contains(qualifier)
             && request_matches(name, method)
             && (proto_result || empty_result)
@@ -297,6 +339,16 @@ fn is_service_name(s: &str) -> bool {
     s.chars().next().is_some_and(char::is_uppercase) && !s.contains('_')
 }
 
+/// Parameters of a handler of a server type: a context and a pointer
+/// (`(ctx context.Context, in *pb.Req)`), or a stream (`pb.<S>_<Method>Server`,
+/// `grpc.BidiStreamingServer[…]`) — as the resolver's service markers
+/// require.
+fn handler_params(types: &[String], method: &str) -> bool {
+    let unary = types.iter().any(|t| t == "context.Context") && types.iter().any(|t| t.starts_with('*'));
+    let suffix = format!("_{method}Server");
+    unary || types.iter().any(|t| t.ends_with(&suffix) || t.contains("StreamingServer["))
+}
+
 /// `S` of `Unimplemented<S>Server` / `Unsafe<S>Server`.
 fn server_service(name: &str) -> Option<&str> {
     let rest = name.strip_prefix("Unimplemented").or_else(|| name.strip_prefix("Unsafe"))?;
@@ -318,6 +370,35 @@ fn qualified_name<'s>(func: Node<'_>, src: &'s [u8]) -> Option<(&'s str, &'s str
             (q.kind() == "identifier").then(|| (text(q, src), text(f, src)))
         }
     }
+}
+
+/// The type of identifier `arg`: the receiver of the enclosing method
+/// (`func (s *T) …`), else a variable of the enclosing function assigned
+/// `&T{…}` / `T{…}` / `new(T)` (`s := &T{}`).
+fn variable_type<'s>(arg: Node<'_>, src: &'s [u8]) -> Option<&'s str> {
+    if arg.kind() != "identifier" {
+        return None;
+    }
+    let name = text(arg, src);
+    let func = top_node(arg);
+    let receiver = func.child_by_field_name("receiver").and_then(|r| named_children(r).first().copied());
+    if let Some(p) = receiver.filter(|p| p.child_by_field_name("name").is_some_and(|n| text(n, src) == name)) {
+        return receiver_type(p.parent()?, src);
+    }
+    assigned_type(func.child_by_field_name("body")?, name, src, 0)
+}
+
+/// The type constructed into `name` by an assignment inside `node`.
+fn assigned_type<'s>(node: Node<'_>, name: &str, src: &'s [u8], depth: usize) -> Option<&'s str> {
+    if depth > 64 {
+        return None;
+    }
+    if matches!(node.kind(), "short_var_declaration" | "assignment_statement") {
+        let (left, right) = (node.child_by_field_name("left")?, node.child_by_field_name("right")?);
+        let pairs = named_children(left).into_iter().zip(named_children(right));
+        return pairs.filter(|(l, _)| text(*l, src) == name).find_map(|(_, r)| constructed_type(r, src));
+    }
+    named_children(node).into_iter().find_map(|c| assigned_type(c, name, src, depth + 1))
 }
 
 /// The type built by `&T{}`, `T{}` or `new(T)`.
@@ -355,11 +436,14 @@ fn param_types(params: Node<'_>, src: &[u8]) -> Vec<String> {
 }
 
 /// Whether a request type names the method: `<Method>Request`, or the
-/// method without a trailing version (`GetConfigurationAlpha1` →
-/// `GetConfigurationRequest`).
+/// method without a trailing version, the version after `Request` or
+/// dropped (`GetConfigurationAlpha1` → `GetConfigurationRequest`,
+/// `DeleteBinaryFileAlpha1` → `DeleteBinaryFileRequestAlpha1`).
 fn request_matches(request: &str, method: &str) -> bool {
-    let Some(base) = request.strip_suffix("Request") else { return false };
-    base == method || base == strip_version(method)
+    let base = strip_version(method);
+    let version = &method[base.len()..];
+    let Some((name, rest)) = request.rsplit_once("Request") else { return false };
+    (name == method && rest.is_empty()) || (name == base && (rest.is_empty() || rest == version))
 }
 
 /// `XAlpha1` / `XBeta2` / `XV2` → `X`.

@@ -1102,11 +1102,20 @@ f-string, concatenated or `path_template(...)` path and a literal or
 tree-sitter for TypeScript calls (verb wrappers, `fetch`, one hop through a
 function that interpolates its parameter into the URL), regular
 expressions for Go (gin / echo routes with group prefixes and their
-handlers; gRPC clients bound to `<Service>Client`; server methods by rpc
-name and signature, on the type embedding `Unimplemented<Service>Server`
-when there is one, request / response types from the service's
-`go_package`), Rust (actix route attributes; tonic `impl <Service> for
-<Type>`), `.proto` files and OpenAPI 3 / Swagger 2 documents. Keys use the
+handlers; `net/http` ServeMux registrations with a literal pattern,
+Go 1.22 `"GET /path"` method patterns included; gRPC clients bound to
+`<Service>Client`; server methods by rpc name and signature, on the type
+embedding `Unimplemented<Service>Server` when there is one, request /
+response types from the service's `go_package`), Rust (actix route
+attributes; tonic `impl <Service> for <Type>`, generic wrapper types
+`impl<T: S> S for W<T>` included), `.proto` files and OpenAPI 3 /
+Swagger 2 documents. Python verb calls read the path from a `url=` /
+`path=` keyword when there is no positional argument
+(`self._connection.get(path="/nodes")`), and a stub or servicer module
+that re-exports a generated one under another name
+(`from dapr.proto import appcallback_service_v1`) takes the package of
+the repository's generated modules that declare the service when they
+agree. Keys use the
 canonical form of `rueca_model::contract` (`contracts_gold/keys.py`); a
 consumer is paired with the providers of its best match quality (exact >
 template > method wildcard; the proto package when the client's generated
@@ -1128,11 +1137,52 @@ pair of that kind (same repositories and files, an accepted target name:
 handler or method name, `Service.Method`, the operation's canonical key).
 Precision = correct / predicted, recall = found / gold, pooled over the
 gated groups per kind and overall, percentile bootstrap over source files.
-Floors ≥ 90 / 75, targets ≥ 97 / 90 (the scorecard family *Cross-service
-edges*, gated per kind; the pooled *all* row is shown, not gated). Edges of
-a kind a group does not label (qdrant's versioned specs, `http-spec` of the
-dapr runtime) are counted as unscored. Raw output
+Edges are scored **at every confidence** (the gated row: ambiguous edges,
+confidence 0.5, count like the others) and again **at confidence ≥ 0.7**
+(`summary_high`, not gated: what an agent that drops ambiguous edges
+keeps). Floors ≥ 90 / 75, targets ≥ 97 / 90 (the scorecard family
+*Cross-service edges*, gated per kind; the pooled *all* row is shown, not
+gated). Edges of a kind a group does not label (qdrant's versioned specs,
+`http-spec` of the dapr runtime) are counted as unscored. Raw output
 `.cache/runs/org/contracts-rueca.json`, results `bench/results/s2.json`.
+
+**Measuring and publishing.** `RUECA_BIN=<release binary> uv run
+rueca-bench run --arm rueca --suite s2 --force` (about two minutes for the
+five groups with warm clones), then `uv run rueca-bench report --s2-only`:
+it writes `bench/results/s2.json`, sets the `contracts` family of
+`bench/results/scorecard.json` and replaces the S2 row of the scorecard
+summary and the *Cross-service edges* section of
+`docs/bench/alpha-results.md`, leaving every other published number as it
+is (a full `report` re-scores S1 / S3 from the local cache, carrying what
+it does not hold). `python -m rueca_bench.contracts score` prints the
+pooled summary of the last run.
+
+**Results** (2026-11-17, feat/org-contracts, pooled over the gated groups,
+every confidence): http-code P 98.3 (116/118) / R 98.0 (97/99); http-spec
+100.0 (131/131) / 100.0 (110/110); rpc-spec-client 96.1 (219/228) / 100.0
+(212/212); rpc-spec-server 100.0 (18/18) / 90.0 (18/20); rpc-code 95.5
+(277/290) / 95.4 (270/283); all 96.9 / 97.7. Every gated floor is met
+(rpc-spec-client and rpc-code precision ⚠: the interval crosses 90). What
+is left: **ollama** `POST /api/create` registered in `routes.go` with its
+handler in `create.go` (a handler in another file: the row is owned by the
+registering function, 2 wrong + 2 missed); **dapr** go-sdk clients that
+only know the method (`c.protoClient.X` with the field typed in another
+file, `*/X`) also reach the `Scheduler` and `Operator` protos (4 wrong,
+0.5); the durabletask `TaskHubSidecarService`, whose `.proto` is outside
+the group, has no gold provider (9 edges: 6 to `fallbackAwareServer`,
+which embeds the service's server interface, 3 to the actors backend's
+same-shaped methods); `BulkPublishEvent` / `ConverseAlpha1/2` take
+requests not named after the method (`BulkPublishRequest`,
+`ConversationRequest`: the name-only server shape misses them, 12 pairs);
+a Python servicer with two `…Servicer` bases is read as the first service,
+so its `AppCallbackAlpha` methods are missed (3 pairs); **weaviate** stub
+calls `Weaviate/Search`, `Weaviate/BatchObjects` match both the `v0` and
+`v1` services (no package in the client code: 8 wrong, 0.5); **qdrant**
+the server's own Rust gRPC client (not labeled) reaches the client
+repository's copy of `qdrant.proto` (1 wrong, 0.5). Rueca's dangling
+consumers are mostly test calls and calls to third-party services (`rueca
+contracts --side dangling`); the labelers' count is lower because they
+skip tests.
 
 ### Configuration — data formats (RFC 0003 §3.3)
 
@@ -1406,6 +1456,11 @@ Rule changes that move published numbers, newest first (the results files
 carry the S3 schema version; rows scored under an older schema are never
 carried forward).
 
+- **2026-11-17 — S2, first published run.** Gold labelers: `net/http`
+  ServeMux routes, generic tonic wrapper impls, Python verb calls with a
+  `path=` / `url=` keyword only, stub / servicer modules re-exporting a
+  generated module (package from the agreeing generated modules). Scoring:
+  every confidence (gated) and confidence ≥ 0.7 (`summary_high`, shown).
 - **2026-11-16 — Organization scenario, larger and self-contained.** The
   multi-repository scenario moves from 21 instances (one per repository, 21
   repositories) to pinned `[[org.repos]]` members (42 gated, 8

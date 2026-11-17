@@ -22,14 +22,14 @@
 //!   dependency's template) leaves no link edge at all. The in-snapshot
 //!   edge of the consumer's own segment keeps the confidence its
 //!   resolver gave it (it cannot see other repositories).
-//! - **Targets.** Providers that are tests or in test files are not
-//!   candidates (as for package edges); a row never matches its own node.
+//! - **Targets.** Providers that are tests or in test files
+//!   (`rueca_model::contract::is_test_source`) are not candidates; a row never matches its own node.
 //!   Nodes are the segments' own (contract rows are stored per segment),
 //!   so nothing is mapped. Evidence: the consumer row's `(file, span)`.
 
 use std::collections::{BTreeMap, HashMap};
 
-use rueca_model::contract::{best_matches, match_bucket, match_confidence};
+use rueca_model::contract::{best_matches, is_test_source, match_bucket, match_confidence};
 use rueca_model::{ContractKind, ContractRow, ContractSide, EdgeKind, EdgeMeta, NodeId, Strategy};
 use rueca_segment::Segment;
 use rueca_segment::org::{LinkEdge, LinkInput};
@@ -69,7 +69,7 @@ impl<'a> Providers<'a> {
 /// Whether node `n` of `seg` is a test or in a test file.
 fn is_test(seg: &Segment, n: NodeId) -> bool {
     let node = seg.node(n);
-    node.is_test || node.file.is_some_and(|f| rueca_segment::is_test_path(&seg.file(f).path))
+    node.is_test || node.file.is_some_and(|f| is_test_source(&seg.file(f).path))
 }
 
 /// The contract link edges of `consumer` into `deps` (`LinkEdge::dep`

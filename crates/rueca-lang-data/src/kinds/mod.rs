@@ -133,9 +133,13 @@ fn is_spring_name(stem: &str, ext: &str) -> bool {
 /// Kubernetes bundles): these get the general size budget instead of the
 /// data-file one (RFC 0003 §4.5 rule 4).
 pub(crate) fn sniff_large_kind(src: &str) -> bool {
-    let head = &src[..src.len().min(4096)];
+    let mut end = src.len().min(4096);
+    while !src.is_char_boundary(end) {
+        end -= 1;
+    }
+    let head = &src[..end];
     let has = |k: &str| head.contains(k);
-    has("openapi") || has("swagger") || (has("apiVersion") && has("kind"))
+    has("openapi") || has("swagger") || (has("apiVersion") && has("kind")) || openapi::declares_version(src)
 }
 
 /// Kind decided from the parsed tree when the path did not decide.

@@ -321,3 +321,61 @@ fn go_and_python_do_not_cross() {
     assert!(!out.graph.edges.iter().any(|e| e.src == py && e.dst == repo));
     g.has(&q(STORE, "Store"), &q(STORE, "Repo"), EdgeKind::Implements, Strategy::Heuristic, 0.5);
 }
+
+#[test]
+fn grpc_server_split_over_files_and_test_doubles() {
+    // The server type embeds `Unimplemented<S>Server` in one file, its
+    // handlers live in another; a fake server in a `_test.go` file would
+    // tie with it.
+    let src = |s: &str| s.as_bytes().to_vec();
+    let files = vec![
+        ("go.mod".to_string(), src("module example.com/svc\n\ngo 1.22\n")),
+        (
+            "server/service.go".to_string(),
+            src(
+                "package server\n\nimport (\n\t\"google.golang.org/grpc\"\n\tpb \"example.com/svc/proto/greeterpb\"\n)\n\ntype Server struct {\n\tpb.UnimplementedGreeterServer\n}\n\nfunc New(s *grpc.Server) *Server { return &Server{} }\n",
+            ),
+        ),
+        (
+            "server/hello.go".to_string(),
+            src(
+                "package server\n\nimport (\n\t\"context\"\n\tpb \"example.com/svc/proto/greeterpb\"\n)\n\nfunc (s *Server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) { return nil, nil }\n\nfunc (s *Server) AddHandler(name string) error { return nil }\n\nfunc (s *Server) Start(ctx context.Context) error { return nil }\n",
+            ),
+        ),
+        (
+            "server/fake_test.go".to_string(),
+            src(
+                "package server\n\nimport (\n\t\"context\"\n\tpb \"example.com/svc/proto/greeterpb\"\n)\n\ntype fake struct {\n\tpb.UnimplementedGreeterServer\n}\n\nfunc (f *fake) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) { return nil, nil }\n",
+            ),
+        ),
+        (
+            "client/client.go".to_string(),
+            src(
+                "package client\n\nimport (\n\t\"context\"\n\tpb \"example.com/svc/proto/greeterpb\"\n)\n\ntype C struct {\n\tconn pb.GreeterClient\n}\n\nfunc (c *C) Hello(ctx context.Context) {\n\tc.conn.SayHello(ctx, &pb.HelloRequest{})\n}\n",
+            ),
+        ),
+    ];
+    let out = build(files);
+    let g = G(&out.graph);
+    let keys: Vec<(String, &str)> = out
+        .graph
+        .contracts
+        .iter()
+        .map(|r| (out.graph.nodes[r.node as usize].qualified_name.clone(), r.key.as_str()))
+        .collect();
+    let srv = "example.com/svc/server";
+    assert!(keys.contains(&(q(srv, "Server.SayHello"), "Greeter/SayHello")), "{keys:?}");
+    assert!(keys.contains(&(q(srv, "fake.SayHello"), "Greeter/SayHello")), "{keys:?}");
+    // Neither the marker nor the methods that are not handlers are rows.
+    assert!(!keys.iter().any(|(_, k)| k.ends_with("/*")), "{keys:?}");
+    assert!(!keys.iter().any(|(qn, _)| qn.ends_with(".AddHandler") || qn.ends_with(".Start")), "{keys:?}");
+    // The client reaches the server, not the test double.
+    g.has(
+        &q("example.com/svc/client", "C.Hello"),
+        &q(srv, "Server.SayHello"),
+        EdgeKind::Calls,
+        Strategy::Contract,
+        0.9,
+    );
+    g.lacks(&q("example.com/svc/client", "C.Hello"), &q(srv, "fake.SayHello"), EdgeKind::Calls);
+}

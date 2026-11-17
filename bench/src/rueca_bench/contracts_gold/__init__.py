@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from .golang import GoRepo, gin_routes, go_grpc_calls, go_grpc_impls
+from .golang import GoRepo, gin_routes, go_grpc_calls, go_grpc_impls, nethttp_routes
 from .model import Site
 from .pairs import KINDS, GoldPair, build_pairs
 from .rust import actix_routes, tonic_impls
@@ -46,9 +46,10 @@ def label_sites(roots: dict[str, Path]) -> tuple[list[Site], dict]:
         go = GoRepo(repo, root)
         if not go.text:
             continue
-        routes, unresolved = gin_routes(go)
-        sites += routes
-        notes["unresolved_handlers"] += unresolved
+        for labeler in (gin_routes, nethttp_routes):
+            routes, unresolved = labeler(go)
+            sites += routes
+            notes["unresolved_handlers"] += unresolved
         if services:
             sites += go_grpc_calls(go, protos)
             sites += go_grpc_impls(go, protos)

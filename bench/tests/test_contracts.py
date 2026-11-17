@@ -7,7 +7,7 @@ import pytest
 
 from rueca_bench.contracts import GROUPS, _entries, audit_sample, classify, edge_tokens, pooled, score_group, score_record, scorecard_block
 from rueca_bench.contracts_gold import build_gold, label_sites
-from rueca_bench.contracts_gold.golang import GoRepo, gin_routes, go_grpc_calls, go_grpc_impls, implements
+from rueca_bench.contracts_gold.golang import GoRepo, gin_routes, go_grpc_calls, go_grpc_impls, implements, nethttp_routes
 from rueca_bench.contracts_gold.keys import canonical_http, match_http, match_rpc
 from rueca_bench.contracts_gold.model import CALL, HANDLER, IMPL, SPEC, Site, in_scope, symbol_tokens
 from rueca_bench.contracts_gold.pairs import build_pairs
@@ -15,6 +15,7 @@ from rueca_bench.contracts_gold.pyclient import python_http_calls, python_servic
 from rueca_bench.contracts_gold.rust import actix_routes, snake, tonic_impls
 from rueca_bench.contracts_gold.specs import ProtoSet, openapi_operations, proto_services
 from rueca_bench.contracts_gold.tsclient import ts_http_calls
+from rueca_bench.report import splice_s2, with_contracts
 
 
 def write(root: Path, rel: str, text: str) -> None:
@@ -111,6 +112,9 @@ class Client:
     def remote(self):
         return httpx.get("https://xkcd.com/info.0.json")
 
+    def nodes(self):
+        return executor.result(self._connection.get(path="/nodes"))
+
     def not_http(self, d):
         return d.get("name")
 
@@ -131,6 +135,7 @@ def test_python_http_labeler(tmp_path):
         ("GET /files/{}", "Client.files"),
         ("GET /authz/roles", "Client.roles"),
         ("GET /info.0.json", "Client.remote"),
+        ("GET /nodes", "Client.nodes"),
     }, "decorated routes, dict.get and test files are not client calls"
     assert all(s.role == CALL and s.path == "pkg/client.py" for s in sites)
 
@@ -194,6 +199,38 @@ def test_go_gin_routes_and_handlers(tmp_path):
     assert ("POST /v1/chat/completions", "server/routes.go", "Server.ChatHandler", ("ChatHandler",)) in got, "arguments over several lines"
     assert ("DELETE /v2/models/{}", "server/delete.go", "Server.DeleteHandler", ("DeleteHandler",)) in got, "group prefix, handler in another file"
     assert [u["key"] for u in unresolved] == ["* /proxy/{}"]
+
+
+GO_MUX = """package ui
+
+import "net/http"
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	proxy := s.ollamaProxy()
+	mux.Handle("GET /api/tags", proxy)
+	mux.HandleFunc("POST /api/v1/chat/{id}", s.chat)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {})
+	mux.Handle("GET /", s.unknown())
+	r.Handle("GET", "/gin/style", h)
+	return mux
+}
+
+func (s *Server) chat(w http.ResponseWriter, r *http.Request) {}
+func (s *Server) proxy() {}
+"""
+
+
+def test_go_nethttp_routes(tmp_path):
+    write(tmp_path, "app/ui/ui.go", GO_MUX)
+    sites, unresolved = nethttp_routes(GoRepo("o/go", tmp_path))
+    got = {(s.key, s.symbol, s.accept) for s in sites}
+    assert got == {
+        ("GET /api/tags", "Server.proxy", ("proxy",)),
+        ("POST /api/v1/chat/{}", "Server.chat", ("chat",)),
+        ("* /healthz", "Server.Handler", ("Handler", "")),
+    }, "method patterns, unexported handlers, inline closures; gin's two-string Handle is not a mux pattern"
+    assert [u["key"] for u in unresolved] == ["GET /"]
 
 
 PROTO = """syntax = "proto3";
@@ -322,6 +359,15 @@ def test_python_grpc_labelers(tmp_path):
     assert [(s.key, s.symbol, s.role) for s in impls] == [("acme.v1.Store/Get", "Servicer.Get", IMPL)]
 
 
+def test_python_servicer_through_an_alias_module(tmp_path):
+    ps = _protos(tmp_path / "api")
+    root = tmp_path / "py"
+    write(root, "acme/gen/store_pb2_grpc.py", "channel.unary_unary('/acme.v1.Store/Get')\n")
+    write(root, "acme/ext/servicer.py", "from acme import store_service_v1\n\nclass S(store_service_v1.StoreServicer):\n    def Get(self, request, context):\n        return None\n")
+    impls = python_servicers("acme/py", root, ps.services)
+    assert [(s.key, s.symbol) for s in impls] == [("acme.v1.Store/Get", "S.Get")], "the only generated module declaring the service names its package"
+
+
 def test_rust_labelers(tmp_path):
     write(tmp_path, "src/api.rs", '#[get("/collections/{name}")]\nasync fn get_collection(path: web::Path<String>) -> impl Responder {}\n')
     write(tmp_path, "src/svc.rs", "#[tonic::async_trait]\nimpl Store for StoreService {\n    async fn get(&self, r: Request<GetRequest>) -> R {\n        inner();\n    }\n    async fn helper(&self) {}\n}\n")
@@ -331,6 +377,9 @@ def test_rust_labelers(tmp_path):
     ps = ProtoSet()
     proto_services("q/q", tmp_path, ps)
     assert [(s.key, s.symbol) for s in tonic_impls("q/q", tmp_path, ps)] == [("acme.v1.Store/Get", "StoreService.get")]
+    write(tmp_path, "src/wrap.rs", "impl<T: Store> Store for Wrapper<T> {\n    async fn get(&self, r: Request<GetRequest>) -> R {\n        self.inner.get(r).await\n    }\n}\n")
+    got = sorted((s.key, s.symbol) for s in tonic_impls("q/q", tmp_path, ps))
+    assert got == [("acme.v1.Store/Get", "StoreService.get"), ("acme.v1.Store/Get", "Wrapper.get")], "a generic delegating wrapper serves the service too"
     assert snake("QueryBatch") == "query_batch" and snake("HealthCheck") == "health_check"
 
 
@@ -482,3 +531,27 @@ def test_score_record_from_a_raw_run():
     assert s2["groups"][1]["status"] == "error" and not s2["complete"]
     assert _entries({"contracts": [{"key": "a"}], "truncated": False}) == [{"key": "a"}]
     assert _entries({"other": [1]}) == [1] and _entries(None) is None
+
+
+def test_high_confidence_summary_and_publishing():
+    gold = {"pairs": [p.as_dict() for p in _gold()], "counts": {"http-code": 2, "http-spec": 1}, "dangling": []}
+    edges = [
+        _edge("id-c", "cli.py", "Cli.me", "id-s", "me.go", "server.Server.Me", "Method"),
+        dict(_edge("id-c", "cli.py", "Cli.me", "id-s", "users.go", "server.Server.Add", "Method"), confidence=0.5),
+    ]
+    raw = {"status": "ok", "groups": [{"name": "g", "split": "gated", "kinds": ["http-code"], "repos": [], "status": "ok", "repo_ids": {"c/cli": "id-c", "s/srv": "id-s"}, "edges": edges, "dangling": [], "provided": [], "gold": gold}]}
+    s2 = score_record(raw)
+    assert s2["summary"]["http-code"]["precision"] == 0.5 and s2["summary_high"]["http-code"]["precision"] == 1.0
+    assert s2["high_confidence"] == 0.7
+
+    def judge(spec, value, ci, n, min_n):
+        return "pending" if value is None else ("✅" if value >= spec["floor"] else "❌")
+
+    block = scorecard_block(s2, judge)
+    card = with_contracts({"generated": "d", "languages": {}, "config": {}, "settings": {}, "rueca": "v"}, block)
+    assert list(card) == ["generated", "languages", "config", "settings", "contracts", "rueca"]
+    md = "\n".join(["## Scorecard", "", "| configuration | `stable` | — |", "", "### Cross-repository edges (packages)", "", "x", "", "### Multi-ref (one repository at two commits)", "", "y", ""])
+    once = splice_s2(md, s2, block)
+    assert "| cross-service edges (S2) |" in once and "### Cross-service edges (S2, contracts)" in once
+    assert splice_s2(once, s2, block) == once, "idempotent: the S2 rows are replaced, nothing else moves"
+    assert once.replace(splice_s2(md, s2, block), "") == "" and once.split("### Multi-ref")[1] == md.split("### Multi-ref")[1]
