@@ -23,6 +23,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Efficiency** | "How many tokens does a correct answer cost?" (RFC 0005 §8) | reported only |
 | **Org scenarios** | "Does it still find the code in a store of many repositories, and of one repository at two commits?" (RFC 0005 §5–§6) | reported; paired vs BM25 with MDE (not a language gate) |
 | **Configuration** (RFC 0003 §3.3) | "Which keys exist, who reads this env var, who sets it?" | key recall, span accuracy, bridge precision / recall |
+| **Service** (RFC 0008 §8.2–§8.3) | "Does `rueca serve` answer the organization suite over HTTP exactly as `rueca query` does, and how fast?" | reported (differential n/n, time to ready, p50 / p95) |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
 the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust}/` and the
@@ -121,6 +122,21 @@ Without `RUECA_BIN` the Rueca column is reported as *pending* (and every
 scorecard floor of that language is *pending*, so it cannot be `stable`); a
 language whose Rueca outputs are missing is left out of the detailed tables'
 `overall` column (which pools only languages every arm has results for).
+
+### Service suite
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo build --release -p rueca                       # the `service` feature is on by default
+RUECA_BIN=$PWD/target/release/rueca uv run --project bench rueca-bench service --small   # ≈ 10 s, no setup
+RUECA_BIN=$PWD/target/release/rueca uv run --project bench rueca-bench service           # the gated organization (needs `setup`)
+```
+
+`service [--small] [--split gated|calibration] [--only REPO ...] [--limit N]
+[--sample N] [--repeat N] [--keep] [--out FILE] [--bin PATH]` (also `run
+--suite service`, which is not part of `all`). Writes
+`bench/results/service-<UTC timestamp>.json`; the method is under *Suites →
+Service*.
 
 ### Sharing a cache between checkouts
 
@@ -1231,6 +1247,65 @@ and terraform-aws-modules/terraform-aws-vpc v6.7.3 (HCL).
   `grep` arm is a regex baseline: the env APIs above in code (reader = the
   innermost tree-sitter function) and `- name: X` / `- X=…` / `X: …` lines
   inside `env:` / `environment:` blocks of YAML manifests.
+
+### Service (RFC 0008 §8.2–§8.3, `service.py`)
+
+The organization served by `rueca serve` (phase 1, the query role) and
+asked over MCP-over-HTTP, against `rueca query` on the same snapshots.
+Self-contained: everything lives in `.cache/service/` (removed after the
+run unless `--keep`).
+
+1. **Organization.** `--small`: the two repositories of
+   `bench/service/small.toml` (this checkout's `crates/rueca-storage` and
+   `bench/src/rueca_bench`, cut with `git archive HEAD:<path>` and committed
+   with a fixed identity and date) and its twelve keyword queries, indexed
+   with one `rueca index --org`. Otherwise the multi-repository scenario's
+   members of `--split` (default `gated`; `--only` restricts the members),
+   indexed one at a time from worktrees at the pins as the org suite does,
+   and its questions' keyword queries (read from
+   `.cache/runs/org/multirepo-<split>-rueca.json` when it exists for the
+   same filter, else selected again).
+2. **Store.** `rueca publish --repo <id> --org bench` per member into a
+   `file://` service store, then `rueca pull --generation` into a separate
+   mirror, which builds the organization and publishes generation 1 (the
+   hidden phase 0 commands; phase 2's updater will do this).
+3. **Serve.** `rueca serve --role query` with a generated
+   `rueca-service.toml`: free local ports, its own cache directory,
+   `ready_when = "index"`, one static token (`sha256:` of a random
+   `rueca_…`, `repos = ["**"]`), rate limits set out of reach. **Time to
+   ready** = process start → first `200` from `/readyz` (`/healthz` is
+   recorded too). One request without a token records the `401` and its
+   `WWW-Authenticate`.
+4. **Calls.** A minimal MCP client (`http.client`, one keep-alive
+   connection, `Authorization: Bearer`, `MCP-Protocol-Version: 2025-06-18`,
+   `Mcp-Method` / `Mcp-Name`): `initialize` and `notifications/initialized`,
+   then one `search_symbols` `{"query", "limit": 10}` per query, then
+   `--sample` (20) `get_symbol` calls and up to as many `trace` calls
+   (`direction: both`, `depth: 2`, callable symbols only) on every k-th
+   distinct result id of the search answers. `--repeat` (3) replays the
+   list; only the first pass is checked.
+5. **Differential** (RFC 0008 §8.3). Every first-pass answer: the HTTP
+   `structuredContent` must equal `rueca query <tool> '<args>' --org bench
+   --store <mirror>` (parsed JSON), and the text content must equal the
+   same call with `--text`. The report gives JSON and text pass counts, per
+   tool, and the first difference (JSON path, both values).
+6. **Latency.** Client: per tool p50 / p95 / max over every pass
+   (`client`) and over the first, cold pass (`client_first_pass`),
+   nearest rank. Server: `/metrics` after the run, `rueca_mcp_request_seconds`
+   summed over scopes per tool (and per tool and scope), p50 / p95
+   interpolated inside the buckets as Prometheus' `histogram_quantile`
+   (bucket bounds 1, 2.5, 5, 10, 25, 50, 75, 100, 150, 250 ms …, so a p95
+   is only as precise as its bucket), plus `rueca_mcp_requests_total` by
+   outcome. The RFC 0008 §8.1 floor (lexical `search_symbols` p95 ≤ 100 ms,
+   server side, warm) reads `server.tools.search_symbols.p95_ms`.
+7. **Sizes.** Binary, service store, harness mirror, the server's cache
+   directory and the indexing store (bytes); server RSS after the calls;
+   the shutdown (SIGTERM → exit code, seconds).
+
+Not yet (RFC 0008 §8.2, later phases): indexers and `--role all`, a local
+git HTTP server, webhooks and push-to-queryable, fault injection, an
+S3-compatible store, concurrent clients. Latency is measured with one
+client and one connection.
 
 ## Datasets, tools and licences
 

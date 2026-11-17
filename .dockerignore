@@ -1,0 +1,9 @@
+# Only what `cargo build --release -p rueca --locked` reads: the workspace
+# manifests, Cargo.lock and crates/ (sources, queries, build scripts).
+*
+!Cargo.toml
+!Cargo.lock
+!crates/
+!README.md
+crates/**/target
+crates/**/tests/fixtures/**/*.rcseg

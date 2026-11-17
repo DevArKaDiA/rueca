@@ -1,0 +1,29 @@
+# `rueca-bench service --small`: two small repositories cut from this
+# checkout (`git archive HEAD:<path>`, committed with a fixed identity and
+# date, `origin` = `url`), so the run needs no network and no `setup`, and
+# the queries the service answers. One Rust and one Python repository.
+
+# `search_symbols` queries (the organization suite's shape: keywords, no
+# `repo`); `get_symbol` / `trace` calls are derived from their answers.
+queries = [
+  "object storage put",
+  "compare and swap object version",
+  "memory storage list prefix",
+  "s3 multipart upload",
+  "retry backoff request",
+  "storage error not found",
+  "reciprocal rank fusion merge",
+  "bm25 union search",
+  "add worktree commit",
+  "count tokens encoder",
+  "wilson interval",
+  "load manifest languages",
+]
+
+[[repo]]
+path = "crates/rueca-storage"
+url = "https://example.invalid/bench/rueca-storage.git"
+
+[[repo]]
+path = "bench/src/rueca_bench"
+url = "https://example.invalid/bench/rueca-bench.git"

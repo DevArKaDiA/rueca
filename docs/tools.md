@@ -685,6 +685,24 @@ curl -s https://rueca.acme.internal/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_symbols","arguments":{"query":"issue invoice"}}}'
 ```
 
+**Container.** The repository's `Dockerfile` builds the CPU image (RFC
+0008 §4.3): the release binary on `gcr.io/distroless/cc-debian13:nonroot`
+with `git` and the libraries it and `git-remote-https` link copied from
+Debian trixie; user `65532`, `ENTRYPOINT ["rueca"]`, default command
+`serve --config /etc/rueca/rueca-service.toml`, volume `/var/cache/rueca`
+(point `[store].cache_dir` there), ports 8080 and 9090; it runs with a
+read-only root filesystem.
+
+```sh
+docker build -t rueca .
+docker run --rm --read-only -p 8080:8080 -p 9090:9090 \
+  -v "$PWD/rueca-service.toml:/etc/rueca/rueca-service.toml:ro" \
+  -v rueca-cache:/var/cache/rueca rueca
+```
+
+`bench/` measures the service (`rueca-bench service`: time to ready,
+latency, and every answer against `rueca query`; `bench/README.md`).
+
 Phase 1 adds three keys to RFC 0008 §4.4's file: `[store].poll` (the
 generation watcher period, default `"5s"`), `[http].ip_rate_limit` (per
 client IP before authentication, default `{ per_second = 20, burst = 100
