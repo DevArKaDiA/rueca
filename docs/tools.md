@@ -308,6 +308,8 @@ other definitions with the same text score. Ranking details:
 | `offset` | int (`cursor` takes precedence) | 0 |
 | `scores` | bool: include each result's score (3 significant digits) | false |
 | `mode` | `"lexical"` (BM25), `"hybrid"` (BM25 fused with embedding similarity), `"semantic"` (embeddings only) | `hybrid` when a selected snapshot has vectors and its model loads, else `lexical` |
+| `rerank` | bool: rerank the top `rerank_k` results with a cross-encoder (seconds per call) | the store's `[retrieval] rerank`, off |
+| `rerank_k` | int, 1–200: candidates the reranker scores | 50 (`[retrieval] rerank_k`, `RUECA_RERANK_K`) |
 
 `mode` ([RFC 0007](rfcs/0007-semantic-search.md) §8,
 [how-it-works §10](how-it-works.md#10-embeddings-rfc-0007)): an explicit
@@ -322,18 +324,39 @@ named in `retrieval.lexical`. `semantic` ranks by the cosine alone and
 leaves such snapshots out. Older binaries reject `mode` (arguments are
 validated strictly).
 
+`rerank` ([RFC 0007](rfcs/0007-semantic-search.md) §7.5,
+[how-it-works §10](how-it-works.md#10-embeddings-rfc-0007)): the top
+`rerank_k` of the first stage (any `mode`) are scored by a cross-encoder
+(`qwen3-reranker-0.6b-q8` by default) on their canonical text, cut to 256
+tokens; they come back in the reranker's order, the rest in first-stage
+order. With `scores`, a reranked result's score is the reranker's
+relevance (0–1) and a result below them its first-stage score scaled under
+the lowest reranked one, so scores always follow the order. An explicit
+`rerank: true` whose weights are missing is an error naming `rueca models
+import` / `rueca models pull`; a reranker turned on in the configuration
+that cannot load leaves the order and a warning. Graph expansion and a
+centrality prior (off by default) are configured per store, not per call
+(`[retrieval] expand`, `centrality_beta`, `RUECA_EXPAND`,
+`RUECA_CENTRALITY_BETA`).
+
 The envelope gains `retrieval` (between `next_cursor` and `budget`):
 
 ```json
 "retrieval": {"mode": "hybrid", "model": "qwen3-0.6b-q8:3f9a1c2b", "alpha": 0.5,
-              "lexical": ["github.com/acme/legacy"]}
+              "lexical": ["github.com/acme/legacy"],
+              "expansion": {"edges": "calls", "added": 4}, "centrality": 0.5,
+              "reranker": {"preset": "qwen3-reranker-0.6b-q8", "model_key": "2689173a", "k": 50, "ms": 6042.1}}
 ```
 
 `mode` is the ranking the call got (`lexical`, `hybrid`, `semantic`);
 `model` the preset and a prefix of the vectors' model key; `alpha` the BM25
 weight (hybrid only); `lexical` the repositories ranked without vectors;
-`warnings` why a call fell back to lexical (a model that did not load,
-unreadable vectors). Empty fields are omitted: a lexical call has
+`expansion` the graph expansion's edge set and how many neighbours it
+added, `centrality` the centrality prior's exponent (both only when
+configured on); `reranker` the reranker that ran (preset, a prefix of its
+model key, candidates scored, milliseconds); `warnings` why a call fell
+back (a model that did not load, unreadable vectors, a configured reranker
+that did not load). Empty fields are omitted: a lexical call has
 `{"mode": "lexical"}`. The text rendering does not change.
 
 Results, grouped by snapshot and file in rank order (a group sits where its

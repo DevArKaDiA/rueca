@@ -147,7 +147,11 @@ path/to/repo --embed` adds a vector per function, class and doc section
 (cached in the store, so a re-index embeds only new text). `search_symbols`
 then fuses BM25 with embedding similarity by default (`mode`: `hybrid`,
 `semantic` or `lexical`), so a question such as `where is the configuration
-file parsed` finds code that does not use those words.
+file parsed` finds code that does not use those words. `rerank: true`
+reorders the top results with a cross-encoder (Qwen3-Reranker-0.6B, a local
+conversion registered with `rueca models import` until its release is
+published), and graph expansion and a centrality prior can be turned on per
+store; all three are off by default.
 
 Other refs are snapshots of their own, next to the working tree: `rueca
 index . --ref pr/123` (also a branch, a tag or a commit; `--remove` drops
@@ -208,14 +212,14 @@ edges into a ref follow the symbols it still has
 
 ### Embeddings (preview)
 
-Semantic search ([RFC 0007](docs/rfcs/0007-semantic-search.md)) is in
-phase 0: the model runtime and a batch command, not yet used by
-`search_symbols`.
+Semantic search ([RFC 0007](docs/rfcs/0007-semantic-search.md)) also has
+batch commands, used by the bench:
 
 ```sh
-rueca models list                                  # presets (Qwen3-Embedding GGUF files) and the cache
+rueca models list                                  # presets (embedders, rerankers) and the cache
 rueca models pull                                  # the default preset, sha256-verified, into $RUECA_HOME/models
 rueca embed --input in.jsonl --output out.jsonl    # {"id","text","query"} lines → {"id","vector"} lines
+rueca rerank --query "…" --input docs.jsonl        # {"id","text"} lines → {"id","score"} lines
 ```
 
 See [how it works, §10](docs/how-it-works.md#10-embeddings-rfc-0007).

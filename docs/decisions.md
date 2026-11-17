@@ -1,5 +1,91 @@
 # Decisions log
 
+## 2026-11-17 — Phase 2: graph expansion, centrality prior and the reranker stage
+
+RFC 0007 phase 2 (Rust side). `search_symbols` gains a second half after
+its first stage (lexical or fused): a centrality prior, graph expansion and
+a cross-encoder reranker, each off by default until the bench's sweep
+(RFC 0007 §7.6) keeps it. The gates of §11.2 are the bench's to read.
+
+Choices and deviations from the RFC:
+
+- **One pipeline for every mode.** The stages run over a pool of at least
+  N first-stage candidates in `lexical`, `hybrid` and `semantic` alike,
+  because the organization index stays lexical (`rueca index --org` does
+  not embed) and the impact question is asked there. With every stage
+  off, the first stage is today's path, untouched.
+- **Expansion parameters** follow the phase brief, not §7.3's numbers:
+  seeds are the top 10 of the one fused list (not the top 5 of each list),
+  decay 0.5, at most 20 neighbours per seed and 100 per query (not 50), and
+  a new neighbour gets the inherited score only (§7.3 computes its own
+  fused score; outside both top-N lists it is small by construction). The
+  inherited score takes the seed's prior, routing boost and centrality out
+  and puts the neighbour's in. Knobs: `RUECA_EXPAND` (`off` | `calls` |
+  `calls+contains` | `calls+contains+imports`), `_DECAY`, `_SEEDS`,
+  `_PER_SEED`, `_TOTAL`; SpIDER's pool filter is not implemented.
+- **"contains" is `DEFINES`.** Rueca's `CONTAINS` links the repository,
+  folders and files, which search never returns; symbol nesting (members,
+  container) is `DEFINES`. `IMPORTS` links files, so with the default
+  labels the `+imports` setting adds nothing; it is kept for the sweep and
+  for `labels: ["File"]` queries.
+- **Across repositories** expansion follows the link layer `trace` uses,
+  through the call's view and visibility, into repositories the call
+  selected (a `repo` narrowing is respected rather than widened).
+- **Centrality** is computed from the incoming CSR on first use, not at
+  open and not at write time: 7.9 ms for 100k nodes / 400k edges with the
+  crate optimized (32 ms unoptimized), above the 5 ms open-time budget, and
+  nothing while β = 0. A `priors.centrality` component is the fallback if
+  the sweep keeps β > 0 and per-process `rueca query` latency matters. The
+  population is the symbols search returns (containers get 1, a neutral
+  prior). In lexical mode it re-scores the BM25 top N rather than entering
+  the in-index prior.
+- **Reranker mechanism: rank pooling over llama.cpp's converted classifier
+  head** (option a), not reading the yes / no logits ourselves (option b).
+  At the vendored commit (`d81235049384`), `convert_hf_to_gguf.py`
+  (`conversion/qwen.py`, `Qwen3Model._is_qwen3_reranker`) detects
+  Qwen3-Reranker by its README title or name, writes the `yes` / `no` rows
+  of the tied LM head as `cls.output.weight` and sets rank pooling, and
+  `build_pooling` applies the softmax for `LLM_ARCH_QWEN3`, so a pooled
+  read is `[p(yes), p(no)]` and no 151k-wide logits are materialized. It
+  worked on the first conversion: rankings equal to `transformers` on all
+  6 test queries, Pearson r 0.9999 on log-odds; the file is reproducible
+  (sha256 `def2f557…`, two runs). Option (b) stays possible with the same
+  file (the tied embedding table remains). Community GGUFs scoring ~1e-23
+  (llama.cpp #16407) were converted without the head; Rueca refuses a file
+  whose `n_cls_out` is not 2.
+- **Prefix sharing**: the system turn, instruction and query are decoded
+  once per call as sequence 0 and copied into each chunk's sequences in
+  the unified KV cache (`llama_memory_seq_cp`); documents are decoded in
+  chunks of about 2,048 tokens (512 was 1.6× slower; 4,096 and 8,192 no
+  faster).
+- **Status `unavailable`, not a new `unpublished`.** The manifest already
+  had a status for a Rueca conversion pinned by sha256 whose release is
+  not published (`qwen3-0.6b-q4`); the reranker uses it, and its note
+  names `rueca models import` and the conversion recipe
+  (`docs/how-it-works.md` §10). `rueca models import` hard-links (else
+  copies) a file whose size and sha256 match.
+- **Scores after reranking** are kept monotone with the order, since the
+  compact envelope groups results by file and rank is read from scores:
+  the reranker's `p` for the top K, first-stage scores scaled under half
+  the lowest `p` below.
+- **Instruction**: the reranker prompt uses the embedder's code-retrieval
+  instruction; a sweep over instructions is left to the bench. Query and
+  documents are tokenized as plain text (special-token strings in code stay
+  text), unlike the Python reference, which parses them.
+- **Latency** (documents of ~256 tokens, M-series GPU shared with a
+  running benchmark): K = 20 2.6 s, K = 50 6.0 s; CPU 4.5 s and 15.6 s.
+  §7.5's estimates (7–14 s per 50 × 500 tokens) hold; K = 50 is a
+  multi-second call, so the default stays off locally.
+- **Not done**: the 4B reranker conversion (≈ 2.5 GB, split release asset)
+  and `mxbai-rerank-large-v2` (own prompt, runtime path unverified) are
+  `planned`; remote rerankers are phase 3; the reranker does not admit or
+  reject expanded neighbours separately (it scores whatever the pool
+  holds).
+
+Also: the canonical text builder moves to `rueca_segment::canonical` so
+the query side can rebuild a candidate's text from the content packs, and
+`rueca status` names the preset that embedded each snapshot.
+
 ## 2026-11-17 — Hybrid search lands as a mode of search_symbols
 
 RFC 0007 phase 1 (Rust side). `rueca index --embed[=PRESET]` embeds every
