@@ -1,7 +1,7 @@
 # MCP protocol reference (Rueca's own layer)
 
-Status: reference for replacing `rmcp` 3.10.0 in `crates/rueca-mcp` (branch
-`refactor/mcp-without-rmcp`). Why: `cargo deny` fails on RUSTSEC-2026-0543
+Status: behaviour reference of Rueca's own MCP layer in `crates/rueca-mcp`,
+which replaced `rmcp` 3.10.0 (branch `refactor/mcp-without-rmcp`). Why: `cargo deny` fails on RUSTSEC-2026-0543
 (`chrono` unmaintained). `chrono` reaches Rueca only through `rmcp`: directly,
 and through `rmcp`'s `schemars` dependency with feature `chrono04`.
 `rueca-query`'s own `schemars = "1"` (default features `derive`, `std`) does
@@ -139,10 +139,9 @@ time, in order**, until a lifecycle is chosen:
       Unselected.
    4. Otherwise the state becomes **Inline**. Dispatch the request as in §5
       and §6.
-4. A notification, response or error message: rmcp **ends the server with an
-   error**, `expect initialized request, but received: Some(..)`, and `rueca
-   mcp` exits 1. EOF while Unselected is the same:
-   `connection closed: initialize request`, exit 1. See §9.
+4. A notification, response or error message: ignored (debug log), the
+   state stays Unselected. EOF while Unselected is a normal shutdown: exit 0,
+   nothing on stdout. rmcp ended the server here with exit 1; see §9.1.
 
 Once Legacy or Inline, requests run **concurrently**. Responses arrive in
 completion order, not request order.
@@ -163,8 +162,9 @@ After the lifecycle is chosen:
 
 - `notifications/initialized` is ignored: no reply, info log `client initialized`.
 - A later well-formed `initialize`, in either state, is answered again with
-  the same rule. Side effect, reproduced from rmcp: `session_version` becomes
-  the **raw requested** version, not the negotiated one. Inline stays Inline.
+  the same rule, and `session_version` becomes the negotiated version (rmcp
+  stored the raw requested one, see §9.3). Legacy stays Legacy, Inline stays
+  Inline.
 - A malformed `initialize` gets -32601 `"initialize"`.
 - Nothing waits for `notifications/initialized`. Requests sent before it are
   served, which matches the TypeScript SDK and the spec's SHOULD NOT.
@@ -244,7 +244,7 @@ default outcome for every row below.
 |---|---|
 | `ping` (params absent, `null` or an object) | `legacy_request` ? `{}` : -32601 `"ping"`. Inline 2026 connections get -32601 once Inline. Before that, §4 step 1 answers `{}`. |
 | `tools/list` (params absent, `null` or an object; `cursor` ignored, even when it has the wrong type) | legacy: `{"ttlMs":3600000,"cacheScope":"public","tools":[…]}`. modern: `{"resultType":"complete","ttlMs":3600000,"cacheScope":"public","tools":[…]}`. No `nextCursor`. |
-| `tools/call` (needs `params.name` as a string; `arguments` absent, `null` or an object; `requestState`, if present, a string) | an unknown name gets -32602 (§3). Otherwise a CallToolResult, below. |
+| `tools/call` (needs `params.name` as a string; `arguments` absent, `null` or an object; `requestState`, if present, a string) | malformed params get -32602 `invalid params for \`tools/call\`: <why>` (§9.2), an unknown name gets -32602 (§3). Otherwise a CallToolResult, below. |
 | `completion/complete` (`params.ref` is `{"type":"ref/prompt","name":<str>}` or `{"type":"ref/resource","uri":<str>}`, and `params.argument` is `{"name":<str>,"value":<str>}`) | `{"completion":{"values":[]}}`. When modern, prefixed with `"resultType":"complete",`. No cache hints. Rueca does not advertise `completions`; rmcp answers anyway. |
 | `prompts/list` | `{"prompts":[]}`, or when modern `{"resultType":"complete","ttlMs":0,"cacheScope":"private","prompts":[]}` |
 | `resources/list` | same, with key `resources` |
@@ -271,7 +271,7 @@ only), `content`, `structuredContent`, `isError`; `_meta` is absent.
 ```text
 ok:     {"content":[{"type":"text","text":<response.text>}],"structuredContent":<response.json>,"isError":false}
 error:  {"content":[{"type":"text","text":"<err:#>"}],"isError":true}
-panic:  {"content":[{"type":"text","text":"internal error in `<name>`: <panic text>"}],"isError":true}
+panic:  {"content":[{"type":"text","text":"internal error in `<name>`: <panic text>"}],"isError":true}   (§9.4)
 ```
 
 The error path covers engine errors, bad arguments, "still indexing" and
@@ -316,58 +316,78 @@ Advertised and accepted: `2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25,
 Public API kept for `rueca-cli`: `ServerOptions`, `RuecaServer::{new,
 with_index_gate}`, `tools()`, `serve_stdio`, `INSTRUCTIONS`, `INDEX_WAIT`,
 `root_to_index`, `index_root`, `ensure_indexed`, `spawn_auto_index`,
-`spawn_org_index`, `IndexGate`. `tools()` changes its return type from
-`Vec<rmcp::model::Tool>` to Rueca's own `Vec<Tool>`.
+`spawn_org_index`, `IndexGate`. `tools()` now returns Rueca's own
+`Vec<Tool>` (was `Vec<rmcp::model::Tool>`); `serve` is synchronous over
+`std::io` (was async over a tokio stream). Added: `RuecaServer::from_options`
+(what `serve_stdio` serves, usable by other transports), `RuecaServer::handle`
+and the types below.
 
 ```text
 crates/rueca-mcp/src/
-  lib.rs       RuecaServer, IndexGate, auto-index, serve_stdio, serve (std I/O)
-  jsonrpc.rs   RequestId, Incoming {Request, Notification, Ignored, Invalid}, parse_line(&[u8]) -> Incoming,
-               Outgoing {Result, Error}, ErrorObject, to_line(&Outgoing) -> Vec<u8>
-  protocol.rs  versions (SUPPORTED, has_initialize, negotiate), Session {Unselected | Legacy | Inline},
-               meta validation, Protocol::handle, method table, error builders
-  tools.rs     Tool, ToolAnnotations, CallToolResult and the list results as Serialize structs; ToolCall job
-  stdio.rs     the reader loop, in-flight map + cancellation, one locked writer, EOF drain
+  lib.rs       RuecaServer (new, with_index_gate, from_options), tools(), IndexGate, auto-index, serve_stdio
+  jsonrpc.rs   RequestId, Request, Notification, Incoming {Request, Notification, Response, Invalid, Ignored,
+               Unparsable}, parse_line(&[u8]) -> Incoming, ErrorObject, Outgoing {Result, Error} (to_json, to_line)
+  protocol.rs  SUPPORTED_VERSIONS, negotiate, Session {Unselected | Legacy | Inline}, Step, RuecaServer::handle,
+               the `_meta` checks and the method table
+  tools.rs     Tool, ToolAnnotations, the result structs (Serialize, fixed key order), ToolCall::run
+  stdio.rs     serve: the reader loop, in-flight set + cancellation, one locked writer, the EOF drain
 ```
+
+Results are serialized once from `#[derive(Serialize)]` structs into a
+`serde_json::value::RawValue` (feature `raw_value`) and embedded verbatim in
+the envelope, so no key order depends on serde_json's `preserve_order`. The
+result shape (`resultType`, cache hints) is decided before the result is
+built, from the per-request facts of §5.
 
 The seam is synchronous and has no I/O:
 
 ```rust
-pub struct Session { state: State, session_version: Option<String> }   // State: Unselected | Legacy | Inline
-impl Session { pub fn new() -> Self; pub fn legacy(version: &str) -> Self }  // `legacy` is for stateless HTTP
+pub struct Session { /* Unselected | Legacy | Inline, plus the legacy version */ }
+impl Session {
+    pub fn new() -> Session;                 // a fresh connection
+    pub fn legacy(version: &str) -> Session; // after `initialize`, for stateless HTTP
+    pub fn is_selected(&self) -> bool;
+}
 pub enum Step {
-    Reply(Outgoing),        // write it now
-    Call(ToolCall),         // run `ToolCall::run(&RuecaServer) -> Outgoing` off-thread (blocking)
-    Silent,                 // notification, ignored message
-    Cancel(RequestId),      // forget an in-flight id
-    Fatal(String),          // only if §9 keeps rmcp's pre-lifecycle exit
+    Reply(Outgoing),     // write it now
+    Call(ToolCall),      // run `ToolCall::run(self, &RuecaServer) -> Outgoing` off-thread (blocking)
+    Silent,              // notification, client response, ignored line
+    Cancel(RequestId),   // forget an in-flight id
 }
 impl RuecaServer { pub fn handle(&self, msg: Incoming, session: &mut Session) -> Step }
+pub fn parse_line(line: &[u8]) -> Incoming;
+pub fn serve(server: RuecaServer, input: impl Read, output: impl Write + Send + 'static) -> anyhow::Result<()>;
 ```
 
-`ToolCall` holds `{id, name, args, modern: bool}`. Tool-name validation
-happens inside `handle`, so an unknown tool becomes `Step::Reply` with
--32602.
+`ToolCall` holds `{id, name, args, modern}`. Tool-name validation happens
+inside `handle`, so an unknown tool becomes `Step::Reply` with -32602. The
+tool list comes from `rueca_query::tool_definitions()`: a tool added there
+needs no change here.
 
-stdio loop:
+stdio loop (`serve`):
 
 ```text
 read line → parse_line → handle →
   Reply      → write
-  Call       → insert id into in-flight → worker thread → on completion, remove id → write only if it was present
+  Call       → wait for a slot (512) → insert id into in-flight → thread → on completion, remove id → write only if it was present
   Cancel     → remove id
-  EOF        → wait up to 5 s for the in-flight set to empty → Ok(())
+  EOF        → wait up to 5 s for the in-flight set to empty → close the output → Ok(())
 ```
 
 RFC 0008's stateless HTTP calls the same `handle` with one message per
 `POST`:
 
+- `parse_line(body)`. `Incoming::Unparsable` is the place for an HTTP 400
+  with -32700 if the HTTP layer wants one (stdio stays silent).
 - `initialize` or a body whose `_meta` has a protocolVersion: `Session::new()`.
 - Otherwise: `Session::legacy(<MCP-Protocol-Version header, or "2025-03-26"
   when absent, per the 2025-11-25 transport spec>)`. A fresh Unselected
-  session would reject a legacy client's `tools/list` with -32602.
-- `Step::Silent` and `Step::Cancel` map to `202`. `Step::Call` runs on
-  `spawn_blocking`.
+  session would reject a legacy client's `tools/list` with -32602 (no
+  `_meta`). The HTTP layer validates the header first (400 when
+  unsupported); `legacy` stores it as given.
+- `Step::Reply` → `200` with `Outgoing::to_json()`; `Step::Call` →
+  `spawn_blocking(move || call.run(&server))` → `200`; `Step::Silent` and
+  `Step::Cancel` → `202`.
 - Header checks (-32020) stay in the HTTP layer.
 
 Keep every function at cognitive complexity 15 or less (SonarQube
@@ -375,7 +395,7 @@ Keep every function at cognitive complexity 15 or less (SonarQube
 method. Write the -32600 / ignore classification and the `_meta` check as
 small pure functions with table-driven unit tests.
 
-**tokio or std threads. Recommendation: std only.** Nothing in the protocol
+**tokio or std threads: std only (chosen).** Nothing in the protocol
 is asynchronous. The engine is blocking, and rmcp needed tokio only for
 itself. A design without tokio:
 
@@ -383,64 +403,81 @@ itself. A design without tokio:
 - Each `tools/call` runs on its own `std::thread`. A counter caps calls at
   512 in flight, matching tokio's default `max_blocking_threads`; at the cap,
   the reader waits.
-- Writes go through `Arc<Mutex<BufWriter<Stdout>>>`, flushing after every
-  message.
+- Writes go through one `Mutex` around the output, flushing after every
+  message. A failed write closes the output and stops the reader.
 - In-flight requests live in a `Mutex<HashSet<RequestId>>`. A `Condvar`
   wakes the EOF drain.
 
 This drops `tokio`, `futures`, `rmcp`, `chrono` and their transitive tree
 from `rueca-mcp`. Cancellation works the same, by dropping the response.
 
-`serve` becomes
-`serve(server, input: impl Read + Send, output: impl Write + Send + 'static)
--> anyhow::Result<()>`, blocking. That is a breaking change; `serve` is only
-used by `tests/duplex.rs`, and the crate is at 0.1-alpha. Rewrite that test
-over `std::io::pipe()` (stable since 1.87; MSRV is 1.90) and remove `tokio`
-from the dev-dependencies too.
+`serve` is `serve(server, input: impl Read, output: impl Write + Send +
+'static) -> anyhow::Result<()>`, blocking. That is a breaking change; `serve`
+was only used by `tests/duplex.rs`, and the crate is at 0.1-alpha. That test
+runs over `std::io::pipe()` (stable since 1.87; MSRV is 1.90), and `tokio`
+left the dev-dependencies too.
 
 The cost: RFC 0008 brings tokio back for `axum`. Do that in the HTTP layer,
 behind its own feature or crate, calling the synchronous `handle`. The core
 stays free of tokio.
 
-Allowed dependencies: `serde` (derive), `serde_json`, `anyhow`, `tracing`,
-and the existing `rueca-*` crates. No `rmcp`, no `chrono`, no `tokio` in the
-core. After the change, `cargo tree -i chrono` must print nothing.
+Dependencies: `serde` (derive), `serde_json` (`raw_value`), `anyhow`,
+`tracing`, and the existing `rueca-*` crates. No `rmcp`, no `chrono`, no
+`tokio`: `cargo tree -i chrono` prints nothing, and `chrono`, `tokio`,
+`futures`, `sha2` and 21 other packages left `Cargo.lock`.
 
 ## 9. Accepted differences from rmcp
 
-The target is zero differences in what clients see on stdout. Candidates,
-each needing an owner decision:
+Decided by the owner. Each one is marked in the code and asserted in
+`tests/golden.rs` (its `OVERRIDES` table and `EXIT_1_IN_RMCP` list); nothing
+else differs from the golden transcripts.
 
-1. **Before a lifecycle is chosen: a notification, client response or EOF.**
-   rmcp ends `rueca mcp` with exit status 1 (§4 step 4). A 2026 client that
-   sends `notifications/cancelled` after a discover probe times out would
-   kill the server. Recommended: ignore such messages, exit 0 on EOF, and log
-   at debug. This is spec-compliant (notifications never get replies, and
-   EOF is the normal shutdown). stdout is identical; only the exit status
-   and stderr differ. If the owner wants rmcp's exact behaviour,
-   `Step::Fatal` keeps it.
-2. **Panic text in `tools/call`.** rmcp formats a tokio `JoinError` (`task
-   <id> panicked with message "…"`), and the task id is not deterministic.
-   Use `internal error in \`<name>\`: <panic payload>`.
-3. **More than 512 concurrent tool calls.** The reader blocks instead of
-   queueing on tokio's pool. This only affects latency.
-4. **Deep typing of rarely used params.** rmcp's typed parse of `icons`,
-   `inputResponses` and nested capability members can make a request fall
-   through to -32601 or -32602 in corners this document does not list.
-   Validate only the shapes listed in §4 to §6. Every client listed in §7
-   sends well-formed requests.
+1. **Before a lifecycle is chosen: a notification, a client response or
+   EOF.** rmcp ended `rueca mcp` with exit status 1 (`expect initialized
+   request`, `connection closed: initialize request`). Rueca ignores the
+   message (debug log) and keeps serving; EOF is a normal shutdown, exit 0,
+   nothing on stdout. A 2026 client that sends `notifications/cancelled`
+   after a discover probe times out no longer kills the server. Rationale:
+   the spec says such messages SHOULD NOT be sent, not that the server must
+   die, and EOF is the normal stdio shutdown.
+2. **Malformed `tools/call` params** (`params` `{}` or absent, a `name` that
+   is missing or not a string, `arguments` not an object, `requestState` not
+   a string): -32602 `invalid params for \`tools/call\`: <why>` (`missing
+   \`name\``, `` `name` must be a string ``, `` `arguments` must be an
+   object ``, `` `requestState` must be a string ``). rmcp answered -32601
+   `"tools/call"`, an artifact of its fallback to `CustomRequest`; the spec
+   says -32602. Other malformed known methods keep rmcp's -32601 with the
+   method as message.
+3. **A second `initialize`** is negotiated exactly like the first: the
+   session keeps the negotiated version. rmcp stored the raw requested
+   version, so a second `initialize` naming 2026-07-28 turned later results
+   modern (and `ping` into -32601) on a legacy session: a bug.
+4. **Panic text in `tools/call`**: `internal error in \`<tool>\`: <panic
+   message>`. rmcp printed a tokio `JoinError` (`task <id> panicked with
+   message "…"`), whose task id changes per run.
+5. **More than 512 concurrent tool calls**: the reader blocks until a slot
+   frees, where rmcp queued them on tokio's blocking pool. Only latency
+   changes.
+
+Not a decision but a limit of the reproduction: rmcp's deep typing of
+rarely used params (`icons` items, `inputResponses`, nested capability
+members) can make a request fall through to -32601 or -32602 in corners this
+document does not list. Rueca validates only the shapes listed in §4 to §6.
+Every client listed in §7 sends well-formed requests.
 
 Everything else in §2 to §6, including rmcp's quirks (no -32700, the id
-dropped on -32600, ping refused once Inline, a later `initialize` storing the
-raw version, duplicate-id dropping), **MUST** be reproduced.
+dropped on -32600, ping refused once Inline, duplicate-id dropping), is
+reproduced.
 
 ## 10. Test plan
 
-1. **Golden replay** (`tests/golden/`, recorded from `rmcp` at `c820290` by
-   the transcript hand): replay each client line against `serve` over
-   `std::io::pipe()` and compare stdout **byte for byte**. Only the server
-   version string may be normalized. Where requests run concurrently, compare
-   the set of responses, not their order. Cover:
+1. **Golden replay** (`tests/golden.rs` over `tests/golden/`, recorded from
+   `rmcp` at `c820290`): every client line of every session is replayed
+   against `serve` over `std::io::pipe()`, in process, and stdout is compared
+   **byte for byte** (and as parsed JSON). Only the server version string is
+   normalized. The transcripts wait for each response, so the order is
+   deterministic. `capture.py --bin <new rueca>` run against the new binary
+   gives the same files except for §9.1 and §9.2. The transcripts cover:
    - legacy `initialize` with each version, plus `2026-07-28`, `2099-01-01`,
      `2024-10-07`, `""`, and a malformed `initialize`;
    - Unselected `ping`, `server/discover` (good meta, missing meta, an
