@@ -168,6 +168,7 @@
 mod args;
 pub mod compact;
 mod contracts;
+mod hybrid;
 pub mod multiref;
 mod orgsel;
 mod refset;
@@ -191,9 +192,10 @@ use serde_json::Value;
 pub use args::{
     CommonArgs, ContractKindArg, ContractSideArg, DirectionArg, FormatArg, GetFileOutlineArgs, GetSnippetArgs,
     GetSymbolArgs, LanguageArg, ListContractsArgs, ListRepositoriesArgs, RefArg, RepoArg, SearchCodeArgs,
-    SearchSymbolsArgs, TraceArgs,
+    SearchModeArg, SearchSymbolsArgs, TraceArgs,
 };
 pub use compact::render_text;
+pub use hybrid::{FusionParams, Norm, PresetQueryLoader, QueryEmbedderLoader};
 pub use text::split_lines;
 
 use view::View;
@@ -290,7 +292,9 @@ fn schema_for_tool(name: &str) -> &'static Value {
 const DESC_SEARCH_SYMBOLS: &str = "Find functions, methods, classes and other definitions by name or by what \
 their code does. BM25 ranking over symbol names, qualified names, signatures, docstrings, file paths and the \
 symbol's source code; identifiers are split on camelCase, snake_case and path separators, so `invoice issue` finds \
-`InvoiceService.issue_invoice`, and `Session.request` ranks that method first. Start here with a name, or with words \
+`InvoiceService.issue_invoice`, and `Session.request` ranks that method first. Repositories indexed with \
+`rueca index --embed` add embedding similarity (`mode`: `hybrid` by default there, `semantic`, `lexical`), so a \
+question or issue text in plain words finds code that does not share them. Start here with a name, or with words \
 from an error message or issue to locate the code involved. Results are grouped by file (label, name, 1-based lines, \
 signature) in one ranking over every selected repository (in an organization, all of them unless `repo` narrows \
 it). Continue with `cursor` = `next_cursor`. \
@@ -373,6 +377,13 @@ pub struct Engine {
     segments: Mutex<HashMap<String, Arc<Segment>>>,
     /// The last opened generation of the organization index.
     org_index: Mutex<Option<Arc<OrgIndex>>>,
+    /// Hybrid search fusion (RFC 0007 §7.2).
+    fusion: FusionParams,
+    /// Where query embedders come from.
+    query_loader: Arc<dyn QueryEmbedderLoader>,
+    /// Query embedders by embed key, loaded once per process (a failure is
+    /// kept too, so an absent model is not retried on every call).
+    embedders: Mutex<HashMap<String, hybrid::EmbedderSlot>>,
 }
 
 /// The snapshots a call reads, plus the organization context in organization
@@ -399,14 +410,36 @@ impl Engine {
     pub fn new(store_dir: PathBuf, default_root: Option<PathBuf>) -> anyhow::Result<Engine> {
         let default_root = default_root.map(|r| std::fs::canonicalize(&r).unwrap_or(r));
         Ok(Engine {
-            store_dir,
             default_root,
             org: None,
             visibility: Visibility::All,
             route: RouteParams::from_env(),
             segments: Mutex::new(HashMap::new()),
             org_index: Mutex::new(None),
+            fusion: FusionParams::resolve(&rueca_embed::RetrievalConfig::load(&store_dir).unwrap_or_default()),
+            query_loader: Arc::new(PresetQueryLoader { store: store_dir.clone() }),
+            embedders: Mutex::new(HashMap::new()),
+            store_dir,
         })
+    }
+
+    /// Sets the hybrid search fusion (default: [`FusionParams::resolve`]
+    /// over the environment and `<store>/rueca.toml`).
+    pub fn with_fusion(mut self, fusion: FusionParams) -> Engine {
+        self.fusion = fusion;
+        self
+    }
+
+    pub fn fusion(&self) -> &FusionParams {
+        &self.fusion
+    }
+
+    /// Sets where query embedders come from (default: the presets of
+    /// `rueca-embed`, weights from the store's model cache).
+    pub fn with_query_embedder(mut self, loader: Arc<dyn QueryEmbedderLoader>) -> Engine {
+        self.query_loader = loader;
+        self.embedders = Mutex::new(HashMap::new());
+        self
     }
 
     /// An engine serving organization `name` of the store (see the crate

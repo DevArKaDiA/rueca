@@ -2810,6 +2810,8 @@ name = "rueca-query"
 version = "0.1.0-alpha.2"
 dependencies = [
  "anyhow",
+ "rueca-embed",
+ "rueca-index",
  "rueca-model",
  "rueca-segment",
  "schemars",
@@ -2817,6 +2819,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]
