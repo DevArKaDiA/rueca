@@ -384,6 +384,11 @@ def _ratio(x: float | None) -> str:
     return "—" if x is None else f"{x:.3f}"
 
 
+def _instance_line(res: dict) -> str:
+    n = res["columns"][res["base"]]["table"]["kw"][POOLED]["n"]
+    return f"One pooled instance = {100 / n:.2f} points (n = {n} for the base); the RFC 0007 §3.3 / §3.4 / §6.3 rules read \"within one calibration instance\" against it. " if n else ""
+
+
 def render(res: dict, variant: str = "both") -> str:
     variants = _variants(variant)
     b = res["bootstrap"]
@@ -392,7 +397,7 @@ def render(res: dict, variant: str = "both") -> str:
         "",
         f"Cache `{res['cache']}`; {res['instances']} instances in the split, {res['with_gold']} with gold. Percentages; failed queries count as misses. "
         f"Paired bootstrap of column − base over the instances both have, {b['resamples']:,} resamples, seed {b['seed']}, 95% intervals. "
-        "Objective (RFC 0007 §7.6): macro over languages of ½ (File Acc@5 + Function Acc@10).",
+        f"{_instance_line(res)}Objective (RFC 0007 §7.6): macro over languages of ½ (File Acc@5 + Function Acc@10).",
         "",
         "## Pooled",
         "",
