@@ -138,6 +138,14 @@ and every tool takes `repo` (a list, or `"*"` for every indexed repository),
 Indexes live in `$RUECA_HOME` (default `~/.cache/rueca`). Re-run
 `rueca index` after changes; only changed files are re-extracted.
 
+Other refs are snapshots of their own, next to the working tree: `rueca
+index . --ref pr/123` (also a branch, a tag or a commit; `--remove` drops
+it) exports that commit's tree under the store and indexes it, reusing the
+facts of every file it shares with what is already indexed. Then `ref:
+"pr/123"` reads it, and `ref: ["main", "pr/123"]` compares: identical
+symbols come back once, marked ` [0,1]`, and the ones that differ are
+marked ` changed`.
+
 ### Several repositories: an organization
 
 ```toml
@@ -149,6 +157,7 @@ path = "~/src/billing"
 
 [[repo]]
 path = "~/src/payments"
+refs = ["release/2.x", "pr/123"]             # other refs to index next to the default
 
 [[repo]]
 url = "https://github.com/acme/shared-lib"   # cloned under the store with git
@@ -161,6 +170,8 @@ rueca query list_repositories '{"query":"refund invoice"}' --org acme --text   #
 rueca query trace '{"qualified_name":"payments.charge","direction":"callers"}' --org acme --text   # callers in every repository
 rueca links --org acme                            # the cross-repository edges
 rueca index ~/src/payments                        # re-index one: only its part of the organization changes
+rueca index --org rueca-org.toml ~/src/billing --ref pr/7   # one more ref of a member: only that entry changes
+rueca query search_symbols '{"query":"refund invoice","repo":"github.com/acme/billing","ref":"pr/7"}' --org acme --text   # the organization seen from that PR
 rueca mcp --org rueca-org.toml                    # serve the organization (builds it first if needed)
 ```
 
@@ -171,7 +182,12 @@ repository's results by that relevance. Repositories that import a package
 another one publishes (npm, PyPI, Go modules, Composer, Maven / Gradle,
 C / C++ headers, Cargo) are linked: imports, calls, inheritance and references
 across repositories, resolved with the publishing repository's own module
-model, which `trace` follows ([RFC 0006](docs/rfcs/0006-org-graph.md),
+model, which `trace` follows. A ref of one repository (`repo: A, ref:
+"pr/7"`) is the organization with A replaced by A at that ref; `ref`
+alone reads every repository that has it (a release branch across
+repositories) and the others at their default, and the cross-repository
+edges into a ref follow the symbols it still has
+([RFC 0006](docs/rfcs/0006-org-graph.md),
 [how it works](docs/how-it-works.md#46-the-organization-layer-rueca-segment-org)).
 
 ## Use it from an agent
@@ -308,12 +324,12 @@ absolute floors and aspirational targets).
 | **Local mode** | One binary, MCP over stdio, the tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
 | **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)) | ✅ done, every language `stable` |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
-| **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed in local mode (pinned ids, envelope, multi-repo, compact output, token metric); other refs and collapse across refs wait for multi-ref indexing |
+| **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
 | **Retrieval** | Semantic search (RFC 0007, design next): default embeddings Qwen3-Embedding-0.6B int4 among presets (0.6B q8 / f16, 4B, 8B, other local models, a remote API); vectors keyed by content hash, reused across branches and repositories; two stages — BM25 + vectors + graph signals, then Qwen3-Reranker-0.6B — measured on CoIR, the S1 localization suite and the organization scenario | 🗺️ next (design) |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
 | **Service mode** | One container, segments in object storage, MCP over HTTP, organization-wide indexing with GPU for embeddings | 🗺️ planned |
-| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 phases 1–2 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges, Cargo included); next: phase 3 refs / branches / PRs over the organization, phase 4 contracts (HTTP / OpenAPI / protobuf) |
+| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 phases 1–3 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges, Cargo included; refs / branches / PRs over the organization with `--ref` and `refs = [...]`, collapse across refs); next: phase 4 contracts (HTTP / OpenAPI / protobuf) |
 | **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
 | **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |
 

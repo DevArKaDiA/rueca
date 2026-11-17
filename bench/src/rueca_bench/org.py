@@ -37,17 +37,17 @@ the same way (its part of the organization replaced), the measure of the
 
 **Multi-ref** (manifest `[multiref]`). One S1 instance's repository at its
 base commit and at a fix commit (the base plus the instance's gold patch,
-committed with a fixed identity and date, so the commit id is deterministic),
-both indexed into one store. Gold (`collapse_gold`): per symbol of the
-patched language, whether it is identical in both refs (its file blob is the
-same: one item, both snapshots), changed (content differs: `changed: true`),
-added, removed, or unchanged inside a changed file. Queries: the names of
-the changed / added / removed functions plus a deterministic sample of
-unchanged ones, each a `search_symbols` over both refs; `score_collapse`
-checks collapse, `in` lists and `changed` flags. The single-ref answers
-(one per root) are measured today as the uncollapsed baseline; the
-multi-ref answer is reported **pending** while the local catalog holds one
-snapshot per root (RFC 0005 §9).
+committed with a fixed identity and date, so the commit id is deterministic):
+the base worktree is indexed, then the fix commit as a ref snapshot of the
+same repository (`rueca index <base> --ref <fix commit>`, RFC 0006 §9.3).
+Gold (`collapse_gold`): per symbol of the patched language, whether it is
+identical in both refs (its file blob is the same: one item, both
+snapshots), changed (content differs: `changed: true`), added, removed, or
+unchanged inside a changed file. Queries: the names of the changed / added /
+removed functions plus a deterministic sample of unchanged ones, each a
+`search_symbols` over both refs (`ref: [base, fix]`) against the two
+single-ref answers (`ref: base`, `ref: fix`, the uncollapsed baseline);
+`score_collapse` checks collapse, `in` lists and `changed` flags.
 
 Raw outputs: .cache/runs/org/{multirepo,multiref}-<arm>.json.
 """
@@ -498,13 +498,15 @@ def score_collapse(items: list[dict], gold: dict, base: int, fix: int) -> dict:
     snapshot indexes of the two refs. Counts:
     identical_ok / identical (one item, both refs, not changed, no duplicate),
     changed_flag tp / fp / fn, in_ok / in_total (added -> [fix], removed ->
-    [base], changed versions one ref each)."""
+    [base], changed versions one ref each). A symbol unchanged inside a
+    changed file that is flagged counts as `changed_same_file`, not as a
+    false positive: Rueca compares versions by file blob (RFC 0006 §9.3)."""
     by_key: dict[tuple, list[dict]] = {}
     for it in items:
         by_key.setdefault((it.get("path"), it.get("qn")), []).append(it)
     unchanged = set(gold["unchanged_files"])
     sy = {(s["path"], s["qn"]): s for s in gold["symbols"].values()}
-    c = {"identical": 0, "identical_ok": 0, "changed_tp": 0, "changed_fp": 0, "changed_fn": 0, "in_total": 0, "in_ok": 0, "unknown": 0}
+    c = {"identical": 0, "identical_ok": 0, "changed_tp": 0, "changed_fp": 0, "changed_fn": 0, "changed_same_file": 0, "in_total": 0, "in_ok": 0, "unknown": 0}
     for key, its in by_key.items():
         path, qn = key
         g = sy.get(key)
@@ -524,7 +526,7 @@ def score_collapse(items: list[dict], gold: dict, base: int, fix: int) -> dict:
                 c["in_total"] += 1
                 c["in_ok"] += int(len(i.get("in") or []) == 1)
         else:
-            c["changed_fp"] += int(flagged)
+            c["changed_same_file" if g["class"] == "same_in_changed_file" else "changed_fp"] += int(flagged)
             want = {"added": [[fix]], "removed": [[base]], "same_in_changed_file": [[base, fix], [base], [fix]]}[g["class"]]
             for i in its:
                 c["in_total"] += 1
@@ -588,17 +590,21 @@ def _multiref(arm, inst: dict) -> dict:
         names = sorted({s["name"] for s in gold["symbols"].values() if s["class"] in ("changed", "added", "removed")})
         every = sorted({fn.name for f in unchanged for fn in extract_functions(f, (base_root / f).read_bytes(), lang)} - set(names))
         sample = every[:: max(1, len(every) // MULTIREF_SAMPLE)][:MULTIREF_SAMPLE]
+        refs = {"base": inst["base_commit"][:12], "fix": fix_commit[:12]}
         idx = {}
-        for name, root in (("base", base_root), ("fix", fix_root)):
-            r = run([arm.bin, "index", str(root), "--store", str(store), "--json"], timeout=arm.index_timeout)
-            idx[name] = {"ok": r.rc == 0, "seconds": r.seconds}
+        for name, extra in (("base", []), ("fix", ["--ref", fix_commit])):
+            r = run([arm.bin, "index", str(base_root), *extra, "--store", str(store), "--json"], timeout=arm.index_timeout)
+            idx[name] = {"ok": r.rc == 0, "seconds": r.seconds, **_index_stats(r.stdout)}
+            if r.rc != 0:
+                return {"status": "error", "error": f"index {name} failed: {r.stderr[-300:]}"}
         queries = []
         for q in names + sorted(set(sample)):
             entry: dict = {"query": q}
             singles = {}
-            for name, root in (("base", base_root), ("fix", fix_root)):
-                data, _, err, raw = arm.call("search_symbols", {"query": q, "limit": EFF_LIMIT}, root, store, mode="agent")
-                tokens, _ = arm.agent_tokens(None, "search_symbols", {"query": q, "limit": EFF_LIMIT}, raw, root=root, store=store, mode="agent") if not err else (None, None)
+            for name, ref in refs.items():
+                args = {"query": q, "limit": EFF_LIMIT, "ref": ref}
+                data, _, err, raw = arm.call("search_symbols", args, base_root, store, mode="agent")
+                tokens, _ = arm.agent_tokens(None, "search_symbols", args, raw, root=base_root, store=store, mode="agent") if not err else (None, None)
                 singles[name] = {"ok": not err, "tokens": tokens}
             entry["single"] = singles
             data, _, err, raw = arm.call(
@@ -628,6 +634,17 @@ def _multiref(arm, inst: dict) -> dict:
         remove_worktree(inst["repo"], base_root)
         remove_worktree(inst["repo"], fix_root)
         shutil.rmtree(store, ignore_errors=True)
+
+
+def _index_stats(stdout: str) -> dict:
+    """Files extracted and facts-cache hits of an `index --json` report (a
+    ref report nests the index report under `index`)."""
+    try:
+        rep = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {}
+    rep = rep.get("index") or rep
+    return {k: rep.get(k) for k in ("files_extracted", "facts_cache_hits", "duration_ms")}
 
 
 def _class_counts(gold: dict) -> dict:
@@ -660,7 +677,7 @@ def score_multiref() -> dict:
     if not multi_ok:
         errs = sorted({str((q.get("multi") or {}).get("error"))[:200] for q in qs})
         out["status"] = "pending"
-        out["reason"] = "local catalog holds one snapshot per root (RFC 0005 §9)"
+        out["reason"] = "the binary rejected the multi-ref query (`ref` list over a ref snapshot, RFC 0006 §9.3)"
         out["errors"] = errs[:3]
         return out
     tot: dict[str, int] = {}

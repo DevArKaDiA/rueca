@@ -31,7 +31,9 @@ release with `"format": "verbose"` ([below](#verbose-alpha-format)).
   repositories `repo` selects: with `repo` (one or a list), every one of
   them must have every ref named; without `repo` (organization mode) or
   with `"*"`, each repository is read at the refs it has and the others at
-  their default — the organization "as of" a release branch. In
+  their default — the organization "as of" a release branch. Pull request
+  numbers are per repository: `pr/<n>` without `repo` is accepted only
+  when exactly one selected repository has it; otherwise name `repo`. In
   organization mode the other repositories stay in the call's view at their
   default (RFC 0006 §4: `repo: A, ref: pr/7` is the organization with A
   replaced by A at `pr/7`): search statistics, routing and `trace`'s link
@@ -357,8 +359,10 @@ Results:
 }
 ```
 
-`readers` / `writers` answer "is this env var / config key used, and is it
-set anywhere?" before a `trace`. A canonical env var (`$env:NAME`) has no
+`callers` / `callees` count edges inside the symbol's repository; in
+organization mode, cross-repository link edges are not counted (`trace`
+follows them). `readers` / `writers` answer "is this env var / config key
+used, and is it set anywhere?" before a `trace`. A canonical env var (`$env:NAME`) has no
 `path` or `lines`. Over budget, the lists are cut (children, then bases,
 subtypes, candidates), `truncated` is set and `"omitted": {"children": n, …}`
 says what was left out; there is no cursor (use `get_file_outline` or
@@ -421,8 +425,11 @@ caller can read. Link edges are computed between default refs (a ref's own
 imports are linked against its dependencies' defaults); when the call reads
 a repository at another ref, the edges into it are **remapped** to that
 ref's nodes by (label, qualified name, path), and an edge whose target the
-ref no longer has is dropped — `trace` from a consumer with `ref: "pr/7"`
-(no `repo`) shows its calls into the library as of `pr/7`. When the answer spans several snapshots, every node
+ref no longer has is dropped: `trace` from a consumer's function with
+`ref: "7.1.2"` (a tag only the library has, no `repo`) shows its calls
+into the library as of that tag, and `repo: <consumer>, ref: "pr/7"`
+traces the pull request's own calls, linked against the libraries'
+defaults. When the answer spans several snapshots, every node
 carries its snapshot `"s"` (the result's `"s"` is the root's), the
 envelope lists the snapshots touched, and the text prefixes such nodes with
 `[s]`:
@@ -461,9 +468,10 @@ some requested ref did not find it); text:
 0 [0] Method InvoiceService.issue  pkg/service.py L9-11 [0,1] changed
 2 [1] out d1 Function audit  pkg/service.py L17-18 changed  ←0 CALLS 0.95 same_module @11 [1] changed
 3 [0] out d1 Function helper  pkg/service.py L13-14 [0,1] changed  ←0 CALLS 0.95 same_module @10
-``` `next_cursor` is the number of non-root
-nodes already returned; a later page repeats the root as node 0 and any
-earlier node an edge needs.
+```
+
+`next_cursor` is the number of non-root nodes already returned; a later
+page repeats the root as node 0 and any earlier node an edge needs.
 
 Edge types beyond calls: `["INHERITS"]` walks a class hierarchy,
 `["IMPORTS"]` file dependencies (`File` → `File`, and `File` → `Folder` for
@@ -550,14 +558,30 @@ rueca index [PATH] [--store DIR] [--repo ID] [--json]
     (or the IndexReport as JSON). Organizations holding PATH are updated
     (only its part; JSON: "orgs").
 
+rueca index [PATH] --ref NAME [--remove] [--store DIR] [--repo ID] [--json]
+    Index a ref of PATH's repository as a snapshot of its own: a branch,
+    `pr/<n>`, a tag or a commit (fetched from `origin` when absent; `pr/<n>`
+    always), its tree exported from the object database under
+    <store>/refs/; the working tree is not touched. Re-running at the same
+    commit does nothing; --remove drops the snapshot and its export.
+    Organizations holding the repository list (or drop) the ref.
+
 rueca index --org FILE [PATH] [--store DIR] [--json]
     Index every repository of the organization file (or only the one
     containing PATH), then build or update the organization layer: the
     symbol index, routing profiles and package registry, and the link
     sets of the repositories whose links changed. JSON: {"org", "indexed":
     [IndexReport], "update" ({…, "profiled", "linked", "link_edges",
-    "link_errors", "profile_ms", "link_ms"}), "repos_ms", "org_ms",
-    "duration_ms"}.
+    "link_errors", "profile_ms", "link_ms", "refs_added", "refs_replaced",
+    "refs_removed", "costs"}), "refs" (one report per ref synced),
+    "ref_errors", "repos_ms", "refs_ms", "org_ms", "duration_ms"}. Every
+    member's refs are synced: its `refs = [...]` and the refs indexed
+    earlier; none is removed.
+
+rueca index --org FILE MEMBER --ref NAME [--remove] [--store DIR] [--json]
+    Index (or remove) one ref of a member (its path, `id` or `url`), then
+    update the organization: only that ref's entry changes (segment copy,
+    profile, link set against its dependencies' defaults).
 
 rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
     Run one tool and print its JSON result (with --text, the compact text
@@ -568,16 +592,20 @@ rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
     --org FILE, builds the organization first if the store has none.
 
 rueca status [--store DIR] [--json]
-    List indexed roots with repo, commit, node/edge/file counts, age, and
-    the organizations (generation, repositories).
+    List indexed roots with repo, commit, node/edge/file counts, age, the
+    ref snapshots under each repository (`ref 8.5.1 @cf19179e8e2f …
+    (export)`), and the organizations (generation, repositories and refs:
+    `main@08b803cf32ce + 8.5.1@cf19179e8e2f`).
 
-rueca links --org FILE|NAME [--repo ID] [--store DIR] [--json]
+rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
     List the organization's cross-repository edges (RFC 0006 link layer):
     one line per edge, or JSON {"org", "generation", "edges": [{"consumer",
     "src_repo", "src", "src_label", "src_path", "dst_repo", "dst",
     "dst_label", "dst_path", "kind", "strategy", "confidence", "path",
-    "line"}]} (`consumer`: the repository the edge was observed in;
-    `--repo`: edges leaving that repository).
+    "line"}]} (`consumer`: the repository the edge was observed in, as
+    `repo@ref` for a ref entry; `--repo`: edges leaving that repository;
+    `--ref`: the link set of that ref entry, into its dependencies'
+    default refs).
 ```
 
 **Organization file** (`rueca-org.toml`, RFC 0006 §7):
@@ -591,7 +619,13 @@ path = "~/src/billing"             # `~` and paths relative to this file
 [[repo]]
 url = "https://github.com/acme/payments"   # cloned under <store>/orgs/acme/clones/ with `git`
 id = "github.com/acme/payments"            # optional repository id (like `index --repo`)
+refs = ["release/2.x", "pr/123"]           # optional: other refs indexed next to the default
 ```
+
+The default ref of a member is its root (a `path` member's working tree; a
+`url` member's clone at the remote's HEAD). `refs` are indexed by `rueca
+index --org` as snapshots of their own (a `url` member's branches are
+fetched first); refs added with `--ref` are kept and refreshed too.
 
 The organization lives in `<store>/orgs/<name>/` ([how it
 works](how-it-works.md#46-the-organization-layer-rueca-segment-org)).

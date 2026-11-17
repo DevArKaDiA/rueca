@@ -794,7 +794,7 @@ component exists because a tool needs it:
 The segment is written to a temp file and atomically renamed; the catalog
 then points the indexed root at it. Query time never reads the working tree.
 
-**Ref snapshots** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--refs-over-the-organization-design)).
+**Ref snapshots** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--implemented)).
 `rueca index [PATH] --ref <name>` indexes a branch, pull request (`pr/<n>`),
 tag or commit of PATH's repository without touching its working tree: the
 name is resolved with `gix` (a branch or pull request missing locally is
@@ -806,8 +806,10 @@ so one repository id groups its working tree and its ref snapshots; tools
 read the working tree unless `ref` names another snapshot, and a `ref` list
 (`["main", "feature/x"]`) reads several side by side, collapsing what is
 identical (§6, *Responses*). The facts cache
-is keyed by blob, so a second ref only re-extracts the files that differ;
-re-indexing a ref at the same commit does nothing, and `--ref <name>
+is keyed by blob, so a second ref only re-extracts the files that differ
+(its walk, resolution and segment write are paid in full: in a debug
+build a second ref of a small repository costs about as much as the
+first, RFC 0006 §9.3); re-indexing a ref at the same commit does nothing, and `--ref <name>
 --remove` drops the snapshot and its export.
 
 ### 4.6 The organization layer (`rueca-segment` `org`)
@@ -895,7 +897,7 @@ index**, so a question asked of the whole organization gets one ranking.
   the consumers whose own segment, one of whose dependencies, or whose set
   of dependencies changed — re-indexing a library re-links its reverse
   dependencies, nothing else.
-- **Refs in the organization** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--refs-over-the-organization-design)).
+- **Refs in the organization** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--implemented)).
   A member's ref snapshots — the `refs = [...]` of its `[[repo]]` in
   `rueca-org.toml`, and any `rueca index <member> --ref <name>` — are
   **entries of its repository** in the generation, next to the default
