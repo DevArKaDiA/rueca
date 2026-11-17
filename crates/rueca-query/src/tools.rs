@@ -64,7 +64,7 @@ const MAX_OFFSET: usize = u32::MAX as usize;
 
 /// Item offset named by `cursor` (else `fallback`, else 0), at most
 /// [`MAX_OFFSET`].
-fn cursor_offset(c: &CommonArgs, fallback: Option<i64>) -> anyhow::Result<usize> {
+pub(crate) fn cursor_offset(c: &CommonArgs, fallback: Option<i64>) -> anyhow::Result<usize> {
     let offset = match c.cursor.as_deref() {
         Some(s) => s.trim().parse::<usize>().ok().filter(|&n| n <= MAX_OFFSET).ok_or_else(|| {
             anyhow::anyhow!("invalid `cursor` `{s}`: pass the `next_cursor` of a previous response unchanged")
@@ -75,7 +75,7 @@ fn cursor_offset(c: &CommonArgs, fallback: Option<i64>) -> anyhow::Result<usize>
 }
 
 /// `budget_tokens`, clamped to [100, 1,000,000].
-fn budget(c: &CommonArgs) -> usize {
+pub(crate) fn budget(c: &CommonArgs) -> usize {
     clamp_int(c.budget_tokens, compact::DEFAULT_BUDGET_TOKENS as i64, 100, 1_000_000) as usize
 }
 

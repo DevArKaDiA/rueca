@@ -177,6 +177,7 @@
 //! - `testdata/` directories are indexed like any other directory.
 
 mod builtins;
+mod contracts;
 mod extract;
 mod locals;
 mod modules;
@@ -213,7 +214,8 @@ impl LanguagePack for GoPack {
         &[Language::Go]
     }
     fn extractor_version(&self) -> u32 {
-        1
+        // 2: contract hints (HTTP routes and calls, gRPC; RFC 0006 phase 4).
+        2
     }
     fn extract(
         &self,

@@ -329,7 +329,7 @@ fn rueca_reads_itself() {
     g.has(registry, "rueca_extract::Registry.register", Calls, TypeResolved, 0.85);
     g.has(registry, "rueca_lang_python::PythonPack", References, ImportResolved, 0.9);
     // The CLI calls into the query engine (`rueca_query::Engine::new`).
-    g.has("rueca::run_query", "rueca_query::Engine.new", Calls, ImportResolved, 0.85);
+    g.has("rueca::query_engine", "rueca_query::Engine.new", Calls, ImportResolved, 0.85);
     // Trait impls of the packs.
     g.has("rueca_lang_rust::RustPack", "rueca_extract::LanguagePack", Implements, ImportResolved, 0.95);
     g.has("rueca_lang_rust::RustPack.extract", "rueca_extract::LanguagePack.extract", Overrides, TypeResolved, 0.9);

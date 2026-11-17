@@ -23,7 +23,7 @@
 //!   `(src, dst, kind)` like every resolver edge. Consumers that match
 //!   nothing get no edge (they stay in the table, dangling).
 
-use rueca_model::contract::{AMBIGUOUS_CONFIDENCE, MatchQuality, match_keys};
+use rueca_model::contract::{AMBIGUOUS_CONFIDENCE, match_bucket as bucket, match_confidence};
 use rueca_model::{ContractKind, ContractRow, ContractSide};
 
 use super::*;
@@ -56,20 +56,6 @@ impl Resolver<'_> {
     }
 }
 
-/// Group of rows a key may match in: same kind and same shape (HTTP:
-/// segment count; RPC: method name; topic: the name).
-fn bucket(kind: ContractKind, key: &str) -> (ContractKind, String) {
-    let shape = match kind {
-        ContractKind::Http => {
-            let path = key.split_once(' ').map_or(key, |(_, p)| p);
-            path.split('/').filter(|s| !s.is_empty()).count().to_string()
-        }
-        ContractKind::Rpc => key.rsplit_once('/').map_or(key, |(_, m)| m).to_string(),
-        ContractKind::Topic => key.to_string(),
-    };
-    (kind, shape)
-}
-
 /// Provider rows (indexes into the table) by [`bucket`].
 type Providers = HashMap<(ContractKind, String), Vec<usize>>;
 
@@ -93,26 +79,15 @@ fn best_matches(
     key: &str,
     exclude: NodeId,
 ) -> (Vec<NodeId>, f32) {
-    let mut best: Option<MatchQuality> = None;
-    let mut nodes: Vec<NodeId> = Vec::new();
-    for &p in group.get(&bucket(kind, key)).into_iter().flatten() {
-        let prov = &rows[p];
-        if prov.node == exclude {
-            continue;
-        }
-        let Some(q) = match_keys(kind, &prov.key, key) else { continue };
-        if best.is_none_or(|b| q < b) {
-            best = Some(q);
-            nodes.clear();
-        }
-        if best == Some(q) && !nodes.contains(&prov.node) {
-            nodes.push(prov.node);
-        }
-    }
-    let confidence = match (best, nodes.len()) {
-        (Some(q), 1) => q.confidence(),
-        _ => AMBIGUOUS_CONFIDENCE,
-    };
+    let candidates = group
+        .get(&bucket(kind, key))
+        .into_iter()
+        .flatten()
+        .map(|&p| &rows[p])
+        .filter(|p| p.node != exclude)
+        .map(|p| (p.node, p.key.as_str()));
+    let (nodes, best) = rueca_model::contract::best_matches(kind, key, candidates);
+    let confidence = best.map_or(AMBIGUOUS_CONFIDENCE, |q| match_confidence(q, nodes.len()));
     (nodes, confidence)
 }
 
@@ -139,7 +114,6 @@ pub(crate) fn contract_edges(rows: &[ContractRow]) -> Vec<ContractEdge> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rueca_model::contract::http_key;
 
     fn row(node: NodeId, side: ContractSide, key: &str, framework: &str) -> ContractRow {
         ContractRow {
@@ -158,15 +132,6 @@ mod tests {
         let mut v: Vec<_> = contract_edges(rows).into_iter().map(|(s, d, k, m)| (s, d, k, m.confidence)).collect();
         v.sort_by_key(|a| (a.0, a.1, a.2));
         v
-    }
-
-    #[test]
-    fn bucket_shapes() {
-        assert_eq!(bucket(ContractKind::Http, "GET /a/{}").1, "2");
-        assert_eq!(bucket(ContractKind::Http, "GET /").1, "0");
-        assert_eq!(bucket(ContractKind::Rpc, "p.S/M").1, "M");
-        let k = http_key(Some("get"), "/users/<int:id>").unwrap();
-        assert_eq!(bucket(ContractKind::Http, &k), bucket(ContractKind::Http, "GET /users/42"));
     }
 
     #[test]

@@ -2,8 +2,8 @@
 
 This is the tool contract of Rueca since RFC 0005 ([responses for
 agents](rfcs/0005-agent-responses.md)), with the organization scope of RFC
-0006 ([the organization graph](rfcs/0006-org-graph.md), phases 1–3: one
-ranking, cross-repository edges, refs). The MCP
+0006 ([the organization graph](rfcs/0006-org-graph.md), phases 1–4: one
+ranking, cross-repository edges, refs, contracts). The MCP
 server, the CLI and the benchmark all use it. The alpha shapes (v0.1.0-alpha) stay available for one
 release with `"format": "verbose"` ([below](#verbose-alpha-format)).
 
@@ -257,6 +257,32 @@ below); `list_repositories` reports `packages` and `depends_on`; `rueca
 links --org` lists them all. A link edge is returned only when the caller
 can read both repositories.
 
+**Contract edges** (the link layer, contracts; RFC 0006 phase 4): every
+segment keeps a contract table — the HTTP routes, OpenAPI operations and
+`.proto` RPC methods its code provides and the HTTP / RPC calls it makes,
+each with a canonical key (`GET /users/{}`, `pkg.Service/Method`). A
+repository also depends on the repositories providing a key it calls, or
+publishing a spec its server code implements, and its link set gets
+`strategy: "contract"` edges: the calling definition → the handler or the
+spec operation (`CALLS`), the server handler → the spec operation it
+implements (`IMPLEMENTS`), with the call site (or route declaration) as
+evidence. Confidence follows the match: 0.9 same key, 0.85 template (a
+`{}` segment matched a literal one, or a package-less RPC key), 0.7 method
+wildcard, and 0.5 each when several providers match one call equally well
+— counted over the caller's own repository and every other one, so a call
+that a handler of its own repository and one of another repository both
+match is ambiguous, and a better match in its own repository leaves no
+cross-repository edge. Code handlers and spec operations are matched
+separately (reaching a handler and the operation it implements is not
+ambiguous); provider tests are never targets. `trace` follows them like any
+link edge (`edge_types: ["CALLS", "IMPLEMENTS"]` for both kinds);
+[`list_contracts`](#list_contracts) lists the tables and the calls nothing
+provides; `rueca links --org` marks them `via: "contract"`. On a view that
+reads a provider at another ref, an edge whose target node (the handler,
+the `Route` or `RpcMethod`) the ref no longer has is dropped; a handler
+kept under a changed route keeps its edges until the consumer's link set
+is recomputed (remapping is by node, not by key).
+
 ## Tools
 
 ### `search_symbols`
@@ -432,7 +458,10 @@ ref no longer has is dropped: `trace` from a consumer's function with
 `ref: "7.1.2"` (a tag only the library has, no `repo`) shows its calls
 into the library as of that tag, and `repo: <consumer>, ref: "pr/7"`
 traces the pull request's own calls, linked against the libraries'
-defaults. When the answer spans several snapshots, every node
+defaults. Contract link edges ([above](#the-envelope), *Contract edges*)
+come back like the others, with strategy `contract` and the call site:
+`1 [1] out d1 Route GET /users/{id}  openapi.yaml L7-11  ←0 CALLS 0.9
+contract @5`. When the answer spans several snapshots, every node
 carries its snapshot `"s"` (the result's `"s"` is the root's), the
 envelope lists the snapshots touched, and the text prefixes such nodes with
 `[s]`:
@@ -535,7 +564,7 @@ then its ref snapshots — with the first 12 hex digits of its commit;
 `ref` reads any of them)
 (`packages`: up to 8 package names the repository publishes, `packages_more`
 the rest's count; `depends_on`: visible repositories it imports packages
-from; `score`: relevance for `query`, 1 = best, results then ordered by it)
+from or whose contracts it calls or implements; `score`: relevance for `query`, 1 = best, results then ordered by it)
 (`s` is the snapshot of the default ref; `symbols` counts nodes that are not
 files, folders, modules or packages), plus `"org"` (the organization name,
 or `null`) next to `next_cursor`. `next_cursor` is the number of
@@ -551,6 +580,49 @@ present):
 [1] github.com/acme/payments@a1b2c3d4e5f6 (main)
 [0] github.com/acme/billing  refs main@7696364aef89, pr/7@c0ffee00c0ff  120 files, 3400 symbols, 9100 edges  python 110, yaml 10
 [1] github.com/acme/payments  refs main@a1b2c3d4e5f6  80 files, 2100 symbols, 5300 edges  typescript 78, json 2
+```
+
+### `list_contracts`
+
+The contract tables of the selected repositories (RFC 0001 §11.4, RFC 0006
+phase 4): HTTP routes, OpenAPI operations and `.proto` RPC methods
+provided, and the HTTP / RPC calls made, each with how many counterparts
+the visible repositories have. `repo` / `ref` select what is listed as in
+the other tools (organization mode: every visible repository by default;
+locally: the default root); counterparts are counted over every visible
+repository at the entry the call reads (in an organization also when `repo`
+narrows the listing; locally, the selected roots only).
+
+| Arg | Type | Default |
+|---|---|---|
+| `side` | `provided`, `consumed`, or `dangling` (consumed, and no visible repository — nor its own — provides a matching key) | provided and consumed |
+| `kind` | `http`, `rpc` or `topic` | every kind |
+| `query` | string: keep entries whose key, raw text or symbol contains it (case-insensitive) | — |
+| `limit` | int, 1–1000 | 50 |
+
+Results: one flat list sorted by (kind, key, repository, path, line):
+`[{"s", "repo", "path", "line", "symbol", "id", "label", "kind", "side",
+"key", "framework", "raw", "matches"}]` — `symbol` the qualified name of
+the declaring / calling definition (the file for file-level code), `id`
+its symbol id, `side` `provides` / `consumes`, `key` the canonical key,
+`framework` the framework or spec (`flask`, `requests`, `openapi`,
+`proto`, `grpc-python`, …), `raw` the text as written (≤ 200 characters),
+`matches` the number of counterpart rows: providers matching a consumed key
+(code and spec), consumers of a provided key (a row never counts itself).
+Dangling entries are computed at query time, nothing is stored.
+`next_cursor` is the number of entries already returned. Verbose:
+`{"contracts": [{"repo", "ref", "path", "line", "symbol", "id", "label",
+"kind", "side", "key", "framework", "raw", "matches"}], "truncated",
+"next_offset"}`. Text, one line per entry (`key  side  framework
+repo:path#local-name Lline  (matches)`, `[s]` first with several
+snapshots):
+
+```
+[0] local/api@worktree (worktree)
+[1] local/client@worktree (worktree)
+[0] GET /users/{}  provides  openapi  local/api:openapi.yaml#paths./users/{id}.get L7  (1)
+[1] GET /users/{}  consumes  requests  local/client:app/users.py#get_user L5  (1)
+[1] POST /nowhere  consumes  requests  local/client:app/users.py#missing L9  (0)
 ```
 
 ## CLI
@@ -602,13 +674,25 @@ rueca status [--store DIR] [--json]
 
 rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
     List the organization's cross-repository edges (RFC 0006 link layer):
-    one line per edge, or JSON {"org", "generation", "edges": [{"consumer",
-    "src_repo", "src", "src_label", "src_path", "dst_repo", "dst",
-    "dst_label", "dst_path", "kind", "strategy", "confidence", "path",
-    "line"}]} (`consumer`: the repository the edge was observed in, as
-    `repo@ref` for a ref entry; `--repo`: edges leaving that repository;
-    `--ref`: the link set of that ref entry, into its dependencies'
-    default refs).
+    one line per edge (contract edges end with `[contract <key>]`), or JSON
+    {"org", "generation", "edges": [{"consumer", "src_repo", "src",
+    "src_label", "src_path", "dst_repo", "dst", "dst_name", "dst_label",
+    "dst_path", "kind", "strategy", "confidence", "path", "line", "via",
+    "key" (contract edges)}]} (`consumer`: the repository the edge was
+    observed in, as `repo@ref` for a ref entry; `dst_name`: the target's
+    name, e.g. an OpenAPI operation's `GET /users/{id}`; `via`: `package` or
+    `contract`; `key`: the calling row's contract key; `--repo`: edges
+    leaving that repository; `--ref`: the link set of that ref entry, into
+    its dependencies' default refs).
+
+rueca contracts [--org FILE|NAME | --root PATH] [--repo ID [--ref NAME]]
+                [--side provided|consumed|dangling] [--kind http|rpc|topic]
+                [--query TEXT] [--limit N] [--store DIR] [--json | --text]
+    The `list_contracts` tool over an organization (or, with --root / the
+    indexed root containing the current directory, one local root), every
+    page of it: the pages are merged into one envelope (snapshots listed
+    once) up to --limit entries (default: all). Text by default (one line
+    per entry), the envelope with --json.
 ```
 
 **Organization file** (`rueca-org.toml`, RFC 0006 §7):

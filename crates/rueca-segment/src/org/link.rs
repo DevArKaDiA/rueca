@@ -1,4 +1,5 @@
-//! The organization link layer, packages (RFC 0006 §3.3.1): the storage side.
+//! The organization link layer, packages and contracts (RFC 0006 §3.3): the
+//! storage side.
 //!
 //! Computing cross-repository edges needs the language packs and the
 //! resolver, which live above this crate; they come in through
@@ -13,6 +14,14 @@
 //!   (`key == import`, or `import` continues `key` after the ecosystem's
 //!   separator: `go:github.com/a/lib` covers `go:github.com/a/lib/sub`), or
 //!   when it requires one of those packages by name.
+//! - **Contract keys** (RFC 0006 phase 4): every repository's [`RepoDeps`]
+//!   also lists the distinct keys of its segment contract table
+//!   ([`ContractKey`]). A repository also depends on another when one of
+//!   its `Consumes` keys matches a `Provides` key of the other
+//!   (`rueca_model::contract::match_keys`), or one of its code `Provides`
+//!   keys matches a specification `Provides` key of the other (a server
+//!   implementing a spec published by another repository). Contract link
+//!   edges (`meta.strategy = Contract`) go into the same link sets.
 //! - **Link sets**: the edges a consumer has into its dependencies, one
 //!   file per (consumer segment, dependency segments, linker version):
 //!   `links/<consumer segment>-<hash>.bin` = `zstd(postcard(Vec<LinkEdge>))`.
@@ -35,7 +44,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use rueca_model::{EdgeKind, EdgeMeta, NodeId};
+use rueca_model::contract::{match_bucket, match_keys};
+use rueca_model::{ContractKind, ContractRow, ContractSide, EdgeKind, EdgeMeta, NodeId};
 use serde::{Deserialize, Serialize};
 
 use super::{OrgRepo, OrgSlot, corrupt};
@@ -73,6 +83,51 @@ pub struct RepoDeps {
     /// Packages its manifests depend on, `eco:name` (`composer:nesbot/carbon`).
     #[serde(default)]
     pub requires: Vec<String>,
+    /// The contract keys of its contract table (RFC 0006 phase 4), sorted
+    /// and deduplicated: what it provides and what it consumes.
+    #[serde(default)]
+    pub contracts: Vec<ContractKey>,
+}
+
+/// One distinct contract key of a repository ([`RepoDeps::contracts`]).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ContractKey {
+    pub side: ContractSide,
+    pub kind: ContractKind,
+    pub key: String,
+    /// A `Provides` key from a specification (an OpenAPI operation, a
+    /// `.proto` RPC method), not from code.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spec: bool,
+}
+
+impl ContractKey {
+    /// The distinct keys of a contract table, sorted.
+    pub fn of_rows(rows: &[ContractRow]) -> Vec<ContractKey> {
+        let mut keys: Vec<ContractKey> = rows
+            .iter()
+            .map(|r| ContractKey {
+                side: r.side,
+                kind: r.kind,
+                key: r.key.clone(),
+                spec: r.side == ContractSide::Provides && r.is_spec(),
+            })
+            .collect();
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    /// Whether this key makes its repository depend on a repository
+    /// providing `provider`: a consumed key matching it, or a code
+    /// provider matching a specification (`IMPLEMENTS`).
+    fn needs(&self, provider: &ContractKey) -> bool {
+        let wanted = match self.side {
+            ContractSide::Consumes => true,
+            ContractSide::Provides => !self.spec && provider.spec,
+        };
+        wanted && match_keys(self.kind, &provider.key, &self.key).is_some()
+    }
 }
 
 /// Separator after which an import key continues a package key.
@@ -102,8 +157,16 @@ pub fn normalize_package(eco: &str, name: &str) -> String {
 }
 
 impl RepoDeps {
+    /// Whether this repository depends on repository `other`: it imports or
+    /// requires a package `other` publishes
+    /// ([`RepoDeps::depends_on_packages`]), or one of its contract keys
+    /// needs a key `other` provides ([`RepoDeps::depends_on_contracts`]).
+    pub fn depends_on(&self, other: &RepoDeps) -> bool {
+        self.depends_on_packages(&other.packages) || self.depends_on_contracts(other)
+    }
+
     /// Whether this repository depends on a repository publishing `published`.
-    pub fn depends_on(&self, published: &[Package]) -> bool {
+    pub fn depends_on_packages(&self, published: &[Package]) -> bool {
         published.iter().any(|p| {
             p.keys.iter().any(|k| {
                 // Imports are sorted: only those sharing the key's
@@ -114,6 +177,37 @@ impl RepoDeps {
             }) || self.requires.iter().any(|r| *r == format!("{}:{}", p.eco, normalize_package(&p.eco, &p.name)))
         })
     }
+}
+
+impl RepoDeps {
+    /// Whether one of this repository's `Consumes` keys matches a
+    /// `Provides` key of `other`, or one of its code `Provides` keys
+    /// matches a specification `Provides` key of `other` (a server
+    /// implementing a spec published elsewhere).
+    pub fn depends_on_contracts(&self, other: &RepoDeps) -> bool {
+        let needs = self.contracts.iter().filter(|k| k.side == ContractSide::Consumes || !k.spec);
+        let mut needs = needs.peekable();
+        if needs.peek().is_none() {
+            return false;
+        }
+        let provided = provider_index(&other.contracts);
+        if provided.is_empty() {
+            return false;
+        }
+        needs.any(|k| {
+            let bucket = match_bucket(k.kind, &k.key);
+            provided.get(&bucket).into_iter().flatten().any(|p| k.needs(p))
+        })
+    }
+}
+
+/// The `Provides` keys of a key list by [`match_bucket`].
+fn provider_index(keys: &[ContractKey]) -> HashMap<(ContractKind, String), Vec<&ContractKey>> {
+    let mut out: HashMap<(ContractKind, String), Vec<&ContractKey>> = HashMap::new();
+    for k in keys.iter().filter(|k| k.side == ContractSide::Provides) {
+        out.entry(match_bucket(k.kind, &k.key)).or_default().push(k);
+    }
+    out
 }
 
 /// One dependency a link set was computed against.
@@ -422,10 +516,65 @@ mod tests {
             dir: String::new(),
             keys: vec![key.into()],
         };
-        assert!(deps.depends_on(&[pkg("pypi", "click", "py:click")]));
-        assert!(deps.depends_on(&[pkg("pypi", "Jinja2", "py:jinja2")]));
-        assert!(!deps.depends_on(&[pkg("pypi", "flask", "py:flask")]));
-        assert!(deps.depends_on(&[pkg("composer", "nesbot/Carbon", "php:Carbon")]));
+        assert!(deps.depends_on_packages(&[pkg("pypi", "click", "py:click")]));
+        assert!(deps.depends_on_packages(&[pkg("pypi", "Jinja2", "py:jinja2")]));
+        assert!(!deps.depends_on_packages(&[pkg("pypi", "flask", "py:flask")]));
+        assert!(deps.depends_on_packages(&[pkg("composer", "nesbot/Carbon", "php:Carbon")]));
+        let other = RepoDeps { packages: vec![pkg("pypi", "click", "py:click")], ..Default::default() };
+        assert!(deps.depends_on(&other));
         assert_eq!(normalize_package("pypi", "Foo_Bar.baz"), "foo-bar-baz");
+    }
+
+    fn ck(side: ContractSide, kind: ContractKind, key: &str, spec: bool) -> ContractKey {
+        ContractKey { side, kind, key: key.into(), spec }
+    }
+
+    #[test]
+    fn contracts_make_dependencies() {
+        use ContractKind::{Http, Rpc};
+        use ContractSide::{Consumes, Provides};
+        let deps = |keys: Vec<ContractKey>| RepoDeps { contracts: keys, ..Default::default() };
+        let server = deps(vec![ck(Provides, Http, "GET /users/{}", false)]);
+        let spec = deps(vec![ck(Provides, Http, "GET /users/{}", true), ck(Provides, Rpc, "pkg.Users/Get", true)]);
+        let client = deps(vec![ck(Consumes, Http, "GET /users/42", false)]);
+        let stub = deps(vec![ck(Consumes, Rpc, "Users/Get", false)]);
+        let other_route = deps(vec![ck(Consumes, Http, "POST /users/42", false)]);
+        // Consumers depend on code and spec providers.
+        assert!(client.depends_on(&server) && client.depends_on(&spec) && stub.depends_on(&spec));
+        assert!(!other_route.depends_on(&server) && !stub.depends_on(&server));
+        // A server depends on the spec it implements, not the reverse; two
+        // servers or two specs never depend on each other.
+        assert!(server.depends_on(&spec) && !spec.depends_on(&server));
+        assert!(!server.depends_on(&server.clone()) && !spec.depends_on(&spec.clone()));
+        // Providers never depend on consumers.
+        assert!(!server.depends_on(&client));
+        // Keys of a contract table: distinct, sorted, spec flagged.
+        let row = |side, key: &str, framework: &str| ContractRow {
+            node: 0,
+            side,
+            kind: Http,
+            key: key.into(),
+            raw: key.into(),
+            file: 0,
+            span: Default::default(),
+            framework: framework.into(),
+        };
+        let keys = ContractKey::of_rows(&[
+            row(Consumes, "GET /a", "requests"),
+            row(Provides, "GET /a", "openapi"),
+            row(Consumes, "GET /a", "fetch"),
+            row(Provides, "GET /a", "flask"),
+        ]);
+        assert_eq!(
+            keys,
+            [
+                ck(Provides, Http, "GET /a", false),
+                ck(Provides, Http, "GET /a", true),
+                ck(Consumes, Http, "GET /a", false)
+            ]
+        );
+        // `contracts` defaults to empty in older profiles.
+        let old: RepoDeps = serde_json::from_str(r#"{"packages": [], "imports": ["py:x"]}"#).unwrap();
+        assert!(old.contracts.is_empty());
     }
 }

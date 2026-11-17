@@ -2,7 +2,7 @@
 //!
 //! Implements the tools defined in `docs/tools.md` (`search_symbols`,
 //! `search_code`, `get_symbol`, `get_snippet`, `trace`, `get_file_outline`,
-//! `list_repositories`) with the response contract of RFC 0005 and the
+//! `list_repositories`, `list_contracts`) with the response contract of RFC 0005 and the
 //! organization scope of RFC 0006. The MCP server and the CLI both
 //! dispatch through [`Engine::respond`] (or [`Engine::call`] for the JSON
 //! alone), so their behavior is identical; [`tool_definitions`] provides
@@ -167,6 +167,7 @@
 
 mod args;
 pub mod compact;
+mod contracts;
 pub mod multiref;
 mod orgsel;
 mod refset;
@@ -188,8 +189,9 @@ use rueca_segment::{CatalogEntry, Segment, Store};
 use serde_json::Value;
 
 pub use args::{
-    CommonArgs, DirectionArg, FormatArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, LanguageArg,
-    ListRepositoriesArgs, RefArg, RepoArg, SearchCodeArgs, SearchSymbolsArgs, TraceArgs,
+    CommonArgs, ContractKindArg, ContractSideArg, DirectionArg, FormatArg, GetFileOutlineArgs, GetSnippetArgs,
+    GetSymbolArgs, LanguageArg, ListContractsArgs, ListRepositoriesArgs, RefArg, RepoArg, SearchCodeArgs,
+    SearchSymbolsArgs, TraceArgs,
 };
 pub use compact::render_text;
 pub use text::split_lines;
@@ -212,8 +214,16 @@ impl Response {
     }
 }
 
-pub const TOOL_NAMES: &[&str] =
-    &["search_symbols", "search_code", "get_symbol", "get_snippet", "trace", "get_file_outline", "list_repositories"];
+pub const TOOL_NAMES: &[&str] = &[
+    "search_symbols",
+    "search_code",
+    "get_symbol",
+    "get_snippet",
+    "trace",
+    "get_file_outline",
+    "list_repositories",
+    "list_contracts",
+];
 
 /// A tool as advertised to MCP clients.
 #[derive(Debug, Clone, PartialEq)]
@@ -264,6 +274,11 @@ fn definitions() -> &'static [ToolDef] {
                 description: DESC_LIST_REPOSITORIES,
                 input_schema: args::input_schema::<ListRepositoriesArgs>(),
             },
+            ToolDef {
+                name: "list_contracts",
+                description: DESC_LIST_CONTRACTS,
+                input_schema: args::input_schema::<ListContractsArgs>(),
+            },
         ]
     })
 }
@@ -312,6 +327,13 @@ const DESC_LIST_REPOSITORIES: &str = "List the repositories this server can read
 repository you may see): repository id, default ref, every indexed ref with its commit, languages (files per \
 language) and counts of files, symbols and edges. Use it to learn what exists and to narrow other tools with `repo` \
 and `ref`. Example: {}";
+
+const DESC_LIST_CONTRACTS: &str = "List the service contracts of the repositories: HTTP routes, OpenAPI \
+operations and RPC methods they provide, and the HTTP / RPC calls they make, each with its canonical key \
+(`GET /users/{}`, `pkg.Service/Method`), framework, the symbol and line that declares or makes it, and `matches`: \
+how many counterparts the visible repositories have (providers of a call, callers of a route). `side: \"dangling\"` \
+lists calls nothing provides; `query` filters by key, raw text or symbol. Follow an entry across repositories with \
+`trace` (`edge_types: [\"CALLS\", \"IMPLEMENTS\"]`). Example: {\"side\": \"consumed\", \"query\": \"/users\"}";
 
 const DESC_GET_FILE_OUTLINE: &str = "Outline of one file: its classes, functions, methods and other definitions, \
 nested by containment and ordered by line, with signatures and 1-based line ranges. Cheaper than reading the file; \
@@ -438,6 +460,7 @@ impl Engine {
             "trace" => self.trace(args::parse_args(name, schema, args)?),
             "get_file_outline" => self.get_file_outline(args::parse_args(name, schema, args)?),
             "list_repositories" => self.list_repositories(args::parse_args(name, schema, args)?),
+            "list_contracts" => self.list_contracts(args::parse_args(name, schema, args)?),
             _ => unreachable!(),
         }
     }

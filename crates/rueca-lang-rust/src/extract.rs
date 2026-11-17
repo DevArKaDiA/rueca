@@ -290,13 +290,14 @@ pub(crate) fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<File
     ex.attach_trait_impls();
     let anchors = std::mem::take(&mut ex.anchors);
     ex.imports.extend(anchors.into_values());
+    let contracts = crate::contracts::hints(root, source, &ex.defs, budget.max_depth);
     Ok(FileFacts {
         definitions: ex.defs,
         references: ex.refs,
         imports: ex.imports,
         parse_errors: count_errors(&tree),
         line_count: line_count(source),
-        contracts: Vec::new(),
+        contracts,
     })
 }
 

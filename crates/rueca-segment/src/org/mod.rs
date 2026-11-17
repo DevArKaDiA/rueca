@@ -114,7 +114,8 @@ use crate::tokenizer::{CODE_TOKENIZER, CodeTokenizer};
 use crate::{CatalogEntry, FORMAT_VERSION, Result, Segment, SegmentError, SegmentMeta, Store, SymbolQuery};
 
 pub use link::{
-    LinkDir, LinkEdge, LinkInput, LinkRef, LinkTable, NoLinker, OrgDep, OrgLinker, OrgLinks, Package, RepoDeps,
+    ContractKey, LinkDir, LinkEdge, LinkInput, LinkRef, LinkTable, NoLinker, OrgDep, OrgLinker, OrgLinks, Package,
+    RepoDeps,
 };
 pub use route::{PROFILE_FORMAT, RepoProfile, RepoRoute, RouteMode, RouteParams};
 pub use select::{OrgRefInfo, OrgSelection, OrgSlot, ref_names_match, snapshot_ref_name};
@@ -904,13 +905,14 @@ fn removed_refs(g: &OrgGeneration, repos: &[OrgRepo]) -> Vec<String> {
 }
 
 /// The other repositories (by index) whose default entry publishes a
-/// package the entry profiled as `p` (of repository `own`) uses; none with
+/// package the entry profiled as `p` (of repository `own`) uses, or
+/// provides a contract it needs ([`RepoDeps::depends_on`]); none with
 /// linker version 0.
 fn wanted_deps(p: &RepoProfile, own: usize, defaults: &[RepoProfile], version: u32) -> Vec<usize> {
     if version == 0 {
         return Vec::new();
     }
-    (0..defaults.len()).filter(|&j| j != own && p.deps.depends_on(&defaults[j].deps.packages)).collect()
+    (0..defaults.len()).filter(|&j| j != own && p.deps.depends_on(&defaults[j].deps)).collect()
 }
 
 fn profile_file_name(segment_id: &str) -> String {

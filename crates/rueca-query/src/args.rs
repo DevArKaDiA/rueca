@@ -305,6 +305,57 @@ pub struct ListRepositoriesArgs {
     pub common: CommonArgs,
 }
 
+/// `list_contracts` `side`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ContractSideArg {
+    /// Routes, spec operations and RPC methods the code declares or implements.
+    Provided,
+    /// HTTP calls, RPC stub calls and publishes.
+    Consumed,
+    /// Consumed endpoints no visible repository provides.
+    Dangling,
+}
+
+/// `list_contracts` `kind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ContractKindArg {
+    /// HTTP routes: `METHOD /path` with `{}` parameters.
+    Http,
+    /// RPC methods: `pkg.Service/Method`.
+    Rpc,
+    /// Message topics.
+    Topic,
+}
+
+impl ContractKindArg {
+    pub fn to_kind(self) -> rueca_model::ContractKind {
+        match self {
+            ContractKindArg::Http => rueca_model::ContractKind::Http,
+            ContractKindArg::Rpc => rueca_model::ContractKind::Rpc,
+            ContractKindArg::Topic => rueca_model::ContractKind::Topic,
+        }
+    }
+}
+
+/// Arguments of `list_contracts`.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ListContractsArgs {
+    /// `provided` (routes, spec operations, RPC methods), `consumed` (calls to them) or `dangling`
+    /// (consumed, provided by no visible repository). Default: both provided and consumed.
+    pub side: Option<ContractSideArg>,
+    /// `http`, `rpc` or `topic`. Default: every kind.
+    pub kind: Option<ContractKindArg>,
+    /// Keep entries whose key, raw text or symbol contains this text (case-insensitive), e.g.
+    /// `/users` or `Greeter`.
+    pub query: Option<String>,
+    /// Maximum entries, 1–1000 (default 50).
+    pub limit: Option<i64>,
+    #[serde(flatten)]
+    pub common: CommonArgs,
+}
+
 /// Generates the JSON schema of an argument type as a plain JSON object
 /// (`type: object`, `properties`, `required`), without `$schema`.
 pub(crate) fn input_schema<T: JsonSchema>() -> Value {
@@ -439,6 +490,7 @@ mod tests {
             input_schema::<TraceArgs>(),
             input_schema::<GetFileOutlineArgs>(),
             input_schema::<ListRepositoriesArgs>(),
+            input_schema::<ListContractsArgs>(),
         ] {
             let p = &s["properties"];
             assert_eq!(s["additionalProperties"], false);

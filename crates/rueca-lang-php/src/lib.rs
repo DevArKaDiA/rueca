@@ -138,6 +138,13 @@
 //!   `laravel`. String literals only (module `bridge`).
 //! - At most 20,000 references per file.
 //!
+//! # Contract hints
+//!
+//! `FileFacts::contracts` (RFC 0006 phase 4): Laravel routes (groups and
+//! prefixes composed), Symfony `#[Route]` attributes, Slim / Lumen routes,
+//! and Guzzle / `Http::` / curl client calls; the patterns and their
+//! evidence are listed in the `contracts` module docs.
+//!
 //! # Laravel config files
 //!
 //! `config/<file>.php` returns an array; its string-keyed entries become
@@ -196,6 +203,7 @@
 mod bridge;
 mod builtins;
 mod composer;
+mod contracts;
 mod extract;
 mod locals;
 mod names;
@@ -241,8 +249,9 @@ impl LanguagePack for PhpPack {
     }
     fn extractor_version(&self) -> u32 {
         // 2: env var / config key reads and Laravel config keys (RFC 0003 §7);
-        // 3: `(new Foo())->m()` and inline `/** @var Foo $x */` receivers.
-        3
+        // 3: `(new Foo())->m()` and inline `/** @var Foo $x */` receivers;
+        // 4: contract hints (RFC 0006 phase 4).
+        4
     }
     fn extract(
         &self,

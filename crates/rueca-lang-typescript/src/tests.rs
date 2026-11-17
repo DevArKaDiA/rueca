@@ -792,7 +792,7 @@ fn local_exports_are_self_reexports() {
 #[test]
 fn pack_metadata() {
     let p = TypeScriptPack;
-    assert_eq!(p.extractor_version(), 5);
+    assert_eq!(p.extractor_version(), 6);
     assert_eq!(p.self_receivers(), &["this"]);
     assert!(p.is_builtin("console") && p.is_builtin("Promise") && p.is_builtin("Record"));
     assert!(!p.is_builtin("UserService"));

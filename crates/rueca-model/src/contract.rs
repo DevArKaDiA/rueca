@@ -29,7 +29,9 @@
 //!   interpolation gaps (`${base}/${path}`, `"/" + path`) has no key.
 //! - **RPC** ([`rpc_key`]): `"<package>.<Service>/<Method>"`, or
 //!   `"<Service>/<Method>"` when the package is empty or unknown (code-side
-//!   stubs); a package-less key matches any package.
+//!   stubs); a package-less key matches any package. Code that knows only
+//!   the method writes `"*/<Method>"` ([`ANY_SERVICE`]), which matches that
+//!   method of any service.
 //! - **Topic**: the topic name as written; the framework names the broker.
 //!
 //! # Matching
@@ -37,10 +39,11 @@
 //! [`match_http`], [`match_rpc`] and [`match_keys`] compare a provider key
 //! with a consumer key: exact (same key) > template (a provider `{}` segment
 //! matches any one consumer segment; for RPC, a package-less side) >
-//! method wildcard (either method is `*`). Segment counts must be equal; no
-//! prefix or suffix tolerance. [`MatchQuality::confidence`] gives the edge
-//! confidence; when several providers match one consumer with the same best
-//! quality, each edge gets [`AMBIGUOUS_CONFIDENCE`].
+//! method wildcard (either HTTP method is `*`, or either RPC service).
+//! Segment counts must be equal; no prefix or suffix tolerance.
+//! [`MatchQuality::confidence`] gives the edge confidence; when several
+//! providers match one consumer with the same best quality, each edge gets
+//! [`AMBIGUOUS_CONFIDENCE`].
 
 use std::fmt;
 
@@ -201,7 +204,7 @@ pub enum MatchQuality {
     /// A provider `{}` segment matched a literal consumer segment, or one
     /// RPC key has no package.
     Template,
-    /// Either HTTP method is `*`.
+    /// Either HTTP method is `*`, or either RPC service ([`ANY_SERVICE`]).
     MethodWildcard,
 }
 
@@ -414,6 +417,12 @@ fn canonical_segment(seg: &[Tok]) -> String {
 // RPC keys
 // ---------------------------------------------------------------------------
 
+/// Service of an RPC key written by code that knows the method but not its
+/// service (a Go server method taking `*pb.<Method>Request`, a call through
+/// a client field typed in another file): `*/Method` matches that method of
+/// any service, at [`MatchQuality::MethodWildcard`].
+pub const ANY_SERVICE: &str = "*";
+
 /// Canonical RPC key: `pkg.Service/Method`, or `Service/Method` when
 /// `package` is empty.
 pub fn rpc_key(package: &str, service: &str, method: &str) -> String {
@@ -469,7 +478,8 @@ fn match_path(provider: &str, consumer: &str) -> Option<bool> {
 }
 
 /// How the provider RPC key matches the consumer key, if it does: exact,
-/// or template when one side has no package (`Service/Method`).
+/// template when one side has no package (`Service/Method`), or method
+/// wildcard when one side's service is `*` ([`ANY_SERVICE`]).
 pub fn match_rpc(provider_key: &str, consumer_key: &str) -> Option<MatchQuality> {
     if provider_key == consumer_key {
         return Some(MatchQuality::Exact);
@@ -478,6 +488,9 @@ pub fn match_rpc(provider_key: &str, consumer_key: &str) -> Option<MatchQuality>
     let (cs, cm) = consumer_key.rsplit_once('/')?;
     if pm != cm {
         return None;
+    }
+    if ps == ANY_SERVICE || cs == ANY_SERVICE {
+        return Some(MatchQuality::MethodWildcard);
     }
     let packageless = !ps.contains('.') || !cs.contains('.');
     (packageless && service_name(ps) == service_name(cs)).then_some(MatchQuality::Template)
@@ -495,6 +508,53 @@ pub fn match_keys(kind: ContractKind, provider_key: &str, consumer_key: &str) ->
         ContractKind::Rpc => match_rpc(provider_key, consumer_key),
         ContractKind::Topic => (provider_key == consumer_key).then_some(MatchQuality::Exact),
     }
+}
+
+/// The group of keys a key may match in: same kind and same shape (HTTP:
+/// path segment count; RPC: method name; topic: the name). Keys of
+/// different buckets never match ([`match_keys`]), so matchers index
+/// providers by bucket.
+pub fn match_bucket(kind: ContractKind, key: &str) -> (ContractKind, String) {
+    let shape = match kind {
+        ContractKind::Http => {
+            let path = key.split_once(' ').map_or(key, |(_, p)| p);
+            path.split('/').filter(|s| !s.is_empty()).count().to_string()
+        }
+        ContractKind::Rpc => key.rsplit_once('/').map_or(key, |(_, m)| m).to_string(),
+        ContractKind::Topic => key.to_string(),
+    };
+    (kind, shape)
+}
+
+/// The providers among `providers` (`(identity, provider key)`) matching
+/// consumer key `key` with the best quality: their distinct identities in
+/// first-seen order, and that quality (`None`: nothing matches). Shared by
+/// the in-snapshot resolver and the organization linker.
+pub fn best_matches<'a, T: PartialEq>(
+    kind: ContractKind,
+    key: &str,
+    providers: impl IntoIterator<Item = (T, &'a str)>,
+) -> (Vec<T>, Option<MatchQuality>) {
+    let mut best: Option<MatchQuality> = None;
+    let mut ids: Vec<T> = Vec::new();
+    for (id, pkey) in providers {
+        let Some(q) = match_keys(kind, pkey, key) else { continue };
+        if best.is_none_or(|b| q < b) {
+            best = Some(q);
+            ids.clear();
+        }
+        if best == Some(q) && !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    (ids, best)
+}
+
+/// Edge confidence of a best match shared by `providers` distinct
+/// providers: the quality's confidence for one, [`AMBIGUOUS_CONFIDENCE`]
+/// for several.
+pub fn match_confidence(quality: MatchQuality, providers: usize) -> f32 {
+    if providers > 1 { AMBIGUOUS_CONFIDENCE } else { quality.confidence() }
 }
 
 #[cfg(test)]
@@ -609,9 +669,32 @@ mod tests {
         assert_eq!(match_rpc("Greeter/SayHello", "a.b.Greeter/SayHello"), Some(Template));
         assert_eq!(match_rpc("a.Greeter/SayHello", "b.Greeter/SayHello"), None);
         assert_eq!(match_rpc("pkg.Greeter/SayHello", "Greeter/SayBye"), None);
+        assert_eq!(match_rpc("pkg.Greeter/SayHello", "*/SayHello"), Some(MethodWildcard));
+        assert_eq!(match_rpc("*/SayHello", "Greeter/SayHello"), Some(MethodWildcard));
+        assert_eq!(match_rpc("*/SayHello", "*/SayHello"), Some(Exact));
+        assert_eq!(match_rpc("*/SayHello", "pkg.Greeter/SayBye"), None);
         assert_eq!(match_keys(ContractKind::Topic, "orders", "orders"), Some(Exact));
         assert_eq!(match_keys(ContractKind::Topic, "orders", "Orders"), None);
         assert_eq!(match_keys(ContractKind::Http, "GET /a/{}", "GET /a/b"), Some(Template));
+    }
+
+    #[test]
+    fn buckets_and_best_matches() {
+        assert_eq!(match_bucket(ContractKind::Http, "GET /a/{}").1, "2");
+        assert_eq!(match_bucket(ContractKind::Http, "GET /").1, "0");
+        assert_eq!(match_bucket(ContractKind::Rpc, "p.S/M").1, "M");
+        let k = http_key(Some("get"), "/users/<int:id>").unwrap();
+        assert_eq!(match_bucket(ContractKind::Http, &k), match_bucket(ContractKind::Http, "GET /users/42"));
+        let providers = [(1, "GET /users/{}"), (2, "GET /users/me"), (3, "* /users/me"), (2, "GET /users/me")];
+        assert_eq!(best_matches(ContractKind::Http, "GET /users/me", providers), (vec![2], Some(MatchQuality::Exact)));
+        assert_eq!(
+            best_matches(ContractKind::Http, "GET /users/7", providers),
+            (vec![1], Some(MatchQuality::Template))
+        );
+        let none: [(u32, &str); 0] = [];
+        assert_eq!(best_matches(ContractKind::Http, "GET /x", none), (vec![], None));
+        assert_eq!(match_confidence(MatchQuality::Template, 1), 0.85);
+        assert_eq!(match_confidence(MatchQuality::Exact, 2), AMBIGUOUS_CONFIDENCE);
     }
 
     #[test]

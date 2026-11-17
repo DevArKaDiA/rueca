@@ -70,6 +70,7 @@ use rueca_resolve::FileInput;
 use rueca_segment::{ContentSource, SegmentMeta, Store};
 use tracing::{debug, info, warn};
 
+mod contract_link;
 mod git;
 #[cfg(test)]
 mod golden;

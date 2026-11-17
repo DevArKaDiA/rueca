@@ -30,15 +30,17 @@ agent can follow.
 
 - **One static binary**, no services: `rueca index` builds a segment,
   `rueca mcp` serves it on stdio.
-- **Seven tools** for agents: `search_symbols`, `search_code`, `get_symbol`,
-  `get_snippet`, `trace`, `get_file_outline`, `list_repositories`
-  ([contract](docs/tools.md)).
+- **Eight tools** for agents: `search_symbols`, `search_code`, `get_symbol`,
+  `get_snippet`, `trace`, `get_file_outline`, `list_repositories`,
+  `list_contracts` ([contract](docs/tools.md)).
 - **Organizations**: several repositories indexed as one organization
   (`rueca-org.toml`) share one symbol index, so a question asked of all of
   them gets one ranking, weighed by which repositories it is about; a
   repository importing a package another one publishes is linked to it
-  (imports, calls, inheritance across repositories, followed by `trace`);
-  re-indexing one repository replaces only its part.
+  (imports, calls, inheritance across repositories, followed by `trace`),
+  and so is a service calling the HTTP routes or RPC methods another one
+  provides or specifies (`list_contracts`); re-indexing one repository
+  replaces only its part.
 - **Call graph with provenance**: every edge carries the strategy that resolved
   it (scope, `self`/MRO, import, re-export, same module, unique name,
   heuristic) and a confidence, so agents can filter guesses out.
@@ -169,6 +171,7 @@ rueca query search_symbols '{"query":"refund invoice"}' --org acme --text   # on
 rueca query list_repositories '{"query":"refund invoice"}' --org acme --text   # which repositories it is about
 rueca query trace '{"qualified_name":"payments.charge","direction":"callers"}' --org acme --text   # callers in every repository
 rueca links --org acme                            # the cross-repository edges
+rueca contracts --org acme --side dangling        # HTTP / RPC calls no repository provides
 rueca index ~/src/payments                        # re-index one: only its part of the organization changes
 rueca index --org rueca-org.toml ~/src/billing --ref pr/7   # one more ref of a member: only that entry changes
 rueca query search_symbols '{"query":"refund invoice","repo":"github.com/acme/billing","ref":"pr/7"}' --org acme --text   # the organization seen from that PR
