@@ -1097,6 +1097,48 @@ and outlines read the repository segment of the id they are given; only
 `trace`, `list_contracts` (counterparts) and routing look across
 repositories.
 
+### 4.7 The service store (`rueca-storage`, `rueca-service`)
+
+[RFC 0008](rfcs/0008-service-mode.md) phase 0. A service keeps the store
+of record in object storage and every process keeps a **mirror**: a local
+store directory with the layout above. `rueca-storage` is the object
+layer behind a `Storage` trait (`get`, `get_if_changed`, `get_range`,
+`get_to_file`, `put_new`, `put_new_file`, `put_if`, `list`, `delete`) with
+three backends — `memory://<name>` (shared by name inside a process),
+`file:///dir` (an exclusive lock on `<dir>/.lock`, BLAKE3 e-tags) and
+`s3://bucket/prefix` / `gs://bucket/prefix` (`rusty-s3` signing over
+`ureq` with the platform's TLS roots; `If-None-Match: *` for a create,
+`If-Match` or `x-goog-if-generation-match` for an update) — and
+`cas_update`, a read-modify-write loop over a JSON object that retries on
+a lost race. The bucket holds `store.json`, one `repos/<repo-dir>/catalog.json`
+per repository (its refs, each with its snapshots newest first:
+commit, segment id, packs, bytes, version), that repository's
+`segments/` and `packs/`, and the organization's `orgs/<name>/` exactly
+as on disk (`org.json` pointer, immutable generations, index, profile and
+link files). Immutable objects are only ever created; the catalogs and
+the pointer are written by compare-and-swap, so two indexers never lose a
+registration and no lock exists in the bucket.
+
+`rueca-service` moves things between the two: **publish** uploads the
+packs a snapshot lists (`SegmentMeta.packs`) and its segment, then adds
+the snapshot to the repository catalog — idempotent by `(ref, commit)`,
+trimmed to the retention of its ref kind — and re-uploads any listed pack
+a concurrent collection removed; **pull** downloads a repository's
+snapshots into the mirror and registers them under synthetic roots
+(`<mirror>/repos/<repo-dir>` for the default ref, `<mirror>/refs/<repo-dir>/<ref-slug>`
+for the others, the same places `rueca index --ref` would use) so the
+organization layer and the query engine open them as in local mode;
+**publish_generation** uploads a generation built on the mirror and swaps
+`org.json` by compare-and-swap (a second updater loses and rebuilds);
+**pull_generation** does the reverse behind a conditional GET and writes
+the local pointer last; **collect_garbage** marks every object a catalog
+or a kept generation names, records the rest as candidates once older
+than a grace period (24 h) and deletes a candidate only in a later round,
+a grace after it was recorded, if nothing references it by then —
+publishes take their objects off the candidate list first — expiring
+closed pull requests and over-retention snapshots on the way. `rueca status --store-url <url>` reads a bucket
+directly. The roles that run these loops (`rueca serve`) are phases 1–2.
+
 ## 5. The graph schema
 
 **Node labels** produced by the alpha:

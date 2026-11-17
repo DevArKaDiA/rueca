@@ -21,6 +21,7 @@ rueca-query.workspace = true
 rueca-mcp.workspace = true
 rueca-segment.workspace = true
 rueca-extract.workspace = true
+rueca-service.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

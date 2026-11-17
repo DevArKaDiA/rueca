@@ -9,6 +9,7 @@
 //! rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
 //! rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
 //! rueca status [--store DIR] [--json]
+//! rueca status --store-url URL [--store-option KEY=VALUE]... [--json]
 //! rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
 //! rueca contracts [--org FILE|NAME | --root PATH] [--repo ID [--ref NAME]] [--side provided|consumed|dangling]
 //!                 [--kind http|rpc|topic] [--query TEXT] [--limit N] [--store DIR] [--json | --text]
@@ -38,6 +39,12 @@
 //! prints `{"error": "..."}` and exits with status 2. Other commands report errors on
 //! stderr and exit with status 1.
 //!
+//! `status --store-url` reports a service store (RFC 0008: object storage
+//! or a `file://` directory) instead of the local store: its repositories,
+//! refs, organization generation and bytes by object class. The hidden,
+//! experimental `publish` and `pull` commands move snapshots between the
+//! local store and a service store (see `service.rs`).
+//!
 //! `query` and `mcp` default to the indexed root that contains the current
 //! directory when `--root` is not given. `mcp` indexes `--root` (in the
 //! background) when it has no segment yet; without an explicit `--root`
@@ -50,6 +57,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod contracts;
+mod service;
 
 use clap::{Parser, Subcommand};
 use rueca_segment::org::OrgGeneration;
@@ -135,8 +143,36 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         no_auto_index: bool,
     },
     /// List indexed roots with repo, commit, node/edge/file counts and age,
-    /// and the organizations of the store.
-    Status,
+    /// and the organizations of the store; with --store-url, what a service
+    /// store holds.
+    Status {
+        #[command(flatten)]
+        remote: service::StoreArgs,
+    },
+    /// Experimental (RFC 0008): publish a snapshot of the local store (the
+    /// working tree containing PATH, or --repo; with --ref, that ref
+    /// snapshot) to the service store --store-url. --org creates the store
+    /// for that organization when it is new.
+    #[command(hide = true)]
+    Publish {
+        path: Option<PathBuf>,
+        #[arg(long, value_name = "ID")]
+        repo: Option<String>,
+        #[arg(long = "ref", value_name = "NAME")]
+        ref_name: Option<String>,
+        #[command(flatten)]
+        remote: service::StoreArgs,
+    },
+    /// Experimental (RFC 0008): mirror the service store --store-url (every
+    /// repository, or --repo) and its organization generation into the
+    /// local store.
+    #[command(hide = true)]
+    Pull {
+        #[arg(long, value_name = "ID")]
+        repo: Option<String>,
+        #[command(flatten)]
+        remote: service::StoreArgs,
+    },
     /// List the cross-repository edges of an organization (--org): the link
     /// layer of RFC 0006 (imports of packages published by another
     /// repository, and the calls, inheritance and references through them;
@@ -199,7 +235,18 @@ fn main() -> ExitCode {
             return cmd_query(&store, cli.root, cli.org.as_deref(), &tool, args, cli.pretty, text);
         }
         Command::Mcp { no_auto_index } => cmd_mcp(&store, cli.root, cli.org.as_deref(), !no_auto_index),
-        Command::Status => cmd_status(&store, cli.json, cli.pretty),
+        Command::Status { remote } if remote.store_url.is_some() => {
+            service::cmd_status(&remote, &store, Output { json: cli.json, pretty: cli.pretty })
+        }
+        Command::Status { .. } => cmd_status(&store, cli.json, cli.pretty),
+        Command::Publish { path, repo, ref_name, remote } => {
+            let out = Output { json: cli.json, pretty: cli.pretty };
+            let cmd = service::PublishCmd { path, repo, ref_name };
+            service::cmd_publish(&remote, &store, cli.org.as_deref(), cmd, out)
+        }
+        Command::Pull { repo, remote } => {
+            service::cmd_pull(&remote, &store, repo.as_deref(), Output { json: cli.json, pretty: cli.pretty })
+        }
         Command::Links { repo, ref_name } => match cli.org.as_deref() {
             Some(org) => {
                 let out = Output { json: cli.json, pretty: cli.pretty };

@@ -1,0 +1,29 @@
+[package]
+name = "rueca-service"
+description = "Rueca service mode, phase 0: publish local segments to object storage, pull them into a local mirror, organization generations and garbage collection"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rueca-storage.workspace = true
+rueca-segment.workspace = true
+rueca-index.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytes = "1.12.1"
+blake3 = "1.8.7"
+tempfile = "3.27.0"
+fastrand = "2.5.0"
+
+[dev-dependencies]
+rueca-model.workspace = true
+rueca-query.workspace = true
+tempfile = "3.27.0"
+fastrand = "2.5.0"

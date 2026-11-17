@@ -2571,6 +2571,7 @@ dependencies = [
  "rueca-mcp",
  "rueca-query",
  "rueca-segment",
+ "rueca-service",
  "serde",
  "serde_json",
  "tempfile",
@@ -2808,6 +2809,26 @@ dependencies = [
  "tempfile",
  "thiserror",
  "zstd",
+]
+
+[[package]]
+name = "rueca-service"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "bytes",
+ "fastrand",
+ "rueca-index",
+ "rueca-model",
+ "rueca-query",
+ "rueca-segment",
+ "rueca-storage",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]

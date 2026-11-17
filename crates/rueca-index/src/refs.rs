@@ -366,6 +366,13 @@ pub fn root_prefix(root: &Path) -> String {
 /// (`github.com/o/r` → `github-com-o-r-<hash>`, its root `web` →
 /// `github-com-o-r--web-<hash>`).
 pub fn repo_export_dir(store: &Path, repo_id: &str, prefix: &str) -> PathBuf {
+    store.join("refs").join(repo_dir_name(repo_id, prefix))
+}
+
+/// `<repo-dir>`, the directory name of repository `repo_id` at path
+/// `prefix` inside it (see [`repo_export_dir`]); also the per-repository
+/// directory of a service store (RFC 0008 §5.1).
+pub fn repo_dir_name(repo_id: &str, prefix: &str) -> String {
     let mut dir = rueca_segment::repo_slug(repo_id);
     let mut key = repo_id.to_string();
     if !prefix.is_empty() {
@@ -376,7 +383,7 @@ pub fn repo_export_dir(store: &Path, repo_id: &str, prefix: &str) -> PathBuf {
     }
     dir.push('-');
     dir.push_str(&git_blob_sha(key.as_bytes())[..8]);
-    store.join("refs").join(dir)
+    dir
 }
 
 /// `<store>/refs/<repo-dir>/<ref-slug>/`: where ref `name` of repository
