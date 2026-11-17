@@ -821,30 +821,46 @@ impl ResolvedGraph {
         if !self.modules.is_empty() && self.modules.len() != self.files.len() {
             return Err("modules and files disagree in length".into());
         }
+        self.validate_edges()?;
+        self.validate_nodes()?;
+        self.validate_files()?;
+        self.validate_contracts()
+    }
+
+    fn validate_edges(&self) -> Result<(), String> {
         let n = self.nodes.len() as u32;
         for (i, e) in self.edges.iter().enumerate() {
             if e.src >= n || e.dst >= n {
                 return Err(format!("edge {i} endpoint out of range"));
             }
-            if let Some((f, _)) = e.meta.evidence
-                && f as usize >= self.files.len()
-            {
+            if e.meta.evidence.is_some_and(|(f, _)| f as usize >= self.files.len()) {
                 return Err(format!("edge {i} evidence file out of range"));
             }
         }
+        Ok(())
+    }
+
+    fn validate_nodes(&self) -> Result<(), String> {
         for (i, node) in self.nodes.iter().enumerate() {
-            if let Some(f) = node.file
-                && f as usize >= self.files.len()
-            {
+            if node.file.is_some_and(|f| f as usize >= self.files.len()) {
                 return Err(format!("node {i} file out of range"));
             }
         }
+        Ok(())
+    }
+
+    fn validate_files(&self) -> Result<(), String> {
         for (i, f) in self.files.iter().enumerate() {
             match self.nodes.get(f.node as usize) {
                 Some(node) if node.label == Label::File => {}
                 _ => return Err(format!("file {i} has no File node")),
             }
         }
+        Ok(())
+    }
+
+    fn validate_contracts(&self) -> Result<(), String> {
+        let n = self.nodes.len() as u32;
         for (i, c) in self.contracts.iter().enumerate() {
             if c.node >= n || c.file as usize >= self.files.len() {
                 return Err(format!("contract {i} node or file out of range"));

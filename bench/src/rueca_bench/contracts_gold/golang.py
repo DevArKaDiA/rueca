@@ -196,7 +196,7 @@ _CLIENT_TYPED = re.compile(r"\b(\w+)[ \t]+\*?(?:(\w+)\.)?(\w+)Client\b")
 _CLIENT_NEW = re.compile(r"\b(\w+)[ \t]*:?=[ \t]*(?:(\w+)\.)?New(\w+)Client\(")
 _CHAINED = re.compile(r"\b(?:(\w+)\.)?New(\w+)Client\([^()]*\)\.([A-Z]\w*)\(")
 _CALL = re.compile(r"\b(\w+)\.([A-Z]\w*)\(")
-_IMPORT = re.compile(r'(?m)^\s*(?:import\s+)?(\w+)?\s*"([^"]+)"\s*$')
+_IMPORT = re.compile(r'(?m)^[ \t]*(?:import[ \t]+)?(?:(\w+)[ \t]+)?"([^"]+)"[ \t]*$')
 
 
 def file_imports(text: str) -> dict[str, str]:
