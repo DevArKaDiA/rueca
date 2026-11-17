@@ -617,11 +617,39 @@ split = "calibration"
 pin = "base_commit of pallets__click-1964, its first calibration [[s1.instances]] entry"
 
 [[org.repos]]
+repo = "yt-dlp/yt-dlp"
+language = "python"
+commit = "2c98d998181c81ee49908be03c031204fd66d03d"
+split = "calibration"
+pin = "base_commit of yt-dlp__yt-dlp-5195, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "Python-Markdown/markdown"
+language = "python"
+commit = "d60c16f712e5caf806e3c0ed40eac385a9d2e18a"
+split = "calibration"
+pin = "base_commit of python-markdown__markdown-1361, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
 repo = "yargs/yargs"
 language = "javascript"
 commit = "c67c257cdf2b79af117cfd1b3938881c8f3e0677"
 split = "calibration"
 pin = "base_commit of yargs__yargs-1600, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "iamkun/dayjs"
+language = "javascript"
+commit = "72cdb20552dd5af6c2295bf52075ba19cceb000f"
+split = "calibration"
+pin = "base_commit of iamkun__dayjs-938, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "sindresorhus/got"
+language = "typescript"
+commit = "39bf82825133f85f6c33b0822eda3910f8ba99a5"
+split = "calibration"
+pin = "base_commit of sindresorhus__got-277, its first calibration [[s1.instances]] entry"
 
 [[org.repos]]
 repo = "JsonMapper/JsonMapper"
@@ -631,11 +659,39 @@ split = "calibration"
 pin = "base_commit of jsonmapper__jsonmapper-135, its first calibration [[s1.instances]] entry"
 
 [[org.repos]]
+repo = "CuyZ/Valinor"
+language = "php"
+commit = "1b8efa1a90e46107e25079ce520f08642ccd65c6"
+split = "calibration"
+pin = "base_commit of cuyz__valinor-490, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "phpactor/phpactor"
+language = "php"
+commit = "a516e6410243d863424096f4968d9d0c1f4ced1d"
+split = "calibration"
+pin = "base_commit of phpactor__phpactor-1917, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
 repo = "benhoyt/goawk"
 language = "go"
 commit = "59441bef1fca2e9eee1d4b207ca3ef5768b8fc1a"
 split = "calibration"
 pin = "base_commit of benhoyt__goawk-173, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "grpc/grpc-go"
+language = "go"
+commit = "61f27c14152c7551d5cc657c31e81a3597c82e48"
+split = "calibration"
+pin = "base_commit of grpc__grpc-go-2932, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "zeromicro/go-zero"
+language = "go"
+commit = "af05219b70c5e18542ebb499b18a1dff6ffacc6d"
+split = "calibration"
+pin = "base_commit of zeromicro__go-zero-1969, its first calibration [[s1.instances]] entry"
 
 [[org.repos]]
 repo = "decorators-squad/eo-yaml"
@@ -645,11 +701,39 @@ split = "calibration"
 pin = "base_commit of decorators-squad__eo-yaml-226, its first calibration [[s1.instances]] entry"
 
 [[org.repos]]
+repo = "fasterxml/jackson-core"
+language = "java"
+commit = "287ec3223b039f24d2db99809ae04a333b287435"
+split = "calibration"
+pin = "base_commit of fasterxml__jackson-core-891, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "mockito/mockito"
+language = "java"
+commit = "b6554b29ed6c204a0dd4b8a670877fe0ba2e808b"
+split = "calibration"
+pin = "base_commit of mockito__mockito-3167, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
 repo = "nanomsg/nng"
 language = "c"
 commit = "206de0ad6f338c7e375885443836fbb44853550b"
 split = "calibration"
 pin = "base_commit of nanomsg__nng-1305, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "facebook/zstd"
+language = "c"
+commit = "04212178b50131ecbbf7bc2ffcce4d5ddcfd8e11"
+split = "calibration"
+pin = "base_commit of facebook__zstd-1105, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "ponylang/ponyc"
+language = "c"
+commit = "22df673d577367dffdc8f31ecf67fce963ac777a"
+split = "calibration"
+pin = "base_commit of ponylang__ponyc-3725, its first calibration [[s1.instances]] entry"
 
 [[org.repos]]
 repo = "randombit/botan"
@@ -659,11 +743,39 @@ split = "calibration"
 pin = "base_commit of randombit__botan-4122, its first calibration [[s1.instances]] entry"
 
 [[org.repos]]
+repo = "zeek/zeek"
+language = "cpp"
+commit = "6d16f9bb420fa8f65ad1c0a862e5ab6a8ba321e4"
+split = "calibration"
+pin = "base_commit of zeek__zeek-2291, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "ccache/ccache"
+language = "cpp"
+commit = "689168c292f1ed26c5f4a3070aeb649dad7facb5"
+split = "calibration"
+pin = "base_commit of ccache__ccache-1312, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
 repo = "tokio-rs/bytes"
 language = "rust"
 commit = "f514bd38dac85695e9053d990b251643e9e4ef92"
 split = "calibration"
 pin = "base_commit of tokio-rs__bytes-543, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "tokio-rs/tracing"
+language = "rust"
+commit = "881091a1dd5d3126faeabbca9e3779f1d16c3cce"
+split = "calibration"
+pin = "base_commit of tokio-rs__tracing-1233, its first calibration [[s1.instances]] entry"
+
+[[org.repos]]
+repo = "sharkdp/fd"
+language = "rust"
+commit = "ee673c92d375d9e5a6c126480a0383bbe3042b96"
+split = "calibration"
+pin = "base_commit of sharkdp__fd-555, its first calibration [[s1.instances]] entry"
 
 
 [multiref]

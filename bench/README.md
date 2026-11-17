@@ -1057,7 +1057,8 @@ gated S1 repository at the base commit of its first gated
 commit of its first calibration entry; `org.derive_pins`, checked by a unit
 test). The **gated organization** is the `split = "gated"` members (42); the
 **calibration organization** is the gated one plus the `split =
-"calibration"` members (8), the gated ones acting as distractors. A member
+"calibration"` members (24 since the calibration split grew from 8; RFC 0007
+phase 0), the gated ones acting as distractors. A member
 without S1 instances (a sibling library) is indexed like the others.
 Instances, per member of a split, in manifest order: the S1 instances whose
 gold is present at the pin — every gold file exists there and, when the
