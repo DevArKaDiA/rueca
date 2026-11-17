@@ -31,15 +31,15 @@ pub const RUNTIME: &str = "llama.cpp";
 pub const RUNTIME_VERSION: &str = "llama-cpp-2 0.1.161 (llama.cpp 0.6.0, d81235049384)";
 
 /// Sequences per batch (llama.cpp's `LLAMA_MAX_SEQ`).
-const MAX_SEQS: usize = 256;
+pub(crate) const MAX_SEQS: usize = 256;
 /// Layers offloaded on a GPU backend: all of them.
-const ALL_LAYERS: u32 = 999;
+pub(crate) const ALL_LAYERS: u32 = 999;
 
 static BACKEND: OnceLock<std::result::Result<LlamaBackend, String>> = OnceLock::new();
 
 /// The process-wide llama.cpp backend, initialized once, logging through
 /// `tracing` (visible with `-v`).
-fn backend() -> Result<&'static LlamaBackend> {
+pub(crate) fn backend() -> Result<&'static LlamaBackend> {
     let b = BACKEND.get_or_init(|| {
         send_logs_to_tracing(LogOptions::default());
         LlamaBackend::init().map_err(|e| e.to_string())
@@ -47,7 +47,7 @@ fn backend() -> Result<&'static LlamaBackend> {
     b.as_ref().map_err(|e| Error::Runtime(e.clone()))
 }
 
-fn runtime<E: std::fmt::Display>(what: &str) -> impl FnOnce(E) -> Error + '_ {
+pub(crate) fn runtime<E: std::fmt::Display>(what: &str) -> impl FnOnce(E) -> Error + '_ {
     move |e| Error::Runtime(format!("{what}: {e}"))
 }
 
@@ -222,7 +222,7 @@ pub fn describe(preset: &Preset, opts: &EmbedOptions) -> Result<ModelMeta> {
     build_meta(preset, opts, gpu)
 }
 
-fn backend_kind(gpu: bool) -> Backend {
+pub(crate) fn backend_kind(gpu: bool) -> Backend {
     match (gpu, cfg!(feature = "cuda")) {
         (false, _) => Backend::Cpu,
         (true, true) => Backend::Cuda,
@@ -233,7 +233,7 @@ fn backend_kind(gpu: bool) -> Backend {
 /// Physical performance cores: on Apple silicon the efficiency cores slow
 /// a CPU run down (measured in phase 0: 10 threads 1,254 tokens/s, 14
 /// threads 500 on an M4 Pro), elsewhere every physical core.
-fn default_threads() -> usize {
+pub(crate) fn default_threads() -> usize {
     performance_cores().unwrap_or_else(num_cpus::get_physical)
 }
 

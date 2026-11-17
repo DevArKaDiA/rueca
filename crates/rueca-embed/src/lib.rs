@@ -35,9 +35,14 @@
 //!
 //! # Rerankers
 //!
-//! Phase 0 ships the [`Reranker`] trait and [`NoReranker`], which keeps the
-//! first-stage order. The llama.cpp cross-encoder (Qwen3-Reranker, RFC 0007
-//! §7.5) arrives in phase 2.
+//! [`Reranker`] scores documents against a query (RFC 0007 §7.5);
+//! [`NoReranker`] keeps the first-stage order. The llama.cpp backend
+//! (`backend::load_reranker`) runs Qwen3-Reranker converted by llama.cpp's
+//! `convert_hf_to_gguf.py`, which keeps the `yes` / `no` rows of the LM head
+//! as a two-way classifier read through rank pooling: the score is
+//! `softmax(yes, no)[yes]` after the model card's chat prompt, the shared
+//! prefix (system prompt, instruction, query) decoded once per call
+//! ([`RerankOptions`]).
 
 pub mod backend;
 pub mod cache;
@@ -54,7 +59,7 @@ pub use cache::{CacheState, MODEL_DIR_ENV, ModelCache};
 pub use config::RetrievalConfig;
 pub use error::{Error, Result};
 pub use key::{Backend, EmbedKey, ModelKey, ModelMeta, TEXT_BUILDER_VERSION, VectorEncoding, VectorKey};
-pub use presets::{DEFAULT_PRESET, PRESETS, Preset, PresetStatus, preset};
+pub use presets::{DEFAULT_PRESET, DEFAULT_RERANK_PRESET, PRESETS, Preset, PresetStatus, Role, preset};
 
 use presets::QueryStyle;
 
@@ -189,6 +194,13 @@ pub struct RuntimeInfo<'a> {
 /// Invalid options ([`EmbedOptions::output_dims`]) or a preset without
 /// weights.
 pub fn model_meta(preset: &Preset, opts: &EmbedOptions, rt: RuntimeInfo<'_>) -> Result<ModelMeta> {
+    if preset.role != Role::Embedder {
+        return Err(Error::Invalid(format!(
+            "`{}` is a {} preset, not an embedder (`rueca models list`)",
+            preset.name,
+            preset.role.as_str()
+        )));
+    }
     let dims = opts.output_dims(preset)?;
     let sha256 = preset.weights()?.sha256;
     let embed_key =
@@ -273,6 +285,70 @@ pub trait Embedder: Send + Sync {
     }
 }
 
+/// Default tokens of a reranked document (RFC 0007 §7.5: the canonical
+/// text cut to 256 tokens).
+pub const DEFAULT_RERANK_DOC_TOKENS: usize = 256;
+/// Default tokens per reranker batch: documents are decoded in chunks of
+/// about this many tokens after the shared prefix.
+pub const DEFAULT_RERANK_BATCH_TOKENS: usize = 2048;
+
+/// How a reranker is loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RerankOptions {
+    /// Documents are cut to this many tokens.
+    pub max_doc_tokens: usize,
+    /// Document tokens per decode call (raised to fit one document).
+    pub batch_tokens: usize,
+    /// Worker threads; `None` uses the physical cores.
+    pub threads: Option<usize>,
+    /// Run on the CPU even when a GPU backend is compiled in.
+    pub cpu: bool,
+    /// The prompt's instruction; `None` uses the preset's.
+    pub instruction: Option<String>,
+}
+
+impl Default for RerankOptions {
+    fn default() -> Self {
+        Self {
+            max_doc_tokens: DEFAULT_RERANK_DOC_TOKENS,
+            batch_tokens: DEFAULT_RERANK_BATCH_TOKENS,
+            threads: None,
+            cpu: false,
+            instruction: None,
+        }
+    }
+}
+
+impl RerankOptions {
+    /// The instruction in effect for a preset.
+    #[must_use]
+    pub fn instruction<'a>(&'a self, preset: &'a Preset) -> &'a str {
+        match (&self.instruction, preset.query) {
+            (Some(i), _) => i,
+            (None, QueryStyle::Instruct { instruction }) => instruction,
+            (None, QueryStyle::Prefix { prefix }) => prefix,
+        }
+    }
+
+    /// What a reranker's scores can be compared with: BLAKE3 (hex) of the
+    /// weights' sha256, the prompt format, the instruction and the document
+    /// budget.
+    ///
+    /// # Errors
+    ///
+    /// A preset without weights.
+    pub fn model_key(&self, preset: &Preset) -> Result<String> {
+        let sha256 = preset.weights()?.sha256;
+        let text =
+            format!("{sha256}\n{}\n{}\n{}", RERANK_PROMPT_VERSION, self.instruction(preset), self.max_doc_tokens);
+        Ok(blake3::hash(text.as_bytes()).to_hex().to_string())
+    }
+}
+
+/// Version of the reranker prompt format (Qwen3-Reranker's chat prompt),
+/// hashed into the reranker's model key.
+pub const RERANK_PROMPT_VERSION: u32 = 1;
+
 /// Scores documents against a query (second stage, RFC 0007 §7.5).
 pub trait Reranker: Send + Sync {
     /// One score per document, higher is more relevant, in document order.
@@ -281,6 +357,16 @@ pub trait Reranker: Send + Sync {
     ///
     /// Runtime failures.
     fn rerank(&self, query: &str, docs: &[&str]) -> Result<Vec<f32>>;
+
+    /// The preset (`none` for [`NoReranker`]).
+    fn preset(&self) -> &str {
+        "none"
+    }
+
+    /// What the scores can be compared with ([`RerankOptions::model_key`]).
+    fn model_key(&self) -> &str {
+        ""
+    }
 }
 
 /// The reranker that is off: strictly decreasing scores in input order, so
@@ -327,6 +413,20 @@ mod tests {
         o.dims = None;
         o.max_tokens = 1;
         assert!(o.output_dims(p).is_err());
+    }
+
+    #[test]
+    fn reranker_presets_are_not_embedders() {
+        let p = preset(DEFAULT_RERANK_PRESET).unwrap();
+        let rt = RuntimeInfo { runtime: "x", version: "", backend: Backend::Cpu, threads: 1 };
+        let err = model_meta(p, &EmbedOptions::default(), rt).unwrap_err().to_string();
+        assert!(err.contains("reranker preset"), "{err}");
+        let o = RerankOptions::default();
+        assert_eq!(o.instruction(p), presets::RERANK_INSTRUCTION);
+        let k = o.model_key(p).unwrap();
+        assert_eq!(k.len(), 64);
+        let other = RerankOptions { instruction: Some("x".into()), ..RerankOptions::default() };
+        assert_ne!(other.model_key(p).unwrap(), k);
     }
 
     #[test]

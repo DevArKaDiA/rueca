@@ -55,6 +55,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod contracts;
 mod embed;
 mod models;
+mod rerank;
 
 use clap::{Parser, Subcommand};
 use rueca_segment::org::OrgGeneration;
@@ -194,7 +195,10 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
     /// Embed JSON lines (`{"id","text","query"}`) into vectors with a model
     /// preset (RFC 0007): the batch entry point of the bench's vector arm.
     Embed(embed::EmbedArgs),
-    /// Manage embedding model weights: list, pull, rm, path.
+    /// Score JSON lines (`{"id","text"}`) against a query with a reranker
+    /// preset (RFC 0007 §7.5), for the bench and for debugging.
+    Rerank(rerank::RerankArgs),
+    /// Manage model weights (embedders and rerankers): list, pull, import, rm, path.
     Models {
         #[command(subcommand)]
         command: models::ModelsCommand,
@@ -240,6 +244,7 @@ fn main() -> ExitCode {
             engine.and_then(|e| contracts::cmd_contracts(&e, &filters, out.json, out.pretty))
         }
         Command::Embed(args) => embed::run(&store, &args, cli.pretty),
+        Command::Rerank(args) => rerank::run(&store, &args),
         Command::Models { command } => models::run(&store, &command, cli.json, cli.pretty),
     };
     match result {

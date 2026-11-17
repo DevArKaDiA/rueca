@@ -111,6 +111,27 @@ pub enum PresetKind {
     Remote,
 }
 
+/// What a preset's model does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    /// Turns texts into vectors ([`crate::Embedder`]).
+    Embedder,
+    /// Scores (query, document) pairs ([`crate::Reranker`], RFC 0007 §7.5).
+    Reranker,
+}
+
+impl Role {
+    /// The manifest spelling.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Embedder => "embedder",
+            Self::Reranker => "reranker",
+        }
+    }
+}
+
 /// One weights file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct WeightsFile {
@@ -137,6 +158,8 @@ pub struct Preset {
     pub license: &'static str,
     /// Local or remote.
     pub kind: PresetKind,
+    /// Embedder or reranker.
+    pub role: Role,
     /// Availability.
     pub status: PresetStatus,
     /// Weights quantization (`Q8_0`, `F16`, `Q4_K_M`).
@@ -149,7 +172,7 @@ pub struct Preset {
     pub context: usize,
     /// Pooling.
     pub pooling: Pooling,
-    /// Query formatting.
+    /// Query formatting; for a reranker, the instruction of its prompt.
     pub query: QueryStyle,
     /// Prefix of every document (empty for every preset today).
     pub document_prefix: &'static str,
@@ -238,6 +261,7 @@ const fn qwen(
         revision,
         license: "Apache-2.0",
         kind: PresetKind::Local,
+        role: Role::Embedder,
         status,
         quantization,
         dims,
@@ -274,6 +298,7 @@ const fn planned(
         revision,
         license,
         kind: PresetKind::Local,
+        role: Role::Embedder,
         status: PresetStatus::Planned,
         quantization: "F16",
         dims: 768,
@@ -289,12 +314,18 @@ const fn planned(
 
 /// A `remote:` preset (RFC 0007 §3.5), listed for phase 3.
 const fn remote(name: &'static str, dims: usize) -> Preset {
+    remote_as(name, dims, Role::Embedder)
+}
+
+/// A `remote:` preset with a role.
+const fn remote_as(name: &'static str, dims: usize, role: Role) -> Preset {
     Preset {
         name,
         model: name,
         revision: "",
         license: "provider terms",
         kind: PresetKind::Remote,
+        role,
         status: PresetStatus::Phase3,
         quantization: "",
         dims,
@@ -307,6 +338,46 @@ const fn remote(name: &'static str, dims: usize) -> Preset {
         note: "remote API preset, opt-in, implemented in phase 3 (RFC 0007 §3.5)",
     }
 }
+
+/// The instruction of the reranker prompt for code (Qwen3-Reranker's
+/// `<Instruct>:` line), the embedder's code-retrieval instruction.
+pub const RERANK_INSTRUCTION: &str = DEFAULT_CODE_INSTRUCTION;
+
+/// A Qwen3-Reranker preset (RFC 0007 §7.5): a causal LM converted with
+/// llama.cpp's `convert_hf_to_gguf.py`, which turns the `yes` / `no` rows
+/// of the LM head into a two-way classifier (`cls.output`, rank pooling).
+const fn qwen_reranker(
+    name: &'static str,
+    model: &'static str,
+    revision: &'static str,
+    quantization: &'static str,
+    status: PresetStatus,
+    dims: usize,
+    weights: Option<WeightsFile>,
+    note: &'static str,
+) -> Preset {
+    Preset {
+        name,
+        model,
+        revision,
+        license: "Apache-2.0",
+        kind: PresetKind::Local,
+        role: Role::Reranker,
+        status,
+        quantization,
+        dims,
+        min_dims: dims,
+        context: 32_768,
+        pooling: Pooling::Last,
+        query: QueryStyle::Instruct { instruction: RERANK_INSTRUCTION },
+        document_prefix: "",
+        weights,
+        note,
+    }
+}
+
+/// The default reranker preset (off by default, RFC 0007 §7.5).
+pub const DEFAULT_RERANK_PRESET: &str = "qwen3-reranker-0.6b-q8";
 
 /// The default preset (RFC 0007 §3.3, provisional).
 pub const DEFAULT_PRESET: &str = "qwen3-0.6b-q8";
@@ -424,6 +495,54 @@ pub static PRESETS: &[Preset] = &[
         "ModernBERT architecture (llama.cpp `modern-bert`, ggml-org/llama.cpp#15641 and #18330); \
          needs a Rueca-hosted GGUF conversion",
     ),
+    qwen_reranker(
+        "qwen3-reranker-0.6b-q8",
+        "Qwen/Qwen3-Reranker-0.6B",
+        "e61197ed45024b0ed8a2d74b80b4d909f1255473",
+        "Q8_0",
+        PresetStatus::Unavailable,
+        1024,
+        Some(WeightsFile {
+            file_name: "Qwen3-Reranker-0.6B-Q8_0.gguf",
+            url: "https://github.com/DevArKaDiA/rueca-models/releases/download/qwen3-reranker-0.6b-q8_0-v1/Qwen3-Reranker-0.6B-Q8_0.gguf",
+            sha256: RERANK_06_SHA256,
+            bytes: RERANK_06_BYTES,
+        }),
+        "Rueca conversion (convert_hf_to_gguf.py --outtype q8_0, llama.cpp d81235049384), not published yet: \
+         convert locally (docs/how-it-works.md §10, Reranker) and register the file with \
+         `rueca models import qwen3-reranker-0.6b-q8 <file>`, or pull once published",
+    ),
+    qwen_reranker(
+        "qwen3-reranker-4b-q4",
+        "Qwen/Qwen3-Reranker-4B",
+        "",
+        "Q4_K_M",
+        PresetStatus::Planned,
+        2560,
+        None,
+        "Rueca conversion to come (≈ 2.5 GB, published split under the 2 GiB release-asset limit); \
+         measured first in the phase 2 sweep (RFC 0007 §7.5)",
+    ),
+    Preset {
+        name: "mxbai-rerank-large-v2",
+        model: "mixedbread-ai/mxbai-rerank-large-v2",
+        revision: "",
+        license: "Apache-2.0",
+        kind: PresetKind::Local,
+        role: Role::Reranker,
+        status: PresetStatus::Planned,
+        quantization: "F16",
+        dims: 1536,
+        min_dims: 1536,
+        context: 8192,
+        pooling: Pooling::Last,
+        query: QWEN_INSTRUCT,
+        document_prefix: "",
+        weights: None,
+        note: "Qwen2-based reranker with its own prompt; llama.cpp runtime path unverified (RFC 0007 §7.5)",
+    },
+    remote_as("remote:voyage/rerank-3", 0, Role::Reranker),
+    remote_as("remote:cohere/rerank-3.5", 0, Role::Reranker),
     remote("remote:voyage/voyage-code-4", 2048),
     remote("remote:voyage/voyage-code-3", 2048),
     remote("remote:openai/text-embedding-3-large", 3072),
@@ -437,6 +556,13 @@ pub static PRESETS: &[Preset] = &[
 const Q4_SHA256: &str = "44f67b5875def0e90ae67247b141a5a861538efb8d8b0f783eef3d94211d9dcd";
 /// Size of that conversion.
 const Q4_BYTES: u64 = 396_474_560;
+
+/// sha256 of the Rueca conversion of Qwen3-Reranker-0.6B to `Q8_0`
+/// (reproducible: two runs give the same file); the release asset must
+/// match it.
+const RERANK_06_SHA256: &str = "def2f55d8729597c9456a441f9cc7781bbbbc1ac5ce8592a404a7575e30dd81e";
+/// Size of that conversion.
+const RERANK_06_BYTES: u64 = 639_153_376;
 
 /// Finds a preset by name.
 ///
@@ -473,6 +599,7 @@ mod tests {
             }
             assert_eq!(p.status == PresetStatus::Available, p.pullable().is_ok(), "{}", p.name);
         }
+        assert_eq!(preset(DEFAULT_RERANK_PRESET).unwrap().role, Role::Reranker);
         assert_eq!(PRESETS[0].name, DEFAULT_PRESET);
         assert!(preset("nope").is_err());
     }

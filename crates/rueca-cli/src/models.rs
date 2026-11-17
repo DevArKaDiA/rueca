@@ -17,6 +17,15 @@ pub enum ModelsCommand {
         /// Preset (default: the default preset).
         preset: Option<String>,
     },
+    /// Register a local file as a preset's weights (a Rueca conversion made
+    /// before its release is published): its size and sha256 must match the
+    /// manifest; it is hard-linked (else copied) into the cache.
+    Import {
+        /// Preset.
+        preset: String,
+        /// The file.
+        path: std::path::PathBuf,
+    },
     /// Delete a preset's weights.
     Rm {
         /// Preset.
@@ -35,6 +44,12 @@ pub fn run(store: &Path, cmd: &ModelsCommand, json_out: bool, pretty: bool) -> a
     match cmd {
         ModelsCommand::List => list(&cache, json_out, pretty),
         ModelsCommand::Pull { preset } => pull(&cache, preset.as_deref().unwrap_or(rueca_embed::DEFAULT_PRESET)),
+        ModelsCommand::Import { preset, path } => {
+            let p = rueca_embed::preset(preset)?;
+            let dest = cache.import(p, path)?;
+            println!("{} sha256 {} verified: {}", p.name, p.weights()?.sha256, dest.display());
+            Ok(())
+        }
         ModelsCommand::Rm { preset } => {
             let p = rueca_embed::preset(preset)?;
             let removed = cache.remove(p)?;
@@ -60,6 +75,7 @@ fn state_str(s: CacheState) -> &'static str {
 fn row(p: &Preset, state: CacheState) -> Value {
     json!({
         "preset": p.name,
+        "role": p.role,
         "status": p.status.as_str(),
         "cache": state,
         "model": p.model,
@@ -81,13 +97,14 @@ fn list(cache: &ModelCache, json_out: bool, pretty: bool) -> anyhow::Result<()> 
     println!("{:<38} {:<12} {:<10} {:<7} {:>5} {:>9}  NOTE", "PRESET", "STATUS", "CACHE", "QUANT", "DIMS", "SIZE");
     for (p, s) in &presets {
         let size = p.weights.map(|w| crate::human_bytes(w.bytes)).unwrap_or_default();
+        let dims = if p.role == rueca_embed::Role::Reranker { "rank".to_string() } else { p.dims.to_string() };
         println!(
             "{:<38} {:<12} {:<10} {:<7} {:>5} {:>9}  {}",
             p.name,
             p.status.as_str(),
             state_str(*s),
             p.quantization,
-            p.dims,
+            dims,
             size,
             p.note
         );

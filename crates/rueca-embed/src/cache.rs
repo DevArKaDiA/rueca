@@ -130,6 +130,38 @@ impl ModelCache {
         }
     }
 
+    /// Registers a local file as the preset's weights (a Rueca conversion
+    /// made by hand before its release is published): checks its size and
+    /// sha256 against the manifest, then hard-links it into the cache (a
+    /// copy across filesystems) and writes the sidecar. A file already in
+    /// place is only verified.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Sha256Mismatch`] or [`Error::Invalid`] (size) when the file
+    /// is not the pinned one, [`Error::Unavailable`] for presets without
+    /// weights, I/O errors.
+    pub fn import(&self, preset: &Preset, src: &Path) -> Result<PathBuf> {
+        let w = preset.weights()?;
+        let size = fs::metadata(src).map_err(|e| Error::io(format!("cannot read {}", src.display()), e))?.len();
+        if size != w.bytes {
+            return Err(Error::Invalid(format!(
+                "{} is {size} bytes; preset `{}` pins {} bytes ({})",
+                src.display(),
+                preset.name,
+                w.bytes,
+                w.file_name
+            )));
+        }
+        verify_file(src, w)?;
+        let dest = self.weights_path(preset)?;
+        if !same_file(src, &dest) {
+            place(src, &dest)?;
+        }
+        write_sidecar(&dest, w.sha256)?;
+        Ok(dest)
+    }
+
     /// Deletes the preset's directory. Returns whether anything was removed.
     ///
     /// # Errors
@@ -196,6 +228,32 @@ fn verify_file(path: &Path, w: &WeightsFile) -> Result<()> {
     }
 }
 
+/// Whether two paths name the same existing file.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Puts `src` at `dest`: a hard link, else a copy renamed into place.
+fn place(src: &Path, dest: &Path) -> Result<()> {
+    let ctx = |what: &str| format!("cannot {what} {}", dest.display());
+    let dir = dest.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(dir).map_err(|e| Error::io(ctx("create the directory of"), e))?;
+    match fs::remove_file(dest) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(Error::io(ctx("replace"), e)),
+    }
+    if fs::hard_link(src, dest).is_ok() {
+        return Ok(());
+    }
+    let tmp = dir.join(format!(".import-{}.part", std::process::id()));
+    fs::copy(src, &tmp).map_err(|e| Error::io(ctx("copy into"), e))?;
+    fs::rename(&tmp, dest).map_err(|e| Error::io(ctx("rename into"), e))
+}
+
 fn sidecar_path(path: &Path) -> PathBuf {
     let mut s = path.as_os_str().to_owned();
     s.push(".sha256");
@@ -240,6 +298,26 @@ mod tests {
         assert!(matches!(cache.resolve(p), Err(Error::Sha256Mismatch { .. })));
         assert!(cache.remove(p).unwrap());
         assert!(!cache.remove(p).unwrap());
+    }
+
+    #[test]
+    fn import_checks_size_and_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ModelCache::new(dir.path().join("models"));
+        let p = preset("qwen3-reranker-0.6b-q8").unwrap();
+        let src = dir.path().join("x.gguf");
+        fs::write(&src, b"not a model").unwrap();
+        let err = cache.import(p, &src).unwrap_err().to_string();
+        assert!(err.contains("bytes"), "{err}");
+        assert!(matches!(cache.import(preset("coderank-137m").unwrap(), &src), Err(Error::Unavailable { .. })));
+        assert_eq!(cache.state(p), CacheState::Missing);
+        // A file already in place is verified where it is.
+        assert!(same_file(&src, &src));
+        assert!(!same_file(&src, &dir.path().join("absent")));
+        let dest = dir.path().join("a/b");
+        place(&src, &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"not a model");
+        place(&src, &dest).unwrap();
     }
 
     #[test]
