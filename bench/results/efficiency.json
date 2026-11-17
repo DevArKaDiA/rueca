@@ -739,12 +739,12 @@
    "trace": {
     "rueca": {
      "n": 1858,
-     "true_edges": 5590,
-     "per_true_edge": 53.80608228980322,
-     "tokens_median": 113.5,
+     "true_edges": 5559,
+     "per_true_edge": 50.63842417701025,
+     "tokens_median": 109.0,
      "ci": [
-      52.66202780048037,
-      55.028091114252675
+      49.70371413115264,
+      51.62838428026731
      ]
     },
     "cbm": {
@@ -819,12 +819,12 @@
    "raw": {
     "trace": {
      "n": 1858,
-     "rueca_median": 407.0,
+     "rueca_median": 400.5,
      "cbm_median": 160.5,
-     "rueca_mean": 531.2787944025835,
+     "rueca_mean": 503.44725511302477,
      "cbm_mean": 189.75349838536061,
      "agent_n": 1858,
-     "agent_rueca_median": 113.5,
+     "agent_rueca_median": 109.0,
      "agent_cbm_median": 107.0
     },
     "search": {
