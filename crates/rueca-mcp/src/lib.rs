@@ -1,22 +1,43 @@
-//! MCP server over stdio exposing the Rueca tools (`docs/tools.md`), for one
-//! working tree (`--root`) or an organization (`--org`, RFC 0006).
+//! MCP server exposing the Rueca tools (`docs/tools.md`) for one working
+//! tree (`--root`) or an organization (`--org`, RFC 0006), over stdio.
 //!
-//! Built on the official Rust SDK, [`rmcp`]. Tools are listed from
-//! [`rueca_query::tool_definitions`] (deterministic order) and every call is
-//! dispatched to [`rueca_query::Engine::respond`] on a blocking thread.
-//! Results carry the JSON response (the RFC 0005 envelope, or the alpha shape
-//! with `format: verbose`) as `structuredContent` and its compact text
-//! rendering ([`rueca_query::render_text`]; compact JSON for `verbose`) as
-//! text content, so clients that read `structuredContent` see the full data
-//! and models that read text see the short form. Engine errors become tool
+//! The Model Context Protocol layer is Rueca's own, std only (no SDK, no
+//! async runtime); `docs/mcp-protocol.md` is its behaviour reference. It
+//! has three parts:
+//!
+//! - framing ([`parse_line`], [`Incoming`], [`Outgoing`]): JSON-RPC 2.0, one
+//!   message per line;
+//! - the protocol core ([`RuecaServer::handle`], [`Session`], [`Step`]):
+//!   synchronous and transport-agnostic, it chooses the lifecycle,
+//!   negotiates the version, checks per-request `_meta` and dispatches;
+//! - the stdio transport ([`serve`], [`serve_stdio`]): a reader loop, one
+//!   thread per tool call, one writer, cancellation and a drain at EOF.
+//!
+//! Protocol versions: 2024-11-05, 2025-03-26, 2025-06-18 and 2025-11-25
+//! through the `initialize` handshake (an `initialize` naming 2026-07-28 or
+//! an unknown version is answered with 2025-11-25, the newest version that
+//! has a handshake), and 2026-07-28 without one: `server/discover`,
+//! per-request `_meta`, `resultType` on results. The connection's lifecycle
+//! is chosen by its first request: `initialize` (legacy) or a request whose
+//! `_meta` names a supported version (inline).
+//!
+//! Tools are listed from [`rueca_query::tool_definitions`] (deterministic
+//! order) and every call is dispatched to [`rueca_query::Engine::respond`]
+//! on its own thread. Results carry the JSON response (the RFC 0005
+//! envelope, or the alpha shape with `format: verbose`) as
+//! `structuredContent` and its compact text rendering
+//! ([`rueca_query::render_text`]; compact JSON for `verbose`) as text
+//! content, so clients that read `structuredContent` see the full data and
+//! models that read text see the short form. Engine errors become tool
 //! results with `isError: true`.
 //!
-//! Protocol versions are whatever `rmcp` 3.7 negotiates by default (Rueca does
-//! not override `supported_protocol_versions`): the 2026-07-28 stateless flow
-//! (`server/discover`, per-request `_meta`, no session) and the legacy
-//! `initialize` handshake for 2024-11-05, 2025-03-26, 2025-06-18 and
-//! 2025-11-25. An `initialize` naming 2026-07-28 or an unknown version is
-//! answered with 2025-11-25, the newest version that has a handshake.
+//! Other transports call the core directly: an HTTP handler (RFC 0008)
+//! parses one message per request body with [`parse_line`], calls
+//! [`RuecaServer::handle`] with a [`Session`] built for that message
+//! ([`Session::new`], or [`Session::legacy`] for a legacy client's requests
+//! after its `initialize`), answers [`Step::Reply`] at once, runs
+//! [`Step::Call`] on a blocking thread ([`ToolCall::run`]) and answers
+//! `202` to [`Step::Silent`] and [`Step::Cancel`].
 //!
 //! When the served root (or organization, given its file) is not indexed yet,
 //! [`serve_stdio`] indexes it on a background thread so `initialize` is
@@ -26,18 +47,21 @@
 //! Nothing is written to stdout except protocol messages; logs go through
 //! `tracing` and the binary installs a stderr subscriber.
 
-use std::borrow::Cow;
+mod jsonrpc;
+mod protocol;
+mod stdio;
+mod tools;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use rmcp::model::{
-    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation, ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
-};
-use rmcp::service::{RequestContext, RoleServer};
-use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt};
 use rueca_query::Engine;
+
+pub use jsonrpc::{ErrorObject, Incoming, JsonObject, Notification, Outgoing, Request, RequestId, parse_line};
+pub use protocol::{SUPPORTED_VERSIONS, Session, Step, negotiate};
+pub use stdio::{DRAIN, MAX_IN_FLIGHT, MAX_LINE, serve};
+pub use tools::{Tool, ToolAnnotations, ToolCall};
 
 #[derive(Debug, Clone, Default)]
 pub struct ServerOptions {
@@ -73,7 +97,8 @@ searches every repository of it in one ranking; `list_repositories` lists them a
 refs. Results come from the last index (by default of the working tree); edges carry a confidence \
 (0–1) and the strategy used to resolve them.";
 
-/// The MCP handler: a shared engine plus the advertised tool list.
+/// The MCP server: a shared engine plus the advertised tool list. Cheap to
+/// clone (shared state behind `Arc`s).
 #[derive(Clone)]
 pub struct RuecaServer {
     engine: Arc<Engine>,
@@ -92,6 +117,17 @@ impl RuecaServer {
         RuecaServer { engine: Arc::new(engine), tools: Arc::new(tools()), gate }
     }
 
+    /// The server [`serve_stdio`] runs: the engine for `opts.org` or
+    /// `opts.root`, with the background index those options call for
+    /// ([`spawn_org_index`], [`spawn_auto_index`]) already started.
+    pub fn from_options(opts: &ServerOptions) -> anyhow::Result<RuecaServer> {
+        let (engine, gate) = match &opts.org {
+            Some(name) => (Engine::for_org(opts.store_dir.clone(), name)?, spawn_org_index(opts)),
+            None => (Engine::new(opts.store_dir.clone(), opts.root.clone())?, spawn_auto_index(opts)),
+        };
+        Ok(RuecaServer::with_index_gate(engine, gate))
+    }
+
     /// Runs one tool call (blocking): waits for a pending auto-index, then
     /// dispatches to the engine.
     fn call_blocking(&self, tool: &str, args: serde_json::Value) -> anyhow::Result<rueca_query::Response> {
@@ -106,81 +142,19 @@ impl RuecaServer {
     }
 }
 
-/// The tools as MCP [`Tool`]s, in `rueca_query::TOOL_NAMES` order.
+/// The tools as MCP [`Tool`]s, in `rueca_query::TOOL_NAMES` order, all
+/// read-only. The input schema is passed through (`{}` if it is not an
+/// object).
 pub fn tools() -> Vec<Tool> {
     rueca_query::tool_definitions()
         .into_iter()
-        .map(|d| {
-            let schema = match d.input_schema {
-                serde_json::Value::Object(m) => m,
-                _ => serde_json::Map::new(),
-            };
-            let mut tool = Tool::new(d.name, d.description, Arc::new(schema));
-            tool.annotations =
-                Some(ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false));
-            tool
+        .map(|d| Tool {
+            name: d.name.to_string(),
+            description: d.description.to_string(),
+            input_schema: if d.input_schema.is_object() { d.input_schema } else { serde_json::json!({}) },
+            annotations: ToolAnnotations::READ_ONLY,
         })
         .collect()
-}
-
-impl ServerHandler for RuecaServer {
-    fn get_info(&self) -> ServerConfig {
-        let mut implementation = Implementation::new("rueca", env!("CARGO_PKG_VERSION"));
-        implementation.title = Some("Rueca code intelligence".into());
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(implementation)
-            .with_instructions(INSTRUCTIONS)
-    }
-
-    async fn list_tools(
-        &self,
-        _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ListToolsResult, McpError> {
-        Ok(ListToolsResult::with_all_items(self.tools.as_ref().clone())
-            .with_ttl_ms(3_600_000)
-            .with_cache_scope(CacheScope::Public))
-    }
-
-    fn get_tool(&self, name: &str) -> Option<Tool> {
-        self.tools.iter().find(|t| t.name == name).cloned()
-    }
-
-    async fn call_tool(
-        &self,
-        request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResponse, McpError> {
-        let name: Cow<'static, str> = request.name;
-        if !rueca_query::TOOL_NAMES.contains(&name.as_ref()) {
-            return Err(McpError::invalid_params(
-                format!("unknown tool `{name}` (available: {})", rueca_query::TOOL_NAMES.join(", ")),
-                None,
-            ));
-        }
-        let args = request.arguments.map(serde_json::Value::Object).unwrap_or(serde_json::Value::Null);
-        let server = self.clone();
-        let tool = name.to_string();
-        let started = Instant::now();
-        let outcome = tokio::task::spawn_blocking(move || server.call_blocking(&tool, args)).await;
-        let result = match outcome {
-            Ok(Ok(response)) => {
-                tracing::debug!(tool = %name, ms = started.elapsed().as_millis() as u64, "tool call ok");
-                let mut result = CallToolResult::structured(response.json);
-                result.content = vec![ContentBlock::text(response.text)];
-                result
-            }
-            Ok(Err(err)) => {
-                tracing::debug!(tool = %name, error = %format!("{err:#}"), "tool call failed");
-                CallToolResult::error(vec![ContentBlock::text(format!("{err:#}"))])
-            }
-            Err(join) => {
-                tracing::error!(tool = %name, error = %join, "tool call panicked");
-                CallToolResult::error(vec![ContentBlock::text(format!("internal error in `{name}`: {join}"))])
-            }
-        };
-        Ok(result.into())
-    }
 }
 
 /// How long a tool call waits for a background auto-index before answering
@@ -372,18 +346,8 @@ fn spawn_gate(gate: IndexGate, job: impl FnOnce() -> anyhow::Result<()> + Send +
     }
 }
 
-/// Serves MCP over any async byte stream pair (used by [`serve_stdio`] and by
-/// tests with in-memory pipes) until the peer disconnects.
-pub async fn serve<T>(server: RuecaServer, transport: T) -> anyhow::Result<()>
-where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + 'static,
-{
-    let running = server.serve(transport).await?;
-    running.waiting().await?;
-    Ok(())
-}
-
-/// Serves MCP on stdin/stdout until the client disconnects. Logs go to stderr.
+/// Serves MCP on stdin/stdout until the client closes stdin. Logs go to
+/// stderr.
 ///
 /// If `opts.root` needs indexing (see [`root_to_index`]), or `opts.org` is
 /// not built yet and its file is known, it is indexed on a background thread
@@ -391,21 +355,9 @@ where
 /// `tools/list`; tool calls wait for it (up to [`INDEX_WAIT`]). With
 /// `opts.org` the server serves the organization (`opts.root` is ignored).
 pub fn serve_stdio(opts: ServerOptions) -> anyhow::Result<()> {
-    let (engine, gate) = match &opts.org {
-        Some(name) => (Engine::for_org(opts.store_dir.clone(), name)?, spawn_org_index(&opts)),
-        None => (Engine::new(opts.store_dir.clone(), opts.root.clone())?, spawn_auto_index(&opts)),
-    };
-    let server = RuecaServer::with_index_gate(engine, gate);
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-    runtime.block_on(async move {
-        tracing::info!(version = env!("CARGO_PKG_VERSION"), "rueca MCP server on stdio");
-        let running = server.serve(rmcp::transport::stdio()).await?;
-        running.waiting().await?;
-        anyhow::Ok(())
-    })?;
-    // Do not wait for a blocking stdin reader thread on shutdown.
-    runtime.shutdown_background();
-    Ok(())
+    let server = RuecaServer::from_options(&opts)?;
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "rueca MCP server on stdio");
+    serve(server, std::io::stdin().lock(), std::io::stdout())
 }
 
 #[cfg(test)]
@@ -461,8 +413,8 @@ mod tests {
     #[test]
     fn read_only_tools() {
         let tools = tools();
-        let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, rueca_query::TOOL_NAMES);
-        assert!(tools.iter().all(|t| t.annotations.as_ref().and_then(|a| a.read_only_hint) == Some(true)));
+        assert!(tools.iter().all(|t| t.annotations.read_only_hint && t.input_schema["type"] == "object"));
     }
 }

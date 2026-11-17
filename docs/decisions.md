@@ -1,5 +1,52 @@
 # Decisions log
 
+## 2026-11-17 — Own MCP layer instead of rmcp
+
+The required `cargo deny` check failed on main with RUSTSEC-2026-0543:
+`chrono` is unmaintained and no patched release exists. `chrono` reached the
+dependency graph only through `rmcp` 3.10, directly and through `rmcp`'s
+`schemars` dependency with feature `chrono04`; upstream
+(modelcontextprotocol/rust-sdk#1469) had no plan to drop it.
+
+Rejected:
+
+- Ignoring the advisory in `deny.toml`: it keeps an unmaintained crate in
+  the graph with no exit.
+- Patching or forking `rmcp`: a fork of a fast-moving SDK (releases every 1–3
+  weeks) to maintain, for a server that uses a small part of it.
+
+Built: Rueca's own MCP layer in `rueca-mcp`, about 1.3k lines (without
+tests), standard library only:
+
+- JSON-RPC 2.0 framing, one message per line (`parse_line`, `Outgoing`);
+- lifecycle A, legacy `initialize` for 2024-11-05, 2025-03-26, 2025-06-18
+  and 2025-11-25; lifecycle B, the stateless 2026-07-28 one with
+  `server/discover` and per-request `_meta`;
+- `tools/list`, `tools/call`, `ping`, cancellation;
+- a transport-agnostic seam, `RuecaServer::handle(msg, &mut Session) ->
+  Step`, which RFC 0008's HTTP transport calls with one message per request.
+
+Equivalence was proven with golden transcripts recorded from the `rmcp`
+server (9 files, 20 sessions, 131 steps) and replayed against the new layer
+byte for byte. Five differences were accepted on purpose:
+
+1. A notification, a client response or EOF before any lifecycle is ignored;
+   `rmcp` exited 1.
+2. Malformed `tools/call` params get -32602; `rmcp` answered -32601, an
+   artifact of its fallback.
+3. A second `initialize` keeps the negotiated version; `rmcp` stored the raw
+   requested one, which could turn a legacy session modern.
+4. A panic in a tool call is reported as `internal error in <tool>`, without
+   `rmcp`'s per-run tokio task id.
+5. Past 512 concurrent tool calls the reader waits for a slot; `rmcp` queued
+   them on tokio's blocking pool. Only latency changes.
+
+Cost: Rueca owns the protocol, so new spec revisions are ours to implement.
+Saved: no async runtime in the server (`tokio`, `futures`, `sha2`, `chrono`,
+`rmcp` and 20 other packages left `Cargo.lock`, 387 → 362), 302 → 280
+distinct crates in `rueca`'s tree, and a release binary 1.67 MB smaller.
+The behaviour reference is [`docs/mcp-protocol.md`](mcp-protocol.md).
+
 ## 2026-11-16 — Refs are snapshots of their own, exported from the object database
 
 RFC 0006 phase 3. A branch, pull request, tag or commit indexed with

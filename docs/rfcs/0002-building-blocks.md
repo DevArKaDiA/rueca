@@ -304,7 +304,7 @@ has happened.
 
 | Candidate | License | Version | Verdict |
 |---|---|---|---|
-| `rmcp` (official Rust SDK) | Apache-2.0 | 3.7.0 (2026-10-22) | **Dependency.** Implements spec 2026-07-28 (stateless) plus legacy versions; stdio and Streamable HTTP as a tower service |
+| `rmcp` (official Rust SDK) | Apache-2.0 | 3.7.0 (2026-10-22) | ~~Dependency.~~ **Replaced 2026-11-17** by Rueca's own layer (RUSTSEC-2026-0543 via `chrono`, see the [decisions log](../decisions.md)); kept as reference. Implements spec 2026-07-28 (stateless) plus legacy versions; stdio and Streamable HTTP as a tower service |
 | turbomcp `turbomcp-auth` | MIT | 3.6.0 | Reference for resource-server middleware |
 | rust-mcp-sdk | MIT | 2.0.0 | Reference |
 
@@ -387,7 +387,7 @@ Large repositories (vscode, kubernetes, linux) for the operational suite only.
 | Query | `open-cypher` parser, regex crates, petgraph | **Cypher executor**, views, traversal, impact |
 | Vectors | model2vec-rs, usearch, fastembed | flat scan |
 | Git / hosts | gix, git CLI, octocrab, gitlab crate | Bitbucket client, fetch orchestration, reconcile loop, permission sync |
-| MCP / auth | rmcp, axum, oauth2, jsonwebtoken | **resource-server auth**, optional embedded authorization server |
+| MCP / auth | axum, oauth2, jsonwebtoken (rmcp until 2026-11-17) | **MCP protocol layer** (since 2026-11-17), **resource-server auth**, optional embedded authorization server |
 | Ops | apalis or sqlx, tracing, metrics, cargo-dist | — |
 | Benchmark | ContextBench, CGraph bench, SWE-rebench V2, Harbor, Inspect, PyCG | manifests, labelers, MCP-output extractors, Swift labels |
 
@@ -407,8 +407,8 @@ Large repositories (vscode, kubernetes, linux) for the operational suite only.
    extension for PHP, and index-store import for Swift. Precision artifacts are
    uploaded from adopter CI; Rueca never runs adopter builds server-side.
 4. **§11.4 / §13 MCP and auth.** Target MCP spec 2026-07-28 with legacy
-   support via rmcp. Rueca implements the resource-server role; host tokens
-   are never MCP bearers.
+   support via rmcp (since 2026-11-17: via Rueca's own MCP layer). Rueca
+   implements the resource-server role; host tokens are never MCP bearers.
 5. **§14 Git.** Network operations use the `git` CLI (blobless, depth-1,
    targeted OID fetch); gix for all reads. Service images therefore include
    `git`.
@@ -429,8 +429,8 @@ Large repositories (vscode, kubernetes, linux) for the operational suite only.
 4. **Single-maintainer dependencies.** gix, octocrab, `open-cypher`, Swift
    grammar, several resolvers. Pin, wrap behind traits, be ready to fork.
 5. **Fast-moving upstreams.** tantivy (breaking minors), arrow (monthly
-   majors), rmcp (releases every 1–3 weeks), MCP spec (2026-07-28 was
-   breaking), TypeScript 7 API gap.
+   majors), rmcp (releases every 1–3 weeks; replaced 2026-11-17), MCP spec
+   (2026-07-28 was breaking), TypeScript 7 API gap.
 6. **Benchmark validity.** Contamination on popular repositories, unlicensed
    datasets, and no human-validated Swift localization set.
 
@@ -461,7 +461,7 @@ Primary sources consulted (non-exhaustive):
 - libgit2 partial clone: https://github.com/libgit2/libgit2/issues/6880
 - Zoekt git cache: https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/git_cache.go
 - Git protocol v2: https://git-scm.com/docs/gitprotocol-v2
-- rmcp: https://github.com/modelcontextprotocol/rust-sdk ; MCP 2026-07-28: https://github.com/modelcontextprotocol/modelcontextprotocol/tree/main/docs/specification/2026-07-28
+- rmcp (a dependency until 2026-11-17): https://github.com/modelcontextprotocol/rust-sdk ; MCP 2026-07-28: https://github.com/modelcontextprotocol/modelcontextprotocol/tree/main/docs/specification/2026-07-28
 - GitHub REST limits: https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
 - Sourcegraph permission syncing: https://sourcegraph.com/docs/admin/permissions/syncing
 - ContextBench: https://github.com/EuniAI/ContextBench ; LocAgent: https://github.com/gersteinlab/LocAgent

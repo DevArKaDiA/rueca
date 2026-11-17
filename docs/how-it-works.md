@@ -1192,6 +1192,17 @@ The recommended agent loop, and why it is cheap:
 Each step returns ids that the next step accepts, so the agent navigates the
 graph instead of reading whole files.
 
+### Serving the tools over MCP
+
+`rueca mcp` serves these tools through Rueca's own MCP layer in
+`rueca-mcp`, written with the standard library only (no SDK, no async
+runtime): JSON-RPC framing on stdio, the `initialize` lifecycle for
+protocol versions 2024-11-05 to 2025-11-25, and the stateless 2026-07-28
+lifecycle (`server/discover`, per-request `_meta`). Each `tools/call` makes
+the same engine call as `rueca query`, on its own thread. The behaviour, the
+versions and the transport seam for HTTP are specified in
+[`docs/mcp-protocol.md`](mcp-protocol.md).
+
 ## 7. Confidence: how to read an edge
 
 | Confidence | Strategies | Meaning |
@@ -1290,4 +1301,4 @@ gaps show up on real repositories.
 | Organization index, generations, visibility | `rueca-segment` | `src/org.rs` (module docs) |
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |
 | Tools | `rueca-query` | `src/tools.rs` |
-| MCP / CLI | `rueca-mcp`, `rueca` | `serve_stdio`, `src/main.rs` |
+| MCP protocol layer, stdio / CLI | `rueca-mcp`, `rueca` | [`docs/mcp-protocol.md`](mcp-protocol.md), `RuecaServer::handle` (`src/protocol.rs`), `serve_stdio`, `src/main.rs` |

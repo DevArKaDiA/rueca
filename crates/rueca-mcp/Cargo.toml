@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+# The golden transcripts and their fixture are test data (about 1.4 MB): keep
+# them out of the published crate, with the test that replays them.
+exclude = ["tests/golden.rs", "tests/golden/*.json", "tests/fixtures/**"]
 
 [dependencies]
 rueca-query.workspace = true
@@ -14,11 +17,11 @@ rueca-index.workspace = true
 rueca-extract.workspace = true
 rueca-segment.workspace = true
 anyhow.workspace = true
-serde_json.workspace = true
+serde.workspace = true
+# `raw_value`: results are serialized once, in a fixed key order, and embedded
+# verbatim in the JSON-RPC envelope.
+serde_json = { workspace = true, features = ["raw_value"] }
 tracing.workspace = true
-rmcp = { version = "3.7", default-features = false, features = ["server", "transport-io"] }
-tokio = { version = "1", features = ["rt-multi-thread", "io-std", "io-util", "sync", "macros"] }
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { version = "1", features = ["rt-multi-thread", "io-util", "macros", "time"] }
