@@ -81,6 +81,41 @@ ollama, qdrant, dapr and weaviate (openai diagnostic: its specs exceed the
 eighth tool: RFC 0001 §11.4 lists it (provided / consumed / dangling), and
 dangling calls — the question "what calls an endpoint nobody provides" —
 cannot be asked of `trace`, which only follows edges that exist.
+## 2026-11-17 — Service mode: object storage as the store of record, compare-and-swap instead of a lock
+
+RFC 0008 (design; nothing implemented). Service mode is the same crates
+run as one image with roles (`rueca serve --role query|indexer|all`):
+stateless query replicas that download segments into a disk cache, and
+indexers that lease jobs. The store of record is object storage through
+`object_store` 0.14 (S3, GCS, Azure, local; OpenDAL rejected: MSRV 1.91
+and no GCS generation compare-and-swap), with the local layout plus two
+changes: a catalog per repository and packs per repository, so a
+snapshot lists the packs it reads and `index.rcpi` has no bucket form.
+Immutable objects are written with `PutMode::Create`, the few mutable
+ones (catalogs, the generation pointer, job and lease objects) with
+`PutMode::Update` in a retry loop; no lock and no database (RFC 0006
+§12 open question 9 closed; Postgres kept as a phase 4 option), and
+local mode gets an advisory file lock. Garbage collection is
+mark-and-sweep with a 24 h grace and per-kind retention (pull requests
+expire after close + 7 days or 14 days unread). MCP is served over
+Streamable HTTP by Rueca's own transport on `axum`, stateless and
+JSON-only — not `rmcp`'s server transport: `cargo deny` flagged `chrono`
+(RUSTSEC-2026-0543), reached only through `rmcp`, and the owner chose a
+minimal MCP layer of Rueca's own over ignoring the advisory;
+authentication is a Rueca tower layer (OAuth 2.1 resource server for
+external OIDC issuers, plus static API tokens; no embedded authorization
+server), and a principal maps to the existing `Visibility` by configured
+rules, deny by default, the seam Org mode's mirrored grants will fill.
+Indexing is level-triggered after Zoekt: webhooks are hints, adaptive
+`ls-remote` polling (45 s – 8 h) is the safety net, one coalesced job
+object per repository, refs fetched with `--depth=1
+--filter=blob:limit=…` from a bare mirror and read under
+`GIT_NO_LAZY_FETCH=1`, each ref indexed in a child process with resource
+limits. Three corrections to RFC 0001 §14 / RFC 0002 §7.1 were found on
+the way: Zoekt uses `blob:limit`, not `blob:none`; `GIT_NO_LAZY_FETCH`
+needs git 2.45, not 2.49; Bitbucket Cloud has supported clone filters
+since 2024-08-08. One organization per deployment. Hotcache and delta
+segments are deferred to a measured need.
 
 ## 2026-11-16 — Refs are snapshots of their own, exported from the object database
 
