@@ -161,3 +161,48 @@ fn missing_weights_fail_when_required_and_warn_otherwise() {
     let wide = index_worktree_with(&opts(&root, &store, embed(Some(999))), &Hashing::new(16));
     assert!(wide.is_err());
 }
+
+/// `cargo test -p rueca-index --test vectors -- --ignored --nocapture`:
+/// the cost of opening this repository's segment with and without its
+/// vectors (1024 dimensions, the hashing embedder standing in for the
+/// model: sizes are what matter), and of the first dense use.
+#[test]
+#[ignore = "measurement"]
+fn open_cost_on_this_repository() {
+    use std::time::Instant;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (lex_store, vec_store) = (dir.path().join("lexical"), dir.path().join("vectors"));
+    let lexical = index_worktree_with(&opts(&root, &lex_store, None), &Hashing::new(1024)).unwrap();
+    let hybrid = index_worktree_with(&opts(&root, &vec_store, embed(None)), &Hashing::new(1024)).unwrap();
+    let v = hybrid.vectors.clone().unwrap();
+    let time = |store: &Path, id: &str| {
+        let s = Store::open(store).unwrap();
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let t = Instant::now();
+            let seg = s.open_segment(id).unwrap();
+            best = best.min(t.elapsed().as_secs_f64() * 1e3);
+            drop(seg);
+        }
+        best
+    };
+    let lex_ms = time(&lex_store, &lexical.segment.id);
+    let vec_ms = time(&vec_store, &hybrid.segment.id);
+    let seg = Store::open(&vec_store).unwrap().open_segment(&hybrid.segment.id).unwrap();
+    let t = Instant::now();
+    let vecs = seg.vectors().unwrap().unwrap();
+    let verify_ms = t.elapsed().as_secs_f64() * 1e3;
+    let q = vec![1.0 / 32.0; 1024];
+    let t = Instant::now();
+    let _ = vecs.top_n(&q, 100, |_| true);
+    let scan_ms = t.elapsed().as_secs_f64() * 1e3;
+    println!(
+        "{} units × {} dims; segment {:.1} MB lexical, {:.1} MB with vectors; open {lex_ms:.1} ms lexical, \
+         {vec_ms:.1} ms with vectors (lazy); first-use checksum {verify_ms:.1} ms; one scan {scan_ms:.1} ms",
+        v.units,
+        v.dims,
+        lexical.segment.bytes as f64 / 1e6,
+        hybrid.segment.bytes as f64 / 1e6,
+    );
+}
