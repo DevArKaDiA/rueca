@@ -152,7 +152,14 @@ def python_docstring(body: list[str]) -> tuple[str, int]:
     return "\n".join(x.strip() for x in body if x.strip()), len(body)
 
 
-_CLOSING = re.compile(r"\s*\}\s*;?\s*$")
+def _drop_closing(text: str) -> str:
+    """`text` without its final `}` (or `};`) and the whitespace around it
+    (string operations: a regex anchored at the end backtracks over long
+    whitespace runs)."""
+    t = text.rstrip()
+    if t.endswith(";"):
+        t = t[:-1].rstrip()
+    return t[:-1].rstrip() if t.endswith("}") else text
 
 
 def _body_text(body: list[str], python: bool) -> str:
@@ -160,7 +167,7 @@ def _body_text(body: list[str], python: bool) -> str:
     the function is left out."""
     text = "\n".join(x.rstrip() for x in body)
     if not python:
-        text = _CLOSING.sub("", text)
+        text = _drop_closing(text)
     text = textwrap.dedent(text)
     return "\n".join(x for x in text.splitlines() if x.strip())
 
