@@ -413,7 +413,7 @@ while building it and the measurements follow.
   database with gix — not `git archive`, whose `export-ignore` /
   `export-subst` and filters would change blob ids and lose facts-cache
   hits; no checkout, nothing written into the user's repository except
-  fetched objects) under `<store>/refs/<repo-slug>/<ref-slug>/`, indexes that
+  fetched objects) under `<store>/refs/<repo-dir>/<ref-slug>/`, indexes that
   tree with the repository's id, the commit and the ref name recorded in
   `SnapshotInfo` (`branch` holds the ref name; `dirty` is always false),
   and registers it. The facts cache is keyed by blob, so a second ref
@@ -484,13 +484,27 @@ Choices and deviations:
 
 - **Exported from the object database, not checked out.** The commit's tree
   is written blob by blob with `gix` into a temporary directory swapped in
-  at `<store>/refs/<repo-slug>/<ref-slug>/`; symlinks and submodules are
-  skipped (the working-tree walk skips them too). A `git worktree` would
+  at `<store>/refs/<repo-dir>/<ref-slug>/`; symlinks and submodules are
+  skipped (the working-tree walk skips them too). A commit with no file
+  under the root's path (a subdirectory root that does not exist at that
+  ref) is an error, not an empty snapshot. A `git worktree` would
   write into the user's repository and lock the branch; `git archive`
   applies `export-ignore`, `export-subst` and content filters, which change
   files and their blob ids and so lose the facts-cache hits. The only
-  writes into the repository are fetched objects, remote-tracking refs and
-  `refs/rueca/…`; a shallow repository is fetched with `--depth 1`.
+  writes into the repository are fetched objects, remote-tracking refs,
+  tags fetched by name and `refs/rueca/…`; a shallow repository is fetched
+  with `--depth 1`, and `git` runs with `GIT_TERMINAL_PROMPT=0` and no
+  askpass, so a fetch fails instead of waiting on a prompt.
+- **Repository directories** (`<repo-dir>`) are the repository id's slug,
+  `--<path slug>` for a root below the top of its repository, then the
+  first 8 hex digits of the hash of the id and that path
+  (`github-com-o-r-<hash>`, `github-com-o-r--web-<hash>`): repository slugs
+  are not injective (`acme/my.lib`, `acme/my-lib`), and two subdirectory
+  roots of one repository carry the same id and must not share a ref's
+  export. An owner marker `<repo-dir>/.owners/<ref-slug>.json` (repository
+  id, path, ref) is checked before an export is overwritten, and
+  `--remove` deletes only an export that its catalog entry or its marker
+  says is that ref of that root.
 - **Ref slugs** keep ASCII letters, digits, `.`, `_` and `-`, turn every
   other run into one `-`, and append the first 8 hex digits of the name's
   hash when anything was replaced or the name has upper-case letters, so
@@ -499,8 +513,10 @@ Choices and deviations:
 - **Resolution order:** `refs/heads/<n>`, `refs/remotes/origin/<n>`,
   `refs/remotes/<n>` (`origin/main` works), `refs/tags/<n>` (annotated tags
   peeled), `HEAD`, a full `refs/…` name, a commit (full or a unique prefix
-  of ≥ 7 hex digits, recorded under its 12-digit form); a branch found
-  nowhere is fetched from `origin`. `pr/<n>` is always fetched,
+  of ≥ 7 hex digits, recorded under its 12-digit form); a name found
+  nowhere is fetched from `origin` (a full commit id into
+  `refs/rueca/commit/<id>`, else a branch, else a tag), so tags and
+  commits work in the shallow clone of a `url` member. `pr/<n>` is always fetched,
   `refs/pull/<n>/head` then `refs/merge-requests/<n>/head`, into
   `refs/rueca/pr/<n>`, which keeps its objects reachable and is the offline
   fallback. A ref whose commit, repository id and Rueca version did not
@@ -518,7 +534,9 @@ Choices and deviations:
   file named by the segments it was computed from, like a default's. The
   incoming side is remapped at read time: `OrgIndex::link_edges(at, node,
   dir, kind, visible, view)` maps the default's endpoints to the ref's
-  nodes by (label, qualified name, path) through a correspondence built on
+  nodes by (label, qualified name, path) — several nodes with one key, a
+  property's getter and setter or overloads, pair by position in source
+  order — through a correspondence built on
   first use per (repository, ref) slot, for the nodes link edges target
   only, and cached with the opened generation; an endpoint the ref no
   longer has drops the edge. Resolving a consumer's imports against a
@@ -529,19 +547,23 @@ Choices and deviations:
   branch checked out at the member root, else any entry whose commit starts
   with the name. A ref entry wins over the default when both carry the
   name: `--ref main` exports the commit `main` points to, the default may
-  be dirty. `HEAD` and `worktree` name the default.
+  be dirty. `HEAD` and `worktree` name the default. Local mode follows the
+  same order (a ref snapshot recorded under the name, then the working
+  tree).
 - **`ref` with and without `repo`.** With `repo` (one or a list) every
   selected repository must have every named ref; without it (or `"*"`)
   each repository is read at the refs it has and the others at their
   default, and naming a ref no repository has is an error. Pull request
-  numbers are per repository, so `pr/<n>` without `repo` is to be accepted
-  only when exactly one selected repository has it (a follow-up change;
-  today it reads every repository that has a `pr/<n>`). Errors list the
+  numbers are per repository, so `pr/<n>` without `repo` (or with `"*"`)
+  is accepted only when exactly one selected repository has it; otherwise
+  the error lists the visible ones that do (`` `pr/7` exists in several
+  repositories (A, B): name `repo` ``). Errors list the
   indexed refs (`main@08b803cf32ce, 7.1.2@1784558ed7c7, …`, per repository
   when `repo` is omitted) and the command that indexes another one; a
   repository the caller cannot read is never named, nor are its refs.
 - **Collapse per tool.** A symbol is matched across the snapshots of one
-  repository by (label, qualified name, path) and its versions compared by
+  repository by (label, qualified name, path), by position in source order
+  among nodes sharing that key, and its versions compared by
   file blob. `search_symbols` fetches `limit` per snapshot, collapses, then
   cuts at `limit` (the cursor counts collapsed items); `get_symbol` answers
   the best match's version and lists the others in `versions` (`{s, in,
@@ -655,3 +677,9 @@ five refs).
    has the commit, blobs and Rueca version of its current one, or key link
    sets by content, so that consumers and their refs are not re-linked
    (§9.3, measured).
+9. A store lock for concurrent indexers: two `rueca index` runs (or an
+   index and an organization update) read-modify-write `catalog.json`, the
+   organization pointer and garbage collection without one, so the last
+   writer wins and a collection can race a registration. Local mode runs
+   one indexer at a time; service mode needs the lock (or a transactional
+   catalog).

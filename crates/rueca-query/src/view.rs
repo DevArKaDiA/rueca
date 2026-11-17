@@ -75,13 +75,24 @@ impl View {
 
     /// The node of this snapshot that is node `n` of `other` (another
     /// snapshot of the same repository): same label, qualified name and file
-    /// path; the lowest node id when several match.
+    /// path. Several nodes with that key (a property's getter and setter,
+    /// overloads) pair by position in source order: the k-th of `other` is
+    /// the k-th of this snapshot, and has none when this one has fewer.
     pub fn same_symbol(&self, other: &View, n: NodeId) -> Option<NodeId> {
         let node = other.node(n);
         let path = other.node_path(n);
-        let mut hits = self.seg.nodes_by_qualified_name(&node.qualified_name);
-        hits.retain(|&m| self.node(m).label == node.label && self.node_path(m) == path);
-        hits.into_iter().min()
+        let theirs = other.nodes_keyed(node.label, &node.qualified_name, path);
+        let k = theirs.iter().position(|&m| m == n)?;
+        self.nodes_keyed(node.label, &node.qualified_name, path).get(k).copied()
+    }
+
+    /// The nodes with label `label`, qualified name `qn` and file `path`, in
+    /// source order (start byte, then id).
+    fn nodes_keyed(&self, label: Label, qn: &str, path: Option<&str>) -> Vec<NodeId> {
+        let mut hits = self.seg.nodes_by_qualified_name(qn);
+        hits.retain(|&m| self.node(m).label == label && self.node_path(m) == path);
+        hits.sort_unstable_by_key(|&m| (self.node(m).span.map_or(u32::MAX, |s| s.start_byte), m));
+        hits
     }
 
     pub fn node(&self, id: NodeId) -> &Node {

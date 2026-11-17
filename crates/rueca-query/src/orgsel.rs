@@ -66,14 +66,19 @@ fn id_view(g: &OrgGeneration, repos: &[usize], id: Option<&SymbolIdParts>) -> Or
 }
 
 /// The view of `repos` at refs `names`: with `star`, each repository at the
-/// refs it has (others at their default; a ref none has is an error);
-/// otherwise every repository must have every ref.
+/// refs it has (others at their default; a ref none has is an error, and a
+/// `pr/<n>` more than one has is ambiguous); otherwise every repository
+/// must have every ref. `repos` are the visible ones, so errors name no
+/// other.
 fn ref_view(g: &OrgGeneration, repos: &[usize], names: &[&str], star: bool) -> anyhow::Result<OrgSelection> {
     let mut sel = OrgSelection::default();
     if star {
         if let Some(n) = names.iter().find(|n| repos.iter().all(|&i| find_slot(g, i, n).is_none())) {
             return Err(unknown_everywhere(g, repos, n));
         }
+        crate::check_pr_refs(names, |n| {
+            repos.iter().filter(|&&i| find_slot(g, i, n).is_some()).map(|&i| g.repos[i].repo.clone()).collect()
+        })?;
         for &i in repos {
             sel.set(i, names.iter().filter_map(|n| find_slot(g, i, n)).collect());
         }

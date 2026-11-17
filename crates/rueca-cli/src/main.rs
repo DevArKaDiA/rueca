@@ -283,7 +283,8 @@ fn cmd_index_ref(store: &Path, cmd: RefCmd, out: Output) -> anyhow::Result<()> {
     let root = std::fs::canonicalize(&path).map_err(|e| anyhow::anyhow!("cannot open `{}`: {e}", path.display()))?;
     if cmd.remove {
         let repo = rueca_index::repo_id(&root, cmd.repo.as_deref());
-        let removed = rueca_index::refs::remove_ref(store, &repo, &cmd.name)?;
+        let prefix = rueca_index::refs::root_prefix(&root);
+        let removed = rueca_index::refs::remove_ref(store, &repo, &prefix, &cmd.name)?;
         // Organizations holding the repository drop the ref's entry.
         let orgs = rueca_index::org::update_orgs_of_repo(store, &repo)?;
         if out.json {

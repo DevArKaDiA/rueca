@@ -52,12 +52,17 @@
 //! store) are never the default: a repository id, `"*"` and the default root
 //! select working trees. `ref` (one name or a list) then picks, for each
 //! selected snapshot, the ones of its repository that the refs name, in
-//! order ([`snapshot::SnapshotDesc::matches_ref`]): the selected snapshot
-//! itself when it matches (its branch, `HEAD`, `worktree` or its commit),
-//! else another snapshot with the same repository id (a ref snapshot,
-//! another worktree). A ref a selected repository does not have is an error
-//! listing its indexed refs (with `"*"`, a repository is read at the refs it
-//! has, and only a ref no repository has is an error).
+//! order: a ref snapshot of its repository recorded under that name (a
+//! commit by any prefix of ≥ 7 digits) first — `--ref main` exports the
+//! commit `main` points to, while the working tree on `main` may be dirty,
+//! as in organization mode — else the selected snapshot itself when it
+//! matches ([`snapshot::SnapshotDesc::matches_ref`]: its branch, `HEAD`,
+//! `worktree` or its commit), else another snapshot with the same
+//! repository id (another worktree, a ref snapshot by commit). A ref a
+//! selected repository does not have is an error listing its indexed refs
+//! (with `"*"`, a repository is read at the refs it has, and only a ref no
+//! repository has is an error; a `pr/<n>` must then name one repository:
+//! pull request numbers are per repository).
 //!
 //! With several snapshots, `search_symbols` returns **one ranking** (RFC 0006
 //! §6, no rank fusion): every snapshot's symbol index is scored with BM25
@@ -494,6 +499,18 @@ impl Engine {
     ) -> anyhow::Result<Vec<CatalogEntry>> {
         let mut picked = Vec::with_capacity(selected.len() * names.len());
         let mut found = vec![false; names.len()];
+        if star {
+            check_pr_refs(names, |r| {
+                let mut repos: Vec<&str> = selected
+                    .iter()
+                    .filter(|b| self.ref_snapshot(store, entries, b, r).is_some())
+                    .map(|b| b.repo.as_str())
+                    .collect();
+                repos.sort_unstable();
+                repos.dedup();
+                repos.into_iter().map(str::to_string).collect()
+            })?;
+        }
         for base in &selected {
             for (k, r) in names.iter().enumerate() {
                 match self.ref_snapshot(store, entries, base, r) {
@@ -514,8 +531,9 @@ impl Engine {
         Ok(picked)
     }
 
-    /// `base` when ref `r` names it, else the first other entry of its
-    /// repository that `r` names.
+    /// The snapshot of `base`'s repository that ref `r` names: a ref
+    /// snapshot recorded under that name, else `base` when `r` names it,
+    /// else the first other entry of its repository that `r` names.
     fn ref_snapshot(
         &self,
         store: &Store,
@@ -523,8 +541,10 @@ impl Engine {
         base: &CatalogEntry,
         r: &str,
     ) -> Option<CatalogEntry> {
-        let siblings = entries.iter().filter(|e| e.repo == base.repo && e.root != base.root);
-        std::iter::once(base).chain(siblings).find(|e| self.entry_matches_ref(store, e, r)).cloned()
+        let siblings = || entries.iter().filter(|e| e.repo == base.repo && e.root != base.root);
+        let all = || std::iter::once(base).chain(siblings());
+        let named = |e: &&CatalogEntry| e.ref_name.as_deref().is_some_and(|n| names_recorded_ref(n, r));
+        all().find(named).or_else(|| all().find(|e| self.entry_matches_ref(store, e, r))).cloned()
     }
 
     fn entry_matches_ref(&self, store: &Store, e: &CatalogEntry, r: &str) -> bool {
@@ -727,6 +747,11 @@ impl Engine {
                 ),
             };
         }
+        // The only root: ref snapshots are not roots of their own.
+        let mut own = entries.iter().filter(|e| !e.is_ref_export());
+        if let (Some(e), None) = (own.next(), own.next()) {
+            return Ok(e.clone());
+        }
         if entries.len() == 1 {
             return Ok(entries[0].clone());
         }
@@ -790,6 +815,35 @@ fn default_entries(entries: &[CatalogEntry]) -> Vec<CatalogEntry> {
         .filter(|e| !e.is_ref_export() || (!own.contains(e.repo.as_str()) && seen.insert(e.repo.as_str())))
         .cloned()
         .collect()
+}
+
+/// Whether ref name `given` names the ref snapshot recorded as `recorded`:
+/// equal (`refs/heads/<name>` too), or both commits with one a prefix of at
+/// least 7 digits of the other (a commit is recorded under its 12-digit
+/// form).
+fn names_recorded_ref(recorded: &str, given: &str) -> bool {
+    let given = given.trim();
+    let given = given.strip_prefix("refs/heads/").unwrap_or(given);
+    rueca_segment::org::ref_names_match(recorded, given)
+}
+
+/// `ref` without `repo` (or `"*"`): pull request numbers are per
+/// repository, so a `pr/<n>` among `names` must be held by exactly one of
+/// the selected repositories (`holders` lists those holding a ref, all of
+/// them visible to the caller). Zero is left to the unknown-ref error.
+pub(crate) fn check_pr_refs(names: &[&str], holders: impl Fn(&str) -> Vec<String>) -> anyhow::Result<()> {
+    for r in names.iter().filter(|r| is_pr_ref(r)) {
+        let repos = holders(r);
+        if repos.len() > 1 {
+            anyhow::bail!("`{r}` exists in several repositories ({}): name `repo`", repos.join(", "));
+        }
+    }
+    Ok(())
+}
+
+/// `pr/<n>`.
+fn is_pr_ref(r: &str) -> bool {
+    r.trim().strip_prefix("pr/").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Adds every entry whose root is not in `selected` yet.

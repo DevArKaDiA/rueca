@@ -798,8 +798,10 @@ then points the indexed root at it. Query time never reads the working tree.
 `rueca index [PATH] --ref <name>` indexes a branch, pull request (`pr/<n>`),
 tag or commit of PATH's repository without touching its working tree: the
 name is resolved with `gix` (a branch or pull request missing locally is
-fetched from `origin`), the commit's tree is written blob by blob to
-`<store>/refs/<repo-slug>/<ref-slug>/`, and that export is indexed like any
+fetched from `origin`; a tag or commit too), the commit's tree is written blob by blob to
+`<store>/refs/<repo-slug>[--<path-slug>]-<hash>/<ref-slug>/` (the hash of the
+repository id and the root's path inside its repository, so neither ids with
+one slug nor two subdirectory roots of one repository share an export), and that export is indexed like any
 root, its snapshot pinned to the ref (`ref` = the name, `commit`, never
 dirty) under the repository's own id. The catalog entry carries `ref_name`,
 so one repository id groups its working tree and its ref snapshots; tools

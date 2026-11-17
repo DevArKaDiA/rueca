@@ -1076,7 +1076,7 @@ fn text_outline(out: &mut String, r: &Value) {
     let _ = write!(out, "{}", str_of(r, "path"));
     let lang = r.get("lang").and_then(Value::as_str);
     let lang = lang.map(|l| format!("{l}, ")).unwrap_or_default();
-    let _ = writeln!(out, " ({lang}{} lines){}", r["line_count"], mark_text(r));
+    let _ = writeln!(out, " ({lang}{} lines){}", r["line_count"], outline_mark(r));
     text_outline_symbols(out, &r["symbols"], 1);
     for v in r.get("versions").and_then(Value::as_array).into_iter().flatten() {
         let changed = if v["changed"] == true { " changed" } else { "" };
@@ -1084,6 +1084,18 @@ fn text_outline(out: &mut String, r: &Value) {
             writeln!(out, "version {}{changed}: {} ({lang}{} lines)", in_list(v), str_of(r, "path"), v["line_count"]);
         text_outline_symbols(out, &v["symbols"], 1);
     }
+}
+
+/// The marks of the first outline of a multi-ref `get_file_outline`: the
+/// snapshots it is (`in`, else `[s]`) even when it is one, so the text says
+/// which ref the version is, then ` changed`.
+fn outline_mark(r: &Value) -> String {
+    if r.get("in").is_none() && r.get("versions").is_none() {
+        return mark_text(r);
+    }
+    let tag = if r.get("in").is_some() { in_list(r) } else { format!("[{}]", r["s"]) };
+    let changed = if r["changed"] == true { " changed" } else { "" };
+    format!(" {tag}{changed}")
 }
 
 fn text_outline_symbols(out: &mut String, syms: &Value, depth: usize) {

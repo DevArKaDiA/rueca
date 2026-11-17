@@ -57,14 +57,21 @@ fn distinct_others(edges: &[EdgeRef]) -> u32 {
     edges.iter().map(|e| e.other).collect::<HashSet<_>>().len() as u32
 }
 
-/// Item offset named by `cursor` (else `fallback`, else 0).
+/// Largest item offset a cursor may name: no listing has more items than a
+/// segment has nodes (`u32`), and offset arithmetic stays far from
+/// overflowing.
+const MAX_OFFSET: usize = u32::MAX as usize;
+
+/// Item offset named by `cursor` (else `fallback`, else 0), at most
+/// [`MAX_OFFSET`].
 fn cursor_offset(c: &CommonArgs, fallback: Option<i64>) -> anyhow::Result<usize> {
-    match c.cursor.as_deref() {
-        Some(s) => s.trim().parse::<usize>().map_err(|_| {
+    let offset = match c.cursor.as_deref() {
+        Some(s) => s.trim().parse::<usize>().ok().filter(|&n| n <= MAX_OFFSET).ok_or_else(|| {
             anyhow::anyhow!("invalid `cursor` `{s}`: pass the `next_cursor` of a previous response unchanged")
-        }),
-        None => Ok(fallback.unwrap_or(0).max(0) as usize),
-    }
+        })?,
+        None => fallback.unwrap_or(0).max(0) as usize,
+    };
+    Ok(offset.min(MAX_OFFSET))
 }
 
 /// `budget_tokens`, clamped to [100, 1,000,000].
@@ -246,7 +253,7 @@ impl Engine {
             labels,
             path_glob: a.path_glob,
             language: a.language.map(|l| l.to_language()),
-            limit: if collapse { (offset + limit + 1) * per_repo } else { limit + 1 },
+            limit: if collapse { offset.saturating_add(limit + 1).saturating_mul(per_repo) } else { limit + 1 },
             offset: if collapse { 0 } else { offset },
         };
         let ranked = self.rank_symbols(&sel, &base)?;
@@ -545,7 +552,15 @@ impl Engine {
             DirectionArg::Callees => &[Dir::Callees],
             DirectionArg::Both => &[Dir::Callers, Dir::Callees],
         };
-        let walk = TraceWalk { dirs, kinds: &kinds, depth, min_conf, limit: offset + limit, filter: &filter, merge };
+        let walk = TraceWalk {
+            dirs,
+            kinds: &kinds,
+            depth,
+            min_conf,
+            limit: offset.saturating_add(limit),
+            filter: &filter,
+            merge,
+        };
         let out = self.bfs(&mut views, org.as_ref(), &roots, &walk)?;
         let result = trace_result(&views, &roots, out, merge);
         if verbose_fmt {

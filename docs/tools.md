@@ -32,8 +32,9 @@ release with `"format": "verbose"` ([below](#verbose-alpha-format)).
   them must have every ref named; without `repo` (organization mode) or
   with `"*"`, each repository is read at the refs it has and the others at
   their default — the organization "as of" a release branch. Pull request
-  numbers are per repository: `pr/<n>` without `repo` is accepted only
-  when exactly one selected repository has it; otherwise name `repo`. In
+  numbers are per repository: `pr/<n>` without `repo` (or with `"*"`) is
+  accepted only when exactly one selected repository you can read has it;
+  otherwise name `repo`. In
   organization mode the other repositories stay in the call's view at their
   default (RFC 0006 §4: `repo: A, ref: pr/7` is the organization with A
   replaced by A at `pr/7`): search statistics, routing and `trace`'s link
@@ -202,7 +203,9 @@ qualified name, path), and its versions are compared by file blob.
 - Text: an item, node or symbol line ends with ` [0,1]` when it is in
   several snapshots and ` changed` when it is changed; an edge not found in
   every requested ref ends with ` [s…] changed`; other versions print as
-  `version [s…] changed: …`:
+  `version [s…] changed: …`, and the first outline of a grouped
+  `get_file_outline` always names its snapshots (`path (python, 17 lines)
+  [0] changed`):
 
 ```
 [0] github.com/acme/billing@7696364aef89+ (main)

@@ -9,21 +9,29 @@
 //!    (annotated tags peeled), `HEAD`, a full `refs/…` name, or a commit (full,
 //!    or a unique prefix of at least 7 hex digits). A branch found nowhere is
 //!    fetched from `origin` (`git fetch origin
-//!    +refs/heads/<name>:refs/remotes/origin/<name>`); `pr/<n>` is always
+//!    +refs/heads/<name>:refs/remotes/origin/<name>`, then the tag
+//!    `+refs/tags/<name>:refs/tags/<name>`, then, for a full commit id, the
+//!    commit into `refs/rueca/commit/<id>`); `pr/<n>` is always
 //!    fetched (`refs/pull/<n>/head`, then `refs/merge-requests/<n>/head`)
 //!    into `refs/rueca/pr/<n>`, which keeps the objects reachable and serves
 //!    as the offline fallback. Fetches are the only writes into the
-//!    repository: objects, remote-tracking refs and `refs/rueca/…`; never a
-//!    branch, never the working tree or the index. A shallow repository is
-//!    fetched with `--depth 1`.
+//!    repository: objects, remote-tracking refs, tags fetched by name and
+//!    `refs/rueca/…`; never a branch, never the working tree or the index.
+//!    A shallow repository is fetched with `--depth 1`; `git` never prompts
+//!    (`GIT_TERMINAL_PROMPT=0`, no askpass).
 //! 2. **Export** ([`export`]) the commit's tree (the root's subtree when the
 //!    root is a subdirectory of its repository) to
-//!    `<store>/refs/<repo-slug>/<ref-slug>/` ([`export_dir`]), writing every
+//!    `<store>/refs/<repo-dir>/<ref-slug>/` ([`export_dir`]; the directory
+//!    of a repository names its id and the root's path inside it, so two
+//!    subdirectory roots of one repository never share an export), writing every
 //!    blob byte for byte from the object database (no `git archive`: its
 //!    `export-ignore` / `export-subst` attributes and content filters would
 //!    change files and their blob ids). Symlinks and submodules are not
 //!    exported (the working-tree walk does not index them either). The export
-//!    is written to a temporary directory and swapped in.
+//!    is written to a temporary directory and swapped in; an owner marker
+//!    (`<repo-dir>/.owners/<ref-slug>.json`: repository id, path inside the
+//!    repository, ref) records whose export it is. A commit with no file
+//!    under the root's path is an error, not an empty snapshot.
 //! 3. **Index** the export with [`crate::index_worktree`], pinned to the ref
 //!    ([`IndexOptions::ref_name`], [`IndexOptions::commit`]): the snapshot's
 //!    `branch` is the ref name, `commit` the resolved commit, `dirty` false,
@@ -35,7 +43,9 @@
 //! Re-indexing a ref whose commit, repository id and Rueca version did not
 //! change, and whose export is still there, does nothing
 //! ([`RefIndexReport::unchanged`]). [`remove_ref`] drops a ref snapshot: its
-//! catalog entry, its segment (unless still referenced) and its export.
+//! catalog entry, its segment (unless still referenced) and its export; it
+//! deletes only an export that the catalog or the owner marker says is that
+//! ref of that repository root.
 //!
 //! Commits are recorded under their 12-digit form (`--ref 7696364` is the ref
 //! `7696364aef89`); every other name is recorded as given.
@@ -105,7 +115,7 @@ pub struct ResolvedRef {
 }
 
 /// Resolves ref `name` of the repository containing `repo_dir` (see the
-/// module docs for the order). Fetches from `origin` when a branch is not
+/// module docs for the order). Fetches from `origin` when the name is not
 /// found locally and for every `pr/<n>`.
 pub fn resolve(repo_dir: &Path, name: &str) -> anyhow::Result<ResolvedRef> {
     validate_ref_name(name)?;
@@ -117,7 +127,7 @@ pub fn resolve(repo_dir: &Path, name: &str) -> anyhow::Result<ResolvedRef> {
     if let Some(r) = resolve_local(&repo, name)? {
         return Ok(r);
     }
-    resolve_fetched_branch(&repo, &root, name)
+    resolve_fetched(&repo, &root, name)
 }
 
 /// The repository containing `root`, or an error naming it.
@@ -234,9 +244,11 @@ fn fetch(repo: &gix::Repository, root: &Path, src: &str, dst: &str) -> anyhow::R
     crate::org::git(&args, Some(root))
 }
 
-/// A branch found nowhere locally: fetched from `origin` into its
-/// remote-tracking ref.
-fn resolve_fetched_branch(repo: &gix::Repository, root: &Path, name: &str) -> anyhow::Result<ResolvedRef> {
+/// A name found nowhere locally, fetched from `origin`: a full commit id as
+/// that commit (into `refs/rueca/commit/<id>`, which keeps it reachable),
+/// else a branch (into its remote-tracking ref), else a tag (into
+/// `refs/tags/<name>`).
+fn resolve_fetched(repo: &gix::Repository, root: &Path, name: &str) -> anyhow::Result<ResolvedRef> {
     let mut tried: Vec<String> = candidates(name).into_iter().map(|(full, _)| full).collect();
     if is_hex(name) && name.len() >= MIN_COMMIT_PREFIX {
         tried.push("a commit".into());
@@ -246,11 +258,34 @@ fn resolve_fetched_branch(repo: &gix::Repository, root: &Path, name: &str) -> an
     if name.starts_with("refs/") || !has_origin(repo) {
         anyhow::bail!("{} (tried {tried}; no `origin` remote to fetch from)", missing());
     }
-    let dst = format!("refs/remotes/origin/{name}");
-    fetch(repo, root, &format!("refs/heads/{name}"), &dst)
-        .map_err(|e| anyhow::anyhow!("{} (tried {tried}, fetch from origin: {e:#})", missing()))?;
-    let commit = peel(&open_repo(root)?, &dst)?.ok_or_else(|| anyhow::anyhow!("{} after fetching {dst}", missing()))?;
-    Ok(ResolvedRef { name: name.to_string(), kind: RefKind::Branch, commit, source: dst, fetched: true })
+    let mut errors = Vec::new();
+    for (src, dst, kind) in remote_sources(name) {
+        if let Err(e) = fetch(repo, root, &src, &dst) {
+            errors.push(format!("{e:#}"));
+            continue;
+        }
+        let commit =
+            peel(&open_repo(root)?, &dst)?.ok_or_else(|| anyhow::anyhow!("{} after fetching {dst}", missing()))?;
+        let resolved = match kind {
+            RefKind::Commit => commit_ref(commit),
+            _ => ResolvedRef { name: name.to_string(), kind, commit, source: String::new(), fetched: false },
+        };
+        return Ok(ResolvedRef { source: dst, fetched: true, ..resolved });
+    }
+    anyhow::bail!("{} (tried {tried}, fetch from origin: {})", missing(), errors.join("; "))
+}
+
+/// What [`resolve_fetched`] fetches for `name`, in order: `(source on the
+/// remote, local destination, kind)`.
+fn remote_sources(name: &str) -> Vec<(String, String, RefKind)> {
+    let mut out = Vec::with_capacity(3);
+    if name.len() == 40 && is_hex(name) {
+        let id = name.to_ascii_lowercase();
+        out.push((id.clone(), format!("refs/rueca/commit/{id}"), RefKind::Commit));
+    }
+    out.push((format!("refs/heads/{name}"), format!("refs/remotes/origin/{name}"), RefKind::Branch));
+    out.push((format!("refs/tags/{name}"), format!("refs/tags/{name}"), RefKind::Tag));
+    out
 }
 
 /// `pr/<n>`: fetched from `origin` (GitHub's `refs/pull/<n>/head`, then
@@ -314,10 +349,83 @@ pub fn ref_slug(name: &str) -> String {
     slug
 }
 
-/// `<store>/refs/<repo-slug>/<ref-slug>/`: where ref `name` of repository
-/// `repo_id` is exported ([`rueca_segment::repo_slug`], [`ref_slug`]).
-pub fn export_dir(store: &Path, repo_id: &str, name: &str) -> PathBuf {
-    store.join("refs").join(rueca_segment::repo_slug(repo_id)).join(ref_slug(name))
+/// The path of `root` inside the working tree of its git repository (`/`
+/// separators, empty at the top or outside git): what tells two
+/// subdirectory roots of one repository apart.
+pub fn root_prefix(root: &Path) -> String {
+    let root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    git::discover(&root).map(|(_, prefix)| prefix).unwrap_or_default()
+}
+
+/// `<store>/refs/<repo-dir>/`: the directory holding the ref exports of
+/// repository `repo_id` at path `prefix` inside it ([`root_prefix`]).
+/// `<repo-dir>` is the id's slug ([`rueca_segment::repo_slug`]), then
+/// `--<prefix slug>` for a subdirectory root, then the first 8 hex digits
+/// of the hash of the id and the prefix, so that ids with the same slug and
+/// different roots of one repository never share it
+/// (`github.com/o/r` → `github-com-o-r-<hash>`, its root `web` →
+/// `github-com-o-r--web-<hash>`).
+pub fn repo_export_dir(store: &Path, repo_id: &str, prefix: &str) -> PathBuf {
+    let mut dir = rueca_segment::repo_slug(repo_id);
+    let mut key = repo_id.to_string();
+    if !prefix.is_empty() {
+        dir.push_str("--");
+        dir.push_str(&rueca_segment::repo_slug(prefix));
+        key.push('\n');
+        key.push_str(prefix);
+    }
+    dir.push('-');
+    dir.push_str(&git_blob_sha(key.as_bytes())[..8]);
+    store.join("refs").join(dir)
+}
+
+/// `<store>/refs/<repo-dir>/<ref-slug>/`: where ref `name` of repository
+/// `repo_id` at path `prefix` inside it is exported ([`repo_export_dir`],
+/// [`ref_slug`]).
+pub fn export_dir(store: &Path, repo_id: &str, prefix: &str, name: &str) -> PathBuf {
+    repo_export_dir(store, repo_id, prefix).join(ref_slug(name))
+}
+
+/// Who an export directory belongs to: written next to it as
+/// `<repo-dir>/.owners/<ref-slug>.json` (a ref slug never starts with `.`,
+/// so it never names an export; the export itself is indexed, so the marker
+/// stays out of it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+struct RefOwner {
+    repo: String,
+    /// [`root_prefix`] of the source root.
+    prefix: String,
+    #[serde(rename = "ref")]
+    ref_name: String,
+}
+
+impl RefOwner {
+    /// The marker of export directory `dir`.
+    fn path(dir: &Path) -> Option<PathBuf> {
+        let parent = dir.parent()?;
+        let name = dir.file_name()?.to_str()?;
+        Some(parent.join(".owners").join(format!("{name}.json")))
+    }
+
+    /// The marker of `dir`, if there is a readable one.
+    fn read(dir: &Path) -> Option<RefOwner> {
+        let text = fs::read(RefOwner::path(dir)?).ok()?;
+        serde_json::from_slice(&text).ok()
+    }
+
+    fn write(&self, dir: &Path) -> anyhow::Result<()> {
+        let path = RefOwner::path(dir).context("export directory has no parent")?;
+        if let Some(d) = path.parent() {
+            fs::create_dir_all(d)?;
+        }
+        fs::write(&path, serde_json::to_vec(self)?).with_context(|| format!("writing {}", path.display()))
+    }
+
+    /// Whether this marker says ref `name` (any spelling [`names_ref`]
+    /// accepts) of repository `repo` at `prefix`.
+    fn names(&self, repo: &str, prefix: &str, name: &str) -> bool {
+        self.repo == repo && self.prefix == prefix && names_ref(&self.ref_name, name)
+    }
 }
 
 /// What [`export`] wrote.
@@ -336,12 +444,17 @@ struct ExportEntry {
 /// Writes the tree of `commit` (the subtree at `repo_dir`'s path when it is a
 /// subdirectory of its working tree) to `dest`, replacing what was there.
 /// Regular and executable files only; nothing is written into the
-/// repository.
+/// repository. A commit with no such file there is an error (the root's
+/// directory does not exist at that commit), and `dest` is left as it was.
 pub fn export(repo_dir: &Path, commit: &str, dest: &Path) -> anyhow::Result<ExportReport> {
     let root = fs::canonicalize(repo_dir).with_context(|| format!("cannot access {}", repo_dir.display()))?;
     let (repo, prefix) =
         git::discover(&root).ok_or_else(|| anyhow::anyhow!("{} is not inside a git repository", root.display()))?;
     let entries = tree_entries(&repo, commit, &prefix)?;
+    if entries.is_empty() {
+        let at = if prefix.is_empty() { "the top of the repository".to_string() } else { format!("`{prefix}`") };
+        anyhow::bail!("commit {} has no files under {at}", &commit[..SHORT_COMMIT.min(commit.len())]);
+    }
     let parent = dest.parent().context("export directory has no parent")?;
     fs::create_dir_all(parent)?;
     let tmp = tempfile::Builder::new().prefix(".export-").tempdir_in(parent)?;
@@ -471,29 +584,41 @@ pub fn index_ref(opts: &RefIndexOptions) -> anyhow::Result<RefIndexReport> {
     let resolve_ms = t.elapsed().as_millis() as u64;
     let repo = crate::repo_id(&root, opts.repo.as_deref());
     let store = Store::open(&opts.store).with_context(|| format!("cannot open store {}", opts.store.display()))?;
-    let dest = export_dir(&fs::canonicalize(&opts.store)?, &repo, &resolved.name);
+    let owner = RefOwner { repo, prefix: root_prefix(&root), ref_name: resolved.name.clone() };
+    let dest = export_dir(&fs::canonicalize(&opts.store)?, &owner.repo, &owner.prefix, &resolved.name);
     let existing = entry_at(&store, &dest)?;
-    check_owner(existing.as_ref(), &repo, &resolved.name, &dest)?;
-    let base = ReportBase { resolved, repo, dest, resolve_ms, started };
+    check_owner(existing.as_ref(), &owner, &dest)?;
+    let base = ReportBase { resolved, repo: owner.repo.clone(), dest, resolve_ms, started };
     match existing.as_ref().and_then(|e| current_report(&store, e, &base.resolved, &base.dest)) {
         Some(index) => {
             info!(repo = %base.repo, r#ref = %base.resolved.name, commit = %base.resolved.commit, "ref snapshot unchanged");
             Ok(base.finish(index, ExportReport::default(), 0, true))
         }
-        None => reindex(opts, &root, base),
+        None => reindex(opts, &root, &owner, base),
     }
 }
 
-/// An export directory holds one ref of one repository: a different one
-/// there (two repository ids with the same slug) is an error, not an
-/// overwrite.
-fn check_owner(existing: Option<&CatalogEntry>, repo: &str, name: &str, dest: &Path) -> anyhow::Result<()> {
-    match existing {
-        Some(e) if e.repo != repo || e.ref_name.as_deref() != Some(name) => anyhow::bail!(
+/// An export directory holds one ref of one repository root: a different
+/// one there, by its catalog entry or its owner marker (two repository ids
+/// or roots whose directory names collide), is an error, not an overwrite.
+fn check_owner(existing: Option<&CatalogEntry>, owner: &RefOwner, dest: &Path) -> anyhow::Result<()> {
+    if let Some(e) = existing
+        && (e.repo != owner.repo || e.ref_name.as_deref() != Some(owner.ref_name.as_str()))
+    {
+        anyhow::bail!(
             "{} already holds a snapshot of `{}` (ref {}); remove it first",
             dest.display(),
             e.repo,
             e.ref_name.as_deref().unwrap_or("none")
+        );
+    }
+    match RefOwner::read(dest) {
+        Some(o) if o != *owner => anyhow::bail!(
+            "{} already holds ref {} of `{}` at `{}`; remove it first",
+            dest.display(),
+            o.ref_name,
+            o.repo,
+            if o.prefix.is_empty() { "." } else { o.prefix.as_str() }
         ),
         _ => Ok(()),
     }
@@ -528,10 +653,12 @@ impl ReportBase {
     }
 }
 
-/// Exports and indexes the ref.
-fn reindex(opts: &RefIndexOptions, root: &Path, base: ReportBase) -> anyhow::Result<RefIndexReport> {
+/// Exports the ref, records its owner and indexes it.
+fn reindex(opts: &RefIndexOptions, root: &Path, owner: &RefOwner, base: ReportBase) -> anyhow::Result<RefIndexReport> {
     let t = Instant::now();
-    let export = export(root, &base.resolved.commit, &base.dest)?;
+    let export = export(root, &base.resolved.commit, &base.dest)
+        .map_err(|e| anyhow::anyhow!("ref `{}`: {e:#}", base.resolved.name))?;
+    owner.write(&base.dest)?;
     let export_ms = t.elapsed().as_millis() as u64;
     let index = index_worktree(&IndexOptions {
         root: base.dest.clone(),
@@ -605,30 +732,42 @@ pub struct RefRemoval {
     pub export_removed: bool,
 }
 
-/// Drops ref snapshot `name` of repository `repo_id`: its catalog entry
-/// ([`Store::unregister`], which deletes the segment unless another entry
-/// or a kept organization generation references it) and its export.
+/// Drops ref snapshot `name` of repository `repo_id` at path `prefix`
+/// inside it ([`root_prefix`] of the root it was indexed from): its catalog
+/// entry ([`Store::unregister`], which deletes the segment unless another
+/// entry or a kept organization generation references it) and its export.
 /// `name` is the ref as indexed (a commit may be given by any prefix of at
-/// least 7 digits). An error when the repository has no such ref snapshot.
-pub fn remove_ref(store_dir: &Path, repo_id: &str, name: &str) -> anyhow::Result<RefRemoval> {
+/// least 7 digits). Only a directory that the catalog or its owner marker
+/// says is that ref of that root is deleted. An error when the root has no
+/// such ref snapshot.
+pub fn remove_ref(store_dir: &Path, repo_id: &str, prefix: &str, name: &str) -> anyhow::Result<RefRemoval> {
     let store = Store::open(store_dir)?;
     let store_dir = fs::canonicalize(store_dir)?;
-    let refs: Vec<CatalogEntry> =
-        store.entries()?.into_iter().filter(|e| e.repo == repo_id && e.is_ref_export()).collect();
+    let repo_dir = repo_export_dir(&store_dir, repo_id, prefix);
+    let refs: Vec<CatalogEntry> = store
+        .entries()?
+        .into_iter()
+        .filter(|e| e.repo == repo_id && e.is_ref_export() && Path::new(&e.root).parent() == Some(repo_dir.as_path()))
+        .collect();
     let entry = refs.iter().find(|e| e.ref_name.as_deref().is_some_and(|r| names_ref(r, name)));
-    let dir = entry.map_or_else(|| export_dir(&store_dir, repo_id, name), |e| PathBuf::from(&e.root));
+    let owned = || owned_export(&repo_dir, repo_id, prefix, name);
+    let (dir, recorded) = match entry {
+        Some(e) => (Some(PathBuf::from(&e.root)), e.ref_name.clone()),
+        None => owned().map_or((None, None), |(d, o)| (Some(d), Some(o.ref_name))),
+    };
     let removed = match entry {
         Some(e) => store.unregister(&e.root)?,
         None => None,
     };
-    let refs_dir = store_dir.join("refs");
-    let export_removed = dir.starts_with(&refs_dir) && dir.is_dir();
-    if export_removed {
-        fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;
-        if let Some(parent) = dir.parent() {
-            // The repository's directory goes with its last ref.
-            let _ = fs::remove_dir(parent);
+    let export_removed = match &dir {
+        Some(d) if d.starts_with(&repo_dir) && d.is_dir() => {
+            fs::remove_dir_all(d).with_context(|| format!("removing {}", d.display()))?;
+            true
         }
+        _ => false,
+    };
+    if let Some(d) = &dir {
+        drop_owner(&repo_dir, d);
     }
     if removed.is_none() && !export_removed {
         let names: Vec<&str> = refs.iter().filter_map(|e| e.ref_name.as_deref()).collect();
@@ -636,12 +775,39 @@ pub fn remove_ref(store_dir: &Path, repo_id: &str, name: &str) -> anyhow::Result
         anyhow::bail!("ref `{name}` of repository `{repo_id}` is not indexed; indexed refs: {names}");
     }
     Ok(RefRemoval {
-        ref_name: entry.and_then(|e| e.ref_name.clone()).unwrap_or_else(|| name.to_string()),
+        ref_name: recorded.unwrap_or_else(|| name.to_string()),
         repo: repo_id.to_string(),
-        export_dir: dir.to_string_lossy().into_owned(),
+        export_dir: dir.unwrap_or_else(|| export_dir(&store_dir, repo_id, prefix, name)).to_string_lossy().into_owned(),
         segment_id: removed.map(|e| e.segment_id),
         export_removed,
     })
+}
+
+/// The export under `repo_dir` whose owner marker names ref `name` of
+/// `repo` at `prefix` (an export without a catalog entry), with its marker.
+fn owned_export(repo_dir: &Path, repo: &str, prefix: &str, name: &str) -> Option<(PathBuf, RefOwner)> {
+    let candidate = repo_dir.join(ref_slug(name));
+    if let Some(o) = RefOwner::read(&candidate).filter(|o| o.names(repo, prefix, name)) {
+        return Some((candidate, o));
+    }
+    // A commit given by another prefix than the one recorded.
+    let markers = fs::read_dir(repo_dir.join(".owners")).ok()?;
+    markers.flatten().find_map(|m| {
+        let file = m.file_name();
+        let slug = file.to_str()?.strip_suffix(".json")?;
+        let dir = repo_dir.join(slug);
+        RefOwner::read(&dir).filter(|o| o.names(repo, prefix, name)).map(|o| (dir, o))
+    })
+}
+
+/// Removes the owner marker of export `dir`, then the marker directory and
+/// the repository's directory when they are empty (the last ref gone).
+fn drop_owner(repo_dir: &Path, dir: &Path) {
+    if let Some(marker) = RefOwner::path(dir) {
+        let _ = fs::remove_file(marker);
+    }
+    let _ = fs::remove_dir(repo_dir.join(".owners"));
+    let _ = fs::remove_dir(repo_dir);
 }
 
 /// Whether `given` names the ref recorded as `recorded`: equal, or both
@@ -670,8 +836,26 @@ mod tests {
         assert_eq!(ref_slug("feature/x"), fx, "deterministic");
         let long = "a/".repeat(100);
         assert!(ref_slug(&long).len() <= MAX_SLUG + 9);
-        let p = export_dir(Path::new("/s"), "github.com/o/r", "main");
-        assert_eq!(p, PathBuf::from("/s/refs/github-com-o-r/main"));
+        let p = export_dir(Path::new("/s"), "github.com/o/r", "", "main");
+        let hash = &git_blob_sha(b"github.com/o/r")[..8];
+        assert_eq!(p, PathBuf::from(format!("/s/refs/github-com-o-r-{hash}/main")));
+    }
+
+    #[test]
+    fn export_dirs_are_per_repository_and_root() {
+        let s = Path::new("/s");
+        // Ids with one slug, and two roots of one repository, never share.
+        assert_ne!(repo_export_dir(s, "acme/my.lib", ""), repo_export_dir(s, "acme/my-lib", ""));
+        assert_eq!(rueca_segment::repo_slug("acme/my.lib"), rueca_segment::repo_slug("acme/my-lib"));
+        let web = export_dir(s, "github.com/o/r", "web", "main");
+        let api = export_dir(s, "github.com/o/r", "api", "main");
+        assert_ne!(web, api);
+        assert!(web.parent().unwrap().file_name().unwrap().to_str().unwrap().starts_with("github-com-o-r--web-"));
+        assert_ne!(web, export_dir(s, "github.com/o/r", "", "main"));
+        let owner = RefOwner { repo: "r".into(), prefix: "web".into(), ref_name: "7696364aef89".into() };
+        assert!(owner.names("r", "web", "7696364") && !owner.names("r", "api", "7696364aef89"));
+        assert!(!owner.names("other", "web", "7696364aef89"));
+        assert_eq!(RefOwner::path(&web).unwrap(), web.parent().unwrap().join(".owners/main.json"));
     }
 
     #[test]

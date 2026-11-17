@@ -178,9 +178,13 @@ pub fn clone_dir(store: &Path, org_name: &str, url: &str) -> PathBuf {
 }
 
 /// Runs the `git` executable (clones and fetches: the network operations
-/// gix is not used for), failing with its stderr.
+/// gix is not used for), failing with its stderr. Credentials come from the
+/// user's credential helpers; git never prompts.
 pub(crate) fn git(args: &[&str], cwd: Option<&Path>) -> anyhow::Result<()> {
     let mut cmd = Command::new("git");
+    // Never wait on a prompt: no terminal prompt, no askpass helper (an
+    // empty `GIT_ASKPASS` also overrides `core.askPass` and `SSH_ASKPASS`).
+    cmd.env("GIT_TERMINAL_PROMPT", "0").env("GIT_ASKPASS", "");
     if let Some(d) = cwd {
         cmd.arg("-C").arg(d);
     }
@@ -350,7 +354,14 @@ impl RefSync {
     fn member(&mut self, opts: &OrgIndexOptions, r: &OrgRepoConfig, root: &Path, repo: &str) -> anyhow::Result<()> {
         let store = Store::open(&opts.store)?;
         let mut names = r.refs.clone();
-        for e in store.entries()?.into_iter().filter(|e| e.repo == repo && e.is_ref_export()) {
+        // This root's exports only: another root of the repository (a
+        // subdirectory member) has its own.
+        let mine = refs::repo_export_dir(&std::fs::canonicalize(&opts.store)?, repo, &refs::root_prefix(root));
+        let earlier = store
+            .entries()?
+            .into_iter()
+            .filter(|e| e.repo == repo && e.is_ref_export() && Path::new(&e.root).parent() == Some(mine.as_path()));
+        for e in earlier {
             let Some(name) = e.ref_name else { continue };
             if !names.iter().any(|n| refs::names_ref(&name, n)) {
                 names.push(name);
@@ -370,7 +381,9 @@ impl RefSync {
 }
 
 /// Indexes ref `name` of member `r` (repository `repo`, root `root`); for a
-/// `url` member a branch is fetched from the remote first.
+/// `url` member a branch is fetched from the remote first (a tag or a
+/// commit the shallow clone lacks is fetched on resolution). The name is
+/// validated before anything runs `git` with it.
 fn index_member_ref(
     opts: &OrgIndexOptions,
     r: &OrgRepoConfig,
@@ -378,6 +391,7 @@ fn index_member_ref(
     repo: &str,
     name: &str,
 ) -> anyhow::Result<RefIndexReport> {
+    refs::validate_ref_name(name)?;
     if matches!(r.source, RepoSource::Url(_)) {
         refresh_remote_branch(root, name);
     }
@@ -447,7 +461,7 @@ pub fn index_org_ref(opts: &OrgIndexOptions, name: &str, remove: bool) -> anyhow
     }
     let repo = crate::repo_id(root, r.id.as_deref());
     let (indexed, removed) = if remove {
-        (None, Some(refs::remove_ref(&opts.store, &repo, name)?))
+        (None, Some(refs::remove_ref(&opts.store, &repo, &refs::root_prefix(root), name)?))
     } else {
         (Some(index_member_ref(opts, r, root, &repo, name)?), None)
     };

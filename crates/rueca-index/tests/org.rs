@@ -8,7 +8,7 @@ use std::path::Path;
 use rueca_index::org::{
     OrgConfig, OrgIndexOptions, index_org, index_org_ref, update_orgs_containing, update_orgs_of_repo,
 };
-use rueca_index::refs::{self, RefIndexOptions};
+use rueca_index::refs::{self, RefIndexOptions, RefKind};
 use rueca_index::{IndexOptions, index_worktree};
 use rueca_segment::Store;
 use rueca_segment::org::{OrgGeneration, current_generation};
@@ -95,6 +95,7 @@ fn url_members_are_cloned() {
             .arg("-C")
             .arg(&remote)
             .args(["-c", "user.name=t", "-c", "user.email=t@invalid", "-c", "commit.gpgsign=false"])
+            .args(["-c", "tag.gpgsign=false"])
             .args(args)
             .output()
             .unwrap();
@@ -108,11 +109,23 @@ fn url_members_are_cloned() {
     write(&remote, "next.py", "def next_helper():\n    return 3\n");
     git(&["add", "-A"]);
     git(&["commit", "-q", "-m", "next"]);
+    // A tag on that commit: the shallow clone of `main` does not have it.
+    git(&["tag", "-a", "v-next", "-m", "release"]);
+    git(&["checkout", "-q", "-b", "side", "main"]);
+    write(&remote, "side.py", "def side_helper():\n    return 5\n");
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "side"]);
     git(&["checkout", "-q", "main"]);
+    let side = String::from_utf8(
+        std::process::Command::new("git").arg("-C").arg(&remote).args(["rev-parse", "side"]).output().unwrap().stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
     let url = format!("file://{}", remote.display());
     let store = base.join("store");
     let config = OrgConfig::parse(
-        &format!("name = \"acme\"\n[[repo]]\nurl = \"{url}\"\nid = \"local/remote\"\nrefs = [\"next\"]\n"),
+        &format!("name = \"acme\"\n[[repo]]\nurl = \"{url}\"\nid = \"local/remote\"\nrefs = [\"next\", \"v-next\"]\n"),
         &base,
     )
     .unwrap();
@@ -125,9 +138,14 @@ fn url_members_are_cloned() {
     };
     let r = index_org(&opts).unwrap();
     assert_eq!(r.update.added, ["local/remote"]);
-    // The branch of the remote (absent from the shallow clone) is fetched.
+    // The branch and the tag of the remote (absent from the shallow clone)
+    // are fetched.
     assert!(r.ref_errors.is_empty(), "{:?}", r.ref_errors);
-    assert_eq!(r.update.refs_added, ["local/remote@next"]);
+    assert_eq!(r.update.refs_added, ["local/remote@next", "local/remote@v-next"]);
+    assert_eq!(
+        (r.refs[1].kind, r.refs[1].fetched, r.refs[1].commit.as_str()),
+        (RefKind::Tag, true, r.refs[0].commit.as_str())
+    );
     let next_commit = r.refs[0].commit.clone();
     let clone = config.root_of(&config.repos[0], &store);
     assert!(clone.join("lib.py").exists() && clone.starts_with(store.join("orgs/acme/clones")));
@@ -138,7 +156,7 @@ fn url_members_are_cloned() {
     let r = index_org(&opts).unwrap();
     assert!(clone.join("more.py").exists());
     assert_eq!(r.update.replaced, ["local/remote"]);
-    assert!(r.refs[0].unchanged && r.update.refs_unchanged == 1, "{:?}", r.update);
+    assert!(r.refs[0].unchanged && r.refs[1].unchanged && r.update.refs_unchanged == 2, "{:?}", r.update);
     // A new commit on the remote's branch is followed.
     git(&["checkout", "-q", "next"]);
     write(&remote, "later.py", "def later():\n    return 4\n");
@@ -150,11 +168,21 @@ fn url_members_are_cloned() {
     assert_eq!(r.update.refs_replaced, ["local/remote@next"]);
     let g = current_generation(&store, "acme").unwrap().unwrap();
     assert_eq!(g.repos[0].url.as_deref(), Some(url.as_str()));
-    assert_eq!(g.refs_of(0).iter().map(|x| x.ref_name.as_str()).collect::<Vec<_>>(), ["main", "next"]);
+    assert_eq!(g.refs_of(0).iter().map(|x| x.ref_name.as_str()).collect::<Vec<_>>(), ["main", "next", "v-next"]);
     // One ref of a `url` member by its id.
     let by_id = OrgIndexOptions { only: Some("local/remote".into()), ..opts };
     let r = index_org_ref(&by_id, "next", true).unwrap();
     assert_eq!(r.update.refs_removed, ["local/remote@next"]);
+    // A commit the clone has never seen, by its full id.
+    let r = index_org_ref(&by_id, &side, false).unwrap();
+    let c = r.indexed.unwrap();
+    assert_eq!(
+        (c.kind, c.fetched, c.ref_name.as_str(), c.commit.as_str()),
+        (RefKind::Commit, true, &side[..12], side.as_str())
+    );
+    // A name that is not a ref is refused before git runs.
+    let e = index_org_ref(&by_id, "-x", false).unwrap_err().to_string();
+    assert!(e.contains("not a valid ref name"), "{e}");
 }
 
 /// Runs git in `dir` with a fixed identity; `false` when it fails or git is

@@ -678,7 +678,7 @@ fn ref_lists_in_get_symbol_trace_and_outline() {
     );
     let txt = text(&t.engine, "get_file_outline", json!({"path": "pkg/service.py", "ref": BOTH}));
     assert!(
-        txt.contains("pkg/service.py (python, 17 lines) changed\n")
+        txt.contains("pkg/service.py (python, 17 lines) [0] changed\n")
             && txt.contains("version [1] changed: pkg/service.py (python, 18 lines)\n"),
         "{txt}"
     );
@@ -706,4 +706,98 @@ fn ref_lists_in_get_symbol_trace_and_outline() {
     );
     let txt = text(&t.engine, "list_repositories", json!({}));
     assert!(txt.contains("github.com/acme/billing  refs main@7696364aef89, feature/x@c0ffee00c0ff  2 files"), "{txt}");
+}
+
+/// Registers the demo graph of `repo` as its ref snapshot `name` at
+/// `commit`, exported under the store.
+fn demo_ref(store: &std::path::Path, repo: &str, name: &str, commit: &str) {
+    let base = std::fs::canonicalize(store).unwrap();
+    let root = base.join("refs").join(repo.replace(['/', '.'], "-")).join(name.replace('/', "-"));
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.to_string_lossy().into_owned();
+    let (mut b, _) = demo(repo, &root);
+    b.graph.snapshot.commit = commit.into();
+    b.graph.snapshot.branch = Some(name.into());
+    b.graph.validate().expect("valid graph");
+    let meta = rueca_segment::write_segment(&b.graph, &Sources(b.sources.clone()), store).unwrap();
+    rueca_segment::Store::open(store).unwrap().register_ref(&root, &meta, name).unwrap();
+}
+
+#[test]
+fn a_ref_snapshot_wins_over_the_working_tree_of_its_name() {
+    // billing's working tree is on `main` with uncommitted changes;
+    // `rueca index . --ref main` exported the commit `main` points to.
+    let t = two();
+    demo_ref(&t.engine.store_dir, BILLING, "main", C3);
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": "main"}));
+    let snap = &r["snapshots"][0];
+    assert_eq!(
+        (snap["ref"].as_str(), snap["commit"].as_str(), snap["overlay"].as_bool()),
+        (Some("main"), Some(C3), Some(false)),
+        "{r}"
+    );
+    // The working tree is still the default, and `HEAD` / its commit name it.
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper"}));
+    assert_eq!(r["snapshots"][0]["overlay"], true, "{r}");
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": "HEAD"}));
+    assert_eq!(r["snapshots"][0]["overlay"], true, "{r}");
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": &C1[..7]}));
+    assert_eq!(r["snapshots"][0]["overlay"], true, "{r}");
+}
+
+#[test]
+fn ref_snapshots_are_not_roots_of_their_own() {
+    // One working tree and one ref snapshot, no default root: a call without
+    // `repo` reads the working tree.
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("store");
+    let root = dir.path().join("billing");
+    std::fs::create_dir_all(&root).unwrap();
+    let root = std::fs::canonicalize(&root).unwrap().to_string_lossy().into_owned();
+    demo(BILLING, &root).0.write(&store, &root);
+    feature_ref(&store);
+    let e = Engine::new(store, None).unwrap();
+    let r = call(&e, "search_symbols", json!({"query": "helper"}));
+    assert_eq!(r["snapshots"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(
+        (r["snapshots"][0]["repo"].as_str(), r["snapshots"][0]["overlay"].as_bool()),
+        (Some(BILLING), Some(false))
+    );
+    assert_ne!(r["snapshots"][0]["ref"], "feature/x", "{r}");
+    let r = call(&e, "search_symbols", json!({"query": "audit", "ref": "feature/x"}));
+    assert_eq!(r["snapshots"][0]["ref"], "feature/x", "{r}");
+}
+
+#[test]
+fn a_pull_request_without_repo_names_one_repository() {
+    let t = two();
+    let store = t.engine.store_dir.clone();
+    demo_ref(&store, BILLING, "pr/7", C3);
+    // One repository has `pr/7`: read there, the others at their default.
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "repo": "*", "ref": "pr/7"}));
+    let refs: Vec<&str> = r["snapshots"].as_array().unwrap().iter().map(|s| s["ref"].as_str().unwrap()).collect();
+    assert!(refs.contains(&"pr/7"), "{r}");
+    // Two have one: pull request numbers are per repository.
+    demo_ref(&store, WEB, "pr/7", "dead00dead00dead00dead00dead00dead00dead");
+    let e = err(&t.engine, "search_symbols", json!({"query": "x", "repo": "*", "ref": "pr/7"}));
+    assert!(
+        e.contains("`pr/7` exists in several repositories (github.com/acme/billing, github.com/acme/web): name `repo`"),
+        "{e}"
+    );
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "repo": WEB, "ref": "pr/7"}));
+    assert_eq!((r["snapshots"][0]["repo"].as_str(), r["snapshots"][0]["ref"].as_str()), (Some(WEB), Some("pr/7")));
+    // Not a pull request: every repository that has it.
+    demo_ref(&store, BILLING, "release", "1111111111111111111111111111111111111111");
+    demo_ref(&store, WEB, "release", "2222222222222222222222222222222222222222");
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "repo": "*", "ref": "release"}));
+    assert_eq!(r["snapshots"].as_array().unwrap().len(), 2, "{r}");
+}
+
+#[test]
+fn huge_cursors_do_not_overflow() {
+    let t = two_refs();
+    let r = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "cursor": "4294967295"}));
+    assert_eq!((r["results"].as_array().map(Vec::len), r["next_cursor"].clone()), (Some(0), Value::Null), "{r}");
+    let e = err(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "cursor": "18446744073709551615"}));
+    assert!(e.contains("invalid `cursor`"), "{e}");
 }

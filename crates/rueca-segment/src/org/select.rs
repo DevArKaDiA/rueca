@@ -184,33 +184,6 @@ impl OrgGeneration {
             .collect::<Vec<_>>()
             .join(", ")
     }
-
-    /// The organization as of refs `names` (RFC 0006 §9.3, `ref` without
-    /// `repo`): every repository of `repos` that has one of the refs is read
-    /// at those it has, the others at their default. An error when none of
-    /// `repos` has any of them.
-    pub fn select_everywhere(&self, repos: &[usize], names: &[&str]) -> Result<OrgSelection> {
-        let mut sel = OrgSelection::default();
-        for &repo in repos {
-            let slots: Vec<OrgSlot> = names.iter().filter_map(|n| self.find_ref(repo, n)).collect();
-            if !slots.is_empty() {
-                sel.set(repo, slots);
-            }
-        }
-        if sel.chosen.is_empty() && !names.is_empty() {
-            let indexed: Vec<String> = repos
-                .iter()
-                .filter_map(|&i| self.repos.get(i).map(|r| format!("{}: {}", r.repo, self.indexed_refs(i))))
-                .collect();
-            return Err(SegmentError::NotFound(format!(
-                "no repository of organization `{}` has ref `{}`; indexed refs: {}",
-                self.name,
-                names.join("`, `"),
-                indexed.join("; ")
-            )));
-        }
-        Ok(sel)
-    }
 }
 
 /// Which slots of each repository a query reads: every repository at its
@@ -291,27 +264,47 @@ fn node_key(seg: &Segment, n: NodeId) -> NodeKey<'_> {
     (node.label, node.qualified_name.as_str(), path)
 }
 
+/// Source order of node `n` among nodes with one key: start byte, then id.
+fn source_order(seg: &Segment, n: NodeId) -> (u32, NodeId) {
+    (seg.node(n).span.map_or(u32::MAX, |s| s.start_byte), n)
+}
+
+/// The nodes of `seg` whose key is one of `keys`, grouped by key in source
+/// order.
+fn nodes_by_key<'a>(seg: &'a Segment, keys: &HashSet<NodeKey<'_>>) -> HashMap<NodeKey<'a>, Vec<NodeId>> {
+    let mut out: HashMap<NodeKey<'a>, Vec<NodeId>> = HashMap::with_capacity(keys.len());
+    for n in 0..seg.nodes().len() as NodeId {
+        let key = node_key(seg, n);
+        if keys.contains(&key) {
+            out.entry(key).or_default().push(n);
+        }
+    }
+    for nodes in out.values_mut() {
+        nodes.sort_unstable_by_key(|&n| source_order(seg, n));
+    }
+    out
+}
+
 impl Remap {
     /// Maps `targets` (nodes of `default`) to the nodes of `at_ref` with
-    /// the same key (the first such node of each side).
+    /// the same key. Several nodes with one key (a property's getter and
+    /// setter, overloads) pair by position in source order; a node past
+    /// the other side's count has no counterpart.
     pub(crate) fn build(default: &Segment, at_ref: &Segment, targets: &HashSet<NodeId>) -> Remap {
-        let mut wanted: HashMap<NodeKey<'_>, NodeId> = HashMap::with_capacity(targets.len());
-        let mut sorted: Vec<NodeId> =
-            targets.iter().copied().filter(|&n| (n as usize) < default.nodes().len()).collect();
-        sorted.sort_unstable();
-        for n in sorted {
-            wanted.entry(node_key(default, n)).or_insert(n);
-        }
         let mut out = Remap::default();
-        if wanted.is_empty() {
+        let n_default = default.nodes().len();
+        let keys: HashSet<NodeKey<'_>> =
+            targets.iter().filter(|&&n| (n as usize) < n_default).map(|&n| node_key(default, n)).collect();
+        if keys.is_empty() {
             return out;
         }
-        for i in 0..at_ref.nodes().len() as NodeId {
-            if let Some(&d) = wanted.get(&node_key(at_ref, i))
-                && !out.to_ref.contains_key(&d)
-            {
-                out.to_ref.insert(d, i);
-                out.to_default.insert(i, d);
+        let ours = nodes_by_key(default, &keys);
+        let theirs = nodes_by_key(at_ref, &keys);
+        for (key, nodes) in &ours {
+            let Some(mapped) = theirs.get(key) else { continue };
+            for (&d, &r) in nodes.iter().zip(mapped).filter(|(d, _)| targets.contains(d)) {
+                out.to_ref.insert(d, r);
+                out.to_default.insert(r, d);
             }
         }
         out
@@ -340,5 +333,89 @@ mod tests {
         assert_eq!(s.slots_of(0), [OrgSlot::default_of(0)]);
         s.set(1, Vec::new());
         assert!(s.is_default());
+    }
+
+    struct Src(String);
+
+    impl crate::ContentSource for Src {
+        fn content(&self, _: &rueca_model::FileEntry) -> std::io::Result<Vec<u8>> {
+            Ok(self.0.clone().into_bytes())
+        }
+    }
+
+    /// A segment of one Python file `m.py` whose `def <name>(` lines are
+    /// functions `m.<name>` (a property's getter and setter share a name).
+    fn segment(store: &crate::Store, commit: &str, src: &str) -> Segment {
+        use rueca_model::{FileEntry, Language, Node, ResolvedGraph, Span};
+        let node = |label, name: &str, qn: &str, span| Node {
+            label,
+            name: name.into(),
+            qualified_name: qn.into(),
+            file: Some(0),
+            span,
+            language: Some(Language::Python),
+            signature: None,
+            doc: None,
+            exported: true,
+            is_test: false,
+        };
+        let mut nodes = vec![node(Label::File, "m.py", "m.py", None)];
+        let mut at = 0;
+        for (line, text) in src.lines().enumerate() {
+            if let Some(name) = text.strip_prefix("def ").and_then(|r| r.split('(').next()) {
+                let (b, l) = (at as u32, line as u32);
+                let span = Span {
+                    start_byte: b,
+                    end_byte: b + text.len() as u32,
+                    start_line: l,
+                    start_col: 0,
+                    end_line: l,
+                    end_col: 0,
+                };
+                nodes.push(node(Label::Function, name, &format!("m.{name}"), Some(span)));
+            }
+            at += text.len() + 1;
+        }
+        let snapshot = SnapshotInfo {
+            repo: "r".into(),
+            commit: commit.into(),
+            dirty: false,
+            branch: None,
+            root: None,
+            indexed_at: 0,
+            rueca_version: "test".into(),
+        };
+        let files = vec![FileEntry {
+            path: "m.py".into(),
+            blob_sha: rueca_model::git_blob_sha(src.as_bytes()),
+            language: Some(Language::Python),
+            size: src.len() as u64,
+            line_count: src.lines().count() as u32,
+            node: 0,
+            status: "ok".into(),
+        }];
+        let g = ResolvedGraph { snapshot, nodes, edges: vec![], files, modules: vec![] };
+        let meta = crate::write_segment(&g, &Src(src.into()), &store.dir).unwrap();
+        store.open_segment(&meta.id).unwrap()
+    }
+
+    #[test]
+    fn same_named_nodes_pair_in_source_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::Store::open(dir.path()).unwrap();
+        let default = segment(&store, "c1", "def prop(self):\ndef prop(self, v):\n");
+        // A function before them shifts every id.
+        let at_ref = segment(&store, "c2", "def first():\ndef prop(self):\ndef prop(self, v):\n");
+        let (get, set) = (1, 2);
+        let m = Remap::build(&default, &at_ref, &HashSet::from([get, set]));
+        assert_eq!((m.to_ref.get(&get), m.to_ref.get(&set)), (Some(&2), Some(&3)));
+        assert_eq!((m.to_default.get(&2), m.to_default.get(&3)), (Some(&get), Some(&set)));
+        // Only the setter targeted: still paired with the ref's second.
+        let m = Remap::build(&default, &at_ref, &HashSet::from([set]));
+        assert_eq!((m.to_ref.len(), m.to_ref.get(&set)), (1, Some(&3)));
+        // The ref has one: the second has no counterpart.
+        let one = segment(&store, "c3", "def prop(self):\n");
+        let m = Remap::build(&default, &one, &HashSet::from([get, set]));
+        assert_eq!((m.to_ref.get(&get), m.to_ref.get(&set)), (Some(&1), None));
     }
 }

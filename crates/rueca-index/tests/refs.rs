@@ -130,7 +130,7 @@ fn branch_snapshot_next_to_the_working_tree() {
     assert_eq!(rf.root, r.export_dir);
     let store_canon = fs::canonicalize(store).unwrap();
     assert!(Path::new(&rf.root).starts_with(store_canon.join("refs")), "{}", rf.root);
-    assert_eq!(PathBuf::from(&rf.root), refs::export_dir(&store_canon, &r.repo, "feature/x"));
+    assert_eq!(PathBuf::from(&rf.root), refs::export_dir(&store_canon, &r.repo, "", "feature/x"));
 
     // The ref snapshot is pinned to the ref; the working tree is untouched.
     let seg = open(store, rf);
@@ -163,7 +163,7 @@ fn branch_snapshot_next_to_the_working_tree() {
     assert!(has_name(&open(store, &entries(store).into_iter().find(|e| e.is_ref_export()).unwrap()), "later"));
 
     // Removal drops the entry, its segment and the export; the working tree stays.
-    let gone = refs::remove_ref(store, &r.repo, "feature/x").unwrap();
+    let gone = refs::remove_ref(store, &r.repo, "", "feature/x").unwrap();
     assert!(gone.export_removed);
     assert_eq!(gone.segment_id.as_deref(), Some(moved.index.segment.id.as_str()));
     assert!(!Path::new(&r.export_dir).exists());
@@ -171,7 +171,7 @@ fn branch_snapshot_next_to_the_working_tree() {
     let left = entries(store);
     assert_eq!(left.len(), 1);
     assert!(!left[0].is_ref_export());
-    let err = refs::remove_ref(store, &r.repo, "feature/x").unwrap_err().to_string();
+    let err = refs::remove_ref(store, &r.repo, "", "feature/x").unwrap_err().to_string();
     assert!(err.contains("is not indexed"), "{err}");
 }
 
@@ -204,14 +204,74 @@ fn tags_commits_subdirectories_and_errors() {
     let seg = open(store, &entries(store).into_iter().find(|e| e.is_ref_export()).unwrap());
     assert_eq!(seg.snapshot().branch.as_deref(), Some(&first[..12]));
     assert!(seg.file_by_path("README.md").is_none(), "README.md came with the second commit");
-    assert!(refs::remove_ref(store, &r.repo, &first[..9]).unwrap().export_removed);
+    assert!(refs::remove_ref(store, &r.repo, "", &first[..9]).unwrap().export_removed);
 
     // A subdirectory root exports (and indexes) only its subtree.
-    let sub = refs::index_ref(&ref_options(&root.join("pkg"), store, "feature/x")).unwrap();
+    // (Both roots carry the repository's id, as with an `origin` remote.)
+    let mono = |dir: &str, name: &str| RefIndexOptions {
+        repo: Some("github.com/acme/mono".into()),
+        ..ref_options(&root.join(dir), store, name)
+    };
+    let sub = refs::index_ref(&mono("pkg", "feature/x")).unwrap();
     assert_eq!(sub.export.files, 3);
     let seg = open(store, &entries(store).into_iter().find(|e| e.is_ref_export()).unwrap());
     assert!(seg.file_by_path("util.py").is_some() && seg.file_by_path("extra.py").is_some());
     assert!(seg.file_by_path("app.py").is_none());
+
+    // Another subdirectory root of the same repository, same ref: an export
+    // of its own, not `pkg`'s.
+    let web = refs::index_ref(&mono("web", "feature/x")).unwrap();
+    assert!(!web.unchanged, "not taken for pkg's snapshot");
+    assert_eq!((web.repo.as_str(), web.export.files), (sub.repo.as_str(), 1));
+    assert_ne!(web.export_dir, sub.export_dir);
+    assert!(Path::new(&sub.export_dir).join("util.py").exists() && Path::new(&web.export_dir).join("math.ts").exists());
+    // Removing pkg's ref leaves web's.
+    let gone = refs::remove_ref(store, &sub.repo, "pkg", "feature/x").unwrap();
+    assert_eq!(gone.export_dir, sub.export_dir);
+    assert!(!Path::new(&sub.export_dir).exists() && Path::new(&web.export_dir).join("math.ts").exists());
+    let left: Vec<String> = entries(store).into_iter().filter(|e| e.is_ref_export()).map(|e| e.root).collect();
+    assert_eq!(left, std::slice::from_ref(&web.export_dir));
+
+    // A ref where the root's directory does not exist is an error, and
+    // leaves nothing behind.
+    let err = refs::index_ref(&mono("web", &first[..12])).unwrap_err().to_string();
+    assert!(err.contains("has no files under `web`") && err.contains(&first[..12]), "{err}");
+    assert_eq!(entries(store).into_iter().filter(|e| e.is_ref_export()).count(), 1);
+}
+
+#[test]
+fn colliding_repository_slugs_keep_their_exports() {
+    let project = tempfile::tempdir().unwrap();
+    let store_dir = tempfile::tempdir().unwrap();
+    let root = &fs::canonicalize(project.path()).unwrap();
+    let store = store_dir.path();
+    if fixture(root).is_none() {
+        return;
+    }
+    // `acme/my.lib` and `acme/my-lib` have one slug.
+    let dot = RefIndexOptions { repo: Some("acme/my.lib".into()), ..ref_options(root, store, "main") };
+    let dash = RefIndexOptions { repo: Some("acme/my-lib".into()), ..ref_options(root, store, "main") };
+    let a = refs::index_ref(&dot).unwrap();
+    let b = refs::index_ref(&dash).unwrap();
+    assert!(!b.unchanged, "the second repository is indexed, not refused or taken for the first");
+    assert_ne!(a.export_dir, b.export_dir);
+    // Removing one never deletes the other's export.
+    refs::remove_ref(store, "acme/my-lib", "", "main").unwrap();
+    assert!(Path::new(&a.export_dir).join("app.py").exists() && !Path::new(&b.export_dir).exists());
+    let err = refs::remove_ref(store, "acme/my-lib", "", "main").unwrap_err().to_string();
+    assert!(err.contains("is not indexed"), "{err}");
+    assert!(Path::new(&a.export_dir).join("app.py").exists());
+    // An export without a catalog entry is removed only by its owner.
+    let store_canon = fs::canonicalize(store).unwrap();
+    let orphan = refs::export_dir(&store_canon, "acme/other", "", "main");
+    fs::create_dir_all(&orphan).unwrap();
+    assert!(refs::remove_ref(store, "acme/other", "", "main").is_err());
+    assert!(orphan.exists(), "no owner marker: not deleted");
+    let e = entries(store).into_iter().find(|e| e.is_ref_export()).unwrap();
+    Store::open(store).unwrap().unregister(&e.root).unwrap();
+    let gone = refs::remove_ref(store, "acme/my.lib", "", "main").unwrap();
+    assert!(gone.export_removed && !Path::new(&a.export_dir).exists());
+    assert!(!Path::new(&a.export_dir).parent().unwrap().exists(), "the repository's directory goes with its last ref");
 }
 
 #[test]

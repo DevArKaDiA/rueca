@@ -744,3 +744,41 @@ fn refs_respect_visibility_and_are_listed() {
     let m = err(&hidden, "get_symbol", json!({"id": format!("{PAYMENTS}@c0ffee00c0ff:payments/aaa.py#audit")}));
     assert!(m.contains("not indexed in organization") && !m.contains("keep"), "{m}");
 }
+
+#[test]
+fn a_pull_request_without_repo_names_one_visible_repository() {
+    let f = refs_fixture();
+    payments_ref(&f.store, "pr/7", KEEP, |b| {
+        b.file("payments/charge.py", CHARGE_PY);
+    });
+    let root = std::fs::canonicalize(&f.store).unwrap().join("refs").join("github-com-acme-billing").join("pr-7");
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.to_string_lossy().into_owned();
+    let (mut b, _) = demo(BILLING, &root);
+    b.graph.snapshot.commit = RENAME.into();
+    b.graph.snapshot.branch = Some("pr/7".into());
+    let meta = rueca_segment::write_segment(&b.graph, &Sources(b.sources.clone()), &f.store).unwrap();
+    Store::open(&f.store).unwrap().register_ref(&root, &meta, "pr/7").unwrap();
+    let st = Store::open(&f.store).unwrap();
+    let members: Vec<OrgMember> = f.roots.iter().map(|r| OrgMember { root: r.clone(), ..Default::default() }).collect();
+    org::update_org_with(&st, "acme", &members, &FakeLinker).unwrap();
+
+    let e = f.engine();
+    let m = err(&e, "search_symbols", json!({"query": "x", "ref": "pr/7"}));
+    assert!(
+        m.contains(
+            "`pr/7` exists in several repositories (github.com/acme/billing, github.com/acme/payments): name `repo`"
+        ),
+        "{m}"
+    );
+    let v = call(&e, "search_symbols", json!({"query": "charge card", "repo": PAYMENTS, "ref": "pr/7"}));
+    assert_eq!(v["snapshots"][0]["ref"], "pr/7", "{v}");
+    // Only one visible repository has it: accepted, and nothing names the
+    // hidden one.
+    let hidden = f
+        .engine()
+        .with_visibility(Visibility::Repos([BILLING.to_string(), SHIPPING.to_string()].into_iter().collect()));
+    let v = call(&hidden, "search_symbols", json!({"query": "helper", "ref": "pr/7"}));
+    assert!(!v.to_string().contains("payments"), "{v}");
+    assert!(v["snapshots"].as_array().unwrap().iter().any(|s| s["repo"] == BILLING && s["ref"] == "pr/7"), "{v}");
+}
