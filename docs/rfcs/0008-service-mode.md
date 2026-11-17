@@ -7,7 +7,7 @@
   `ref`), RFC 0006 (organization layer, refs, generations), RFC 0007
   (embeddings, §5.5 vector cache, §8.3 service mode)
 - Amends: RFC 0001 §5, §8.3, §8.4, §13, §14, §19 open questions 1, 5, 7,
-  8; RFC 0002 §7.1; RFC 0006 §9.3, §12 open questions 5, 6, 9; RFC 0007
+  8; RFC 0002 §7.1, §7.3, §9; RFC 0006 §9.3, §12 open questions 5, 6, 9; RFC 0007
   §8.3, §15 open question 8
 - Research date: 2026-11-17. Crate versions, specifications, host
   documentation and comparable systems were checked that day (§15). Code
@@ -39,9 +39,10 @@ on HTTP.
    open them as today; they poll the generation pointer with a
    conditional GET every 5 s. Hotcache and range reads are phase 4,
    gated on measured time to ready.
-4. **MCP over Streamable HTTP, stateless**: `rmcp` 3.10 behind `axum` 0.8
-   at `/mcp`, JSON responses, no sessions, no SSE; a per-request deadline
-   inside the engine, where none exists today.
+4. **MCP over Streamable HTTP, stateless**: Rueca's own transport on
+   `axum` 0.8 at `/mcp` (owner decision, §6.1: no `rmcp`), JSON responses,
+   no sessions, no SSE; a per-request deadline inside the engine, where
+   none exists today.
 5. **Authentication** is a Rueca tower layer: an OAuth 2.1 resource
    server (MCP 2026-07-28) validating JWTs of external OIDC issuers, plus
    static API tokens; no embedded authorization server. A principal maps
@@ -135,7 +136,7 @@ embeddings. Local mode unchanged in behaviour, numbers and store.
      ▼                    │                             ▼                ▼
  ┌─────────── indexer role (1..N) ────────────┐  ┌──── query role (1..N, stateless) ───┐
  │ /webhooks/* → desired state (job objects)  │  │ auth · rate limit · deadline        │
- │ lease job (CAS) → `rueca index-worker`     │  │ rmcp StreamableHttpService          │
+ │ lease job (CAS) → `rueca index-worker`     │  │ Streamable HTTP (Rueca's own)       │
  │ bare git mirrors, facts cache (local disk) │  │ Engine (organization mode)          │
  │ org updater (one leader): reconcile,       │  │ disk cache: segments, packs, index  │
  │   generations, garbage collection          │  │ /healthz /readyz /metrics           │
@@ -156,7 +157,7 @@ one process.
 
 | Component | `query` | `indexer` | `all` |
 |---|---|---|---|
-| `/mcp` (rmcp, auth, visibility, deadline) | yes | no | yes |
+| `/mcp` (Streamable HTTP, auth, visibility, deadline) | yes | no | yes |
 | `/healthz`, `/readyz`, `/metrics`, `/status` | yes | yes | yes |
 | `/webhooks/*`, `/admin/*` | no (404) | yes | yes |
 | Generation watcher (`org.json`, 5 s) and disk cache | yes | no | yes |
@@ -600,31 +601,45 @@ a segment is still a local file; only how it arrives changes.
 
 ### 6.1 Transport
 
+**Owner decision (2026-11-17): no `rmcp`.** On the research date `cargo
+deny` failed on `main` with RUSTSEC-2026-0543, `chrono` unmaintained
+([advisory](https://rustsec.org/advisories/RUSTSEC-2026-0543)); `chrono`
+reaches Rueca only through `rmcp` 3.10.0 (directly, and through its
+`schemars` dependency, `cargo tree -i chrono` at `c82029013c6d`). The
+owner rejected ignoring the advisory and chose a minimal MCP layer of
+Rueca's own (branch `refactor/mcp-without-rmcp`: JSON-RPC `initialize`,
+`tools/list`, `tools/call`, `ping`, stdio first, a transport abstraction
+for HTTP) over a dependency tree Rueca does not control. The first draft
+of this section ran rmcp's `transport-streamable-http-server` under
+`axum`; the behaviour chosen then is kept, the implementation is Rueca's.
+
 | Item | Choice | Source |
 |---|---|---|
-| SDK | `rmcp` 3.10.0: `server`, `transport-io`, `transport-streamable-http-server` | [versions](https://crates.io/api/v1/crates/rmcp/versions): Apache-2.0, MSRV 1.88; `Cargo.lock` already resolves 3.10.0, `crates/rueca-mcp/Cargo.toml` says `"3.7"` |
-| HTTP | `axum` 0.8.9, `hyper` 1.12.0, `tower-http` 0.7.1 (`trace`, `limit`, `timeout`) | rmcp pulls neither axum nor hyper ([dependencies](https://crates.io/api/v1/crates/rmcp/3.10.0/dependencies)) |
-| Mount | `Router::new().nest_service("/mcp", StreamableHttpService::new(…))`, `session::never` | [example](https://github.com/modelcontextprotocol/rust-sdk/blob/main/examples/servers/src/counter_streamhttp.rs), [docs](https://docs.rs/rmcp/3.7.0/rmcp/transport/streamable_http_server/) |
+| MCP layer | `rueca-mcp` without an SDK: JSON-RPC 2.0 over a `Transport` trait (stdio today, HTTP here); `Engine::respond` unchanged behind it | the replacement branch above; the stdio seam `serve<T>` (`crates/rueca-mcp/src/lib.rs:377-384` at `c82029013c6d`) |
+| HTTP | `axum` 0.8.9 (MIT, MSRV 1.80), `hyper` 1.12.0, `tower-http` 0.7.1 (`trace`, `limit`, `timeout`) | [tower-http](https://crates.io/crates/tower-http) |
+| Mount | `Router::new().route("/mcp", post(mcp_handler))`; no `GET`, no `DELETE` | §6.2 |
+| Protocol versions | 2026-07-28 (stateless, `server/discover`) and the handshake versions the stdio layer serves, every one served statelessly | [changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog) |
 
-`StreamableHttpServerConfig`:
+Transport behaviour, the same choices made against rmcp's
+`StreamableHttpServerConfig` and now Rueca's own (`[http]`, §4.4):
 
-| Field | rmcp default | Rueca | Why |
-|---|---|---|---|
-| `legacy_session_mode` | `true` | **`false`** | stateless for every version (SEP-2567 already makes 2026-07-28 requests stateless) |
-| `json_response` | `false` | **`true`** | tool calls are short: one JSON body, no SSE, no affinity |
-| `allowed_hosts` | loopback | config + canonical host | public deployments must override |
-| `allowed_origins` | empty (off) | config + canonical origin | `Origin` MUST be validated |
-| `max_request_body_bytes` | 4 MiB | 1 MiB *(default)* | 413 above |
-| `session_store` | `None` | `None` | no sessions |
-| `stateless_protocol_metadata_required` | `false` | `false` | older clients |
-| `cancellation_token` | — | server shutdown token | graceful drain |
+| Behaviour | Rueca | Why |
+|---|---|---|
+| Sessions | none: `Mcp-Session-Id` ignored, never minted; `initialize` answered statelessly | stateless for every version (SEP-2567 already makes 2026-07-28 requests stateless) |
+| Response body | always `application/json`, one JSON-RPC response per `POST`; no SSE | tool calls are short: one body, no stream, no load-balancer affinity (§13, question 11) |
+| `allowed_hosts` | `[http].allowed_hosts` + the canonical host; loopback when unset | public deployments must set it |
+| `allowed_origins` | `[http].allowed_origins` + the canonical origin | `Origin` MUST be validated (403) |
+| `max_body_bytes` | 1 MiB *(default)* | 413 above |
+| Required headers | `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` checked against `_meta` by the handler itself | §6.2; tested in phase 1 |
+| Shutdown | the server stops accepting, drains in-flight calls up to `request_timeout`, exits | graceful drain |
 
-Handlers keep today's dispatch: `call_tool` → `spawn_blocking` →
-`call_blocking` → `Engine::respond` (`crates/rueca-mcp/src/lib.rs:149-183`).
-The validated principal reaches the handler through
-`RequestContext.extensions` (raw `http::request::Parts`) and selects that
-call's `Visibility`. `serve<T>` (`lib.rs:377-384`) stays the stdio seam;
-`IndexGate` and `INDEX_WAIT` (120 s, `lib.rs:188`) are local only.
+Handlers keep today's dispatch: a tool call → `spawn_blocking` →
+`Engine::respond` (`call_tool` → `call_blocking`,
+`crates/rueca-mcp/src/lib.rs:149-183` at `c82029013c6d`; the replacement
+keeps the shape). The validated principal travels as an `axum`
+request extension into the handler and selects that call's
+`Visibility`. `IndexGate` and `INDEX_WAIT` (120 s, `lib.rs:188`) are
+local only.
 
 ### 6.2 Specification behaviours (MCP 2026-07-28)
 
@@ -640,22 +655,25 @@ and the [changelog](https://modelcontextprotocol.io/specification/2026-07-28/cha
 | `Origin` or `Host` not allowed | `403` |
 | Body over the limit | `413` |
 | `Mcp-Session-Id`, `Last-Event-ID` | ignored, never minted |
-| `server/discover` | answered (MUST, SEP-2575; the stdio server already does, `lib.rs:386-392`) |
+| `server/discover` | answered (MUST, SEP-2575; the stdio server already does, `lib.rs:386-392` at `c82029013c6d`) |
 
 Rueca sends no server-initiated messages, so the removed GET stream costs
-nothing; `tools/list` keeps its 1 h `CacheScope::Public` TTL (`lib.rs:141-142`; the
-list does not depend on the principal). rmcp's enforcement of the `Mcp-Name` /
-body match is *(unverified)*: phase 1 tests it. 2025-11-25 clients
+nothing; `tools/list` keeps a 1 h public cache TTL (`ttlMs` /
+`cacheScope`, SEP-2549; today's stdio server sets it, `lib.rs:141-142`;
+the list does not depend on the principal). The `Mcp-Method` / `Mcp-Name`
+/ body match is Rueca's own check, tested in phase 1. 2025-11-25 clients
 ([transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports))
 that `initialize` and send `MCP-Session-Id` are served statelessly.
 
 ### 6.3 Authentication
 
-rmcp's auth is client-side only
-([OAUTH_SUPPORT.md](https://github.com/modelcontextprotocol/rust-sdk/blob/main/docs/OAUTH_SUPPORT.md));
-its server examples check tokens themselves
-([examples](https://github.com/modelcontextprotocol/rust-sdk/tree/main/examples/servers/src)).
-The resource-server layer is Rueca's (RFC 0001 §13), per the
+No SDK supplies the server side: the official Rust SDK's auth is
+client-side only
+([OAUTH_SUPPORT.md](https://github.com/modelcontextprotocol/rust-sdk/blob/main/docs/OAUTH_SUPPORT.md))
+and its server examples check tokens themselves
+([examples](https://github.com/modelcontextprotocol/rust-sdk/tree/main/examples/servers/src)),
+so dropping it (§6.1) removes nothing here. The resource-server layer is
+Rueca's (RFC 0001 §13), per the
 [2026-07-28 authorization spec](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization).
 
 **Protected Resource Metadata** ([RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)),
@@ -776,7 +794,7 @@ set:
   a trusted proxy). Per process; a global limit belongs to the gateway.
   Over the limit: `429` with `Retry-After`.
 - Layer order: trace → body limit → IP limiter → auth → principal limiter
-  → timeout → rmcp.
+  → timeout → the MCP handler.
 
 ### 6.6 Observability
 
@@ -1381,6 +1399,9 @@ repository names. Code reaches an embedding provider only with
   nor a `SKIP LOCKED` table; job objects leased by CAS (§7.5).
 - **RFC 0002 §7.1** — the fetch pattern and its Bitbucket sentence take
   the same three corrections.
+- **RFC 0002 §7.3 and §9** — `rmcp` leaves the dependency table: the MCP
+  layer is Rueca's own (§6.1, owner decision of 2026-11-17); the
+  resource-server auth row stays Rueca's as it already was.
 - **RFC 0006 §9.3** — "service mode will materialize refs from the object
   store": as built, refs are exported from a bare mirror on the indexer
   and indexed as `index_ref` does (§7.7); snapshot, ref naming and error
@@ -1415,6 +1436,11 @@ repository names. Code reaches an embedding provider only with
   ([Blackbird](https://github.blog/engineering/architecture-optimization/the-technology-behind-githubs-new-code-search/)),
   but needs global reference counting and a mutable index; Rueca's unit
   is the repository, and refs of a repository still share packs.
+- **`rmcp`'s `transport-streamable-http-server`** (the first draft of
+  §6.1): a maintained, spec-tracking server transport, but its dependency
+  tree carries `chrono` (RUSTSEC-2026-0543) and the owner would not
+  ignore the advisory; Rueca's MCP surface is four methods, small enough
+  to own (§6.1).
 - **Stateful sessions with a session store**: affinity or shared state
   for no benefit; tools are request/response, and 2026-07-28 removed
   sessions (SEP-2567).
@@ -1443,44 +1469,47 @@ repository names. Code reaches an embedding provider only with
 
 ## 13. Open questions
 
-1. **CAS-only catalog or Postgres?** Recommendation: CAS only until
-   `rueca_cas_conflicts_total` shows retries above a few percent of
-   catalog writes on a real organization.
-2. **S3-compatible store for CI**, MinIO's repository being archived
-   (AGPL-3.0). Recommendation: in-memory in CI; nightly against a real
+All fourteen were decided by the owner on 2026-11-17 with the
+recommendation given; the "revisit if" notes stay.
+
+1. ~~**CAS-only catalog or Postgres?**~~ Decided (§5, §10): CAS only;
+   revisit if `rueca_cas_conflicts_total` shows retries above a few
+   percent of catalog writes on a real organization (phase 4).
+2. ~~**S3-compatible store for CI**, MinIO's repository being archived
+   (AGPL-3.0).~~ Decided (§8.2): in-memory in CI; nightly against a real
    bucket (S3, GCS or Azure, the targets of §5.10's table) rather than an
    emulator: Garage does not support conditional writes
    ([maintainer](https://news.ycombinator.com/item?id=46326984)) and
    LocalStack implements `If-Match`
    ([#11941](https://github.com/localstack/localstack/pull/11941)) but its
    `If-None-Match` is *(unverified)*; an emulator that passes the phase 0
-   CAS tests may replace the bucket. The owner picks.
-3. **PR expiry defaults** (closed + 7 days, 14 days unread).
-   Recommendation: as stated.
-4. **Static tokens long-term, or OIDC only?** Recommendation: keep them
+   CAS tests may replace the bucket later.
+3. ~~**PR expiry defaults** (closed + 7 days, 14 days unread).~~ Decided
+   (§5.8): as stated; both are configuration keys.
+4. ~~**Static tokens long-term, or OIDC only?**~~ Decided (§6.3): kept,
    for CI jobs and agents without an identity provider.
-5. **Per-repository packs** give up cross-repository dedup.
-   Recommendation: per repository; measure duplicated bytes on the
-   organization suite in phase 2.
-6. **Child process per job or per blob?** Recommendation: per job.
-7. **Operational endpoints beyond MCP.** Recommendation: §6.8's set only.
-8. **Hotcache timing.** Recommendation: phase 4, unless the bench
-   organization's time to ready exceeds 60 s.
-9. **`allow_remote` default.** Recommendation: `false`.
-10. **Inventory discovery here (phase 3) or in Org mode?**
-    Recommendation: here, one list call per reconcile; permissions in Org
-    mode.
-11. **`json_response = true`, no streaming.** Recommendation: yes; revisit
-    if a tool ever streams.
-12. **Read evidence for idle expiry** gives query replicas one
-    create-only prefix, against "query = read-only" (§5.8).
-    Recommendation: accept it; `pr_idle = "0"` restores strictly
-    read-only replicas.
-13. **`Authenticator` returns a future**, since JWKS refresh is I/O
-    (§6.3). Recommendation: accept the change to the decided signature.
-14. **`git` version in the images** (Ubuntu 24.04 ships 2.43,
-    §4.3). Recommendation: one `git` build stage for both
-    images, asserted at build time.
+5. ~~**Per-repository packs** give up cross-repository dedup.~~ Decided
+   (§5.1): per repository; phase 2 measures duplicated bytes on the
+   organization suite and §12's global packs are the fallback.
+6. ~~**Child process per job or per blob?**~~ Decided (§7.8): per job, one
+   child per ref.
+7. ~~**Operational endpoints beyond MCP.**~~ Decided (§6.8): that set only.
+8. ~~**Hotcache timing.**~~ Decided (§5.6, §10): phase 4; starts early if
+   the bench organization's time to ready exceeds 60 s.
+9. ~~**`allow_remote` default.**~~ Decided (§7.11): `false`.
+10. ~~**Inventory discovery here (phase 3) or in Org mode?**~~ Decided
+    (§7.1): here, one list call per reconcile; permissions in Org mode.
+11. ~~**JSON responses only, no streaming.**~~ Decided (§6.1): yes;
+    revisit if a tool ever streams.
+12. ~~**Read evidence for idle expiry** gives query replicas one
+    create-only prefix, against "query = read-only" (§5.8).~~ Decided
+    (§5.8): accepted; `pr_idle = "0"` restores strictly read-only
+    replicas.
+13. ~~**`Authenticator` returns a future**, since JWKS refresh is I/O
+    (§6.3).~~ Decided (§6.3): accepted.
+14. ~~**`git` version in the images** (Ubuntu 24.04 ships 2.43,
+    §4.3).~~ Decided (§4.3): one `git` build stage for both images,
+    asserted at build time.
 
 ## 14. Dogfood notes: where Rueca failed while writing this RFC
 
@@ -1530,7 +1559,7 @@ or section; `search_symbols` with `labels: ["EnvVar"]` listed every
 
 All consulted on 2026-11-17.
 
-- **MCP and rmcp:** https://modelcontextprotocol.io/specification/2026-07-28/basic/transports · https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http · https://modelcontextprotocol.io/specification/2026-07-28/changelog · https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization · https://modelcontextprotocol.io/specification/2025-11-25/basic/transports · https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization · https://modelcontextprotocol.io/specification/2025-11-25/changelog · https://modelcontextprotocol.io/specification/2025-06-18/changelog · https://crates.io/api/v1/crates/rmcp/versions · https://crates.io/api/v1/crates/rmcp/3.10.0/dependencies · https://docs.rs/rmcp/3.7.0/rmcp/transport/streamable_http_server/ · https://github.com/modelcontextprotocol/rust-sdk/blob/main/crates/rmcp/CHANGELOG.md · https://github.com/modelcontextprotocol/rust-sdk/blob/main/docs/OAUTH_SUPPORT.md · https://github.com/modelcontextprotocol/rust-sdk/tree/main/examples/servers/src · https://github.com/modelcontextprotocol/rust-sdk/blob/main/examples/servers/src/counter_streamhttp.rs · https://crates.io/crates/tower-http
+- **MCP and rmcp (the first draft's transport, §6.1):** https://rustsec.org/advisories/RUSTSEC-2026-0543 · https://modelcontextprotocol.io/specification/2026-07-28/basic/transports · https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http · https://modelcontextprotocol.io/specification/2026-07-28/changelog · https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization · https://modelcontextprotocol.io/specification/2025-11-25/basic/transports · https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization · https://modelcontextprotocol.io/specification/2025-11-25/changelog · https://modelcontextprotocol.io/specification/2025-06-18/changelog · https://crates.io/api/v1/crates/rmcp/versions · https://crates.io/api/v1/crates/rmcp/3.10.0/dependencies · https://docs.rs/rmcp/3.7.0/rmcp/transport/streamable_http_server/ · https://github.com/modelcontextprotocol/rust-sdk/blob/main/crates/rmcp/CHANGELOG.md · https://github.com/modelcontextprotocol/rust-sdk/blob/main/docs/OAUTH_SUPPORT.md · https://github.com/modelcontextprotocol/rust-sdk/tree/main/examples/servers/src · https://github.com/modelcontextprotocol/rust-sdk/blob/main/examples/servers/src/counter_streamhttp.rs · https://crates.io/crates/tower-http
 - **Authorization and JWT:** https://www.rfc-editor.org/rfc/rfc9728 · https://www.rfc-editor.org/rfc/rfc8707 · https://crates.io/crates/jsonwebtoken · https://github.com/Keats/jsonwebtoken/blob/master/CHANGELOG.md · https://crates.io/crates/jwt-simple · https://crates.io/crates/openidconnect
 - **Object storage:** https://crates.io/crates/object_store · https://github.com/apache/arrow-rs-object-store · https://docs.rs/object_store/0.14.2/object_store/enum.PutMode.html · https://docs.rs/object_store/0.14.2/object_store/aws/enum.S3ConditionalPut.html · https://github.com/apache/arrow-rs-object-store/blob/main/CHANGELOG.md · https://github.com/apache/arrow-rs-object-store/blob/main/CHANGELOG-old.md · https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html · https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html · https://aws.amazon.com/about-aws/whats-new/2024/08/amazon-s3-conditional-writes · https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-functionality-conditional-writes · https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-enforcement-conditional-write-operations-general-purpose-buckets/ · https://developers.cloudflare.com/r2/api/s3/extensions/ · https://github.com/minio/minio/issues/20346 · https://github.com/minio/minio/pull/19682 · https://crates.io/crates/opendal · https://github.com/apache/opendal · https://quickwit.io/docs/overview/architecture · https://github.com/quickwit-oss/quickwit/blob/main/quickwit/quickwit-storage/Cargo.toml · https://news.ycombinator.com/item?id=46326984 · https://github.com/localstack/localstack/pull/11941
 - **Leases and queues:** https://www.morling.dev/blog/leader-election-with-s3-conditional-writes/ · https://quanttype.net/posts/2025-02-25-leader-election-with-s3-and-if-match.html · https://github.com/apalis-dev/apalis · https://crates.io/crates/apalis-postgres · https://www.postgresql.org/docs/current/sql-select.html

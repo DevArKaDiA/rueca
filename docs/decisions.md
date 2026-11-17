@@ -98,7 +98,10 @@ ones (catalogs, the generation pointer, job and lease objects) with
 local mode gets an advisory file lock. Garbage collection is
 mark-and-sweep with a 24 h grace and per-kind retention (pull requests
 expire after close + 7 days or 14 days unread). MCP is served over
-Streamable HTTP with `rmcp` 3.10 behind `axum`, stateless and JSON-only;
+Streamable HTTP by Rueca's own transport on `axum`, stateless and
+JSON-only — not `rmcp`'s server transport: `cargo deny` flagged `chrono`
+(RUSTSEC-2026-0543), reached only through `rmcp`, and the owner chose a
+minimal MCP layer of Rueca's own over ignoring the advisory;
 authentication is a Rueca tower layer (OAuth 2.1 resource server for
 external OIDC issuers, plus static API tokens; no embedded authorization
 server), and a principal maps to the existing `Visibility` by configured
