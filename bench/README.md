@@ -243,7 +243,13 @@ rows per repository (same commit). So a
 checkout that only adds a language, or the CI regression check that runs
 only the Rueca arm, reproduces every other number without re-running it,
 and the report lists what was carried, from which run (date, machine).
-Local outputs always win over carried ones.
+Local outputs always win over carried ones. Tokens per correct answer
+(efficiency) is the exception in one direction: a language whose Rueca rows
+were carried keeps its published entry whole, because the compact carried
+rows cannot reproduce it and a partial local recomputation (say, only the
+baseline arms re-run) would misreport it. Delete stale local runs of
+languages you did not mean to re-measure (`rueca-bench clean --runs <arm>`,
+or the files under `bench/.cache/runs/{s1,s3}/<arm>/`) before `report`.
 
 ## Scorecard (RFC 0004 §5–§9)
 

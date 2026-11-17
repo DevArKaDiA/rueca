@@ -2,6 +2,7 @@
 
 from rueca_bench.common import count_tokens
 from rueca_bench.efficiency import json_prefix_tokens, search_aggregate, search_row, text_prefix_tokens, trace_aggregate
+from rueca_bench.report import carried_rueca_groups, carry_efficiency
 
 TREE = "results: 3  (cols: qn label file lines rank)\n  a.f Function a.c 1-2 -3.1\n  a.g Function a.c 4-9 -2.0\n  b.h Function b.c 1-2 -1.0\ntotal: 3\n"
 
@@ -55,3 +56,18 @@ def test_trace_aggregate():
     a = trace_aggregate([100, 50, 30], [4, 0, 1])
     assert a["per_true_edge"] == 180 / 5 and a["true_edges"] == 5
     assert trace_aggregate([10], [0])["per_true_edge"] is None
+
+
+def test_carried_rueca_groups_from_s1_and_s3():
+    s1 = {"carried": {"rueca:python": 45, "cbm:go": 46, "grep:php": 45}}
+    s3 = {"carried": ["rueca:gin", "cbm:gson"]}
+    assert carried_rueca_groups(s1, s3) == {"python", "go"}
+
+
+def test_carry_efficiency_keeps_published_entry_for_carried_groups():
+    eff = {"python": {"trace": {"rueca": {"n": 10}}}, "rust": {"trace": {"rueca": {"n": 5}}}}
+    published = {"tokens_per_correct_answer": {"python": {"trace": {"rueca": {"n": 745}}, "search": {"rueca": {"n": 40}}}}}
+    carry_efficiency(eff, published, {"python", "go"})
+    assert eff["python"] == {"trace": {"rueca": {"n": 745}}, "search": {"rueca": {"n": 40}}, "carried": True}
+    assert eff["rust"] == {"trace": {"rueca": {"n": 5}}}
+    assert "go" not in eff

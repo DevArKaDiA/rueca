@@ -274,7 +274,7 @@ scorecard (`stable` = every floor met; full tables in
 - **Java** `stable`
 - **C** `stable` (1.1% of files with parse errors, vendored code excluded)
 - **C++** `stable` (callees precision 92.5 with SCIP-ambiguous definitions scored as one class; 0.5% of files with parse errors, vendored code excluded)
-- **Rust** <<RUST-NUMBERS>>
+- **Rust** `stable` (localization meets the floor but trails BM25 on the point estimate: File Acc@5 62.8 vs 67.4, Function Acc@10 39.0 vs 46.3 over 43 issues, paired intervals cross zero; callers / callees precision 95.3 / 93.1, recall 88.2 / 88.8 against rust-analyzer on serde_json and ripgrep; 0.1% of files with parse errors)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 **Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),

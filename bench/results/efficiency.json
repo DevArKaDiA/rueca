@@ -102,7 +102,8 @@
      "agent_rueca_median": 335.0,
      "agent_cbm_median": 108.0
     }
-   }
+   },
+   "carried": true
   },
   "ts/js": {
    "trace": {
@@ -206,7 +207,8 @@
      "agent_rueca_median": 315.0,
      "agent_cbm_median": 113.0
     }
-   }
+   },
+   "carried": true
   },
   "php": {
    "trace": {
@@ -310,7 +312,8 @@
      "agent_rueca_median": 400.0,
      "agent_cbm_median": 177.5
     }
-   }
+   },
+   "carried": true
   },
   "go": {
    "trace": {
@@ -414,7 +417,8 @@
      "agent_rueca_median": 276.5,
      "agent_cbm_median": 87.0
     }
-   }
+   },
+   "carried": true
   },
   "java": {
    "trace": {
@@ -518,7 +522,8 @@
      "agent_rueca_median": 330.0,
      "agent_cbm_median": 244.0
     }
-   }
+   },
+   "carried": true
   },
   "c": {
    "trace": {
@@ -622,7 +627,8 @@
      "agent_rueca_median": 291.5,
      "agent_cbm_median": 73.0
     }
-   }
+   },
+   "carried": true
   },
   "cpp": {
    "trace": {
@@ -725,6 +731,111 @@
      "agent_n": 52,
      "agent_rueca_median": 340.0,
      "agent_cbm_median": 111.0
+    }
+   },
+   "carried": true
+  },
+  "rust": {
+   "trace": {
+    "rueca": {
+     "n": 1858,
+     "true_edges": 5590,
+     "per_true_edge": 53.80608228980322,
+     "tokens_median": 113.5,
+     "ci": [
+      52.66202780048037,
+      55.028091114252675
+     ]
+    },
+    "cbm": {
+     "n": 1858,
+     "true_edges": 2333,
+     "per_true_edge": 106.12344620660095,
+     "tokens_median": 107.0,
+     "ci": [
+      99.24234788833215,
+      113.58321703325072
+     ]
+    }
+   },
+   "search": {
+    "rueca": {
+     "n": 43,
+     "hit_rate": 0.5813953488372093,
+     "to_first_hit": 391.64,
+     "to_first_hit_ci": [
+      268.09268817204304,
+      603.5614035087718
+     ],
+     "per_hit": 232.265625,
+     "per_hit_ci": [
+      164.95499999999998,
+      358.15931818181804
+     ],
+     "func_hit_rate": 0.27906976744186046,
+     "func_to_first_hit": 1017.0,
+     "func_per_hit": 782.3684210526316,
+     "tokens_median": 336.0,
+     "formats": [
+      "text"
+     ],
+     "approx": 0
+    },
+    "cbm": {
+     "n": 43,
+     "hit_rate": 0.5116279069767442,
+     "to_first_hit": 606.4545454545455,
+     "to_first_hit_ci": [
+      384.2743226600985,
+      1001.0
+     ],
+     "per_hit": 319.4179104477612,
+     "per_hit_ci": [
+      225.68748421717171,
+      517.1964285714284
+     ],
+     "func_hit_rate": 0.3023255813953488,
+     "func_to_first_hit": 1294.2307692307693,
+     "func_per_hit": 1188.9444444444443,
+     "tokens_median": 502.0,
+     "formats": [
+      "tree"
+     ],
+     "approx": 0
+    }
+   },
+   "lookup": {
+    "rueca": {
+     "n": 100,
+     "found": 90,
+     "per_found": 380.84444444444443
+    },
+    "cbm": {
+     "n": 100,
+     "found": 91,
+     "per_found": 238.73626373626374
+    }
+   },
+   "raw": {
+    "trace": {
+     "n": 1858,
+     "rueca_median": 407.0,
+     "cbm_median": 160.5,
+     "rueca_mean": 531.2787944025835,
+     "cbm_mean": 189.75349838536061,
+     "agent_n": 1858,
+     "agent_rueca_median": 113.5,
+     "agent_cbm_median": 107.0
+    },
+    "search": {
+     "n": 100,
+     "rueca_median": 1013.0,
+     "cbm_median": 193.0,
+     "rueca_mean": 995.71,
+     "cbm_mean": 253.56,
+     "agent_n": 100,
+     "agent_rueca_median": 328.5,
+     "agent_cbm_median": 165.5
     }
    }
   }
@@ -1645,7 +1756,8 @@
      "version": "codebase-memory-mcp 0.12.0",
      "carried": true
     }
-   }
+   },
+   "carried": true
   },
   "multiref": {
    "instance": "psf__requests-2317",
@@ -1669,7 +1781,8 @@
    "reason": "local catalog holds one snapshot per root (RFC 0005 \u00a79)",
    "errors": [
     "rc=2: invalid argument `ref` for `search_symbols`: invalid type: sequence, expected a string"
-   ]
+   ],
+   "carried": true
   },
   "crossrepo": {
    "status": "ok",
@@ -2154,7 +2267,8 @@
      ]
     }
    ],
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)"
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)",
+   "carried": true
   }
  }
 }
