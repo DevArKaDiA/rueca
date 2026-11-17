@@ -2,12 +2,13 @@
 
 use std::ops::Range;
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use roaring::RoaringBitmap;
 use rueca_model::{EdgeKind, FileEntry, FileId, Node, NodeId};
 
 use crate::bundle::Bundle;
+use crate::centrality::{self, InAdjacency};
 use crate::contracts::ContractTable;
 use crate::graph::{self, EdgeMetaRec};
 use crate::ngram::{self, NgramIndex};
@@ -55,6 +56,8 @@ pub(crate) struct Inner {
     /// first use ([`Inner::vectors`]).
     vectors: Option<Vectors>,
     vectors_checked: OnceLock<std::result::Result<(), String>>,
+    /// Centrality percentiles, computed on first use ([`Inner::centrality`]).
+    centrality: OnceLock<Arc<[f32]>>,
 }
 
 fn corrupt(msg: impl Into<String>) -> SegmentError {
@@ -199,6 +202,7 @@ impl Inner {
             packs: PackReader::new(store),
             vectors,
             vectors_checked: OnceLock::new(),
+            centrality: OnceLock::new(),
             bundle,
         })
     }
@@ -217,6 +221,26 @@ impl Inner {
             Ok(()) => Ok(Some(v)),
             Err(e) => Err(SegmentError::Corrupt(e.trim_start_matches("corrupt segment: ").to_string())),
         }
+    }
+
+    /// The vectors' meta, without verifying the bulk components.
+    pub fn vectors_meta(&self) -> Option<&vectors::VectorsMeta> {
+        self.vectors.as_ref().map(Vectors::meta)
+    }
+
+    /// The centrality percentile of every node (RFC 0007 §7.4), computed
+    /// from the incoming adjacency on the first call.
+    pub fn centrality(&self) -> Arc<[f32]> {
+        self.centrality
+            .get_or_init(|| {
+                let adj = InAdjacency {
+                    offsets: self.arr(&self.inc.offsets),
+                    sources: self.arr(&self.inc.targets),
+                    kinds: &self.bundle.map[self.inc.kinds.clone()],
+                };
+                centrality::percentiles(&self.nodes, &adj).into()
+            })
+            .clone()
     }
 
     /// The bundle (for re-publication with vectors).

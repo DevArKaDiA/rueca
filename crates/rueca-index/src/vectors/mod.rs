@@ -19,7 +19,9 @@
 //! at the model's full width in `f16`; the segment stores `dims`
 //! components (Matryoshka truncation, re-normalized) as int8.
 
-pub mod text;
+/// The canonical text builder, shared with the query side's reranker
+/// (`rueca_segment::canonical`).
+pub use rueca_segment::canonical as text;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

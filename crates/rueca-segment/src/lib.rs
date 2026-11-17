@@ -268,6 +268,8 @@
 compile_error!("rueca-segment format v2 reads little-endian arrays zero-copy; big-endian hosts are unsupported");
 
 mod bundle;
+pub mod canonical;
+mod centrality;
 mod contracts;
 mod graph;
 mod ngram;
@@ -282,6 +284,7 @@ pub mod vcache;
 pub mod vectors;
 mod writer;
 
+pub use centrality::centrality_prior;
 pub use vectors::{Vectors, VectorsMeta, VectorsWrite};
 
 use std::path::{Path, PathBuf};
@@ -670,6 +673,55 @@ impl Segment {
     /// [`SegmentError::Corrupt`] when a vectors component fails its checksum.
     pub fn vectors(&self) -> Result<Option<&Vectors>> {
         self.inner.vectors()
+    }
+    /// The metadata of the segment's vectors (preset, keys, width, rows),
+    /// `None` for a lexical-only segment. Unlike [`Segment::vectors`] it
+    /// verifies nothing (`rueca status`).
+    pub fn vectors_meta(&self) -> Option<&VectorsMeta> {
+        self.inner.vectors_meta()
+    }
+    /// The centrality percentile of every node (index = node id), RFC 0007
+    /// §7.4: the share of the snapshot's symbols with a smaller distinct
+    /// in-degree over `CALLS` and `IMPORTS`; files, folders, modules and
+    /// the repository get 1. Computed on the first call and kept.
+    pub fn centrality(&self) -> std::sync::Arc<[f32]> {
+        self.inner.centrality()
+    }
+    /// The canonical text of each node ([`canonical::canonical_text`], the
+    /// text its vector embeds) cut to `max_tokens × 4` characters, read
+    /// from the content packs once per file; a type lists its members
+    /// (`DEFINES` children). Nodes without a file get their header line.
+    ///
+    /// # Errors
+    ///
+    /// A content pack that cannot be read.
+    pub fn canonical_texts(&self, nodes: &[NodeId], max_tokens: usize) -> Result<Vec<String>> {
+        let mut by_file: std::collections::BTreeMap<FileId, Vec<usize>> = std::collections::BTreeMap::new();
+        let mut out = vec![String::new(); nodes.len()];
+        for (i, &n) in nodes.iter().enumerate() {
+            match self.nodes().get(n as usize).and_then(|nd| nd.file) {
+                Some(f) => by_file.entry(f).or_default().push(i),
+                None => out[i] = canonical::canonical_text(self.node(n), "", &[], &[], max_tokens),
+            }
+        }
+        for (file, idx) in by_file {
+            let content = self.content(file)?;
+            let path = &self.file(file).path;
+            for i in idx {
+                let members = self.members_of(nodes[i]);
+                let refs: Vec<&Node> = members.iter().map(|&m| self.node(m)).collect();
+                out[i] = canonical::canonical_text(self.node(nodes[i]), path, &content, &refs, max_tokens);
+            }
+        }
+        Ok(out)
+    }
+    /// The members a type's canonical text lists: its `DEFINES` children.
+    fn members_of(&self, node: NodeId) -> Vec<NodeId> {
+        let is_type = canonical::unit_kind(self.node(node).label) == Some(canonical::UnitKind::Type);
+        if !is_type {
+            return Vec::new();
+        }
+        self.out_edges(node, Some(EdgeKind::Defines)).into_iter().map(|e| e.other).filter(|&m| m != node).collect()
     }
     /// The filter `search_symbols` applies for `query` without its text:
     /// labels (the default exclusions when `labels` is empty), language and
