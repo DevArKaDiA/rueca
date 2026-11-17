@@ -3,6 +3,8 @@
 //! - **embed key** = BLAKE3(model file sha256 ‖ pooling ‖ document prefix ‖
 //!   text builder version ‖ token budget). The weights' quantization is
 //!   inside the file hash.
+//! - **vector key** = BLAKE3(embed key ‖ canonical text): the identity of
+//!   one stored vector, the key of the store's vector cache.
 //! - **model key** = BLAKE3(embed key ‖ dimensions ‖ vector encoding): what
 //!   a segment's vectors and a query vector must share to be compared.
 //!
@@ -20,8 +22,10 @@ use serde::Serialize;
 
 use crate::presets::Pooling;
 
-/// Version of the canonical symbol text (RFC 0007 §5.2). Phase 1 defines
-/// the text builder and bumps it; `rueca embed` embeds caller text as is.
+/// Text builder version of caller text: `rueca embed` embeds its input as
+/// is, so its keys carry version 0. The indexer's canonical symbol text
+/// (RFC 0007 §5.2) is version 1 (`rueca_index::vectors::TEXT_BUILDER_VERSION`)
+/// and is passed through [`crate::EmbedOptions::text_builder_version`].
 pub const TEXT_BUILDER_VERSION: u32 = 0;
 
 /// A 32-byte BLAKE3 digest printed as lower-case hex.
@@ -116,6 +120,38 @@ impl EmbedKey {
 }
 
 impl fmt::Display for EmbedKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// The identity of one stored vector (RFC 0007 §5.4): BLAKE3 of the embed
+/// key and the text as embedded. Equal text under one embed key has one
+/// key on every branch, worktree and repository.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize)]
+#[serde(transparent)]
+pub struct VectorKey(Digest);
+
+impl VectorKey {
+    /// Hashes `text` under `embed`.
+    #[must_use]
+    pub fn new(embed: &EmbedKey, text: &str) -> Self {
+        Self(
+            KeyHasher::new("rueca-embed/vector-key/v1")
+                .field(1, embed.digest().as_bytes())
+                .field(2, text.as_bytes())
+                .finish(),
+        )
+    }
+
+    /// The raw bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        self.0.as_bytes()
+    }
+}
+
+impl fmt::Display for VectorKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
@@ -302,6 +338,17 @@ mod tests {
         let m = ModelKey::new(&base, 1024, VectorEncoding::F32);
         assert_ne!(m, ModelKey::new(&base, 512, VectorEncoding::F32));
         assert_ne!(m, ModelKey::new(&base, 1024, VectorEncoding::I8));
+    }
+
+    #[test]
+    fn vector_key_depends_on_text_and_embed_key() {
+        let embed = EmbedKey::new(Q8, Pooling::Last, "", 1, 512);
+        let a = VectorKey::new(&embed, "rust Function f");
+        assert_eq!(a, VectorKey::new(&embed, "rust Function f"));
+        assert_ne!(a, VectorKey::new(&embed, "rust Function g"));
+        assert_ne!(a, VectorKey::new(&EmbedKey::new(Q8, Pooling::Last, "", 0, 512), "rust Function f"));
+        // Golden: changing it invalidates every cached vector.
+        assert_eq!(a.to_string(), "257ce8fe2ec508308c7793171d8274780bf1c97b4ead7d7bcd62df934020592c");
     }
 
     #[test]

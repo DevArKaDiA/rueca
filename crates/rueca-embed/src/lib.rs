@@ -44,13 +44,14 @@ pub mod cache;
 #[cfg(feature = "embeddings")]
 mod download;
 mod error;
+pub mod hashing;
 pub mod key;
 pub mod presets;
 pub mod vector;
 
 pub use cache::{CacheState, MODEL_DIR_ENV, ModelCache};
 pub use error::{Error, Result};
-pub use key::{Backend, EmbedKey, ModelKey, ModelMeta, TEXT_BUILDER_VERSION, VectorEncoding};
+pub use key::{Backend, EmbedKey, ModelKey, ModelMeta, TEXT_BUILDER_VERSION, VectorEncoding, VectorKey};
 pub use presets::{DEFAULT_PRESET, PRESETS, Preset, PresetStatus, preset};
 
 use presets::QueryStyle;
@@ -88,8 +89,10 @@ impl EmbedInput {
 
 /// Default token budget per input (RFC 0007 §5.2).
 pub const DEFAULT_MAX_TOKENS: usize = 512;
-/// Default tokens per batch.
-pub const DEFAULT_BATCH_TOKENS: usize = 2048;
+/// Default tokens per batch: 512 holds peak memory near 1.0 GB with the
+/// default preset (2.2 GB at 2048) for about 4% less throughput (measured
+/// in phase 0, `docs/how-it-works.md` §10).
+pub const DEFAULT_BATCH_TOKENS: usize = 512;
 
 /// How an embedder is loaded.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +109,10 @@ pub struct EmbedOptions {
     pub cpu: bool,
     /// Query instruction for `Instruct` presets; `None` uses the preset's.
     pub query_instruction: Option<String>,
+    /// Version of the text builder that produced the documents, keyed in
+    /// the [`EmbedKey`]: [`TEXT_BUILDER_VERSION`] (0) for caller text, the
+    /// indexer's canonical text version for symbol vectors.
+    pub text_builder_version: u32,
 }
 
 impl Default for EmbedOptions {
@@ -117,6 +124,7 @@ impl Default for EmbedOptions {
             threads: None,
             cpu: false,
             query_instruction: None,
+            text_builder_version: TEXT_BUILDER_VERSION,
         }
     }
 }
@@ -156,6 +164,58 @@ impl EmbedOptions {
             QueryStyle::Prefix { prefix } => prefix.to_string(),
         }
     }
+}
+
+/// Where an embedder runs, for its audit record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeInfo<'a> {
+    /// Runtime family (`llama.cpp`).
+    pub runtime: &'a str,
+    /// Runtime version.
+    pub version: &'a str,
+    /// Compute backend.
+    pub backend: Backend,
+    /// Worker threads.
+    pub threads: usize,
+}
+
+/// The audit record of `preset` embedded with `opts` on `rt`, computed
+/// without loading the weights: keys come from the manifest's sha256.
+///
+/// # Errors
+///
+/// Invalid options ([`EmbedOptions::output_dims`]) or a preset without
+/// weights.
+pub fn model_meta(preset: &Preset, opts: &EmbedOptions, rt: RuntimeInfo<'_>) -> Result<ModelMeta> {
+    let dims = opts.output_dims(preset)?;
+    let sha256 = preset.weights()?.sha256;
+    let embed_key =
+        EmbedKey::new(sha256, preset.pooling, preset.document_prefix, opts.text_builder_version, opts.max_tokens);
+    let encoding = VectorEncoding::F32;
+    let batch = opts.batch_tokens.max(opts.max_tokens);
+    Ok(ModelMeta {
+        preset: preset.name.to_string(),
+        model: format!("{}@{}", preset.model, preset.revision),
+        model_sha256: sha256.to_string(),
+        quantization: preset.quantization.to_string(),
+        dims,
+        max_dims: preset.dims,
+        pooling: preset.pooling,
+        query_prefix: opts.query_prefix(preset),
+        document_prefix: preset.document_prefix.to_string(),
+        token_budget: opts.max_tokens,
+        text_builder_version: opts.text_builder_version,
+        encoding,
+        embed_key,
+        model_key: ModelKey::new(&embed_key, dims, encoding),
+        runtime: rt.runtime.to_string(),
+        runtime_version: rt.version.to_string(),
+        backend: rt.backend,
+        cpu_level: key::cpu_level().to_string(),
+        batch_tokens: batch,
+        ubatch_tokens: batch,
+        threads: rt.threads.max(1),
+    })
 }
 
 /// The text the model sees for an input.

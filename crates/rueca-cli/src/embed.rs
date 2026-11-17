@@ -62,7 +62,8 @@ pub struct EmbedArgs {
     /// Output encoding.
     #[arg(long, value_enum, default_value_t = Format::Jsonl)]
     format: Format,
-    /// Print the model record (keys, sha256, dims, runtime, backend, CPU level) as JSON.
+    /// Print the model record (keys, sha256, dims, runtime, backend, CPU level) as JSON,
+    /// without loading the model (`load_ms` is null).
     #[arg(long)]
     info: bool,
     /// Embed one string and print its vector as JSON.
@@ -103,17 +104,19 @@ pub fn run(store: &Path, args: &EmbedArgs, pretty: bool) -> anyhow::Result<()> {
         threads: args.threads,
         cpu: args.cpu,
         query_instruction: args.instruction.clone(),
+        text_builder_version: rueca_embed::TEXT_BUILDER_VERSION,
     };
+    if args.info {
+        // The record without loading the model (the bench asks per instance).
+        let mut v = serde_json::to_value(rueca_embed::backend::describe(preset, &opts)?)?;
+        v["load_ms"] = Value::Null;
+        println!("{}", crate::render(&v, pretty));
+        return Ok(());
+    }
     let cache = ModelCache::for_store(store);
     let started = Instant::now();
     let embedder = rueca_embed::backend::load(&cache, preset, &opts)?;
     let load_ms = started.elapsed().as_secs_f64() * 1e3;
-    if args.info {
-        let mut v = serde_json::to_value(embedder.meta())?;
-        v["load_ms"] = json!(round2(load_ms));
-        println!("{}", crate::render(&v, pretty));
-        return Ok(());
-    }
     if let Some(text) = &args.text {
         let kind = if args.query { InputKind::Query } else { InputKind::Document };
         let v = embedder.embed(&[EmbedInput { text: text.clone(), kind }])?;

@@ -20,10 +20,10 @@ use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::{LogOptions, send_logs_to_tracing};
 
 use crate::error::{Error, Result};
-use crate::key::{Backend, EmbedKey, ModelKey, ModelMeta, TEXT_BUILDER_VERSION, VectorEncoding, cpu_level};
+use crate::key::{Backend, ModelKey, ModelMeta};
 use crate::presets::{Pooling, Preset};
 use crate::vector::{batch_order, pack_batches, restore_order, truncate_normalized};
-use crate::{EmbedInput, EmbedOptions, Embedder, model_input};
+use crate::{EmbedInput, EmbedOptions, Embedder, RuntimeInfo, model_input};
 
 /// Runtime family recorded in [`ModelMeta`].
 pub const RUNTIME: &str = "llama.cpp";
@@ -72,7 +72,7 @@ impl LlamaEmbedder {
     /// Invalid options, a model that is not a pooled embedder of the
     /// preset's width, runtime failures.
     pub fn load(preset: &'static Preset, weights: &Path, opts: EmbedOptions) -> Result<Self> {
-        let dims = opts.output_dims(preset)?;
+        opts.output_dims(preset)?;
         if preset.pooling != Pooling::Last {
             return Err(Error::Invalid(format!("`{}`: only last-token pooling is wired in phase 0", preset.name)));
         }
@@ -88,8 +88,7 @@ impl LlamaEmbedder {
         let vocab = model.vocab();
         let bos = vocab.should_add_bos().then(|| vocab.bos());
         let eos = vocab.should_add_eos().then(|| vocab.eos());
-        let sha = preset.weights()?.sha256;
-        let meta = build_meta(preset, sha, &opts, dims, gpu);
+        let meta = build_meta(preset, &opts, gpu)?;
         let query_prefix = opts.query_prefix(preset);
         Ok(Self {
             model,
@@ -202,34 +201,25 @@ impl Embedder for LlamaEmbedder {
     }
 }
 
-fn build_meta(preset: &Preset, sha256: &str, opts: &EmbedOptions, dims: usize, gpu: bool) -> ModelMeta {
-    let embed_key =
-        EmbedKey::new(sha256, preset.pooling, preset.document_prefix, TEXT_BUILDER_VERSION, opts.max_tokens);
-    let encoding = VectorEncoding::F32;
-    let batch = opts.batch_tokens.max(opts.max_tokens);
-    ModelMeta {
-        preset: preset.name.to_string(),
-        model: format!("{}@{}", preset.model, preset.revision),
-        model_sha256: sha256.to_string(),
-        quantization: preset.quantization.to_string(),
-        dims,
-        max_dims: preset.dims,
-        pooling: preset.pooling,
-        query_prefix: opts.query_prefix(preset),
-        document_prefix: preset.document_prefix.to_string(),
-        token_budget: opts.max_tokens,
-        text_builder_version: TEXT_BUILDER_VERSION,
-        encoding,
-        embed_key,
-        model_key: ModelKey::new(&embed_key, dims, encoding),
-        runtime: RUNTIME.to_string(),
-        runtime_version: RUNTIME_VERSION.to_string(),
-        backend: backend_kind(gpu),
-        cpu_level: cpu_level().to_string(),
-        batch_tokens: batch,
-        ubatch_tokens: batch,
-        threads: opts.threads.unwrap_or_else(default_threads).max(1),
-    }
+fn build_meta(preset: &Preset, opts: &EmbedOptions, gpu: bool) -> Result<ModelMeta> {
+    let threads = opts.threads.unwrap_or_else(default_threads);
+    crate::model_meta(
+        preset,
+        opts,
+        RuntimeInfo { runtime: RUNTIME, version: RUNTIME_VERSION, backend: backend_kind(gpu), threads },
+    )
+}
+
+/// The audit record of `preset` with `opts` on this machine, without
+/// loading the weights (`rueca embed --info`, the indexer's cache lookup).
+///
+/// # Errors
+///
+/// Invalid options, a preset without weights, or a backend that does not
+/// initialize.
+pub fn describe(preset: &Preset, opts: &EmbedOptions) -> Result<ModelMeta> {
+    let gpu = !opts.cpu && backend()?.supports_gpu_offload();
+    build_meta(preset, opts, gpu)
 }
 
 fn backend_kind(gpu: bool) -> Backend {
