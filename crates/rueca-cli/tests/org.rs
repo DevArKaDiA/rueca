@@ -230,6 +230,23 @@ fn refs_of_an_organization() {
     assert!(text.contains("2 repositories + 3 refs"), "{text}");
     assert!(text.lines().any(|l| l.contains("local/beta  main@") && l.contains(" + next@")), "{text}");
 
+    // Queries read refs through the organization: `list_repositories` lists
+    // them with their commits, a `ref` list compares two refs of a member.
+    let query = |tool: &str, args: &str| {
+        let out = rueca(&store).args(["query", tool, args, "--org", "duo", "--text"]).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let text = query("list_repositories", "{}");
+    assert!(text.lines().any(|l| l.contains("local/alpha  refs main@") && l.contains(", feature/x@")), "{text}");
+    let text =
+        query("search_symbols", r#"{"query": "alpha core x", "repo": "local/alpha", "ref": ["main", "feature/x"]}"#);
+    assert!(text.contains("(main)\n[1] local/alpha@") && text.contains(" (feature/x)\n"), "{text}");
+    assert!(text.lines().any(|l| l.contains("Function alpha_core") && l.ends_with(" [0,1]")), "{text}");
+    assert!(text.lines().any(|l| l.contains("Function x L1-2") && l.ends_with(" changed")), "{text}");
+    let text = query("search_symbols", r#"{"query": "n", "ref": "next"}"#);
+    assert!(text.contains("local/beta@") && text.contains(" (next)\n"), "{text}");
+
     // `links --ref`: an empty link set prints its count; an unknown ref
     // lists the indexed ones.
     let out = rueca(&store).args(["links", "--org", "duo", "--repo", "local/beta", "--ref", "next"]).output().unwrap();

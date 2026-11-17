@@ -3,20 +3,22 @@
 //! statistics), and the output format (compact envelope or the alpha
 //! `verbose` shapes).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use rueca_model::{EdgeKind, FileId, Label, NodeId, SymbolIdParts};
-use rueca_segment::org::{LinkDir, OrgScope, OrgSelection, OrgSlot, RouteMode};
-use rueca_segment::{ContentMatch, ContentQuery, EdgeRef, Segment, SymbolQuery};
+use rueca_segment::org::{LinkDir, OrgScope, OrgSlot, RouteMode};
+use rueca_segment::{CatalogEntry, ContentMatch, ContentQuery, EdgeRef, Segment, SymbolQuery};
 
 use crate::args::{
     CommonArgs, DirectionArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, ListRepositoriesArgs, RepoArg,
     SearchCodeArgs, SearchSymbolsArgs, TraceArgs, clamp_int,
 };
+use crate::refset::{self, EdgeMap, Ident, Key, NodeMerge, TracedEdge};
+use crate::snapshot::{SnapshotDesc, short_commit};
 use crate::text::{join_window, split_lines, window};
 use crate::types::*;
 use crate::view::{Lookup, Selector, View, innermost_at_line, is_container};
-use crate::{Engine, OrgCtx, Response, compact};
+use crate::{Engine, OrgCtx, Response, Selection, compact};
 
 fn parse_labels(labels: Option<&[String]>) -> anyhow::Result<Vec<Label>> {
     let mut out = Vec::new();
@@ -127,11 +129,12 @@ fn resolve_symbol(
     Ok((vi, l, extra))
 }
 
-/// Resolves a file path over the selected snapshots; a path present in several
-/// is ambiguous.
-fn resolve_path(views: &[View], path: &str) -> anyhow::Result<(usize, FileId)> {
+/// Resolves a file path over the selected snapshots: every snapshot that has
+/// it, in view order. A path present in several repositories is ambiguous;
+/// several snapshots of one repository (refs) all hold it.
+fn resolve_path(views: &[View], path: &str) -> anyhow::Result<Vec<(usize, FileId)>> {
     if views.len() == 1 {
-        return Ok((0, views[0].resolve_file(path)?));
+        return Ok(vec![(0, views[0].resolve_file(path)?)]);
     }
     let mut hits = Vec::new();
     let mut first_err = None;
@@ -143,13 +146,81 @@ fn resolve_path(views: &[View], path: &str) -> anyhow::Result<(usize, FileId)> {
             }
         }
     }
-    match hits.len() {
-        1 => Ok(hits[0]),
+    let repos: BTreeSet<&str> = hits.iter().map(|&(vi, _)| views[vi].repo()).collect();
+    match repos.len() {
         0 => Err(first_err.unwrap_or_else(|| anyhow::anyhow!("file not indexed: `{path}`"))),
+        1 => Ok(hits),
         _ => {
             let repos: Vec<String> = hits.iter().map(|(vi, _)| views[*vi].snap.header()).collect();
             anyhow::bail!("`{path}` is indexed in several repositories ({}); pass one as `repo`", repos.join(", "))
         }
+    }
+}
+
+/// `extra` candidates without the versions of `primary` in other snapshots
+/// of its repository: a multi-ref answer lists those as `versions`.
+fn drop_versions(views: &[View], primary: Key, extra: Vec<Brief>) -> Vec<Brief> {
+    let b = views[primary.0].brief(primary.1);
+    let repo = views[primary.0].repo();
+    extra
+        .into_iter()
+        .filter(|c| {
+            let same_repo = rueca_model::parse_symbol_id(&c.id).is_some_and(|p| p.repo == repo);
+            !(same_repo && c.qualified_name == b.qualified_name && c.label == b.label && c.path == b.path)
+        })
+        .collect()
+}
+
+/// The `get_symbol` details of node `n`.
+fn symbol_detail(view: &View, n: NodeId) -> SymbolDetail {
+    let node = view.node(n);
+    SymbolDetail {
+        brief: view.brief(n),
+        language: node.language.map(|l| l.as_str().to_string()),
+        signature: node.signature.clone(),
+        doc: node.doc.clone(),
+        exported: node.exported,
+        is_test: node.is_test,
+    }
+}
+
+/// The `get_symbol` answer for node `n` of `view`: its details,
+/// neighbourhood and counts, with `candidates` (other matches in the view)
+/// and `extra` (best matches of other snapshots).
+fn symbol_result(view: &View, n: NodeId, candidates: Vec<NodeId>, extra: Vec<Brief>) -> GetSymbolResult {
+    let node = view.node(n);
+    let seg = &view.seg;
+    let parent = seg.in_edges(n, Some(EdgeKind::Defines)).iter().map(|e| e.other).find(|&p| p != n);
+    let mut children: Vec<NodeId> = seg.out_edges(n, Some(EdgeKind::Defines)).iter().map(|e| e.other).collect();
+    children.sort_by_cached_key(|&c| view.position_key(c));
+    children.dedup();
+    let related = |incoming: bool| {
+        let mut v: Vec<NodeId> = [EdgeKind::Inherits, EdgeKind::Implements]
+            .into_iter()
+            .flat_map(|k| if incoming { seg.in_edges(n, Some(k)) } else { seg.out_edges(n, Some(k)) })
+            .map(|e| e.other)
+            .collect();
+        v.sort_by_cached_key(|&c| view.position_key(c));
+        v.dedup();
+        v
+    };
+    // The code ↔ config bridge (RFC 0003 §7.4): who reads / sets it.
+    let bridge = matches!(node.label, Label::EnvVar | Label::Key);
+    let count_in = |kind| bridge.then(|| distinct_others(&seg.in_edges(n, Some(kind))));
+    let mut all_candidates = view.briefs(candidates);
+    all_candidates.extend(extra);
+    all_candidates.truncate(crate::view::MAX_CANDIDATES);
+    GetSymbolResult {
+        symbol: symbol_detail(view, n),
+        parent: parent.map(|p| view.brief(p)),
+        children: view.briefs(children),
+        bases: view.briefs(related(false)),
+        subtypes: view.briefs(related(true)),
+        callers_count: distinct_others(&seg.in_edges(n, Some(EdgeKind::Calls))),
+        callees_count: distinct_others(&seg.out_edges(n, Some(EdgeKind::Calls))),
+        readers_count: count_in(EdgeKind::Reads),
+        writers_count: count_in(EdgeKind::Writes),
+        candidates: all_candidates,
     }
 }
 
@@ -165,85 +236,114 @@ impl Engine {
         let labels = parse_labels(a.labels.as_deref())?;
         let sel = self.select(&a.common, None)?;
         let views = &sel.views;
+        // Several snapshots of one repository (RFC 0005 §6): fetch every copy
+        // of the page, collapse identical versions, then cut, so an
+        // identical symbol counts once.
+        let per_repo = if verbose_fmt { 1 } else { refset::max_per_repo(views) };
+        let collapse = per_repo > 1;
         let base = SymbolQuery {
             text: a.query,
             labels,
             path_glob: a.path_glob,
             language: a.language.map(|l| l.to_language()),
-            limit: limit + 1,
-            offset,
+            limit: if collapse { (offset + limit + 1) * per_repo } else { limit + 1 },
+            offset: if collapse { 0 } else { offset },
         };
-        // (view, node, score): one ranking over every selected snapshot
-        // (RFC 0006 §6) — the organization index, or the snapshots' indexes
-        // scored with summed statistics.
-        let mut ranked: Vec<(usize, NodeId, f64)> = match &sel.org {
-            Some(org) => {
-                let mut selected: Vec<(usize, &Segment)> =
-                    views.iter().filter_map(|v| v.org_repo.map(|i| (i, v.seg.as_ref()))).collect();
-                let view_of: HashMap<usize, usize> =
-                    views.iter().enumerate().filter_map(|(vi, v)| v.org_repo.map(|i| (i, vi))).collect();
-                // Repository routing (RFC 0006 phase 2): the query also
-                // scores the repositories; their relevance weighs (or, in
-                // `top` mode, narrows) the symbol ranking.
-                let mut boost: HashMap<usize, f32> = HashMap::new();
-                if selected.len() > 1 && self.route.mode != RouteMode::Off {
-                    let routes = org.index.route(&base.text, &org.visible, &self.route)?;
-                    match self.route.mode {
-                        RouteMode::Prior => {
-                            boost = routes.iter().map(|r| (r.repo, self.route.prior(r.score))).collect();
-                        }
-                        RouteMode::Top => {
-                            let keep: HashSet<usize> = routes
-                                .iter()
-                                .filter(|r| r.score >= self.route.ratio)
-                                .take(self.route.top.max(1))
-                                .map(|r| r.repo)
-                                .collect();
-                            selected.retain(|(i, _)| keep.contains(i));
-                        }
-                        RouteMode::Off => {}
-                    }
-                }
-                org.index
-                    .search_with(
-                        &base,
-                        &OrgScope { visible: &org.visible, selected: &selected, view: None },
-                        &boost,
-                        self.route.local_stats && self.route.mode != RouteMode::Off,
-                    )?
-                    .into_iter()
-                    .filter_map(|h| view_of.get(&h.repo).map(|&vi| (vi, h.node, f32_to_f64(h.score))))
-                    .collect()
-            }
-            None if views.len() == 1 => {
-                views[0].seg.search_symbols(&base)?.into_iter().map(|h| (0, h.node, f32_to_f64(h.score))).collect()
-            }
-            None => {
-                let segs: Vec<&Segment> = views.iter().map(|v| v.seg.as_ref()).collect();
-                rueca_segment::search_symbols_merged(&segs, &base)?
-                    .into_iter()
-                    .map(|(vi, h)| (vi, h.node, f32_to_f64(h.score)))
-                    .collect()
-            }
+        let ranked = self.rank_symbols(&sel, &base)?;
+        let mut ranked: Vec<(Key, f64, Option<RefMark>)> = if collapse {
+            refset::collapse_hits(views, ranked).into_iter().skip(offset).collect()
+        } else {
+            ranked.into_iter().map(|(vi, n, score)| ((vi, n), score, None)).collect()
         };
         let more = ranked.len() > limit;
         ranked.truncate(limit);
-        let hits: Vec<(usize, SymbolSearchHit)> = ranked
+        let hits: Vec<(usize, SymbolSearchHit, Option<RefMark>)> = ranked
             .into_iter()
-            .map(|(vi, n, score)| {
+            .map(|((vi, n), score, mark)| {
                 let v = &views[vi];
-                (vi, SymbolSearchHit { brief: v.brief(n), signature: v.node(n).signature.clone(), score })
+                (vi, SymbolSearchHit { brief: v.brief(n), signature: v.node(n).signature.clone(), score }, mark)
             })
             .collect();
         if verbose_fmt {
             return verbose(&SearchSymbolsResult {
-                results: hits.into_iter().map(|(_, h)| h).collect(),
+                results: hits.into_iter().map(|(_, h, _)| h).collect(),
                 truncated: more,
                 next_offset: more.then_some((offset + limit) as u64),
             });
         }
         let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
         Ok(compact::search_symbols(&snaps, &hits, offset, more, a.scores.unwrap_or(false), budget(&a.common)))
+    }
+
+    /// `(view, node, score)`: one ranking over every selected snapshot (RFC
+    /// 0006 §6) — the organization index, or the snapshots' indexes scored
+    /// with summed statistics.
+    fn rank_symbols(&self, sel: &Selection, base: &SymbolQuery) -> anyhow::Result<Vec<(usize, NodeId, f64)>> {
+        let views = &sel.views;
+        Ok(match &sel.org {
+            Some(org) => self.org_ranked(org, views, base)?,
+            None if views.len() == 1 => {
+                views[0].seg.search_symbols(base)?.into_iter().map(|h| (0, h.node, f32_to_f64(h.score))).collect()
+            }
+            None => {
+                let segs: Vec<&Segment> = views.iter().map(|v| v.seg.as_ref()).collect();
+                rueca_segment::search_symbols_merged(&segs, base)?
+                    .into_iter()
+                    .map(|(vi, h)| (vi, h.node, f32_to_f64(h.score)))
+                    .collect()
+            }
+        })
+    }
+
+    /// The organization index ranking over the selected entries, seen from
+    /// the call's view (statistics, routing).
+    fn org_ranked(
+        &self,
+        org: &OrgCtx,
+        views: &[View],
+        base: &SymbolQuery,
+    ) -> anyhow::Result<Vec<(usize, NodeId, f64)>> {
+        let mut selected: Vec<(usize, &Segment)> =
+            views.iter().filter_map(|v| v.org_repo().map(|i| (i, v.seg.as_ref()))).collect();
+        let view_of: HashMap<OrgSlot, usize> =
+            views.iter().enumerate().filter_map(|(vi, v)| v.org_slot.map(|s| (s, vi))).collect();
+        let boost = self.route_boost(org, &base.text, &mut selected)?;
+        let scope = OrgScope { visible: &org.visible, selected: &selected, view: Some(&org.view) };
+        let local_stats = self.route.local_stats && self.route.mode != RouteMode::Off;
+        Ok(org
+            .index
+            .search_with(base, &scope, &boost, local_stats)?
+            .into_iter()
+            .filter_map(|h| view_of.get(&h.slot).map(|&vi| (vi, h.node, f32_to_f64(h.score))))
+            .collect())
+    }
+
+    /// Repository routing (RFC 0006 phase 2) when several repositories are
+    /// selected: the query also scores the repositories, each at the entry
+    /// the view reads; their relevance weighs the symbol ranking (the
+    /// returned boosts) or, in `top` mode, narrows `selected`.
+    fn route_boost(
+        &self,
+        org: &OrgCtx,
+        text: &str,
+        selected: &mut Vec<(usize, &Segment)>,
+    ) -> anyhow::Result<HashMap<usize, f32>> {
+        let repos: BTreeSet<usize> = selected.iter().map(|(i, _)| *i).collect();
+        if repos.len() < 2 || self.route.mode == RouteMode::Off {
+            return Ok(HashMap::new());
+        }
+        let routes = org.index.route_view(text, &org.visible, &org.view, &self.route)?;
+        if self.route.mode == RouteMode::Top {
+            let keep: HashSet<usize> = routes
+                .iter()
+                .filter(|r| r.score >= self.route.ratio)
+                .take(self.route.top.max(1))
+                .map(|r| r.repo)
+                .collect();
+            selected.retain(|(i, _)| keep.contains(i));
+            return Ok(HashMap::new());
+        }
+        Ok(routes.iter().map(|r| (r.repo, self.route.prior(r.score))).collect())
     }
 
     pub(crate) fn search_code(&self, a: SearchCodeArgs) -> anyhow::Result<Response> {
@@ -317,57 +417,28 @@ impl Engine {
         }
         let views = self.scope(&a.common, parts.as_ref())?;
         let (vi, found, extra) = resolve_symbol(&views, &sel, parts.as_ref())?;
-        let view = &views[vi];
         let n = found.node;
-        let node = view.node(n);
-        let seg = &view.seg;
-
-        let parent = seg.in_edges(n, Some(EdgeKind::Defines)).iter().map(|e| e.other).find(|&p| p != n);
-        let mut children: Vec<NodeId> = seg.out_edges(n, Some(EdgeKind::Defines)).iter().map(|e| e.other).collect();
-        children.sort_by_cached_key(|&c| view.position_key(c));
-        children.dedup();
-        let related = |incoming: bool| {
-            let mut v: Vec<NodeId> = [EdgeKind::Inherits, EdgeKind::Implements]
-                .into_iter()
-                .flat_map(|k| if incoming { seg.in_edges(n, Some(k)) } else { seg.out_edges(n, Some(k)) })
-                .map(|e| e.other)
-                .collect();
-            v.sort_by_cached_key(|&c| view.position_key(c));
-            v.dedup();
-            v
-        };
-        let bases = related(false);
-        let subtypes = related(true);
-        // The code ↔ config bridge (RFC 0003 §7.4): who reads / sets it.
-        let bridge = matches!(node.label, Label::EnvVar | Label::Key);
-        let count_in = |kind| bridge.then(|| distinct_others(&seg.in_edges(n, Some(kind))));
-        let mut candidates = view.briefs(found.candidates);
-        candidates.extend(extra);
-        candidates.truncate(crate::view::MAX_CANDIDATES);
-
-        let result = GetSymbolResult {
-            symbol: SymbolDetail {
-                brief: view.brief(n),
-                language: node.language.map(|l| l.as_str().to_string()),
-                signature: node.signature.clone(),
-                doc: node.doc.clone(),
-                exported: node.exported,
-                is_test: node.is_test,
-            },
-            parent: parent.map(|p| view.brief(p)),
-            children: view.briefs(children),
-            bases: view.briefs(bases),
-            subtypes: view.briefs(subtypes),
-            callers_count: distinct_others(&seg.in_edges(n, Some(EdgeKind::Calls))),
-            callees_count: distinct_others(&seg.out_edges(n, Some(EdgeKind::Calls))),
-            readers_count: count_in(EdgeKind::Reads),
-            writers_count: count_in(EdgeKind::Writes),
-            candidates,
-        };
+        // Several refs of its repository: one item per distinct version.
+        let versions = if a.common.verbose() { vec![((vi, n), None)] } else { refset::symbol_versions(&views, vi, n) };
+        let extra = if versions[0].1.is_some() { drop_versions(&views, (vi, n), extra) } else { extra };
+        let result = symbol_result(&views[vi], n, found.candidates, extra);
         if a.common.verbose() {
             return verbose(&result);
         }
-        Ok(compact::get_symbol(&view.snap, &result, budget(&a.common)))
+        let others: Vec<SymbolVersion> = versions[1..]
+            .iter()
+            .map(|((vj, m), mark)| SymbolVersion {
+                view: *vj,
+                symbol: symbol_detail(&views[*vj], *m),
+                callers_count: distinct_others(&views[*vj].seg.in_edges(*m, Some(EdgeKind::Calls))),
+                callees_count: distinct_others(&views[*vj].seg.out_edges(*m, Some(EdgeKind::Calls))),
+                mark: mark.clone().unwrap_or_default(),
+            })
+            .collect();
+        let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
+        let answer =
+            compact::SymbolAnswer { view: vi, result: &result, mark: versions[0].1.as_ref(), versions: &others };
+        Ok(compact::get_symbol(&snaps, &answer, budget(&a.common)))
     }
 
     pub(crate) fn get_snippet(&self, a: GetSnippetArgs) -> anyhow::Result<Response> {
@@ -402,7 +473,8 @@ impl Engine {
             (vi, file, s, e, Some(view.brief(n)))
         } else {
             let path = a.path.as_deref().unwrap_or_default();
-            let (vi, file) = resolve_path(&views, path)?;
+            // Several refs of one repository: the first listed that has it.
+            let (vi, file) = resolve_path(&views, path)?[0];
             let s = a.start_line.unwrap_or(1);
             if s < 1 {
                 anyhow::bail!("`start_line` is 1-based (got {s})");
@@ -463,50 +535,19 @@ impl Engine {
         let mut views = selection.views;
         let (root_view, found, _) = resolve_symbol(&views, &sel, parts.as_ref())?;
         let root = (root_view, found.node);
+        // Several refs of one repository (RFC 0005 §6): the union graph of a
+        // walk from every version of the root, nodes merged by symbol.
+        let merge = !verbose_fmt && refset::any_multi(&views);
+        let roots = if merge { refset::versions_of(&views, root) } else { vec![root] };
         let filter = NeighbourFilter { labels: &labels, include_tests };
         let dirs: &[Dir] = match a.direction.unwrap_or(DirectionArg::Both) {
             DirectionArg::Callers => &[Dir::Callers],
             DirectionArg::Callees => &[Dir::Callees],
             DirectionArg::Both => &[Dir::Callers, Dir::Callees],
         };
-        let walk = TraceWalk { dirs, kinds: &kinds, depth, min_conf, limit: offset + limit, filter: &filter };
-        let out = self.bfs(&mut views, org.as_ref(), root, &walk)?;
-
-        let qn = |k: Key| views[k.0].node(k.1).qualified_name.clone();
-        let mut nodes: Vec<(u32, Dir, String, Key)> = out.nodes.iter().map(|&(d, dir, k)| (d, dir, qn(k), k)).collect();
-        nodes.sort();
-        let mut edges: Vec<(EdgeSortKey, (rueca_model::EdgeMeta, usize))> =
-            out.edges.into_iter().map(|((src, dst, kind), meta)| ((qn(src), src, qn(dst), dst, kind), meta)).collect();
-        edges.sort_by(|a, b| a.0.cmp(&b.0));
-        let result = TraceResult {
-            root_view,
-            root: views[root_view].brief(root.1),
-            nodes: nodes
-                .into_iter()
-                .map(|(d, dir, _, (vi, n))| TraceNode {
-                    brief: views[vi].brief(n),
-                    depth: d,
-                    direction: dir.as_str().to_string(),
-                    view: vi,
-                })
-                .collect(),
-            edges: edges
-                .into_iter()
-                .map(|((_, src, _, dst, kind), (meta, ev))| TraceEdge {
-                    src: views[src.0].symbol_id(src.1),
-                    dst: views[dst.0].symbol_id(dst.1),
-                    kind: kind.as_str().to_string(),
-                    confidence: f32_to_f64(meta.confidence),
-                    strategy: meta.strategy.as_str().to_string(),
-                    call_site: meta.evidence.and_then(|(f, span)| {
-                        let file = views[ev].seg.files().get(f as usize)?;
-                        Some(CallSite { path: file.path.clone(), line: span.start_line + 1 })
-                    }),
-                })
-                .collect(),
-            truncated: out.truncated,
-            tests_excluded: out.tests_excluded.len() as u32,
-        };
+        let walk = TraceWalk { dirs, kinds: &kinds, depth, min_conf, limit: offset + limit, filter: &filter, merge };
+        let out = self.bfs(&mut views, org.as_ref(), &roots, &walk)?;
+        let result = trace_result(&views, &roots, out, merge);
         if verbose_fmt {
             return verbose(&result);
         }
@@ -514,30 +555,14 @@ impl Engine {
         Ok(compact::trace(&snaps, &result, offset, budget(&a.common)))
     }
 
-    /// The view of organization repository `repo` (index into the
-    /// generation), opened and appended to `views` when not selected yet.
-    fn view_of_repo(&self, views: &mut Vec<View>, org: &OrgCtx, repo: usize) -> anyhow::Result<usize> {
-        if let Some(i) = views.iter().position(|v| v.org_repo == Some(repo)) {
+    /// The view of organization entry `slot`, opened and appended to
+    /// `views` when not read yet.
+    fn view_of_slot(&self, views: &mut Vec<View>, org: &OrgCtx, slot: OrgSlot) -> anyhow::Result<usize> {
+        if let Some(i) = views.iter().position(|v| v.org_slot == Some(slot)) {
             return Ok(i);
         }
-        let g = org
-            .index
-            .generation()
-            .repos
-            .get(repo)
-            .ok_or_else(|| anyhow::anyhow!("organization repository #{repo} is out of range"))?;
         let store = rueca_segment::Store::open(&self.store_dir)?;
-        let seg = self.open_cached(&store, &g.default.segment_id)?;
-        let entry = rueca_segment::CatalogEntry {
-            root: g.default.root.clone(),
-            repo: g.repo.clone(),
-            segment_id: g.default.segment_id.clone(),
-            indexed_at: g.default.snapshot.indexed_at,
-            ref_name: None,
-        };
-        let mut v = View::new(seg, entry);
-        v.org_repo = Some(repo);
-        views.push(v);
+        views.push(self.slot_view(&store, org, slot)?);
         Ok(views.len() - 1)
     }
 
@@ -561,15 +586,16 @@ impl Engine {
         };
         let mut out: Vec<(Key, rueca_model::EdgeMeta, usize)> =
             local.into_iter().map(|e| ((vi, e.other), e.meta, vi)).collect();
-        if let (Some(org), Some(repo)) = (org, views[vi].org_repo) {
+        if let (Some(org), Some(at)) = (org, views[vi].org_slot) {
             let ld = match dir {
                 Dir::Callers => LinkDir::In,
                 Dir::Callees => LinkDir::Out,
             };
-            let at = OrgSlot::default_of(repo);
-            for e in org.index.link_edges(at, n, ld, Some(kind), &org.visible, &OrgSelection::default())? {
-                let other = self.view_of_repo(views, org, e.repo)?;
-                let ev = self.view_of_repo(views, org, e.evidence_repo)?;
+            // Seen from the call's view: edges into a repository read at a
+            // ref are remapped to the ref's nodes (RFC 0006 §9.3).
+            for e in org.index.link_edges(at, n, ld, Some(kind), &org.visible, &org.view)? {
+                let other = self.view_of_slot(views, org, e.slot)?;
+                let ev = self.view_of_slot(views, org, e.evidence)?;
                 out.push(((other, e.node), e.meta, ev));
             }
         }
@@ -577,9 +603,10 @@ impl Engine {
         Ok(out)
     }
 
-    /// Breadth-first traversal from `root`, level by level, callers before
-    /// callees. Each node is visited once per direction; `walk.limit` bounds
-    /// the number of discovered nodes (all directions together). Neighbours
+    /// Breadth-first traversal from `roots` (the versions of one symbol),
+    /// level by level, callers before callees. Each node is visited once per
+    /// direction; `walk.limit` bounds the number of discovered nodes (all
+    /// directions together; with `walk.merge`, symbols). Neighbours
     /// rejected by the filter are neither reported nor expanded, and their
     /// edges are dropped. In organization mode the walk follows link edges
     /// into other repositories (RFC 0006 §6).
@@ -587,15 +614,16 @@ impl Engine {
         &self,
         views: &mut Vec<View>,
         org: Option<&OrgCtx>,
-        root: Key,
+        roots: &[Key],
         walk: &TraceWalk<'_>,
     ) -> anyhow::Result<BfsOut> {
         let mut state = BfsState {
             out: BfsOut { nodes: Vec::new(), edges: BTreeMap::new(), truncated: false, tests_excluded: HashSet::new() },
-            visited: walk.dirs.iter().map(|&d| (d, HashSet::from([root]))).collect(),
-            root,
+            visited: walk.dirs.iter().map(|&d| (d, roots.iter().copied().collect())).collect(),
+            roots: roots.to_vec(),
+            idents: HashSet::new(),
         };
-        let mut frontier: HashMap<Dir, Vec<Key>> = walk.dirs.iter().map(|&d| (d, vec![root])).collect();
+        let mut frontier: HashMap<Dir, Vec<Key>> = walk.dirs.iter().map(|&d| (d, roots.to_vec())).collect();
         for level in 1..=walk.depth {
             for &dir in walk.dirs {
                 let mut current = std::mem::take(frontier.get_mut(&dir).expect("dir"));
@@ -618,21 +646,36 @@ impl Engine {
     pub(crate) fn get_file_outline(&self, a: GetFileOutlineArgs) -> anyhow::Result<Response> {
         let offset = cursor_offset(&a.common, None)?;
         let views = self.scope(&a.common, None)?;
-        let (vi, file) = resolve_path(&views, &a.path)?;
-        let view = &views[vi];
-        let entry = view.seg.file(file);
-        let symbols = view.file_symbols(file);
-        let tree = outline_tree(view, &symbols);
-        let result = FileOutlineResult {
-            path: entry.path.clone(),
-            language: entry.language.map(|l| l.as_str().to_string()),
-            line_count: entry.line_count,
-            symbols: tree,
-        };
+        let hits = resolve_path(&views, &a.path)?;
+        let (vi, file) = hits[0];
+        let result = outline_result(&views[vi], file);
         if a.common.verbose() {
             return verbose(&result);
         }
-        Ok(compact::outline(&view.snap, &result, offset, budget(&a.common)))
+        // Several refs of its repository: one outline per distinct version
+        // of the file (RFC 0005 §6, per-ref groups).
+        let mut versions =
+            if refset::peers(&views, vi).len() > 1 { refset::file_versions(&views, &hits) } else { vec![] };
+        let mark = (!versions.is_empty()).then(|| versions.remove(0).2);
+        let others: Vec<OutlineVersion> = versions
+            .into_iter()
+            .map(|(vj, f, mark)| OutlineVersion { view: vj, outline: outline_result(&views[vj], f), mark })
+            .collect();
+        let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
+        let answer = compact::OutlineAnswer { view: vi, result: &result, mark: mark.as_ref(), versions: &others };
+        Ok(compact::outline(&snaps, &answer, offset, budget(&a.common)))
+    }
+}
+
+/// The outline of `file` in `view`.
+fn outline_result(view: &View, file: FileId) -> FileOutlineResult {
+    let entry = view.seg.file(file);
+    let symbols = view.file_symbols(file);
+    FileOutlineResult {
+        path: entry.path.clone(),
+        language: entry.language.map(|l| l.as_str().to_string()),
+        line_count: entry.line_count,
+        symbols: outline_tree(view, &symbols),
     }
 }
 
@@ -648,18 +691,22 @@ impl Engine {
         let views = &sel.views;
         let mut repos: Vec<(usize, RepositorySummary)> = Vec::new();
         for (vi, v) in views.iter().enumerate() {
-            match repos.iter_mut().find(|(_, r)| r.repo == v.repo()) {
-                Some((_, r)) => r.refs.push(v.snap.ref_name.clone()),
-                None => repos.push((vi, repository_summary(v, sel.org.as_ref()))),
+            if !repos.iter().any(|(_, r)| r.repo == v.repo()) {
+                let mut summary = repository_summary(v, sel.org.as_ref());
+                summary.refs = match &sel.org {
+                    Some(org) => org_refs(org, v),
+                    None => local_refs(&self.local_snapshots(&sel.catalog, v)),
+                };
+                repos.push((vi, summary));
             }
         }
         repos.sort_by(|a, b| a.1.repo.cmp(&b.1.repo));
         // `query`: the organization's repository routing, best first.
         if let (Some(q), Some(org)) = (a.query.as_deref().filter(|q| !q.trim().is_empty()), &sel.org) {
-            let routes = org.index.route(q, &org.visible, &self.route)?;
+            let routes = org.index.route_view(q, &org.visible, &org.view, &self.route)?;
             let score: HashMap<usize, f32> = routes.iter().map(|r| (r.repo, r.score)).collect();
             for (vi, r) in &mut repos {
-                r.score = views[*vi].org_repo.and_then(|i| score.get(&i)).map(|&s| compact::sig3(f32_to_f64(s)));
+                r.score = views[*vi].org_repo().and_then(|i| score.get(&i)).map(|&s| compact::sig3(f32_to_f64(s)));
             }
             repos.sort_by(|a, b| {
                 b.1.score.unwrap_or(0.0).total_cmp(&a.1.score.unwrap_or(0.0)).then(a.1.repo.cmp(&b.1.repo))
@@ -674,9 +721,40 @@ impl Engine {
         let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
         Ok(compact::list_repositories(&snaps, &repos, self.org.as_deref(), offset, budget(&a.common)))
     }
+
+    /// Local mode: every indexed snapshot of the repository of `v`, `v`'s
+    /// first, then the other working trees, then the ref snapshots by name.
+    fn local_snapshots(&self, catalog: &[CatalogEntry], v: &View) -> Vec<SnapshotDesc> {
+        let mut mine: Vec<&CatalogEntry> =
+            catalog.iter().filter(|e| e.repo == v.repo() && e.root != v.entry.root).collect();
+        mine.sort_by(|a, b| (a.is_ref_export(), &a.ref_name, &a.root).cmp(&(b.is_ref_export(), &b.ref_name, &b.root)));
+        let Ok(store) = rueca_segment::Store::open(&self.store_dir) else { return vec![v.snap.clone()] };
+        let others = mine.into_iter().filter_map(|e| self.open_cached(&store, &e.segment_id).ok());
+        std::iter::once(v.snap.clone()).chain(others.map(|seg| SnapshotDesc::from_info(seg.snapshot()))).collect()
+    }
 }
 
-/// The summary of the repository of view `v` (its own ref only).
+/// `list_repositories` `refs` of snapshots: ref name and 12-digit commit.
+fn local_refs(snaps: &[SnapshotDesc]) -> Vec<RefSummary> {
+    snaps
+        .iter()
+        .map(|d| RefSummary { ref_name: d.ref_name.clone(), commit: short_commit(&d.commit).to_string() })
+        .collect()
+}
+
+/// `list_repositories` `refs` of the organization repository of `v`: its
+/// default entry, then its ref entries.
+fn org_refs(org: &OrgCtx, v: &View) -> Vec<RefSummary> {
+    let Some(i) = v.org_repo() else { return Vec::new() };
+    org.index
+        .generation()
+        .refs_of(i)
+        .into_iter()
+        .map(|r| RefSummary { ref_name: r.ref_name, commit: short_commit(&r.commit).to_string() })
+        .collect()
+}
+
+/// The summary of the repository of view `v` (its own ref; `refs` empty).
 fn repository_summary(v: &View, org: Option<&OrgCtx>) -> RepositorySummary {
     let seg = &v.seg;
     let mut languages = BTreeMap::new();
@@ -684,7 +762,7 @@ fn repository_summary(v: &View, org: Option<&OrgCtx>) -> RepositorySummary {
         *languages.entry(l.as_str().to_string()).or_insert(0u32) += 1;
     }
     let symbols = seg.nodes().iter().filter(|n| !is_container(n.label)).count() as u32;
-    let (packages, depends_on) = match (org, v.org_repo) {
+    let (packages, depends_on) = match (org, v.org_repo()) {
         (Some(org), Some(i)) => org_dependencies(org, i),
         _ => (Vec::new(), Vec::new()),
     };
@@ -693,7 +771,7 @@ fn repository_summary(v: &View, org: Option<&OrgCtx>) -> RepositorySummary {
         root: v.snap.root.clone(),
         default_ref: v.snap.ref_name.clone(),
         commit: v.snap.commit.clone(),
-        refs: vec![v.snap.ref_name.clone()],
+        refs: Vec::new(),
         languages,
         files: seg.files().len() as u32,
         symbols,
@@ -727,8 +805,74 @@ fn org_dependencies(org: &OrgCtx, i: usize) -> (Vec<String>, Vec<String>) {
     (packages, depends_on)
 }
 
-/// A node of a trace: (view index, node).
-type Key = (usize, NodeId);
+/// The `trace` result of a walk from `roots` (the root, then its versions
+/// in other snapshots). With `merge` (several snapshots of one repository),
+/// the versions of a symbol are one node and the same edge of several
+/// snapshots one edge, each with its mark.
+fn trace_result(views: &[View], roots: &[Key], out: BfsOut, merge: bool) -> TraceResult {
+    let root = roots[0];
+    let qn = |k: Key| views[k.0].node(k.1).qualified_name.clone();
+    let m = merge.then(|| NodeMerge::build(views, roots, out.nodes.iter().map(|n| n.2)));
+    let (edges, tests_excluded) = match &m {
+        Some(m) => {
+            let tests: HashSet<Ident> = out.tests_excluded.iter().map(|&k| refset::ident(views, k)).collect();
+            (m.edges(views, out.edges), tests.len())
+        }
+        None => {
+            let edges = out.edges.into_iter().map(|((src, dst, kind), meta)| (src, dst, kind, meta, None)).collect();
+            (edges, out.tests_excluded.len())
+        }
+    };
+    let rep = |k: Key| m.as_ref().map_or(k, |m| m.of(k));
+    let mark = |k: Key| m.as_ref().and_then(|m| m.marks.get(&k).cloned());
+    let mut nodes: Vec<(u32, Dir, String, Key)> = out
+        .nodes
+        .iter()
+        .map(|&(d, dir, k)| {
+            let r = rep(k);
+            (d, dir, qn(r), r)
+        })
+        .collect();
+    nodes.sort();
+    let mut seen = HashSet::new();
+    nodes.retain(|n| seen.insert((n.1, n.3)));
+    let mut edges: Vec<(EdgeSortKey, TracedEdge)> =
+        edges.into_iter().map(|e| ((qn(e.0), e.0, qn(e.1), e.1, e.2), e)).collect();
+    edges.sort_by(|a, b| a.0.cmp(&b.0));
+    TraceResult {
+        root_view: root.0,
+        root: views[root.0].brief(root.1),
+        root_mark: mark(root),
+        nodes: nodes
+            .into_iter()
+            .map(|(d, dir, _, (vi, n))| TraceNode {
+                brief: views[vi].brief(n),
+                depth: d,
+                direction: dir.as_str().to_string(),
+                view: vi,
+                mark: mark((vi, n)),
+            })
+            .collect(),
+        edges: edges.into_iter().map(|(_, e)| trace_edge(views, e)).collect(),
+        truncated: out.truncated,
+        tests_excluded: tests_excluded as u32,
+    }
+}
+
+fn trace_edge(views: &[View], (src, dst, kind, (meta, ev), mark): TracedEdge) -> TraceEdge {
+    TraceEdge {
+        src: views[src.0].symbol_id(src.1),
+        dst: views[dst.0].symbol_id(dst.1),
+        kind: kind.as_str().to_string(),
+        confidence: f32_to_f64(meta.confidence),
+        strategy: meta.strategy.as_str().to_string(),
+        call_site: meta.evidence.and_then(|(f, span)| {
+            let file = views[ev].seg.files().get(f as usize)?;
+            Some(CallSite { path: file.path.clone(), line: span.start_line + 1 })
+        }),
+        mark,
+    }
+}
 
 /// Edge order in `trace` results: (src qualified name, src, dst qualified
 /// name, dst, kind).
@@ -758,6 +902,9 @@ struct TraceWalk<'a> {
     min_conf: f32,
     limit: usize,
     filter: &'a NeighbourFilter<'a>,
+    /// Several snapshots of one repository: `limit` counts symbols
+    /// ([`refset::ident`]), not nodes of each snapshot.
+    merge: bool,
 }
 
 pub(crate) struct BfsOut {
@@ -765,7 +912,7 @@ pub(crate) struct BfsOut {
     pub nodes: Vec<(u32, Dir, Key)>,
     /// (src, dst, kind) → strongest edge metadata and the view its evidence
     /// file belongs to.
-    pub edges: BTreeMap<(Key, Key, EdgeKind), (rueca_model::EdgeMeta, usize)>,
+    pub edges: EdgeMap,
     pub truncated: bool,
     /// Test neighbours skipped by the filter.
     pub tests_excluded: HashSet<Key>,
@@ -786,7 +933,10 @@ struct BfsState {
     out: BfsOut,
     /// Nodes discovered per direction.
     visited: HashMap<Dir, HashSet<Key>>,
-    root: Key,
+    /// The root and its versions in other snapshots (never filtered).
+    roots: Vec<Key>,
+    /// Symbols discovered (with `TraceWalk::merge`).
+    idents: HashSet<Ident>,
 }
 
 impl BfsState {
@@ -828,7 +978,7 @@ impl BfsState {
     /// Whether `other` is reported: `None` when filtered out or over the
     /// limit, else whether it was discovered now.
     fn admit(&mut self, views: &[View], walk: &TraceWalk<'_>, hop: Hop, other: Key) -> Option<bool> {
-        if other != self.root
+        if !self.roots.contains(&other)
             && let Err(is_test) = walk.filter.check(&views[other.0], other.1)
         {
             if is_test {
@@ -839,10 +989,14 @@ impl BfsState {
         if self.visited[&hop.dir].contains(&other) {
             return Some(false);
         }
-        if self.out.nodes.len() >= walk.limit {
+        let ident = walk.merge.then(|| refset::ident(views, other));
+        let known = ident.as_ref().is_some_and(|i| self.idents.contains(i));
+        let count = if walk.merge { self.idents.len() } else { self.out.nodes.len() };
+        if !known && count >= walk.limit {
             self.out.truncated = true;
             return None;
         }
+        self.idents.extend(ident);
         self.visited.get_mut(&hop.dir).expect("dir").insert(other);
         self.out.nodes.push((hop.level, hop.dir, other));
         Some(true)

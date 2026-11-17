@@ -5,6 +5,21 @@
 use schemars::JsonSchema;
 use serde::Serialize;
 
+/// Where an item of a response that reads several snapshots of one
+/// repository comes from (RFC 0005 §6): the snapshots (view indexes of the
+/// call, renumbered in the envelope) whose version is identical to this one,
+/// and whether it is not identical in every requested snapshot of its
+/// repository (another version, or absent: added or deleted on a ref).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RefMark {
+    /// View indexes, ascending.
+    pub in_: Vec<usize>,
+    pub changed: bool,
+    /// Every requested snapshot of the item's repository (view indexes): the
+    /// envelope lists them all, so `in` and `changed` read against them.
+    pub peers: Vec<usize>,
+}
+
 /// Brief symbol, used inside every result.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct Brief {
@@ -117,6 +132,10 @@ pub struct TraceNode {
     #[serde(skip)]
     #[schemars(skip)]
     pub view: usize,
+    /// Several refs of the node's repository were read (compact only).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub mark: Option<RefMark>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
@@ -134,6 +153,11 @@ pub struct TraceEdge {
     pub confidence: f64,
     pub strategy: String,
     pub call_site: Option<CallSite>,
+    /// Several refs of the edge's repository were read (compact only): the
+    /// snapshots whose walk found the edge.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub mark: Option<RefMark>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
@@ -143,6 +167,10 @@ pub struct TraceResult {
     #[schemars(skip)]
     pub root_view: usize,
     pub root: Brief,
+    /// Several refs of the root's repository were read (compact only).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub root_mark: Option<RefMark>,
     pub nodes: Vec<TraceNode>,
     pub edges: Vec<TraceEdge>,
     pub truncated: bool,
@@ -166,8 +194,38 @@ pub struct FileOutlineResult {
     pub symbols: Vec<OutlineSymbol>,
 }
 
-/// Converts an `f32` to the `f64` with the same shortest decimal form, so
-/// `0.9f32` serializes as `0.9` rather than `0.8999999761581421`.
+/// Another version of a `get_symbol` answer when several refs of its
+/// repository are read (compact only; RFC 0005 §6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SymbolVersion {
+    /// View the version was read from.
+    pub view: usize,
+    pub symbol: SymbolDetail,
+    pub callers_count: u32,
+    pub callees_count: u32,
+    pub mark: RefMark,
+}
+
+/// Another version of a `get_file_outline` answer when several refs of its
+/// repository are read (compact only; RFC 0005 §6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutlineVersion {
+    /// View the version was read from.
+    pub view: usize,
+    pub outline: FileOutlineResult,
+    pub mark: RefMark,
+}
+
+/// One indexed snapshot of a repository in `list_repositories`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefSummary {
+    /// The ref name (`main`, `pr/7`, `v1.2`, a commit).
+    #[serde(rename = "ref")]
+    pub ref_name: String,
+    /// First 12 hex digits of the commit (`worktree` outside git).
+    pub commit: String,
+}
+
 /// One repository of `list_repositories`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RepositorySummary {
@@ -178,8 +236,8 @@ pub struct RepositorySummary {
     pub default_ref: String,
     /// Full commit of the default ref.
     pub commit: String,
-    /// Every indexed ref of the repository (its snapshots).
-    pub refs: Vec<String>,
+    /// Every indexed snapshot of the repository, the default ref first.
+    pub refs: Vec<RefSummary>,
     /// Indexed files per language.
     pub languages: std::collections::BTreeMap<String, u32>,
     pub files: u32,
@@ -204,6 +262,8 @@ pub struct ListRepositoriesResult {
     pub repositories: Vec<RepositorySummary>,
 }
 
+/// Converts an `f32` to the `f64` with the same shortest decimal form, so
+/// `0.9f32` serializes as `0.9` rather than `0.8999999761581421`.
 pub(crate) fn f32_to_f64(x: f32) -> f64 {
     if !x.is_finite() {
         return 0.0;

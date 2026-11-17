@@ -803,7 +803,9 @@ fetched from `origin`), the commit's tree is written blob by blob to
 root, its snapshot pinned to the ref (`ref` = the name, `commit`, never
 dirty) under the repository's own id. The catalog entry carries `ref_name`,
 so one repository id groups its working tree and its ref snapshots; tools
-read the working tree unless `ref` names another snapshot. The facts cache
+read the working tree unless `ref` names another snapshot, and a `ref` list
+(`["main", "feature/x"]`) reads several side by side, collapsing what is
+identical (§6, *Responses*). The facts cache
 is keyed by blob, so a second ref only re-extracts the files that differ;
 re-indexing a ref at the same commit does nothing, and `--ref <name>
 --remove` drops the snapshot and its export.
@@ -914,7 +916,10 @@ index**, so a question asked of the whole organization gets one ranking.
   --ref <name> [--remove]` handles one, a plain `rueca index <path> --ref
   <name>` updates the organizations holding the repository, `rueca status`
   lists `main@… + feature/x@…` per repository and `rueca links --org <org>
-  --repo <id> --ref <name>` prints one ref's link set.
+  --repo <id> --ref <name>` prints one ref's link set. At query time `ref`
+  picks the entries a call reads — `repo: A, ref: pr/7` is the organization
+  with A at `pr/7` and every other repository at its default — and search
+  statistics, routing and `trace`'s link edges are computed over that view.
 - **Across repositories at query time.** `trace` follows link edges in
   both directions: callers of a library function include its callers in
   other repositories, each node carrying its snapshot (`s`). A link edge is
@@ -1152,6 +1157,11 @@ an agent:
 - **Text.** MCP text content (and `rueca query --text`) is a rendering of
   that JSON with one line per item and the local name of each symbol, which
   together with the header and the group path spells the id.
+- **Several refs, once.** With a `ref` list, a symbol whose file blob is the
+  same in two refs is one item `in` both (facts are per blob, so it is
+  identical); versions that differ, or exist in one ref only, are marked
+  `changed` — the unchanged code once, the difference highlighted. `trace`
+  returns the union of the walks from every version of the root.
 - **Budget.** `budget_tokens` (default 2,000) bounds the text: the builder
   binary-searches the longest prefix of items whose rendering fits
   (`ceil(bytes / 4)` tokens), marks the response `truncated` and returns a

@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use rueca_model::{ENV_PATH, EdgeKind, FileId, Label, LanguageFamily, Node, NodeId, Span, env_var_qualified_name};
+use rueca_segment::org::OrgSlot;
 use rueca_segment::{CatalogEntry, Segment};
 
 use crate::snapshot::SnapshotDesc;
@@ -19,8 +20,9 @@ pub struct View {
     pub snap: SnapshotDesc,
     /// `commit12[+]`, cached for ids.
     id_commit: String,
-    /// Index of the repository in the organization generation (organization mode).
-    pub org_repo: Option<usize>,
+    /// The organization entry this snapshot is (organization mode): its
+    /// repository's index in the generation and which of its refs.
+    pub org_slot: Option<OrgSlot>,
 }
 
 /// How a tool names a symbol.
@@ -54,11 +56,32 @@ impl View {
     pub fn new(seg: Arc<Segment>, entry: CatalogEntry) -> View {
         let snap = SnapshotDesc::from_info(seg.snapshot());
         let id_commit = snap.id_commit();
-        View { seg, entry, snap, id_commit, org_repo: None }
+        View { seg, entry, snap, id_commit, org_slot: None }
     }
 
     pub fn repo(&self) -> &str {
         &self.seg.snapshot().repo
+    }
+
+    /// Index of the repository in the organization generation (organization mode).
+    pub fn org_repo(&self) -> Option<usize> {
+        self.org_slot.map(|s| s.repo)
+    }
+
+    /// The git blob id of the file defining `id` (`None` for nodes without a file).
+    pub fn blob_of(&self, id: NodeId) -> Option<&str> {
+        self.node(id).file.map(|f| self.seg.file(f).blob_sha.as_str())
+    }
+
+    /// The node of this snapshot that is node `n` of `other` (another
+    /// snapshot of the same repository): same label, qualified name and file
+    /// path; the lowest node id when several match.
+    pub fn same_symbol(&self, other: &View, n: NodeId) -> Option<NodeId> {
+        let node = other.node(n);
+        let path = other.node_path(n);
+        let mut hits = self.seg.nodes_by_qualified_name(&node.qualified_name);
+        hits.retain(|&m| self.node(m).label == node.label && self.node_path(m) == path);
+        hits.into_iter().min()
     }
 
     pub fn node(&self, id: NodeId) -> &Node {

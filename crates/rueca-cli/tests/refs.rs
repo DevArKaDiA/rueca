@@ -87,6 +87,19 @@ fn index_a_branch_query_it_and_remove_it() {
     assert!(out.status.success() && text.contains("refund_only_on_branch") && text.contains("(feature/x)"), "{text}");
     let text = String::from_utf8(query(r#"{"query": "refund only on branch"}"#).stdout).unwrap();
     assert!(!text.contains("refund_only_on_branch"), "{text}");
+    // A list of refs compares them: identical symbols once, in both
+    // snapshots (`[0,1]`); the branch's own symbol `changed`.
+    let out = query(r#"{"query": "place order refund", "ref": ["main", "feature/x"]}"#);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(out.status.success() && text.starts_with("[0] local/shop@"), "{text}");
+    assert!(text.lines().any(|l| l.contains("Function place_order") && l.ends_with(" [0,1]")), "{text}");
+    assert!(text.lines().any(|l| l.contains("Function refund_only_on_branch") && l.ends_with(" changed")), "{text}");
+    assert_eq!(text.matches("Function place_order").count(), 1, "{text}");
+    // `list_repositories` lists every snapshot of the repository.
+    let out =
+        rueca(&store).arg("--root").arg(&root).args(["query", "list_repositories", "{}", "--text"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("local/shop  refs main@") && text.contains(", feature/x@"), "{text}");
     let out = query(r#"{"query": "refund", "ref": "nope"}"#);
     assert_eq!(out.status.code(), Some(2));
     let err = stdout_json(&out)["error"].as_str().unwrap().to_string();
