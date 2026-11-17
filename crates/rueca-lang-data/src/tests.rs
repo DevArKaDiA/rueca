@@ -472,6 +472,46 @@ fn openapi_and_json_schema() {
 }
 
 #[test]
+fn openapi_contract_hints() {
+    use rueca_model::{ContractKind, ContractSide};
+    let f = fixture("api/openapi.yaml");
+    let route = f.definitions.iter().position(|d| d.qualified_name == "paths./users/{id}.get").unwrap() as u32;
+    assert_eq!(f.contracts.len(), 1, "{:?}", f.contracts);
+    let h = &f.contracts[0];
+    assert_eq!((h.side, h.kind), (ContractSide::Provides, ContractKind::Http));
+    assert_eq!(h.key, "GET /users/{}");
+    assert_eq!(h.raw, "GET /users/{id} (getUser)");
+    assert_eq!(h.framework, "openapi");
+    assert_eq!(h.owner, Some(route));
+    assert_eq!(h.span, f.definitions[route as usize].span);
+    // JSON, several methods per path, a Flask-style parameter, a non-method
+    // key (`parameters`) and a non-OpenAPI file.
+    let f = run(
+        "api/spec.json",
+        r#"{"swagger": "2.0", "paths": {
+            "/orders/{orderId}/items": {"parameters": [], "get": {"responses": {}}, "post": {"operationId": "addItem"}},
+            "/health/": {"head": {}}
+        }}"#,
+    );
+    let keys: Vec<(&str, &str)> = f.contracts.iter().map(|h| (h.key.as_str(), h.raw.as_str())).collect();
+    assert_eq!(
+        keys,
+        [
+            ("GET /orders/{}/items", "GET /orders/{orderId}/items"),
+            ("POST /orders/{}/items", "POST /orders/{orderId}/items (addItem)"),
+            ("HEAD /health", "HEAD /health/"),
+        ]
+    );
+    for h in &f.contracts {
+        let d = &f.definitions[h.owner.unwrap() as usize];
+        assert_eq!(d.label, Label::Route);
+        assert_eq!(h.span, d.span);
+    }
+    assert!(run("api/spec.json", "{}").contracts.is_empty());
+    assert!(run("k8s/x.yaml", "paths:\n  /a:\n    get: {}\n").contracts.is_empty());
+}
+
+#[test]
 fn spring_config() {
     let f = fixture("src/main/resources/application.yml");
     // Dotted YAML keys are split like `.properties` keys.

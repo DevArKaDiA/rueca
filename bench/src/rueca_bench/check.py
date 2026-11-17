@@ -4,7 +4,8 @@
 A floor metric regresses when its value moves the wrong way by more than
 the half-width of its committed 95% interval. Checked: every gated metric
 with a floor, for Rueca, per language (localization, structure, micro,
-parse-error rate) and the configuration metrics. Not checked: query
+parse-error rate), the configuration metrics and the cross-service
+edges (S2, per contract kind). Not checked: query
 latency (machine-dependent: CI runners are not the machine that produced
 the published numbers) and tokens (no floor). A metric present in the
 baseline and missing now is a failure; a new metric is reported, not
@@ -41,6 +42,8 @@ def _rows(card: dict):
             yield lang, key, m
     for key, m in ((card.get("config") or {}).get("metrics") or {}).items():
         yield "config", key, m
+    for key, m in ((card.get("contracts") or {}).get("metrics") or {}).items():
+        yield "contracts", key, m  # S2 cross-service edges
 
 
 def compare(baseline: dict, current: dict) -> tuple[list[str], list[str]]:

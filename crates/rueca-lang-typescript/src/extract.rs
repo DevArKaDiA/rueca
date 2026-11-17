@@ -224,7 +224,14 @@ pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], path: &str, max_depth: us
         }
     }
     ex.drop_local_calls();
-    FileFacts { definitions: ex.defs, references: ex.refs, imports: ex.imports, parse_errors: 0, line_count: 0 }
+    FileFacts {
+        definitions: ex.defs,
+        references: ex.refs,
+        imports: ex.imports,
+        parse_errors: 0,
+        line_count: 0,
+        contracts: Vec::new(),
+    }
 }
 
 /// Module-level names bound by project imports (relative or aliased

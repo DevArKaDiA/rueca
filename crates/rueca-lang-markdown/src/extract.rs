@@ -103,6 +103,7 @@ pub fn extract(source: &[u8], budget: &Budget) -> Result<FileFacts, ExtractError
         imports,
         parse_errors: u32::from(invalid_utf8),
         line_count: rueca_extract::line_count(source),
+        contracts: Vec::new(),
     })
 }
 

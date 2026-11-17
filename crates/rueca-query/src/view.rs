@@ -131,7 +131,8 @@ impl View {
             | LanguageFamily::Go
             | LanguageFamily::C
             | LanguageFamily::Java
-            | LanguageFamily::Rust),
+            | LanguageFamily::Rust
+            | LanguageFamily::Proto),
         ) = family
             && let Some(local) = self.module_local_name(node, family)
         {
@@ -174,7 +175,7 @@ impl View {
             Some(m) => m.to_string(),
             None => match family {
                 LanguageFamily::Data => self.seg.file(file).path.clone(),
-                LanguageFamily::C => String::new(),
+                LanguageFamily::C | LanguageFamily::Proto => String::new(),
                 _ => return None,
             },
         };

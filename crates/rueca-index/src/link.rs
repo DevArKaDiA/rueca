@@ -644,7 +644,7 @@ pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String>
         LanguageFamily::Java => Some(format!("java:{m}")),
         LanguageFamily::Php => Some(format!("php:{}", m.trim_start_matches('\\'))),
         LanguageFamily::C => Some(format!("c:{}", m.trim_start_matches("./"))),
-        LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Rust => None,
+        LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Rust | LanguageFamily::Proto => None,
     }
 }
 

@@ -306,6 +306,18 @@
 //! Several candidates outside a scope resolve to nothing. `Key` and
 //! `Document` definitions are never strategy-6 candidates.
 //!
+//! # Contracts
+//!
+//! `FileFacts::contracts` hints (HTTP routes, spec operations, RPC methods
+//! and the calls that use them; RFC 0006 phase 4) become the contract table
+//! `ResolvedGraph::contracts`, one row per hint on its owner's node (else
+//! the file node), and `Strategy::Contract` edges matched by canonical key
+//! (`rueca_model::contract`): consumer → code provider and consumer → spec
+//! provider (`CALLS`), code provider → spec provider (`IMPLEMENTS`), at
+//! 0.9 (exact) / 0.85 (template) / 0.7 (method wildcard), 0.5 each when
+//! several provider nodes tie; evidence = the consumer's (for `IMPLEMENTS`
+//! the handler's) span. Details in the `contracts` module.
+//!
 //! # Edge kinds
 //!
 //! `Call`/`New` → `CALLS` (a call that targets a class also `CALLS` its
@@ -362,6 +374,7 @@ use rueca_model::{
 };
 
 mod bridge;
+mod contracts;
 mod go;
 mod hooks;
 mod rust;
@@ -475,6 +488,10 @@ pub fn resolve(
     r.resolve_references();
     r.expand_macro_calls();
     r.env_provider_edges();
+    let contracts = r.contract_rows();
+    for (src, dst, kind, meta) in contracts::contract_edges(&contracts) {
+        r.add_edge(src, dst, kind, meta);
+    }
     r.tests_edges();
 
     let modules: Vec<String> =
@@ -494,7 +511,7 @@ pub fn resolve(
         })
         .collect();
     let edges = edges.into_iter().map(|((src, kind, dst), meta)| Edge { src, dst, kind, meta }).collect();
-    ResolveOutput { graph: ResolvedGraph { snapshot, nodes, edges, files: file_entries, modules }, stats }
+    ResolveOutput { graph: ResolvedGraph { snapshot, nodes, edges, files: file_entries, modules, contracts }, stats }
 }
 
 // ---------------------------------------------------------------------------

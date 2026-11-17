@@ -27,6 +27,7 @@ from collections import Counter, defaultdict
 from . import data as data_mod
 from . import health as health_mod
 from . import crossrepo as crossrepo_mod
+from . import contracts as contracts_mod
 from . import org as org_mod
 from . import orgstats as orgstats_mod
 from .arms import ARM_NAMES, make_arm
@@ -1215,6 +1216,8 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
         L.append(f"| {c['label']} | `{c['status']}` | {_failing_txt(c) or '—'} |")
     cfg = card["config"]
     L.append(f"| configuration | `{cfg['status']}` | {'; '.join(cfg['metrics'][k]['label'] + ' ' + _ci(cfg['metrics'][k]['value'], cfg['metrics'][k]['ci']) for k in cfg['failing']) or '—'} |")
+    if card.get("contracts"):
+        L.append(contracts_mod.scorecard_row(card["contracts"]))
     L.append("")
     for key, c in card["languages"].items():
         L.append(f"### {c['label']} — `{c['status']}`")
@@ -1950,6 +1953,12 @@ def _render_crossrepo(L: list[str], xr: dict, pools: dict | None = None) -> None
             L.append("")
 
 
+def _render_contracts(L: list[str], s2: dict) -> None:
+    """S2 cross-service edges (contracts), precision / recall per kind on
+    pinned service groups (`contracts.py`)."""
+    contracts_mod.render(L, s2, _judge)
+
+
 def _render_org(L: list[str], orgs: dict) -> None:
     mr = orgs.get("multirepo") or {}
     st = orgs.get("stats") or {}
@@ -1978,6 +1987,7 @@ def _render_org(L: list[str], orgs: dict) -> None:
             L.append("")
         _render_org_rfc0006(L, orgs.get("rfc0006") or [])
     _render_crossrepo(L, orgs.get("crossrepo") or {}, orgs.get("crossrepo_pools"))
+    _render_contracts(L, contracts_mod.last_score())
     mf = orgs.get("multiref") or {}
     L.append("### Multi-ref (one repository at two commits)")
     L.append("")
@@ -2152,6 +2162,8 @@ def report() -> None:
     orgs = score_orgs(published.get("org") or {})
     log("report: scorecard")
     card = build_scorecard(s1, s3, health, data, eff)
+    s2 = contracts_mod.score()
+    card["contracts"] = contracts_mod.scorecard_block(s2, _judge)  # gated family "Cross-service edges" (S2)
     carried_pairs = {tuple(k.split(":", 1)) for k in s1.get("carried", {})}
     for k in s3.get("carried", []):
         arm, name = k.split(":", 1)
@@ -2194,6 +2206,7 @@ def report() -> None:
     # one row per organization question and arm (compact, like s3.json)
     write_json(RESULTS_DIR / "org.json", orgs, compact=True)
     write_json(RESULTS_DIR / "scorecard.json", card)
+    write_json(RESULTS_DIR / "s2.json", s2)
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     (DOCS_DIR / "alpha-results.md").write_text(render(meta, s1, s3, data, health, card, eff, orgs))
     log(f"wrote {RESULTS_DIR}/{{meta,s1,s3,data,health,efficiency,org,scorecard}}.json and {DOCS_DIR / 'alpha-results.md'}")

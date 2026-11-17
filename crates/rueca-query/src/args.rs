@@ -36,6 +36,7 @@ pub enum LanguageArg {
     C,
     Java,
     Rust,
+    Proto,
 }
 
 impl LanguageArg {
@@ -62,6 +63,7 @@ impl LanguageArg {
             LanguageArg::C => L::C,
             LanguageArg::Java => L::Java,
             LanguageArg::Rust => L::Rust,
+            LanguageArg::Proto => L::Proto,
         }
     }
 }

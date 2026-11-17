@@ -38,6 +38,7 @@ fn graph(repo: &str, commit: &str, root: &str, files: &[(&str, &str)]) -> (Resol
         edges: vec![],
         files: vec![],
         modules: vec![],
+        contracts: vec![],
     };
     let mut mem = HashMap::new();
     for (path, src) in files {

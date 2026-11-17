@@ -7,6 +7,7 @@ use roaring::RoaringBitmap;
 use rueca_model::{EdgeKind, FileEntry, FileId, Node, NodeId};
 
 use crate::bundle::Bundle;
+use crate::contracts::ContractTable;
 use crate::graph::{self, EdgeMetaRec};
 use crate::ngram::{self, NgramIndex};
 use crate::packs::PackReader;
@@ -32,6 +33,8 @@ pub(crate) struct Inner {
     pub files: Vec<FileEntry>,
     /// Module name per file (optional component `files.modules`).
     pub modules: Option<Vec<String>>,
+    /// The contract table (optional component `contracts`).
+    pub contracts: ContractTable,
     out: Adj,
     inc: Adj,
     edge_meta: Range<usize>,
@@ -86,6 +89,8 @@ impl Inner {
         if meta.node_count as usize != n || meta.file_count as usize != f {
             return Err(corrupt("meta counts disagree with tables"));
         }
+        // Optional (added without a format bump): absent = no contracts.
+        let contracts = ContractTable::open(&bundle, n, f)?;
         let e = meta.edge_count as usize;
 
         let edge_meta = bundle.pod_range::<EdgeMetaRec>("edge_meta")?;
@@ -169,6 +174,7 @@ impl Inner {
             nodes,
             files,
             modules,
+            contracts,
             out,
             inc,
             edge_meta,

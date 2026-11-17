@@ -2,7 +2,7 @@
 
 use super::*;
 use rueca_extract::{Budget, ExtractError};
-use rueca_model::ImportedName;
+use rueca_model::{ContractHint, ImportedName};
 
 // ---------------------------------------------------------------------------
 // Fake packs
@@ -1187,4 +1187,61 @@ fn php_deterministic_across_input_order() {
     files.reverse();
     let b = run(files);
     assert_eq!(serde_json::to_string(&a.graph).unwrap(), serde_json::to_string(&b.graph).unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Contracts (RFC 0006 phase 4)
+// ---------------------------------------------------------------------------
+
+fn hint(side: rueca_model::ContractSide, key: &str, owner: Option<u32>, a: u32, framework: &str) -> ContractHint {
+    ContractHint {
+        side,
+        kind: rueca_model::ContractKind::Http,
+        key: key.into(),
+        raw: key.into(),
+        span: sp(a, a + 1),
+        owner,
+        framework: framework.into(),
+    }
+}
+
+#[test]
+fn contracts_rows_and_edges() {
+    use rueca_model::ContractSide::{Consumes, Provides};
+    let mut server = F::py();
+    let get_user = server.def(Label::Function, "get_user", None, 0, 10);
+    server.facts.contracts.push(hint(Provides, "GET /users/{}", Some(get_user), 1, "flask"));
+    let mut client = F::py();
+    let fetch = client.def(Label::Function, "fetch_user", None, 0, 10);
+    client.facts.contracts.push(hint(Consumes, "GET /users/42", Some(fetch), 3, "requests"));
+    // File-level consumer, owner out of range: the file node.
+    client.facts.contracts.push(hint(Consumes, "GET /users/{}", Some(99), 20, "requests"));
+    client.facts.contracts.push(hint(Consumes, "DELETE /nowhere", None, 30, "requests"));
+    let mut test = F::py();
+    let t = test.def(Label::Function, "test_user", None, 0, 10);
+    test.d(t).is_test = true;
+    test.facts.contracts.push(hint(Consumes, "GET /users/7", Some(t), 4, "requests"));
+    let mut spec = F::es();
+    spec.facts.contracts.push(hint(Provides, "GET /users/{}", None, 5, "openapi"));
+    let out = run(vec![
+        server.file("app/server.py"),
+        client.file("app/client.py"),
+        test.file("tests/test_api.py"),
+        spec.file("api/openapi.ts"),
+    ]);
+    let g = G(&out.graph);
+    let rows = &out.graph.contracts;
+    assert_eq!(rows.len(), 6);
+    assert_eq!(rows.iter().filter(|r| r.node == g.id("app/client.py")).count(), 2);
+    assert!(rows.iter().any(|r| r.node == g.id("app.server.get_user") && r.framework == "flask"));
+    g.has("app.client.fetch_user", "app.server.get_user", EdgeKind::Calls, Strategy::Contract, 0.85);
+    g.has("app/client.py", "app.server.get_user", EdgeKind::Calls, Strategy::Contract, 0.9);
+    g.has("app/client.py", "api/openapi.ts", EdgeKind::Calls, Strategy::Contract, 0.9);
+    g.has("app.server.get_user", "api/openapi.ts", EdgeKind::Implements, Strategy::Contract, 0.9);
+    g.has("tests.test_api.test_user", "app.server.get_user", EdgeKind::Tests, Strategy::Contract, 0.85);
+    let e = g.edge("app.client.fetch_user", "app.server.get_user", EdgeKind::Calls).unwrap();
+    let client_file = out.graph.files.iter().position(|f| f.path == "app/client.py").unwrap() as FileId;
+    assert_eq!(e.evidence, Some((client_file, sp(3, 4))));
+    let contract_edges = out.graph.edges.iter().filter(|e| e.meta.strategy == Strategy::Contract).count();
+    assert_eq!(contract_edges, 8, "{:?}", out.graph.edges);
 }

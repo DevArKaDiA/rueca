@@ -1,10 +1,14 @@
 //! OpenAPI 3 / Swagger 2 and JSON Schema. `paths.<path>.<method>` → `Route`
 //! named `GET /users/{id}` with signature `GET /users/{id} (operationId)`
-//! and doc = `summary`, else `description`. For both kinds a definition
+//! and doc = `summary`, else `description`. Every `Route` also provides an
+//! HTTP contract (RFC 0006 phase 4): a `Provides` hint, framework `openapi`,
+//! key `GET /users/{}` (`rueca_model::contract::http_key`), owner = the
+//! `Route`, raw = its signature, span = the operation's. For both kinds a definition
 //! without a comment gets its schema `description` (or `title`) as doc.
 //! `$ref` pointers are handled generically by the emitter.
 
-use rueca_model::Label;
+use rueca_model::contract::{http_key, truncate_raw};
+use rueca_model::{ContractHint, ContractKind, ContractSide, Label};
 
 use super::Kind;
 use crate::emit::{Ctx, Out};
@@ -51,6 +55,18 @@ fn operation(out: &mut Out<'_>, ctx: &Ctx<'_>, path: &str, op: &Entry) {
     d.name = route;
     if let Some(s) = op.value.get_str("summary").or_else(|| op.value.get_str("description")) {
         d.doc = Some(text::truncate(s.trim(), 500));
+    }
+    let (span, raw) = (d.span, d.signature.clone().unwrap_or_default());
+    if let Some(key) = http_key(Some(&method), path) {
+        out.facts.contracts.push(ContractHint {
+            side: ContractSide::Provides,
+            kind: ContractKind::Http,
+            key,
+            raw: truncate_raw(&raw),
+            span,
+            owner: Some(id),
+            framework: "openapi".into(),
+        });
     }
 }
 

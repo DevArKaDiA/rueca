@@ -1074,6 +1074,66 @@ per ref and flagged: it is counted apart (`changed_same_file`), not as a
 false positive. Trace collapse needs per-commit call-graph gold and is not
 scored yet.
 
+### Cross-service edges (S2, RFC 0004 §4, `contracts.py`)
+
+Contract edges of the organization link layer (RFC 0006 phase 4): HTTP
+routes, OpenAPI operations and protobuf / gRPC services matched across
+repositories. `--suite s2` (Rueca only) indexes each group of
+`contracts.GROUPS` as one organization (`rueca index --org`), reads its
+link layer (`rueca links --org --json`, edges with `strategy: contract`)
+and its dangling consumers (`rueca contracts --side dangling`). Groups,
+pinned to commits: **ollama** (ollama/ollama — gin server and
+`docs/openapi.yaml` — with ollama-python and ollama-js: *http-code*,
+*http-spec*), **qdrant** (qdrant v1.20.2 — actix routes, tonic services,
+`.proto` — with qdrant-client: *http-code*, *rpc-spec-client*,
+*rpc-code*), **dapr** (dapr/dapr — `.proto`, Go runtime — with python-sdk
+and go-sdk: *rpc-spec-client*, *rpc-spec-server*, *rpc-code*),
+**weaviate** (weaviate — Swagger 2 spec, `.proto`, Go gRPC server — with
+weaviate-python-client: *http-spec*, *rpc-spec-client*, *rpc-code*);
+**openai** (openai-openapi with openai-python v3.52.0, *http-spec*) is a
+diagnostic group, not gated: its 4–5 MB specs exceed the 2 MiB extraction
+budget.
+
+**Gold** (`contracts_gold/`), computed on the fly from the pinned checkouts
+by labelers independent of Rueca: Python `ast` (HTTP calls with a literal,
+f-string, concatenated or `path_template(...)` path and a literal or
+`method=client.get` method; gRPC stub calls through names bound to
+`<Service>Stub(...)` or annotated `-> <Service>Stub`; grpcio servicers),
+tree-sitter for TypeScript calls (verb wrappers, `fetch`, one hop through a
+function that interpolates its parameter into the URL), regular
+expressions for Go (gin / echo routes with group prefixes and their
+handlers; gRPC clients bound to `<Service>Client`; server methods by rpc
+name and signature, on the type embedding `Unimplemented<Service>Server`
+when there is one, request / response types from the service's
+`go_package`), Rust (actix route attributes; tonic `impl <Service> for
+<Type>`), `.proto` files and OpenAPI 3 / Swagger 2 documents. Keys use the
+canonical form of `rueca_model::contract` (`contracts_gold/keys.py`); a
+consumer is paired with the providers of its best match quality (exact >
+template > method wildcard; the proto package when the client's generated
+module or Go package tells it). Gold pairs are cross-repository only, at
+(source file → target file + symbol): *http-code* (client → handler),
+*http-spec* (client → `METHOD /path` operation), *rpc-spec-client* (stub
+call → `.proto` rpc), *rpc-spec-server* (server method → `.proto` rpc,
+IMPLEMENTS, the method must match too), *rpc-code* (stub call → server
+method). Tests and generated stubs (`_pb2*.py`, `*.pb.go`, Go files marked
+`Code generated`) are out of scope for the gold and for scoring.
+`python -m rueca_bench.contracts gold` labels every group without Rueca
+(`.cache/runs/org/contracts-gold.json`, about a minute with cold clones);
+`… audit` prints a fixed sample of 15 pairs per kind with their evidence.
+
+**Scoring.** A contract edge is classified by its target (`RpcMethod` /
+`.proto`, `Route` / spec file, else a handler or implementation — HTTP or
+RPC by the provider's contract kind) and is correct when it hits a gold
+pair of that kind (same repositories and files, an accepted target name:
+handler or method name, `Service.Method`, the operation's canonical key).
+Precision = correct / predicted, recall = found / gold, pooled over the
+gated groups per kind and overall, percentile bootstrap over source files.
+Floors ≥ 90 / 75, targets ≥ 97 / 90 (the scorecard family *Cross-service
+edges*, gated per kind; the pooled *all* row is shown, not gated). Edges of
+a kind a group does not label (qdrant's versioned specs, `http-spec` of the
+dapr runtime) are counted as unscored. Raw output
+`.cache/runs/org/contracts-rueca.json`, results `bench/results/s2.json`.
+
 ### Configuration — data formats (RFC 0003 §3.3)
 
 `data.py`, manifest `[[data.repos]]`, pinned: GoogleCloudPlatform/

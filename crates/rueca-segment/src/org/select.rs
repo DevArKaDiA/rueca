@@ -394,7 +394,7 @@ mod tests {
             node: 0,
             status: "ok".into(),
         }];
-        let g = ResolvedGraph { snapshot, nodes, edges: vec![], files, modules: vec![] };
+        let g = ResolvedGraph { snapshot, nodes, edges: vec![], files, modules: vec![], contracts: vec![] };
         let meta = crate::write_segment(&g, &Src(src.into()), &store.dir).unwrap();
         store.open_segment(&meta.id).unwrap()
     }

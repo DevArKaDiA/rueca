@@ -15,6 +15,10 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub mod contract;
+
+pub use contract::{ContractHint, ContractKind, ContractRow, ContractSide};
+
 // ---------------------------------------------------------------------------
 // Languages
 // ---------------------------------------------------------------------------
@@ -55,6 +59,8 @@ pub enum Language {
     C,
     Java,
     Rust,
+    /// Protocol Buffers (`.proto`): services, RPC methods, messages, enums.
+    Proto,
 }
 
 impl Language {
@@ -80,6 +86,7 @@ impl Language {
         Language::C,
         Language::Java,
         Language::Rust,
+        Language::Proto,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -104,6 +111,7 @@ impl Language {
             Language::C => "c",
             Language::Java => "java",
             Language::Rust => "rust",
+            Language::Proto => "proto",
         }
     }
 
@@ -151,6 +159,7 @@ impl Language {
             "c" | "h" => Language::C,
             "java" => Language::Java,
             "rs" => Language::Rust,
+            "proto" => Language::Proto,
             _ => return None,
         })
     }
@@ -199,6 +208,7 @@ impl Language {
             Language::Cpp | Language::C => LanguageFamily::C,
             Language::Java => LanguageFamily::Java,
             Language::Rust => LanguageFamily::Rust,
+            Language::Proto => LanguageFamily::Proto,
         }
     }
 }
@@ -232,6 +242,9 @@ pub enum LanguageFamily {
     /// Rust: module name = module path (`rueca_index::link`); local names
     /// join items with `.` (`Linker.new`, `tests.helper`).
     Rust,
+    /// Protocol Buffers: no module names; local names carry the package
+    /// (`helloworld.Greeter.SayHello`).
+    Proto,
 }
 
 impl LanguageFamily {
@@ -242,11 +255,12 @@ impl LanguageFamily {
     /// `config/app.yaml:database.host`, Go
     /// `github.com/gin-gonic/gin.Engine.ServeHTTP`, Java
     /// `com.example.Owner.getPets`, Rust `rueca_index::link::Linker.new`.
-    /// C and C++ have no module names (the local name `fmt::v11::format_to`
+    /// Protocol Buffers have no module names (the local name
+    /// `helloworld.Greeter.SayHello` carries the package). C and C++ have no module names (the local name `fmt::v11::format_to`
     /// is global); `::` is the separator their local names use.
     pub fn module_separator(self) -> &'static str {
         match self {
-            LanguageFamily::Python | LanguageFamily::Go | LanguageFamily::Java => ".",
+            LanguageFamily::Python | LanguageFamily::Go | LanguageFamily::Java | LanguageFamily::Proto => ".",
             LanguageFamily::EcmaScript | LanguageFamily::Markdown | LanguageFamily::Data => ":",
             LanguageFamily::Php => "\\",
             LanguageFamily::C | LanguageFamily::Rust => "::",
@@ -537,7 +551,8 @@ impl Strategy {
 ///
 /// - 1: alpha 1 – alpha 2.
 /// - 2: RFC 0003 wave R — `Definition::is_declaration`, `Reference::arity`.
-pub const FACTS_FORMAT: u32 = 2;
+/// - 3: RFC 0006 phase 4 — `FileFacts::contracts`.
+pub const FACTS_FORMAT: u32 = 3;
 
 /// Index of a [`Definition`] within its file's `definitions` vector.
 pub type LocalDefId = u32;
@@ -670,6 +685,9 @@ pub struct FileFacts {
     /// Number of tree-sitter ERROR / MISSING nodes encountered.
     pub parse_errors: u32,
     pub line_count: u32,
+    /// Contract ends found in the file: routes and spec operations it
+    /// provides, endpoints it calls ([`contract`], RFC 0006 phase 4).
+    pub contracts: Vec<ContractHint>,
 }
 
 // ---------------------------------------------------------------------------
@@ -778,6 +796,10 @@ pub struct ResolvedGraph {
     /// dots, Java packages).
     #[serde(default)]
     pub modules: Vec<String>,
+    /// The contract table: every [`FileFacts::contracts`] hint placed on
+    /// its owner's node (else the file node), in file then hint order.
+    #[serde(default)]
+    pub contracts: Vec<ContractRow>,
 }
 
 impl ResolvedGraph {
@@ -807,6 +829,11 @@ impl ResolvedGraph {
             match self.nodes.get(f.node as usize) {
                 Some(node) if node.label == Label::File => {}
                 _ => return Err(format!("file {i} has no File node")),
+            }
+        }
+        for (i, c) in self.contracts.iter().enumerate() {
+            if c.node >= n || c.file as usize >= self.files.len() {
+                return Err(format!("contract {i} node or file out of range"));
             }
         }
         Ok(())
@@ -994,6 +1021,7 @@ mod tests {
             ("src/redis.h", Some(C)),
             ("src/main/java/com/x/Owner.java", Some(Java)),
             ("crates/x/src/lib.rs", Some(Rust)),
+            ("proto/helloworld.proto", Some(Proto)),
         ];
         for (path, want) in cases {
             assert_eq!(Language::from_path(path), *want, "{path}");
@@ -1024,7 +1052,13 @@ mod tests {
             b[0]
         }
         let langs: Vec<u8> = Language::ALL.iter().map(idx).collect();
-        assert_eq!(langs, (0..20).collect::<Vec<u8>>());
+        assert_eq!(langs, (0..21).collect::<Vec<u8>>());
+        assert_eq!(idx(&Language::Proto), 20);
+        assert_eq!(idx(&ContractSide::Provides), 0);
+        assert_eq!(idx(&ContractSide::Consumes), 1);
+        assert_eq!(idx(&ContractKind::Http), 0);
+        assert_eq!(idx(&ContractKind::Rpc), 1);
+        assert_eq!(idx(&ContractKind::Topic), 2);
         assert_eq!(idx(&Language::Markdown), 5);
         assert_eq!(idx(&Language::Json), 6);
         assert_eq!(idx(&Language::Java), 18);

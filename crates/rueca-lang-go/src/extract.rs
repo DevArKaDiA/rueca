@@ -68,6 +68,7 @@ pub(crate) fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<File
         imports: ex.imports,
         parse_errors: count_errors(&tree),
         line_count: line_count(source),
+        contracts: Vec::new(),
     })
 }
 

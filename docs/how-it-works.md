@@ -135,7 +135,7 @@ such edges disappear. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-markdown`, `rueca-lang-data`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -770,6 +770,21 @@ be fuzzy-matched to a code symbol.
   `extends`, Dockerfile `FROM <stage>`) resolve the same way into
   `INHERITS`.
 
+**Contracts** ([RFC 0006](rfcs/0006-org-graph.md) phase 4). Packs also
+emit contract hints (`FileFacts::contracts`): a route or spec operation a
+file *provides* (an OpenAPI `Route`, a `.proto` `rpc`), an endpoint it
+*consumes* (an HTTP or RPC call), each with a canonical key
+(`rueca_model::contract`: `GET /users/{}` — every parameter segment `{}`,
+host, query and trailing `/` dropped — or `pkg.Service/Method`). Every hint
+becomes a row of the segment's contract table on its owner's node (the
+handler, `Route` or `RpcMethod`; else the file), and keys that match within
+the snapshot become `contract` edges: consumer → provider `CALLS`, code
+provider → spec provider `IMPLEMENTS`, at 0.9 (same key), 0.85 (a provider
+`{}` segment stands for a literal one, or an RPC key without package) or
+0.7 (a `*` method), 0.5 each when several providers tie. Code-to-code and
+spec-to-spec providers never link; unmatched consumers stay in the table
+(dangling).
+
 Duplicate edges `(src, dst, kind)` are merged keeping the best strategy, the
 highest confidence and the first evidence. **Evidence** is the file and span
 of the reference: this is what `trace` returns as `call_site`.
@@ -786,6 +801,7 @@ component exists because a tool needs it:
 | edge metadata | confidence, strategy, evidence span per edge | `trace` |
 | name indexes | node ids sorted by qualified name and by name | symbol lookup (`get_symbol`, `get_snippet`, `trace`) |
 | file → symbols | symbol nodes per file, sorted by position | `get_file_outline`, `search_code` (enclosing symbol) |
+| contract table | every contract hint on its node: side, kind, canonical key, raw text, span, framework (optional component `contracts`) | the organization linker, `list_contracts` |
 | tantivy symbol index | BM25 over name, qualified name, signature, path, docstring and the symbol's source (`body`, from the content packs) | `search_symbols` |
 | bodiless set | C/C++ functions and methods whose source has no body (prototypes, in-class declarations), for the declaration prior | `search_symbols` |
 | trigram index | which files contain each 3-byte sequence | `search_code` |
@@ -958,6 +974,7 @@ and outlines read the repository segment of the id they are given; only
 | `Key`, `Document` | structured-data keys at any depth (key path = local name), Laravel `config/*.php` keys, and documents of multi-document YAML streams |
 | `Resource`, `Image` | deployable / infrastructure objects (Kubernetes objects, compose services, Terraform resources, data sources and modules) and container images (Dockerfile stages, compose `build`) |
 | `Route`, `Variable` (data) | OpenAPI operations (`GET /users/{id}`); Terraform `var.x` / `local.x` and Dockerfile `ARG` |
+| `Interface`, `RpcMethod`, `Struct`, `Field`, `Enum`, `Constant` (proto) | `.proto` services (`helloworld.Greeter`), their `rpc`s (`helloworld.Greeter.SayHello`), messages and fields, enums and values |
 
 Every symbol node carries: name, qualified name, file, span, language,
 signature, docstring, `exported`, `is_test`. Canonical env vars have no
@@ -1214,6 +1231,7 @@ versions and the transport seam for HTTP are specified in
 |---|---|---|
 | 1.0 | `syntactic`, `import_resolved` (IMPORTS) | Structure or a resolved import. Certain. |
 | 0.90–0.95 | `contract` | An env var or config key read resolved through a known namespace (the code ↔ config bridge). |
+| 0.5–0.9 | `contract` | An HTTP / RPC call or handler matched to a route or spec operation by canonical key: 0.9 same key, 0.85 template, 0.7 method wildcard, 0.5 ambiguous (§4.4, *Contracts*). |
 | 0.85–0.95 | `type_resolved`, `import_resolved`, `same_module` | Resolved through scope, `self`, or an import. Wrong only with dynamic tricks (monkey-patching, `getattr`, re-assigned names). |
 | 0.60 | `unique_name` | A bare name that matched the only compatible definition in the project. Usually right in small/medium code bases; can be wrong when a third-party symbol shadows it. |
 | 0.50 | `heuristic` | Method call on an untyped receiver matched by name alone. Useful for exploration; verify before relying on it. |
@@ -1289,7 +1307,7 @@ gaps show up on real repositories.
 
 | Step | Crate | Start reading at |
 |---|---|---|
-| Data model (labels, edge kinds, facts, ids) | `rueca-model` | `src/lib.rs` |
+| Data model (labels, edge kinds, facts, ids) | `rueca-model` | `src/lib.rs`; `src/contract.rs` (contract keys and matching) |
 | Language-pack contract, budgeted parsing | `rueca-extract` | `LanguagePack` (crate docs list the RFC 0003 hooks) |
 | Python extraction, module names, imports | `rueca-lang-python` | crate docs, `queries/locals.scm` |
 | TS/TSX/JS extraction, `oxc_resolver` | `rueca-lang-typescript` | crate docs, `src/resolve.rs` |
@@ -1300,8 +1318,9 @@ gaps show up on real repositories.
 | Java extraction, packages, Maven / Gradle source roots | `rueca-lang-java` | crate docs, `src/extract.rs`, `src/project.rs`, `queries/locals.scm` |
 | C/C++ extraction, preprocessing (masking, conditionals, repairs), include directories | `rueca-lang-cpp` | crate docs, `src/extract.rs`, `src/preprocess.rs`, `src/mask.rs`, `src/cond.rs`, `src/repair.rs`, `src/includes.rs` |
 | Rust extraction, receivers, macro arguments, Cargo module model | `rueca-lang-rust` | crate docs, `src/extract.rs`, `src/receivers.rs`, `src/macros.rs`, `src/modules.rs` |
+| `.proto` services, RPC methods, messages (`protox-parse`) | `rueca-lang-proto` | crate docs, `src/extract.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
-| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods) |
+| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/contracts.rs` (contract table and edges) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
 | Organization index, generations, visibility | `rueca-segment` | `src/org.rs` (module docs) |
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |
