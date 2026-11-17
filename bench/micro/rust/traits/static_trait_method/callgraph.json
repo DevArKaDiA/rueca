@@ -1,0 +1,11 @@
+{
+  "src/main.rs:Factory.create": [],
+  "src/main.rs:Widget.create": [],
+  "src/main.rs:build": [
+    "src/main.rs:Factory.create"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:Widget.create",
+    "src/main.rs:build"
+  ]
+}

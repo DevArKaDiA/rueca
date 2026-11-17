@@ -1,0 +1,13 @@
+{
+  "src/main.rs:boxed": [
+    "src/main.rs:inc"
+  ],
+  "src/main.rs:inc": [],
+  "src/main.rs:main": [
+    "src/main.rs:boxed",
+    "src/main.rs:make_adder"
+  ],
+  "src/main.rs:make_adder": [
+    "src/main.rs:inc"
+  ]
+}

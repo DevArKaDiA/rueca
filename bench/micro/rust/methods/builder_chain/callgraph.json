@@ -1,0 +1,12 @@
+{
+  "src/main.rs:Builder.build": [],
+  "src/main.rs:Builder.name": [],
+  "src/main.rs:Builder.new": [],
+  "src/main.rs:Builder.size": [],
+  "src/main.rs:main": [
+    "src/main.rs:Builder.build",
+    "src/main.rs:Builder.name",
+    "src/main.rs:Builder.new",
+    "src/main.rs:Builder.size"
+  ]
+}

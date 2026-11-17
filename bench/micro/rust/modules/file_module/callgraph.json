@@ -1,0 +1,9 @@
+{
+  "src/main.rs:main": [
+    "src/net.rs:connect"
+  ],
+  "src/net.rs:connect": [
+    "src/net.rs:resolve"
+  ],
+  "src/net.rs:resolve": []
+}

@@ -1,0 +1,12 @@
+{
+  "src/main.rs:helper": [],
+  "src/main.rs:main": [
+    "src/main.rs:outer"
+  ],
+  "src/main.rs:outer": [
+    "src/main.rs:outer.inner"
+  ],
+  "src/main.rs:outer.inner": [
+    "src/main.rs:helper"
+  ]
+}

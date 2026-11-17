@@ -1,0 +1,10 @@
+{
+  "src/main.rs:Bob.name": [],
+  "src/main.rs:Greeter.greet": [
+    "src/main.rs:Named.name"
+  ],
+  "src/main.rs:Named.name": [],
+  "src/main.rs:main": [
+    "src/main.rs:Greeter.greet"
+  ]
+}

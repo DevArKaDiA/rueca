@@ -1,0 +1,9 @@
+{
+  "src/main.rs:main": [
+    "src/main.rs:util.twice"
+  ],
+  "src/main.rs:util.helper": [],
+  "src/main.rs:util.twice": [
+    "src/main.rs:util.helper"
+  ]
+}

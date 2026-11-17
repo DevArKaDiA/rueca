@@ -1,0 +1,6 @@
+{
+  "src/main.rs:helper": [],
+  "src/main.rs:main": [
+    "src/main.rs:helper"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "src/main.rs:main": [
+    "src/main.rs:shapes.circle",
+    "src/main.rs:shapes.square"
+  ],
+  "src/main.rs:shapes.circle": [],
+  "src/main.rs:shapes.square": []
+}

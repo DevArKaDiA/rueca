@@ -1,0 +1,6 @@
+{
+  "src/main.rs:Config.default": [],
+  "src/main.rs:main": [
+    "src/main.rs:Config.default"
+  ]
+}

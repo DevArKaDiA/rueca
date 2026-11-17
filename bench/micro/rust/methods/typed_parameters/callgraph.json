@@ -1,0 +1,22 @@
+{
+  "src/main.rs:Engine.start": [],
+  "src/main.rs:Engine.stop": [],
+  "src/main.rs:by_box": [
+    "src/main.rs:Engine.stop"
+  ],
+  "src/main.rs:by_option": [
+    "src/main.rs:Engine.start"
+  ],
+  "src/main.rs:by_ref": [
+    "src/main.rs:Engine.start"
+  ],
+  "src/main.rs:by_slice": [
+    "src/main.rs:Engine.start"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:by_box",
+    "src/main.rs:by_option",
+    "src/main.rs:by_ref",
+    "src/main.rs:by_slice"
+  ]
+}

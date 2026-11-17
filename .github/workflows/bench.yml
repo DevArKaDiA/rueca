@@ -47,6 +47,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
       - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v7
       # scip-python / scip-typescript run through npx; scip-go needs a Go toolchain

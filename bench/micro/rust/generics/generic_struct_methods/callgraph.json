@@ -1,0 +1,10 @@
+{
+  "src/main.rs:Stack.new": [],
+  "src/main.rs:Stack.peek": [],
+  "src/main.rs:Stack.push": [],
+  "src/main.rs:main": [
+    "src/main.rs:Stack.new",
+    "src/main.rs:Stack.peek",
+    "src/main.rs:Stack.push"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "src/main.rs:build": [],
+  "src/main.rs:main": [
+    "src/main.rs:build"
+  ]
+}

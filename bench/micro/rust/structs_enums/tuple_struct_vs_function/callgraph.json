@@ -1,0 +1,6 @@
+{
+  "src/main.rs:main": [
+    "src/main.rs:wrapper"
+  ],
+  "src/main.rs:wrapper": []
+}

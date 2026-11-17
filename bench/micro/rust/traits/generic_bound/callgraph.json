@@ -1,0 +1,14 @@
+{
+  "src/main.rs:Circle.area": [],
+  "src/main.rs:Shape.area": [],
+  "src/main.rs:largest": [
+    "src/main.rs:Shape.area"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:largest",
+    "src/main.rs:total"
+  ],
+  "src/main.rs:total": [
+    "src/main.rs:Shape.area"
+  ]
+}

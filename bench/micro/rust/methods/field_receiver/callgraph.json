@@ -1,0 +1,10 @@
+{
+  "src/main.rs:Car.drive": [
+    "src/main.rs:Engine.start"
+  ],
+  "src/main.rs:Engine.start": [],
+  "src/main.rs:main": [
+    "src/main.rs:Car.drive",
+    "src/main.rs:Engine.start"
+  ]
+}

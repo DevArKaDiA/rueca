@@ -1,0 +1,13 @@
+{
+  "src/main.rs:Shape.area": [
+    "src/main.rs:circle_area",
+    "src/main.rs:rect_area"
+  ],
+  "src/main.rs:Shape.unit": [],
+  "src/main.rs:circle_area": [],
+  "src/main.rs:main": [
+    "src/main.rs:Shape.area",
+    "src/main.rs:Shape.unit"
+  ],
+  "src/main.rs:rect_area": []
+}

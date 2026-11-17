@@ -1,0 +1,9 @@
+{
+  "src/macros.rs:log_value": [],
+  "src/main.rs:main": [
+    "src/main.rs:work"
+  ],
+  "src/main.rs:work": [
+    "src/macros.rs:log_value"
+  ]
+}

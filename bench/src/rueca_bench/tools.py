@@ -2,13 +2,15 @@
 
 Each platform entry gives a release `url` and either `binary_sha256` (a raw
 binary) or `archive_sha256` + `member` (a .tar.gz holding the binary; its
-`binary_sha256` is pinned too when known). Binaries land in
+`binary_sha256` is pinned too when known) or `archive_sha256` alone for a
+single gzip-compressed binary (`.gz`, e.g. rust-analyzer). Binaries land in
 bench/.cache/bin/<name> and are read from $RUECA_BENCH_SHARED_CACHE when the
 sha256 matches.
 """
 
 from __future__ import annotations
 
+import gzip
 import shutil
 import tarfile
 import tempfile
@@ -63,20 +65,14 @@ def fetch_tool(key: str) -> Path:
     BIN_DIR.mkdir(parents=True, exist_ok=True)
     fname = Path(plat["url"]).name
     if "archive_sha256" in plat:
-        archive = pinned_asset(dl / fname, plat["archive_sha256"])
-        if not archive.exists() or sha256_file(archive) != plat["archive_sha256"]:
-            archive = dl / fname
-            log(f"download {plat['url']}")
-            urllib.request.urlretrieve(plat["url"], archive)
-        if sha256_file(archive) != plat["archive_sha256"]:
-            raise RuntimeError(f"{spec['name']} archive sha256 mismatch")
-        with tempfile.TemporaryDirectory(dir=dl) as tmp:
-            with tarfile.open(archive) as tf:
-                tf.extractall(tmp, filter="data")
-            found = [p for p in Path(tmp).rglob(plat.get("member", spec["name"])) if p.is_file()]
-            if not found:
-                raise RuntimeError(f"{plat.get('member')} not found in {fname}")
-            shutil.move(str(found[0]), dest)
+        archive = _fetch_archive(plat, dl / fname, spec["name"])
+        if fname.endswith(".gz") and not fname.endswith(".tar.gz"):
+            # one gzip-compressed binary (rust-analyzer release assets)
+            with gzip.open(archive) as src, (dest.with_suffix(".part")).open("wb") as out:
+                shutil.copyfileobj(src, out)
+            dest.with_suffix(".part").replace(dest)
+        else:
+            _extract_member(archive, dl, plat.get("member", spec["name"]), dest)
     else:
         log(f"download {plat['url']}")
         tmp = dest.with_suffix(".part")
@@ -87,6 +83,28 @@ def fetch_tool(key: str) -> Path:
         raise RuntimeError(f"{spec['name']} binary sha256 mismatch: {sha256_file(dest)}")
     log(f"{spec['name']} {spec.get('version')} ready at {dest}")
     return dest
+
+
+def _fetch_archive(plat: dict, local: Path, name: str) -> Path:
+    """The release archive, downloaded once and verified by `archive_sha256`."""
+    archive = pinned_asset(local, plat["archive_sha256"])
+    if not archive.exists() or sha256_file(archive) != plat["archive_sha256"]:
+        archive = local
+        log(f"download {plat['url']}")
+        urllib.request.urlretrieve(plat["url"], archive)
+    if sha256_file(archive) != plat["archive_sha256"]:
+        raise RuntimeError(f"{name} archive sha256 mismatch")
+    return archive
+
+
+def _extract_member(archive: Path, dl: Path, member: str, dest: Path) -> None:
+    with tempfile.TemporaryDirectory(dir=dl) as tmp:
+        with tarfile.open(archive) as tf:
+            tf.extractall(tmp, filter="data")
+        found = [p for p in Path(tmp).rglob(member) if p.is_file()]
+        if not found:
+            raise RuntimeError(f"{member} not found in {archive.name}")
+        shutil.move(str(found[0]), dest)
 
 
 def fetch_artifact(key: str) -> Path:

@@ -1,0 +1,6 @@
+{
+  "src/main.rs:main": [
+    "src/main.rs:util.compute"
+  ],
+  "src/main.rs:util.compute": []
+}

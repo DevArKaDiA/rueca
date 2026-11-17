@@ -1,0 +1,11 @@
+{
+  "src/main.rs:V.add": [],
+  "src/main.rs:main": [
+    "src/main.rs:sum_explicit",
+    "src/main.rs:sum_operator"
+  ],
+  "src/main.rs:sum_explicit": [
+    "src/main.rs:V.add"
+  ],
+  "src/main.rs:sum_operator": []
+}

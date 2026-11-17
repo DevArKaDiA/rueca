@@ -1,0 +1,7 @@
+{
+  "src/main.rs:main": [
+    "src/main.rs:square"
+  ],
+  "src/main.rs:mul": [],
+  "src/main.rs:square": []
+}

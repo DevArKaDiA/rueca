@@ -7,6 +7,7 @@ reference occurrence a call site? which callable encloses it?).
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 
@@ -17,6 +18,7 @@ import tree_sitter_java
 import tree_sitter_javascript
 import tree_sitter_php
 import tree_sitter_python
+import tree_sitter_rust
 import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
 
@@ -33,6 +35,7 @@ _BINDINGS = {
     "tree_sitter_javascript": tree_sitter_javascript,
     "tree_sitter_php": tree_sitter_php,
     "tree_sitter_python": tree_sitter_python,
+    "tree_sitter_rust": tree_sitter_rust,
     "tree_sitter_typescript": tree_sitter_typescript,
 }
 
@@ -121,6 +124,8 @@ def extract_functions(path: str, source: bytes, language: str | None = None) -> 
         return _go_functions(tree.root_node)
     if labeler == "c":
         return _c_functions(tree.root_node, spec)
+    if labeler == "rust":
+        return _rust_functions(tree.root_node, spec)
     return _nesting_functions(tree.root_node, spec)
 
 
@@ -381,6 +386,115 @@ def _c_functions(root: Node, spec: dict) -> list[Func]:
     return out
 
 
+# Rust: the self type of an `impl` names its methods. Wrappers stripped down
+# to the last path segment: `&mut a::Foo<'x, T>` -> `Foo`, `dyn Tr` -> `Tr`.
+_RUST_TYPE_STEPS = {
+    "reference_type": "type",
+    "pointer_type": "type",
+    "generic_type": "type",
+    "scoped_type_identifier": "name",
+    "dynamic_type": "trait",
+}
+# `#[test]`, `#[tokio::test]`, `#[bench]`, `#[cfg(test)]`, `#[cfg(all(test, ...))]`
+# (whitespace removed); `#[cfg(not(test))]` is not test code.
+_RUST_TEST_ATTR = re.compile(r"^#\[(?:(?:\w+::)*(?:test|bench)(?:\(.*\))?|cfg\(test\)|cfg\(all\(test[,)].*)\]$")
+_RUST_ITEMS = {"function_item", "mod_item", "impl_item", "trait_item"}
+_RUST_ATTACHED = {"attribute_item", "line_comment", "block_comment"}
+
+
+def _rust_type_name(t: Node | None) -> str:
+    """Last path segment of an impl's self type, generics and references
+    stripped (`impl<T> Tr for &a::Foo<T>` -> `Foo`); other shapes (`[T]`,
+    tuples) keep their text without whitespace."""
+    while t is not None and t.type in _RUST_TYPE_STEPS:
+        t = t.child_by_field_name(_RUST_TYPE_STEPS[t.type])
+    return re.sub(r"\s+", "", _text(t))
+
+
+def _rust_attributes(node: Node) -> list[Node]:
+    """Attribute items written before an item (doc comments may sit between
+    them), nearest first."""
+    out: list[Node] = []
+    sib = node.prev_named_sibling
+    while sib is not None and sib.type in _RUST_ATTACHED:
+        if sib.type == "attribute_item":
+            out.append(sib)
+        sib = sib.prev_named_sibling
+    return out
+
+
+def _rust_is_test_item(node: Node) -> bool:
+    if node.type not in _RUST_ITEMS:
+        return False
+    return any(_RUST_TEST_ATTR.match(re.sub(r"\s+", "", _text(a))) for a in _rust_attributes(node))
+
+
+def _rust_container_name(node: Node) -> str:
+    if node.type == "impl_item":
+        return _rust_type_name(node.child_by_field_name("type"))
+    return _text(node.child_by_field_name("name"))
+
+
+def _rust_scope(node: Node, containers: set[str]) -> tuple[list[str], str]:
+    """(enclosing names outermost first, label): inline `mod`s, `impl` self
+    types, traits and enclosing functions; `Method` when the nearest of them
+    is an `impl` or a trait."""
+    parts: list[str] = []
+    label = ""
+    anc = node.parent
+    while anc is not None:
+        if anc.type in containers or anc.type == "function_item":
+            parts.append(_rust_container_name(anc))
+            if not label:
+                label = "Method" if anc.type in ("impl_item", "trait_item") else "Function"
+        anc = anc.parent
+    return list(reversed(parts)), label or "Function"
+
+
+def _rust_callable(node: Node, containers: set[str]) -> Func | None:
+    """A callable node -> Func; a bodiless `fn` signature is a callable only
+    in a trait (an `extern` block declares foreign functions)."""
+    if node.type == "function_signature_item":
+        body = node.parent
+        if body is None or body.parent is None or body.parent.type != "trait_item":
+            return None
+    nn = node.child_by_field_name("name")
+    name = _text(nn)
+    if nn is None or not name:
+        return None
+    parts, label = _rust_scope(node, containers)
+    if node.type == "macro_definition":
+        label = "Function"
+    attrs = _rust_attributes(node)
+    return _func(name, ".".join([*parts, name]), label, node, nn, attrs[-1] if attrs else None)
+
+
+def _rust_functions(root: Node, spec: dict) -> list[Func]:
+    """Rust (the Rust pack's qualified names): free `fn` -> `name`; in an
+    inline `mod m` -> `m.name`; nested in a function -> `outer.inner`;
+    methods and associated functions of `impl<T> Foo<T>` / `impl Tr for
+    &Foo<'a>` -> `Foo.method` (last path segment of the self type); trait
+    methods, signatures and default bodies -> `Tr.method`; `macro_rules!`
+    definitions -> `name` (manifest `callables`). File modules are not part
+    of the name. Test code — items marked `#[test]`, `#[tokio::test]`,
+    `#[bench]` or `#[cfg(test)]` (the usual `mod tests`) — is skipped with
+    everything inside it, as test files are elsewhere."""
+    kinds = set(spec.get("callables", {}))
+    containers = set(spec.get("containers", []))
+    out: list[Func] = []
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if _rust_is_test_item(node):
+            continue
+        if node.type in kinds:
+            f = _rust_callable(node, containers)
+            if f is not None:
+                out.append(f)
+        stack.extend(reversed(node.children))
+    return out
+
+
 def innermost(funcs: list[Func], line: int) -> Func | None:
     best: Func | None = None
     for f in funcs:
@@ -468,6 +582,24 @@ def _is_construction(node: Node) -> bool:
     return decl is not None and decl.type == "declaration" and decl.parent is not None and decl.parent.type in _BODY_PARENTS
 
 
+def _is_token_call(node: Node, token_tree: str) -> bool:
+    """A call written in a macro's arguments (manifest `token_calls`: the
+    grammar's unparsed token-tree node, Rust `token_tree`). Tree-sitter keeps
+    `println!("{}", foo(x))`, `vec![a.len()]` and `assert_eq!(T::new(), b)` as
+    flat tokens; an identifier directly followed by a `(`-delimited token tree
+    is called there (`foo(`, `.len(`, `::new(`), and one followed by `!` and a
+    token tree is a nested macro invocation. rust-analyzer resolves these
+    tokens through the expansion."""
+    parent = node.parent
+    if parent is None or parent.type != token_tree or node.type != "identifier":
+        return False
+    nxt = node.next_sibling
+    if nxt is not None and nxt.type == "!":
+        nxt = nxt.next_sibling
+        return nxt is not None and nxt.type == token_tree
+    return nxt is not None and nxt.type == token_tree and nxt.child_count > 0 and nxt.children[0].type == "("
+
+
 def is_call_site(tree, grammar: str, line0: int, byte_col: int, end_byte_col: int) -> bool:
     node = tree.root_node.named_descendant_for_point_range((line0, byte_col), (line0, max(byte_col, end_byte_col - 1)))
     if node is None:
@@ -477,7 +609,11 @@ def is_call_site(tree, grammar: str, line0: int, byte_col: int, end_byte_col: in
         return False
     spec = _grammars().get(grammar, {})
     if "calls" in spec:
-        return _is_callee(node, spec["calls"], spec.get("members", {})) or (bool(spec.get("constructions")) and _is_construction(node))
+        return (
+            _is_callee(node, spec["calls"], spec.get("members", {}))
+            or (bool(spec.get("constructions")) and _is_construction(node))
+            or (bool(spec.get("token_calls")) and _is_token_call(node, spec["token_calls"]))
+        )
     if grammar == "python":
         if parent.type == "call" and parent.child_by_field_name("function") == node:
             return True

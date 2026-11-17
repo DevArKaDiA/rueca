@@ -1,0 +1,9 @@
+{
+  "src/ext.rs:Account.audit": [],
+  "src/main.rs:Account.deposit": [
+    "src/ext.rs:Account.audit"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:Account.deposit"
+  ]
+}

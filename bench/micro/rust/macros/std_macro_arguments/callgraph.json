@@ -1,0 +1,10 @@
+{
+  "src/main.rs:Item.label": [],
+  "src/main.rs:compute": [],
+  "src/main.rs:main": [
+    "src/main.rs:Item.label",
+    "src/main.rs:compute",
+    "src/main.rs:make"
+  ],
+  "src/main.rs:make": []
+}

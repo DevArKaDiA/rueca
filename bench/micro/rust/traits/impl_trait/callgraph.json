@@ -1,0 +1,13 @@
+{
+  "src/main.rs:Page.render": [],
+  "src/main.rs:Render.render": [],
+  "src/main.rs:main": [
+    "src/main.rs:Page.render",
+    "src/main.rs:make",
+    "src/main.rs:show"
+  ],
+  "src/main.rs:make": [],
+  "src/main.rs:show": [
+    "src/main.rs:Render.render"
+  ]
+}
