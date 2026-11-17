@@ -236,6 +236,34 @@ Rueca, listed in RFC 0006 §9.2 and §12. cbm (per project + rank fusion, no
 cross-project search): File Acc@5 11.7 against 56.7 alone; Rueca − cbm
 +45.0 (+35.8…+54.2).
 
+## 2026-11-16 — Semantic search: top-tier embeddings in presets, vectors by content hash, convex fusion, reranker gated by measurement
+
+[RFC 0007](rfcs/0007-semantic-search.md): semantic retrieval is a mode of
+`search_symbols` (and of the organization ranking), not a new tool;
+`search_code` is untouched. Static embeddings (`model2vec-rs`, RFC 0002
+§6.2) are dropped: embedding quality must be top-tier. Models come as
+presets — Qwen3-Embedding 0.6B / 4B / 8B in several quantizations,
+CodeRankEmbed, opt-in `remote:` APIs — downloaded on first use and
+sha256-pinned, never in the binary; Rueca hosts the conversions Qwen does
+not publish. Runtime: llama.cpp through `llama-cpp-2` behind
+`Embedder` / `Reranker` traits in a new `rueca-embed` crate, `fastembed`
+(candle) as fallback, `ort` rejected. One vector per symbol, keyed by a
+hash of the model and the embedded text, cached in the store like facts
+and packs, so branches, worktrees and repositories share embeddings;
+segments carry int8 vectors (optional components, no format bump),
+rescored from f16. Stage 1 fuses BM25, dense and graph-neighbour
+candidates by a convex combination of normalized scores (beats RRF, whose
+flat head RFC 0006 measured), times today's priors; stage 2 is an optional
+reranker. Every default is set by a stated rule on the calibration split
+or CoIR; the gate is pooled S1 File Acc@5 on the issue text at least 5
+points above BM25 with the interval above zero. Two owner decisions await
+confirmation: the default quantization (int4 chosen; the owner's own rule
+gives Q8 on Metal and x86, so `qwen3-0.6b-q8` is the provisional default)
+and the reranker (Qwen3-Reranker-0.6B chosen; it scores below the embedder
+alone on code in Qwen's table and costs seconds per query locally, so it
+ships off by default locally, on only if it adds ≥ 3 points of Function
+Acc@10 on the calibration split).
+
 ## 2026-11-16 — Rust: call results typed from signatures; methods by name only when unique
 
 Dogfooding showed name-matched edges where the receiver's type was
