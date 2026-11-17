@@ -1,0 +1,7 @@
+{
+  "src/main.rs:Shout.shout": [],
+  "src/main.rs:T.shout": [],
+  "src/main.rs:main": [
+    "src/main.rs:T.shout"
+  ]
+}

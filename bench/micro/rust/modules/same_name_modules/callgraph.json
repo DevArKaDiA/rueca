@@ -1,0 +1,10 @@
+{
+  "src/a.rs:run": [
+    "src/b.rs:run"
+  ],
+  "src/b.rs:run": [],
+  "src/main.rs:main": [
+    "src/a.rs:run",
+    "src/b.rs:run"
+  ]
+}

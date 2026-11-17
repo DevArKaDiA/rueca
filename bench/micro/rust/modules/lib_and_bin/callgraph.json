@@ -1,0 +1,9 @@
+{
+  "src/lib.rs:api": [
+    "src/lib.rs:internal"
+  ],
+  "src/lib.rs:internal": [],
+  "src/main.rs:main": [
+    "src/lib.rs:api"
+  ]
+}

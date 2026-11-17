@@ -63,11 +63,25 @@ def _scip_command(spec: dict, root: Path, out: Path) -> tuple[list[str], Path, d
     binary = fetch_tool(spec["indexer"])
     compdb = SCIP_DIR / f"{repo_name(spec)}-compile_commands.json"
     args = [a.format(out=out, root=root, compdb=compdb) for a in spec.get("args", [])]
-    env = {}
-    if spec["indexer"] == "scip_go":
-        # module downloads stay inside the bench cache; never fetch a toolchain
-        env = {"GOMODCACHE": str(CACHE / "go" / "mod"), "GOCACHE": str(CACHE / "go" / "build"), "GOTOOLCHAIN": "local", "GOFLAGS": "-mod=mod"}
-    return [str(binary), *args], root, env
+    return [str(binary), *args], root, indexer_env(spec["indexer"])
+
+
+def indexer_env(indexer: str) -> dict[str, str]:
+    """Environment of a binary SCIP indexer that drives a language
+    toolchain: downloads and build outputs stay inside the bench cache.
+    scip-go: module cache and build cache, never fetch a toolchain.
+    rust-analyzer: `cargo metadata` / build scripts / proc macros write to
+    `CARGO_TARGET_DIR`, so the indexed trees only gain a `Cargo.lock` when
+    they ship none. `CARGO_HOME` is the cache directory itself (registry in
+    `.cache/registry`): cargo never looks for a workspace root above
+    `CARGO_HOME`, and the trees live inside it — without that, a cache inside
+    this checkout makes cargo take Rueca's own `Cargo.toml` for the
+    workspace of every indexed crate."""
+    if indexer == "scip_go":
+        return {"GOMODCACHE": str(CACHE / "go" / "mod"), "GOCACHE": str(CACHE / "go" / "build"), "GOTOOLCHAIN": "local", "GOFLAGS": "-mod=mod"}
+    if indexer == "rust_analyzer":
+        return {"CARGO_TARGET_DIR": str(CACHE / "cargo-target"), "CARGO_HOME": str(CACHE)}
+    return {}
 
 
 _JAVAC_JVM = [
@@ -215,6 +229,7 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
     scip_out = SCIP_DIR / f"{name}.scip"
     with worktree(spec["repo"], spec["commit"], f"s3-{name}") as root:
         indexer_seconds = None
+        indexer_log = None
         if not scip_out.exists() or force:
             SCIP_DIR.mkdir(parents=True, exist_ok=True)
             if spec["indexer"] == "scip_java":
@@ -227,6 +242,7 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
                 log(f"scip {name}: {' '.join(cmd[1:])}")
                 res = sh(cmd, cwd=cwd, env=env, timeout=3600)
             indexer_seconds = res.seconds
+            indexer_log = _log_summary(res.stderr)
             if res.rc != 0 or not scip_out.exists():
                 raise RuntimeError(f"SCIP indexer failed for {name} rc={res.rc}: {res.stderr[-1500:]} {res.stdout[-500:]}")
         docs = read_index(scip_out)
@@ -242,6 +258,7 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
         "exclude": spec.get("exclude", []),
         "indexer": f"{tool_spec(spec['indexer']).get('npm') or tool_spec(spec['indexer'])['name']}@{tool_spec(spec['indexer'])['version']}",
         "indexer_seconds": indexer_seconds,
+        "indexer_log": indexer_log,
         "stats": graph["stats"],
         "callables": graph["callables"],
         "callers": graph["callers"],
@@ -253,6 +270,16 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
     qs = questions(graph, man["min_lines"])
     log(f"s3 gold {name}: {graph['stats'].get('edges')} edges, {len(graph['callables'])} callables, questions callers {len(qs['callers'])} / callees {len(qs['callees'])}")
     return gold
+
+
+def _log_summary(stderr: str | None, keep: int = 20) -> dict:
+    """The indexer's stderr in the gold file: line counts of errors and
+    warnings, and the last `keep` of them (the rest of a run's log is
+    progress)."""
+    lines = [ln for ln in (stderr or "").splitlines() if ln.strip()]
+    errors = [ln for ln in lines if " ERROR " in ln or ln.startswith("error")]
+    warnings = [ln for ln in lines if " WARN " in ln or ln.startswith("warning")]
+    return {"lines": len(lines), "errors": len(errors), "warnings": len(warnings), "last": (errors + warnings)[-keep:]}
 
 
 # --- gold: PyCG micro-benchmark ---------------------------------------------------
@@ -466,7 +493,7 @@ def _phpstan_agreement(dest: Path, snippets: dict[str, dict], name: str) -> dict
 
 def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     """Cross-check hand-written answer keys against a SCIP indexer
-    (manifest `crosscheck = "scip_go" | "scip_clang"`): each snippet is
+    (manifest `crosscheck = "scip_go" | "scip_clang" | "rust_analyzer" | ...`): each snippet is
     copied to a scratch directory, indexed, and its call edges derived exactly
     like the repository gold (scip.derive_call_graph); edge-level agreement
     with the key is reported, callees compared by the SCIP gold's
@@ -496,8 +523,10 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
                 args += ["--project-name", sname, "--project-version", "0"]
             res = sh(["npx", "--yes", f"{ts['npm']}@{ts['version']}", *args, "--cwd", str(root), "--output", str(out)], cwd=scratch, timeout=600)
         elif tool == "scip_go":
-            env = {"GOMODCACHE": str(CACHE / "go" / "mod"), "GOCACHE": str(CACHE / "go" / "build"), "GOTOOLCHAIN": "local", "GOFLAGS": "-mod=mod"}
-            res = sh([str(binary), "--output", str(out)], cwd=root, env=env, timeout=600)
+            res = sh([str(binary), "--output", str(out)], cwd=root, env=indexer_env(tool), timeout=600)
+        elif tool == "rust_analyzer":
+            # every case is a crate of its own (`Cargo.toml` + `src/`)
+            res = sh([str(binary), "scip", str(root), "--output", str(out)], cwd=root, env=indexer_env(tool), timeout=600)
         elif tool == "scip_java":
             res = run_scip_java(root, out, ["."], [], f"micro-{sname}")
         else:

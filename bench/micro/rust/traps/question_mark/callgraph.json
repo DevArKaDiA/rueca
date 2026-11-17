@@ -1,0 +1,10 @@
+{
+  "src/main.rs:AppError.from": [],
+  "src/main.rs:main": [
+    "src/main.rs:run"
+  ],
+  "src/main.rs:parse": [],
+  "src/main.rs:run": [
+    "src/main.rs:parse"
+  ]
+}

@@ -13,7 +13,8 @@
    "duration_ms": 368,
    "raw_files_extracted": 37,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-flask",
@@ -28,7 +29,8 @@
    "duration_ms": 331,
    "raw_files_extracted": 83,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-jinja",
@@ -43,7 +45,8 @@
    "duration_ms": 310,
    "raw_files_extracted": 60,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-click",
@@ -58,7 +61,8 @@
    "duration_ms": 291,
    "raw_files_extracted": 70,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-hono",
@@ -73,7 +77,8 @@
    "duration_ms": 1196,
    "raw_files_extracted": 450,
    "raw_files_partial": 8,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-zod",
@@ -88,7 +93,8 @@
    "duration_ms": 440,
    "raw_files_extracted": 169,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-express",
@@ -103,7 +109,8 @@
    "duration_ms": 377,
    "raw_files_extracted": 141,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-monolog",
@@ -118,7 +125,8 @@
    "duration_ms": 489,
    "raw_files_extracted": 217,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-commonmark",
@@ -133,7 +141,8 @@
    "duration_ms": 1176,
    "raw_files_extracted": 486,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-gin",
@@ -148,7 +157,8 @@
    "duration_ms": 326,
    "raw_files_extracted": 95,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-cli",
@@ -163,7 +173,8 @@
    "duration_ms": 289,
    "raw_files_extracted": 66,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-goawk",
@@ -178,7 +189,8 @@
    "duration_ms": 270,
    "raw_files_extracted": 39,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-gson",
@@ -193,7 +205,8 @@
    "duration_ms": 652,
    "raw_files_extracted": 264,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-javapoet",
@@ -208,7 +221,8 @@
    "duration_ms": 281,
    "raw_files_extracted": 39,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-fmt",
@@ -225,7 +239,8 @@
    "raw_files_partial": 3,
    "excluded": {
     "gtest copy": 4
-   }
+   },
+   "carried": true
   },
   {
    "name": "s3-yaml-cpp",
@@ -242,7 +257,8 @@
    "raw_files_partial": 17,
    "excluded": {
     "gtest copy": 148
-   }
+   },
+   "carried": true
   },
   {
    "name": "s3-cJSON",
@@ -257,7 +273,8 @@
    "duration_ms": 343,
    "raw_files_extracted": 99,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-lua",
@@ -272,6 +289,52 @@
    "duration_ms": 365,
    "raw_files_extracted": 68,
    "raw_files_partial": 1,
+   "excluded": {},
+   "carried": true
+  },
+  {
+   "name": "s3-json",
+   "repo": "serde-rs/json",
+   "commit": "20572a6d066958542d79cdd6cf1a7cd9f0c8e1f8",
+   "language": "rust",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 72,
+   "files_partial": 1,
+   "duration_ms": 363,
+   "raw_files_extracted": 72,
+   "raw_files_partial": 1,
+   "excluded": {}
+  },
+  {
+   "name": "s3-ripgrep",
+   "repo": "BurntSushi/ripgrep",
+   "commit": "e89fff89ac9af12e8d4ce9d5fd07beb408ca730f",
+   "language": "rust",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 100,
+   "files_partial": 0,
+   "duration_ms": 440,
+   "raw_files_extracted": 100,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s3-bytes",
+   "repo": "tokio-rs/bytes",
+   "commit": "76c0fbb54ed4336caf9d2311658a2f4a5627c21d",
+   "language": "rust",
+   "source": "s3",
+   "split": "calibration",
+   "ok": true,
+   "files_extracted": 34,
+   "files_partial": 0,
+   "duration_ms": 234,
+   "raw_files_extracted": 34,
+   "raw_files_partial": 0,
    "excluded": {}
   },
   {
@@ -287,7 +350,8 @@
    "duration_ms": 326,
    "raw_files_extracted": 83,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-pallets__flask",
@@ -302,7 +366,8 @@
    "duration_ms": 295,
    "raw_files_extracted": 80,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-pylint-dev__pylint",
@@ -317,7 +382,8 @@
    "duration_ms": 1707,
    "raw_files_extracted": 1923,
    "raw_files_partial": 6,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-pytest-dev__pytest",
@@ -332,7 +398,8 @@
    "duration_ms": 604,
    "raw_files_extracted": 222,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-sphinx-doc__sphinx",
@@ -347,7 +414,8 @@
    "duration_ms": 1319,
    "raw_files_extracted": 530,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-pallets__click",
@@ -362,7 +430,8 @@
    "duration_ms": 281,
    "raw_files_extracted": 63,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-tailwindlabs__tailwindcss",
@@ -377,7 +446,8 @@
    "duration_ms": 277,
    "raw_files_extracted": 102,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-coder__code-server",
@@ -392,7 +462,8 @@
    "duration_ms": 279,
    "raw_files_extracted": 71,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-vuejs__core",
@@ -407,7 +478,8 @@
    "duration_ms": 1337,
    "raw_files_extracted": 510,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-preactjs__preact",
@@ -422,7 +494,8 @@
    "duration_ms": 584,
    "raw_files_extracted": 241,
    "raw_files_partial": 18,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-axios__axios",
@@ -437,7 +510,8 @@
    "duration_ms": 390,
    "raw_files_extracted": 139,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-yargs__yargs",
@@ -452,7 +526,8 @@
    "duration_ms": 331,
    "raw_files_extracted": 86,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-briannesbitt__carbon",
@@ -467,7 +542,8 @@
    "duration_ms": 2110,
    "raw_files_extracted": 1992,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-php-cs-fixer__php-cs-fixer",
@@ -482,7 +558,8 @@
    "duration_ms": 1974,
    "raw_files_extracted": 1212,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-laravel__framework",
@@ -499,7 +576,8 @@
    "raw_files_partial": 1,
    "excluded": {
     "vendored": 9
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-phpoffice__phpspreadsheet",
@@ -514,7 +592,8 @@
    "duration_ms": 2027,
    "raw_files_extracted": 2269,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-twigphp__Twig",
@@ -529,7 +608,8 @@
    "duration_ms": 1033,
    "raw_files_extracted": 360,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-Seldaek__monolog",
@@ -544,7 +624,8 @@
    "duration_ms": 433,
    "raw_files_extracted": 214,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-thephpleague__commonmark",
@@ -559,7 +640,8 @@
    "duration_ms": 1080,
    "raw_files_extracted": 471,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-JsonMapper__JsonMapper",
@@ -574,7 +656,8 @@
    "duration_ms": 322,
    "raw_files_extracted": 150,
    "raw_files_partial": 1,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-caddyserver__caddy",
@@ -589,7 +672,8 @@
    "duration_ms": 509,
    "raw_files_extracted": 240,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-gin-gonic__gin",
@@ -604,7 +688,8 @@
    "duration_ms": 269,
    "raw_files_extracted": 84,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-prometheus__prometheus",
@@ -619,7 +704,8 @@
    "duration_ms": 863,
    "raw_files_extracted": 394,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-gohugoio__hugo",
@@ -636,7 +722,8 @@
    "raw_files_partial": 0,
    "excluded": {
     "vendored": 2
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-hashicorp__terraform",
@@ -651,7 +738,8 @@
    "duration_ms": 2338,
    "raw_files_extracted": 1601,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-benhoyt__goawk",
@@ -666,7 +754,8 @@
    "duration_ms": 246,
    "raw_files_extracted": 37,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-google__gson",
@@ -681,7 +770,8 @@
    "duration_ms": 839,
    "raw_files_extracted": 218,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-projectlombok__lombok",
@@ -698,7 +788,8 @@
    "raw_files_partial": 90,
    "excluded": {
     "vendored": 1
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-apache__dubbo",
@@ -713,7 +804,8 @@
    "duration_ms": 3011,
    "raw_files_extracted": 3118,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-apache__rocketmq",
@@ -728,7 +820,8 @@
    "duration_ms": 2630,
    "raw_files_extracted": 1615,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-apolloconfig__apollo",
@@ -743,7 +836,8 @@
    "duration_ms": 1190,
    "raw_files_extracted": 809,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-decorators-squad__eo-yaml",
@@ -758,7 +852,8 @@
    "duration_ms": 256,
    "raw_files_extracted": 81,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-redis__redis",
@@ -775,7 +870,8 @@
    "raw_files_partial": 24,
    "excluded": {
     "vendored": 356
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-jqlang__jq",
@@ -790,7 +886,8 @@
    "duration_ms": 376,
    "raw_files_extracted": 73,
    "raw_files_partial": 1,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-micropython__micropython",
@@ -808,7 +905,8 @@
    "excluded": {
     "not the language (qstr list)": 10,
     "vendored": 277
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-valkey-io__valkey",
@@ -825,7 +923,8 @@
    "raw_files_partial": 28,
    "excluded": {
     "vendored": 478
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-nanomsg__nng",
@@ -840,7 +939,8 @@
    "duration_ms": 631,
    "raw_files_extracted": 287,
    "raw_files_partial": 64,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-fmtlib__fmt",
@@ -857,7 +957,8 @@
    "raw_files_partial": 5,
    "excluded": {
     "gtest copy": 4
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-nlohmann__json",
@@ -875,7 +976,8 @@
    "excluded": {
     "vendored": 97,
     "amalgamation": 3
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-catchorg__Catch2",
@@ -894,7 +996,8 @@
     "vendored": 2,
     "not the language (Objective-C)": 5,
     "amalgamation": 4
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-simdjson__simdjson",
@@ -912,7 +1015,8 @@
    "excluded": {
     "vendored": 3,
     "amalgamation": 3
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-randombit__botan",
@@ -927,8 +1031,131 @@
    "duration_ms": 2280,
    "raw_files_extracted": 1185,
    "raw_files_partial": 53,
+   "excluded": {},
+   "carried": true
+  },
+  {
+   "name": "s1-tokio-rs__tokio",
+   "repo": "tokio-rs/tokio",
+   "commit": "0cbf1a5adae81e8ff86ca6d040aeee67cf888262",
+   "language": "rust",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 712,
+   "files_partial": 0,
+   "duration_ms": 1624,
+   "raw_files_extracted": 712,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-sharkdp__bat",
+   "repo": "sharkdp/bat",
+   "commit": "db66e4459bc4e66c03629d7cbc235f59245280c0",
+   "language": "rust",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 61,
+   "files_partial": 2,
+   "duration_ms": 324,
+   "raw_files_extracted": 61,
+   "raw_files_partial": 2,
+   "excluded": {}
+  },
+  {
+   "name": "s1-tokio-rs__axum",
+   "repo": "tokio-rs/axum",
+   "commit": "6f7ff8556587d51c6919a864926e4b8090f92c3f",
+   "language": "rust",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 270,
+   "files_partial": 0,
+   "duration_ms": 776,
+   "raw_files_extracted": 270,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-astral-sh__ruff",
+   "repo": "astral-sh/ruff",
+   "commit": "13a6b5600b47489ca6af0b5a13d916bda8e50662",
+   "language": "rust",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 1523,
+   "files_partial": 2,
+   "duration_ms": 2317,
+   "raw_files_extracted": 1524,
+   "raw_files_partial": 2,
+   "excluded": {
+    "vendored": 1
+   }
+  },
+  {
+   "name": "s1-uutils__coreutils",
+   "repo": "uutils/coreutils",
+   "commit": "b89a6255a9cb5ee09867707f395d02929273dc45",
+   "language": "rust",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 503,
+   "files_partial": 0,
+   "duration_ms": 1828,
+   "raw_files_extracted": 503,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-nushell__nushell",
+   "repo": "nushell/nushell",
+   "commit": "cc9f41e553333b1ad0aa4185a912f7a52355a238",
+   "language": "rust",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 1446,
+   "files_partial": 0,
+   "duration_ms": 1961,
+   "raw_files_extracted": 1446,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-burntsushi__ripgrep",
+   "repo": "burntsushi/ripgrep",
+   "commit": "fed4fea217abbc502f2e823465de903c8f2b623d",
+   "language": "rust",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 83,
+   "files_partial": 0,
+   "duration_ms": 395,
+   "raw_files_extracted": 83,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-tokio-rs__bytes",
+   "repo": "tokio-rs/bytes",
+   "commit": "f514bd38dac85695e9053d990b251643e9e4ef92",
+   "language": "rust",
+   "source": "s1",
+   "split": "calibration",
+   "ok": true,
+   "files_extracted": 33,
+   "files_partial": 0,
+   "duration_ms": 220,
+   "raw_files_extracted": 33,
+   "raw_files_partial": 0,
    "excluded": {}
   }
  ],
- "carried": 0
+ "carried": 60
 }

@@ -1,0 +1,8 @@
+{
+  "src/main.rs:first": [],
+  "src/main.rs:main": [
+    "src/main.rs:first",
+    "src/main.rs:parse_num"
+  ],
+  "src/main.rs:parse_num": []
+}

@@ -1,0 +1,14 @@
+{
+  "src/main.rs:geometry.Scale.scale": [],
+  "src/main.rs:geometry.Square.area": [],
+  "src/main.rs:geometry.Square.double": [
+    "src/main.rs:geometry.Square.area"
+  ],
+  "src/main.rs:geometry.Square.scale": [
+    "src/main.rs:geometry.Square.double"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:geometry.Square.area",
+    "src/main.rs:geometry.Square.scale"
+  ]
+}

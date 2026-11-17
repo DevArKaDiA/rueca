@@ -1,0 +1,9 @@
+{
+  "src/main.rs:helper": [],
+  "src/main.rs:main": [
+    "src/main.rs:run"
+  ],
+  "src/main.rs:run": [
+    "src/main.rs:helper"
+  ]
+}

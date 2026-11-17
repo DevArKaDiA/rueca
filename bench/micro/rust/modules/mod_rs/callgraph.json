@@ -1,0 +1,9 @@
+{
+  "src/main.rs:main": [
+    "src/store/mod.rs:open"
+  ],
+  "src/store/disk.rs:read": [],
+  "src/store/mod.rs:open": [
+    "src/store/disk.rs:read"
+  ]
+}

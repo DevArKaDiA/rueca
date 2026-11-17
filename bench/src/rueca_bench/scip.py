@@ -223,6 +223,7 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
     bound: set[str] = set()
 
     scoped = [d for d in docs if in_scope(d.path, include, exclude)]
+    keep_start = (language or "").lower() in _TREE_SITTER_START
     stats["documents_total"] = len(docs)
     stats["documents_in_scope"] = len(scoped)
 
@@ -287,7 +288,8 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
                 stats["definitions_with_enclosing_range"] += 1
                 es, ee = o.enclosing[0] + 1, o.enclosing[2] + 1
                 if es <= f["def_line"] <= ee and not f.get("_enc"):
-                    f["start"], f["end"], f["_enc"] = min(es, f["start"]), ee, True
+                    start = f["start"] if keep_start else min(es, f["start"])
+                    f["start"], f["end"], f["_enc"] = start, ee, True
 
     stats["classes_by_symbol"] = len(same_symbol.groups())
     stats["class_members_unbound"] = join_unbound_alternatives(callables, bound, same_symbol, language)
@@ -341,13 +343,23 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
     return graph
 
 
+# Indexers whose enclosing range starts above the declaration: rust-analyzer's
+# covers the item's doc comments and attributes, which would make a
+# documented one-line function a structural question and move its start
+# away from where every arm puts it. The tree-sitter start is kept (the end
+# still comes from the enclosing range).
+_TREE_SITTER_START = ("rust",)
+
 # Languages where a definition can exist in alternatives the indexer did not
 # compile: C / C++ `#if` branches and Go build tags (whose build
 # configuration also selects files of a directory: `_win.cc`, `_unix.go`),
-# Python conditional `def`s and `typing.overload` stubs spelled another way.
-# Java, TS/JS and PHP have none: an unbound callable there is another
-# function (scip-java's anonymous classes are `local` symbols).
-_FILE_ALTERNATIVES = ("python",)
+# Python conditional `def`s and `typing.overload` stubs spelled another way,
+# Rust `#[cfg(...)]` items (features, platforms) in one file — a file
+# compiled for another platform is not in rust-analyzer's module tree at
+# all, so it has no SCIP document and no callables. Java, TS/JS and PHP have
+# none: an unbound callable there is another function (scip-java's
+# anonymous classes are `local` symbols).
+_FILE_ALTERNATIVES = ("python", "rust")
 _DIR_ALTERNATIVES = ("c", "cpp", "go")
 
 

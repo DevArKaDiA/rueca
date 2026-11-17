@@ -1,5 +1,149 @@
 # Decisions log
 
+## 2026-11-16 — Rust: call results typed from signatures; methods by name only when unique
+
+Dogfooding showed name-matched edges where the receiver's type was
+knowable: `let store = Store::open(p).context(…)?; store.register(…)` and
+`Index::open(dir).map_err(…)?.tokenizers().register(…)` bound the only
+project trait method named `register`. The pack now writes such receivers
+as `$ret:<receiver>#<name>` (`?` when unwrapped by `?`, `unwrap()`,
+`expect()`; `.context()`, `.map_err()`, `.clone()` seen through), also for
+`let` bindings, and the resolver resolves the callee like a call, reads the
+return type of its signature (`Self` → its impl's type or trait,
+`Result<T, _>` / `Option<T>` → `T` when unwrapped, references and smart
+pointers seen through), resolves it in the callee's file and looks the
+member up there (`type_resolved` 0.85); a callee or return type outside
+the project (tantivy's `Index::open`) makes the call external. Same-file
+inference also learned `HashMap` / `BTreeMap` `get` / `values` / `keys`.
+
+By-name method calls on receivers of unknown type now bind a **unique**
+candidate only (a trait method's implementations still count as it), as
+the Go and C/C++ unique-method rung does; the fan-out to two or three
+candidates at × 0.8 of the first Rust entry is gone. An impl on `&mut T` /
+`&T` / `Box<T>` forwards to `T`'s impl and counts as the trait's item
+instead of attracting every call of its names (ripgrep's `impl Sink for
+&mut S`), and `context` / `with_context` (anyhow) joined the
+standard-library method names that never match by name.
+
+Measured with the Rust S3 suite (macro precision / recall): ripgrep
+callers 95.5 / 89.6 → 99.5 / 89.9, callees 93.3 / 93.4 → 99.4 / 91.4;
+serde_json callers 94.8 / 83.6 → 95.3 / 81.1, callees 92.6 / 81.7 →
+95.4 / 80.5; micro-benchmark unchanged (callers 99.6 / 97.5). Most
+remaining false edges on serde_json point into code behind
+`#[cfg(feature = …)]` features off by default, which rust-analyzer does
+not analyze and Rueca indexes (`#[cfg]` is not evaluated); a type with
+several `impl From<X>` binds the first `from` it sees.
+
+## 2026-11-16 — Rust pack: module paths, `Type.method`, impl items outside their type
+
+Rust (`rueca-lang-rust`, `tree-sitter-rust` 0.24.2, vendored
+nvim-treesitter `locals.scm`) names definitions the way the bench
+labeler does: a file's module name is its **module path**, crate name
+first (`rueca_index::link`, from `Cargo.toml` targets and the file
+layout; separator `::`), and local names join items with `.` — `f`,
+`outer.inner` for a nested function, `m.f` for an item of an inline
+module (a `Module` definition that owns its items, like a TS namespace),
+`Tr.m` for a trait item, `Type.m` for an `impl` item (the last segment of
+the self type, generics and references stripped). File modules are not
+part of local names, as Go packages are not. Traits are `Interface`s,
+structs and unions `Struct`s, variants `Constant`s, `macro_rules!` a
+callable `Function` so that invocations of the repository's macros are
+`CALLS`.
+
+`impl` items are **not children of their type**: an `impl` block may sit
+in another file (often another module) than the type, and only the
+resolver can find the type through imports. They are top level (or
+children of their inline module) and carry the self type as written in
+`bases` and the trait in `implements`; the new `rust` module of
+`rueca-resolve` attaches them to the type wherever it is declared, adds
+`IMPLEMENTS` type → trait (also from the type's own `implements` when an
+`impl Tr for T {}` without items is in the type's file) and `OVERRIDES`
+item → trait item. Rejected: an `Impl` label or definition per block (a
+new label for every tool and the bench to learn, and impl nodes competing
+with the type in name lookups) and a facts-format change (every pack
+touched).
+
+Module lookups follow Rust, not the Python / ECMAScript defaults: a name
+in a module is an item, else what `mod`, `use` (leaves, re-exports, globs,
+private ones too) and `extern crate` bind; a `use` path is walked from its
+anchor (`crate`, `self` / `super`, a name in scope, a crate of the
+snapshot) through module files, inline modules, types and re-exports, so
+the pack's `resolve_import` only maps module paths to files. `IMPORTS`
+go to the file each `use` leaf is found in (not to the crate root of
+`crate::…`). Path anchors written in code (`crate::a::f()`, `super::g()`,
+`serde_json::to_string`) get synthetic imports (`type_only`), which make
+no `IMPORTS`.
+
+Measured: the fixture workspace resolves as labelled (`rueca-resolve`
+`tests/rust.rs`); the Rust micro-benchmarks of `bench/micro/rust` (58
+cases on this date) give 132 of their 133 call edges with 1 extra (a
+method on an `impl Trait` return value resolves to the trait, not the
+concrete type); 0 files with parse errors on rueca (251 files), tokio
+(816) and ripgrep (102), 1 of 72 on serde_json (a deliberately invalid
+`trybuild` UI test). Resolution (references resolved / external /
+unresolved): ripgrep 59.1 / 35.5 / 4.5 %, serde_json 60.4 / 37.4 / 1.9 %,
+the rueca workspace itself 45.2 / 52.7 / 0.3 % (`rueca_reads_itself`, a
+test), tokio 39.9 / 45.1 / 14.6 % — tokio declares many items inside
+`cfg_*!` macros, which are not expanded (a known gap; a child module file
+that only a macro declares is still found).
+
+## 2026-11-16 — Rust: macro arguments are code, macro bodies are not
+
+tree-sitter keeps a macro's arguments as a flat token tree, yet most of
+them are expressions that rust-analyzer resolves at their real positions
+(`println!("{}", total())`, `assert_eq!(v.len(), 3)`, `vec![make()]`,
+`write!(f, "{}", self.name())`), and its SCIP index is the Rust S3 gold.
+The pack parses each argument list again on its own, wrapped so that it is
+valid Rust (`(…)` as a tuple, `[…]` as an array, `{…}` as a block), the
+text copied byte for byte so a node maps back to the file by one fixed
+offset; the re-parsed text gets its own local scopes (closures inside
+`json!` / `assert!`), nesting is bounded (4 levels, four times the file's
+bytes plus 64 KiB per file) and its parse errors do not count as the
+file's. Not re-parsed: `stringify!`, `concat!`, `include*!` and
+`quote!`-style token builders (their tokens are data, not references), and
+the bodies of `macro_rules!` rules: they are token patterns, rust-analyzer
+records no references in them, and the bench's micro-benchmark agrees
+(an invocation calls the macro, not what its body calls; unlike the C/C++
+pack, whose macro expansion follows `#define` bodies). Standard macros are
+not references unless the file defines a `macro_rules!` of the same name;
+a bare invocation no rung resolves binds the only `macro_rules!` of that
+name in the snapshot (`#[macro_use]` needs no import), `unique_name` 0.60.
+
+## 2026-11-16 — Rust: trait dispatch and methods called by name
+
+A call on a receiver typed `T: Trait`, `impl Trait` or `dyn Trait` binds
+the trait's method (`type_resolved` 0.85), as rust-analyzer does;
+`trace` then reaches the implementations through `OVERRIDES`. With an
+unknown receiver, the implementations of one trait method count as that
+method: a name that only one trait declares binds the trait's method
+(`heuristic` 0.50) however many types implement it; two or three distinct
+candidates are all linked at × 0.8, as C++ overloads the arguments cannot
+tell apart; more is no edge (amended the same day: a unique candidate
+only, see the entry on call results above). A blanket impl (`impl<T: Bound> Tr for T`,
+items named `T.m`) applies to every type, so its items are the by-name
+targets. Rust types are open: a member missing from a project type comes
+from a derive or a blanket implementation outside the project
+(`Clone::clone`, `ToString::to_string`) and is external, never a guess;
+so is a method call on an unknown receiver when no project method has the
+name, or when the name is a common standard-library method (`unwrap`,
+`iter`, `insert`, `len`, …: such calls are overwhelmingly on standard
+types).
+
+## 2026-11-16 — Cargo packages in the organization layer
+
+A Cargo package with a library publishes `rust:<crate name>` (`[lib]
+name`, else the package name with `-` → `_`); its dependency tables
+(`[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`, their
+`[target.*]` forms and `[workspace.dependencies]`) are `cargo:<package>`
+requirements. An import a repository's own pack cannot resolve is keyed
+by its first path segment (`serde::de::Visitor` → `rust:serde`; `crate`,
+`self`, `super` and the standard library never), so `use acme_kit::Retry`
+in one repository links to the repository whose package builds the
+`acme_kit` crate, resolved by its own module model. Inside one snapshot a
+crate is found by name (a `path` / `workspace = true` dependency of the
+file's package first, renames followed; else any library crate with that
+name, the same workspace first).
+
 ## 2026-10-27 — An ambiguous overload call never targets its caller
 
 The Java benchmark showed self-loop `CALLS` edges on overloads that

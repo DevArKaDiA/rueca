@@ -1,0 +1,15 @@
+{
+  "src/main.rs:factorial": [
+    "src/main.rs:factorial"
+  ],
+  "src/main.rs:is_even": [
+    "src/main.rs:is_odd"
+  ],
+  "src/main.rs:is_odd": [
+    "src/main.rs:is_even"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:factorial",
+    "src/main.rs:is_even"
+  ]
+}

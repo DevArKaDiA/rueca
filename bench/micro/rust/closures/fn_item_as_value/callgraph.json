@@ -1,0 +1,7 @@
+{
+  "src/main.rs:apply": [],
+  "src/main.rs:double": [],
+  "src/main.rs:main": [
+    "src/main.rs:apply"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "src/main.rs:add": [],
+  "src/main.rs:double": [],
+  "src/main.rs:main": [
+    "src/main.rs:add",
+    "src/main.rs:double"
+  ]
+}

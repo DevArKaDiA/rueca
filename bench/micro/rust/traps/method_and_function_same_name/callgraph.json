@@ -1,0 +1,8 @@
+{
+  "src/main.rs:Bag.len": [],
+  "src/main.rs:len": [],
+  "src/main.rs:main": [
+    "src/main.rs:Bag.len",
+    "src/main.rs:len"
+  ]
+}

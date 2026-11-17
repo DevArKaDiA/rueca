@@ -272,6 +272,21 @@
 //! module). Nothing else is Go-specific: package scope, `$self` and
 //! `$type:` are the hooks above.
 //!
+//! # Rust
+//!
+//! Rust module semantics (lookups through `mod`, `use`, re-exports and
+//! globs; `use` paths walked from their anchor through module files, inline
+//! modules and types), `IMPORTS` to the files of `use` leaves, `impl`
+//! items attached to the type their block is for wherever it is declared
+//! (`IMPLEMENTS` type → trait, `OVERRIDES` item → trait item,
+//! `type_resolved` 0.90), blanket impls, open types (a missing member is
+//! external), `$ret:` receivers typed from the callee's declared return
+//! type (`type_resolved` 0.85), by-name method calls that count a trait
+//! method's implementations as the trait method (`heuristic` 0.5, unique
+//! only; common standard-library method names external), and
+//! macros by name (`unique_name` 0.6) are the `rust` module; `$self`,
+//! `$type:` and `$member:` are the hooks above.
+//!
 //! # Bridge and data references (RFC 0003 §6–§7)
 //!
 //! Handled outside the ladder (exact matches only, never name matching; see
@@ -349,6 +364,7 @@ use rueca_model::{
 mod bridge;
 mod go;
 mod hooks;
+mod rust;
 
 /// One file of the snapshot as seen by the resolver.
 #[derive(Debug, Clone)]
@@ -451,6 +467,8 @@ pub fn resolve(
     r.structural_edges();
     r.import_edges();
     r.build_envs();
+    r.rust_import_edges();
+    r.rust_open_types();
     r.resolve_bases();
     r.override_edges();
     r.go_implicit_interfaces();
@@ -623,6 +641,16 @@ struct Resolver<'a> {
     decls_of: HashMap<NodeId, Vec<NodeId>>,
     /// C/C++ file → files it sees through includes (memo).
     visible_memo: RefCell<HashMap<FileId, std::rc::Rc<HashSet<FileId>>>>,
+    /// Rust `impl` item → the type its block is for (see the `rust` module).
+    rust_impl_type: HashMap<NodeId, NodeId>,
+    /// Rust trait-impl item → the trait item it implements.
+    rust_overrides: HashMap<NodeId, NodeId>,
+    /// Items of Rust blanket impls (`impl<T> Tr for T`).
+    rust_blanket: HashSet<NodeId>,
+    /// Nesting of Rust module lookups (see the `rust` module).
+    rust_depth: std::cell::Cell<usize>,
+    /// Rust `macro_rules!` definitions by name.
+    rust_macros: HashMap<String, Vec<NodeId>>,
 
     /// Key: (module, name, reached through `export *`).
     lookup_memo: RefCell<HashMap<(FileId, String, bool), Option<Target>>>,
@@ -1053,6 +1081,11 @@ impl<'a> Resolver<'a> {
             declared_in: HashMap::new(),
             decls_of: HashMap::new(),
             visible_memo: RefCell::new(HashMap::new()),
+            rust_impl_type: HashMap::new(),
+            rust_overrides: HashMap::new(),
+            rust_blanket: HashSet::new(),
+            rust_depth: std::cell::Cell::new(0),
+            rust_macros: HashMap::new(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
@@ -1219,6 +1252,10 @@ impl<'a> Resolver<'a> {
     fn add_parent_members(&mut self, i: usize, defs: &[Definition], parents: &[Option<LocalDefId>]) {
         for (j, p) in parents.iter().enumerate() {
             let Some(p) = p else { continue };
+            // Rust `impl` items belong to their type, not to their module.
+            if self.is_rust_impl_item(i as FileId, &defs[j]) {
+                continue;
+            }
             let owner = self.def_node[i][*p as usize];
             let member = self.def_node[i][j];
             if owner != member {
@@ -1253,7 +1290,7 @@ impl<'a> Resolver<'a> {
         let package_scoped = self.package_of[i].is_some();
         for &j in top {
             let d = &defs[j as usize];
-            if package_scoped && d.qualified_name != d.name {
+            if (package_scoped && d.qualified_name != d.name) || self.is_rust_impl_item(i as FileId, d) {
                 continue;
             }
             let node = self.def_node[i][j as usize];
@@ -1363,6 +1400,10 @@ impl<'a> Resolver<'a> {
     fn import_edges(&mut self) {
         for i in 0..self.files.len() {
             let fid = i as FileId;
+            // Rust: `rust_import_edges` (leaves, not anchors).
+            if self.is_rust(fid) {
+                continue;
+            }
             let fnode = self.file_node[i];
             for (k, imp) in self.imports(fid).iter().enumerate() {
                 let meta =
@@ -1484,6 +1525,9 @@ impl<'a> Resolver<'a> {
         via_star: bool,
         visited: &mut Vec<(FileId, String)>,
     ) -> Option<Target> {
+        if self.is_rust(f) {
+            return self.rust_lookup(f, name, visited);
+        }
         if let Some(n) = self.module_def(f, name) {
             return Some(Target::Symbol(n));
         }
@@ -1755,6 +1799,9 @@ impl<'a> Resolver<'a> {
         let mut env = Env::new();
         if self.is_php(fid) {
             return env;
+        }
+        if self.is_rust(fid) {
+            return self.rust_env(fid);
         }
         let python = self.is_python(fid);
         for (k, imp) in self.imports(fid).iter().enumerate() {
@@ -2028,10 +2075,15 @@ impl<'a> Resolver<'a> {
             Want::Value => &[Slot::Value, Slot::Method, Slot::Type],
             Want::Type => &[Slot::Type, Slot::Value, Slot::Method],
         };
-        order.iter().find_map(|&slot| {
-            let mut visited = Vec::new();
-            self.find_member_rec(class, name, slot, 0, &mut visited).map(|(n, d)| (n, d > 0))
-        })
+        order
+            .iter()
+            .find_map(|&slot| {
+                let mut visited = Vec::new();
+                self.find_member_rec(class, name, slot, 0, &mut visited).map(|(n, d)| (n, d > 0))
+            })
+            .or_else(|| {
+                self.is_rust_module(class).then(|| self.rust_module_member(class, name)).flatten().map(|n| (n, false))
+            })
     }
 
     fn find_member_rec(
@@ -2105,6 +2157,9 @@ impl<'a> Resolver<'a> {
     /// The base and implements lists of a code definition, resolved as
     /// `Type` references in the definition's outer scope.
     fn code_bases(&mut self, fid: FileId, j: LocalDefId, d: &Definition) {
+        if self.is_rust_impl_item(fid, d) {
+            return self.rust_impl_item(fid, j, d);
+        }
         let php = self.is_php(fid);
         // Implemented interfaces contribute members (default methods,
         // constants) in PHP and the RFC 0003 languages.
@@ -2182,6 +2237,7 @@ impl<'a> Resolver<'a> {
             if !defs[a as usize].label.is_type()
                 && let Some(&c) = self.child_by_name[f as usize].get(&(a, name))
                 && !(ecma && defs[c as usize].label == Label::Method)
+                && !self.is_rust_impl_item(f, &defs[c as usize])
             {
                 return Some(self.node_of(f, c));
             }
@@ -2227,7 +2283,7 @@ impl<'a> Resolver<'a> {
             cur = match cur {
                 Target::Module(m) => self.lookup_in_module(m, seg, &mut Vec::new())?,
                 Target::Symbol(n) => {
-                    if !self.nodes[n as usize].label.is_type() {
+                    if !self.nodes[n as usize].label.is_type() && !self.is_rust_module(n) {
                         return None;
                     }
                     Target::Symbol(self.find_member(n, seg, Want::Type)?.0)
@@ -2317,9 +2373,13 @@ impl<'a> Resolver<'a> {
         if selfs.contains(&receiver) {
             return self.self_receiver_member(f, item, scope, receiver);
         }
-        // 5. Typed receiver: `$type:T` (declared type known in the file).
+        // 5. Typed receiver: `$type:T` (declared type known in the file);
+        // Rust `$ret:` (the result of a call, typed from its signature).
         if let Some(ty) = receiver.strip_prefix(TYPE_RECEIVER_PREFIX) {
             return self.resolve_typed(f, item, scope, ty);
+        }
+        if let Some(spec) = receiver.strip_prefix(rust::RET_RECEIVER_PREFIX) {
+            return self.rust_resolve_ret(f, item, scope, spec);
         }
         // C++ namespace-qualified name: `$ns:a::b`.
         if let Some(path) = receiver.strip_prefix(NAMESPACE_RECEIVER_PREFIX) {
@@ -2354,7 +2414,7 @@ impl<'a> Resolver<'a> {
         match class.and_then(|c| self.find_member(c, item.name, Want::of(item.kind))) {
             Some((n, false)) => Outcome::Hit(n, Strategy::TypeResolved, 0.9),
             Some((n, true)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
-            None => Outcome::Miss,
+            None => class.and_then(|c| self.rust_missing_member(f, c)).unwrap_or(Outcome::Miss),
         }
     }
 
@@ -2382,7 +2442,8 @@ impl<'a> Resolver<'a> {
             },
             Some(Target::Symbol(c)) if self.owns_members(c) => self
                 .find_member(c, item.name, Want::of(item.kind))
-                .map(|(n, _)| Outcome::Hit(n, Strategy::ImportResolved, 0.85)),
+                .map(|(n, _)| Outcome::Hit(n, Strategy::ImportResolved, 0.85))
+                .or_else(|| self.rust_missing_member(f, c)),
             Some(Target::External) | Some(Target::Prefix(_)) => Some(Outcome::External),
             _ => None,
         }
@@ -2400,17 +2461,26 @@ impl<'a> Resolver<'a> {
         if !self.owns_members(c) {
             return None;
         }
-        self.find_member(c, item.name, Want::of(item.kind)).map(|(n, _)| Outcome::Hit(n, Strategy::SameModule, 0.85))
+        self.find_member(c, item.name, Want::of(item.kind))
+            .map(|(n, _)| Outcome::Hit(n, Strategy::SameModule, 0.85))
+            .or_else(|| self.rust_missing_member(f, c))
     }
 
     /// Whether `c` has members a receiver can name: a type or an ECMAScript
     /// constructor function.
     fn owns_members(&self, c: NodeId) -> bool {
-        self.nodes[c as usize].label.is_type() || self.is_constructor_function(c)
+        self.nodes[c as usize].label.is_type() || self.is_constructor_function(c) || self.is_rust_module(c)
     }
 
-    /// Strategy 6.
+    /// Strategy 6 (Rust methods by name: the `rust` module).
     fn unique_name(&self, f: FileId, kind: RefKind, name: &str, with_receiver: bool) -> Outcome {
+        if with_receiver && self.is_rust(f) && kind != RefKind::Write && !name.is_empty() {
+            return self.rust_unique_method(f, kind, name);
+        }
+        self.unique_name_generic(f, kind, name, with_receiver)
+    }
+
+    fn unique_name_generic(&self, f: FileId, kind: RefKind, name: &str, with_receiver: bool) -> Outcome {
         if kind == RefKind::Write || name.is_empty() {
             return Outcome::Miss;
         }
@@ -2421,7 +2491,7 @@ impl<'a> Resolver<'a> {
             return Outcome::Miss;
         }
         let family = self.families[f as usize];
-        let Some(cands) = self.by_name.get(name) else { return Outcome::Miss };
+        let Some(cands) = self.by_name.get(name) else { return self.rust_macro_by_name(f, kind, name) };
         let mut found = None;
         for &n in cands {
             let node = &self.nodes[n as usize];
@@ -2436,7 +2506,7 @@ impl<'a> Resolver<'a> {
         match found {
             Some(n) if with_receiver => Outcome::Hit(n, Strategy::Heuristic, 0.5),
             Some(n) => Outcome::Hit(n, Strategy::UniqueName, 0.6),
-            None => Outcome::Miss,
+            None => self.rust_macro_by_name(f, kind, name),
         }
     }
 
@@ -2462,7 +2532,7 @@ impl<'a> Resolver<'a> {
         let mut best: Option<LocalDefId> = None;
         for &j in &self.with_bases[f as usize] {
             let d = &defs[j as usize];
-            if !d.span.contains(&r.span) {
+            if !d.span.contains(&r.span) || self.is_rust_impl_item(f, d) {
                 continue;
             }
             if best.is_some_and(|b| !defs[b as usize].span.contains(&d.span)) {
@@ -2625,6 +2695,16 @@ impl<'a> Resolver<'a> {
     }
 
     fn count_miss(&mut self, f: FileId, item: &RefItem<'_>) {
+        if std::env::var("RUECA_DEBUG_MISS").is_ok() && self.is_rust(f) {
+            eprintln!(
+                "MISS {:?} {} {} @{}:{}",
+                item.kind,
+                item.receiver.unwrap_or("-"),
+                item.name,
+                self.files[f as usize].path,
+                item.span.start_line + 1
+            );
+        }
         tracing::trace!(
             kind = ?item.kind,
             receiver = item.receiver.unwrap_or("-"),
@@ -2662,6 +2742,8 @@ impl<'a> Resolver<'a> {
             Some(LanguageFamily::Php) => self.find_member(class, "__construct", Want::Call),
             // Constructors are members named like the class.
             Some(LanguageFamily::Java | LanguageFamily::C) => self.named_constructor(class).map(|c| (c, false)),
+            // Rust: `T::new` is an ordinary associated function.
+            Some(LanguageFamily::Rust) => None,
             _ => self
                 .find_member(class, "__init__", Want::Call)
                 .or_else(|| self.find_member(class, "constructor", Want::Call)),

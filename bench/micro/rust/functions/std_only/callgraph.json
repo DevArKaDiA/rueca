@@ -1,0 +1,6 @@
+{
+  "src/main.rs:describe": [],
+  "src/main.rs:main": [
+    "src/main.rs:describe"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "src/main.rs:Point.new": [],
+  "src/main.rs:Point.origin": [
+    "src/main.rs:Point.new"
+  ],
+  "src/main.rs:Point.shifted": [
+    "src/main.rs:Point.new"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:Point.origin",
+    "src/main.rs:Point.shifted"
+  ]
+}

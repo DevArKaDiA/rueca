@@ -1,0 +1,9 @@
+{
+  "src/main.rs:Counter.add": [],
+  "src/main.rs:Counter.inc": [
+    "src/main.rs:Counter.add"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:Counter.inc"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "src/main.rs:Dog.name": [],
+  "src/main.rs:Speak.describe": [
+    "src/main.rs:Speak.name"
+  ],
+  "src/main.rs:Speak.name": [],
+  "src/main.rs:main": [
+    "src/main.rs:Speak.describe"
+  ]
+}

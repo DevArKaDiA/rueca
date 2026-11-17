@@ -1,0 +1,11 @@
+{
+  "src/main.rs:MemStore.put": [],
+  "src/main.rs:Store.put": [],
+  "src/main.rs:fill": [
+    "src/main.rs:Store.put"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:MemStore.put",
+    "src/main.rs:fill"
+  ]
+}

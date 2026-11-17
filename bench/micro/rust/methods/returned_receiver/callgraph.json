@@ -1,0 +1,8 @@
+{
+  "src/main.rs:Config.is_debug": [],
+  "src/main.rs:load": [],
+  "src/main.rs:main": [
+    "src/main.rs:Config.is_debug",
+    "src/main.rs:load"
+  ]
+}

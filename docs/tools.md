@@ -64,7 +64,13 @@ release with `"format": "verbose"` ([below](#verbose-alpha-format)).
   `Parser.parse(String,int)`; anonymous classes are named after their base
   under the enclosing definition, `Gson.fromJson.TypeAdapter$1.read`); C/C++ `geo::Circle::area` (namespace and
   class path, no module; overloads in one file carry their parameter types,
-  `geo::scale(double, double)`; macros `GEO_PI`; GoogleTest `Suite::Name`).
+  `geo::scale(double, double)`; macros `GEO_PI`; GoogleTest `Suite::Name`);
+  Rust `rueca_index::link::PackageLinker.analyze` (module path with `::`,
+  crate name first; then the local name joined with `.`: an `impl` item is
+  `Type.method` after the last segment of the impl's self type, a trait
+  item `Trait.method`, an item of an inline module `tests.helper`, a nested
+  function `outer.inner`, a `macro_rules!` its name; the symbol id is
+  `crates/rueca-index/src/link.rs#PackageLinker.analyze`).
 - **Errors**: MCP tool errors use `isError: true` with a message; the CLI
   prints `{"error": "..."}` to stdout and exits with status 2.
 
@@ -217,7 +223,7 @@ best result ranks):
 
 **Language names** (`search_symbols`, `search_code`): `python`,
 `typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`, `java`, `cpp`, `c` (a `.h` header is `cpp` when the
-repository has C++ sources), the data languages
+repository has C++ sources), `rust`, the data languages
 `json` (JSONC included), `yaml`, `toml`, `dotenv`, `ini`, `properties`,
 `xml` (`pom.xml`, `*.csproj`, `AndroidManifest.xml` only), `hcl`
 (Terraform / OpenTofu included) and `dockerfile`. A language whose pack is not in
@@ -367,12 +373,15 @@ earlier node an edge needs.
 
 Edge types beyond calls: `["INHERITS"]` walks a class hierarchy,
 `["IMPORTS"]` file dependencies (`File` → `File`, and `File` → `Folder` for
-imports of a directory: a Go or Java package, a Terraform module), `["TESTS"]`
+imports of a directory: a Go or Java package, a Terraform module; for Rust,
+`mod` declarations and the module files `use` items come from), `["TESTS"]`
 the tests of a function, `["OVERRIDES"]` the methods an override replaces
-(callers: the overrides of a method; Java and C/C++, and Go methods that
+(callers: the overrides of a method; Java and C/C++, Rust trait-impl items
+and the trait items they implement, and Go methods that
 implicitly implement an interface method, heuristic 0.5). Go types also
 get heuristic `IMPLEMENTS` edges to the interfaces whose methods they
-cover, so `get_symbol` `subtypes` of a Go interface lists its implementers. The code ↔ config
+cover, so `get_symbol` `subtypes` of a Go interface lists its implementers;
+a Rust `impl Trait for Type` gives `IMPLEMENTS` `Type` → `Trait`. The code ↔ config
 bridge (RFC 0003 §7) uses `READS` / `WRITES`:
 
 ```json

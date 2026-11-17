@@ -1,0 +1,9 @@
+{
+  "src/main.rs:check": [
+    "src/main.rs:ensure"
+  ],
+  "src/main.rs:ensure": [],
+  "src/main.rs:main": [
+    "src/main.rs:check"
+  ]
+}

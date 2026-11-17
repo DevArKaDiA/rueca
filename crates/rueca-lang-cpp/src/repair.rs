@@ -546,8 +546,8 @@ fn type_argument_edit(cx: &Cx<'_>, arg: std::ops::Range<usize>, site: Site) -> O
 /// initializers as arguments); `None` at a `;` outside braces.
 fn matching_paren_braced(cx: &Cx<'_>, open: usize) -> Option<usize> {
     let (mut parens, mut braces) = (0i32, 0i32);
-    for k in open..cx.toks.len().min(open + 512) {
-        match cx.toks[k].kind {
+    for (k, tok) in cx.toks.iter().enumerate().skip(open).take(512) {
+        match tok.kind {
             Kind::Punct(b'(') => parens += 1,
             Kind::Punct(b')') => {
                 parens -= 1;

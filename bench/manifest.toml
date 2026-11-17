@@ -372,6 +372,21 @@ s1_sources = "SWE-bench Multilingual (all 12 C++ instances: fmt, nlohmann/json) 
 s3_gold = "scip-clang 0.4.1 (fmt 12.1.0, yaml-cpp 0.8.0; bench-synthesized compile_commands.json) and the rueca-bench C++ micro-benchmark"
 notes = "`.h` headers belong to the instance language (C or C++); the bench parses them with that grammar."
 
+[languages.rust]
+label = "rust"
+members = ["rust"]
+extensions = [".rs"]
+# Rust has no test-file suffix convention: integration tests live in `tests/`
+# (a built-in test directory) and benchmarks in `benches/`; `tests.rs` /
+# `test.rs` / `*_tests.rs` files are test modules. Unit tests inside source
+# files (`#[cfg(test)] mod tests`, `#[test]` functions) are dropped by the
+# labeler (treesitter.py: _rust_functions), not by the file heuristic.
+test_files = ['^tests?\.rs$', '.*_tests?\.rs$']
+test_dirs = ["benches"]
+s1_sources = "SWE-bench Multilingual (Rust: tokio, bat, axum, ruff, coreutils, nushell, ripgrep); function gold from the tree-sitter labeler"
+s3_gold = "rust-analyzer 2026-11-09 `scip` (serde_json v1.0.154, ripgrep 15.2.0; bytes = calibration) and the rueca-bench Rust micro-benchmark"
+notes = "Rust methods are named `Type.method` (last path segment of the impl's self type) and trait methods `Trait.method`; items under `#[cfg(test)]` / `#[test]` are test code. rust-analyzer resolves calls on a generic `T: Trait` or `dyn Trait` receiver to the trait method only, and calls in a `macro_rules!` body to nothing."
+
 # Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
 # callables). `binding` = Python package (pinned in pyproject.toml) and
 # function returning the language. `labeler = "nesting"` (default) is the
@@ -455,6 +470,27 @@ labeler = "c"
 separator = "::"
 calls = { call_expression = "function" }
 members = { field_expression = "field", parenthesized_expression = "@0" }
+
+# Rust: code-backed labeler for the Rust pack's qualified names (impl self
+# type, trait, inline `mod`, enclosing `fn`; treesitter.py: _rust_functions);
+# `callables` / `containers` are the node types it reads. A bodiless `fn`
+# signature is a callable in a trait only (not in `extern` blocks).
+# `macro_rules!` definitions are callables, so an invocation of a macro the
+# repository defines is a call edge (std / dependency macros are out of
+# scope). `token_calls`: calls written in a macro's arguments
+# (`println!("{}", f(x))`), which tree-sitter keeps as a flat token tree and
+# rust-analyzer resolves through the expansion (treesitter.py: _is_token_call).
+[grammars.rust]
+binding = "tree_sitter_rust:language"
+package = "tree-sitter-rust 0.24.2 (MIT)"
+extensions = [".rs"]
+labeler = "rust"
+separator = "."
+callables = { function_item = "Function", function_signature_item = "Method", macro_definition = "Function" }
+containers = ["mod_item", "impl_item", "trait_item"]
+calls = { call_expression = "function", macro_invocation = "macro" }
+members = { field_expression = "field", scoped_identifier = "name", generic_function = "function" }
+token_calls = "token_tree"
 
 # ---------------------------------------------------------------- tools
 
@@ -555,6 +591,29 @@ image_name = "eclipse-temurin:21-jdk (Docker official image; GPL-2.0 with Classp
 url = "https://github.com/scip-code/scip-java/releases/download/v0.13.2/scip-java-v0.13.2"
 binary_sha256 = "5248136592d19ea2c468f64ebd18587d32de7c961536ff19346f8a025af1d13c"
 
+# Rust S3 gold: rust-analyzer's `scip` command, standalone release binary
+# (tags are weekly dates; assets are single gzip-compressed binaries). It
+# runs `cargo metadata` and, for build scripts and proc macros, `cargo check`
+# with the toolchain on PATH (needs `cargo`, `rustc` and the `rust-src`
+# component); dependencies are downloaded into bench/.cache/cargo/home and
+# build outputs go to bench/.cache/cargo/target (s3.py: indexer_env).
+[tools.rust_analyzer]
+name = "rust-analyzer"
+version = "2026-11-09"
+build = "0.3.3113-standalone (e5e7830640 2026-11-08)"
+license = "MIT OR Apache-2.0"
+release = "https://github.com/rust-lang/rust-analyzer/releases/tag/2026-11-09"
+
+[tools.rust_analyzer.binaries.darwin-arm64]
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-11-09/rust-analyzer-aarch64-apple-darwin.gz"
+archive_sha256 = "e43a65008f8f4291320f33c0545dd577ad7623a7407b584a27155833d3722dfb"
+binary_sha256 = "f21b42b915d3f0d05a8c799f74ed54dda7b74de542a48f0ae5f8c394ec7f6b9f"
+
+[tools.rust_analyzer.binaries.linux-amd64]
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-11-09/rust-analyzer-x86_64-unknown-linux-gnu.gz"
+archive_sha256 = "8c039b25cb338b3970c731646677a4c9d4e9dd7a92c9ab9ae459c71467fbf4a9"
+binary_sha256 = "dfd442f535bdd94c572637b7a875fd29b6152b4bb412d116cb8df728c33a5067"
+
 [artifacts.error_prone_annotations]
 url = "https://repo1.maven.org/maven2/com/google/errorprone/error_prone_annotations/2.50.0/error_prone_annotations-2.50.0.jar"
 sha256 = "4667724877f1d37a689202da191e23efa7657c62eef93ccdac406eccfe5cdd0a"
@@ -570,7 +629,7 @@ contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arm
 # 1ff5e82. Every other suite (carried): the RFC 0005 contract branch, main
 # 2c5a384 plus the response contract, whose quality metrics are identical
 # to main's binary on the same run (only tokens and latency differ).
-results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886)"
+results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -638,6 +697,19 @@ role = "S1 C++ issues and patches (fmt, nlohmann/json, Catch2, simdjson)"
 "cpp/nlohmann__json_dataset.jsonl" = "bdc33098e920b20fcdef5680953a723c171bd8f53608e8cecad305e96495a93c"
 "cpp/catchorg__Catch2_dataset.jsonl" = "a2fad917a116bca66692129bfa91bbf6d1e8563dd0bbd7fd82732d6a82f3048f"
 "cpp/simdjson__simdjson_dataset.jsonl" = "0a7aba551a76754fd088c5eccbab4caae025bdf6cdae2faa05a9f7b5f11994c2"
+
+# Multi-SWE-bench Rust (same dataset and revision as the C++ files): the
+# Rust calibration split (tokio-rs/bytes, every instance).
+[datasets.multi_swe_bench_rust]
+hf = "ByteDance-Seed/Multi-SWE-bench"
+revision = "56ff018c04a38e27ada1e9d0a6d5839a51f88f0d"
+format = "multi_swe_bench"
+card_license = "CC0 (dataset README; upstream repository licenses apply)"
+citation = "Zan et al., Multi-SWE-bench: A Multilingual Benchmark for Issue Resolving (2025)"
+role = "S1 Rust calibration issues and patches (tokio-rs/bytes)"
+
+[datasets.multi_swe_bench_rust.files]
+"rust/tokio-rs__bytes_dataset.jsonl" = "9516b916eb11556a27a62d79296829c821b19873fea0a9f8f02d52c043f855a0"
 
 # Assembled localization gold (RFC 0002 §8/§9). Used for gold labels only;
 # issue text / patches still come from the source dataset of each instance.
@@ -956,6 +1028,59 @@ quota = 5
 sources = ["swe_rebench_v2"]
 split = "calibration"
 
+# Rust: every SWE-bench Multilingual Rust instance. Calibration: tokio-rs/bytes
+# from Multi-SWE-bench (its five Rust instances; repository disjoint from
+# the gated S1 and S3 sets, and the Rust S3 calibration set).
+
+[[s1.repos]]
+repo = "tokio-rs/tokio"
+language = "rust"
+quota = 9
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "sharkdp/bat"
+language = "rust"
+quota = 8
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "tokio-rs/axum"
+language = "rust"
+quota = 7
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "astral-sh/ruff"
+language = "rust"
+quota = 7
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "uutils/coreutils"
+language = "rust"
+quota = 5
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "nushell/nushell"
+language = "rust"
+quota = 5
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "burntsushi/ripgrep"
+language = "rust"
+quota = 2
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "tokio-rs/bytes"
+language = "rust"
+quota = 5
+sources = ["multi_swe_bench_rust"]
+split = "calibration"
+
 # ---------------------------------------------------------------- S3 structural
 # Gold call edges from SCIP indexes (`gold = "scip"`, default) or, for PHP,
 # the bench's PHPStan collector (`gold = "phpstan"`) at pinned commits
@@ -1154,6 +1279,41 @@ indexer = "scip_clang"
 args = ["--compdb-path={compdb}", "--index-output-path={out}"]
 compdb = { std = "c99", includes = ["."], files = ["*.c"] }
 
+# Rust: rust-analyzer `scip` gold (RFC 0003 §10): a library (serde_json) and
+# an application with a Cargo workspace (ripgrep); bytes = calibration
+# (disjoint from the gated S1 / S3 repositories).
+[[s3.repos]]
+repo = "serde-rs/json"
+language = "rust"
+tag = "v1.0.154"
+commit = "20572a6d066958542d79cdd6cf1a7cd9f0c8e1f8"
+license = "MIT OR Apache-2.0"
+include = ["src/"]
+indexer = "rust_analyzer"
+args = ["scip", "{root}", "--output", "{out}"]
+
+[[s3.repos]]
+repo = "BurntSushi/ripgrep"
+language = "rust"
+tag = "15.2.0"
+commit = "e89fff89ac9af12e8d4ce9d5fd07beb408ca730f"
+license = "Unlicense OR MIT"
+include = ["crates/"]
+exclude = ["crates/grep/examples/", "crates/ignore/examples/", "crates/searcher/examples/"]
+indexer = "rust_analyzer"
+args = ["scip", "{root}", "--output", "{out}"]
+
+[[s3.repos]]
+repo = "tokio-rs/bytes"
+language = "rust"
+tag = "v1.12.1"
+commit = "76c0fbb54ed4336caf9d2311658a2f4a5627c21d"
+license = "MIT"
+include = ["src/"]
+indexer = "rust_analyzer"
+args = ["scip", "{root}", "--output", "{out}"]
+split = "calibration"
+
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
 [[s3.micro]]
 name = "pycg"
@@ -1238,6 +1398,18 @@ format = "rueca"
 local = "micro/cpp"
 license = "Apache-2.0"
 crosscheck = "scip_clang"
+
+# Rust micro-benchmark: Rueca's own hand-labelled snippets (Apache-2.0); each
+# case is a crate of its own (`Cargo.toml` with an empty `[workspace]`,
+# `src/main.rs`, other modules), cross-checked against rust-analyzer.
+[[s3.micro]]
+name = "rust-micro"
+title = "Rust micro-benchmark (rueca-bench)"
+language = "rust"
+format = "rueca"
+local = "micro/rust"
+license = "Apache-2.0"
+crosscheck = "rust_analyzer"
 
 # ---------------------------------------------------------------- data formats
 # RFC 0003 §3.3 (bench/README.md, "Data formats"): key recall and span line
@@ -3715,4 +3887,388 @@ repo = "randombit/botan"
 language = "cpp"
 base_commit = "865184972cbda7a3b6bd46c2ec0b399cbdde7b6e"
 dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tokio-6724"
+repo = "tokio-rs/tokio"
+language = "rust"
+base_commit = "0cbf1a5adae81e8ff86ca6d040aeee67cf888262"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tokio-4867"
+repo = "tokio-rs/tokio"
+language = "rust"
+base_commit = "53cf021b813c61cdeace26e863c89f65f6e92abd"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tokio-6551"
+repo = "tokio-rs/tokio"
+language = "rust"
+base_commit = "0a85a9662d30139c779ea49a59be30db0f292b5d"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tokio-4898"
+repo = "tokio-rs/tokio"
+language = "rust"
+base_commit = "9d9488db67136651f85d839efcb5f61aba8531c9"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tokio-6838"
+repo = "tokio-rs/tokio"
+language = "rust"
+base_commit = "d6213594ca3767f182e8981fde7a119575e94c65"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tokio-7139"
+repo = "tokio-rs/tokio"
+language = "rust"
+base_commit = "b8ac94ed70df22f885bad7ea3c0ff51c536bad4a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tokio-6603"
+repo = "tokio-rs/tokio"
+language = "rust"
+base_commit = "873cb8ae2fc291eaffbd71e3c83d17b2f0ed7abf"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tokio-6752"
+repo = "tokio-rs/tokio"
+language = "rust"
+base_commit = "ab53bf0c4727ae63c6a3a3d772b7bd837d2f49c3"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__tokio-4384"
+repo = "tokio-rs/tokio"
+language = "rust"
+base_commit = "553cc3b194df875cac8736473e1f01cf3e40a660"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "sharkdp__bat-2835"
+repo = "sharkdp/bat"
+language = "rust"
+base_commit = "db66e4459bc4e66c03629d7cbc235f59245280c0"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "sharkdp__bat-3108"
+repo = "sharkdp/bat"
+language = "rust"
+base_commit = "2be3a14a7e2c74360765a5fa213750f727f2c5bb"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "sharkdp__bat-2650"
+repo = "sharkdp/bat"
+language = "rust"
+base_commit = "e2bf85e749d87459e3fced697af5cd9cc96eeb8c"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "sharkdp__bat-2201"
+repo = "sharkdp/bat"
+language = "rust"
+base_commit = "02a9d191ed06e6e37d4e352f12e25e65e8037dd0"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "sharkdp__bat-1892"
+repo = "sharkdp/bat"
+language = "rust"
+base_commit = "59d4cfb75c1a17a26b2b38956ee08d8c53f04e04"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "sharkdp__bat-2393"
+repo = "sharkdp/bat"
+language = "rust"
+base_commit = "7c847d84b0c3c97df6badfbb39d153ad93aec74e"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "sharkdp__bat-562"
+repo = "sharkdp/bat"
+language = "rust"
+base_commit = "2b9d25df052e50c60531b1000703b79bf9b6065a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "sharkdp__bat-2260"
+repo = "sharkdp/bat"
+language = "rust"
+base_commit = "c14ce4f7caa36fe524975c51f7aae3d5a852d1f9"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__axum-2096"
+repo = "tokio-rs/axum"
+language = "rust"
+base_commit = "6f7ff8556587d51c6919a864926e4b8090f92c3f"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__axum-1934"
+repo = "tokio-rs/axum"
+language = "rust"
+base_commit = "e97462d45251c21ffd1ba4fb5db30f3cf6f6cb6c"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__axum-691"
+repo = "tokio-rs/axum"
+language = "rust"
+base_commit = "d6ce99190b2d53e5858678264027e656197f0efa"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__axum-1119"
+repo = "tokio-rs/axum"
+language = "rust"
+base_commit = "23808f72a2c00c314cedea40a75b73954402a148"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__axum-682"
+repo = "tokio-rs/axum"
+language = "rust"
+base_commit = "5512ebcd23d261a2be5ee07676721b7637ffc054"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__axum-1730"
+repo = "tokio-rs/axum"
+language = "rust"
+base_commit = "b4204e223dc96df3d51fc8893f32d37b66be7005"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__axum-734"
+repo = "tokio-rs/axum"
+language = "rust"
+base_commit = "84df7eaa38aa38b3a4b4153678316c0700fc4fa8"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "astral-sh__ruff-15626"
+repo = "astral-sh/ruff"
+language = "rust"
+base_commit = "13a6b5600b47489ca6af0b5a13d916bda8e50662"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "astral-sh__ruff-15356"
+repo = "astral-sh/ruff"
+language = "rust"
+base_commit = "ee9a912f47e64de13cad0b525a714b46c5e29293"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "astral-sh__ruff-15543"
+repo = "astral-sh/ruff"
+language = "rust"
+base_commit = "3950b00ee410754913122e8104cbc39353b62c0b"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "astral-sh__ruff-15443"
+repo = "astral-sh/ruff"
+language = "rust"
+base_commit = "d1666fbbeec27fe534f261f388fbd5891546ffcf"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "astral-sh__ruff-15330"
+repo = "astral-sh/ruff"
+language = "rust"
+base_commit = "b2a0d68d70ee690ea871fe9b3317be43075ddb33"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "astral-sh__ruff-15309"
+repo = "astral-sh/ruff"
+language = "rust"
+base_commit = "75a24bbc67aa31b825b6326cfb6e6afdf3ca90d5"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "astral-sh__ruff-15394"
+repo = "astral-sh/ruff"
+language = "rust"
+base_commit = "73d424ee5e6963d577e196d71c3b19c82e84e612"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "uutils__coreutils-6682"
+repo = "uutils/coreutils"
+language = "rust"
+base_commit = "b89a6255a9cb5ee09867707f395d02929273dc45"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "uutils__coreutils-6575"
+repo = "uutils/coreutils"
+language = "rust"
+base_commit = "bc0b4880e000b881a1cabc733b2d261f3526d15e"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "uutils__coreutils-6377"
+repo = "uutils/coreutils"
+language = "rust"
+base_commit = "e2aa2c74408d46da900cad4a0b764c8760a300ff"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "uutils__coreutils-6690"
+repo = "uutils/coreutils"
+language = "rust"
+base_commit = "af86aee6b86a99736ca304ff656d0e4c6d547333"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "uutils__coreutils-6731"
+repo = "uutils/coreutils"
+language = "rust"
+base_commit = "a4088475832957e070b8f904cd3a33a818d07d72"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "nushell__nushell-12901"
+repo = "nushell/nushell"
+language = "rust"
+base_commit = "cc9f41e553333b1ad0aa4185a912f7a52355a238"
+dataset = "swe_bench_multilingual"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "nushell__nushell-12950"
+repo = "nushell/nushell"
+language = "rust"
+base_commit = "0c5a67f4e5bf17a2fffbe3cbb54792a6464b3237"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "nushell__nushell-13831"
+repo = "nushell/nushell"
+language = "rust"
+base_commit = "fb34a4fc6c9ca882cc6dc95d437902a45c402e9a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "nushell__nushell-13246"
+repo = "nushell/nushell"
+language = "rust"
+base_commit = "46ed69ab126015375d5163972ae321715f34874b"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "nushell__nushell-13605"
+repo = "nushell/nushell"
+language = "rust"
+base_commit = "48e401834d604563106a6ef3738a996d38c790ca"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "burntsushi__ripgrep-2576"
+repo = "burntsushi/ripgrep"
+language = "rust"
+base_commit = "fed4fea217abbc502f2e823465de903c8f2b623d"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "burntsushi__ripgrep-2209"
+repo = "burntsushi/ripgrep"
+language = "rust"
+base_commit = "4dc6c73c5a9203c5a8a89ce2161feca542329812"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__bytes-543"
+repo = "tokio-rs/bytes"
+language = "rust"
+base_commit = "f514bd38dac85695e9053d990b251643e9e4ef92"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "tokio-rs__bytes-721"
+repo = "tokio-rs/bytes"
+language = "rust"
+base_commit = "9965a04b5684079bb614addd750340ffc165a9f5"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "tokio-rs__bytes-732"
+repo = "tokio-rs/bytes"
+language = "rust"
+base_commit = "291df5acc94b82a48765e67eeb1c1a2074539e68"
+dataset = "multi_swe_bench_rust"
+assets = ["contextbench"]
+
+[[s1.instances]]
+id = "tokio-rs__bytes-643"
+repo = "tokio-rs/bytes"
+language = "rust"
+base_commit = "09214ba51bdace6f6cb91740cee9514fc08d55ce"
+dataset = "multi_swe_bench_rust"
+assets = []
+
+[[s1.instances]]
+id = "tokio-rs__bytes-547"
+repo = "tokio-rs/bytes"
+language = "rust"
+base_commit = "068ed41bc02c21fe0a0a4d8e95af8a4668276f5d"
+dataset = "multi_swe_bench_rust"
 assets = []

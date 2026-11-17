@@ -1,0 +1,8 @@
+{
+  "src/main.rs:largest": [],
+  "src/main.rs:main": [
+    "src/main.rs:largest",
+    "src/main.rs:pair"
+  ],
+  "src/main.rs:pair": []
+}

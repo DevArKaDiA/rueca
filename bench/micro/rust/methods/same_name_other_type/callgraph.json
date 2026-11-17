@@ -1,0 +1,8 @@
+{
+  "src/main.rs:Cat.speak": [],
+  "src/main.rs:Dog.speak": [],
+  "src/main.rs:main": [
+    "src/main.rs:Cat.speak",
+    "src/main.rs:Dog.speak"
+  ]
+}

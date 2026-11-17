@@ -21,15 +21,17 @@
 //!   (`settings.gradle` root project, `build.gradle` `group`) with the Java
 //!   packages under the build file's directory (`java:<package>`); C / C++
 //!   repositories publish the directories and headers directly under their
-//!   `include/` (or `single_include/`) directories (`c:<dir>`).
+//!   `include/` (or `single_include/`) directories (`c:<dir>`); every Cargo
+//!   package with a library publishes its crate (`rust:<crate name>`).
 //! - **Imports** the repository's own pack cannot resolve inside it (the
 //!   ones a single-repository index reports as external), as keys:
 //!   `npm:<package name>`, `py:<module>`, `go:<import path>`,
-//!   `java:<package>`, `php:<name>`, `c:<include path>`.
+//!   `java:<package>`, `php:<name>`, `c:<include path>`, `rust:<crate>`.
 //! - **Requires**: dependencies declared by manifests (`package.json`
 //!   dependencies, `composer.json` require, `go.mod` require, PEP 621
-//!   dependencies, Maven dependencies), for languages whose code can use a
-//!   package without an import statement (PHP fully qualified names).
+//!   dependencies, Maven dependencies, Cargo dependency tables), for
+//!   languages whose code can use a package without an import statement
+//!   (PHP fully qualified names, Rust paths through the extern prelude).
 //!
 //! # Links ([`PackageLinker::link`])
 //!
@@ -386,6 +388,7 @@ impl Manifests {
             "pyproject.toml" | "setup.cfg" | "setup.py" if !dir.contains('/') => self.python_manifest(path, text, dir),
             "pom.xml" => self.pom(text, &dir, files),
             "settings.gradle" | "settings.gradle.kts" => self.gradle_settings(text, &dir, files),
+            "Cargo.toml" => self.cargo_toml(text, dir),
             _ => {}
         }
     }
@@ -460,6 +463,17 @@ impl Manifests {
         let group = xml_tag(&own, "groupId").map(str::to_string).or(parent_group);
         if let (Some(g), Some(a)) = (group, xml_tag(&own, "artifactId")) {
             self.packages.push(java_package(format!("{g}:{a}"), dir, files));
+        }
+    }
+
+    /// A Cargo package publishes its library crate (`rust:<crate name>`);
+    /// its dependency tables (and a workspace's) are requirements.
+    fn cargo_toml(&mut self, text: &str, dir: String) {
+        let Some(m) = rueca_lang_rust::modules::parse_manifest(text) else { return };
+        let deps = m.dependencies.iter().chain(&m.workspace_dependencies);
+        self.requires.extend(deps.map(|d| format!("cargo:{}", d.package_name().to_lowercase())));
+        if let (Some(name), Some(lib)) = (m.package.clone(), m.lib_crate_name()) {
+            self.packages.push(Package { eco: "cargo".into(), name, dir, keys: vec![format!("rust:{lib}")] });
         }
     }
 
@@ -608,6 +622,9 @@ fn java_package(name: String, dir: &str, files: &[FileModule]) -> Package {
 /// repository, or `None` for relative imports and languages without
 /// cross-repository packages.
 pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String> {
+    if family == LanguageFamily::Rust {
+        return rust_import_key(imp);
+    }
     let m = imp.module.trim();
     if m.is_empty() {
         return None;
@@ -627,8 +644,24 @@ pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String>
         LanguageFamily::Java => Some(format!("java:{m}")),
         LanguageFamily::Php => Some(format!("php:{}", m.trim_start_matches('\\'))),
         LanguageFamily::C => Some(format!("c:{}", m.trim_start_matches("./"))),
-        LanguageFamily::Markdown | LanguageFamily::Data => None,
+        LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Rust => None,
     }
+}
+
+/// A Rust import's crate (`rust:serde` for `serde::de`, `::serde` or
+/// `use serde;`): `None` for `crate`, `self` / `super` paths, `#[path]`
+/// modules and the standard library.
+fn rust_import_key(imp: &Import) -> Option<String> {
+    if imp.relative_level > 0 || imp.module.starts_with('"') {
+        return None;
+    }
+    let m = imp.module.trim().trim_start_matches("::");
+    let first = match m.split("::").next().filter(|s| !s.is_empty()) {
+        Some(f) => f,
+        None => imp.names.first().map(|n| n.name.as_str()).filter(|n| *n != "*")?,
+    };
+    (!matches!(first, "crate" | "self" | "super" | "std" | "core" | "alloc" | "proc_macro" | "test"))
+        .then(|| format!("rust:{first}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1005,6 +1038,11 @@ mod tests {
         assert_eq!(import_key(LanguageFamily::Python, &imp("core", 1)), None);
         assert_eq!(import_key(LanguageFamily::Php, &imp("\\Carbon\\Carbon", 0)).as_deref(), Some("php:Carbon\\Carbon"));
         assert_eq!(import_key(LanguageFamily::Data, &imp("x", 0)), None);
+        assert_eq!(import_key(LanguageFamily::Rust, &imp("serde::de", 0)).as_deref(), Some("rust:serde"));
+        assert_eq!(import_key(LanguageFamily::Rust, &imp("::anyhow", 0)).as_deref(), Some("rust:anyhow"));
+        assert_eq!(import_key(LanguageFamily::Rust, &imp("crate::a", 0)), None);
+        assert_eq!(import_key(LanguageFamily::Rust, &imp("std::fmt", 0)), None);
+        assert_eq!(import_key(LanguageFamily::Rust, &imp("a", 2)), None);
     }
 
     #[test]
@@ -1030,6 +1068,10 @@ mod tests {
         );
         configs.insert("node_modules/x/package.json".to_string(), r#"{"name": "x"}"#.to_string());
         configs.insert(
+            "crates/kit/Cargo.toml".to_string(),
+            "[package]\nname = \"acme-kit\"\n\n[dependencies]\nSerde = \"1\"\nlog2 = { package = \"log\", version = \"0.4\" }\n".to_string(),
+        );
+        configs.insert(
             "packages/ui/package.json".to_string(),
             r#"{"name": "@acme/ui", "dependencies": {"React": "1"}}"#.to_string(),
         );
@@ -1053,6 +1095,10 @@ mod tests {
         );
         assert_eq!(find("c").keys, ["c:fmt"]);
         assert_eq!(
+            (find("cargo").name.as_str(), find("cargo").keys.clone()),
+            ("acme-kit", vec!["rust:acme_kit".to_string()])
+        );
+        assert_eq!(
             packages.iter().filter(|p| p.eco == "npm").map(|p| p.name.as_str()).collect::<Vec<_>>(),
             ["@acme/ui"]
         );
@@ -1064,6 +1110,8 @@ mod tests {
             "go:github.com/d/e",
             "maven:junit:junit",
             "npm:react",
+            "cargo:serde",
+            "cargo:log",
         ] {
             assert!(requires.contains(&r.to_string()), "{r}: {requires:?}");
         }

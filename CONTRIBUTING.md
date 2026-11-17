@@ -42,6 +42,62 @@ cargo run -p rueca -- index path/to/repo
 cargo run -p rueca -- query search_symbols '{"query":"parse"}' --root path/to/repo --pretty
 ```
 
+## Navigating Rueca with Rueca
+
+Rueca indexes itself; agents and contributors are encouraged to explore the
+code through it. From the repository root, with a built binary
+(`cargo build --release -p rueca`, then `target/release/rueca`, or an
+installed `rueca`):
+
+```sh
+rueca index .        # first run extracts every file; re-run after edits
+rueca status         # indexed roots: repo, commit, nodes, edges, files, age
+```
+
+The index lives in `$RUECA_HOME` (default `~/.cache/rueca`). After editing,
+re-run `rueca index .`: unchanged files come from the facts cache, only
+changed files are re-extracted.
+
+From an agent: `claude mcp add rueca -- rueca mcp --root "$PWD"`, or for
+other clients `{"mcpServers": {"rueca": {"command": "rueca", "args": ["mcp",
+"--root", "/absolute/path/to/rueca"]}}}`. The flow is `search_symbols` →
+`get_symbol` / `get_snippet` → `trace` (`search_code` for literals).
+
+```sh
+rueca query search_symbols '{"query":"register language pack","language":"rust","limit":5}' --root . --text
+rueca query get_symbol '{"qualified_name":"rueca_lang_rust::RustPack.extract"}' --root . --text
+rueca query trace '{"qualified_name":"rueca_extract::Registry.register","direction":"callers"}' --root . --text
+rueca query get_file_outline '{"path":"crates/rueca-index/src/lib.rs"}' --root . --text
+```
+
+Rust qualified names are the module path, crate name first, then the local
+name joined with `.`: `impl` items are `Type.method`, trait items
+`Trait.method`, items of an inline module `m.f`. The bare local name
+(`Registry.register`) also works but may pick a same-named symbol in a test
+fixture under `crates/*/tests/fixtures` or `bench/`; use the full name, or
+`name` + `path` with `get_symbol`. The `trace` above prints:
+
+```
+github.com/DevArKaDiA/rueca@117083093bf2 (feat/lang-rust)
+0 Method Registry.register  crates/rueca-extract/src/lib.rs L397-399
+1 in d1 Function default_registry  crates/rueca-index/src/lib.rs L125-137  →0 CALLS 0.85 type_resolved @127
+2 in d1 Function index_worktree  crates/rueca-index/src/lib.rs L207-331  →0 CALLS 0.4 heuristic @294
+3 in d1 Method PackageLinker.link  crates/rueca-index/src/link.rs L708-737  →0 CALLS 0.85 type_resolved @730
+…
+(16 tests excluded; `include_tests: true` lists them)
+```
+
+Each edge carries its strategy and confidence; drop the `heuristic` ones
+when you need certainty. `get_symbol` gives the signature and neighbourhood:
+
+```
+Method RustPack.extract  crates/rueca-lang-rust/src/lib.rs L219-230  rust exported
+  qn: rueca_lang_rust::RustPack.extract
+  fn extract( &self, path: &str, language: Language, source: &[u8], budget: &Budget, ) -> Result<FileFacts, ExtractError>
+  parent: File crates/rueca-lang-rust/src/lib.rs L1-252
+  callers 4, callees 1
+```
+
 ## Branching
 
 Trunk-based development:

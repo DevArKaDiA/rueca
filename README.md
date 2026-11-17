@@ -22,7 +22,7 @@ agent can follow.
 
 > **Status: alpha (`0.1.0-alpha.2`).** Local mode (one repository, or an
 > organization of local repositories with `--org`); Python,
-> TypeScript/JavaScript, PHP, Go, Java, C and C++, plus Markdown and
+> TypeScript/JavaScript, PHP, Go, Java, C, C++ and Rust, plus Markdown and
 > structured configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
@@ -52,14 +52,22 @@ agent can follow.
 
 Languages: Python, TypeScript, TSX, JavaScript (incl. JSX, CommonJS, ESM),
 PHP (incl. HTML templates, Composer PSR-4 / PSR-0 autoload, PHPUnit and Pest
-tests), Go (preview: `go.mod` / `go.work` import paths, packages across
-files, methods with typed receivers, embedding, implicit interfaces as
-heuristic `IMPLEMENTS`, generics, `go test` functions), Java (preview: packages, Maven / Gradle multi-module
-source roots, overloads, `OVERRIDES`, JUnit and TestNG tests, Spring
-`@Value` and `System.getenv` reads), C and C++ (preview: namespaces,
+tests), Go (`go.mod` / `go.work` import paths, packages across files,
+methods with typed receivers, embedding, implicit interfaces as heuristic
+`IMPLEMENTS`, generics, `go test` functions), Java (packages, Maven /
+Gradle multi-module source roots, overloads, `OVERRIDES`, JUnit and TestNG
+tests, Spring `@Value` and `System.getenv` reads), C and C++ (namespaces,
 classes, out-of-line bodies linked to their declarations, overloads,
 templates, macros, `#include` through `compile_commands.json` include
-directories, GoogleTest and Catch2 tests).
+directories, GoogleTest and Catch2 tests), Rust (Cargo workspaces and crate
+roots, `mod` files / `mod.rs` / inline modules, `use` with `crate::` /
+`super::` / `self::`, globs and `pub use` re-export chains, `impl` and
+trait items named `Type.method` / `Trait.method`, receivers from `self` /
+`Self`, annotations, constructors, fields and return types, calls through
+`dyn Trait` / `impl Trait` / generic bounds bound to the trait item,
+`macro_rules!` as callables and calls recovered inside macro arguments,
+`#[test]` / `#[cfg(test)]` / `tests/` tests, `env!` / `option_env!` /
+`env::var` reads, Cargo dependencies for cross-repository package edges).
 Documents: Markdown headings become `Section` symbols and file links become
 `IMPORTS` edges, in the same graph as the code.
 Configuration: JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
@@ -161,7 +169,7 @@ narrows the same ranking; the query also ranks the repositories (names,
 packages, README, central symbols, where its words occur) and weighs each
 repository's results by that relevance. Repositories that import a package
 another one publishes (npm, PyPI, Go modules, Composer, Maven / Gradle,
-C / C++ headers) are linked: imports, calls, inheritance and references
+C / C++ headers, Cargo) are linked: imports, calls, inheritance and references
 across repositories, resolved with the publishing repository's own module
 model, which `trace` follows ([RFC 0006](docs/rfcs/0006-org-graph.md),
 [how it works](docs/how-it-works.md#46-the-organization-layer-rueca-segment-org)).
@@ -218,7 +226,8 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    including `tsconfig` paths and workspace packages; PHP names through
    `namespace` / `use` and Composer autoload; Go import paths through
    `go.mod`; Java packages and imports through Maven / Gradle source roots; C/C++
-   `#include` through `compile_commands.json` include directories),
+   `#include` through `compile_commands.json` include directories; Rust
+   `mod` / `use` through the Cargo workspace model),
    re-export chains, `self`/`this` with base classes and traits,
    receiver types the file declares or constructs (every code language:
    `c: Context`, `const app = new Hono()`, `x = Session()`), declarations to
@@ -265,6 +274,7 @@ scorecard (`stable` = every floor met; full tables in
 - **Java** `stable`
 - **C** `stable` (1.1% of files with parse errors, vendored code excluded)
 - **C++** `stable` (callees precision 92.5 with SCIP-ambiguous definitions scored as one class; 0.5% of files with parse errors, vendored code excluded)
+- **Rust** `stable` (localization meets the floor but trails BM25 on the point estimate: File Acc@5 62.8 vs 67.4, Function Acc@10 39.0 vs 46.3 over 43 issues, paired intervals cross zero; callers / callees precision 98.5 / 98.0, recall 87.8 / 87.1 against rust-analyzer on serde_json and ripgrep; 0.1% of files with parse errors)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 **Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),
@@ -296,19 +306,18 @@ absolute floors and aspirational targets).
 | Stage | What it delivers | Status |
 |---|---|---|
 | **Local mode** | One binary, MCP over stdio, the tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
-| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)) | ✅ landed, most languages `preview` |
-| **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | 🚧 in progress |
-| **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | 🚧 design |
-| **First public release** | `0.1.0` on crates.io and GitHub Releases once every language is `stable` | ⏳ next |
-| **Retrieval** | Vector baseline in the bench; hybrid retrieval in Rueca (BM25 over code + static embeddings + graph signals) aimed at the localization targets | 🗺️ planned |
+| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)) | ✅ done, every language `stable` |
+| **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
+| **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed in local mode (pinned ids, envelope, multi-repo, compact output, token metric); other refs and collapse across refs wait for multi-ref indexing |
+| **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
+| **Retrieval** | Semantic search (RFC 0007, design next): default embeddings Qwen3-Embedding-0.6B int4 among presets (0.6B q8 / f16, 4B, 8B, other local models, a remote API); vectors keyed by content hash, reused across branches and repositories; two stages — BM25 + vectors + graph signals, then Qwen3-Reranker-0.6B — measured on CoIR, the S1 localization suite and the organization scenario | 🗺️ next (design) |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
-| **Service mode** | One container, segments in object storage, MCP over HTTP | 🗺️ planned |
-| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 phases 1–2 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges); refs over the organization and contracts next |
+| **Service mode** | One container, segments in object storage, MCP over HTTP, organization-wide indexing with GPU for embeddings | 🗺️ planned |
+| **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | 🚧 phases 1–2 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges, Cargo included); next: phase 3 refs / branches / PRs over the organization, phase 4 contracts (HTTP / OpenAPI / protobuf) |
 | **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
 | **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |
 
-More languages (Kotlin, Swift, Rust, Ruby, C#, …) follow the same gate once
-the first release is out.
+More languages (Kotlin, Swift, Ruby, C#, …) follow the same gate.
 
 ## Workspace
 
@@ -325,6 +334,7 @@ the first release is out.
 | [`rueca-lang-go`](crates/rueca-lang-go) | Go extraction, receivers and the `go.mod` module model |
 | [`rueca-lang-java`](crates/rueca-lang-java) | Java extraction, packages and Maven / Gradle source roots |
 | [`rueca-lang-cpp`](crates/rueca-lang-cpp) | C and C++ extraction, macro masking and include resolution |
+| [`rueca-lang-rust`](crates/rueca-lang-rust) | Rust extraction, receivers, macro arguments and the Cargo module model |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |
 | [`rueca-segment`](crates/rueca-segment) | segment format, search, content packs, catalog |
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |

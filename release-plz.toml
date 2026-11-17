@@ -55,6 +55,10 @@ name = "rueca-lang-cpp"
 version_group = "rueca"
 
 [[package]]
+name = "rueca-lang-rust"
+version_group = "rueca"
+
+[[package]]
 name = "rueca-lang-markdown"
 version_group = "rueca"
 

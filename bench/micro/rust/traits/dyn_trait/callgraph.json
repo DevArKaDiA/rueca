@@ -1,0 +1,14 @@
+{
+  "src/main.rs:Shape.area": [],
+  "src/main.rs:Square.area": [],
+  "src/main.rs:area_of": [
+    "src/main.rs:Shape.area"
+  ],
+  "src/main.rs:main": [
+    "src/main.rs:area_of",
+    "src/main.rs:sum"
+  ],
+  "src/main.rs:sum": [
+    "src/main.rs:Shape.area"
+  ]
+}

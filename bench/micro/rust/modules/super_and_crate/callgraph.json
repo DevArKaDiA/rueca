@@ -1,0 +1,13 @@
+{
+  "src/main.rs:main": [
+    "src/main.rs:outer.inner.via_crate"
+  ],
+  "src/main.rs:outer.inner.via_crate": [
+    "src/main.rs:outer.via_super",
+    "src/main.rs:top"
+  ],
+  "src/main.rs:outer.via_super": [
+    "src/main.rs:top"
+  ],
+  "src/main.rs:top": []
+}

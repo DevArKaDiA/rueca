@@ -5,7 +5,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
@@ -24,3 +23,5 @@ rueca-lang-typescript = { path = "../rueca-lang-typescript" }
 rueca-lang-php = { path = "../rueca-lang-php" }
 # Path-only so `cargo publish` drops it (it would form a publish cycle).
 rueca-lang-go = { path = "../rueca-lang-go" }
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-lang-rust = { path = "../rueca-lang-rust" }

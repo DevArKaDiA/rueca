@@ -862,6 +862,28 @@ def score_efficiency(s1: dict, s3: dict) -> dict:
     return out
 
 
+def carried_rueca_groups(s1: dict, s3: dict) -> set[str]:
+    """Language groups whose Rueca rows (S1 instances or any S3 set) were
+    carried from the published results rather than scored from this run."""
+    groups = {k.split(":", 1)[1] for k in s1.get("carried", {}) if k.startswith("rueca:")}
+    by_set = {name: lang_group(spec["language"]) for name, spec, _ in suites()}
+    for k in s3.get("carried", []):
+        arm, name = k.split(":", 1)
+        if arm == "rueca" and name in by_set:
+            groups.add(by_set[name])
+    return groups
+
+
+def carry_efficiency(eff: dict, published_eff: dict, groups: set[str]) -> None:
+    """A language whose Rueca rows were carried keeps its published
+    tokens-per-correct-answer entry: the compact carried rows cannot
+    reproduce it, and a partial local recomputation would misreport it."""
+    published = published_eff.get("tokens_per_correct_answer") or {}
+    for grp in groups:
+        if published.get(grp):
+            eff[grp] = dict(published[grp], carried=True)
+
+
 def _judge(spec: dict, value, ci, n, min_n: int | None, paired: dict | None = None) -> str:
     floor = spec.get("floor")
     if floor is None:
@@ -1888,8 +1910,9 @@ def report() -> None:
     data = data_mod.score(published["data"])
     health = health_mod.score(published["health"])
     eff = score_efficiency(s1, s3)
-    orgs = {"multirepo": org_mod.score_multirepo(s1), "multiref": org_mod.score_multiref(), "crossrepo": crossrepo_mod.score_crossrepo()}
     published_eff = published.get("efficiency") or {}
+    carry_efficiency(eff, published_eff, carried_rueca_groups(s1, s3))
+    orgs = {"multirepo": org_mod.score_multirepo(s1), "multiref": org_mod.score_multiref(), "crossrepo": crossrepo_mod.score_crossrepo()}
     for k in ("multirepo", "multiref", "crossrepo"):
         if not orgs[k] or not orgs[k].get("arms", orgs[k].get("status")):
             if published_eff.get("org", {}).get(k):

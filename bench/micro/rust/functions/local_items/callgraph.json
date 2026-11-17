@@ -1,0 +1,9 @@
+{
+  "src/main.rs:main": [
+    "src/main.rs:outer"
+  ],
+  "src/main.rs:outer": [
+    "src/main.rs:outer.Local.value"
+  ],
+  "src/main.rs:outer.Local.value": []
+}

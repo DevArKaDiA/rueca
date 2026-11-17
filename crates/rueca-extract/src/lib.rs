@@ -217,8 +217,8 @@ pub struct ProjectFiles {
     /// keyed by repository-relative path: `tsconfig*.json`, `jsconfig.json`,
     /// `package.json`, `pyproject.toml`, `setup.cfg`, `setup.py`,
     /// `composer.json`, `go.mod`, `go.work`, `pom.xml`, `build.gradle(.kts)`,
-    /// `settings.gradle(.kts)`, `compile_commands.json`, `compile_flags.txt`
-    /// (see [`ProjectFiles::is_config_file`], size limits in
+    /// `settings.gradle(.kts)`, `compile_commands.json`, `compile_flags.txt`,
+    /// `Cargo.toml` (see [`ProjectFiles::is_config_file`], size limits in
     /// [`ProjectFiles::max_config_bytes`]).
     pub configs: BTreeMap<String, String>,
 }
@@ -251,6 +251,8 @@ impl ProjectFiles {
                 // C / C++ (§10.3)
                 | "compile_commands.json"
                 | "compile_flags.txt"
+                // Rust: Cargo packages and workspaces
+                | "Cargo.toml"
         ) || (name.starts_with("tsconfig") && name.ends_with(".json"))
     }
 
@@ -569,6 +571,7 @@ mod tests {
             "settings.gradle.kts",
             "build/compile_commands.json",
             "compile_flags.txt",
+            "crates/core/Cargo.toml",
         ] {
             assert!(ProjectFiles::is_config_file(p), "{p}");
         }
