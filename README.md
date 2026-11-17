@@ -141,6 +141,14 @@ and every tool takes `repo` (a list, or `"*"` for every indexed repository),
 Indexes live in `$RUECA_HOME` (default `~/.cache/rueca`). Re-run
 `rueca index` after changes; only changed files are re-extracted.
 
+Semantic search is opt-in: `rueca models pull` downloads the default
+embedding model (Qwen3-Embedding-0.6B, 639 MB) and `rueca index
+path/to/repo --embed` adds a vector per function, class and doc section
+(cached in the store, so a re-index embeds only new text). `search_symbols`
+then fuses BM25 with embedding similarity by default (`mode`: `hybrid`,
+`semantic` or `lexical`), so a question such as `where is the configuration
+file parsed` finds code that does not use those words.
+
 Other refs are snapshots of their own, next to the working tree: `rueca
 index . --ref pr/123` (also a branch, a tag or a commit; `--remove` drops
 it) exports that commit's tree under the store and indexes it, reusing the

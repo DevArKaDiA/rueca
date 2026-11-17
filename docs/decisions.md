@@ -1,5 +1,74 @@
 # Decisions log
 
+## 2026-11-17 — Hybrid search lands as a mode of search_symbols
+
+RFC 0007 phase 1 (Rust side). `rueca index --embed[=PRESET]` embeds every
+callable, type and Markdown section (canonical text version 1, the bench
+vector arm's format) into a store vector cache and the segment;
+`search_symbols` gains `mode` (`lexical` | `hybrid` | `semantic`, default
+hybrid when the snapshot has vectors and the model loads) and the envelope
+`retrieval`. α stays 0.5 until the phase 1 tuning on the calibration split;
+the acceptance rows of RFC 0007 §11.2 are the bench's to measure.
+
+Choices and deviations from the RFC:
+
+- **Normalization: min-max over each list's top N by default**, not RFC
+  §7.2's division by the theoretical minimum, which stays as
+  `RUECA_FUSION_NORM=theoretical`. Cosines of unrelated code sit far above
+  −1, so `(cos + 1) / (max + 1)` puts every candidate in a narrow band near
+  1 and the dense signal barely moves the fused order: in the test fixture
+  a function that only the embedding finds stayed below three BM25 decoys
+  even at α = 0.2; with min-max it ranks first at α = 0.5. The phase 1 sweep
+  (RFC §7.6) compares both.
+- **Publication**: lexical first, then a copy of the bundle under a new id
+  with the `vectors.*` components, swapped in the catalog (RFC §5.6); one
+  publication when every vector is cached. Appending to the published file
+  was rejected: segments are immutable and mapped by readers.
+- **Cache layout**: `<store>/vectors/<embed key>/` (the embed key, not the
+  model key: entries are full-width f16, shared by every width and
+  encoding), 256 shards of append-only `.keys` / `.f16` pairs with a
+  per-shard `flock`, rows written before keys, lock-free readers, repair by
+  truncation — instead of RFC §5.5's pack files plus index with one writer
+  per store, so indexers of different repositories can share a store. No
+  collection of unreferenced entries yet.
+- **Lazy checksums**: `vectors.meta` and `vectors.nodes` at open, `keys`,
+  `scale`, `data` on the first dense use (RFC §6.5). On this repository
+  (9,868 vectors × 1,024) the open time is unchanged (≈ 21 ms) and the first
+  dense use adds ≈ 7 ms.
+- **Scan**: f32 query against int8 rows with 16 accumulators, ≈ 92 ns per
+  1,024-wide row (≈ 9 ms per 100k vectors); quantizing the query for an
+  integer dot product measured slower (264 ns) and was dropped.
+- **Snapshots without vectors** in a hybrid answer are scored `b̂ · prior ·
+  route` (RFC §10) and named in `retrieval.lexical` by repository id, not by
+  the snapshot index `s` of RFC §8.2 (an untouched snapshot has none);
+  `semantic` leaves them out with a warning. `retrieval` also carries
+  `alpha` and `warnings`; `rerank` waits for phase 2.
+- **Degradation** (RFC §7.7, §4.4): `--embed` with missing weights is an
+  error before anything is published, a preset from configuration warns and
+  indexes lexically; a query without `mode` falls back to lexical (with a
+  warning when a model failed), an explicit `hybrid` / `semantic` errors
+  naming `rueca index --embed` or `rueca models pull`. A failed model load
+  is remembered for the process (the MCP server needs a restart after
+  `rueca models pull`).
+- **Configuration**: `<store>/rueca.toml` `[retrieval]` with `preset`,
+  `dims`, `alpha`, `fusion_n`, `normalization`; knobs as
+  `RUECA_FUSION_ALPHA` / `_N` / `_NORM` rather than one `RUECA_SEARCH`
+  string. `rerank`, `query_instruction` and `rueca-org.toml [retrieval]`
+  come with phases 2 and 3; `rueca index --org`, `--ref` and the MCP
+  server's auto-index stay lexical (an organization member embedded with
+  `rueca index <member> --embed` is picked up by the organization update).
+- **Text builder**: the qualified name is Rueca's global one (the bench uses
+  the local one), the doc is the extracted docstring when there is one, and
+  the cut is `max_tokens × 4` characters before the model's token cut.
+- **Not in phase 1**: graph expansion and the centrality prior (phase 2).
+  The f16 rescoring covers the best 200 candidates (at least every BM25
+  one) when the store cache is reachable; a segment alone serves int8
+  scores.
+
+Also: `rueca embed --info` no longer loads the model (`load_ms: null`), and
+the default batch is 512 tokens (memory 2.2 → 1.0 GB for about 4% less
+throughput, phase 0).
+
 ## 2026-11-17 — Own MCP layer instead of rmcp
 
 The required `cargo deny` check failed on main with RUSTSEC-2026-0543:

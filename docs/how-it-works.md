@@ -880,9 +880,26 @@ component exists because a tool needs it:
 | bodiless set | C/C++ functions and methods whose source has no body (prototypes, in-class declarations), for the declaration prior | `search_symbols` |
 | trigram index | which files contain each 3-byte sequence | `search_code` |
 | content packs | zstd-compressed file contents by blob SHA | `search_code`, `get_snippet` |
+| symbol vectors | with `rueca index --embed`: one int8 vector per callable, type and Markdown section, its node, its vector key and a per-row scale, plus the model record (optional components `vectors.meta`, `vectors.nodes`, `vectors.keys`, `vectors.scale`, `vectors.data`; §10) | `search_symbols` in `hybrid` / `semantic` mode |
 
 The segment is written to a temp file and atomically renamed; the catalog
 then points the indexed root at it. Query time never reads the working tree.
+
+Every component is BLAKE3-checksummed when a segment opens, except the
+vector bulk (`vectors.keys`, `vectors.scale`, `vectors.data`): their bounds
+and lengths are checked at open and their checksums on the first dense use
+in a process, so lexical queries never pay for them. On this repository
+(9,868 vectors of 1,024 dimensions, 19.0 MB segment, 29.5 MB with vectors)
+opening takes the same time with or without vectors, about 21 ms, and the
+first dense use adds about 7 ms of checksum (debug build with BLAKE3 and
+`rueca-segment` optimized). Readers ignore components they do not know, so
+a segment with vectors opens in an older build of format 2.
+
+Besides `segments/`, `packs/` and `facts/`, the store holds a **vector
+cache** (`<store>/vectors/<embed key>/`, or `$RUECA_VECTOR_DIR`): the f16
+vector of every text ever embedded under one embed key, at the model's full
+width, keyed by its vector key (BLAKE3 of the embed key and the text), so
+worktrees, branches and repositories of one store embed a text once (§10).
 
 **Ref snapshots** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--implemented)).
 `rueca index [PATH] --ref <name>` indexes a branch, pull request (`pr/<n>`),
@@ -1187,6 +1204,16 @@ document sections are found alongside code (`install linux` →
 has far more config keys than functions. Ties break by node id so pages are
 stable.
 
+**Hybrid and semantic modes** (RFC 0007, §10). When the repository was
+indexed with `rueca index --embed`, the default `mode` is `hybrid`: the
+BM25 top 100 above and the 100 symbols whose vectors are closest to the
+query's (an exact scan under the same filters) are fused by a convex
+combination of their normalized scores, times the same priors and routing
+boost. A question in plain words (`where is the configuration file
+parsed`) then finds `load_settings` though it shares none of them.
+`semantic` ranks by the embedding alone, `lexical` is the ranking above,
+unchanged.
+
 ### `search_code` — "where does this text appear?"
 
 The only tool that reads file contents for matching. The pattern (literal or
@@ -1412,7 +1439,9 @@ gaps show up on real repositories.
   instead of failing the index.
 - **Immutable**: a segment is never modified after it is written; re-indexing
   writes a new one and swaps the catalog entry atomically, so queries running
-  during a re-index keep working. An organization does the same with
+  during a re-index keep working. Adding vectors (§10) is the same move: a
+  copy of the lexical segment plus the `vectors.*` components, under a new
+  id, swapped in. An organization does the same with
   generations: one repository's part is replaced and a pointer swapped.
 
 ## 9. Where the code lives
@@ -1443,8 +1472,10 @@ gaps show up on real repositories.
 ## 10. Embeddings (RFC 0007)
 
 Semantic search ([RFC 0007](rfcs/0007-semantic-search.md)) is being built
-in phases. Phase 0 adds the runtime and a batch command; nothing in
-`search_symbols` uses vectors yet.
+in phases. Phase 0 added the runtime and a batch command; phase 1 adds
+symbol vectors to the index (`rueca index --embed`) and the `hybrid` and
+`semantic` modes of `search_symbols` (*Indexing with vectors* and *Hybrid
+search* below). The reranker and graph expansion are phase 2.
 
 **Crate.** `rueca-embed` owns presets, weights and runtimes behind two
 traits: `Embedder` (`embed` of a batch of documents and queries into
@@ -1499,8 +1530,10 @@ use. A missing file is an error naming the preset, the URL,
 **Embedding.** Inputs are tokenized with the tokenizer inside the GGUF
 file, cut to the token budget (512 by default, special tokens included;
 Qwen3 ends every input with `<|endoftext|>`, which last-token pooling
-reads), packed into batches of 2,048 tokens (every input fits one
-micro-batch), pooled, L2-normalized and, with `--dims`, truncated and
+reads), packed into batches of 512 tokens by default (`--batch`; every
+input fits one micro-batch: 512 tokens keep the default model near 1.0 GB
+of memory where 2,048 took 2.2 GB, for about 4% less throughput, measured
+in phase 0), pooled, L2-normalized and, with `--dims`, truncated and
 re-normalized. The batch order is fixed by content: inputs are sorted by
 token length, then BLAKE3 of the text, and results are returned in input
 order. Threads default to the performance cores (on Apple silicon the
@@ -1519,11 +1552,12 @@ prints (`model_sha256`, `quantization`, `dims`, `pooling`, `runtime`,
 **Commands.**
 
 ```sh
+rueca index . --embed                 # index with symbol vectors (default preset)
 rueca models list                     # presets, status, what the cache holds
 rueca models pull qwen3-0.6b-q8       # download and verify
 rueca models path qwen3-0.6b-q8       # where the file lives
 rueca models rm qwen3-0.6b-f16
-rueca embed --info                    # the audit record of the default preset
+rueca embed --info                    # the audit record of the default preset (no model load; load_ms: null)
 rueca embed --text "where is login handled?" --query
 rueca embed --input in.jsonl --output out.jsonl          # {"id","text","query"} → {"id","vector"}
 rueca embed --input in.jsonl --output out.f32 --format f32le --dims 256   # raw rows + out.f32.ids
@@ -1533,6 +1567,131 @@ rueca embed --bench --n 2000 --tokens 200 --runs 3 [--cpu]               # token
 `--preset` (or `RUECA_EMBED_PRESET`), `--max-tokens`, `--batch`,
 `--threads` and `--cpu` apply to every form. Output keeps input order.
 Errors print `rueca: …` on stderr and exit with status 1.
+
+**Indexing with vectors.** `rueca index --embed[=PRESET]` (or a configured
+preset, below) runs a vectors pass after resolution:
+
+1. **Units.** Every `Function`, `Method`, `Test`, `Class`, `Struct`,
+   `Interface`, `Trait`, `Enum` and Markdown `Section` with a file gets one
+   vector; fields, variables, constants, type aliases, configuration keys,
+   contracts and containers do not (RFC 0007 §5.1).
+2. **Canonical text** (text builder version 1, the bench vector arm's
+   format):
+
+   ```text
+   <language> <label> <qualified name>
+   path: <repository-relative path>
+   <signature>
+   <doc comment>
+   <body head>
+   ```
+
+   The signature is the declaration header scanned from the source (to the
+   `:` closing a Python header, else to the first `{` outside brackets,
+   lines joined by one space); the doc is the extracted docstring, else the
+   comment lines right above the definition; the body is the rest of the
+   span, dedented, without blank lines or the closing `}`. Types list their
+   members' signatures instead of their body, so a method edit does not
+   re-embed its class; sections are their text. Empty parts are left out
+   and the text is cut to `max_tokens × 4` characters (512 tokens → 2,048
+   characters; the model then cuts at 512 real tokens — a tokenizer-based
+   cut in the builder is a follow-up).
+3. **Cache lookup.** Each text's *vector key* is BLAKE3(embed key ‖ text);
+   the store vector cache answers which are already embedded.
+4. **Publication.** If every key hits (a re-index after a small change, a
+   second worktree, another repository with the same files), the segment is
+   written once with its vectors and the model is never loaded. Otherwise
+   the lexical segment is published and registered first (queries are
+   lexical meanwhile), the misses are embedded in batches of 256 texts in
+   key order — each batch appended to the cache as it finishes, so an
+   interrupted run resumes — and the snapshot is published again: the
+   bundle's components copied byte for byte, `meta` with a new segment id,
+   plus the `vectors.*` components; the catalog entry is swapped to it and
+   the lexical file deleted. Copying beats appending to the file: a
+   published segment is never modified (readers map it), and the copy of a
+   20 MB bundle costs tens of milliseconds next to minutes of embedding.
+
+`IndexReport.vectors` (and the `vectors:` line of `rueca index`) gives the
+units, how many were cached and embedded, tokens, time and the number of
+publications; progress (`embedded n of m`, tokens/s) is logged at `info`.
+`--embed` is an explicit request: missing weights are an error naming
+`rueca models pull`, raised before anything is published. A preset that
+comes from configuration only warns and indexes lexically.
+
+**Segment vectors.** `vectors.meta` (JSON: the audit record above plus
+`dims`, `rows`, `encoding: "i8"`, the segment's model key and the embedded
+labels), `vectors.nodes` (`[u32]`, ascending), `vectors.keys` (`[[u8; 32]]`),
+`vectors.scale` (`[f32]`) and `vectors.data` (`[i8; rows × dims]`). The
+cache keeps the model's full width; the segment stores `dims` components
+(`[retrieval] dims`, default the full width): truncated, re-normalized
+(Matryoshka) and quantized with one scale per row (`max |x| / 127`), so a
+new width re-quantizes from the cache without embedding anything.
+
+**Store vector cache.** `<store>/vectors/<embed key>/` (or
+`$RUECA_VECTOR_DIR`, shared across stores): `meta.json` (width, `f16`) and
+256 shards by the first byte of the key, each a pair of append-only files,
+`<xx>.keys` (32-byte keys) and `<xx>.f16` (rows). Writers lock the shard's
+`.keys` file (`flock`), skip keys already present, append and fsync the
+rows, then the keys; readers take no lock and count the complete entries
+(`min(keys, rows)`), so indexers of several repositories can share one
+store. A shard whose lengths disagree (a crash between the two appends) is
+truncated to its complete entries by the next writer. Entries are never
+removed yet (like content packs).
+
+**Hybrid search.** `search_symbols` gains `mode`:
+
+| Snapshot has vectors | Model loads | `mode` | Ranking |
+|---|---|---|---|
+| yes | yes | absent or `hybrid` | hybrid (`retrieval.mode: "hybrid"`) |
+| yes | yes | `semantic` | dense only |
+| yes | no (weights missing, model differs) | absent | lexical, with `retrieval.warnings` |
+| yes | no | `hybrid` / `semantic` | error naming `rueca models pull` |
+| no | — | absent | lexical |
+| no | — | `hybrid` / `semantic` | error naming `rueca index --embed` |
+| any | — | `lexical` | lexical, unchanged |
+
+The query model is the one recorded in the segment's `vectors.meta`
+(preset, token budget, text builder version; its embed key is checked), not
+the configured preset; it is loaded once per process (about 0.2 s and
+1.0 GB resident for the default model: a `rueca query` process pays it on
+every call, the MCP server once). The query is embedded with the preset's
+instruction, truncated to each segment's width. Candidates are the BM25 top
+N (today's ranking; its raw score is recovered by dividing out the prior and
+routing boost) and the dense top N of an exhaustive int8 scan of each
+selected snapshot under the same label, language, `path_glob` and scope
+filters (N = 100, at least the requested page; about 1.4 ms for this
+repository's 9,868 vectors). Every candidate with a vector gets its cosine,
+rescored from the cache's f16 rows when the cache is there. Then
+
+```text
+s = (α · b̂ + (1 − α) · d̂) · prior · route
+```
+
+with `b̂`, `d̂` min-max normalized over each list's top N (a list of equal
+scores normalizes to 1; BM25 is 0 outside its top N, a cosine below the
+dense list's range 0) and α = 0.5 until the phase 1 tuning. A snapshot
+without vectors for the model (an organization member indexed without
+`--embed`) is scored `b̂ · prior · route` and listed in `retrieval.lexical`;
+`semantic` leaves it out with a warning. Ties break by (snapshot, node),
+so pages are exact. Knobs: `RUECA_FUSION_ALPHA`, `RUECA_FUSION_N`,
+`RUECA_FUSION_NORM` (`minmax`, or `theoretical`: RFC 0007 §7.2's division
+by the theoretical minimum), over `[retrieval]` in the store's
+`rueca.toml`.
+
+**Configuration.** `<store>/rueca.toml`:
+
+```toml
+[retrieval]
+preset = "qwen3-0.6b-q8"   # rueca index embeds with it ("off": never)
+dims = 1024                # width stored in segments
+alpha = 0.5                # BM25 weight of the hybrid fusion
+fusion_n = 100             # candidates per list
+normalization = "minmax"   # or "theoretical"
+```
+
+Precedence: the argument (`--embed=PRESET`, `--no-embed`), the environment
+(`RUECA_EMBED_PRESET`, `RUECA_FUSION_*`), the file, the default (no
+embedding; α 0.5, N 100, min-max).
 
 **Fallback runtime.** RFC 0007 §4.2 names `fastembed` (candle) as the
 fallback should the llama.cpp build break cargo-dist or the size budget.
