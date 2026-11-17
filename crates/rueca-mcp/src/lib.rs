@@ -119,6 +119,14 @@ impl RuecaServer {
         RuecaServer { engine: Arc::new(engine), tools: Arc::new(tools()), gate }
     }
 
+    /// The same server for a caller who may read only `visibility` (RFC
+    /// 0008 §6.4): the engine is cloned (cheap; the clone shares opened
+    /// segments and the organization index), the tool list is shared.
+    pub fn with_visibility(&self, visibility: rueca_query::Visibility) -> RuecaServer {
+        let engine = self.engine.as_ref().clone().with_visibility(visibility);
+        RuecaServer { engine: Arc::new(engine), tools: self.tools.clone(), gate: self.gate.clone() }
+    }
+
     /// The server [`serve_stdio`] runs: the engine for `opts.org` or
     /// `opts.root`, with the background index those options call for
     /// ([`spawn_org_index`], [`spawn_auto_index`]) already started.

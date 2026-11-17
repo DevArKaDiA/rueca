@@ -625,6 +625,61 @@ snapshots):
 [1] POST /nowhere  consumes  requests  local/client:app/users.py#missing L9  (0)
 ```
 
+## Over HTTP
+
+`rueca serve` ([RFC 0008](rfcs/0008-service-mode.md) §6) serves the same
+tools to many clients from a service store. The envelope, the tool
+arguments and the text rendering are exactly those of `rueca mcp`; only the
+transport and the caller's visibility differ.
+
+- **Endpoint**: `POST /mcp` on `[http].listen`, one JSON-RPC message per
+  request, one `application/json` response (no SSE, no session:
+  `Mcp-Session-Id` is ignored and never minted). Every protocol version of
+  `rueca mcp` is served statelessly: a legacy client's `initialize` and its
+  later requests (version from `MCP-Protocol-Version`, `2025-03-26` when
+  absent), or 2026-07-28 requests with `_meta`. Notifications answer `202`.
+- **Headers**: `Authorization: Bearer <token>` (required);
+  `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` optional, but when
+  present they must match the body (`400`, -32020 `HeaderMismatch`); an
+  unsupported version is `400` (-32022).
+- **Auth**: static tokens (`rueca_…`, configured as `sha256:<hex>` in
+  `[[auth.token]]`) or OIDC access tokens from a configured issuer
+  (`[[auth.oidc]]`), with scope `rueca:read`. No token: `401` with
+  `WWW-Authenticate: Bearer … resource_metadata="<PRM URL>"`; a bad token:
+  `401 invalid_token`; no scope: `403 insufficient_scope`; a token in the
+  query string: `400`. With an OIDC issuer the Protected Resource Metadata
+  is at `/.well-known/oauth-protected-resource/mcp`.
+- **Visibility**: a principal reads the repositories its rules grant
+  (`repos` globs); with none it sees an empty organization (empty
+  `list_repositories`, no results), and a repository it cannot read is
+  reported like one that does not exist.
+- **Limits**: `Origin` / `Host` not allowed `403`, body over
+  `[http].max_body_bytes` `413`, `GET` / `DELETE` `405`, over a rate limit
+  `429` with `Retry-After`; a tool call over `[http].query_deadline`
+  (10 s) is a JSON-RPC error -32001 ("deadline of 10s exceeded; narrow
+  `repo` or lower `limit`"); before the first generation is served,
+  -32002.
+- **Operations** (`[http].ops_listen`, no auth): `/healthz`, `/readyz`
+  (`503` until a generation is served, then `{"generation": n, "warm":
+  "k/m"}`), `/metrics` (Prometheus). `GET /status` on the main listener
+  (`rueca:read`): generation, lag, and the caller's repositories with their
+  refs and commits.
+
+```sh
+curl -s https://rueca.acme.internal/mcp \
+  -H "Authorization: Bearer $RUECA_TOKEN" -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2025-06-18' -H 'Mcp-Method: tools/call' -H 'Mcp-Name: search_symbols' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_symbols","arguments":{"query":"issue invoice"}}}'
+```
+
+Phase 1 adds three keys to RFC 0008 §4.4's file: `[store].poll` (the
+generation watcher period, default `"5s"`), `[http].ip_rate_limit` (per
+client IP before authentication, default `{ per_second = 20, burst = 100
+}`) and `[http].trusted_proxies` (addresses or CIDR blocks whose
+`X-Forwarded-For` / `X-Real-IP` name the client). `[org].inventory`,
+`[[repo]]`, `[indexing]`, `[retention]` and `[retrieval]` are parsed and
+checked, used from phase 2 on.
+
 ## CLI
 
 ```
@@ -671,6 +726,16 @@ rueca status [--store DIR] [--json]
     ref snapshots under each repository (`ref 8.5.1 @cf19179e8e2f …
     (export)`), and the organizations (generation, repositories and refs:
     `main@08b803cf32ce + 8.5.1@cf19179e8e2f`).
+
+rueca serve [--config FILE] [--role query|indexer|all] [--check-config]
+    Service mode, query role (RFC 0008 phase 1): MCP over HTTP from a
+    service store (see "Over HTTP" below). The configuration is
+    `rueca-service.toml` (--config, else $RUECA_CONFIG; RFC 0008 §4.4);
+    $RUECA_ROLE, $RUECA_STORE_URL and $RUECA_LOG override it.
+    --check-config validates the file, its `env:` references and the store,
+    prints `warning:` / `error:` lines and exits 0 or 1. Logs: stdout, JSON
+    by default (`[telemetry].log_format`). SIGTERM / SIGINT drain in-flight
+    requests for up to `[http].request_timeout`, then exit 0.
 
 rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
     List the organization's cross-repository edges (RFC 0006 link layer):

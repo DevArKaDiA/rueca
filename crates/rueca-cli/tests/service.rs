@@ -59,3 +59,37 @@ fn publish_status_and_pull_through_a_file_store() {
     let hits = json_of(rueca(mirror.path()).args(["query", "search_symbols", r#"{"query": "issue invoice"}"#]));
     assert!(hits.to_string().contains("InvoiceService"), "{hits}");
 }
+
+#[test]
+fn pull_publishes_a_generation_and_serve_checks_its_config() {
+    let project = tempfile::tempdir().unwrap();
+    common::write(project.path(), "pkg/models.py", common::MODELS_PY);
+    let store = tempfile::tempdir().unwrap();
+    let bucket = tempfile::tempdir().unwrap();
+    let url = format!("file://{}", bucket.path().canonicalize().unwrap().display());
+    assert!(rueca(store.path()).arg("index").arg(project.path()).output().unwrap().status.success());
+    json_of(rueca(store.path()).arg("publish").arg(project.path()).args(["--store-url", &url, "--org", "acme"]));
+
+    // `pull --generation` builds the organization on a dedicated mirror and
+    // publishes generation 1.
+    let builder = tempfile::tempdir().unwrap();
+    let pulled = json_of(rueca(builder.path()).args(["pull", "--generation", "--store-url", &url]));
+    assert_eq!(pulled["published"]["generation"], 1, "{pulled}");
+    let st = json_of(rueca(store.path()).args(["status", "--store-url", &url]));
+    assert_eq!(st["generation"], 1, "{st}");
+
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("rueca-service.toml");
+    let good = format!("[store]\nurl = \"{url}\"\ncache_dir = \"{}\"\n", dir.path().join("cache").display());
+    std::fs::write(&config, &good).unwrap();
+    let out = rueca(store.path()).args(["serve", "--check-config", "--config"]).arg(&config).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("configuration is valid"));
+
+    let bad = format!("{good}[indexing]\ncredentials = {{ \"github.com\" = \"ghp_literal\" }}\n");
+    std::fs::write(&config, bad).unwrap();
+    let out = rueca(store.path()).args(["serve", "--check-config"]).env("RUECA_CONFIG", &config).output().unwrap();
+    assert!(!out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("environment reference") && !text.contains("configuration is valid"), "{text}");
+}

@@ -4,13 +4,16 @@
 //! ```text
 //! rueca status --store-url URL [--store-option K=V]... [--store DIR] [--json]
 //! rueca publish [PATH | --repo ID] [--ref NAME] --store-url URL [--org NAME] [--store DIR] [--json]
-//! rueca pull [--repo ID] --store-url URL [--store DIR] [--json]
+//! rueca pull [--repo ID | --generation] --store-url URL [--store DIR] [--json]
 //! ```
 //!
 //! `--store` is the local store: where `publish` reads the snapshot and
 //! where `pull` mirrors the service store (`rueca query --store DIR` then
 //! reads it). `publish` creates the service store for `--org` when it is
 //! new; the other commands read the organization from its `store.json`.
+//! `pull --generation` then builds the organization from the mirror and
+//! publishes it as the store's next generation, what phase 2's updater
+//! will do (until then, the way to give `rueca serve` something to serve).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -19,7 +22,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, bail};
 use rueca_segment::{CatalogEntry, Store};
 use rueca_service::{
-    PullWhich, RefKind, Retention, ServiceStatus, ServiceStore, publish_snapshot, pull_generation, pull_repo, status,
+    PullWhich, RefKind, Retention, ServiceStatus, ServiceStore, publish_generation, publish_snapshot, pull_generation,
+    pull_repo, status,
 };
 use serde_json::json;
 
@@ -196,8 +200,9 @@ fn ref_kind(name: &str) -> RefKind {
 }
 
 /// `rueca pull`: mirror the service store (or one repository) into the
-/// local store, then its organization generation.
-pub fn cmd_pull(args: &StoreArgs, store: &Path, repo: Option<&str>, out: Output) -> anyhow::Result<()> {
+/// local store, then its organization generation; with `publish`, build
+/// and publish the next generation from the mirror.
+pub fn cmd_pull(args: &StoreArgs, store: &Path, repo: Option<&str>, publish: bool, out: Output) -> anyhow::Result<()> {
     let svc = args.open(store, None)?;
     let repos: Vec<String> = match repo {
         Some(r) => vec![r.to_string()],
@@ -208,8 +213,14 @@ pub fn cmd_pull(args: &StoreArgs, store: &Path, repo: Option<&str>, out: Output)
         reports.push(pull_repo(&svc, r, PullWhich::All)?);
     }
     let generation = if repo.is_none() { pull_generation(&svc, None)? } else { None };
+    let published = if publish {
+        rueca_segment::org::update_org(&svc.local, &svc.org, &svc.mirror_members()?)?;
+        Some(publish_generation(&svc)?)
+    } else {
+        None
+    };
     if out.json {
-        let v = json!({ "repos": reports, "generation": generation });
+        let v = json!({ "repos": reports, "generation": generation, "published": published });
         println!("{}", render(&v, out.pretty));
         return Ok(());
     }
@@ -226,6 +237,9 @@ pub fn cmd_pull(args: &StoreArgs, store: &Path, repo: Option<&str>, out: Output)
     }
     if let Some(g) = generation {
         println!("pulled organization {} generation {} ({} repositories)", g.org, g.generation, g.repos);
+    }
+    if let Some(p) = published {
+        println!("published organization {} generation {} ({} files uploaded)", p.org, p.generation, p.files_uploaded);
     }
     println!("mirror: {}", svc.local.dir.display());
     Ok(())

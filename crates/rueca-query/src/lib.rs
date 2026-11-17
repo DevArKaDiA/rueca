@@ -106,7 +106,8 @@
 //! repositories only), so results, totals and scores never depend on a
 //! repository the caller cannot read, and a repository named in `repo` that
 //! is not visible is reported exactly like one that does not exist (so are
-//! its refs). `trace` sees link edges through the view: edges into a
+//! its refs); a caller who may read none of them sees an empty organization
+//! (no results, no error naming it). `trace` sees link edges through the view: edges into a
 //! repository read at a ref are remapped to the ref's nodes. Other tools read
 //! the selected entries' segments. Local mode passes [`Visibility::All`].
 //!
@@ -361,6 +362,11 @@ impl Visibility {
 }
 
 /// The query engine. See the crate docs.
+///
+/// Cloning is cheap and the clones share the opened segments and the
+/// organization index: a service gives each call a clone with the caller's
+/// [`Visibility`] ([`Engine::with_visibility`]).
+#[derive(Clone)]
 pub struct Engine {
     pub store_dir: PathBuf,
     /// Root used when a request does not name a repository.
@@ -370,9 +376,9 @@ pub struct Engine {
     visibility: Visibility,
     /// How a query's repository relevance weighs organization rankings.
     route: RouteParams,
-    segments: Mutex<HashMap<String, Arc<Segment>>>,
+    segments: Arc<Mutex<HashMap<String, Arc<Segment>>>>,
     /// The last opened generation of the organization index.
-    org_index: Mutex<Option<Arc<OrgIndex>>>,
+    org_index: Arc<Mutex<Option<Arc<OrgIndex>>>>,
 }
 
 /// The snapshots a call reads, plus the organization context in organization
@@ -404,8 +410,8 @@ impl Engine {
             org: None,
             visibility: Visibility::All,
             route: RouteParams::from_env(),
-            segments: Mutex::new(HashMap::new()),
-            org_index: Mutex::new(None),
+            segments: Arc::new(Mutex::new(HashMap::new())),
+            org_index: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -603,8 +609,10 @@ impl Engine {
                 });
             }
         }
-        if entries.is_empty() {
-            anyhow::bail!("organization `{name}` has no repositories you can read");
+        // A caller who may read none of them sees an empty organization
+        // (RFC 0008 §6.4: deny by default, nothing named).
+        if index.generation().repos.is_empty() {
+            anyhow::bail!("organization `{name}` has no repositories");
         }
         Ok((entries, OrgCtx { index, visible, view: OrgSelection::default() }))
     }

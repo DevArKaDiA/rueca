@@ -320,7 +320,10 @@ with_index_gate}`, `tools()`, `serve_stdio`, `INSTRUCTIONS`, `INDEX_WAIT`,
 `Vec<Tool>` (was `Vec<rmcp::model::Tool>`); `serve` is synchronous over
 `std::io` (was async over a tokio stream). Added: `RuecaServer::from_options`
 (what `serve_stdio` serves, usable by other transports), `RuecaServer::handle`
-and the types below.
+and the types below; `RuecaServer::with_visibility` (the same server for a
+caller who may read only some repositories: the engine is cloned cheaply,
+sharing its opened segments and organization index), which the HTTP
+transport (`rueca-serve`, `rueca serve`) calls per tool call.
 
 ```text
 crates/rueca-mcp/src/

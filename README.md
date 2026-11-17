@@ -230,6 +230,24 @@ claude mcp add rueca -- rueca mcp --root "$PWD"
 }
 ```
 
+**Over HTTP**: a shared `rueca serve` (service mode, [RFC
+0008](docs/rfcs/0008-service-mode.md); [details](docs/tools.md#over-http))
+serves an organization to many clients at `https://<host>/mcp` with a
+bearer token (a static `rueca_…` token or an OIDC access token):
+
+```sh
+claude mcp add --transport http rueca https://rueca.acme.internal/mcp --header "Authorization: Bearer $RUECA_TOKEN"
+```
+
+```json
+{ "servers": { "rueca": { "type": "http", "url": "https://rueca.acme.internal/mcp",
+  "headers": { "Authorization": "Bearer ${input:rueca-token}" } } } }
+```
+
+(VS Code, `.vscode/mcp.json`; Cursor: `{"mcpServers": {"rueca": {"url":
+"https://rueca.acme.internal/mcp", "headers": {"Authorization": "Bearer
+…"}}}}`.)
+
 Recommended agent flow: `search_symbols` → `get_symbol` / `get_snippet` →
 `trace`; `search_code` for literals and config.
 
@@ -370,6 +388,9 @@ More languages (Kotlin, Swift, Ruby, C#, …) follow the same gate.
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
 | [`rueca-query`](crates/rueca-query) | the tools, organization scope |
 | [`rueca-mcp`](crates/rueca-mcp) | MCP server: its own protocol layer ([reference](docs/mcp-protocol.md)), stdio |
+| [`rueca-storage`](crates/rueca-storage) | object storage behind a `Storage` trait: `memory://`, `file://`, `s3://`, `gs://`, conditional writes |
+| [`rueca-service`](crates/rueca-service) | service store: publish, pull, organization generations, garbage collection |
+| [`rueca-serve`](crates/rueca-serve) | `rueca serve`: MCP over HTTP, authentication, visibility, rate limits, health and metrics |
 
 ## Contributing
 

@@ -1137,7 +1137,26 @@ than a grace period (24 h) and deletes a candidate only in a later round,
 a grace after it was recorded, if nothing references it by then —
 publishes take their objects off the candidate list first — expiring
 closed pull requests and over-retention snapshots on the way. `rueca status --store-url <url>` reads a bucket
-directly. The roles that run these loops (`rueca serve`) are phases 1–2.
+directly.
+
+**The query role** (`rueca serve`, crate `rueca-serve`, RFC 0008 phase 1)
+is a replica: its disk cache (`[store].cache_dir`) is such a mirror. A
+watcher calls `pull_generation` every `[store].poll` (5 s) with the
+version of `org.json` it last read — one conditional request when nothing
+changed — and a new generation is downloaded whole, installed, its
+organization index opened (then `/readyz` answers 200), and segments the
+generation no longer names are evicted above `[store].cache_bytes`. The
+engine re-reads the local pointer on every call, so the next request sees
+the new generation. `POST /mcp` runs Rueca's own MCP core
+(`RuecaServer::handle`, synchronous) once per request with a fresh
+session; a tool call runs on a blocking thread with the caller's
+`Visibility` — the union of the repository globs its static token or OIDC
+rules grant, matched against the generation's repository ids (none: an
+empty organization) — under the query deadline. Authentication (static
+`rueca_` tokens, OIDC with JWKS discovery), `Host` / `Origin` checks, rate
+limits per IP and per principal, Prometheus metrics and JSON logs sit in
+front of it ([tools.md, *Over HTTP*](tools.md#over-http)). The indexer
+role (jobs, webhooks, the updater) is phase 2.
 
 ## 5. The graph schema
 
@@ -1420,7 +1439,8 @@ protocol versions 2024-11-05 to 2025-11-25, and the stateless 2026-07-28
 lifecycle (`server/discover`, per-request `_meta`). Each `tools/call` makes
 the same engine call as `rueca query`, on its own thread. The behaviour, the
 versions and the transport seam for HTTP are specified in
-[`docs/mcp-protocol.md`](mcp-protocol.md).
+[`docs/mcp-protocol.md`](mcp-protocol.md). `rueca serve` puts the same core
+behind stateless HTTP for a service (§4.7).
 
 ## 7. Confidence: how to read an edge
 
