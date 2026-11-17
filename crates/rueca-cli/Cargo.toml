@@ -15,7 +15,16 @@ rust-version.workspace = true
 name = "rueca"
 path = "src/main.rs"
 
+[features]
+default = ["embeddings"]
+# Embedding runtime (llama.cpp, needs CMake and a C/C++ compiler) and model
+# downloads. `--no-default-features` builds a lexical-only binary.
+embeddings = ["rueca-embed/embeddings"]
+# CUDA build of the embedding runtime.
+cuda = ["rueca-embed/cuda"]
+
 [dependencies]
+rueca-embed.workspace = true
 rueca-index.workspace = true
 rueca-query.workspace = true
 rueca-mcp.workspace = true

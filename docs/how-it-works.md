@@ -23,6 +23,7 @@ Contents:
 7. [Confidence: how to read an edge](#7-confidence-how-to-read-an-edge)
 8. [Determinism, incrementality, limits](#8-determinism-incrementality-limits)
 9. [Where the code lives](#9-where-the-code-lives)
+10. [Embeddings (RFC 0007)](#10-embeddings-rfc-0007)
 
 ---
 
@@ -1437,3 +1438,109 @@ gaps show up on real repositories.
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |
 | Tools | `rueca-query` | `src/tools.rs` |
 | MCP protocol layer, stdio / CLI | `rueca-mcp`, `rueca` | [`docs/mcp-protocol.md`](mcp-protocol.md), `RuecaServer::handle` (`src/protocol.rs`), `serve_stdio`, `src/main.rs` |
+| Embedding presets, weights cache, llama.cpp runtime | `rueca-embed` | crate docs, `src/presets.rs`, `src/backend/llama.rs` |
+
+## 10. Embeddings (RFC 0007)
+
+Semantic search ([RFC 0007](rfcs/0007-semantic-search.md)) is being built
+in phases. Phase 0 adds the runtime and a batch command; nothing in
+`search_symbols` uses vectors yet.
+
+**Crate.** `rueca-embed` owns presets, weights and runtimes behind two
+traits: `Embedder` (`embed` of a batch of documents and queries into
+L2-normalized vectors, `model_key`, `dims`, `meta`) and `Reranker`
+(`rerank(query, docs)`; phase 0 ships only `NoReranker`, the llama.cpp
+cross-encoder comes in phase 2). The runtime is llama.cpp through
+`llama-cpp-2` (pinned exactly), behind the `embeddings` feature, on by
+default in `rueca-embed` and `rueca`: it needs CMake and a C/C++ compiler,
+uses Metal on Apple silicon, and `--no-default-features` builds a
+lexical-only binary. `cuda` is an opt-in feature for service builds.
+
+**Presets.** A manifest compiled into the binary (`rueca models list`):
+
+| Preset | File | Status |
+|---|---|---|
+| `qwen3-0.6b-q8` | Qwen3-Embedding-0.6B, official `Q8_0` GGUF | default (provisional) |
+| `qwen3-0.6b-f16` | same, official `f16` | reference for rank overlap |
+| `qwen3-0.6b-q4` | `Q4_K_M` converted by Rueca from the official `f16` | unavailable until published; a local file with the pinned sha256 loads |
+| `qwen3-4b-q4`, `qwen3-4b-q8`, `qwen3-8b-q4`, `qwen3-8b-q8` | official `Q4_K_M` / `Q8_0` | available (GPU) |
+| `coderank-137m`, `gte-modernbert-149m` | NomicBERT / ModernBERT; llama.cpp supports both architectures, Rueca must convert them | planned |
+| `remote:…` | provider APIs | phase 3 |
+
+Each local preset pins the file's URL at an upstream revision, its sha256
+and size, the quantization, the width (with its Matryoshka range), the
+context, the pooling (last token for Qwen3) and the query format. Qwen3
+queries are `Instruct: {instruction}\nQuery:{query}` with a code-search
+instruction by default (`--instruction` overrides it for the phase 0
+sweep); documents get no prefix.
+
+The `qwen3-0.6b-q4` file is made with llama.cpp's own tool at the commit
+`llama-cpp-2` vendors, and is byte-for-byte reproducible:
+
+```sh
+llama-quantize Qwen3-Embedding-0.6B-f16.gguf Qwen3-Embedding-0.6B-Q4_K_M.gguf Q4_K_M
+# llama.cpp d81235049384 → sha256 44f67b5875def0e90ae67247b141a5a861538efb8d8b0f783eef3d94211d9dcd
+```
+
+**Weights cache.** Never in the binary:
+
+```text
+<models>/<preset>/<file>          the GGUF file
+<models>/<preset>/<file>.sha256   its verified sha256
+```
+
+`<models>` is `$RUECA_MODEL_DIR` when set, else `<store>/models`
+(`~/.cache/rueca/models` by default). `rueca models pull [PRESET]`
+downloads to a temporary file, checks size and sha256, renames it into
+place and writes the sidecar; a hand-placed file is hashed once on first
+use. A missing file is an error naming the preset, the URL,
+`rueca models pull` and `RUECA_MODEL_DIR`.
+
+**Embedding.** Inputs are tokenized with the tokenizer inside the GGUF
+file, cut to the token budget (512 by default, special tokens included;
+Qwen3 ends every input with `<|endoftext|>`, which last-token pooling
+reads), packed into batches of 2,048 tokens (every input fits one
+micro-batch), pooled, L2-normalized and, with `--dims`, truncated and
+re-normalized. The batch order is fixed by content: inputs are sorted by
+token length, then BLAKE3 of the text, and results are returned in input
+order. Threads default to the performance cores (on Apple silicon the
+efficiency cores slow a CPU run down by half).
+
+**Identity and audit** (RFC 0007 §5.4, §9). The *embed key* is BLAKE3 of
+the model file's sha256, the pooling, the document prefix, the text
+builder version and the token budget; the *model key* adds the output
+width and the vector encoding. The query instruction is in neither key
+(documents carry none), nor are the runtime, its version, the backend or
+the CPU level: those go to the audit record that `rueca embed --info`
+prints (`model_sha256`, `quantization`, `dims`, `pooling`, `runtime`,
+`runtime_version`, `backend` = `metal` | `cpu` | `cuda`, `cpu_level` =
+`neon` or the x86-64 psABI level, batch and micro-batch sizes, threads).
+
+**Commands.**
+
+```sh
+rueca models list                     # presets, status, what the cache holds
+rueca models pull qwen3-0.6b-q8       # download and verify
+rueca models path qwen3-0.6b-q8       # where the file lives
+rueca models rm qwen3-0.6b-f16
+rueca embed --info                    # the audit record of the default preset
+rueca embed --text "where is login handled?" --query
+rueca embed --input in.jsonl --output out.jsonl          # {"id","text","query"} → {"id","vector"}
+rueca embed --input in.jsonl --output out.f32 --format f32le --dims 256   # raw rows + out.f32.ids
+rueca embed --bench --n 2000 --tokens 200 --runs 3 [--cpu]               # tokens/s and texts/s as JSON
+```
+
+`--preset` (or `RUECA_EMBED_PRESET`), `--max-tokens`, `--batch`,
+`--threads` and `--cpu` apply to every form. Output keeps input order.
+Errors print `rueca: …` on stderr and exit with status 1.
+
+**Fallback runtime.** RFC 0007 §4.2 names `fastembed` (candle) as the
+fallback should the llama.cpp build break cargo-dist or the size budget.
+Phase 0 measured `fastembed` 7.7.1 with only `qwen3-text` on the same
+`Q8_0` file: it builds in pure Rust (plus Oniguruma for the tokenizer) and
+its vectors match the reference (cosine ≥ 0.999), but it needs the
+model's `tokenizer.json` beside the GGUF file, runs on the CPU at about
+0.7× llama.cpp's speed with about twice the memory, and its Metal path
+fails on Qwen3 (`no metal implementation for qk-norm-rope`). It is not in
+the tree; llama.cpp builds, links statically and adds about 11 MB to the
+release binary.

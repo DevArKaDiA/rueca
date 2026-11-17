@@ -1,0 +1,488 @@
+//! The presets manifest, compiled into the binary (RFC 0007 §3.1, §4.4).
+//!
+//! Every local preset names one GGUF file by URL, sha256 and size. Official
+//! files are pinned to a Hugging Face revision (the URL holds the commit),
+//! and their sha256 is the Git LFS object id published for that revision.
+//! Weights are never in the binary: [`crate::ModelCache`] downloads them on
+//! request and checks them against this table.
+
+use serde::Serialize;
+
+use crate::error::{Error, Result};
+
+/// Default query instruction for code retrieval.
+///
+/// Phase 0 sweeps it (RFC 0007 §5.3) against [`QWEN_CODE_INSTRUCTION`] and
+/// [`ISSUE_INSTRUCTION`]; the winner is recorded in `docs/decisions.md`.
+/// Documents carry no instruction, so changing it invalidates no stored
+/// vector (§5.4).
+pub const DEFAULT_CODE_INSTRUCTION: &str =
+    "Given a natural-language question about a codebase, retrieve the code symbols that answer it";
+
+/// Qwen's own code-retrieval instruction (Qwen3-Embedding `task_prompts.json`),
+/// a phase 0 sweep candidate.
+pub const QWEN_CODE_INSTRUCTION: &str =
+    "Given a question about coding, retrieval code or passage that can solve user's question";
+
+/// The issue-localization instruction of RFC 0007 §5.3, a phase 0 sweep
+/// candidate.
+pub const ISSUE_INSTRUCTION: &str = "Given a GitHub issue or a question about a code base, retrieve the functions, \
+     classes or sections that answer it or must change";
+
+/// Whether a preset can be used, and when it could be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresetStatus {
+    /// Official weights, downloadable now.
+    Available,
+    /// A Rueca-hosted conversion that is not published yet; a local file
+    /// with the pinned sha256 still loads.
+    Unavailable,
+    /// Listed for the phase 0 model sweep; no GGUF file pinned yet.
+    Planned,
+    /// A remote API preset (RFC 0007 §3.5), implemented in phase 3.
+    #[serde(rename = "phase 3")]
+    Phase3,
+}
+
+impl PresetStatus {
+    /// The manifest spelling.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Unavailable => "unavailable",
+            Self::Planned => "planned",
+            Self::Phase3 => "phase 3",
+        }
+    }
+}
+
+/// How token states become one vector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pooling {
+    /// The last token's state (decoder embedders, Qwen3).
+    Last,
+    /// The first token's state (BERT-family encoders).
+    Cls,
+    /// The mean over tokens.
+    Mean,
+}
+
+impl Pooling {
+    /// Stable name, hashed into the embed key.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Last => "last",
+            Self::Cls => "cls",
+            Self::Mean => "mean",
+        }
+    }
+}
+
+/// How a query is turned into model input. Documents are embedded as they
+/// are (no prefix) for every preset in this manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "style", rename_all = "snake_case")]
+pub enum QueryStyle {
+    /// Qwen3: `Instruct: {instruction}\nQuery:{query}` (model card format,
+    /// no space after `Query:`).
+    Instruct {
+        /// The default instruction; [`crate::EmbedOptions::query_instruction`]
+        /// overrides it.
+        instruction: &'static str,
+    },
+    /// A fixed prefix before the query (CodeRankEmbed).
+    Prefix {
+        /// The prefix.
+        prefix: &'static str,
+    },
+}
+
+/// Where a preset's vectors come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresetKind {
+    /// A GGUF file run in-process.
+    Local,
+    /// A provider API (`remote:` presets).
+    Remote,
+}
+
+/// One weights file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct WeightsFile {
+    /// File name inside `<models>/<preset>/`.
+    pub file_name: &'static str,
+    /// Download URL (pinned revision).
+    pub url: &'static str,
+    /// Lower-case hex sha256 of the file.
+    pub sha256: &'static str,
+    /// Size in bytes.
+    pub bytes: u64,
+}
+
+/// One manifest entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Preset {
+    /// Preset name (`qwen3-0.6b-q8`).
+    pub name: &'static str,
+    /// Upstream model.
+    pub model: &'static str,
+    /// Upstream repository revision the weights come from.
+    pub revision: &'static str,
+    /// Model license (SPDX).
+    pub license: &'static str,
+    /// Local or remote.
+    pub kind: PresetKind,
+    /// Availability.
+    pub status: PresetStatus,
+    /// Weights quantization (`Q8_0`, `F16`, `Q4_K_M`).
+    pub quantization: &'static str,
+    /// Full output width.
+    pub dims: usize,
+    /// Smallest Matryoshka width the model was trained for.
+    pub min_dims: usize,
+    /// Model context length in tokens.
+    pub context: usize,
+    /// Pooling.
+    pub pooling: Pooling,
+    /// Query formatting.
+    pub query: QueryStyle,
+    /// Prefix of every document (empty for every preset today).
+    pub document_prefix: &'static str,
+    /// The weights, for local presets with a pinned file.
+    pub weights: Option<WeightsFile>,
+    /// One line for `rueca models list`.
+    pub note: &'static str,
+}
+
+impl Preset {
+    /// The weights, or the reason this preset has none to load.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Unavailable`] for planned and remote presets.
+    pub fn weights(&self) -> Result<&WeightsFile> {
+        self.weights.as_ref().ok_or_else(|| Error::Unavailable {
+            preset: self.name.to_string(),
+            status: self.status.as_str().to_string(),
+            reason: self.note.to_string(),
+        })
+    }
+}
+
+const QWEN_INSTRUCT: QueryStyle = QueryStyle::Instruct { instruction: DEFAULT_CODE_INSTRUCTION };
+
+/// Download URL of a file of an official Qwen GGUF repository, pinned to the
+/// revision recorded in [`qwen`].
+macro_rules! qwen_url {
+    (B06, $file:literal) => {
+        concat!(
+            "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/370f27d7550e0def9b39c1f16d3fbaa13aa67728/",
+            $file
+        )
+    };
+    (B4, $file:literal) => {
+        concat!(
+            "https://huggingface.co/Qwen/Qwen3-Embedding-4B-GGUF/resolve/f4602530db1d980e16da9d7d3a70294cf5c190be/",
+            $file
+        )
+    };
+    (B8, $file:literal) => {
+        concat!(
+            "https://huggingface.co/Qwen/Qwen3-Embedding-8B-GGUF/resolve/69d0e58a13e463cd99a9b83e3f5fee7c10265fab/",
+            $file
+        )
+    };
+}
+
+impl Preset {
+    /// The weights, if `rueca models pull` can download them now.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Unavailable`] for planned and remote presets and for
+    /// Rueca-hosted files not published yet.
+    pub fn pullable(&self) -> Result<&WeightsFile> {
+        match (self.status, self.weights.as_ref()) {
+            (PresetStatus::Available, Some(w)) => Ok(w),
+            _ => Err(Error::Unavailable {
+                preset: self.name.to_string(),
+                status: self.status.as_str().to_string(),
+                reason: self.note.to_string(),
+            }),
+        }
+    }
+}
+
+/// A Qwen3-Embedding preset with an official or Rueca-hosted GGUF file.
+const fn qwen(
+    name: &'static str,
+    size: Qwen,
+    quantization: &'static str,
+    status: PresetStatus,
+    weights: WeightsFile,
+    note: &'static str,
+) -> Preset {
+    let (model, revision, dims) = match size {
+        Qwen::B06 => ("Qwen/Qwen3-Embedding-0.6B-GGUF", "370f27d7550e0def9b39c1f16d3fbaa13aa67728", 1024),
+        Qwen::B4 => ("Qwen/Qwen3-Embedding-4B-GGUF", "f4602530db1d980e16da9d7d3a70294cf5c190be", 2560),
+        Qwen::B8 => ("Qwen/Qwen3-Embedding-8B-GGUF", "69d0e58a13e463cd99a9b83e3f5fee7c10265fab", 4096),
+    };
+    Preset {
+        name,
+        model,
+        revision,
+        license: "Apache-2.0",
+        kind: PresetKind::Local,
+        status,
+        quantization,
+        dims,
+        min_dims: 32,
+        context: 32_768,
+        pooling: Pooling::Last,
+        query: QWEN_INSTRUCT,
+        document_prefix: "",
+        weights: Some(weights),
+        note,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Qwen {
+    B06,
+    B4,
+    B8,
+}
+
+/// A preset without a pinned file yet (phase 0 model sweep).
+const fn planned(
+    name: &'static str,
+    model: &'static str,
+    revision: &'static str,
+    license: &'static str,
+    pooling: Pooling,
+    query: QueryStyle,
+    note: &'static str,
+) -> Preset {
+    Preset {
+        name,
+        model,
+        revision,
+        license,
+        kind: PresetKind::Local,
+        status: PresetStatus::Planned,
+        quantization: "F16",
+        dims: 768,
+        min_dims: 768,
+        context: 8192,
+        pooling,
+        query,
+        document_prefix: "",
+        weights: None,
+        note,
+    }
+}
+
+/// A `remote:` preset (RFC 0007 §3.5), listed for phase 3.
+const fn remote(name: &'static str, dims: usize) -> Preset {
+    Preset {
+        name,
+        model: name,
+        revision: "",
+        license: "provider terms",
+        kind: PresetKind::Remote,
+        status: PresetStatus::Phase3,
+        quantization: "",
+        dims,
+        min_dims: dims,
+        context: 0,
+        pooling: Pooling::Last,
+        query: QWEN_INSTRUCT,
+        document_prefix: "",
+        weights: None,
+        note: "remote API preset, opt-in, implemented in phase 3 (RFC 0007 §3.5)",
+    }
+}
+
+/// The default preset (RFC 0007 §3.3, provisional).
+pub const DEFAULT_PRESET: &str = "qwen3-0.6b-q8";
+
+/// Every preset, default first.
+pub static PRESETS: &[Preset] = &[
+    qwen(
+        "qwen3-0.6b-q8",
+        Qwen::B06,
+        "Q8_0",
+        PresetStatus::Available,
+        WeightsFile {
+            file_name: "Qwen3-Embedding-0.6B-Q8_0.gguf",
+            url: qwen_url!(B06, "Qwen3-Embedding-0.6B-Q8_0.gguf"),
+            sha256: "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439",
+            bytes: 639_150_592,
+        },
+        "default (provisional, RFC 0007 §3.3); official Q8_0",
+    ),
+    qwen(
+        "qwen3-0.6b-f16",
+        Qwen::B06,
+        "F16",
+        PresetStatus::Available,
+        WeightsFile {
+            file_name: "Qwen3-Embedding-0.6B-f16.gguf",
+            url: qwen_url!(B06, "Qwen3-Embedding-0.6B-f16.gguf"),
+            sha256: "421a27e58d165478cc7acb984a688c2aa41404968b0203e7cd743ece44c54340",
+            bytes: 1_197_629_632,
+        },
+        "reference for rank overlap; official f16",
+    ),
+    qwen(
+        "qwen3-0.6b-q4",
+        Qwen::B06,
+        "Q4_K_M",
+        PresetStatus::Unavailable,
+        WeightsFile {
+            file_name: "Qwen3-Embedding-0.6B-Q4_K_M.gguf",
+            url: "https://github.com/DevArKaDiA/rueca-models/releases/download/qwen3-embedding-0.6b-q4_k_m-v1/Qwen3-Embedding-0.6B-Q4_K_M.gguf",
+            sha256: Q4_SHA256,
+            bytes: Q4_BYTES,
+        },
+        "Rueca-made Q4_K_M (llama-quantize of the official f16, llama.cpp d81235049384), not published yet; \
+         a local file with the pinned sha256 loads (docs/how-it-works.md, Embeddings)",
+    ),
+    qwen(
+        "qwen3-4b-q4",
+        Qwen::B4,
+        "Q4_K_M",
+        PresetStatus::Available,
+        WeightsFile {
+            file_name: "Qwen3-Embedding-4B-Q4_K_M.gguf",
+            url: qwen_url!(B4, "Qwen3-Embedding-4B-Q4_K_M.gguf"),
+            sha256: "2b0cf8f17b4c723c27303015383c27ec4bf2d8314bb677d05e920dd70bb0f16b",
+            bytes: 2_496_703_776,
+        },
+        "official Q4_K_M; GPU",
+    ),
+    qwen(
+        "qwen3-4b-q8",
+        Qwen::B4,
+        "Q8_0",
+        PresetStatus::Available,
+        WeightsFile {
+            file_name: "Qwen3-Embedding-4B-Q8_0.gguf",
+            url: qwen_url!(B4, "Qwen3-Embedding-4B-Q8_0.gguf"),
+            sha256: "b60ae5ce2dd6a0b77f82cadf21def1f310a3e10cde380ad0081b07a9d416949d",
+            bytes: 4_279_660_224,
+        },
+        "official Q8_0; GPU",
+    ),
+    qwen(
+        "qwen3-8b-q4",
+        Qwen::B8,
+        "Q4_K_M",
+        PresetStatus::Available,
+        WeightsFile {
+            file_name: "Qwen3-Embedding-8B-Q4_K_M.gguf",
+            url: qwen_url!(B8, "Qwen3-Embedding-8B-Q4_K_M.gguf"),
+            sha256: "3fcd3febec8b3fd64435204db75bf0dd73b91e8d0661e0331acfe7e7c3120b85",
+            bytes: 4_676_804_928,
+        },
+        "official Q4_K_M; GPU, service mode",
+    ),
+    qwen(
+        "qwen3-8b-q8",
+        Qwen::B8,
+        "Q8_0",
+        PresetStatus::Available,
+        WeightsFile {
+            file_name: "Qwen3-Embedding-8B-Q8_0.gguf",
+            url: qwen_url!(B8, "Qwen3-Embedding-8B-Q8_0.gguf"),
+            sha256: "d20ddc71e8a5c4344f2343481e242233a997dc5eaff442427a945836c97b4deb",
+            bytes: 8_047_105_824,
+        },
+        "official Q8_0; GPU, service mode",
+    ),
+    planned(
+        "coderank-137m",
+        "nomic-ai/CodeRankEmbed",
+        "3c4b60807d71f79b43f3c4363786d9493691f8b1",
+        "MIT",
+        Pooling::Cls,
+        QueryStyle::Prefix { prefix: "Represent this query for searching relevant code: " },
+        "NomicBERT architecture (supported by llama.cpp as `nomic-bert`); needs a Rueca-hosted GGUF conversion",
+    ),
+    planned(
+        "gte-modernbert-149m",
+        "Alibaba-NLP/gte-modernbert-base",
+        "e7f32e3c00f91d699e8c43b53106206bcc72bb22",
+        "Apache-2.0",
+        Pooling::Cls,
+        QueryStyle::Prefix { prefix: "" },
+        "ModernBERT architecture (llama.cpp `modern-bert`, ggml-org/llama.cpp#15641 and #18330); \
+         needs a Rueca-hosted GGUF conversion",
+    ),
+    remote("remote:voyage/voyage-code-4", 2048),
+    remote("remote:voyage/voyage-code-3", 2048),
+    remote("remote:openai/text-embedding-3-large", 3072),
+    remote("remote:gemini/gemini-embedding-001", 3072),
+    remote("remote:bedrock/titan-embed-text-v2", 1024),
+    remote("remote:bedrock/cohere-embed-v4", 1536),
+];
+
+/// sha256 of the phase 0 local conversion (`llama-quantize` of the official
+/// f16 to `Q4_K_M`); the published release asset must match it.
+const Q4_SHA256: &str = "44f67b5875def0e90ae67247b141a5a861538efb8d8b0f783eef3d94211d9dcd";
+/// Size of that conversion.
+const Q4_BYTES: u64 = 396_474_560;
+
+/// Finds a preset by name.
+///
+/// # Errors
+///
+/// [`Error::UnknownPreset`] when no preset has that name.
+pub fn preset(name: &str) -> Result<&'static Preset> {
+    PRESETS.iter().find(|p| p.name == name).ok_or_else(|| Error::UnknownPreset(name.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn manifest_integrity() {
+        let mut names = HashSet::new();
+        let mut files = HashSet::new();
+        for p in PRESETS {
+            assert!(names.insert(p.name), "duplicate preset {}", p.name);
+            assert!(p.min_dims <= p.dims, "{}", p.name);
+            if let Some(w) = p.weights {
+                assert_eq!(w.sha256.len(), 64, "{}", p.name);
+                assert!(w.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{}", p.name);
+                assert!(w.bytes > 0, "{}", p.name);
+                assert!(w.url.starts_with("https://") && w.url.ends_with(w.file_name), "{}", p.name);
+                assert!(files.insert(w.sha256), "duplicate file in {}", p.name);
+            }
+            match p.kind {
+                PresetKind::Remote => assert!(p.name.starts_with("remote:") && p.weights.is_none()),
+                PresetKind::Local => assert!(!p.name.contains(':') && !p.name.contains('/'), "{}", p.name),
+            }
+            assert_eq!(p.status == PresetStatus::Available, p.pullable().is_ok(), "{}", p.name);
+        }
+        assert_eq!(PRESETS[0].name, DEFAULT_PRESET);
+        assert!(preset("nope").is_err());
+    }
+
+    #[test]
+    fn default_preset_is_the_official_q8() {
+        let p = preset(DEFAULT_PRESET).unwrap();
+        let w = p.weights.unwrap();
+        assert_eq!(w.sha256, "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439");
+        assert_eq!(w.bytes, 639_150_592);
+        assert_eq!((p.dims, p.pooling, p.status), (1024, Pooling::Last, PresetStatus::Available));
+    }
+}

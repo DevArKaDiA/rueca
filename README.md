@@ -91,7 +91,8 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/DevArKaDiA/rueca/releases/download/v0.1.0-alpha.2/rueca-installer.sh | sh
 ```
 
-With Cargo (Rust 1.90+):
+With Cargo (Rust 1.90+; the default `embeddings` feature builds llama.cpp and
+needs CMake and a C/C++ compiler, `--no-default-features` skips it):
 
 ```sh
 cargo install rueca@0.1.0-alpha.2 --locked
@@ -196,6 +197,20 @@ repositories) and the others at their default, and the cross-repository
 edges into a ref follow the symbols it still has
 ([RFC 0006](docs/rfcs/0006-org-graph.md),
 [how it works](docs/how-it-works.md#46-the-organization-layer-rueca-segment-org)).
+
+### Embeddings (preview)
+
+Semantic search ([RFC 0007](docs/rfcs/0007-semantic-search.md)) is in
+phase 0: the model runtime and a batch command, not yet used by
+`search_symbols`.
+
+```sh
+rueca models list                                  # presets (Qwen3-Embedding GGUF files) and the cache
+rueca models pull                                  # the default preset, sha256-verified, into $RUECA_HOME/models
+rueca embed --input in.jsonl --output out.jsonl    # {"id","text","query"} lines → {"id","vector"} lines
+```
+
+See [how it works, §10](docs/how-it-works.md#10-embeddings-rfc-0007).
 
 ## Use it from an agent
 
@@ -370,6 +385,7 @@ More languages (Kotlin, Swift, Ruby, C#, …) follow the same gate.
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
 | [`rueca-query`](crates/rueca-query) | the tools, organization scope |
 | [`rueca-mcp`](crates/rueca-mcp) | MCP server: its own protocol layer ([reference](docs/mcp-protocol.md)), stdio |
+| [`rueca-embed`](crates/rueca-embed) | embedding presets, weights cache, llama.cpp runtime |
 
 ## Contributing
 

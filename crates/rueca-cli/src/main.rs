@@ -12,6 +12,9 @@
 //! rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
 //! rueca contracts [--org FILE|NAME | --root PATH] [--repo ID [--ref NAME]] [--side provided|consumed|dangling]
 //!                 [--kind http|rpc|topic] [--query TEXT] [--limit N] [--store DIR] [--json | --text]
+//! rueca embed [--preset P] [--dims N] [--max-tokens N] [--batch N] [--cpu] [--threads N]
+//!             [--input FILE|-] [--output FILE|-] [--format jsonl|f32le] [--info | --bench | --text TEXT]
+//! rueca models list | pull [PRESET] | rm PRESET | path PRESET
 //! ```
 //!
 //! `--store`, `--root`, `--org`, `-v`, `--json` and `--pretty` are global
@@ -50,6 +53,8 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod contracts;
+mod embed;
+mod models;
 
 use clap::{Parser, Subcommand};
 use rueca_segment::org::OrgGeneration;
@@ -176,6 +181,14 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         #[arg(long)]
         text: bool,
     },
+    /// Embed JSON lines (`{"id","text","query"}`) into vectors with a model
+    /// preset (RFC 0007): the batch entry point of the bench's vector arm.
+    Embed(embed::EmbedArgs),
+    /// Manage embedding model weights: list, pull, rm, path.
+    Models {
+        #[command(subcommand)]
+        command: models::ModelsCommand,
+    },
 }
 
 fn main() -> ExitCode {
@@ -213,6 +226,8 @@ fn main() -> ExitCode {
             let engine = query_engine(&store, cli.root, cli.org.as_deref());
             engine.and_then(|e| contracts::cmd_contracts(&e, &filters, out.json, out.pretty))
         }
+        Command::Embed(args) => embed::run(&store, &args, cli.pretty),
+        Command::Models { command } => models::run(&store, &command, cli.json, cli.pretty),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -226,7 +241,8 @@ fn main() -> ExitCode {
 fn init_logging(verbose: u8, serving: bool) {
     let default = match verbose {
         0 if serving => "info",
-        0 => "warn",
+        // llama.cpp reports model-file quirks as warnings on every load.
+        0 => "warn,llama-cpp-2=error",
         1 => "debug",
         _ => "trace",
     };
