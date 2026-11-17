@@ -426,13 +426,11 @@ impl Engine {
         }
         for (vi, nodes) in per_view {
             let (Some(v), Some(q)) = (dense.vectors[vi], dense.queries[vi].as_deref()) else { continue };
-            if let Ok(rescored) = rescore(&cache, v, q, &nodes) {
-                for (n, cos) in rescored {
-                    if let Some(c) = cands.get_mut(&(vi, n)) {
-                        c.cos = Some(cos);
-                    }
-                }
-            }
+            // A cache that fails to read leaves the int8 scores.
+            let rescored = rescore(&cache, v, q, &nodes).unwrap_or_default();
+            rescored.into_iter().for_each(|(n, cos)| {
+                cands.entry((vi, n)).and_modify(|c| c.cos = Some(cos));
+            });
         }
     }
 }
