@@ -20,6 +20,12 @@ TypeScript, Markdown; 55 lines), indexed by the server itself on start-up
 | `framing.json` | 1 | 22 | malformed JSON, a batch array, empty and whitespace lines, a JSON string, a client response, `jsonrpc` 1.0, no `jsonrpc`, an extra member, a fractional id, CRLF; a `ping` after each |
 | `shutdown.json` | 4 | 5 | stdin closed after `initialize`, after `server/discover`, before any message, after a `ping` only |
 
+`../golden.rs` replays every session against Rueca's own MCP layer (in
+process, over pipes) and compares every line byte for byte. The differences
+decided on purpose ([`docs/mcp-protocol.md`](../../../../docs/mcp-protocol.md)
+§9) are spelled out there (`OVERRIDES`, `EXIT_1_IN_RMCP`); these files stay
+as rmcp wrote them.
+
 ## Format
 
 ```json
