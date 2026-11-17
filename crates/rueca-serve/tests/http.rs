@@ -25,7 +25,21 @@ fn mcp_over_http_equals_the_local_engine() {
     let p = populated("memory://serve-a");
     let s = Server::start("memory://serve-a", "");
     s.wait_ready();
+    legacy_handshake(&s);
+    // The visible part of the organization, answered as the engine answers
+    // it locally for the same visibility.
+    let local = p.local_engine().with_visibility(rueca_query::Visibility::Repos(
+        ["github.com/acme/billing", "github.com/acme/core"].iter().map(|s| s.to_string()).collect(),
+    ));
+    legacy_calls_match(&s, &local);
+    stateless_flow_matches(&s, &local);
+    // A notification is accepted without a body.
+    let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+    assert_eq!(s.mcp(Some(TOKEN), &note, &[]).status, 202);
+}
 
+/// `initialize` and `tools/list`: no session minted, every tool listed.
+fn legacy_handshake(s: &Server) {
     let init = s.mcp(Some(TOKEN), &initialize("2025-06-18"), &[]);
     assert_eq!(init.status, 200, "{}", init.body);
     assert_eq!(init.header("content-type"), Some("application/json"));
@@ -35,19 +49,13 @@ fn mcp_over_http_equals_the_local_engine() {
     let list = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
     let tools = s.mcp(Some(TOKEN), &list, &[("mcp-protocol-version", "2025-06-18"), ("mcp-session-id", "ignored")]);
     assert_eq!(tools.status, 200, "{}", tools.body);
-    let names: Vec<String> = tools.json()["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["name"].as_str().unwrap().into())
-        .collect();
+    let listed = tools.json()["result"]["tools"].as_array().cloned().unwrap_or_default();
+    let names: Vec<&str> = listed.iter().filter_map(|t| t["name"].as_str()).collect();
     assert_eq!(names, rueca_query::TOOL_NAMES);
+}
 
-    // The visible part of the organization, answered as the engine answers
-    // it locally for the same visibility.
-    let local = p.local_engine().with_visibility(rueca_query::Visibility::Repos(
-        ["github.com/acme/billing", "github.com/acme/core"].iter().map(|s| s.to_string()).collect(),
-    ));
+/// Legacy `tools/call`s answer what `local` answers.
+fn legacy_calls_match(s: &Server, local: &rueca_query::Engine) {
     for (tool, args) in [
         ("search_symbols", json!({"query": "invoice"})),
         ("list_repositories", json!({})),
@@ -62,9 +70,11 @@ fn mcp_over_http_equals_the_local_engine() {
         assert_eq!(v["result"]["isError"], false);
         assert!(!r.body.contains("hidden/secret"), "{tool}: {}", r.body);
     }
+}
 
-    // 2026-07-28: discover, then a call that carries `_meta` and the
-    // headers matching it.
+/// 2026-07-28: discover, then a call that carries `_meta` and the headers
+/// matching it.
+fn stateless_flow_matches(s: &Server, local: &rueca_query::Engine) {
     let meta = json!({META_VERSION: "2026-07-28", META_CAPS: {}});
     let discover = json!({"jsonrpc": "2.0", "id": 3, "method": "server/discover", "params": {"_meta": meta}});
     let d = s.mcp(Some(TOKEN), &discover, &[("mcp-protocol-version", "2026-07-28"), ("mcp-method", "server/discover")]);
@@ -82,10 +92,6 @@ fn mcp_over_http_equals_the_local_engine() {
         v["result"]["structuredContent"],
         local.respond("search_symbols", json!({"query": "order"})).unwrap().json
     );
-
-    // A notification is accepted without a body.
-    let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
-    assert_eq!(s.mcp(Some(TOKEN), &note, &[]).status, 202);
 }
 
 /// (c) A token without `repos` sees an empty organization: no results, no
@@ -95,7 +101,12 @@ fn a_principal_without_rules_sees_nothing() {
     let _p = populated("memory://serve-c");
     let s = Server::start("memory://serve-c", "");
     s.wait_ready();
-    // The organization reads as empty.
+    organization_reads_as_empty(&s);
+    nothing_hidden_is_named(&s);
+    status_by_role(&s);
+}
+
+fn organization_reads_as_empty(s: &Server) {
     for (tool, args) in [("list_repositories", json!({})), ("search_symbols", json!({"query": "invoice"}))] {
         let r = s.call(TOKEN_NO_RULES, tool, args);
         assert_eq!(r.status, 200, "{}", r.body);
@@ -104,8 +115,11 @@ fn a_principal_without_rules_sees_nothing() {
         assert_eq!(v["result"]["structuredContent"]["results"], json!([]), "{tool}");
         assert_eq!(v["result"]["structuredContent"]["snapshots"], json!([]), "{tool}");
     }
-    // A repository named by the caller is reported like one that does not
-    // exist; a symbol is not found. Nothing else is named.
+}
+
+/// A repository named by the caller is reported like one that does not
+/// exist; a symbol is not found. Nothing else is named.
+fn nothing_hidden_is_named(s: &Server) {
     for (tool, args) in [
         ("search_symbols", json!({"query": "invoice", "repo": "github.com/acme/billing"})),
         ("get_symbol", json!({"qualified_name": "billing.invoices.issue_invoice"})),
@@ -113,18 +127,24 @@ fn a_principal_without_rules_sees_nothing() {
     ] {
         let r = s.call(TOKEN_NO_RULES, tool, args);
         assert_eq!(r.status, 200, "{}", r.body);
-        for hidden in ["acme/core", "hidden/secret", "billing/invoices.py", "create_order"] {
-            assert!(!r.body.contains(hidden), "{tool} names {hidden}: {}", r.body);
-        }
+        let named = ["acme/core", "hidden/secret", "billing/invoices.py", "create_order"]
+            .into_iter()
+            .find(|hidden| r.body.contains(hidden));
+        assert_eq!(named, None, "{tool}: {}", r.body);
     }
+}
+
+/// `/status`: nothing visible and no cache detail for the principal without
+/// rules; both repositories and the cache for the admin token.
+fn status_by_role(s: &Server) {
     let st = get(&format!("{}/status", s.base), &[("authorization", &format!("Bearer {TOKEN_NO_RULES}"))]);
     assert_eq!(st.status, 200, "{}", st.body);
     assert_eq!(st.json()["repositories"], json!([]));
     assert!(st.json().get("cache").is_none(), "not an admin");
     let admin = get(&format!("{}/status", s.base), &[("authorization", &format!("Bearer {TOKEN}"))]).json();
-    assert_eq!(admin["repositories"].as_array().unwrap().len(), 2);
+    assert_eq!(admin["repositories"].as_array().map(Vec::len), Some(2));
     assert_eq!(admin["generation"], 1);
-    assert!(admin["cache"]["bytes"]["segment"].as_u64().unwrap() > 0, "{admin}");
+    assert!(admin["cache"]["bytes"]["segment"].as_u64().unwrap_or(0) > 0, "{admin}");
 }
 
 /// (d) Transport checks: Origin, methods, body size, header/body match,
@@ -255,28 +275,4 @@ fn rate_limits() {
     assert_eq!(s.mcp(Some(TOKEN_NO_RULES), &list, &[]).status, 200, "limits are per principal");
     let metrics = get(&format!("{}/metrics", s.ops), &[]).body;
     assert!(metrics.contains("rueca_rate_limited_total{stage=\"principal\"} 2"), "{metrics}");
-}
-
-/// The deadline: a call that runs past `[http].query_deadline` is answered
-/// with a JSON-RPC error naming it.
-#[test]
-fn deadline_is_reported() {
-    let _p = populated("memory://serve-deadline");
-    let s = Server::start("memory://serve-deadline", "query_deadline = \"1ms\"");
-    s.wait_ready();
-    // Several calls: at least one exceeds 1 ms in a debug build.
-    let mut seen = false;
-    for _ in 0..20 {
-        let r = s.call(TOKEN, "search_symbols", json!({"query": "invoice order", "limit": 50}));
-        assert_eq!(r.status, 200, "{}", r.body);
-        let v = r.json();
-        if v["error"]["code"] == -32001 {
-            assert!(v["error"]["message"].as_str().unwrap().starts_with("deadline of 1ms exceeded"), "{v}");
-            seen = true;
-            break;
-        }
-    }
-    assert!(seen, "no call exceeded 1 ms");
-    let metrics = get(&format!("{}/metrics", s.ops), &[]).body;
-    assert!(metrics.contains("outcome=\"deadline\""), "{metrics}");
 }

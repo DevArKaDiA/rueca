@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use rueca_model::{
     ContractKind, ContractRow, ContractSide, Edge, EdgeKind, EdgeMeta, FileEntry, Label, Language, Node, ResolvedGraph,
@@ -501,6 +502,26 @@ fn content_context_filters_and_limits() {
 // ---------------------------------------------------------------------------
 // Content packs
 // ---------------------------------------------------------------------------
+
+/// A passed deadline stops both searches with `DeadlineExceeded`; a future
+/// one changes nothing.
+#[test]
+fn searches_stop_at_their_deadline() {
+    let (_dir, _g, seg) = open_fixture();
+    let past = Some(Instant::now());
+    let late = seg.search_symbols(&SymbolQuery { deadline: past, ..sym("user") });
+    assert!(matches!(late, Err(SegmentError::DeadlineExceeded)), "{late:?}");
+    let merged = rueca_segment::search_symbols_merged(&[&seg, &seg], &SymbolQuery { deadline: past, ..sym("user") });
+    assert!(matches!(merged, Err(SegmentError::DeadlineExceeded)), "{merged:?}");
+    let late = seg.search_content(&ContentQuery { deadline: past, ..content_query("user") });
+    assert!(matches!(late, Err(SegmentError::DeadlineExceeded)), "{late:?}");
+
+    let future = Some(Instant::now() + Duration::from_secs(600));
+    let on_time = seg.search_symbols(&SymbolQuery { deadline: future, ..sym("user") }).unwrap();
+    assert_eq!(ids(&on_time), ids(&seg.search_symbols(&sym("user")).unwrap()));
+    let on_time = seg.search_content(&ContentQuery { deadline: future, ..content_query("user") }).unwrap();
+    assert_eq!(on_time, seg.search_content(&content_query("user")).unwrap());
+}
 
 #[test]
 fn content_round_trip() {

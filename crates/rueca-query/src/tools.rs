@@ -13,6 +13,7 @@ use crate::args::{
     CommonArgs, DirectionArg, GetFileOutlineArgs, GetSnippetArgs, GetSymbolArgs, ListRepositoriesArgs, RepoArg,
     SearchCodeArgs, SearchSymbolsArgs, TraceArgs, clamp_int,
 };
+use crate::deadline::Deadline;
 use crate::refset::{self, EdgeMap, Ident, Key, NodeMerge, TracedEdge};
 use crate::snapshot::{SnapshotDesc, short_commit};
 use crate::text::{join_window, split_lines, window};
@@ -255,10 +256,11 @@ impl Engine {
             language: a.language.map(|l| l.to_language()),
             limit: if collapse { offset.saturating_add(limit + 1).saturating_mul(per_repo) } else { limit + 1 },
             offset: if collapse { 0 } else { offset },
+            deadline: self.deadline.at(),
         };
         let ranked = self.rank_symbols(&sel, &base)?;
         let mut ranked: Vec<(Key, f64, Option<RefMark>)> = if collapse {
-            refset::collapse_hits(views, ranked).into_iter().skip(offset).collect()
+            refset::collapse_hits(views, ranked, &self.deadline)?.into_iter().skip(offset).collect()
         } else {
             ranked.into_iter().map(|(vi, n, score)| ((vi, n), score, None)).collect()
         };
@@ -315,6 +317,7 @@ impl Engine {
         let view_of: HashMap<OrgSlot, usize> =
             views.iter().enumerate().filter_map(|(vi, v)| v.org_slot.map(|s| (s, vi))).collect();
         let boost = self.route_boost(org, &base.text, &mut selected)?;
+        self.deadline.check()?;
         let scope = OrgScope { visible: &org.visible, selected: &selected, view: Some(&org.view) };
         let local_stats = self.route.local_stats && self.route.mode != RouteMode::Off;
         Ok(org
@@ -370,6 +373,7 @@ impl Engine {
             language: a.language.map(|l| l.to_language()),
             max_matches: skip + limit + 1,
             context_lines: context,
+            deadline: self.deadline.at(),
             ..ContentQuery::default()
         };
         let mut all: Vec<(usize, ContentMatch)> = Vec::new();
@@ -380,6 +384,7 @@ impl Engine {
                 more = true;
                 break;
             }
+            self.deadline.check()?;
             let res = view.seg.search_content(&base)?;
             more |= res.truncated;
             files_scanned += res.files_scanned;
@@ -426,6 +431,7 @@ impl Engine {
         let (vi, found, extra) = resolve_symbol(&views, &sel, parts.as_ref())?;
         let n = found.node;
         // Several refs of its repository: one item per distinct version.
+        self.deadline.check()?;
         let versions = if a.common.verbose() { vec![((vi, n), None)] } else { refset::symbol_versions(&views, vi, n) };
         let extra = if versions[0].1.is_some() { drop_versions(&views, (vi, n), extra) } else { extra };
         let result = symbol_result(&views[vi], n, found.candidates, extra);
@@ -562,7 +568,7 @@ impl Engine {
             merge,
         };
         let out = self.bfs(&mut views, org.as_ref(), &roots, &walk)?;
-        let result = trace_result(&views, &roots, out, merge);
+        let result = trace_result(&views, &roots, out, merge, &self.deadline)?;
         if verbose_fmt {
             return verbose(&result);
         }
@@ -639,12 +645,15 @@ impl Engine {
             idents: HashSet::new(),
         };
         let mut frontier: HashMap<Dir, Vec<Key>> = walk.dirs.iter().map(|&d| (d, roots.to_vec())).collect();
+        let mut expanded = 0usize;
         for level in 1..=walk.depth {
             for &dir in walk.dirs {
-                let mut current = std::mem::take(frontier.get_mut(&dir).expect("dir"));
+                let mut current = frontier.remove(&dir).unwrap_or_default();
                 current.sort_by_cached_key(|&k| (views[k.0].node(k.1).qualified_name.clone(), k));
                 let mut next = Vec::new();
                 for from in current {
+                    self.deadline.tick(expanded)?;
+                    expanded += 1;
                     for &kind in walk.kinds {
                         let hop = Hop { level, dir, from, kind };
                         for nb in self.neighbours(views, org, from, dir, kind)? {
@@ -663,7 +672,7 @@ impl Engine {
         let views = self.scope(&a.common, None)?;
         let hits = resolve_path(&views, &a.path)?;
         let (vi, file) = hits[0];
-        let result = outline_result(&views[vi], file);
+        let result = outline_result(&views[vi], file, &self.deadline)?;
         if a.common.verbose() {
             return verbose(&result);
         }
@@ -674,8 +683,10 @@ impl Engine {
         let mark = (!versions.is_empty()).then(|| versions.remove(0).2);
         let others: Vec<OutlineVersion> = versions
             .into_iter()
-            .map(|(vj, f, mark)| OutlineVersion { view: vj, outline: outline_result(&views[vj], f), mark })
-            .collect();
+            .map(|(vj, f, mark)| {
+                Ok(OutlineVersion { view: vj, outline: outline_result(&views[vj], f, &self.deadline)?, mark })
+            })
+            .collect::<anyhow::Result<_>>()?;
         let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
         let answer = compact::OutlineAnswer { view: vi, result: &result, mark: mark.as_ref(), versions: &others };
         Ok(compact::outline(&snaps, &answer, offset, budget(&a.common)))
@@ -683,15 +694,16 @@ impl Engine {
 }
 
 /// The outline of `file` in `view`.
-fn outline_result(view: &View, file: FileId) -> FileOutlineResult {
+fn outline_result(view: &View, file: FileId, deadline: &Deadline) -> anyhow::Result<FileOutlineResult> {
+    deadline.check()?;
     let entry = view.seg.file(file);
     let symbols = view.file_symbols(file);
-    FileOutlineResult {
+    Ok(FileOutlineResult {
         path: entry.path.clone(),
         language: entry.language.map(|l| l.as_str().to_string()),
         line_count: entry.line_count,
-        symbols: outline_tree(view, &symbols),
-    }
+        symbols: outline_tree(view, &symbols, deadline)?,
+    })
 }
 
 impl Engine {
@@ -824,10 +836,16 @@ fn org_dependencies(org: &OrgCtx, i: usize) -> (Vec<String>, Vec<String>) {
 /// in other snapshots). With `merge` (several snapshots of one repository),
 /// the versions of a symbol are one node and the same edge of several
 /// snapshots one edge, each with its mark.
-fn trace_result(views: &[View], roots: &[Key], out: BfsOut, merge: bool) -> TraceResult {
+fn trace_result(
+    views: &[View],
+    roots: &[Key],
+    out: BfsOut,
+    merge: bool,
+    deadline: &Deadline,
+) -> anyhow::Result<TraceResult> {
     let root = roots[0];
     let qn = |k: Key| views[k.0].node(k.1).qualified_name.clone();
-    let m = merge.then(|| NodeMerge::build(views, roots, out.nodes.iter().map(|n| n.2)));
+    let m = if merge { Some(NodeMerge::build(views, roots, out.nodes.iter().map(|n| n.2), deadline)?) } else { None };
     let (edges, tests_excluded) = match &m {
         Some(m) => {
             let tests: HashSet<Ident> = out.tests_excluded.iter().map(|&k| refset::ident(views, k)).collect();
@@ -854,7 +872,7 @@ fn trace_result(views: &[View], roots: &[Key], out: BfsOut, merge: bool) -> Trac
     let mut edges: Vec<(EdgeSortKey, TracedEdge)> =
         edges.into_iter().map(|e| ((qn(e.0), e.0, qn(e.1), e.1, e.2), e)).collect();
     edges.sort_by(|a, b| a.0.cmp(&b.0));
-    TraceResult {
+    Ok(TraceResult {
         root_view: root.0,
         root: views[root.0].brief(root.1),
         root_mark: mark(root),
@@ -871,7 +889,7 @@ fn trace_result(views: &[View], roots: &[Key], out: BfsOut, merge: bool) -> Trac
         edges: edges.into_iter().map(|(_, e)| trace_edge(views, e)).collect(),
         truncated: out.truncated,
         tests_excluded: tests_excluded as u32,
-    }
+    })
 }
 
 fn trace_edge(views: &[View], (src, dst, kind, (meta, ev), mark): TracedEdge) -> TraceEdge {
@@ -1012,7 +1030,7 @@ impl BfsState {
             return None;
         }
         self.idents.extend(ident);
-        self.visited.get_mut(&hop.dir).expect("dir").insert(other);
+        self.visited.entry(hop.dir).or_default().insert(other);
         self.out.nodes.push((hop.level, hop.dir, other));
         Some(true)
     }
@@ -1042,10 +1060,16 @@ impl NeighbourFilter<'_> {
 
 /// Nests `symbols` by `DEFINES` parent (when the parent is in the same file)
 /// or else by span containment; children ordered by line.
-fn outline_tree(view: &View, symbols: &[(NodeId, rueca_model::Span)]) -> Vec<OutlineSymbol> {
+fn outline_tree(
+    view: &View,
+    symbols: &[(NodeId, rueca_model::Span)],
+    deadline: &Deadline,
+) -> anyhow::Result<Vec<OutlineSymbol>> {
     let ids: HashSet<NodeId> = symbols.iter().map(|(n, _)| *n).collect();
     let mut parent_of: HashMap<NodeId, NodeId> = HashMap::new();
-    for &(n, span) in symbols {
+    for (i, &(n, span)) in symbols.iter().enumerate() {
+        // Finding a parent by containment scans every symbol of the file.
+        deadline.tick(i)?;
         let defines_parent = view
             .seg
             .in_edges(n, Some(EdgeKind::Defines))
@@ -1101,5 +1125,5 @@ fn outline_tree(view: &View, symbols: &[(NodeId, rueca_model::Span)]) -> Vec<Out
             })
             .unwrap_or_default()
     }
-    build(view, &children, None)
+    Ok(build(view, &children, None))
 }

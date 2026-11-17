@@ -1612,13 +1612,15 @@ impl OrgIndex {
         let want = query.offset.saturating_add(limit);
         let seg_boost: HashMap<SegmentId, f32> =
             by_segment.iter().filter_map(|(&sid, (slot, _))| boost.get(&slot.repo).map(|&b| (sid, b))).collect();
+        let top = symbols::TopK { want, keep: &keep, deadline: query.deadline };
         let hits = if local_stats {
             let mut all = Vec::new();
             for (sid, p) in priors {
+                crate::check_deadline(query.deadline)?;
                 let own = HashSet::from([sid]);
                 let stats = SubsetStats { searcher: &searcher, segments: &own };
                 let one: PriorsBySegment = HashMap::from([(sid, p)]);
-                all.extend(symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(one), &seg_boost, want, &keep)?);
+                all.extend(symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(one), &seg_boost, &top)?);
             }
             all.sort_by(|a, b| {
                 b.score.total_cmp(&a.score).then(a.segment_ord.cmp(&b.segment_ord)).then(a.doc.cmp(&b.doc))
@@ -1627,7 +1629,7 @@ impl OrgIndex {
             all
         } else {
             let stats = SubsetStats { searcher: &searcher, segments: &visible };
-            symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(priors), &seg_boost, want, &keep)?
+            symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(priors), &seg_boost, &top)?
         };
         Ok(hits
             .into_iter()

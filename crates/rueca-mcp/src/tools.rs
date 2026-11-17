@@ -5,11 +5,12 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Instant;
 
+use rueca_query::{DeadlineExceeded, RespondOptions};
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::RuecaServer;
-use crate::jsonrpc::{Outgoing, RequestId};
+use crate::jsonrpc::{ErrorObject, Outgoing, RequestId, code};
 
 /// `resultType` of every complete 2026-07-28 result.
 pub(crate) const COMPLETE: &str = "complete";
@@ -193,9 +194,24 @@ impl ToolCall {
     /// Runs the call and builds its response. Engine errors and panics
     /// become results with `isError: true`, visible to the model.
     pub fn run(self, server: &RuecaServer) -> Outgoing {
+        self.run_with(server, RespondOptions::default())
+    }
+
+    /// [`ToolCall::run`] with per-call options (the caller's visibility, a
+    /// deadline; [`rueca_query::Engine::respond_with`]). A call stopped by
+    /// its deadline is answered with the JSON-RPC error
+    /// [`DEADLINE_EXCEEDED`](crate::DEADLINE_EXCEEDED), whose message names
+    /// the deadline, rather than a tool result.
+    pub fn run_with(self, server: &RuecaServer, opts: RespondOptions) -> Outgoing {
         let started = Instant::now();
         let ToolCall { id, name, args, modern } = self;
-        let outcome = catch_unwind(AssertUnwindSafe(|| server.call_blocking(&name, args)));
+        let outcome = catch_unwind(AssertUnwindSafe(|| server.call_blocking(&name, args, opts)));
+        if let Ok(Err(err)) = &outcome
+            && let Some(exceeded) = err.downcast_ref::<DeadlineExceeded>()
+        {
+            tracing::debug!(tool = %name, error = %exceeded, "tool call stopped by its deadline");
+            return Outgoing::error(id, ErrorObject::new(code::DEADLINE_EXCEEDED, exceeded.to_string()));
+        }
         let result = match outcome {
             Ok(Ok(response)) => {
                 let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);

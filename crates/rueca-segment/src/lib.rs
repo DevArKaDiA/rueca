@@ -208,6 +208,11 @@
 //! `max_matches` or when the next file would exceed `scan_budget_bytes`, and
 //! sets `truncated`. One match per line, ordered by (path, line).
 //!
+//! Both searches take an optional `deadline` (RFC 0008 §6.5): symbol search
+//! checks it before scoring each tantivy segment and before each over-fetch
+//! round, content search before verifying each candidate file; once it has
+//! passed the search returns [`SegmentError::DeadlineExceeded`].
+//!
 //! # Content pack format (`.rcpack`, version 1)
 //!
 //! ```text
@@ -296,6 +301,7 @@ pub mod tokenizer;
 mod writer;
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use rueca_model::{
     ContractRow, EdgeKind, EdgeMeta, FileEntry, FileId, Label, Language, Node, NodeId, ResolvedGraph, SnapshotInfo,
@@ -334,6 +340,18 @@ pub enum SegmentError {
     NotFound(String),
     #[error("{0}")]
     Other(String),
+    /// The query's `deadline` passed before the search finished.
+    #[error("the search deadline passed")]
+    DeadlineExceeded,
+}
+
+/// `Err(DeadlineExceeded)` when `deadline` has passed: one `Instant::now()`
+/// comparison, cheap enough for a loop over segments or files.
+pub(crate) fn check_deadline(deadline: Option<Instant>) -> Result<()> {
+    match deadline {
+        Some(at) if Instant::now() >= at => Err(SegmentError::DeadlineExceeded),
+        _ => Ok(()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -512,6 +530,10 @@ pub struct SymbolQuery {
     pub language: Option<Language>,
     pub limit: usize,
     pub offset: usize,
+    /// When the search must stop ([`SegmentError::DeadlineExceeded`]):
+    /// checked before each tantivy segment is scored and before each
+    /// over-fetch round, and per segment of a merged ranking.
+    pub deadline: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -534,6 +556,9 @@ pub struct ContentQuery {
     pub context_lines: u32,
     /// Upper bound on bytes verified; hitting it sets `truncated`.
     pub scan_budget_bytes: u64,
+    /// When the scan must stop ([`SegmentError::DeadlineExceeded`]):
+    /// checked before verifying each candidate file.
+    pub deadline: Option<Instant>,
 }
 
 impl Default for ContentQuery {
@@ -547,6 +572,7 @@ impl Default for ContentQuery {
             max_matches: 100,
             context_lines: 0,
             scan_budget_bytes: 256 * 1024 * 1024,
+            deadline: None,
         }
     }
 }
@@ -685,6 +711,7 @@ pub fn search_symbols_merged(segments: &[&Segment], query: &SymbolQuery) -> Resu
     let stats = symbols::SummedStats { searchers: &searchers };
     let mut all: Vec<(usize, SymbolHit)> = Vec::new();
     for (i, seg) in segments.iter().enumerate() {
+        check_deadline(query.deadline)?;
         let index = seg.inner.symbols();
         let q = symbols::build_query(index.fields(), query);
         let priors: std::sync::Arc<symbols::PriorsBySegment> =
@@ -693,7 +720,8 @@ pub fn search_symbols_merged(segments: &[&Segment], query: &SymbolQuery) -> Resu
         let keep = |_: tantivy::index::SegmentId, doc: u32| {
             (doc as usize) < n && glob.as_ref().is_none_or(|g| g.is_match(seg.inner.node_path(doc)))
         };
-        let hits = symbols::top_hits(&searchers[i], q.as_ref(), &stats, priors, &Default::default(), want, &keep)?;
+        let top = symbols::TopK { want, keep: &keep, deadline: query.deadline };
+        let hits = symbols::top_hits(&searchers[i], q.as_ref(), &stats, priors, &Default::default(), &top)?;
         all.extend(hits.into_iter().map(|h| (i, SymbolHit { node: h.doc, score: h.score })));
     }
     all.sort_by(|a, b| b.1.score.total_cmp(&a.1.score).then(a.0.cmp(&b.0)).then(a.1.node.cmp(&b.1.node)));

@@ -114,6 +114,7 @@ impl Engine {
         let mut views = Vec::new();
         for &i in &repos {
             for slot in org.view.slots_of(i) {
+                self.deadline.check()?;
                 views.push(self.slot_view(store, &org, slot)?);
             }
         }

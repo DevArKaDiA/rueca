@@ -655,10 +655,23 @@ transport and the caller's visibility differ.
   reported like one that does not exist.
 - **Limits**: `Origin` / `Host` not allowed `403`, body over
   `[http].max_body_bytes` `413`, `GET` / `DELETE` `405`, over a rate limit
-  `429` with `Retry-After`; a tool call over `[http].query_deadline`
-  (10 s) is a JSON-RPC error -32001 ("deadline of 10s exceeded; narrow
-  `repo` or lower `limit`"); before the first generation is served,
+  `429` with `Retry-After`; before the first generation is served,
   -32002.
+- **Deadline**: every tool call has `[http].query_deadline` (10 s) to
+  finish. The engine checks it cooperatively where work loops (per segment
+  of a symbol search, per file of `search_code`'s scan, every 64 nodes of
+  `trace`'s traversal, outline symbols and multi-ref versions) and stops
+  there; the answer is the JSON-RPC error -32001, not a tool result, with
+  a message naming the deadline:
+
+  ```json
+  {"jsonrpc":"2.0","id":7,"error":{"code":-32001,"message":"deadline of 10s exceeded; narrow `repo` or lower `limit`"}}
+  ```
+
+  Retry with a narrower `repo` (one repository instead of the whole
+  organization), a tighter `path_glob`, a lower `limit` or `depth`. A
+  timeout of the same length around the call is the backstop and gives
+  the same error. `rueca mcp` (stdio) and `rueca query` have no deadline.
 - **Operations** (`[http].ops_listen`, no auth): `/healthz`, `/readyz`
   (`503` until a generation is served, then `{"generation": n, "warm":
   "k/m"}`), `/metrics` (Prometheus). `GET /status` on the main listener

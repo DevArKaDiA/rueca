@@ -14,10 +14,12 @@
 //! 4. `initialize`, or a body whose `_meta` carries a protocol version:
 //!    `Session::new()`; anything else: `Session::legacy(<header version>)`.
 //! 5. `Step::Reply` → `200`; `Step::Call` → the tool runs on a blocking
-//!    thread with the caller's visibility, bounded by
-//!    `[http].query_deadline` (on expiry a JSON-RPC error naming the
-//!    deadline; the thread finishes on its own) → `200`; `Step::Silent` and
-//!    `Step::Cancel` → `202`.
+//!    thread ([`rueca_mcp::ToolCall::run_with`]) with the caller's
+//!    visibility and the deadline `now + [http].query_deadline`, which the
+//!    engine checks cooperatively and answers with -32001 naming the
+//!    deadline; a `tokio::time::timeout` of the same length is the
+//!    backstop (also -32001; the thread then finishes on its own) → `200`;
+//!    `Step::Silent` and `Step::Cancel` → `202`.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -28,6 +30,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rueca_mcp::{ErrorObject, Incoming, JsonObject, Outgoing, RequestId, SUPPORTED_VERSIONS, Session, Step, ToolCall};
+use rueca_query::{DeadlineExceeded, RespondOptions};
 use serde_json::{Value, json};
 use tracing::field::Empty;
 
@@ -45,7 +48,7 @@ pub mod code {
     pub const UNSUPPORTED_PROTOCOL_VERSION: i32 = -32022;
     pub const HEADER_MISMATCH: i32 = -32020;
     /// The tool call exceeded `[http].query_deadline`.
-    pub const DEADLINE: i32 = -32001;
+    pub const DEADLINE: i32 = rueca_mcp::DEADLINE_EXCEEDED;
     /// No generation is served yet.
     pub const NOT_READY: i32 = -32002;
 }
@@ -123,7 +126,8 @@ async fn respond(
     }
 }
 
-/// Runs a tool call with the caller's visibility, under the deadline.
+/// Runs a tool call with the caller's visibility, under the deadline: the
+/// engine's cooperative one, and a timeout of the same length as backstop.
 async fn call_tool(
     st: &Arc<AppState>,
     principal: &Principal,
@@ -140,13 +144,14 @@ async fn call_tool(
         return ("error", rpc_error(StatusCode::OK, Some(id), err));
     };
     let visibility = st.visibility.resolve(&principal.repos, current.generation.generation, &current.repos);
-    let server = server.with_visibility(visibility);
     let deadline = st.config.http.query_deadline.0;
     let started = Instant::now();
+    let opts = RespondOptions { deadline: Some(started + deadline), visibility: Some(visibility) };
+    let server = server.clone();
     let task_span = span.clone();
-    let task = tokio::task::spawn_blocking(move || task_span.in_scope(|| call.run(&server)));
+    let task = tokio::task::spawn_blocking(move || task_span.in_scope(|| call.run_with(&server, opts)));
     let (outcome, response) = match tokio::time::timeout(deadline, task).await {
-        Ok(Ok(out)) => (if is_tool_error(&out) { "error" } else { "ok" }, json_response(StatusCode::OK, out.to_json())),
+        Ok(Ok(out)) => (outcome_of(&out), json_response(StatusCode::OK, out.to_json())),
         Ok(Err(join)) => {
             tracing::error!(error = %join, "tool call task failed");
             let err = ErrorObject::new(code::INTERNAL_ERROR, format!("internal error in `{tool}`"));
@@ -158,16 +163,20 @@ async fn call_tool(
     (outcome, response)
 }
 
-/// The error of a call that ran past `deadline`.
+/// The error of a call that ran past `deadline` (the same message the
+/// engine gives, [`DeadlineExceeded`]).
 pub fn deadline_error(deadline: Duration) -> ErrorObject {
-    ErrorObject::new(code::DEADLINE, format!("deadline of {:?} exceeded; narrow `repo` or lower `limit`", deadline))
+    ErrorObject::new(code::DEADLINE, DeadlineExceeded { budget: deadline }.to_string())
 }
 
-/// `ok` / `error`: a tool result with `isError: true` (its last member).
-fn is_tool_error(out: &Outgoing) -> bool {
+/// `ok`; `error`: a tool result with `isError: true` (its last member) or a
+/// JSON-RPC error; `deadline`: the engine stopped at the deadline.
+fn outcome_of(out: &Outgoing) -> &'static str {
     match out {
-        Outgoing::Result { result, .. } => result.get().ends_with("\"isError\":true}"),
-        Outgoing::Error { .. } => true,
+        Outgoing::Result { result, .. } if result.get().ends_with("\"isError\":true}") => "error",
+        Outgoing::Result { .. } => "ok",
+        Outgoing::Error { error, .. } if error.code == code::DEADLINE => "deadline",
+        Outgoing::Error { .. } => "error",
     }
 }
 

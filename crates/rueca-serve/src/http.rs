@@ -3,7 +3,7 @@
 //!
 //! Main listener layers, outermost first (RFC 0008 §6.5): request log →
 //! `Host` / `Origin` and query-string token checks (403 / 400) → body limit
-//! (413) → IP limiter (429) → [`authenticate`] (401 / 403) → principal
+//! (413) → IP limiter (429) → `authenticate` (401 / 403) → principal
 //! limiter (429) → `[http].request_timeout` (503) → the handler.
 //! `/admin/*` and `/webhooks/*` are the indexer role's (phase 2): 404 here.
 

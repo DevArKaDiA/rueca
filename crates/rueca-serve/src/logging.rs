@@ -4,7 +4,7 @@
 //! Fields named `token`, `secret`, `authorization` or `password` (or ending
 //! in `_token`, `_secret`, `_password`) are written as `"[redacted]"`.
 //! With the `otel` feature and `[telemetry].otlp_endpoint`, spans are also
-//! exported over OTLP/HTTP ([`crate::otel`]).
+//! exported over OTLP/HTTP (the `otel` module, feature `otel`).
 
 use std::fmt;
 

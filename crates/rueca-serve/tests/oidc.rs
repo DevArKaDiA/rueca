@@ -52,98 +52,108 @@ fn mint(key: &EncodingKey, claims: Value) -> String {
     jsonwebtoken::encode(&header, &claims, key).unwrap()
 }
 
+/// Mints ES256 tokens for the fake issuer: default claims (subject `ana`,
+/// group `eng`, scope `rueca:read`, valid ten minutes) overridden by `extra`.
+struct Minter {
+    key: EncodingKey,
+    issuer: String,
+    audience: &'static str,
+}
+
+impl Minter {
+    fn token(&self, extra: Value) -> String {
+        let mut c = json!({"iss": self.issuer, "sub": "ana", "aud": self.audience, "exp": now() + 600, "iat": now(),
+            "scope": "openid rueca:read", "groups": ["eng"]});
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            c[k] = v.clone();
+        }
+        mint(&self.key, c)
+    }
+}
+
+const PRM_URL: &str = "http://rueca.test/.well-known/oauth-protected-resource/mcp";
+
+fn list() -> Value {
+    json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+}
+
 #[test]
 fn oidc_tokens_prm_and_challenges() {
     let _p = populated("memory://serve-b");
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
     let key = es256_key();
     let issuer = fake_issuer(&rt, &key);
-    let audience = "http://rueca.test/mcp";
+    let m = Minter { key, issuer, audience: "http://rueca.test/mcp" };
     let extra = format!(
-        r#"canonical_url = "{audience}"
+        r#"canonical_url = "{}"
 allowed_hosts = ["127.0.0.1"]
 
 [[auth.oidc]]
-issuer = "{issuer}"
+issuer = "{}"
 algorithms = ["ES256"]
 rules = [{{ group = "eng", repos = ["github.com/acme/*"] }}]
-"#
+"#,
+        m.audience, m.issuer
     );
     let s = Server::start("memory://serve-b", &extra);
     s.wait_ready();
-    let prm_url = "http://rueca.test/.well-known/oauth-protected-resource/mcp";
-    let list = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
-
-    // No token: 401, the challenge names the PRM.
-    let r = s.mcp(None, &list, &[]);
-    assert_eq!(r.status, 401);
-    assert_eq!(
-        r.header("www-authenticate").unwrap(),
-        format!("Bearer scope=\"rueca:read\", resource_metadata=\"{prm_url}\"")
-    );
-    for path in ["/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource"] {
-        let prm = get(&format!("{}{path}", s.base), &[]);
-        assert_eq!(prm.status, 200, "{}", prm.body);
-        let v = prm.json();
-        assert_eq!(v["resource"], audience);
-        assert_eq!(v["authorization_servers"], json!([issuer]));
-        assert_eq!(v["bearer_methods_supported"], json!(["header"]));
-        assert_eq!(v["resource_name"], "Rueca (acme)");
-    }
-
-    let claims = |extra: Value| {
-        let mut c = json!({"iss": issuer, "sub": "ana", "aud": audience, "exp": now() + 600, "iat": now(),
-            "scope": "openid rueca:read", "groups": ["eng"]});
-        for (k, v) in extra.as_object().unwrap() {
-            c[k] = v.clone();
-        }
-        c
-    };
-
-    // Accepted, with the rule's visibility.
-    let good = mint(&key, claims(json!({})));
-    let r = s.call(&good, "list_repositories", json!({}));
-    assert_eq!(r.status, 200, "{}", r.body);
-    assert!(r.body.contains("github.com/acme/billing") && !r.body.contains("hidden/secret"), "{}", r.body);
-
-    // Expired: 401 invalid_token "token expired".
-    let expired = mint(&key, claims(json!({"exp": now() - 3600})));
-    let r = s.mcp(Some(&expired), &list, &[]);
-    assert_eq!(r.status, 401);
-    assert_eq!(
-        r.header("www-authenticate").unwrap(),
-        format!("Bearer error=\"invalid_token\", error_description=\"token expired\", resource_metadata=\"{prm_url}\"")
-    );
-
-    // Wrong audience: 401.
-    let other = mint(&key, claims(json!({"aud": "https://elsewhere/mcp"})));
-    let r = s.mcp(Some(&other), &list, &[]);
-    assert_eq!(r.status, 401);
-    assert!(r.header("www-authenticate").unwrap().contains("audience"), "{:?}", r.header("www-authenticate"));
-
-    // Another issuer: 401.
-    let foreign = mint(&key, claims(json!({"iss": "https://idp.example"})));
-    assert_eq!(s.mcp(Some(&foreign), &list, &[]).status, 401);
-
-    // Without rueca:read: 403 insufficient_scope.
-    let no_scope = mint(&key, claims(json!({"scope": "openid"})));
-    let r = s.mcp(Some(&no_scope), &list, &[]);
-    assert_eq!(r.status, 403);
-    assert_eq!(
-        r.header("www-authenticate").unwrap(),
-        format!("Bearer error=\"insufficient_scope\", scope=\"rueca:read\", resource_metadata=\"{prm_url}\"")
-    );
-
-    // A group without a rule: authenticated, sees nothing.
-    let outsider = mint(&key, claims(json!({"groups": ["sales"]})));
-    let r = s.call(&outsider, "list_repositories", json!({}));
-    assert_eq!(r.status, 200);
-    assert!(!r.body.contains("github.com/acme"), "{}", r.body);
-
+    no_token_names_the_prm(&s, &m);
+    accepted_tokens_see_their_rules(&s, &m);
+    rejected_tokens(&s, &m);
     let metrics = get(&format!("{}/metrics", s.ops), &[]).body;
     for reason in ["missing", "invalid", "issuer", "scope"] {
         assert!(metrics.contains(&format!("rueca_auth_failures_total{{reason=\"{reason}\"}}")), "{reason}: {metrics}");
     }
     drop(s);
     rt.shutdown_background();
+}
+
+/// No token: 401, the challenge names the PRM, served at both paths.
+fn no_token_names_the_prm(s: &Server, m: &Minter) {
+    let r = s.mcp(None, &list(), &[]);
+    assert_eq!(r.status, 401);
+    assert_eq!(
+        r.header("www-authenticate").unwrap(),
+        format!("Bearer scope=\"rueca:read\", resource_metadata=\"{PRM_URL}\"")
+    );
+    for path in ["/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource"] {
+        let prm = get(&format!("{}{path}", s.base), &[]);
+        assert_eq!(prm.status, 200, "{}", prm.body);
+        let v = prm.json();
+        assert_eq!(v["resource"], m.audience);
+        assert_eq!(v["authorization_servers"], json!([m.issuer]));
+        assert_eq!(v["bearer_methods_supported"], json!(["header"]));
+        assert_eq!(v["resource_name"], "Rueca (acme)");
+    }
+}
+
+/// A valid token reads what its group's rule allows; a group without a rule
+/// is authenticated and sees nothing.
+fn accepted_tokens_see_their_rules(s: &Server, m: &Minter) {
+    let r = s.call(&m.token(json!({})), "list_repositories", json!({}));
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(r.body.contains("github.com/acme/billing") && !r.body.contains("hidden/secret"), "{}", r.body);
+    let r = s.call(&m.token(json!({"groups": ["sales"]})), "list_repositories", json!({}));
+    assert_eq!(r.status, 200);
+    assert!(!r.body.contains("github.com/acme"), "{}", r.body);
+}
+
+/// Expired, wrong audience, another issuer: 401; without `rueca:read`: 403.
+fn rejected_tokens(s: &Server, m: &Minter) {
+    let r = s.mcp(Some(&m.token(json!({"exp": now() - 3600}))), &list(), &[]);
+    assert_eq!(r.status, 401);
+    assert_eq!(
+        r.header("www-authenticate").unwrap(),
+        format!("Bearer error=\"invalid_token\", error_description=\"token expired\", resource_metadata=\"{PRM_URL}\"")
+    );
+    let r = s.mcp(Some(&m.token(json!({"aud": "https://elsewhere/mcp"}))), &list(), &[]);
+    assert_eq!(r.status, 401);
+    assert!(r.header("www-authenticate").unwrap().contains("audience"), "{:?}", r.header("www-authenticate"));
+    assert_eq!(s.mcp(Some(&m.token(json!({"iss": "https://idp.example"}))), &list(), &[]).status, 401);
+    let r = s.mcp(Some(&m.token(json!({"scope": "openid"}))), &list(), &[]);
+    assert_eq!(r.status, 403);
+    assert_eq!(
+        r.header("www-authenticate").unwrap(),
+        format!("Bearer error=\"insufficient_scope\", scope=\"rueca:read\", resource_metadata=\"{PRM_URL}\"")
+    );
 }

@@ -101,6 +101,7 @@ error:   {"jsonrpc":"2.0","id":<id>,"error":{"code":<int>,"message":<string>,"da
 | -32602 | Invalid params | missing per-request `_meta` (§5), or an unknown tool (§6) |
 | -32603 | Internal error | never |
 | -32022 | UnsupportedProtocolVersion | §5. `message` `Unsupported protocol version`, `data` `{"requested":"<v>","supported":["2024-11-05","2025-03-26","2025-06-18","2025-11-25","2026-07-28"]}` |
+| -32001 | Deadline exceeded | never on stdio. A tool call run with a deadline (`ToolCall::run_with`, the HTTP transport's `[http].query_deadline`) that the engine stopped; `message` names the deadline and asks for a narrower `repo` or a lower `limit` (`deadline of 10s exceeded; …`) |
 | -32020, -32021 | HeaderMismatch, MissingRequiredClientCapability | never on stdio. -32020 belongs to HTTP (RFC 0008). -32021 only applies to `tasks/*`, which Rueca does not advertise. |
 
 Exact messages:
@@ -264,8 +265,12 @@ absent:
 
 CallToolResult. Arguments: `params.arguments` as an object, or `Value::Null`
 when absent or `null`. Dispatch runs off the reader thread:
-`RuecaServer::call_blocking`, then `Engine::respond`, which waits on the index
-gate for up to `INDEX_WAIT` (120 s). Field order is `resultType` (modern
+`RuecaServer::call_blocking`, then `Engine::respond_with` (stdio passes no
+options, so it is `Engine::respond`), which waits on the index
+gate for up to `INDEX_WAIT` (120 s). `ToolCall::run_with` passes per-call
+options (the HTTP transport's visibility and deadline); a call its deadline
+stopped is answered with the JSON-RPC error -32001 instead of a
+CallToolResult. Field order is `resultType` (modern
 only), `content`, `structuredContent`, `isError`; `_meta` is absent.
 
 ```text
@@ -322,8 +327,11 @@ with_index_gate}`, `tools()`, `serve_stdio`, `INSTRUCTIONS`, `INDEX_WAIT`,
 (what `serve_stdio` serves, usable by other transports), `RuecaServer::handle`
 and the types below; `RuecaServer::with_visibility` (the same server for a
 caller who may read only some repositories: the engine is cloned cheaply,
-sharing its opened segments and organization index), which the HTTP
-transport (`rueca-serve`, `rueca serve`) calls per tool call.
+sharing its opened segments and organization index); `ToolCall::run_with`
+(a call with `rueca_query::RespondOptions`: a visibility and a cooperative
+deadline, without cloning the engine) and `DEADLINE_EXCEEDED` (-32001),
+which the HTTP transport (`rueca-serve`, `rueca serve`) uses per tool
+call.
 
 ```text
 crates/rueca-mcp/src/

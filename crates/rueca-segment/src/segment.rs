@@ -304,6 +304,7 @@ impl Inner {
         let mut res = ContentSearchResult { candidate_files: candidates.len() as u32, ..Default::default() };
         let mut scanned = 0u64;
         for f in candidates {
+            crate::check_deadline(q.deadline)?;
             let size = self.files[f as usize].size;
             if scanned.saturating_add(size) > q.scan_budget_bytes {
                 res.truncated = true;

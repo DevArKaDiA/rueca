@@ -1152,7 +1152,15 @@ the new generation. `POST /mcp` runs Rueca's own MCP core
 session; a tool call runs on a blocking thread with the caller's
 `Visibility` — the union of the repository globs its static token or OIDC
 rules grant, matched against the generation's repository ids (none: an
-empty organization) — under the query deadline. Authentication (static
+empty organization) — under the query deadline: the call gets
+`deadline = now + [http].query_deadline` through
+`Engine::respond_with`, and the engine checks it cooperatively where work
+loops (per tantivy segment and over-fetch round of a symbol search, per
+file of a content scan, every 64 items of `trace`'s traversal, outlines
+and the multi-ref collapse), returning `DeadlineExceeded`, which the
+transport answers as JSON-RPC -32001; a blocking thread cannot be
+cancelled from outside, so a `tokio` timeout of the same length is only a
+backstop. Authentication (static
 `rueca_` tokens, OIDC with JWKS discovery), `Host` / `Origin` checks, rate
 limits per IP and per principal, Prometheus metrics and JSON logs sit in
 front of it ([tools.md, *Over HTTP*](tools.md#over-http)). The indexer
@@ -1226,6 +1234,15 @@ lookup**:
    parameter suffix is optional (`Parser.parse` finds every
    `Parser.parse(…)`);
 3. else `name` → name index, optionally narrowed by `path`.
+
+`Engine::respond_with` runs a call with per-call options: the caller's
+`Visibility` (local mode too: a root of a repository the caller may not
+read does not exist for that call, so it is never selected, listed or
+named in an error; a default root it may not read is ignored) and a
+cooperative deadline, checked when the snapshots are selected and inside
+the loops below; once it has passed the call fails with
+`DeadlineExceeded` ("deadline of 10s exceeded; narrow `repo` or lower
+`limit`"). `Engine::respond` is `respond_with` with neither.
 
 When several nodes match, the pick is deterministic (non-test, exported,
 symbol before container, shorter qualified name, lower id) and the others
