@@ -7,6 +7,8 @@
 - Amends: RFC 0001 §8.1 item 5, §11.3, §19 open question 3; RFC 0002 §2
   (excluded models), §6.2 (rows "Vectors", "Offline embeddings", "Quality
   embeddings"); RFC 0004 §6, §11, §13 open questions 1–2; RFC 0006 §6, §9.2
+- Revised: 2026-11-17 (the owner's answers, §15; organization-suite
+  evidence, §2)
 - Research date: 2026-11-16. Model cards, licenses, file sizes, crate
   versions and prices were checked that day (§17). *(estimate)* marks
   arithmetic on published figures, with its inputs; *(unverified)* marks a
@@ -42,11 +44,12 @@ inside the organization ranking, not as a separate tool; `search_code`
    the calibration split or CoIR, never on the gated set (RFC 0004 §7.7).
    Code leaves the machine only with a `remote:` preset.
 
-Two owner decisions are recorded with the evidence against them and a
-provisional default; confirming each is an open question (§15, questions
-1 and 2): the default quantization (§3.3: int4 chosen, `Q8_0` by the
-owner's own rule) and the reranker (§7.5: Qwen3-Reranker-0.6B chosen, off
-by default locally).
+Both owner decisions were decided on 2026-11-17: the default quantization
+(§3.3: `qwen3-0.6b-q8`, with int4 a preset that phase 0 promotes per
+backend only by the owner's rule) and the reranker (§7.5: off by default
+locally; the 4B and mxbai-rerank-large-v2 measured first, on in service
+mode only past its gate). The other open questions were closed
+provisionally the same day, each with a "Revisit if" note (§15).
 
 ## 2. Motivation
 
@@ -60,7 +63,18 @@ finds what an agent names, not what it describes.
   both gated metrics (62.8 vs 67.4, 39.0 vs 46.3). Per-language paired
   intervals span roughly ±10–17 points: gains are demonstrable only pooled.
 - **Organization scope trails** the single repository: gated File Acc@5
-  42.9% vs 61.9% (0.69×, floor 0.85×, RFC 0006 §9.2).
+  42.9% vs 61.9% (0.69×, floor 0.85×, RFC 0006 §9.2). In the larger
+  organization scenario it cannot be told apart from BM25: File Acc@5
+  56.7 vs 52.5 (+4.2, 95% interval −4.2 … +12.5; minimum detectable
+  effect 12.1 points at n = 120; bench organization suite,
+  [PR #60](https://github.com/DevArKaDiA/rueca/pull/60)).
+- **Impact questions lose to BM25.** The organization suite's "impact"
+  kind gives a changed library symbol and asks for its consumers across
+  the organization: Rueca hit@10 12.5 vs BM25 37.5 (−25.0, 95% interval
+  −50.0 … −6.2; same source). The consumers do not share the symbol's
+  words the way BM25's file-level text does. It is a graph question —
+  the consumers are the symbol's callers and importers — that §7.3's
+  expansion and the dense signal should answer together.
 - **Vocabulary mismatch**, met while writing this RFC with Rueca's own
   tools: "bm25 ranking" missed `top_hits`, "read symbol source text from
   content pack" missed `body_texts` (§16).
@@ -80,7 +94,7 @@ finds what an agent names, not what it describes.
 | Preset | Model and file | Params | Dims (MRL) | Context | License | On disk | Code quality (nDCG@10 unless noted) | Status |
 |---|---|---|---|---|---|---|---|---|
 | `qwen3-0.6b-q8` | Qwen3-Embedding-0.6B, official `Q8_0` GGUF | 0.6B | 1024 (32–1024) | 32k | Apache-2.0 | 639 MB | MTEB-Code 75.41 ([Qwen3 report](https://arxiv.org/html/2506.05176v3)); CoIR-10 74.96 *(derived from [C2LLM](https://arxiv.org/html/2512.21332), Table 2)* | **default, provisional (§3.3)** |
-| `qwen3-0.6b-q4` | same, `Q4_K_M` converted and hosted by Rueca | 0.6B | 1024 | 32k | Apache-2.0 | ≈ 380–400 MB *(estimate; a [community Q4_K_M](https://huggingface.co/PeterAM4/Qwen3-Embedding-0.6B-GGUF) is 378 MB)* | no published run; 4-bit RTN −7.5% ([arXiv 2609.24322](https://arxiv.org/html/2609.24322v1)) | optional; the owner's choice, re-decided in phase 0 |
+| `qwen3-0.6b-q4` | same, `Q4_K_M` converted and hosted by Rueca | 0.6B | 1024 | 32k | Apache-2.0 | ≈ 380–400 MB *(estimate; a [community Q4_K_M](https://huggingface.co/PeterAM4/Qwen3-Embedding-0.6B-GGUF) is 378 MB)* | no published run; 4-bit RTN −7.5% ([arXiv 2609.24322](https://arxiv.org/html/2609.24322v1)) | optional; default on a backend only by §3.3's rule |
 | `qwen3-0.6b-f16` | same, official `f16` | 0.6B | 1024 | 32k | Apache-2.0 | 1,198 MB | reference | optional; reference for rank overlap |
 | `qwen3-4b-q4` / `-q8` | Qwen3-Embedding-4B, official `Q4_K_M` / `Q8_0` | 4B | 2560 | 32k | Apache-2.0 | 2,497 / 4,280 MB | MTEB-Code 80.06 (Qwen3 report) | optional; GPU |
 | `qwen3-8b-q4` / `-q8` | Qwen3-Embedding-8B, official `Q4_K_M` / `Q8_0` | 8B | 4096 | 32k | Apache-2.0 | 4,677 / 8,047 MB | MTEB-Code 80.68 (same) | optional; GPU, service mode |
@@ -109,11 +123,15 @@ purposes only"), SweRankEmbed / SweRankLLM (the issue-tuned models of
 §11.3), jina-reranker-v2 / v3; **use-restriction licenses** —
 Qodo-Embed-1 (Open-RAIL-M / custom) and EmbeddingGemma (Gemma terms).
 
-### 3.3 Default embedder: quantization (owner decision, to confirm)
+### 3.3 Default embedder: quantization (decided by rule)
 
-**Owner's decision:** Qwen3-Embedding-0.6B in int4, "the fastest
-acceptable". **Owner's rule:** int4 unless the loss is large or int8 is
-about as fast. **Evidence:**
+**Owner's decision** (2026-11-17): the default preset is
+**`qwen3-0.6b-q8`**, provisional and decided in phase 0 by the owner's
+rule; `qwen3-0.6b-q4` ships as a preset. **Owner's rule:** int4 wins on a
+backend only if it is at least 1.2× faster there *without* a large loss,
+by the thresholds below. The owner first chose int4, "the fastest
+acceptable"; on the evidence below the rule yields Q8 on Metal and x86.
+**Evidence:**
 
 - **Supply.** Qwen publishes the 0.6B GGUF only as `Q8_0` (639,150,592
   bytes) and `f16` (1,197,629,632 bytes); the 4B and 8B also ship
@@ -141,21 +159,20 @@ about as fast. **Evidence:**
   the two group sizes *(unverified)*; no MTEB run of a Qwen3-Embedding
   `Q4_K_M` was found.
 
-**What the rule yields:** on Metal and x86, int8 is about as fast (int4
-gains at most 8%), which alone yields **`Q8_0`**, and the loss is
-uncertain; int4 wins only when an ARM CPU embeds without its GPU.
+On Metal and x86 int4 gains at most 8%, below the 1.2× bar, so the rule
+alone yields `Q8_0` there, and the loss is uncertain; int4 can win only
+when an ARM CPU embeds without its GPU.
 
-**Recorded:** the default preset is **`qwen3-0.6b-q8`**, provisionally;
-`qwen3-0.6b-q4` ships as a preset; phase 0 re-applies the owner's rule
-per backend with these thresholds. *Loss is large*: CoIR cheap-profile
-mean nDCG@10 (§11.1) more than 1.0 point below Q8, or more than one
-calibration instance lower (pooled File Acc@5 or Function Acc@10), or
-top-10 overlap with F16 below 0.9 (aggregate nDCG hides ranking churn, per
-the same paper). *About as fast*: int4 below 1.2× Q8's tokens/s on that
-backend. If int4 wins on a backend (ARM CPU-only Linux), the default
-becomes per backend. Open question 1.
+**Recorded:** phase 0 applies the rule per backend with these thresholds.
+*Faster*: int4 at least 1.2× Q8's tokens/s on that backend. *Loss is
+large*: CoIR cheap-profile mean nDCG@10 (§11.1) more than 1.0 point below
+Q8, or more than one calibration instance lower (pooled File Acc@5 or
+Function Acc@10), or top-10 overlap with F16 below 0.9 (aggregate nDCG
+hides ranking churn, per the same paper). If int4 wins on a backend (ARM
+CPU-only Linux), the default becomes per backend; the outcome is recorded
+in `docs/decisions.md` with the sweep.
 
-### 3.4 Default embedder: size and family
+### 3.4 Default embedder: size and family (decided by rule)
 
 The 0.6B is the weakest candidate on the tasks closest to localization:
 
@@ -170,12 +187,17 @@ The 4B costs about 8× the 0.6B per token (7.5 vs 0.91 GFLOP/token from
 the configs *(estimate)*): 100k symbols take 77–154 min with the 0.6B and
 10.6–21 h with the 4B on an M1 Pro GPU *(estimate, §5.6)*.
 
-**Recorded:** phase 0 compares `qwen3-0.6b-q8`, `qwen3-4b-q4`,
-`coderank-137m` and `gte-modernbert-149m` on the S1 calibration split
-(`raw` and `kw`) and the CoIR cheap profile before freezing the default.
-The local default stays the 0.6B unless a candidate of equal or lower cost
-is better by more than one calibration instance pooled; the 4B can be a
-default only where a GPU indexes (service mode). Open question 3.
+**Recorded (decided by rule, 2026-11-17):** phase 0 measures
+`qwen3-0.6b-q8`, `qwen3-4b-q4`, `coderank-137m` and, as a fourth
+candidate, `gte-modernbert-149m` on the S1 calibration split (`raw` and
+`kw`) and the CoIR cheap profile. **Rule:** the local default is the
+candidate with the best macro over languages of ½ (File Acc@5 + Function
+Acc@10) on the calibration split, `raw` and `kw` averaged, among those
+whose cold indexing time on an M1 Pro GPU stays within **twice the
+0.6B's**; ties within one calibration instance go to the cheaper model. A
+candidate above the budget (the 4B, about 8× by §5.6's estimate) may
+become the service-mode GPU default instead (§8.3). Every candidate must
+meet the CoIR sanity row of §11.2.
 
 ### 3.5 Remote presets
 
@@ -183,6 +205,18 @@ Opt-in, mainly for service mode. The embed key (§5.4) uses provider,
 model, version string and dimensions instead of a file hash, and Rueca
 records the date of first use (a provider may change weights behind a
 name).
+
+**Recorded (provisional, 2026-11-17): privacy.** A `remote:` preset is
+set per repository (`rueca.toml`) or per organization
+(`rueca-org.toml`), never by default, and `rueca-org.toml` gains
+`[retrieval] allow_remote` (default `false`) so an organization file can
+forbid them: an organization's code leaves the machine only when that
+key is `true` and a `remote:` preset is set (a repository indexed outside
+any organization opts in by setting the preset alone). The envelope's
+`model` (§8.2) names the preset in every answer, so a remote model is
+visible wherever it ranked.
+*Revisit if:* service mode needs per-caller policies (RFC 0001 §13
+permissions) rather than one switch per organization.
 
 | Preset | $ / 1M tokens | Dims | Code evidence | Source |
 |---|---|---|---|---|
@@ -236,10 +270,20 @@ breaks cargo-dist or the size budget.
   C/C++ compiler, on CI and for `cargo install` with default features.
 - **x86 CPU features are fixed at compile time** (`GGML_NATIVE` is off
   unless `target-cpu=native`; `build.rs` maps rustc target features to
-  `GGML_AVX2` and friends). **Recorded:** x86_64 releases target
-  `x86-64-v3` and document AVX2 as the minimum; the alternative is
-  llama.cpp's dynamic CPU backends (a shared library per CPU level).
-  Open question 7.
+  `GGML_AVX2` and friends). **Recorded (provisional, 2026-11-17):** the
+  cargo-dist x86_64 builds with the `embeddings` feature target
+  `x86-64-v3` (AVX2, FMA, F16C, BMI2,
+  [x86-64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI)); on an older
+  CPU the vectors pass and dense queries fail with a clear error naming
+  the missing level, and the documented fallback is
+  `cargo install --no-default-features` (lexical only). Rationale: one
+  static binary per target, as the project promises, with no extra
+  shared libraries; AVX2 has shipped since Intel Haswell (2013) and AMD
+  Excavator (2015), though Celeron and Pentium models gained it only in
+  2020 ([AVX2](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions)).
+  The alternative, llama.cpp's dynamic CPU backends, is a shared library
+  per CPU level. *Revisit if:* users report pre-AVX2 machines, or the
+  dynamic backends become loadable from inside one static binary.
 - **API churn.** The crate "does not follow semver meaningfully": pinned
   exactly, upgraded in its own pull request with the tests of §9 and the
   CoIR sanity row.
@@ -280,10 +324,23 @@ breaks cargo-dist or the size budget.
   near 4.5e-23 (llama.cpp issue #16407,
   [summary](https://gist.github.com/VooDisss/42bce4eb5c76d3c325633886c5e348ee)).
   Rueca converts them with a recorded llama.cpp commit and script, pins
-  their sha256 and publishes them as release assets of a `rueca-models`
-  repository (open question 4), each with the upstream license file;
-  `NOTICE` lists the license of every model Rueca redistributes
-  (Apache-2.0 Qwen, MIT CodeRankEmbed).
+  their sha256 and publishes them as release assets, each with the
+  upstream license file; `NOTICE` lists the license of every model Rueca
+  redistributes (Apache-2.0 Qwen, MIT CodeRankEmbed).
+- **Hosting. Recorded (provisional, 2026-11-17):** GitHub Releases of a
+  `DevArKaDiA/rueca-models` repository: immutable tagged assets, their
+  sha256 in the manifest, no Hugging Face account or token at download
+  time, the same CDN as the binaries; mirrors to Hugging Face may follow.
+  Each release file must be under 2 GiB, with no limit on a release's
+  total size or bandwidth
+  ([GitHub](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)):
+  the 0.6B int4 embedder and the 0.6B reranker fit, but a 4B reranker at
+  `Q4_K_M` would be about 2.5 GB *(estimate: the official 4B embedder
+  file at that quantization is 2,497 MB)*, above the limit, and ships
+  split with llama.cpp's `gguf-split` (loading split files through
+  `llama-cpp-2` *(unverified)*). Upstream official files stay on
+  Hugging Face. *Revisit if:* split files prove fragile, or bandwidth
+  becomes a problem.
 
 ## 5. What is embedded
 
@@ -293,11 +350,18 @@ breaks cargo-dist or the size budget.
 `Function`, `Method`, `Test`, `Class`, `Struct`, `Interface`, `Trait`,
 `Enum` and Markdown `Section`. Not in v1: `Field`, `Variable`, `Constant`,
 `TypeAlias`, configuration (`Key`, `Document`, `EnvVar`, `Resource`,
-`Image`), contracts (`Route`, `RpcMethod`, `Topic`) and containers: they
-are numerous and short, BM25 matches their names, the data prior ranks
-them low, and adding them later embeds only them (open question 6). No
+`Image`), contracts (`Route`, `RpcMethod`, `Topic`) and containers. No
 file vectors: a file's dense score is its best symbol's, as SweRank and
 Agent Retrieval Bench do and as S1 ranks files today.
+
+**Recorded (provisional, 2026-11-17):** configuration keys, fields and
+variables are not embedded in v1. They are reached through `search_code`
+and the code ↔ config bridge today; their canonical text is short and
+dominated by the name, which BM25 already matches; the data prior ranks
+them low; and leaving them out cuts the vector count substantially.
+Adding them later embeds only them. *Revisit if:* the S1 `raw` misses on
+the calibration split show configuration files among the gold files, or
+when the bridge gets its own localization gold.
 
 ### 5.2 Canonical text
 
@@ -535,7 +599,11 @@ fall below the baseline (26.00 vs 27.33 resolved,
 MuLocBench file Acc@5 drops from 55.7 to 48.2
 ([LARGER](https://arxiv.org/html/2605.16352)). Swept: decay {0, 0.25, 0.5},
 edges {none, contains, contains + calls}, and SpIDER's pool filter (a
-neighbour enters only if it is in the dense top 500).
+neighbour enters only if it is in the dense top 500). The organization
+suite's impact questions (§2) are the direct test of expansion: a changed
+symbol's consumers are its 1-hop `CALLS` / `IMPORTS` neighbours, across
+repositories through the link layer (RFC 0006 §3.3), so the edge sweep
+gains a `contains + calls + imports` setting, read on §11.2's impact row.
 
 ### 7.4 Priors and centrality
 
@@ -550,10 +618,14 @@ query-independent centrality prior as a localization gain; the evidence of
 §7.3 is query-dependent, as is Aider's personalized PageRank
 ([repo map](https://aider.chat/docs/repomap.html)).
 
-### 7.5 Stage 2: reranker (owner decision, to confirm)
+### 7.5 Stage 2: reranker (decided)
 
-**Owner's decision:** a cross-encoder, Qwen3-Reranker-0.6B, over the top
-~50, with the embedder's preset logic. **Evidence:**
+**Owner's decision** (2026-11-17): a cross-encoder over the top ~50, with
+the embedder's preset logic, **off by default in local mode**; phase 2
+measures Qwen3-Reranker-4B and mxbai-rerank-large-v2 first, then the
+0.6B; on by default in service mode with a GPU only if the gate below
+holds. The owner first chose Qwen3-Reranker-0.6B; the evidence below
+moved the order. **Evidence:**
 
 | Reranker | Params | License | MTEB-Code, reranking Qwen3-Emb-0.6B's top 100 | CoIR, reranking jina-v3's top 100 |
 |---|---|---|---|---|
@@ -588,18 +660,18 @@ Sources: [Qwen3-Reranker card](https://huggingface.co/Qwen/Qwen3-Reranker-0.6B),
   service mode with a GPU **only if** the gate holds.
 - **Gate:** on the calibration split, reranking raises pooled Function
   Acc@10 by ≥ 3 points over the same pipeline without it and lowers pooled
-  File Acc@5 by no more than one instance. At 40 calibration instances one
-  instance is 2.5 points: the gate needs the larger split of open
-  question 5.
+  File Acc@5 by no more than one instance, read on the grown split of
+  §7.6 (at 40 instances one instance is 2.5 points).
 - Candidate text: the canonical text cut to 256 tokens; K = 50, swept over
   {20, 50}; the shared prompt prefix computed once per call. Final order:
   reranker order for the top K, stage-1 order below (a λ-blend is a sweep
   variant). The reranker also admits or rejects expanded neighbours
   (SpIDER used an LLM filter).
-- Presets measured against the 0.6B: `qwen3-reranker-0.6b-q8`,
-  `qwen3-reranker-4b-q4` (Rueca conversions), `mxbai-rerank-large-v2`
-  (runtime path *(unverified)*), `remote:voyage/rerank-3`,
-  `remote:cohere/rerank-3.5`. Open question 2.
+- Presets measured, in order: `qwen3-reranker-4b-q4` (a Rueca
+  conversion) and `mxbai-rerank-large-v2` (runtime path *(unverified)*)
+  first, then `qwen3-reranker-0.6b-q8` (a Rueca conversion); the remote
+  `remote:voyage/rerank-3` and `remote:cohere/rerank-3.5` as reference
+  rows.
 
 ### 7.6 Tuning protocol
 
@@ -615,6 +687,15 @@ Calibration split only (RFC 0004 §7.7):
    arg-max; leaving one language out must keep it within one instance on
    that language.
 4. Freeze; evaluate the gated set once; publish every arm (§11.2).
+
+**Recorded (provisional, 2026-11-17): the split grows first.** Phase 0
+grows the calibration split from 5 to 10–15 instances per language, drawn
+from SWE-rebench V2, Multi-SWE-bench and spare SWE-PolyBench repositories,
+disjoint from the gated repositories (RFC 0004 §7.7), before any α or
+reranker gate is read. At 40 instances one instance is 2.5 points; the +3
+reranker gate (§7.5) and the α plateau need 80–120 pooled. *Revisit if:*
+a language has no spare instances; that language keeps 5 and the pooled
+gate carries it.
 
 CoIR is not used for fusion (no BM25, graph or issue queries); it chooses
 model, quantization, dimensions and instruction only.
@@ -661,7 +742,8 @@ got; the bench labels its runs with it.
   runner.
 - `[retrieval]` in `rueca.toml` (new, in the store) and `rueca-org.toml`
   (RFC 0006 §7): `preset`, `dims`, `rerank`, `rerank_preset`,
-  `query_instruction`. Environment: `RUECA_EMBED_PRESET`,
+  `query_instruction`, and in `rueca-org.toml` only `allow_remote`
+  (§3.5). Environment: `RUECA_EMBED_PRESET`,
   `RUECA_MODEL_DIR`, `RUECA_VECTOR_DIR`, and `RUECA_SEARCH` for experiment
   knobs (α, N, K, expansion, β) as `RUECA_ORG_ROUTE` is for routing.
   Precedence: argument, environment, organization file, store file,
@@ -670,7 +752,14 @@ got; the bench labels its runs with it.
   before): `rueca index` downloads the weights on first use with a notice;
   `--no-embed` or `preset = "off"` opts out.
 - **Service mode** embeds on a GPU through the CUDA build or an external
-  TEI / llama-server (`remote:openai-compatible`).
+  TEI / llama-server (`remote:openai-compatible`). **Recorded
+  (provisional, 2026-11-17):** its GPU defaults are the `qwen3-4b-q4`
+  embedder, or whichever candidate phase 0 picks above the local budget
+  (§3.4), and the reranker on only if its gate held (§7.5); `remote:`
+  presets stay opt-in under §3.5's `allow_remote`. Rationale: a GPU takes
+  the 4B's cold embed of 100k symbols from hours to 13–26 min (§5.6),
+  and the 4B leads the 0.6B on MTEB-Code (80.06 vs 75.41, §3.1) and
+  CodeEditSearch (76.49 vs 64.42, §3.4).
 
 ### 8.4 Process model and latency
 
@@ -779,6 +868,12 @@ path is not bitwise reproducible even within one build
    **throughput** (symbols/s per preset and backend, cold embed of the S1
    corpora); a **re-index test** after a one-file change; the **routing
    calibration** of RFC 0006 §9.2 gains the hybrid modes and the centroid.
+6. **Organization suite**, both kinds of question, for every mode against
+   BM25 and the vector arm: localization (File Acc@5, gated and the
+   larger scenario of n = 120) and **impact** (hit@10: given a changed
+   library symbol, its consumers across the organization), each with and
+   without §7.3's expansion (bench organization suite,
+   [PR #60](https://github.com/DevArKaDiA/rueca/pull/60)).
 
 ### 11.2 Acceptance gates
 
@@ -793,6 +888,8 @@ unless noted.
 | S1 per language, both variants | met (⚠ for 7 of 8 languages on File Acc@5) | not significantly below the better of BM25 and the vector arm | — |
 | S1 `kw` pooled, hybrid − BM25 | −0.3 *(derived)* | interval not below 0 | interval above 0 |
 | Organization File Acc@5 over single repository, gated | 0.69× | ≥ 0.85× (RFC 0006) | ≥ 0.95× |
+| Organization File Acc@5, larger scenario (PR #60, n = 120), hybrid − BM25 | lexical Rueca vs BM25: 56.7 vs 52.5 (+4.2, interval −4.2 … +12.5) | reported | — |
+| Organization impact hit@10, hybrid + expansion − BM25 | 12.5 vs 37.5 (−25.0) | interval not below 0 | point ≥ +10 and interval above 0 |
 | CoIR cheap profile, chosen preset: mean over tasks with a published number | — | within 1.0 point of the published mean | — |
 | Hybrid latency p95, warm, keyword-length query, no reranker | — | ≤ 300 ms | ≤ 100 ms |
 | Lexical latency p95 (RFC 0004 health) | met | ≤ 100 ms, unchanged | ≤ 20 ms |
@@ -830,10 +927,10 @@ below the better of BM25 and the vector arm.
 
 | Phase | Delivers | Acceptance |
 |---|---|---|
-| 0. Measurement | Runtime bake-off (§4.2); minimal `rueca-embed` and `rueca embed`; `vector` arm; CoIR cheap runner; sweeps of model (§3.4), quantization (§3.3), dimensions (§6.3), token budget (§5.2) and instruction (§5.3) | Each choice made by its rule and recorded in `docs/decisions.md` with the sweep; vector-arm rows on S1 (`kw`, `raw`) and the Lite diagnostic; CoIR sanity row met; binary size within budget |
+| 0. Measurement | Calibration split grown (§7.6); runtime bake-off (§4.2); minimal `rueca-embed` and `rueca embed`; `vector` arm; CoIR cheap runner; sweeps of model (§3.4), quantization (§3.3), dimensions (§6.3), token budget (§5.2) and instruction (§5.3) | Each choice made by its rule and recorded in `docs/decisions.md` with the sweep; vector-arm rows on S1 (`kw`, `raw`) and the Lite diagnostic; CoIR sanity row met; binary size within budget |
 | 1. Hybrid search | `rueca-embed`, weights and `rueca models`; store vector cache; `vectors.*` components; lexical-first publication; exhaustive scan, f16 rescoring; convex fusion in `search_symbols` tuned on calibration; `mode`, envelope, configuration | §11.2 File Acc@5 rows (`raw` gate, `kw` and per-language floors); latency rows; re-index test; backend overlap row; Function Acc@10 reported |
-| 2. Graph and reranker | Expansion and centrality prior, each kept only if the sweep keeps it; reranker stage and presets, default per §7.5; `raw` results published | §11.2 Function Acc@10 gate; reranker gate; reranker latency reported |
-| 3. Organization and service | One model key per organization; centroid routing; ANN threshold measured at organization scale; remote presets; service-mode GPU defaults | Organization File Acc@5 ≥ 0.85× (gated); incremental-update floor unchanged; ANN recall against the exact scan reported |
+| 2. Graph and reranker | Expansion and centrality prior, each kept only if the sweep keeps it; reranker stage and presets, default per §7.5; `raw` results published | §11.2 Function Acc@10 gate; reranker gate; organization impact hit@10 floor; reranker latency reported |
+| 3. Organization and service | One model key per organization; centroid routing; ANN threshold measured at organization scale; remote presets; service-mode GPU defaults | Organization File Acc@5 ≥ 0.85× (gated); organization impact hit@10 target; incremental-update floor unchanged; ANN recall against the exact scan reported |
 
 Follow-ups, not phases:
 
@@ -924,29 +1021,36 @@ Follow-ups, not phases:
   `search_symbols` for descriptions — and measures tokens per correct
   answer next to localization.
 
-## 15. Open questions
+## 15. Open questions — all resolved provisionally on 2026-11-17
 
-1. **Default quantization.** The owner chose int4; the owner's rule, on
-   §3.3's evidence, yields Q8 on Metal and x86. Confirm `qwen3-0.6b-q8` as
-   the default until phase 0 re-applies the rule with §3.3's thresholds.
-2. **Reranker default.** The owner chose Qwen3-Reranker-0.6B; §7.5 shows it
-   below the embedder alone on code and seconds per query locally. Confirm
-   "off by default locally, gated by +3 Function Acc@10", and whether the
-   4B or mxbai-rerank-large-v2 is measured first for service mode.
-3. **Default embedder after phase 0:** 0.6B, 4B (GPU only) or
-   CodeRankEmbed, by §3.4's rule?
-4. **Hosting conversions:** release assets of a `rueca-models` GitHub
-   repository, or a Hugging Face repository?
-5. **Calibration split size:** grow from 5 to 10–15 instances per language
-   (SWE-rebench V2, Multi-SWE-bench, spare SWE-PolyBench repositories,
-   Lite instances outside the gated repositories), so §7.5's gate and the
-   plateau rule resolve more than single instances?
-6. **Configuration keys, fields and variables** embedded in v1, or later?
-7. **x86 releases:** `x86-64-v3` (AVX2 required) or llama.cpp's dynamic
-   CPU backends (more files, older CPUs)?
-8. **Service mode and privacy:** GPU defaults (4B embedder, reranker on),
-   and `remote:` presets — code leaves the machine only with them; should
-   an organization file be able to forbid them?
+1. ~~**Default quantization:** int4, as the owner chose, or Q8, as the
+   owner's rule yields on Metal and x86?~~ Decided (§3.3):
+   `qwen3-0.6b-q8`, provisional; int4 wins on a backend in phase 0 only if
+   ≥ 1.2× faster there without §3.3's loss.
+2. ~~**Reranker default:** Qwen3-Reranker-0.6B, as the owner chose, or off
+   locally and gated?~~ Decided (§7.5): off by default locally; the 4B
+   and mxbai-rerank-large-v2 measured first, then the 0.6B; on in service
+   mode with a GPU only past the gate.
+3. ~~**Default embedder after phase 0:** 0.6B, 4B (GPU only) or
+   CodeRankEmbed?~~ Decided by rule (§3.4): best calibration score within
+   twice the 0.6B's indexing time; above it, a service-mode candidate.
+4. ~~**Hosting conversions:** a `rueca-models` GitHub repository or a
+   Hugging Face repository?~~ Decided (§4.4): GitHub Releases of
+   `DevArKaDiA/rueca-models`, sha256 in the manifest; Hugging Face mirrors
+   may follow.
+5. ~~**Calibration split size:** grow from 5 to 10–15 instances per
+   language?~~ Decided (§7.6): grown in phase 0, disjoint from the gated
+   repositories, before any α or reranker gate is read.
+6. ~~**Configuration keys, fields and variables** embedded in v1, or
+   later?~~ Decided (§5.1): not in v1; revisited on calibration misses in
+   configuration files.
+7. ~~**x86 releases:** `x86-64-v3` or llama.cpp's dynamic CPU
+   backends?~~ Decided (§4.3): `x86-64-v3` with a clear error on older
+   CPUs and a documented lexical-only `cargo install`.
+8. ~~**Service mode and privacy:** GPU defaults, and can an organization
+   file forbid `remote:` presets?~~ Decided (§3.5, §8.3): the 4B (or phase
+   0's above-budget pick) and the reranker only past its gate;
+   `[retrieval] allow_remote = false` by default in `rueca-org.toml`.
 
 ## 16. Dogfood notes: where Rueca failed while writing this RFC
 
@@ -977,7 +1081,8 @@ documented store layout omits `facts/`, and RFC 0001 §8.1 describes
 
 ## 17. Sources
 
-All consulted on 2026-11-16.
+All consulted on 2026-11-16, except the revision's, consulted on
+2026-11-17.
 
 - **Qwen3:** https://huggingface.co/Qwen/Qwen3-Embedding-0.6B · https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF (and the 4B / 8B GGUF repositories via the Hugging Face API) · https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/discussions/5 · https://x.com/Alibaba_Qwen/status/1944425668235977146 · https://arxiv.org/html/2506.05176v3 · https://media.githubusercontent.com/media/QwenLM/Qwen3-Embedding/main/evaluation/task_prompts.json · https://huggingface.co/Qwen/Qwen3-Reranker-0.6B · https://github.com/QwenLM/Qwen3-Embedding · https://gist.github.com/VooDisss/42bce4eb5c76d3c325633886c5e348ee · https://github.com/jamesburton/dotLLM/issues/1398
 - **Other models and licenses:** https://arxiv.org/html/2512.21332 · https://huggingface.co/codefuse-ai/C2LLM-0.5B · https://arxiv.org/html/2508.21290 · https://huggingface.co/jinaai/jina-code-embeddings-1.5b · https://jina.ai/news/jina-embeddings-v5-text-distilling-4b-quality-into-sub-1b-multilingual-embeddings/ · https://arxiv.org/html/2509.25085 · https://huggingface.co/mixedbread-ai/mxbai-rerank-base-v2 · https://huggingface.co/nomic-ai/CodeRankEmbed · https://huggingface.co/nomic-ai/nomic-embed-code · https://huggingface.co/Alibaba-NLP/gte-modernbert-base · https://arxiv.org/html/2508.21085 · https://huggingface.co/voyageai/voyage-4-nano · https://www.qodo.ai/open-rail-m-license/ · https://huggingface.co/PeterAM4/Qwen3-Embedding-0.6B-GGUF
@@ -987,3 +1092,4 @@ All consulted on 2026-11-16.
 - **Localization, fusion, chunking:** https://arxiv.org/html/2503.09089 · https://arxiv.org/html/2505.07849 · https://arxiv.org/html/2512.20482 · https://arxiv.org/html/2412.01007 · https://arxiv.org/html/2605.16352 · https://www.swebench.com/lite.html · https://arxiv.org/html/2210.11934v2 · http://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf · https://arxiv.org/html/2512.16956 · https://arxiv.org/html/2410.14684v2 · https://aider.chat/docs/repomap.html · https://arxiv.org/html/2505.24715 · https://arxiv.org/html/2506.15655 · https://www.greptile.com/blog/semantic-codebase-search · https://arxiv.org/html/2607.24882
 - **Benchmarks:** https://arxiv.org/abs/2407.02883 · https://github.com/CoIR-team/coir · https://github.com/embeddings-benchmark/mteb · https://arxiv.org/abs/2606.11864
 - **Practice:** https://cursor.com/blog/semsearch · https://github.blog/changelog/2026-03-17-copilot-coding-agent-works-faster-with-semantic-code-search/ · https://sourcegraph.com/blog/how-cody-understands-your-codebase · https://cline.bot/blog/why-cline-doesnt-index-your-codebase-and-why-thats-a-good-thing · https://github.com/openai/codex/issues/5181 · https://arxiv.org/abs/2608.01507 · https://x.com/bcherny/status/2017824286489383315 · https://github.com/zilliztech/claude-context (and its `evaluation/`) · https://www.augmentcode.com/blog/context-engine-mcp-now-live
+- **Revision of 2026-11-17:** https://github.com/DevArKaDiA/rueca/pull/60 (bench organization suite) · https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases · https://gitlab.com/x86-psABIs/x86-64-ABI · https://en.wikipedia.org/wiki/Advanced_Vector_Extensions

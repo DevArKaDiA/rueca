@@ -256,13 +256,16 @@ candidates by a convex combination of normalized scores (beats RRF, whose
 flat head RFC 0006 measured), times today's priors; stage 2 is an optional
 reranker. Every default is set by a stated rule on the calibration split
 or CoIR; the gate is pooled S1 File Acc@5 on the issue text at least 5
-points above BM25 with the interval above zero. Two owner decisions await
-confirmation: the default quantization (int4 chosen; the owner's own rule
-gives Q8 on Metal and x86, so `qwen3-0.6b-q8` is the provisional default)
-and the reranker (Qwen3-Reranker-0.6B chosen; it scores below the embedder
-alone on code in Qwen's table and costs seconds per query locally, so it
-ships off by default locally, on only if it adds ≥ 3 points of Function
-Acc@10 on the calibration split).
+points above BM25 with the interval above zero. Two owner decisions: the
+default quantization (int4 chosen; the owner's own rule gives Q8 on Metal
+and x86, so `qwen3-0.6b-q8` is the default) and the reranker
+(Qwen3-Reranker-0.6B chosen; it scores below the embedder alone on code in
+Qwen's table and costs seconds per query locally, so it ships off by
+default locally, on only if it adds ≥ 3 points of Function Acc@10 on the
+calibration split). Confirmed by the owner on 2026-11-17: Q8 default
+decided in phase 0 by the rule; reranker off by default locally, 4B and
+mxbai measured first; the remaining open questions were closed
+provisionally (RFC §15).
 
 ## 2026-11-16 — Rust: call results typed from signatures; methods by name only when unique
 
