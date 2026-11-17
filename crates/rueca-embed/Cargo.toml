@@ -24,6 +24,7 @@ thiserror.workspace = true
 tracing.workspace = true
 blake3 = "1.8.7"
 sha2 = "0.11.1"
+toml = "1.1.8"
 # Pinned exactly: the crate does not follow semver meaningfully (RFC 0007 §4.3).
 llama-cpp-2 = { version = "=0.1.161", default-features = false, optional = true }
 num_cpus = { version = "1.17.0", optional = true }

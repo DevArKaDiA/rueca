@@ -77,6 +77,9 @@ mod golden;
 pub mod link;
 pub mod org;
 pub mod refs;
+pub mod vectors;
+
+pub use vectors::{EmbedConfig, EmbedderLoader, PresetLoader, VectorsReport};
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct IndexOptions {
@@ -102,6 +105,10 @@ pub struct IndexOptions {
     /// Full commit of the exported ref (see [`IndexOptions::ref_name`]).
     #[serde(default)]
     pub commit: Option<String>,
+    /// Embed the snapshot's symbols (RFC 0007 §5.6, [`vectors`]); `None`
+    /// indexes lexically only.
+    #[serde(default)]
+    pub embed: Option<EmbedConfig>,
 }
 
 impl IndexOptions {
@@ -143,6 +150,9 @@ pub struct IndexReport {
     pub references_external: u64,
     /// Wall-clock time per phase, in milliseconds.
     pub timings: PhaseTimings,
+    /// The vectors pass, when the run embedded ([`IndexOptions::embed`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vectors: Option<VectorsReport>,
 }
 
 /// Wall-clock milliseconds per indexing phase.
@@ -152,6 +162,8 @@ pub struct PhaseTimings {
     pub extract_ms: u64,
     pub resolve_ms: u64,
     pub write_ms: u64,
+    /// The vectors pass: texts, cache lookup, embedding, second publication.
+    pub embed_ms: u64,
 }
 
 /// Language packs shipped with this build (Python, TypeScript/TSX/JavaScript,
@@ -240,7 +252,14 @@ const CONTENT_MEMORY_CAP: u64 = 512 * 1024 * 1024;
 
 /// Indexes the working tree at `opts.root` (including uncommitted changes and
 /// untracked, non-ignored files) and registers the new segment in the store.
+/// With [`IndexOptions::embed`], embeds with the presets of `rueca-embed`.
 pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
+    index_worktree_with(opts, &PresetLoader { store: opts.store.clone() })
+}
+
+/// [`index_worktree`] with the embedder of the vectors pass supplied by
+/// `loader`.
+pub fn index_worktree_with(opts: &IndexOptions, loader: &dyn EmbedderLoader) -> anyhow::Result<IndexReport> {
     let started = Instant::now();
     let pinned = opts.pinned()?;
     let root = fs::canonicalize(&opts.root).with_context(|| format!("cannot access {}", opts.root.display()))?;
@@ -329,17 +348,27 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
     timings.resolve_ms = t.elapsed().as_millis() as u64;
     debug!(nodes = out.graph.nodes.len(), edges = out.graph.edges.len(), ms = timings.resolve_ms, "resolve");
 
-    // 5. Write and register.
+    // 5. Write and register; with vectors, lexical first unless every
+    // vector is cached (RFC 0007 §5.6).
     let t = Instant::now();
+    let pass = match &opts.embed {
+        Some(cfg) => prepare_vectors(&out.graph, &root, &contents, cfg, loader, &opts.store)?,
+        None => None,
+    };
+    let embed_prepare_ms = t.elapsed().as_millis() as u64;
     let source = WorktreeContent { root: &root, contents: std::sync::Mutex::new(contents) };
-    let meta = rueca_segment::write_segment(&out.graph, &source, &opts.store).context("writing segment")?;
-    match pinned {
-        Some((ref_name, _)) => store.register_ref(&root_str, &meta, ref_name),
-        None => store.register(&root_str, &meta),
-    }
-    .context("registering segment")?;
-    timings.write_ms = t.elapsed().as_millis() as u64;
-    debug!(segment = %meta.id, bytes = meta.bytes, ms = timings.write_ms, "write");
+    let register = |meta: &SegmentMeta| -> anyhow::Result<()> {
+        match pinned {
+            Some((ref_name, _)) => store.register_ref(&root_str, meta, ref_name),
+            None => store.register(&root_str, meta),
+        }
+        .context("registering segment")
+    };
+    let published = publish(&out.graph, &source, &store, pass, loader, &register)?;
+    let (meta, vectors) = (published.meta, published.vectors);
+    timings.write_ms = published.write_ms;
+    timings.embed_ms = embed_prepare_ms + published.embed_ms;
+    debug!(segment = %meta.id, bytes = meta.bytes, ms = timings.write_ms, embed_ms = timings.embed_ms, "write");
 
     let stats = out.stats;
     let report = IndexReport {
@@ -358,6 +387,7 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
         references_builtin: stats.references_builtin,
         references_external: stats.references_external,
         timings,
+        vectors,
     };
     info!(
         root = %report.root,
@@ -374,6 +404,98 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
         "indexed"
     );
     Ok(report)
+}
+
+/// The vectors pass up to the cache lookup, or `None` when the run stays
+/// lexical: a configured (not required) embedding whose preset, weights or
+/// cache are unusable warns instead of failing. Required (`--embed`)
+/// failures are errors before anything is published.
+fn prepare_vectors(
+    graph: &rueca_model::ResolvedGraph,
+    root: &Path,
+    contents: &HashMap<String, Vec<u8>>,
+    cfg: &EmbedConfig,
+    loader: &dyn EmbedderLoader,
+    store: &Path,
+) -> anyhow::Result<Option<vectors::Pass>> {
+    let read = |f: &FileEntry| -> anyhow::Result<Vec<u8>> {
+        if let Some(b) = contents.get(&f.path) {
+            return Ok(b.clone());
+        }
+        let bytes = fs::read(root.join(&f.path))?;
+        anyhow::ensure!(git_blob_sha(&bytes) == f.blob_sha, "{} changed while indexing", f.path);
+        Ok(bytes)
+    };
+    let pass = vectors::Pass::prepare(graph, &read, cfg, loader, store).and_then(|p| {
+        if !p.all_cached() {
+            loader.check(cfg)?;
+        }
+        Ok(p)
+    });
+    match pass {
+        Ok(p) => Ok(Some(p)),
+        Err(e) if cfg.required => Err(e.context(format!("vectors (`--embed={}`)", cfg.preset))),
+        Err(e) => {
+            warn!("indexing lexically, vectors unavailable: {e:#}");
+            Ok(None)
+        }
+    }
+}
+
+/// What [`publish`] published.
+struct Published {
+    meta: SegmentMeta,
+    vectors: Option<VectorsReport>,
+    write_ms: u64,
+    embed_ms: u64,
+}
+
+/// Writes and registers the segment: once with its vectors when the pass
+/// found every vector cached; else lexical first, then (after embedding the
+/// misses) a copy with vectors that replaces it.
+fn publish(
+    graph: &rueca_model::ResolvedGraph,
+    source: &dyn ContentSource,
+    store: &Store,
+    pass: Option<vectors::Pass>,
+    loader: &dyn EmbedderLoader,
+    register: &dyn Fn(&SegmentMeta) -> anyhow::Result<()>,
+) -> anyhow::Result<Published> {
+    let t = Instant::now();
+    if let Some(p) = pass.as_ref().filter(|p| p.all_cached()) {
+        let vw = p.build()?;
+        let meta =
+            rueca_segment::write_segment_with(graph, source, &store.dir, Some(&vw)).context("writing segment")?;
+        register(&meta)?;
+        let write_ms = t.elapsed().as_millis() as u64;
+        let report = pass.map(|p| p.finish(1));
+        return Ok(Published { meta, vectors: report, write_ms, embed_ms: 0 });
+    }
+    let lexical = rueca_segment::write_segment(graph, source, &store.dir).context("writing segment")?;
+    register(&lexical)?;
+    let write_ms = t.elapsed().as_millis() as u64;
+    let Some(mut p) = pass else {
+        return Ok(Published { meta: lexical, vectors: None, write_ms, embed_ms: 0 });
+    };
+    let t = Instant::now();
+    let required = p.required();
+    let republished = p.embed_misses(loader).and_then(|()| {
+        let vw = p.build()?;
+        let seg = store.open_segment(&lexical.id)?;
+        Ok(store.republish_with_vectors(&seg, &vw)?)
+    });
+    match republished {
+        Ok(meta) => {
+            register(&meta)?;
+            let embed_ms = t.elapsed().as_millis() as u64;
+            Ok(Published { meta, vectors: Some(p.finish(2)), write_ms, embed_ms })
+        }
+        Err(e) if required => Err(e.context("embedding (the lexical segment is published)")),
+        Err(e) => {
+            warn!("vectors not published, the snapshot stays lexical: {e:#}");
+            Ok(Published { meta: lexical, vectors: None, write_ms, embed_ms: t.elapsed().as_millis() as u64 })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

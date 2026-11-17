@@ -668,6 +668,7 @@ fn reindex(opts: &RefIndexOptions, root: &Path, owner: &RefOwner, base: ReportBa
         threads: opts.threads,
         ref_name: Some(base.resolved.name.clone()),
         commit: Some(base.resolved.commit.clone()),
+        embed: None,
     })
     .with_context(|| format!("indexing ref `{}` exported at {}", base.resolved.name, base.dest.display()))?;
     info!(
@@ -715,6 +716,7 @@ fn current_report(store: &Store, e: &CatalogEntry, resolved: &ResolvedRef, dest:
         references_builtin: 0,
         references_external: 0,
         timings: PhaseTimings::default(),
+        vectors: None,
     })
 }
 
