@@ -28,6 +28,7 @@ rueca-segment = { path = "crates/rueca-segment", version = "0.1.0-alpha.2" }
 rueca-index = { path = "crates/rueca-index", version = "0.1.0-alpha.2" }
 rueca-query = { path = "crates/rueca-query", version = "0.1.0-alpha.2" }
 rueca-mcp = { path = "crates/rueca-mcp", version = "0.1.0-alpha.2" }
+rueca-storage = { path = "crates/rueca-storage", version = "0.1.0-alpha.2" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

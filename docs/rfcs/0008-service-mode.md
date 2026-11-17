@@ -1,6 +1,6 @@
 # RFC 0008 — Service mode
 
-- Status: Draft
+- Status: Draft; phase 0 (§10) in implementation
 - Created: 2026-11-17
 - Depends on: RFC 0001 (§8 storage, §13 security, §14 deployment modes),
   RFC 0004 (latency floor), RFC 0005 (envelope, pinned ids, `repo` /
@@ -523,9 +523,31 @@ build, never a lost write. Local mode gets §5.5's file lock.
 |---|---|---|
 | License, MSRV | MIT/Apache-2.0, 1.85 | Apache-2.0, **1.91** (Rueca: 1.90) |
 | GCS update CAS | `if-generation-match` | only `if_not_exists` |
-| Verdict | **chosen** | rejected (§12) |
+| Verdict | ~~chosen~~ rejected at implementation (below) | rejected (§12) |
 
-`object_store = { version = "0.14", default-features = false, features =
+**Amended 2026-11-17 (phase 0, owner decision).** Adding `object_store`
+0.14.2 fails `cargo deny`: it depends unconditionally, even with no
+features, on `chrono` 0.4.45 (RUSTSEC-2026-0543, unmaintained) and
+`humantime` 2.4.0 (RUSTSEC-2026-0542, unmaintained), and its `aws` /
+`gcp` / `azure` features pull `webpki-root-certs` (CDLA-Permissive-2.0,
+not in `deny.toml`) through `reqwest/rustls`. Advisory ignores are
+rejected (the same rule that replaced `rmcp`, §6.1), and OpenDAL needs
+MSRV 1.91. **Recorded:** `rueca-storage` keeps the `Storage` trait of
+§5.11 and assembles the S3 backend from
+[`rusty-s3`](https://crates.io/crates/rusty-s3) 0.11 (sans-IO request
+builder and SigV4 signer, BSD-2-Clause, `jiff` for dates) and `ureq`
+3.5 (`rustls-no-provider` + `ring`) with the platform's roots through
+`rustls-native-certs` (no CDLA bundle); the in-memory and `file://`
+backends are Rueca's own. Signing is never written in-house. Covered:
+AWS S3 and S3-compatible stores (MinIO verified in phase 0, R2); GCS
+through its XML API with HMAC keys, the generation preconditions
+signed, verified against a fake server only; Azure Blob is deferred (an
+S3-compatible gateway in front of it works today). Credentials come
+from options or `AWS_*` environment variables; IMDS / IRSA providers
+are phase 2 (`CredentialsProvider` seam). The rest of this section stays as
+the behaviour reference for conditional writes.
+
+The first draft chose `object_store = { version = "0.14", default-features = false, features =
 ["aws", "gcp", "azure", "fs"] }`; the in-memory backend backs every test.
 Conditional writes ([`PutMode`](https://docs.rs/object_store/0.14.2/object_store/enum.PutMode.html);
 backend sources in the [repository](https://github.com/apache/arrow-rs-object-store)):

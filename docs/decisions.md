@@ -164,6 +164,25 @@ Still open for the resolver: a module and a function with one name
 (`mod spawn; pub use spawn::spawn;`) bind the module, so `tokio::spawn(…)`
 calls stay unresolved.
 
+## 2026-11-17 — Service store: rusty-s3 and own backends instead of object_store
+
+RFC 0008 phase 0. `object_store` 0.14.2, the crate RFC 0008 §5.10 chose,
+fails the required `cargo deny` check: `chrono` 0.4.45
+(RUSTSEC-2026-0543) and `humantime` 2.4.0 (RUSTSEC-2026-0542), both
+unmaintained with no patched release, are unconditional dependencies
+even of its in-memory backend, and its cloud features pull
+`webpki-root-certs` (CDLA-Permissive-2.0, not an allowed license)
+through `reqwest/rustls`. Ignoring the advisories was rejected, as for
+`rmcp`; OpenDAL needs MSRV 1.91 (Rueca: 1.90). Chosen: `rueca-storage`
+keeps the RFC's `Storage` trait and compare-and-swap semantics, with
+in-memory and `file://` backends of its own (the file backend locks
+`<root>/.lock` and uses BLAKE3 e-tags) and an S3 backend assembled from
+`rusty-s3` 0.11 (sans-IO SigV4 signing and request building, dates from
+`jiff`) over `ureq` 3.5 with `rustls` and the platform's native roots
+(`rustls-native-certs`). Request signing is not written in-house. GCS is
+served through its S3-compatible XML API when the generation headers can
+be signed; Azure Blob is deferred. The RFC's §5.10 carries the amendment.
+
 ## 2026-11-17 — Own MCP layer instead of rmcp
 
 The required `cargo deny` check failed on main with RUSTSEC-2026-0543:
