@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, SegmentError};
+use crate::{Result, SegmentError, StoreLock};
 
 pub(crate) const PACK_MAGIC: &[u8; 8] = b"RUECAPAK";
 pub(crate) const PACK_END_MAGIC: &[u8; 8] = b"RCPAKEND";
@@ -130,20 +130,37 @@ fn map_file(path: &Path) -> Result<Arc<Mmap>> {
     Ok(Arc::new(unsafe { Mmap::map(&f)? }))
 }
 
+/// A pack [`crate::write_segment`] just published, for [`BlobIndex::commit`]:
+/// its id and its `(sha, offset, clen, raw_len)` entries.
+pub(crate) struct NewPack<'a> {
+    pub id: &'a str,
+    pub blobs: &'a [(Sha, u64, u64, u64)],
+}
+
 impl BlobIndex {
     /// Loads `<packs>/index.rcpi` if it is valid and lists exactly the packs on
     /// disk; otherwise rebuilds the index by scanning pack footers (corrupt
-    /// packs are skipped). Returns `(index, rebuilt)`.
+    /// packs are skipped). Returns `(index, rebuilt)`. Takes no lock.
     pub fn load(packs_dir: &Path) -> Result<(BlobIndex, bool)> {
         let on_disk = list_packs(packs_dir)?;
-        if let Some(idx) = Self::read_index_file(&packs_dir.join(INDEX_FILE)) {
-            let listed: BTreeSet<String> = idx.packs.iter().cloned().collect();
-            if listed == on_disk {
-                return Ok((idx, false));
-            }
+        if let Some(idx) = Self::read_index_file(&packs_dir.join(INDEX_FILE))
+            && idx.lists(&on_disk)
+        {
+            return Ok((idx, false));
         }
+        Ok((Self::rebuild(packs_dir, on_disk), true))
+    }
+
+    /// Whether the index covers exactly the packs `set`.
+    fn lists(&self, set: &BTreeSet<String>) -> bool {
+        self.packs.len() == set.len() && self.packs.iter().all(|p| set.contains(p))
+    }
+
+    /// The index of the packs `names`, from their footers (corrupt packs are
+    /// skipped; a blob in several packs maps to the first by name).
+    fn rebuild(packs_dir: &Path, names: BTreeSet<String>) -> BlobIndex {
         let mut idx = BlobIndex::default();
-        for name in on_disk {
+        for name in names {
             let Ok(map) = map_file(&packs_dir.join(format!("{name}.rcpack"))) else { continue };
             let Ok(entries) = read_pack_footer(&map) else { continue };
             let pack = idx.packs.len() as u32;
@@ -152,7 +169,44 @@ impl BlobIndex {
                 idx.map.entry(sha).or_insert(BlobLoc { pack, offset, clen, raw_len });
             }
         }
-        Ok((idx, true))
+        idx
+    }
+
+    /// Records a writer's work in `<store>/packs/index.rcpi`, under the store
+    /// lock (a read-modify-write: another writer may have saved the index,
+    /// or added a pack, since `mine` was loaded).
+    ///
+    /// The base is the packs on disk other than `new`: `mine` when it covers
+    /// exactly those, else the index file when it does, else a rebuild from
+    /// their footers. `new`'s blobs are then added, superseding older
+    /// locations (a blob re-stored because its old frame was damaged). The
+    /// file is rewritten unless it already covered the base and there is no
+    /// new pack.
+    pub fn commit(store_dir: &Path, mine: BlobIndex, new: Option<NewPack<'_>>) -> Result<()> {
+        let _lock = StoreLock::acquire(store_dir)?;
+        let packs_dir = store_dir.join("packs");
+        let mut base = list_packs(&packs_dir)?;
+        if let Some(n) = &new {
+            base.remove(n.id);
+        }
+        let on_file = Self::read_index_file(&packs_dir.join(INDEX_FILE)).filter(|i| i.lists(&base));
+        let file_current = on_file.is_some();
+        if file_current && new.is_none() {
+            return Ok(());
+        }
+        let mut idx = match on_file {
+            _ if mine.lists(&base) => mine,
+            Some(i) => i,
+            None => Self::rebuild(&packs_dir, base),
+        };
+        if let Some(n) = new {
+            let pack = idx.packs.len() as u32;
+            idx.packs.push(n.id.to_string());
+            for &(sha, offset, clen, raw_len) in n.blobs {
+                idx.map.insert(sha, BlobLoc { pack, offset, clen, raw_len });
+            }
+        }
+        idx.save(&packs_dir, &store_dir.join("tmp"))
     }
 
     fn read_index_file(path: &Path) -> Option<BlobIndex> {
@@ -175,7 +229,8 @@ impl BlobIndex {
     }
 
     /// Atomically rewrites `<packs>/index.rcpi` (entries sorted by sha).
-    pub fn save(&self, packs_dir: &Path, tmp_dir: &Path) -> Result<()> {
+    /// Callers hold the store lock ([`BlobIndex::commit`]).
+    fn save(&self, packs_dir: &Path, tmp_dir: &Path) -> Result<()> {
         let mut entries: Vec<(Sha, BlobLoc)> = self.map.iter().map(|(k, v)| (*k, *v)).collect();
         entries.sort_unstable_by_key(|(k, _)| *k);
         let payload = postcard::to_stdvec(&IndexFile { packs: self.packs.clone(), entries })
@@ -287,6 +342,11 @@ impl PackReader {
             .get_or_init(|| BlobIndex::load(&self.packs_dir).map(|(i, _)| i).map_err(|e| e.to_string()))
             .as_ref()
             .map_err(|e| SegmentError::Other(format!("loading blob index: {e}")))
+    }
+
+    /// The pack (position in the loaded index) holding `sha`, if indexed.
+    pub fn pack_of(&self, sha: &Sha) -> Option<u32> {
+        self.index().ok()?.map.get(sha).map(|l| l.pack)
     }
 
     pub fn into_index(self) -> Option<BlobIndex> {

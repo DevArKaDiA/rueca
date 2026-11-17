@@ -938,3 +938,136 @@ fn contract_table_round_trip() {
     graph.contracts[0].node = graph.nodes.len() as u32;
     assert!(write_segment(&graph, &mem, dir.path()).is_err());
 }
+
+// ---------------------------------------------------------------------------
+// Several writers per store (RFC 0008 §5.5), pack lists and ids
+// ---------------------------------------------------------------------------
+
+/// Two threads registering different roots into one store at the same time
+/// never lose an entry: the catalog read-modify-write runs under the store
+/// lock.
+#[test]
+fn concurrent_registrations_are_never_lost() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let (graph, mem) = fixture();
+    let meta = write_segment(&graph, &mem, dir.path()).unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    const PER_THREAD: usize = 50;
+    std::thread::scope(|s| {
+        for t in ["a", "b"] {
+            let (store, meta, work) = (&store, &meta, work.path());
+            s.spawn(move || {
+                for i in 0..PER_THREAD {
+                    let root = work.join(format!("{t}{i:02}"));
+                    store.register(root.to_str().unwrap(), meta).unwrap();
+                }
+            });
+        }
+    });
+    let entries = store.entries().unwrap();
+    assert_eq!(entries.len(), 2 * PER_THREAD, "lost registrations");
+    assert!(store.segment_path(&meta.id).exists());
+    assert!(dir.path().join(".lock").is_file());
+}
+
+/// The pack ids in the store's `packs/` directory, sorted.
+fn pack_ids(store: &Path) -> Vec<String> {
+    let mut ids: Vec<String> = std::fs::read_dir(store.join("packs"))
+        .unwrap()
+        .filter_map(|e| e.unwrap().file_name().to_string_lossy().strip_suffix(".rcpack").map(str::to_string))
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// `SegmentMeta::packs` names exactly the packs holding the snapshot's
+/// blobs: the new pack plus the packs its known blobs were read from.
+#[test]
+fn segment_meta_lists_the_packs_of_its_blobs() {
+    let dir = tempfile::tempdir().unwrap();
+    let (graph, mem) = fixture();
+    let first = write_segment(&graph, &mem, dir.path()).unwrap();
+    let p1 = pack_ids(dir.path());
+    assert_eq!(p1.len(), 1);
+    assert_eq!(first.packs, p1);
+
+    // Second snapshot: shares every file but one, which is new.
+    let (mut graph2, _) = fixture();
+    let new = b"export const x = 1;\n".to_vec();
+    graph2.files[1].blob_sha = git_blob_sha(&new);
+    graph2.files[1].size = new.len() as u64;
+    let mem2 = Mem { by_path: HashMap::from([("src/web/app.ts".to_string(), new)]), calls: AtomicUsize::new(0) };
+    let second = write_segment(&graph2, &mem2, dir.path()).unwrap();
+    let both = pack_ids(dir.path());
+    assert_eq!(both.len(), 2);
+    assert_eq!(second.packs, both, "the new pack and the pack of the shared blobs");
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(store.open_segment(&second.id).unwrap().meta().packs, both, "round-trips through the bundle");
+
+    // A snapshot of known blobs only adds no pack and lists the one it reads.
+    let (graph3, mem3) = fixture();
+    let third = write_segment(&graph3, &mem3, dir.path()).unwrap();
+    assert_eq!((third.content_bytes_added, third.packs.clone()), (0, p1));
+
+    // An empty snapshot needs no pack, and the field is then not written.
+    let (mut empty, _) = fixture();
+    (empty.nodes, empty.edges, empty.files) = (vec![], vec![], vec![]);
+    let e = write_segment(&empty, &mem3, dir.path()).unwrap();
+    assert!(e.packs.is_empty());
+    assert!(store.open_segment(&e.id).unwrap().meta().packs.is_empty());
+}
+
+/// Segment and pack ids end in 64 random bits (16 lowercase hex digits).
+#[test]
+fn ids_end_in_64_random_bits() {
+    let dir = tempfile::tempdir().unwrap();
+    let (graph, mem) = fixture();
+    let meta = write_segment(&graph, &mem, dir.path()).unwrap();
+    let is_hex64 = |s: &str| s.len() == 16 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    let parts: Vec<&str> = meta.id.rsplitn(3, '-').collect();
+    assert!(is_hex64(parts[0]), "{}", meta.id);
+    assert!(parts[1].parse::<u64>().is_ok(), "unix seconds: {}", meta.id);
+    assert!(meta.id.starts_with("local-demo-0123456789ab-"), "{}", meta.id);
+    let pack = &meta.packs[0];
+    let (ts, rand) = pack.split_once('-').unwrap();
+    assert!(ts.parse::<u64>().is_ok() && is_hex64(rand), "{pack}");
+    // Two writes of one commit in one second get distinct ids.
+    let again = write_segment(&graph, &mem, dir.path()).unwrap();
+    assert_ne!(meta.id, again.id);
+}
+
+/// Concurrent writers each add a pack; the blob index lists every pack
+/// afterwards (none is dropped by a stale read-modify-write), so readers
+/// never need to rebuild it.
+#[test]
+fn concurrent_writers_keep_every_pack_in_the_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let metas: Vec<rueca_segment::SegmentMeta> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..4u8)
+            .map(|t| {
+                let dir = dir.path();
+                s.spawn(move || {
+                    let (mut graph, _) = fixture();
+                    let body = format!("thread = {t}\n").into_bytes();
+                    graph.files.truncate(1);
+                    graph.nodes.truncate(3);
+                    graph.edges.clear();
+                    graph.files[0].blob_sha = git_blob_sha(&body);
+                    graph.files[0].size = body.len() as u64;
+                    let path = graph.files[0].path.clone();
+                    let mem = Mem { by_path: HashMap::from([(path, body)]), calls: AtomicUsize::new(0) };
+                    write_segment(&graph, &mem, dir).unwrap()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let packs = pack_ids(dir.path());
+    assert_eq!(packs.len(), 4);
+    let index = std::fs::read(dir.path().join("packs/index.rcpi")).unwrap();
+    for (m, p) in metas.iter().zip(metas.iter().map(|m| &m.packs[0])) {
+        assert!(packs.contains(p), "{} lists {p}", m.id);
+        assert!(index.windows(p.len()).any(|w| w == p.as_bytes()), "index.rcpi lists {p}");
+    }
+}

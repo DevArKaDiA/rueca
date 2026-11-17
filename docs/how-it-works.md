@@ -910,6 +910,22 @@ component exists because a tool needs it:
 The segment is written to a temp file and atomically renamed; the catalog
 then points the indexed root at it. Query time never reads the working tree.
 
+The store directory holds `catalog.json`, `segments/<id>.rcseg`,
+`packs/<id>.rcpack` with the blob index `packs/index.rcpi`, `orgs/`,
+`refs/`, `tmp/` and `.lock`. Segment ids are
+`<repo-slug>-<commit12>-<unix seconds>-<16 hex digits>` and pack ids
+`<unix seconds>-<16 hex digits>`: 64 random bits, so two indexers writing
+one commit in the same second never collide. A segment's meta lists the
+packs holding its blobs (`packs`: the pack it added plus the packs its
+known blobs came from), so a service store can copy exactly what a
+snapshot needs ([RFC 0008 §5.9](rfcs/0008-service-mode.md)). Several
+indexers may write one store at once: every read-modify-write of
+`catalog.json`, `packs/index.rcpi` and an organization's `org.json`, and
+organization garbage collection, runs under an exclusive file lock on
+`.lock` (a writer waiting more than 60 s fails, naming the lock file);
+parsing, resolution and segment writing run unlocked, and readers never
+lock.
+
 **Ref snapshots** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--implemented)).
 `rueca index [PATH] --ref <name>` indexes a branch, pull request (`pr/<n>`),
 tag or commit of PATH's repository without touching its working tree: the

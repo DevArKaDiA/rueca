@@ -148,7 +148,27 @@ fn read_components(b: &[u8], footer: &[u8], footer_offset: u64) -> Result<HashMa
     if at != footer.len() {
         return Err(corrupt("trailing bytes in footer"));
     }
+    check_padding(b, &components, footer_offset as usize)?;
     Ok(components)
+}
+
+/// The bytes between the header and the footer that no component covers
+/// (the alignment padding) must be zero, so no byte of a bundle escapes
+/// validation.
+fn check_padding(b: &[u8], components: &HashMap<String, Range<usize>>, footer_offset: usize) -> Result<()> {
+    let mut ranges: Vec<&Range<usize>> = components.values().collect();
+    ranges.sort_by_key(|r| r.start);
+    let mut at = HEADER_LEN;
+    for r in ranges {
+        if r.start > at && b[at..r.start].iter().any(|&x| x != 0) {
+            return Err(corrupt("non-zero padding between components"));
+        }
+        at = at.max(r.end);
+    }
+    if footer_offset > at && b[at..footer_offset].iter().any(|&x| x != 0) {
+        return Err(corrupt("non-zero padding before the footer"));
+    }
+    Ok(())
 }
 
 /// The footer entry at `*at` — (name, offset, length, blake3 hash) — and
