@@ -4,7 +4,8 @@
 - Created: 2026-10-22
 - Supersedes: —
 - Amended by: RFC 0002 (2026-10-22): segment bundle format, blob-visibility
-  deltas, precision layer, MCP 2026-07-28 auth, git transport, untrusted input
+  deltas, precision layer, MCP 2026-07-28 auth, git transport, untrusted input;
+  decisions log (2026-11-17): own MCP layer instead of `rmcp` (§11, §13)
 
 ## 1. Summary
 
@@ -487,11 +488,16 @@ structured data and the next languages):
 Output conventions: compact by default, fully pinned IDs plus host URLs,
 explicit `truncated` / `next_cursor`, token budget parameter on every tool.
 
-Transports: stdio (local) and Streamable HTTP (service / org), built on the
-official `rmcp` SDK. Target protocol: MCP 2026-07-28 (stateless, no
-`initialize` handshake or session IDs, `server/discover`, deterministic
-`tools/list` ordering), with legacy protocol versions still served for older
-clients. In stdio mode all logs go to stderr.
+> *Amended 2026-11-17 ([decisions log](../decisions.md)): the transports
+> are built on Rueca's own MCP layer, not on the `rmcp` SDK, after
+> RUSTSEC-2026-0543 (`chrono`, reached only through `rmcp`). Behaviour
+> reference: [`docs/mcp-protocol.md`](../mcp-protocol.md).*
+
+Transports: stdio (local) and Streamable HTTP (service / org), built on
+Rueca's own MCP layer (`rueca-mcp`). Target protocol: MCP 2026-07-28
+(stateless, no `initialize` handshake or session IDs, `server/discover`,
+deterministic `tools/list` ordering), with legacy protocol versions still
+served for older clients. In stdio mode all logs go to stderr.
 
 ## 12. Supported languages
 
@@ -522,8 +528,8 @@ configuration.
 - **MCP authorization (service / org):** Rueca is an OAuth 2.1 **resource
   server** per the MCP 2026-07-28 authorization spec: RFC 9728 protected
   resource metadata, bearer validation with audience check,
-  `WWW-Authenticate` challenges and `insufficient_scope` step-up. `rmcp`
-  provides only client-side auth, so this layer is Rueca's. Tokens are issued
+  `WWW-Authenticate` challenges and `insufficient_scope` step-up. This
+  resource-server layer is Rueca's. Tokens are issued
   either by an external OIDC provider (Rueca validates via JWKS) or by a
   minimal embedded authorization server that federates login to GitHub /
   GitLab. **Code-host tokens are never accepted as MCP bearers** and never

@@ -193,7 +193,9 @@ edges into a ref follow the symbols it still has
 ## Use it from an agent
 
 `rueca mcp --root <repo>` speaks MCP over stdio and indexes the root on first
-start if needed.
+start if needed. It serves protocol versions 2024-11-05 to 2025-11-25 through
+`initialize` and 2026-07-28 without it
+([protocol reference](docs/mcp-protocol.md)).
 
 **Claude Code**
 
@@ -355,7 +357,7 @@ More languages (Kotlin, Swift, Ruby, C#, …) follow the same gate.
 | [`rueca-segment`](crates/rueca-segment) | segment format, search, content packs, catalog |
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
 | [`rueca-query`](crates/rueca-query) | the tools, organization scope |
-| [`rueca-mcp`](crates/rueca-mcp) | MCP stdio server |
+| [`rueca-mcp`](crates/rueca-mcp) | MCP server: its own protocol layer ([reference](docs/mcp-protocol.md)), stdio |
 
 ## Contributing
 
@@ -371,6 +373,6 @@ tree-sitter queries keep their original licenses; see [NOTICE](NOTICE).
 
 Built on [tree-sitter](https://tree-sitter.github.io), [tantivy](https://github.com/quickwit-oss/tantivy),
 [oxc_resolver](https://github.com/oxc-project/oxc-resolver), [gix](https://github.com/GitoxideLabs/gitoxide),
-[rmcp](https://github.com/modelcontextprotocol/rust-sdk), and queries adapted from
+and queries adapted from
 [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) and
 [bloop](https://github.com/BloopAI/bloop).

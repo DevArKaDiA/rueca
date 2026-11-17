@@ -1,8 +1,8 @@
 # MCP protocol reference (Rueca's own layer)
 
 Status: behaviour reference of Rueca's own MCP layer in `crates/rueca-mcp`,
-which replaced `rmcp` 3.10.0 (branch `refactor/mcp-without-rmcp`). Why: `cargo deny` fails on RUSTSEC-2026-0543
-(`chrono` unmaintained). `chrono` reaches Rueca only through `rmcp`: directly,
+which replaced `rmcp` 3.10.0 on 2026-11-17. Why: `cargo deny` failed on
+RUSTSEC-2026-0543 (`chrono` unmaintained). `chrono` reaches Rueca only through `rmcp`: directly,
 and through `rmcp`'s `schemars` dependency with feature `chrono04`.
 `rueca-query`'s own `schemars = "1"` (default features `derive`, `std`) does
 not enable it. The owner chose to write a small MCP layer that behaves the
@@ -300,8 +300,8 @@ Advertised and accepted: `2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25,
 
 - TypeScript SDK `packages/core/src/constants.ts`: `LATEST_PROTOCOL_VERSION = '2025-11-25'`, supported `[2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07]`. Its modern era (`protocolEras.ts`) is `[2026-07-28]`.
 - Python SDK `mcp_types/version.py`: handshake versions are `2024-11-05` through `2025-11-25`; the modern list is `2026-07-28`.
-- Claude Code 2.1.311 (bundled TypeScript SDK): `LATEST_PROTOCOL_VERSION = "2025-11-25"`, so it is expected to send `initialize` with `2025-11-25` (read from the binary, to be confirmed by e2e). The bundle also contains 2026-07-28 era code.
-- MCP Inspector CLI: uses the TypeScript SDK client, so it is expected to send its SDK's `LATEST_PROTOCOL_VERSION`. Not verified.
+- Claude Code 2.1.311: uses the 2026-07-28 lifecycle, not `initialize`. Observed on stdin of the own layer (2026-11-17): a `server/discover` probe (id `server-discover-probe-1`) with `_meta` `protocolVersion` `2026-07-28`, then `tools/list` and every `tools/call` with the same `_meta`. All answers carry `resultType: "complete"`.
+- MCP Inspector CLI 2.13.0: sends `initialize` with `2025-11-25` (client `inspector-cli`, capabilities with `roots` and `extensions`), then `notifications/initialized`. Rueca answers `2025-11-25`.
 
 | Version | What differs for Rueca |
 |---|---|
@@ -498,12 +498,15 @@ reproduced.
 3. **Existing tests**: `tests/duplex.rs` on std pipes; `lib.rs` tests
    unchanged (`index_gate_states`, `old_segment_format_is_reindexed`,
    `read_only_tools`).
-4. **Inspector e2e**: `npx @modelcontextprotocol/inspector --cli rueca mcp
-   --root <repo> --method tools/list`, and `--method tools/call --tool-name
-   search_symbols --tool-arg query=main`.
-5. **Claude Code e2e**: `claude mcp add rueca -- rueca mcp --root .`. Check
-   `/mcp` shows it connected with 7 tools, and that one `search_symbols`
-   call succeeds.
+4. **Inspector e2e** (done 2026-11-17, Inspector 2.13.0, legacy lifecycle):
+   `npx @modelcontextprotocol/inspector --cli rueca mcp --root <repo>
+   --method tools/list` lists the 7 tools; `--method tools/call --tool-name
+   search_symbols --tool-arg query=invoice` returns results;
+   `--tool-name get_symbol` without arguments returns `isError: true`.
+5. **Claude Code e2e** (done 2026-11-17, Claude Code 2.1.311, 2026-07-28
+   lifecycle): `claude mcp add rueca -- rueca mcp --root .`; `claude mcp
+   list` shows it connected; a `claude -p` prompt answered through
+   `get_file_outline` and `trace`.
 6. **Gates**: `cargo deny check` (RUSTSEC-2026-0543 gone), `cargo tree -i
    chrono` and `cargo tree -i tokio -p rueca-mcp` both empty, clippy with
    `-D warnings`, MSRV 1.90, SonarQube.
