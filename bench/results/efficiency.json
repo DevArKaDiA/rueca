@@ -739,12 +739,12 @@
    "trace": {
     "rueca": {
      "n": 1858,
-     "true_edges": 5559,
-     "per_true_edge": 50.63842417701025,
+     "true_edges": 5527,
+     "per_true_edge": 50.71937760086846,
      "tokens_median": 109.0,
      "ci": [
-      49.70371413115264,
-      51.62838428026731
+      49.76968087900432,
+      51.72068286748736
      ]
     },
     "cbm": {
@@ -761,21 +761,21 @@
    "search": {
     "rueca": {
      "n": 43,
-     "hit_rate": 0.5813953488372093,
-     "to_first_hit": 391.64,
+     "hit_rate": 0.6046511627906976,
+     "to_first_hit": 381.88461538461536,
      "to_first_hit_ci": [
-      268.09268817204304,
-      603.5614035087718
+      266.27257575757574,
+      572.6368421052631
      ],
-     "per_hit": 232.265625,
+     "per_hit": 224.1969696969697,
      "per_hit_ci": [
-      164.95499999999998,
-      358.15931818181804
+      159.30340579710145,
+      343.5951839826839
      ],
      "func_hit_rate": 0.27906976744186046,
-     "func_to_first_hit": 1017.0,
-     "func_per_hit": 782.3684210526316,
-     "tokens_median": 336.0,
+     "func_to_first_hit": 1032.3333333333333,
+     "func_per_hit": 778.7894736842105,
+     "tokens_median": 338.0,
      "formats": [
       "text"
      ],
@@ -808,7 +808,7 @@
     "rueca": {
      "n": 100,
      "found": 90,
-     "per_found": 380.84444444444443
+     "per_found": 380.3
     },
     "cbm": {
      "n": 100,
@@ -819,9 +819,9 @@
    "raw": {
     "trace": {
      "n": 1858,
-     "rueca_median": 400.5,
+     "rueca_median": 400.0,
      "cbm_median": 160.5,
-     "rueca_mean": 503.44725511302477,
+     "rueca_mean": 501.7362755651238,
      "cbm_mean": 189.75349838536061,
      "agent_n": 1858,
      "agent_rueca_median": 109.0,
@@ -831,14 +831,13 @@
      "n": 100,
      "rueca_median": 1013.0,
      "cbm_median": 193.0,
-     "rueca_mean": 995.71,
+     "rueca_mean": 995.32,
      "cbm_mean": 253.56,
      "agent_n": 100,
      "agent_rueca_median": 328.5,
      "agent_cbm_median": 165.5
     }
-   },
-   "carried": true
+   }
   }
  }
 }
