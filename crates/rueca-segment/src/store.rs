@@ -4,7 +4,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{CatalogEntry, Result, SegmentError, SegmentMeta, Store};
+use crate::{CatalogEntry, Result, SegmentError, SegmentMeta, Store, StoreLock};
 
 pub(crate) const CATALOG_FILE: &str = "catalog.json";
 
@@ -123,8 +123,11 @@ impl Store {
         atomic_write(&self.dir.join(CATALOG_FILE), &self.dir.join("tmp"), &bytes)
     }
 
+    /// Read-modify-write of `catalog.json` under the store lock, so two
+    /// writers never lose each other's entries.
     pub(crate) fn register_impl(&self, root: &str, meta: &SegmentMeta, ref_name: Option<&str>) -> Result<()> {
         let root = canonical(Path::new(root)).to_string_lossy().into_owned();
+        let _lock = StoreLock::acquire(&self.dir)?;
         let mut entries = self.entries_impl()?;
         let replaced = take_root(&mut entries, &root);
         entries.push(CatalogEntry {
@@ -140,8 +143,10 @@ impl Store {
         Ok(())
     }
 
+    /// Like [`Store::register_impl`], under the store lock.
     pub(crate) fn unregister_impl(&self, root: &str) -> Result<Option<CatalogEntry>> {
         let root = canonical(Path::new(root)).to_string_lossy().into_owned();
+        let _lock = StoreLock::acquire(&self.dir)?;
         let mut entries = self.entries_impl()?;
         let mut removed = take_root(&mut entries, &root);
         let Some(entry) = removed.pop() else { return Ok(None) };
@@ -151,7 +156,8 @@ impl Store {
     }
 
     /// Deletes the segment files of `candidates` that no entry of `entries`
-    /// and no kept organization generation references.
+    /// and no kept organization generation references. Called under the
+    /// store lock, so no organization update publishes in between.
     ///
     /// The catalog no longer points at them, so deleting is best effort: a
     /// failure (e.g. a reader still holding one open on a platform that

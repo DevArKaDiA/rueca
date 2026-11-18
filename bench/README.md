@@ -23,6 +23,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Efficiency** | "How many tokens does a correct answer cost?" (RFC 0005 §8) | reported only |
 | **Org scenarios** | "Does it still find the code in a store of many repositories, and of one repository at two commits?" (RFC 0005 §5–§6) | reported; paired vs BM25 with MDE (not a language gate) |
 | **Configuration** (RFC 0003 §3.3) | "Which keys exist, who reads this env var, who sets it?" | key recall, span accuracy, bridge precision / recall |
+| **Service** (RFC 0008 §8.2–§8.3) | "Does `rueca serve` answer the organization suite over HTTP exactly as `rueca query` does, and how fast?" | reported (differential n/n, time to ready, p50 / p95) |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
 the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust}/` and the
@@ -121,6 +122,32 @@ Without `RUECA_BIN` the Rueca column is reported as *pending* (and every
 scorecard floor of that language is *pending*, so it cannot be `stable`); a
 language whose Rueca outputs are missing is left out of the detailed tables'
 `overall` column (which pools only languages every arm has results for).
+
+### Service suite
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo build --release -p rueca                       # the `service` feature is on by default
+RUECA_BIN=$PWD/target/release/rueca uv run --project bench rueca-bench service --small   # ≈ 10 s, no setup
+RUECA_BIN=$PWD/target/release/rueca uv run --project bench rueca-bench service           # the gated organization (needs `setup`)
+```
+
+`service [--small] [--split gated|calibration] [--only REPO ...] [--limit N]
+[--sample N] [--repeat N] [--keep] [--out FILE] [--bin PATH]` (also `run
+--suite service`, which is not part of `all`). Writes
+`bench/results/service-<UTC timestamp>.json`; the method is under *Suites →
+Service*.
+
+```sh
+cargo build -p rueca                                  # a debug build: test-only flags
+RUECA_BIN=$PWD/target/debug/rueca uv run --project bench rueca-bench service-index --small --indexers 1 2   # a few minutes
+RUECA_BIN=$PWD/target/debug/rueca uv run --project bench rueca-bench service-index                          # the gated organization, 1 and 4 indexers
+```
+
+`service-index [--small] [--split gated|calibration] [--only REPO ...]
+[--indexers N ...] [--pushes N] [--no-faults] [--keep] [--out FILE] [--bin
+PATH]` writes `bench/results/service-index-<UTC timestamp>.json`; the
+method is under *Suites → Service indexing*.
 
 ### Sharing a cache between checkouts
 
@@ -1231,6 +1258,124 @@ and terraform-aws-modules/terraform-aws-vpc v6.7.3 (HCL).
   `grep` arm is a regex baseline: the env APIs above in code (reader = the
   innermost tree-sitter function) and `- name: X` / `- X=…` / `X: …` lines
   inside `env:` / `environment:` blocks of YAML manifests.
+
+### Service (RFC 0008 §8.2–§8.3, `service.py`)
+
+The organization served by `rueca serve` (phase 1, the query role) and
+asked over MCP-over-HTTP, against `rueca query` on the same snapshots.
+Self-contained: everything lives in `.cache/service/` (removed after the
+run unless `--keep`).
+
+1. **Organization.** `--small`: the two repositories of
+   `bench/service/small.toml` (this checkout's `crates/rueca-storage` and
+   `bench/src/rueca_bench`, cut with `git archive HEAD:<path>` and committed
+   with a fixed identity and date) and its twelve keyword queries, indexed
+   with one `rueca index --org`. Otherwise the multi-repository scenario's
+   members of `--split` (default `gated`; `--only` restricts the members),
+   indexed one at a time from worktrees at the pins as the org suite does,
+   and its questions' keyword queries (read from
+   `.cache/runs/org/multirepo-<split>-rueca.json` when it exists for the
+   same filter, else selected again).
+2. **Store.** `rueca publish --repo <id> --org bench` per member into a
+   `file://` service store, then `rueca pull --generation` into a separate
+   mirror, which builds the organization and publishes generation 1 (the
+   hidden phase 0 commands; phase 2's updater will do this).
+3. **Serve.** `rueca serve --role query` with a generated
+   `rueca-service.toml`: free local ports, its own cache directory,
+   `ready_when = "index"`, one static token (`sha256:` of a random
+   `rueca_…`, `repos = ["**"]`), rate limits set out of reach. **Time to
+   ready** = process start → first `200` from `/readyz` (`/healthz` is
+   recorded too). One request without a token records the `401` and its
+   `WWW-Authenticate`.
+4. **Calls.** A minimal MCP client (`http.client`, one keep-alive
+   connection, `Authorization: Bearer`, `MCP-Protocol-Version: 2025-06-18`,
+   `Mcp-Method` / `Mcp-Name`): `initialize` and `notifications/initialized`,
+   then one `search_symbols` `{"query", "limit": 10}` per query, then
+   `--sample` (20) `get_symbol` calls and up to as many `trace` calls
+   (`direction: both`, `depth: 2`, callable symbols only) on every k-th
+   distinct result id of the search answers. `--repeat` (3) replays the
+   list; only the first pass is checked.
+5. **Differential** (RFC 0008 §8.3). Every first-pass answer: the HTTP
+   `structuredContent` must equal `rueca query <tool> '<args>' --org bench
+   --store <mirror>` (parsed JSON), and the text content must equal the
+   same call with `--text`. The report gives JSON and text pass counts, per
+   tool, and the first difference (JSON path, both values).
+6. **Latency.** Client: per tool p50 / p95 / max over every pass
+   (`client`) and over the first, cold pass (`client_first_pass`),
+   nearest rank. Server: `/metrics` after the run, `rueca_mcp_request_seconds`
+   summed over scopes per tool (and per tool and scope), p50 / p95
+   interpolated inside the buckets as Prometheus' `histogram_quantile`
+   (bucket bounds 1, 2.5, 5, 10, 25, 50, 75, 100, 150, 250 ms …, so a p95
+   is only as precise as its bucket), plus `rueca_mcp_requests_total` by
+   outcome. The RFC 0008 §8.1 floor (lexical `search_symbols` p95 ≤ 100 ms,
+   server side, warm) reads `server.tools.search_symbols.p95_ms`.
+7. **Sizes.** Binary, service store, harness mirror, the server's cache
+   directory and the indexing store (bytes); server RSS after the calls;
+   the shutdown (SIGTERM → exit code, seconds).
+
+Not yet (RFC 0008 §8.2, later phases): an S3-compatible store, concurrent
+clients. Latency is measured with one client and one connection. Indexers,
+webhooks and faults are the next suite's.
+
+### Service indexing (RFC 0008 §8.2–§8.3 phase 2, `service_index.py`)
+
+The indexer role end to end: the organization indexed from URLs by 1 and N
+indexers, push → queryable through signed webhooks, and fault injection.
+Self-contained in `.cache/service-index/` (removed unless `--keep`). The
+binary must be a **debug** build (`cargo build -p rueca`): the local git
+host is reached through the test-only `[indexing].allow_file_urls`, and
+the looping-parser fixture (`RUECA_TEST_WORKER_FAULT`) exists only in
+debug builds.
+
+1. **Members.** `--small`: the two repositories of
+   `bench/service/small.toml`, one commit each. Otherwise the split's
+   members (`--only` restricts), each cut at its pin into a one-commit
+   repository with `git archive` (needs `setup`).
+2. **Local baseline.** `rueca index <member>` once per member, timed one
+   at a time; the sum is the reference for the cold index.
+3. **Git host.** Bare clones (`uploadpack.allowFilter = true`) served by
+   `git daemon --export-all --base-path` on an ephemeral loopback port:
+   `git://127.0.0.1:<port>/<name>.git`, protocol v2, blob filters and
+   commit wants work as on a hosted server. Chosen over `git http-backend`
+   behind a CGI shim: one process, no Python server, the same on macOS and
+   Linux; the cost is that `git://` is accepted only by the test flag.
+4. **Runs** (`--indexers`, default `1 4`; fresh host and `file://` store
+   each): N = 1 runs one `rueca serve --role all`; N > 1 one `--role
+   query` replica and N `--role indexer` processes, `org_updater` on the
+   first only. Discovery, the updater tick and the replica's poll are 1 s;
+   polling of the host waits at least 5 min, so pushes travel by webhook;
+   `worker.wall_time` is 15 s (or 4 × the slowest local index).
+   - **Cold index**: process start → every member's commit served by the
+     replica (`/status`), next to the local sum; `rueca status
+     --store-url` catalogs and the suite's `search_symbols` answers are
+     compared with the first run's (`equal_to_first`).
+   - **Push → queryable** (`--pushes`, 10): a commit adding a function
+     `rueca_push_marker_<run>_<i>`, pushed to the host, then a signed GitHub
+     `push` delivery (`X-Hub-Signature-256`, a fresh `X-GitHub-Delivery`)
+     to one indexer, round robin; from the delivery to the first
+     `search_symbols` answer naming the function (polled every 100 ms).
+     p50 / p95 (nearest rank) and `rueca_publish_seconds` per stage
+     (`fetch`, `export`, `index`, `upload`, `generation`) over the pushes
+     alone: bucket deltas of every indexer's `/metrics`, quantiles as
+     `histogram_quantile`, as precise as the buckets.
+5. **Faults** (the last run; `--no-faults` skips), each `ok` with its
+   evidence: `looping_parser` (an on-demand ref whose worker spins is
+   killed at the wall-clock limit and fails alone), `worker_killed` (a
+   worker SIGKILLed from outside: the ref fails alone, the indexer lives),
+   `lease_taken` (the job object rewritten mid-job with a forged, expired
+   lease of epoch + 1: the running indexer loses its finish, another lease
+   re-runs the job, the served default commit never regresses),
+   `webhooks_duplicate_reordered` (newest delivery first, then the older,
+   then the newest again: `accepted`, `accepted`, `duplicate`; the newest
+   commit is served and stays), `storage_unwritable` (`chmod -R a-w` on the
+   store for 8 s around a delivery: its confirmation fails and is
+   forgotten, the redelivery with the same id after the window is accepted
+   and the commit becomes queryable). Not injected: a bucket answering 409
+   or 503, which needs an S3-compatible store.
+
+Output: `bench/results/service-index-<UTC timestamp>.json`: `local`,
+`runs[]` (`cold`, `catalog`, `answers`, `push`, `faults`, `equal_to_first`)
+and the summary printed at the end.
 
 ## Datasets, tools and licences
 

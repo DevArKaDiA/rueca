@@ -181,6 +181,7 @@ impl Engine {
         let store = rueca_segment::Store::open(&self.store_dir)?;
         for &i in &org.visible {
             for slot in org.view.slots_of(i).into_iter().filter(|s| !have.contains(s)) {
+                self.deadline.check()?;
                 views.push(self.slot_view(&store, &org, slot)?);
             }
         }

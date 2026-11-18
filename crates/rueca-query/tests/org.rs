@@ -273,8 +273,16 @@ fn visibility_hides_repositories_everywhere() {
     let small = Engine::for_org(f.store.clone(), "small").unwrap();
     let args = json!({"query": "refund payment invoice helper", "scores": true, "limit": 50});
     assert_eq!(call(&e, "search_symbols", args.clone()), call(&small, "search_symbols", args));
+    // Nothing visible: an empty organization (RFC 0008 §6.4), not an error.
     let none = f.engine().with_visibility(Visibility::Repos(BTreeSet::new()));
-    assert!(err(&none, "search_symbols", json!({"query": "x"})).contains("no repositories you can read"));
+    for (tool, args) in [
+        ("search_symbols", json!({"query": "charge"})),
+        ("list_repositories", json!({})),
+        ("search_code", json!({"pattern": "charge"})),
+    ] {
+        let v = call(&none, tool, args);
+        assert!(v["results"].as_array().unwrap().is_empty() && repos_of(&v).is_empty(), "{tool}: {v}");
+    }
 }
 
 #[test]

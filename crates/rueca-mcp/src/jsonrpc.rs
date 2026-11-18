@@ -242,6 +242,9 @@ pub mod code {
     pub const METHOD_NOT_FOUND: i32 = -32601;
     pub const INVALID_PARAMS: i32 = -32602;
     pub const UNSUPPORTED_PROTOCOL_VERSION: i32 = -32022;
+    /// A tool call stopped by its deadline ([`crate::ToolCall::run_with`];
+    /// only a transport that sets one, such as `rueca serve`, sees it).
+    pub const DEADLINE_EXCEEDED: i32 = -32001;
 }
 
 /// The `error` member of an error response, in wire order: `code`,

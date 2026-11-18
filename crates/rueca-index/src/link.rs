@@ -74,7 +74,6 @@
 //! import of a dependency's root package maps to its `Repository` node.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -125,14 +124,30 @@ const PY_NOT_PUBLISHED: &[&str] = &[
 ];
 
 /// The linker of `rueca index --org`.
+///
+/// Facts come from the facts cache of the store it was made for
+/// (`<store>/facts`), then from the [`PackageLinker::with_fallback`]
+/// caches; a file found in none is extracted from the content packs and
+/// its facts written to the store's cache (best effort), so the next
+/// profile or link set that reads the file does not parse it again (an
+/// organization updater's mirror has no indexer filling its cache).
 pub struct PackageLinker {
     facts_dir: PathBuf,
+    /// Read-only facts caches tried after `facts_dir`.
+    fallback: Vec<PathBuf>,
     budget: Budget,
 }
 
 impl PackageLinker {
     pub fn new(store: &Path) -> PackageLinker {
-        PackageLinker { facts_dir: store.join("facts"), budget: Budget::default() }
+        PackageLinker { facts_dir: store.join("facts"), fallback: Vec::new(), budget: Budget::default() }
+    }
+
+    /// Also reads the facts cache of local store `store` (`<store>/facts`,
+    /// e.g. an indexer's staging store), never writing to it.
+    pub fn with_fallback(mut self, store: &Path) -> PackageLinker {
+        self.fallback.push(store.join("facts"));
+        self
     }
 }
 
@@ -198,20 +213,27 @@ impl PackageLinker {
         Loaded { files, project }
     }
 
-    /// Facts of file `i` from the cache, else extracted from the content packs.
+    /// Facts of file `i` from the caches, else extracted from the content
+    /// packs and written to the store's cache.
     fn facts(&self, seg: &Segment, i: usize, lang: Language, pack: &dyn LanguagePack) -> Option<FileFacts> {
         let f = &seg.files()[i];
         let key = pack.facts_depend_on_path().then_some(f.path.as_str());
-        let cache = facts_cache_path(&self.facts_dir, &f.blob_sha, lang, pack.extractor_version(), key);
-        if let Ok(compressed) = fs::read(&cache)
-            && let Ok(raw) = zstd::decode_all(compressed.as_slice())
-            && let Ok(facts) = postcard::from_bytes::<FileFacts>(&raw)
-        {
-            return Some(facts);
+        let version = pack.extractor_version();
+        let cache = facts_cache_path(&self.facts_dir, &f.blob_sha, lang, version, key);
+        let cached = std::iter::once(cache.clone())
+            .chain(self.fallback.iter().map(|d| facts_cache_path(d, &f.blob_sha, lang, version, key)))
+            .find_map(|p| crate::read_cached(&p));
+        if cached.is_some() {
+            return cached;
         }
         let bytes = seg.content(i as FileId).ok()?;
         match catch_unwind(AssertUnwindSafe(|| pack.extract(&f.path, lang, &bytes, &self.budget))) {
-            Ok(Ok(facts)) => Some(facts),
+            Ok(Ok(facts)) => {
+                if let Err(e) = crate::write_cached(&cache, &facts) {
+                    tracing::debug!(path = %cache.display(), error = %e, "facts cache not written");
+                }
+                Some(facts)
+            }
             Ok(Err(ExtractError::Skipped(_))) | Ok(Err(_)) | Err(_) => None,
         }
     }

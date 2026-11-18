@@ -9,6 +9,8 @@
 //! rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
 //! rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
 //! rueca status [--store DIR] [--json]
+//! rueca status --store-url URL [--store-option KEY=VALUE]... [--json]
+//! rueca serve [--config FILE] [--role query|indexer|all] [--check-config]
 //! rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
 //! rueca contracts [--org FILE|NAME | --root PATH] [--repo ID [--ref NAME]] [--side provided|consumed|dangling]
 //!                 [--kind http|rpc|topic] [--query TEXT] [--limit N] [--store DIR] [--json | --text]
@@ -38,6 +40,25 @@
 //! prints `{"error": "..."}` and exits with status 2. Other commands report errors on
 //! stderr and exit with status 1.
 //!
+//! `status --store-url` reports a service store (RFC 0008: object storage
+//! or a `file://` directory) instead of the local store: its repositories,
+//! refs, organization generation and bytes by object class. The hidden,
+//! experimental `publish` and `pull` commands move snapshots between the
+//! local store and a service store (see `service.rs`).
+//!
+//! `serve` runs the service mode (RFC 0008, crate `rueca-serve`, feature
+//! `service`, on by default): the query role serves MCP over HTTP from a
+//! service store; the indexer role (`--role indexer`, or `all` for both)
+//! polls the `[[repo]]` repositories, leases and runs index jobs and, on
+//! the leader, publishes organization generations. It indexes each ref in
+//! a child process of this binary, the hidden `rueca index-worker` (one
+//! JSON request on stdin, the report on stdout, JSON logs on stderr;
+//! `rueca_service::worker`). Configured by `rueca-service.toml` (`--config`, else
+//! `RUECA_CONFIG`); `--check-config` validates the file, its `env:`
+//! references and the store, prints the problems and exits 0 or 1. Its logs
+//! go to stdout as `[telemetry]` says (JSON by default), filtered by
+//! `RUECA_LOG` (else `-v`, else `info`).
+//!
 //! `query` and `mcp` default to the indexed root that contains the current
 //! directory when `--root` is not given. `mcp` indexes `--root` (in the
 //! background) when it has no segment yet; without an explicit `--root`
@@ -50,6 +71,8 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod contracts;
+mod serve;
+mod service;
 
 use clap::{Parser, Subcommand};
 use rueca_segment::org::OrgGeneration;
@@ -135,8 +158,61 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         no_auto_index: bool,
     },
     /// List indexed roots with repo, commit, node/edge/file counts and age,
-    /// and the organizations of the store.
-    Status,
+    /// and the organizations of the store; with --store-url, what a service
+    /// store holds.
+    Status {
+        #[command(flatten)]
+        remote: service::StoreArgs,
+    },
+    /// Service mode (RFC 0008): serve MCP over HTTP from a service store
+    /// (query role) and/or keep it indexed (indexer role).
+    /// Configuration: `rueca-service.toml` (--config, else $RUECA_CONFIG).
+    Serve {
+        /// The service configuration file (`rueca-service.toml`).
+        #[arg(long, value_name = "FILE")]
+        config: Option<PathBuf>,
+        /// `query` (default, else $RUECA_ROLE), `indexer` or `all` (both in
+        /// one process).
+        #[arg(long, value_name = "ROLE")]
+        role: Option<String>,
+        /// Validate the configuration, its secrets and the store, print the
+        /// problems, exit 0 (valid) or 1.
+        #[arg(long)]
+        check_config: bool,
+    },
+    /// Experimental (RFC 0008): publish a snapshot of the local store (the
+    /// working tree containing PATH, or --repo; with --ref, that ref
+    /// snapshot) to the service store --store-url. --org creates the store
+    /// for that organization when it is new.
+    #[command(hide = true)]
+    Publish {
+        path: Option<PathBuf>,
+        #[arg(long, value_name = "ID")]
+        repo: Option<String>,
+        #[arg(long = "ref", value_name = "NAME")]
+        ref_name: Option<String>,
+        #[command(flatten)]
+        remote: service::StoreArgs,
+    },
+    /// Experimental (RFC 0008): mirror the service store --store-url (every
+    /// repository, or --repo) and its organization generation into the
+    /// local store. With --generation, then build the organization from the
+    /// mirror and publish it as the store's next generation (the job of
+    /// phase 2's updater; use a store directory dedicated to the mirror).
+    #[command(hide = true)]
+    Pull {
+        #[arg(long, value_name = "ID")]
+        repo: Option<String>,
+        #[arg(long, conflicts_with = "repo")]
+        generation: bool,
+        #[command(flatten)]
+        remote: service::StoreArgs,
+    },
+    /// Service mode (RFC 0008 §7.8), internal: the indexer's child process.
+    /// Reads one index request (JSON) on stdin, writes `{"ok": <report>}`
+    /// or `{"error": …}` on stdout, logs JSON lines on stderr.
+    #[command(name = "index-worker", hide = true)]
+    IndexWorker,
     /// List the cross-repository edges of an organization (--org): the link
     /// layer of RFC 0006 (imports of packages published by another
     /// repository, and the calls, inheritance and references through them;
@@ -180,6 +256,12 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Command::Serve { config, role, check_config } = cli.command {
+        return serve::cmd_serve(config, role.as_deref(), check_config, cli.verbose);
+    }
+    if let Command::IndexWorker = cli.command {
+        return serve::cmd_index_worker();
+    }
     init_logging(cli.verbose, matches!(cli.command, Command::Mcp { .. }));
     let store = cli.store.clone().unwrap_or_else(Store::default_dir);
     let result = match cli.command {
@@ -199,7 +281,22 @@ fn main() -> ExitCode {
             return cmd_query(&store, cli.root, cli.org.as_deref(), &tool, args, cli.pretty, text);
         }
         Command::Mcp { no_auto_index } => cmd_mcp(&store, cli.root, cli.org.as_deref(), !no_auto_index),
-        Command::Status => cmd_status(&store, cli.json, cli.pretty),
+        Command::Status { remote } if remote.store_url.is_some() => {
+            service::cmd_status(&remote, &store, Output { json: cli.json, pretty: cli.pretty })
+        }
+        Command::Status { .. } => cmd_status(&store, cli.json, cli.pretty),
+        Command::Publish { path, repo, ref_name, remote } => {
+            let out = Output { json: cli.json, pretty: cli.pretty };
+            let cmd = service::PublishCmd { path, repo, ref_name };
+            service::cmd_publish(&remote, &store, cli.org.as_deref(), cmd, out)
+        }
+        Command::Serve { .. } | Command::IndexWorker => {
+            Err(anyhow::anyhow!("`serve` and `index-worker` are dispatched before logging starts"))
+        }
+        Command::Pull { repo, generation, remote } => {
+            let out = Output { json: cli.json, pretty: cli.pretty };
+            service::cmd_pull(&remote, &store, repo.as_deref(), generation, out)
+        }
         Command::Links { repo, ref_name } => match cli.org.as_deref() {
             Some(org) => {
                 let out = Output { json: cli.json, pretty: cli.pretty };

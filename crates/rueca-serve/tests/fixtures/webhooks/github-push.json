@@ -1,0 +1,18 @@
+{
+  "ref": "refs/heads/main",
+  "before": "0000000000000000000000000000000000000001",
+  "after": "0000000000000000000000000000000000000002",
+  "created": false,
+  "deleted": false,
+  "forced": false,
+  "repository": {
+    "id": 1296269,
+    "name": "billing",
+    "full_name": "acme/billing",
+    "clone_url": "REPO_URL",
+    "html_url": "https://github.com/acme/billing",
+    "default_branch": "main"
+  },
+  "pusher": {"name": "octocat"},
+  "commits": [{"id": "0000000000000000000000000000000000000002", "message": "change"}]
+}

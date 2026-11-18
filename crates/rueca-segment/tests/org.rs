@@ -12,7 +12,7 @@ use rueca_segment::org::{
     self, ContractKey, LinkDir, LinkEdge, LinkInput, OrgIndex, OrgLinker, OrgMember, OrgScope, OrgSelection, OrgSlot,
     Package, RepoDeps,
 };
-use rueca_segment::{ContentSource, Segment, Store, SymbolQuery, search_symbols_merged, write_segment};
+use rueca_segment::{ContentSource, Segment, SegmentError, Store, SymbolQuery, search_symbols_merged, write_segment};
 
 struct Mem(HashMap<String, Vec<u8>>);
 
@@ -237,6 +237,25 @@ fn one_ranking_with_comparable_scores() {
     let page = |offset| idx.search(&SymbolQuery { offset, limit: 2, ..q("refund") }, &scope).unwrap();
     let full = idx.search(&q("refund"), &scope).unwrap();
     assert_eq!([page(0), page(2)].concat(), full[..4.min(full.len())].to_vec());
+}
+
+/// A passed deadline stops the organization search, with shared or local
+/// statistics.
+#[test]
+fn org_search_stops_at_its_deadline() {
+    let o = org3();
+    org::update_org(&o.store, "acme", &o.members(&[0, 1, 2])).unwrap();
+    let idx = OrgIndex::open(&o.store.dir, "acme").unwrap();
+    let segs = o.segments(&idx);
+    let all = [0, 1, 2];
+    let sel: Vec<(usize, &Segment)> = all.iter().map(|&i| (i, &segs[i])).collect();
+    let scope = OrgScope { visible: &all, selected: &sel, view: None };
+    let late = SymbolQuery { deadline: Some(std::time::Instant::now()), ..q("refund") };
+    for local_stats in [false, true] {
+        let r = idx.search_with(&late, &scope, &HashMap::new(), local_stats);
+        assert!(matches!(r, Err(SegmentError::DeadlineExceeded)), "{local_stats}: {r:?}");
+    }
+    assert!(!idx.search(&q("refund"), &scope).unwrap().is_empty());
 }
 
 #[test]
@@ -705,4 +724,36 @@ fn contract_dependencies_link_and_recompute() {
     assert!(up.linked.is_empty(), "{:?}", up.linked);
     let g = org::current_generation(&o.store.dir, "acme").unwrap().unwrap();
     assert!(g.repos[0].default.links.is_none());
+}
+
+/// Concurrent updates of one organization: each either publishes the next
+/// generation or fails because another published since it started; no
+/// generation is written twice and the published one opens with every file
+/// it names.
+#[test]
+fn concurrent_updates_never_overwrite_a_generation() {
+    let o = org3();
+    let sets: [&[usize]; 4] = [&[0, 1, 2], &[0, 1], &[1, 2], &[0, 2]];
+    let results: Vec<_> = std::thread::scope(|s| {
+        let handles: Vec<_> = sets
+            .iter()
+            .map(|set| {
+                let o = &o;
+                s.spawn(move || (0..3).map(|_| org::update_org(&o.store, "acme", &o.members(set))).collect::<Vec<_>>())
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+    });
+    let mut published = 0;
+    for r in &results {
+        match r {
+            Ok(up) => published += u64::from(up.published),
+            Err(e) => assert!(e.to_string().contains("updated concurrently"), "{e}"),
+        }
+    }
+    let idx = OrgIndex::open(&o.store.dir, "acme").unwrap();
+    assert_eq!(idx.generation().generation, published, "one generation per successful publication");
+    let segs = o.segments(&idx);
+    let all: Vec<usize> = (0..segs.len()).collect();
+    assert!(!org_search(&idx, &segs, "refund invoice", &all, &all).is_empty());
 }

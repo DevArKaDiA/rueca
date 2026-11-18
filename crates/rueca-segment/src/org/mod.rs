@@ -83,7 +83,16 @@
 //! repository. Queries choose the entries they read per repository
 //! ([`OrgSelection`], [`OrgSlot`]).
 //!
-//! Single writer per store, as for the rest of the store.
+//! # Concurrent updates
+//!
+//! An update reads the current generation under the store lock
+//! (`<store>/.lock`, see the crate docs), builds without it, then takes it
+//! again to publish: it checks that `org.json` still names the generation
+//! it started from, writes the generation file, swaps the pointer and
+//! collects garbage, all under the lock. If another update published in
+//! between, the late one fails (nothing of it is published) and is run
+//! again; it never overwrites a generation or publishes one whose files the
+//! other's garbage collection removed. Readers take no lock.
 
 pub mod link;
 pub mod route;
@@ -111,7 +120,7 @@ use crate::bundle::Bundle;
 use crate::store::{atomic_write, canonical, ensure_dirs};
 use crate::symbols::{self, PriorsBySegment, SubsetStats, TANTIVY_PREFIX};
 use crate::tokenizer::{CODE_TOKENIZER, CodeTokenizer};
-use crate::{CatalogEntry, FORMAT_VERSION, Result, Segment, SegmentError, SegmentMeta, Store, SymbolQuery};
+use crate::{CatalogEntry, FORMAT_VERSION, Result, Segment, SegmentError, SegmentMeta, Store, StoreLock, SymbolQuery};
 
 pub use link::{
     ContractKey, LinkDir, LinkEdge, LinkInput, LinkRef, LinkTable, NoLinker, OrgDep, OrgLinker, OrgLinks, Package,
@@ -465,7 +474,12 @@ pub fn update_org_with(store: &Store, name: &str, members: &[OrgMember], linker:
         fs::create_dir_all(dir.join(d))?;
     }
     let tmp = store.dir.join("tmp");
-    let prev = current_generation(&store.dir, name)?;
+    // Under the lock: never between another update's pointer swap and its
+    // garbage collection, which could remove files this build reuses.
+    let prev = {
+        let _lock = StoreLock::acquire(&store.dir)?;
+        current_generation(&store.dir, name)?
+    };
     let catalog = store.entries()?;
     let template = tantivy_template()?;
     let mut b = OrgBuild {
@@ -840,7 +854,8 @@ impl OrgBuild<'_> {
         Ok(links)
     }
 
-    /// Publishes generation `next` when anything changed.
+    /// Publishes generation `next` when anything changed, under the store
+    /// lock: fails when another update published since this one started.
     fn publish(self, name: &str, repos: Vec<OrgRepo>, started: Instant) -> Result<OrgUpdate> {
         let OrgBuild { store, dir, tmp, prev, template, version, next, mut update, costs, .. } = self;
         update.repos = repos.len();
@@ -865,6 +880,8 @@ impl OrgBuild<'_> {
             linker: version,
         };
         let bytes = serde_json::to_vec_pretty(&generation).map_err(|e| SegmentError::Other(e.to_string()))?;
+        let _lock = StoreLock::acquire(&store.dir)?;
+        check_base(&dir, name, prev.as_ref().map(|g| g.generation))?;
         atomic_write(&generation_path(&dir, next), &tmp, &bytes)?;
         let ptr = serde_json::to_vec_pretty(&OrgPointer { name: name.to_string(), generation: next })
             .map_err(|e| SegmentError::Other(e.to_string()))?;
@@ -875,6 +892,30 @@ impl OrgBuild<'_> {
         update.duration_ms = started.elapsed().as_millis() as u64;
         Ok(update)
     }
+}
+
+/// Fails unless `org.json` in `dir` still names generation `base` (`None`:
+/// no pointer yet), i.e. no other update published since this one read it.
+fn check_base(dir: &Path, name: &str, base: Option<u64>) -> Result<()> {
+    let current = match fs::read(dir.join(POINTER_FILE)) {
+        Ok(b) => {
+            let ptr: OrgPointer =
+                serde_json::from_slice(&b).map_err(|e| corrupt(format!("{POINTER_FILE} of `{name}`: {e}")))?;
+            Some(ptr.generation)
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    if current == base {
+        return Ok(());
+    }
+    let show = |g: Option<u64>| g.map_or_else(|| "none".to_string(), |g| g.to_string());
+    Err(SegmentError::Other(format!(
+        "organization `{name}` was updated concurrently (it is at generation {}, this update started from {}); \
+         run the update again",
+        show(current),
+        show(base)
+    )))
 }
 
 /// Repositories of the previous generation `g` that are gone: their root
@@ -1020,7 +1061,7 @@ fn extract_entry(
 /// Keeps generations `current` and `current - 1`; deletes older generation
 /// files, segment files no kept generation references, and store segments
 /// that only dropped generations referenced (default and ref entries
-/// alike). Best effort.
+/// alike). Best effort. Called under the store lock.
 fn collect_garbage(store: &Store, dir: &Path, current: u64) {
     let Ok(rd) = fs::read_dir(dir.join(GENERATIONS_DIR)) else { return };
     let mut kept: Vec<OrgGeneration> = Vec::new();
@@ -1571,13 +1612,15 @@ impl OrgIndex {
         let want = query.offset.saturating_add(limit);
         let seg_boost: HashMap<SegmentId, f32> =
             by_segment.iter().filter_map(|(&sid, (slot, _))| boost.get(&slot.repo).map(|&b| (sid, b))).collect();
+        let top = symbols::TopK { want, keep: &keep, deadline: query.deadline };
         let hits = if local_stats {
             let mut all = Vec::new();
             for (sid, p) in priors {
+                crate::check_deadline(query.deadline)?;
                 let own = HashSet::from([sid]);
                 let stats = SubsetStats { searcher: &searcher, segments: &own };
                 let one: PriorsBySegment = HashMap::from([(sid, p)]);
-                all.extend(symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(one), &seg_boost, want, &keep)?);
+                all.extend(symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(one), &seg_boost, &top)?);
             }
             all.sort_by(|a, b| {
                 b.score.total_cmp(&a.score).then(a.segment_ord.cmp(&b.segment_ord)).then(a.doc.cmp(&b.doc))
@@ -1586,7 +1629,7 @@ impl OrgIndex {
             all
         } else {
             let stats = SubsetStats { searcher: &searcher, segments: &visible };
-            symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(priors), &seg_boost, want, &keep)?
+            symbols::top_hits(&searcher, q.as_ref(), &stats, Arc::new(priors), &seg_boost, &top)?
         };
         Ok(hits
             .into_iter()

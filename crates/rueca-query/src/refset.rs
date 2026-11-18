@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use rueca_model::{EdgeKind, EdgeMeta, FileId, Label, NodeId};
 
+use crate::deadline::Deadline;
 use crate::multiref::{Collapsed, RefEdge, RefItem, collapse, collapse_edges};
 use crate::types::RefMark;
 use crate::view::View;
@@ -109,14 +110,22 @@ pub(crate) fn mark_of(views: &[View], vi: usize, n: NodeId) -> Option<RefMark> {
 /// collapsed into their first (best-ranked) occurrence, each with its mark.
 /// The marks are looked up rather than read off the hits, so a version whose
 /// twin ranked past the fetched hits is still `in` both.
-pub(crate) fn collapse_hits(views: &[View], ranked: Vec<(usize, NodeId, f64)>) -> Vec<(Key, f64, Option<RefMark>)> {
+pub(crate) fn collapse_hits(
+    views: &[View],
+    ranked: Vec<(usize, NodeId, f64)>,
+    deadline: &Deadline,
+) -> anyhow::Result<Vec<(Key, f64, Option<RefMark>)>> {
     let items: Vec<RefItem<(usize, NodeId, f64)>> =
         ranked.into_iter().map(|(vi, n, score)| ref_item(views, vi, n, (vi, n, score))).collect();
+    deadline.check()?;
     collapse(&repos_of(views), items)
         .into_iter()
-        .map(|c| {
+        .enumerate()
+        .map(|(i, c)| {
+            // Each mark looks the hit up in every other snapshot.
+            deadline.tick(i)?;
             let (vi, n, score) = c.item;
-            ((vi, n), score, mark_of(views, vi, n))
+            Ok(((vi, n), score, mark_of(views, vi, n)))
         })
         .collect()
 }
@@ -177,7 +186,12 @@ pub(crate) struct NodeMerge {
 
 impl NodeMerge {
     /// `roots`: the root first, then its versions in other snapshots.
-    pub(crate) fn build(views: &[View], roots: &[Key], keys: impl IntoIterator<Item = Key>) -> NodeMerge {
+    pub(crate) fn build(
+        views: &[View],
+        roots: &[Key],
+        keys: impl IntoIterator<Item = Key>,
+        deadline: &Deadline,
+    ) -> anyhow::Result<NodeMerge> {
         let root = roots[0];
         let mut groups: BTreeMap<Ident, BTreeSet<Key>> = BTreeMap::new();
         for k in roots.iter().copied().chain(keys) {
@@ -185,8 +199,10 @@ impl NodeMerge {
         }
         let repos = repos_of(views);
         let mut out = NodeMerge { rep: HashMap::new(), marks: HashMap::new() };
-        for keys in groups.values() {
-            let rep = if keys.contains(&root) { root } else { *keys.first().expect("non-empty group") };
+        for (i, keys) in groups.values().enumerate() {
+            deadline.tick(i)?;
+            let Some(&first) = keys.first() else { continue };
+            let rep = if keys.contains(&root) { root } else { first };
             out.rep.extend(keys.iter().map(|&k| (k, rep)));
             if peers(views, rep.0).len() < 2 {
                 continue;
@@ -197,7 +213,7 @@ impl NodeMerge {
             let changed = versions.iter().any(|c| c.changed);
             out.marks.insert(rep, RefMark { in_: in_.into_iter().collect(), changed, peers: peers(views, rep.0) });
         }
-        out
+        Ok(out)
     }
 
     pub(crate) fn of(&self, k: Key) -> Key {

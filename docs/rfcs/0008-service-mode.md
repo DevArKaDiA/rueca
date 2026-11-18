@@ -1,6 +1,6 @@
 # RFC 0008 — Service mode
 
-- Status: Draft
+- Status: Draft; phases 0–2 (§10.1–§10.3) are implemented
 - Created: 2026-11-17
 - Depends on: RFC 0001 (§8 storage, §13 security, §14 deployment modes),
   RFC 0004 (latency floor), RFC 0005 (envelope, pinned ids, `repo` /
@@ -523,9 +523,31 @@ build, never a lost write. Local mode gets §5.5's file lock.
 |---|---|---|
 | License, MSRV | MIT/Apache-2.0, 1.85 | Apache-2.0, **1.91** (Rueca: 1.90) |
 | GCS update CAS | `if-generation-match` | only `if_not_exists` |
-| Verdict | **chosen** | rejected (§12) |
+| Verdict | ~~chosen~~ rejected at implementation (below) | rejected (§12) |
 
-`object_store = { version = "0.14", default-features = false, features =
+**Amended 2026-11-17 (phase 0, owner decision).** Adding `object_store`
+0.14.2 fails `cargo deny`: it depends unconditionally, even with no
+features, on `chrono` 0.4.45 (RUSTSEC-2026-0543, unmaintained) and
+`humantime` 2.4.0 (RUSTSEC-2026-0542, unmaintained), and its `aws` /
+`gcp` / `azure` features pull `webpki-root-certs` (CDLA-Permissive-2.0,
+not in `deny.toml`) through `reqwest/rustls`. Advisory ignores are
+rejected (the same rule that replaced `rmcp`, §6.1), and OpenDAL needs
+MSRV 1.91. **Recorded:** `rueca-storage` keeps the `Storage` trait of
+§5.11 and assembles the S3 backend from
+[`rusty-s3`](https://crates.io/crates/rusty-s3) 0.11 (sans-IO request
+builder and SigV4 signer, BSD-2-Clause, `jiff` for dates) and `ureq`
+3.5 (`rustls-no-provider` + `ring`) with the platform's roots through
+`rustls-native-certs` (no CDLA bundle); the in-memory and `file://`
+backends are Rueca's own. Signing is never written in-house. Covered:
+AWS S3 and S3-compatible stores (MinIO verified in phase 0, R2); GCS
+through its XML API with HMAC keys, the generation preconditions
+signed, verified against a fake server only; Azure Blob is deferred (an
+S3-compatible gateway in front of it works today). Credentials come
+from options or `AWS_*` environment variables; IMDS / IRSA providers
+are phase 2 (`CredentialsProvider` seam). The rest of this section stays as
+the behaviour reference for conditional writes.
+
+The first draft chose `object_store = { version = "0.14", default-features = false, features =
 ["aws", "gcp", "azure", "fs"] }`; the in-memory backend backs every test.
 Conditional writes ([`PutMode`](https://docs.rs/object_store/0.14.2/object_store/enum.PutMode.html);
 backend sources in the [repository](https://github.com/apache/arrow-rs-object-store)):
@@ -1364,11 +1386,221 @@ repository names. Code reaches an embedding provider only with
 
 | Phase | Delivers | Acceptance |
 |---|---|---|
-| 0. Storage abstraction, CAS catalog | `Storage` trait (local, `object_store`); per-repository catalogs; CAS pointer; local file lock; mark-and-sweep GC with grace; `packs` in segment meta; 64-bit id suffixes | Local-mode tests and bench numbers unchanged; the store round-trips through the in-memory `object_store`; two concurrent indexers never lose a registration (test); GC never deletes a referenced object (test); `rueca status` works against a bucket |
-| 1. `rueca serve`, query path | MCP over HTTP, stateless; static tokens + OIDC; visibility rules; deadline; rate limits; health, readiness, metrics, traces, `/status`; configuration file; Dockerfiles and image workflow; disk cache | Three MCP clients (Claude Code, VS Code, Cursor) complete `search_symbols` → `get_symbol` → `trace` over HTTP; differential test service == local; unauthenticated → 401 with PRM; a principal without rules sees an empty organization; lexical p95 ≤ 100 ms on the organization suite; time to ready reported |
-| 2. Indexer role | Jobs and leases; reconciler; mirrors and filtered fetch; webhooks for three hosts; adaptive polling; refs lifecycle and expiry; `rueca index-worker`; updater lease | Organization suite indexed from URLs by 1 and 4 indexers with equal results; push → queryable p95 ≤ 5 min; a looping-parser fixture fails only its job; duplicate webhooks coalesce (test); a taken lease never corrupts the catalog (test); a PR ref expires by policy (test) |
+| 0. Storage abstraction, CAS catalog — **implemented (§10.1)** | `Storage` trait (local, `object_store`); per-repository catalogs; CAS pointer; local file lock; mark-and-sweep GC with grace; `packs` in segment meta; 64-bit id suffixes | Local-mode tests and bench numbers unchanged; the store round-trips through the in-memory `object_store`; two concurrent indexers never lose a registration (test); GC never deletes a referenced object (test); `rueca status` works against a bucket |
+| 1. `rueca serve`, query path — **implemented (§10.2)** | MCP over HTTP, stateless; static tokens + OIDC; visibility rules; deadline; rate limits; health, readiness, metrics, traces, `/status`; configuration file; Dockerfiles and image workflow; disk cache | Three MCP clients (Claude Code, VS Code, Cursor) complete `search_symbols` → `get_symbol` → `trace` over HTTP; differential test service == local; unauthenticated → 401 with PRM; a principal without rules sees an empty organization; lexical p95 ≤ 100 ms on the organization suite; time to ready reported |
+| 2. Indexer role — **implemented (§10.3)** | Jobs and leases; reconciler; mirrors and filtered fetch; webhooks for three hosts; adaptive polling; refs lifecycle and expiry; `rueca index-worker`; updater lease | Organization suite indexed from URLs by 1 and 4 indexers with equal results; push → queryable p95 ≤ 5 min; a looping-parser fixture fails only its job; duplicate webhooks coalesce (test); a taken lease never corrupts the catalog (test); a PR ref expires by policy (test) |
 | 3. Embeddings and inventory | `embed` jobs on GPU indexers or a self-run endpoint; vector cache in the bucket; inventory discovery for the three hosts; cost report | Organization suite embedded on one GPU within RFC 0007 §5.6's estimate band; a CPU-only deployment serves lexical with the envelope's `lexical` list; inventory adds and removes repositories on reconcile (test); cost per repository reported |
 | 4. Scale, on measured need | Hotcache / range reads; shared segment writes or delta segments; pack compaction; a Postgres catalog if CAS contention is measured; ANN threshold (RFC 0007 phase 3) | Each starts on its trigger: time to ready > 60 s; ref re-index cost; pack live fraction; `rueca_cas_conflicts_total`; scope above RFC 0007 §6.4's threshold |
+
+### 10.1 Phase 0 — implemented
+
+`rueca-storage` (the `Storage` trait, `memory://`, `file://`, `s3://`,
+`gs://`, `cas_update`), the Part-B changes in `rueca-segment` (the
+`<store>/.lock` advisory lock, `SegmentMeta.packs`, 64-bit id suffixes),
+and `rueca-service` (per-repository catalogs, `publish_snapshot`,
+`pull_repo`, `publish_generation`, `pull_generation`, `collect_garbage`,
+`status`; `rueca status --store-url`). Choices and deviations:
+
+- **No `object_store`** (§5.10 amendment): `rusty-s3` + `ureq`; GCS
+  verified against a fake server only; Azure deferred; credentials from
+  options or `AWS_*` variables, IMDS / IRSA are phase 2.
+- **`packs` is a field of `meta`** (JSON, no `deny_unknown_fields`), so
+  older readers ignore it; `Bundle::open` now rejects non-zero padding
+  between components.
+- **The lock** covers `register` / `unregister`, `BlobIndex::commit` and
+  `update_org` (read of the base generation; publish plus garbage
+  collection); `publish` fails with "updated concurrently" when another
+  update landed in between. Readers, extraction and segment writes are
+  lock-free. `Store::lock()` is public for the mirror's pointer writes.
+- **Mirror roots**: a pulled default ref registers at
+  `<mirror>/repos/<repo-dir>`, other refs at
+  `<mirror>/refs/<repo-dir>/<ref-slug>`, the directories `rueca index
+  --ref` uses, so `update_org_with` and `Engine` need no change; a pulled
+  generation is rewritten to those roots.
+- `SnapshotEntry.dirty` is recorded and dirty snapshots are never
+  "duplicates"; `publish_generation` refuses a generation whose segments
+  are not in the bucket; garbage collection re-reads the catalog or
+  pointer before each delete and **deletes in two rounds**: an
+  unreferenced object older than the grace is first recorded in
+  `gc/candidates.json` (CAS) and deleted only by a later round, at least
+  one grace after, if still unreferenced; a publish removes its objects
+  from that list before referencing them and re-uploads any pack a
+  collection removed, so the invariant holds for every publish that
+  completes within the grace (packs: referenced ⇒ present). `grace = 0`
+  deletes in one round. Idle-based pull request expiry (`reads/`) is
+  phase 2.
+
+Measured (tests, in-memory backend; `cargo test --workspace`: 815 passed):
+round trip local → bucket → second mirror answers every tool byte-equal
+in local and organization mode (nothing masked); 4 × 20 concurrent
+publishes: 80 of 80 snapshots kept, 0 duplicate `(ref, commit)`, 16 CAS
+conflicts retried; two updaters from one base generation: one wins, one
+`Conflict`, the loser rebuilds; seeded garbage collection over 120 steps
+(24 collections, 23 generation builds, 6 refs expired, 116 unreferenced
+objects deleted at grace 0) and 226 collections concurrent with 30
+publishes: 0 live objects deleted; `rueca-storage` against MinIO: the
+ignored integration test (create, stale update, conditional get, list,
+multipart, delete) passes. Local-mode tests are unchanged; the bench was
+not re-run (the writer gained one JSON field).
+
+### 10.2 Phase 1 — implemented
+
+`rueca serve --config rueca-service.toml [--role query|all]` in a new
+crate `rueca-serve`: the stateless `POST /mcp` on `axum` 0.8 calling
+`rueca-mcp`'s `handle` per request, the authentication layer, visibility
+rules, deadlines, rate limits, `/healthz` / `/readyz` / `/metrics` /
+`/status`, JSON logs, the generation watcher over the phase-0 store, the
+configuration file with `env:` secret references and
+`--check-config`; `Engine::respond_with` (cooperative deadline, visibility
+per call, also in local mode); a multi-stage `Dockerfile` with a
+container workflow (build and smoke, no push); and the `service` bench
+suite. Choices and deviations:
+
+- **Dependencies** (all `cargo deny` clean, no advisory ignores): `axum`,
+  `tokio`, `tower`, `tower-http` (`limit`, `timeout`), `jsonwebtoken` 12
+  with `rust_crypto` (no aws-lc-sys), `globset`, `subtle`, `governor` 0.10
+  used directly (`tower_governor`'s IP extractor trusts forwarding headers
+  from any peer; Rueca honours them only from `[http].trusted_proxies`),
+  `metrics` 0.24 with the Prometheus text rendered from the app's own
+  registry (no `http-listener`), JWKS fetched with the `ureq` client
+  `rueca-storage` already has. OpenTelemetry (`opentelemetry` 0.33,
+  `tracing-opentelemetry` 0.34) is an optional feature `otel`, OTLP/HTTP
+  over `ureq`, tested against a fake collector only.
+- **Keys honoured**: `[store]` (plus `poll`, the watcher tick), `[org].name`,
+  `[http]` (plus `ip_rate_limit`, `trusted_proxies`), `[auth]`,
+  `[telemetry]`; `[[repo]]`, `[org].inventory`, `[indexing]`,
+  `[retention]` and `[retrieval]` are parsed and validated (secrets
+  resolved) but drive nothing until phases 2–3.
+- **Errors**: deadline expiry is JSON-RPC `-32001`, "not ready yet"
+  `-32002`, `request_timeout` answers 503; a token in the query string is
+  400; `WWW-Authenticate` carries `resource_metadata` only when an OIDC
+  issuer is configured (no PRM without one).
+- **Watcher**: `pull_generation` downloads the generation's files eagerly
+  (`ready_when = "warm"` adds opening and verifying the default segments);
+  eviction by `cache_bytes` covers segment files; `Engine` is `Clone`
+  with shared caches and `RuecaServer::with_visibility` /
+  `ToolCall::run_with` carry the caller's visibility and deadline (the
+  stdio path is unchanged). A principal without a matching rule sees an
+  empty organization (not an error).
+- **Deadline checks**: per selected segment, per tantivy segment and
+  over-fetch round in `top_hits`, per candidate file in `search_code`, and
+  every 64 items in `trace`, outlines and the multi-ref collapse; the
+  outer `tokio` timeout stays as a backstop with the same error.
+- **Image**: `gcr.io/distroless/cc-debian13:nonroot` with `git` 2.47.3,
+  its HTTPS helper and their libraries copied from `debian:trixie-slim`
+  (102 MB on disk, ≈ 35 MB compressed, of which the binary is 35.4 MB);
+  no shell and no ssh, so `ssh://` remotes and credential helpers need
+  the slim variant (phase 2 decides).
+
+Measured (debug build, the `service` suite's `--small` organization —
+two small repositories, 52 queries): time to ready 0.38–0.41 s;
+differential 52 / 52 JSON and 52 / 52 text byte-equal against `rueca
+query` on the same mirror; server-side p50 / p95: `search_symbols`
+1.3 / 2.5 ms, `get_symbol` 0.5 / 1.0 ms, `trace` 0.5–0.6 / 1.4–2.0 ms
+(client-side within 1 ms of those; one cold `search_symbols` at 33 ms).
+Clients over HTTP: Claude Code (`--mcp-config` with `"type": "http"` and
+a bearer header, one-shot `claude -p`) completed `search_symbols` →
+`get_symbol` → `trace` against `rueca serve`, the server logging the
+three calls with `outcome: ok`; VS Code's and Cursor's flows (legacy
+`initialize` with `MCP-Protocol-Version` on later requests, `GET /mcp`
+answered 405) are covered by the HTTP tests and documented in
+`docs/tools.md`; Cursor itself was not installed on the test machine
+and VS Code was not driven interactively.
+
+On 18 repositories of the organization suite (the cached members of the
+calibration split, 5 S1 queries × 3 passes, 20 derived `get_symbol` and
+`trace` calls each, debug build, one laptop): time to ready 8.8 s
+(download, verify, and warm the engine — before the warm-up landed the
+first query paid the segment opens, 2.2 s, which is why `/readyz` now
+means warmed); server-side p50 / p95: `search_symbols` 18 / 31 ms,
+`get_symbol` 0.5 / 1.0 ms, `trace` 0.5 / 1.0 ms (client-side 14 / 26
+ms, 0.7 / 1.5 ms, 0.8 / 1.7 ms); differential 45 / 45 JSON and 45 / 45
+text. The lexical p95 floor (≤ 100 ms) holds in a debug build; the
+20 ms target is to be measured in release.
+
+### 10.3 Phase 2 — implemented
+
+The indexer role: `rueca serve --role indexer|all` (`rueca-service`
+`jobs`, `reconcile`, `remote`, `indexer`, `updater`, `reads`, `worker`,
+`webhooks`; `rueca-index` `mirror`; `rueca-serve` `indexer`, `admin`,
+`webhooks`), the hidden `rueca index-worker`, and the bench suite
+`service-index`. Choices and deviations:
+
+- **Jobs and leases** as §7.5, with a `JobCache` that re-reads only
+  objects whose e-tag changed, an injected clock, and per-ref back-off
+  (`failed_refs`): a job fails as a whole only when no ref reached its
+  desired commit, so a looping on-demand ref never holds back the default
+  branch; a `failed` job is leasable again after `not_before`, ranked
+  last. An `expired` tombstone keeps polling from re-adding a ref expired
+  at the same commit.
+- **Reconciler and polling** as §7.2–§7.4: `git ls-remote` through the
+  existing runner with credentials passed as `GIT_CONFIG_COUNT` /
+  `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` (never on a command line or
+  in a mirror's configuration); a 429 pauses the host for 60 s (`git`
+  does not surface `Retry-After`); `[indexing].ls_remote_concurrency`,
+  `discover` and the test-only `allow_file_urls` (debug builds accept
+  `file://` and `git://` hosts; a release build rejects the key) were
+  added. The updater pulls every repository whose job object changed,
+  which also covers removals; an accepted webhook wakes job discovery and
+  a finished job wakes the updater.
+- **Idle expiry** (§5.8, question 12): replicas write one `reads/` object
+  per hour; the updater expires `pr/*` refs unread for `pr_idle`
+  (tested with an injected clock: unread at 14 days, read on day 10
+  expires on day 24).
+- **Git** as §7.6, the exact fetch command, `GIT_NO_LAZY_FETCH=1`; when a
+  host refuses a commit want the ref name is fetched into
+  `refs/rueca/fallback` and its tip compared (`RefMoved` → retry later);
+  mirrors are re-created after `mirror_max_age` and unused ones swept
+  hourly; two indexers must not share a `mirror_dir` (not locked). The
+  export opens bare mirrors; a blob the filter left out becomes a
+  `skipped:size` row with its blob id and no content.
+- **Worker** as §7.8: `rueca index-worker` (stdin request with the
+  budget and an `absent` blob list; stdout `{"ok"}` / `{"error"}`; exit 0,
+  1, 2 = unreadable request); `RLIMIT_AS`, `RLIMIT_CPU` (hard limit 10 s
+  later) and `RLIMIT_CORE = 0` set with `libc` before `exec`, clamped to
+  the parent's own limits, plus the wall-clock `SIGKILL`. macOS does not
+  enforce `RLIMIT_AS`; the limit is verified on Linux only. The fault hook
+  `RUECA_TEST_WORKER_FAULT` (`loop:<ref>`, `alloc:<ref>:<bytes>`) exists
+  in debug builds only.
+- **Webhooks** as §7.3: GitLab secrets starting with `whsec_` select
+  Standard Webhooks signing (5-minute timestamp tolerance), any other the
+  legacy token (logged as weaker); Bitbucket pull requests are confirmed
+  from the source branch tip (Bitbucket lists no PR refs) and fork pull
+  requests are skipped (polling or `/admin/index` covers them); a
+  delivery whose confirmation fails is forgotten so the host's redelivery
+  is heard.
+- **Not built**: `embed` jobs (phase 3); pruning of the staging store and
+  the updater mirror; the resolved-address SSRF check is best effort
+  (`git` resolves again); a bucket answering 409 / 503 was not injected
+  (needs an S3-compatible store).
+
+Measured (debug build for both sides, 17 of the organization suite's
+calibration members hosted on a local `git daemon`, `file://` store, one
+laptop; `bench/README.md`, suite `service-index`):
+
+| Metric | Measured | Floor / target (§8.1) |
+|---|---|---|
+| Cold index from URLs, 1 indexer | 104 s (263 s before the facts-cache fix below) against a local `rueca index` sum of 54 s: **1.93×** | ≤ 1.5× / ≤ 1.2× — **not met** |
+| Cold index, 4 indexers | 194 s before the fix; catalogs and query answers equal to the 1-indexer run | equal results — met |
+| Push → queryable, 10 pushes with signed `push` webhooks, 1 indexer | p50 **12.9 s**, p95 **17.8 s** (34.3 / 82.5 s before); stages p50: fetch 56 ms, export 250 ms, index (child) 2.0 s, upload 217 ms, generation 8.3 s (p95 27.5 s) | p50 ≤ 60 s, p95 ≤ 5 min / p50 ≤ 20 s — met |
+| Fault injection (4-indexer run) | looping parser killed at the wall clock, only its ref failed; worker `SIGKILL`ed mid-job; lease taken with a forged epoch, the catalog never regressed; duplicate and reordered deliveries coalesced; store unwritable for 8 s then recovered | §8.3 — met |
+| Tests | lease race 8 × 20 jobs, every job leased once per epoch; steal after expiry; back-off 10 … 120 min; two updaters, one leader, hand-over at epoch 2; pull-request expiry by close and by idle reads with an injected clock; the three hosts' signatures, duplicates and events | §10 — met |
+
+The generation step dominated: the updater's mirror had no facts cache,
+so every relink re-parsed the consumer and its dependencies from the
+content packs (a `psf/requests` push relinks `ruff`, `pylint`, `pytest`
+and `sphinx`: 60 of 62 s), and `publish_generation` opened every segment
+with a full checksum to list its packs. Now the `PackageLinker` reads the
+indexer's facts caches (`UpdaterOptions.facts_from`) and writes back what
+it had to extract, pack lists are remembered per segment on the
+`ServiceStore`, and `file://` refuses a `Create` before copying. What
+remains is linking itself (about 90% of a generation: a joint resolve of
+a large consumer such as `ruff`, 8.7k files, 6.3 s in debug) and the cold
+start rebuilding the hub consumers once per generation while
+repositories are still arriving — the reasons the cold-index floor is not
+met. Phase 4 candidates: incremental linking against the dependency that
+changed only, dependencies kept in memory within one update, profiles and
+links built in parallel.
 
 ## 11. Amendments
 

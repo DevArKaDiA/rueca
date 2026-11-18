@@ -1,0 +1,81 @@
+[package]
+name = "rueca-serve"
+description = "Rueca service mode: the query role (MCP over stateless Streamable HTTP with authentication, visibility, rate limits and health endpoints) and the indexer role (jobs, leases, the reconciler, the updater)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rueca-extract.workspace = true
+rueca-index.workspace = true
+rueca-mcp.workspace = true
+rueca-query.workspace = true
+rueca-segment.workspace = true
+rueca-service.workspace = true
+rueca-storage.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+thiserror.workspace = true
+tracing.workspace = true
+# HTTP: axum on hyper 1 (HTTP/1.1 only), tokio enters only in this crate.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json", "query"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "signal", "time", "macros", "sync"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+tower-http = { version = "0.7", default-features = false, features = ["limit", "timeout"] }
+http = "1"
+bytes = "1.12.1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+toml = "1.1.8"
+url = "2.5"
+# Authentication: JWT validation with the pure-Rust backend; JWKS and
+# discovery documents fetched with ureq over rustls (ring) and the
+# platform's roots, as rueca-storage does.
+jsonwebtoken = { version = "12", default-features = false, features = ["rust_crypto"] }
+globset = "0.4.20"
+sha2 = "0.11.1"
+subtle = "2.6.1"
+# Webhook signatures (RFC 0008 §7.3): HMAC-SHA256, constant-time verify;
+# Standard Webhooks keys and signatures are base64. Both already in the tree.
+hmac = "0.13.0"
+base64 = "0.22.1"
+ureq = { version = "3.5.2", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.8.5"
+# Rate limits: GCRA keyed limiters (per peer IP, per principal).
+governor = { version = "0.10.4", default-features = false, features = ["std", "dashmap", "quanta"] }
+# Metrics: a recorder of our own instance (no global), rendered on /metrics.
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+# OpenTelemetry traces over OTLP/HTTP (protobuf), feature `otel`, off by
+# default; the exporter's HTTP client is ureq (no hyper/reqwest client).
+opentelemetry = { version = "0.33", optional = true, default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", optional = true, default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33", optional = true, default-features = false, features = ["http-proto", "trace"] }
+opentelemetry-http = { version = "0.33", optional = true, default-features = false }
+tracing-opentelemetry = { version = "0.34", optional = true, default-features = false }
+async-trait = { version = "0.1", optional = true }
+
+[features]
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry-http",
+    "dep:tracing-opentelemetry",
+    "dep:async-trait",
+]
+
+# The indexer tests' binary is its own `index-worker` (no libtest harness:
+# its `main` dispatches `index-worker` to the worker before running tests).
+[[test]]
+name = "indexer"
+harness = false
+
+[dev-dependencies]
+rueca-model.workspace = true
+tempfile = "3.27.0"

@@ -382,3 +382,55 @@ fn ref_link_sets_and_remapped_edges() {
         idx.link_edges(OrgSlot::default_of(lib_i), charge_node, LinkDir::In, None, &all, &default_view).unwrap();
     assert_eq!(callers.iter().map(|e| e.slot).collect::<Vec<_>>(), [app_main]);
 }
+
+/// Files under `dir`, recursively.
+fn count_files(dir: &Path) -> usize {
+    let Ok(rd) = fs::read_dir(dir) else { return 0 };
+    rd.flatten().map(|e| if e.path().is_dir() { count_files(&e.path()) } else { 1 }).sum()
+}
+
+#[test]
+fn the_linker_reads_fallback_facts_and_caches_what_it_extracts() {
+    use rueca_index::link::PackageLinker;
+    use rueca_segment::org::{OrgMember, update_org_with};
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = fs::canonicalize(dir.path()).unwrap();
+    let store = base.join("store");
+    fixture(&base);
+    let opts = OrgIndexOptions {
+        config: OrgConfig::load(&base.join("rueca-org.toml")).unwrap(),
+        store: store.clone(),
+        budget: Default::default(),
+        threads: Some(2),
+        only: None,
+    };
+    index_org(&opts).unwrap();
+    let before = link_edges(&store);
+    let members: Vec<OrgMember> = Store::open(&store)
+        .unwrap()
+        .entries()
+        .unwrap()
+        .into_iter()
+        .map(|e| OrgMember { root: e.root, ..Default::default() })
+        .collect();
+    // The store's facts move to another store (an indexer's staging store),
+    // and the organization is built again from scratch.
+    let staging = base.join("staging");
+    fs::create_dir_all(&staging).unwrap();
+    fs::rename(store.join("facts"), staging.join("facts")).unwrap();
+    let rebuild = |linker: &PackageLinker| {
+        fs::remove_dir_all(store.join("orgs")).unwrap();
+        let u = update_org_with(&Store::open(&store).unwrap(), "acme", &members, linker).unwrap();
+        assert!(u.link_errors.is_empty(), "{:?}", u.link_errors);
+        assert_eq!(link_edges(&store), before);
+    };
+    // With the staging store as a fallback nothing is extracted again.
+    rebuild(&PackageLinker::new(&store).with_fallback(&staging));
+    assert_eq!(count_files(&store.join("facts")), 0);
+    // Without it, the facts are extracted from the packs once and cached.
+    rebuild(&PackageLinker::new(&store));
+    let cached = count_files(&store.join("facts"));
+    assert!(cached > 0);
+    assert_eq!(cached, count_files(&staging.join("facts")));
+}

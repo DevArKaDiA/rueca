@@ -1,0 +1,29 @@
+[package]
+name = "rueca-storage"
+description = "Storage seam for Rueca service mode: conditional writes over S3-compatible object storage, memory and a locked local directory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytes = "1.12.1"
+blake3 = "1.8.7"
+tempfile = "3.27.0"
+fastrand = "2.5.0"
+# S3 request signing and response parsing, sans-IO (no chrono, no async runtime).
+rusty-s3 = "0.11.0"
+jiff = { version = "0.2", default-features = false, features = ["std"] }
+# Blocking HTTP over rustls (ring provider) with the platform's root
+# certificates: no webpki-roots / webpki-root-certs bundle.
+ureq = { version = "3.5.2", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.8.5"
+url = "2.5"

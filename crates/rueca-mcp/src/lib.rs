@@ -37,7 +37,11 @@
 //! ([`Session::new`], or [`Session::legacy`] for a legacy client's requests
 //! after its `initialize`), answers [`Step::Reply`] at once, runs
 //! [`Step::Call`] on a blocking thread ([`ToolCall::run`]) and answers
-//! `202` to [`Step::Silent`] and [`Step::Cancel`].
+//! `202` to [`Step::Silent`] and [`Step::Cancel`]. [`ToolCall::run_with`]
+//! runs a call with per-call [`rueca_query::RespondOptions`]: the caller's
+//! visibility and a cooperative deadline; a call stopped by its deadline is
+//! answered with the JSON-RPC error [`DEADLINE_EXCEEDED`] (-32001) instead
+//! of a tool result. The stdio transport sets neither.
 //!
 //! When the served root (or organization, given its file) is not indexed yet,
 //! [`serve_stdio`] indexes it on a background thread so `initialize` is
@@ -58,6 +62,7 @@ use std::time::{Duration, Instant};
 
 use rueca_query::Engine;
 
+pub use jsonrpc::code::DEADLINE_EXCEEDED;
 pub use jsonrpc::{ErrorObject, Incoming, JsonObject, Notification, Outgoing, Request, RequestId, parse_line};
 pub use protocol::{SUPPORTED_VERSIONS, Session, Step, negotiate};
 pub use stdio::{DRAIN, MAX_IN_FLIGHT, MAX_LINE, serve};
@@ -119,6 +124,14 @@ impl RuecaServer {
         RuecaServer { engine: Arc::new(engine), tools: Arc::new(tools()), gate }
     }
 
+    /// The same server for a caller who may read only `visibility` (RFC
+    /// 0008 §6.4): the engine is cloned (cheap; the clone shares opened
+    /// segments and the organization index), the tool list is shared.
+    pub fn with_visibility(&self, visibility: rueca_query::Visibility) -> RuecaServer {
+        let engine = self.engine.as_ref().clone().with_visibility(visibility);
+        RuecaServer { engine: Arc::new(engine), tools: self.tools.clone(), gate: self.gate.clone() }
+    }
+
     /// The server [`serve_stdio`] runs: the engine for `opts.org` or
     /// `opts.root`, with the background index those options call for
     /// ([`spawn_org_index`], [`spawn_auto_index`]) already started.
@@ -131,13 +144,18 @@ impl RuecaServer {
     }
 
     /// Runs one tool call (blocking): waits for a pending auto-index, then
-    /// dispatches to the engine.
-    fn call_blocking(&self, tool: &str, args: serde_json::Value) -> anyhow::Result<rueca_query::Response> {
+    /// dispatches to the engine with `opts`.
+    fn call_blocking(
+        &self,
+        tool: &str,
+        args: serde_json::Value,
+        opts: rueca_query::RespondOptions,
+    ) -> anyhow::Result<rueca_query::Response> {
         let index_failure = match &self.gate {
             Some(gate) => gate.wait(INDEX_WAIT).map_err(anyhow::Error::msg)?,
             None => None,
         };
-        self.engine.respond(tool, args).map_err(|err| match index_failure {
+        self.engine.respond_with(tool, args, opts).map_err(|err| match index_failure {
             Some(reason) => err.context(format!("automatic indexing failed: {reason}")),
             None => err,
         })

@@ -14,6 +14,8 @@ use std::io;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use globset::GlobMatcher;
 use roaring::RoaringBitmap;
@@ -457,15 +459,9 @@ impl SymbolIndex {
         let searcher = self.reader.searcher();
         let query = build_query(&self.fields, q);
         let priors: Arc<PriorsBySegment> = Arc::new(self.segment.iter().map(|id| (*id, self.priors.clone())).collect());
-        let hits = top_hits(
-            &searcher,
-            query.as_ref(),
-            &searcher,
-            priors,
-            &HashMap::new(),
-            q.offset.saturating_add(limit),
-            &|_, doc| path_ok(doc),
-        )?;
+        let keep = |_: SegmentId, doc: DocId| path_ok(doc);
+        let top = TopK { want: q.offset.saturating_add(limit), keep: &keep, deadline: q.deadline };
+        let hits = top_hits(&searcher, query.as_ref(), &searcher, priors, &HashMap::new(), &top)?;
         // doc id == node id (checked at open).
         Ok(hits.into_iter().skip(q.offset).take(limit).map(|h| SymbolHit { node: h.doc, score: h.score }).collect())
     }
@@ -516,15 +512,17 @@ pub(crate) struct RankedDoc {
 ///
 /// `boost` multiplies every score of a segment (a repository's routing
 /// prior in an organization index); missing segments keep their scores.
+/// `top.deadline` is checked before each over-fetch round and before each
+/// segment is scored ([`SegmentError::DeadlineExceeded`]).
 pub(crate) fn top_hits(
     searcher: &Searcher,
     query: &dyn Query,
     stats: &dyn Bm25StatisticsProvider,
     priors: Arc<PriorsBySegment>,
     boost: &HashMap<SegmentId, f32>,
-    want: usize,
-    keep: &dyn Fn(SegmentId, DocId) -> bool,
+    top: &TopK<'_>,
 ) -> Result<Vec<RankedDoc>> {
+    let TopK { want, keep, deadline } = *top;
     let total: usize = searcher
         .segment_readers()
         .iter()
@@ -537,7 +535,9 @@ pub(crate) fn top_hits(
     let scope: Arc<HashSet<SegmentId>> = Arc::new(priors.keys().copied().collect());
     let boost: Arc<HashMap<SegmentId, f32>> = Arc::new(boost.clone());
     let mut fetch = want.saturating_mul(2).saturating_add(16).min(total);
+    let expired = Arc::new(AtomicBool::new(false));
     loop {
+        crate::check_deadline(deadline)?;
         let p = priors.clone();
         let b = boost.clone();
         let collector = InScope {
@@ -549,8 +549,13 @@ pub(crate) fn top_hits(
                 }
             }),
             scope: scope.clone(),
+            deadline,
+            expired: expired.clone(),
         };
         let top = searcher.search_with_statistics_provider(query, &collector, stats).map_err(terr)?;
+        if expired.load(Ordering::Relaxed) {
+            return Err(SegmentError::DeadlineExceeded);
+        }
         let exhausted = top.len() < fetch || fetch >= total;
         let mut hits: Vec<RankedDoc> = top
             .iter()
@@ -575,12 +580,24 @@ pub(crate) fn top_hits(
     }
 }
 
+/// What [`top_hits`] collects: the best `want` documents that `keep`
+/// accepts, unless `deadline` passes first.
+#[derive(Clone, Copy)]
+pub(crate) struct TopK<'a> {
+    pub want: usize,
+    pub keep: &'a dyn Fn(SegmentId, DocId) -> bool,
+    pub deadline: Option<Instant>,
+}
+
 /// A collector that reads only the segments in `scope`: the others yield an
 /// empty fruit without being scored (the visibility and repository filters
-/// of an organization index, applied before top-k).
+/// of an organization index, applied before top-k). Once `deadline` has
+/// passed, the remaining segments are skipped too and `expired` is set.
 struct InScope<C> {
     inner: C,
     scope: Arc<HashSet<SegmentId>>,
+    deadline: Option<Instant>,
+    expired: Arc<AtomicBool>,
 }
 
 impl<C: Collector> Collector for InScope<C> {
@@ -610,6 +627,10 @@ impl<C: Collector> Collector for InScope<C> {
         reader: &SegmentReader,
     ) -> tantivy::Result<<C::Child as SegmentCollector>::Fruit> {
         if !self.scope.contains(&reader.segment_id()) {
+            return Ok(self.inner.for_segment(ord, reader)?.harvest());
+        }
+        if crate::check_deadline(self.deadline).is_err() {
+            self.expired.store(true, Ordering::Relaxed);
             return Ok(self.inner.for_segment(ord, reader)?.harvest());
         }
         self.inner.collect_segment(weight, ord, reader)

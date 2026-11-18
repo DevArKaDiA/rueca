@@ -164,6 +164,67 @@ Still open for the resolver: a module and a function with one name
 (`mod spawn; pub use spawn::spawn;`) bind the module, so `tokio::spawn(…)`
 calls stay unresolved.
 
+## 2026-11-18 — Indexer role: leased job objects, child processes per ref, webhooks as hints
+
+RFC 0008 phase 2. Indexing is level-triggered: a reconciler holds the
+desired commit of every configured ref from webhooks, adaptive
+`ls-remote` polling and admin requests, and writes one job object per
+repository in the bucket; indexers lease jobs by compare-and-swap (15 min
+leases with epochs, stealable when expired), fetch exact commits into a
+bare mirror with `--depth=1 --filter=blob:limit`, export from the mirror
+and index each ref in a `rueca index-worker` child under `RLIMIT_AS`,
+`RLIMIT_CPU` and a wall-clock kill, so a parser that loops or explodes
+fails only its ref; the job fails as a whole only when no ref reached its
+desired commit. Webhooks (GitHub, GitLab incl. Standard Webhooks,
+Bitbucket) are verified, deduplicated by delivery id and confirmed with
+`ls-remote` before they move the desired state; polling keeps
+correctness. One updater, elected by a lease object, publishes
+generations, collects garbage and expires pull requests by close and by
+idle reads that replicas record hourly. Credentials reach `git` only
+through `GIT_CONFIG_*` environment variables. `file://` and `git://`
+hosts are accepted by debug builds only, for tests.
+
+## 2026-11-17 — Service query role: Rueca's own HTTP transport and auth layer, governor over tower_governor
+
+RFC 0008 phase 1. `rueca serve` answers MCP over a stateless `POST /mcp`
+on `axum`, calling the own MCP layer's `handle` once per request with a
+fresh or a legacy `Session` (no sessions, no SSE, JSON only), so any
+replica answers any request. The resource-server side of MCP
+authorization is Rueca's: static API tokens hashed in the file and OIDC
+bearer JWTs validated against the issuer's JWKS (`jsonwebtoken` with the
+pure-Rust `rust_crypto` backend; no aws-lc-sys), protected resource
+metadata, 401 / 403 challenges; a principal maps to the existing
+`Visibility` by configured rules, deny by default, and the engine runs
+every call with that visibility and a cooperative deadline
+(`Engine::respond_with`, checked inside the search, trace, scan and
+collapse loops). `governor` is used directly rather than
+`tower_governor`, whose IP key extractor trusts `X-Forwarded-For` from
+any peer; forwarding headers count only from `[http].trusted_proxies`.
+Prometheus text is rendered from the app's own `metrics` registry;
+OpenTelemetry is an optional feature. The image is distroless with `git`
+copied in; it has no shell or ssh. Verified: byte-equal answers against
+local mode, Claude Code over HTTP, sub-3 ms server p95 on the small
+organization in a debug build.
+
+## 2026-11-17 — Service store: rusty-s3 and own backends instead of object_store
+
+RFC 0008 phase 0. `object_store` 0.14.2, the crate RFC 0008 §5.10 chose,
+fails the required `cargo deny` check: `chrono` 0.4.45
+(RUSTSEC-2026-0543) and `humantime` 2.4.0 (RUSTSEC-2026-0542), both
+unmaintained with no patched release, are unconditional dependencies
+even of its in-memory backend, and its cloud features pull
+`webpki-root-certs` (CDLA-Permissive-2.0, not an allowed license)
+through `reqwest/rustls`. Ignoring the advisories was rejected, as for
+`rmcp`; OpenDAL needs MSRV 1.91 (Rueca: 1.90). Chosen: `rueca-storage`
+keeps the RFC's `Storage` trait and compare-and-swap semantics, with
+in-memory and `file://` backends of its own (the file backend locks
+`<root>/.lock` and uses BLAKE3 e-tags) and an S3 backend assembled from
+`rusty-s3` 0.11 (sans-IO SigV4 signing and request building, dates from
+`jiff`) over `ureq` 3.5 with `rustls` and the platform's native roots
+(`rustls-native-certs`). Request signing is not written in-house. GCS is
+served through its S3-compatible XML API when the generation headers can
+be signed; Azure Blob is deferred. The RFC's §5.10 carries the amendment.
+
 ## 2026-11-17 — Own MCP layer instead of rmcp
 
 The required `cargo deny` check failed on main with RUSTSEC-2026-0543:

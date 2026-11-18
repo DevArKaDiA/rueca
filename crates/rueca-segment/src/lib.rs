@@ -11,6 +11,7 @@
 //! ([`Store::default_dir`]):
 //!
 //! ```text
+//! <store>/.lock                   advisory writer lock (see Concurrency)
 //! <store>/catalog.json            local catalog: indexed roots → current segment
 //! <store>/segments/<id>.rcseg     one bundle file per segment
 //! <store>/packs/<pack-id>.rcpack  content packs (one zstd frame per blob)
@@ -21,20 +22,38 @@
 //!
 //! Every file is published by writing it under `tmp/`, fsyncing it, renaming
 //! it into place and fsyncing the parent directory, so readers only ever see
-//! complete files. Segment ids are `<repo-slug>-<commit[..12]>-<unix-ts>-<rand16-hex>`;
-//! pack ids are `<unix-ts>-<rand32-hex>`. Leftovers in `tmp/` older than 24 h
-//! (crashed writers) are removed by the next [`write_segment`].
+//! complete files. Segment ids are `<repo-slug>-<commit[..12]>-<unix-ts>-<rand64>`
+//! and pack ids `<unix-ts>-<rand64>`, where `<rand64>` is 64 random bits as
+//! 16 lowercase hex digits (RFC 0008 §5.2: two writers of one commit in one
+//! second do not collide; stores written before keep their shorter ids,
+//! which are only ever compared as strings). Leftovers in `tmp/` older than
+//! 24 h (crashed writers) are removed by the next [`write_segment`].
 //!
 //! # Concurrency
 //!
-//! **Single writer per store.** [`write_segment`] and [`Store::register`] are
-//! not coordinated across threads or processes. Readers may run concurrently
-//! with the writer: every publication is an atomic rename, a published file is
-//! never modified, and an opened [`Segment`] keeps its own mapping.
-//! Two concurrent writers cannot corrupt published files, but can store the
-//! same blob twice and can lose one of two simultaneous catalog updates; the
-//! blob index heals itself (it is rebuilt whenever the set of packs it lists
-//! differs from the packs on disk).
+//! **Several writers per store**, threads or processes on one host (RFC 0008
+//! §5.5). Every read-modify-write of a mutable store file runs under an
+//! advisory exclusive lock on `<store>/.lock` ([`std::fs::File::lock`],
+//! [`StoreLock`]): `catalog.json` ([`Store::register`],
+//! [`Store::register_ref`], [`Store::unregister`], including the deletion of
+//! the segment files they release), `packs/index.rcpi` (re-read under the
+//! lock when [`write_segment`] adds a pack or rebuilt the index, so a
+//! concurrent writer's pack is never dropped from it), and
+//! `orgs/<name>/org.json` with the organization garbage collection
+//! ([`org::update_org`]). The lock is held only for those short steps:
+//! extraction, the segment write and pack writes run unlocked and in
+//! parallel. A writer waiting more than 60 s fails with an error naming the
+//! lock file (and the holder's process id, which the holder writes into it).
+//! The lock is advisory and per host: a store on a network filesystem shared
+//! by several hosts is not supported (service stores use object storage and
+//! compare-and-swap instead, RFC 0008 §5.2). It is not reentrant
+//! ([`Store::lock`]).
+//!
+//! **Readers take no lock** and may run concurrently with writers: every
+//! publication is an atomic rename, a published file is never modified, and
+//! an opened [`Segment`] keeps its own mapping. Two concurrent writers may
+//! still store the same blob twice (each in its own pack; the blob index
+//! keeps one location), which costs space, never correctness.
 //!
 //! # Bundle format (`.rcseg`, [`FORMAT_VERSION`] 2)
 //!
@@ -53,7 +72,7 @@
 //! `footer_offset + footer_len == file_len - 56`. [`Segment::open`] maps the
 //! file and validates, in order: magic, version ([`SegmentError::Version`]),
 //! flags, trailer magic, footer bounds and checksum, every component's bounds
-//! and BLAKE3 checksum, array lengths/alignment, every cross-table id (edge
+//! and BLAKE3 checksum, the zero padding between components, array lengths/alignment, every cross-table id (edge
 //! endpoints, edge kinds and strategies, evidence files, CSR offsets, name
 //! index permutations, file ↔ node references, trigram offsets, text-file
 //! bitmap) and the symbol index against the node table. Any failure is
@@ -70,7 +89,7 @@
 //!
 //! | Name | Encoding | Content |
 //! |---|---|---|
-//! | `meta` | JSON | [`SegmentMeta`] (`bytes` is stored as 0; the reader reports the file size) |
+//! | `meta` | JSON | [`SegmentMeta`] (`bytes` is stored as 0; the reader reports the file size). Fields are added with a serde default (`packs`, RFC 0008); unknown fields are ignored, so older readers open newer segments |
 //! | `nodes` | postcard `Vec<Node>` | node table, index = [`NodeId`] |
 //! | `files` | postcard `Vec<FileEntry>` | file table, index = [`FileId`] |
 //! | `files.modules` (optional) | postcard `Vec<String>` | module name per file as its pack computed it (`""` = none); absent in segments written before RFC 0003 wave R ([`Segment::module_of`] returns `None`) |
@@ -189,6 +208,11 @@
 //! `max_matches` or when the next file would exceed `scan_budget_bytes`, and
 //! sets `truncated`. One match per line, ordered by (path, line).
 //!
+//! Both searches take an optional `deadline` (RFC 0008 §6.5): symbol search
+//! checks it before scoring each tantivy segment and before each over-fetch
+//! round, content search before verifying each candidate file; once it has
+//! passed the search returns [`SegmentError::DeadlineExceeded`].
+//!
 //! # Content pack format (`.rcpack`, version 1)
 //!
 //! ```text
@@ -207,7 +231,10 @@
 //! asks the [`ContentSource`] only for blobs absent from the index (or whose
 //! stored frame no longer decodes), verifies each returned blob against its
 //! git blob SHA-1 ([`rueca_model::git_blob_sha`]), and writes the new blobs
-//! to one new pack; [`SegmentMeta::content_bytes_added`] is that pack's size.
+//! to one new pack; [`SegmentMeta::content_bytes_added`] is that pack's size
+//! and [`SegmentMeta::packs`] lists the packs holding the snapshot's blobs
+//! (that pack plus those the known blobs were read from), so the segment
+//! names every pack it needs without the index (RFC 0008 §5.9).
 //! Reads check the zstd frame checksum and the raw length.
 //!
 //! There is **no pack garbage collection** yet: packs only grow, and blobs
@@ -218,7 +245,8 @@
 //! # Catalog
 //!
 //! `catalog.json` is a JSON array of [`CatalogEntry`] sorted by root,
-//! rewritten atomically on every [`Store::register`] / [`Store::unregister`].
+//! rewritten atomically, under the store lock, on every [`Store::register`]
+//! / [`Store::unregister`].
 //! Roots are canonicalized; [`Store::entry_for_path`] returns the entry with
 //! the longest root that is an ancestor of (or equal to) the canonicalized
 //! path. Several entries may share a repository id: worktrees of one
@@ -261,6 +289,7 @@ compile_error!("rueca-segment format v2 reads little-endian arrays zero-copy; bi
 mod bundle;
 mod contracts;
 mod graph;
+mod lock;
 mod ngram;
 pub mod org;
 mod packs;
@@ -272,11 +301,14 @@ pub mod tokenizer;
 mod writer;
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use rueca_model::{
     ContractRow, EdgeKind, EdgeMeta, FileEntry, FileId, Label, Language, Node, NodeId, ResolvedGraph, SnapshotInfo,
 };
 use serde::{Deserialize, Serialize};
+
+pub use lock::StoreLock;
 
 /// Whether `path` looks like test code (a `test`, `tests`, `__tests__`,
 /// `spec`, … directory, `test_*.py`, `*.spec.ts`, …): the path part of the
@@ -308,6 +340,18 @@ pub enum SegmentError {
     NotFound(String),
     #[error("{0}")]
     Other(String),
+    /// The query's `deadline` passed before the search finished.
+    #[error("the search deadline passed")]
+    DeadlineExceeded,
+}
+
+/// `Err(DeadlineExceeded)` when `deadline` has passed: one `Instant::now()`
+/// comparison, cheap enough for a loop over segments or files.
+pub(crate) fn check_deadline(deadline: Option<Instant>) -> Result<()> {
+    match deadline {
+        Some(at) if Instant::now() >= at => Err(SegmentError::DeadlineExceeded),
+        _ => Ok(()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +362,16 @@ pub enum SegmentError {
 /// whose blob is not already present in a content pack.
 pub trait ContentSource: Sync {
     fn content(&self, file: &FileEntry) -> std::io::Result<Vec<u8>>;
+
+    /// Whether `file`'s content is not available at all: a blob a partial
+    /// clone's filter left out (RFC 0008 §7.6), listed as a coverage gap.
+    /// Such a file stays in the file table but has no content in the packs
+    /// (unless a pack already holds its blob), so `content` is never asked
+    /// for it and reading it later fails like a missing blob. Default: no
+    /// file is absent.
+    fn absent(&self, _file: &FileEntry) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -333,6 +387,15 @@ pub struct SegmentMeta {
     pub bytes: u64,
     /// Bytes added to content packs by this write (0 if all blobs were known).
     pub content_bytes_added: u64,
+    /// The content packs holding the snapshot's blobs, by pack id (the file
+    /// stem of `packs/<id>.rcpack`), sorted: the pack this write added, if
+    /// any, plus the packs its already-stored blobs were read from. Lets a
+    /// service store copy or keep exactly the packs a snapshot needs without
+    /// `packs/index.rcpi` (RFC 0008 §5.9). Empty (and not serialized) for an
+    /// empty snapshot and in segments written before the field; older
+    /// readers ignore it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub packs: Vec<String>,
 }
 
 /// Writes `graph` as a new segment into `store` and appends unseen blobs to
@@ -341,7 +404,8 @@ pub struct SegmentMeta {
 /// Calls [`ContentSource::content`] only for blobs not already stored, verifies
 /// each returned blob against `FileEntry::blob_sha` (mismatch → error), and
 /// reads already-stored blobs back from the packs to build the n-gram index.
-/// Single writer per store (see crate docs).
+/// Safe to run concurrently with other writers of the store: only the
+/// blob-index update takes the store lock (see crate docs).
 pub fn write_segment(graph: &ResolvedGraph, contents: &dyn ContentSource, store: &Path) -> Result<SegmentMeta> {
     writer::write_segment(graph, contents, store)
 }
@@ -439,6 +503,16 @@ impl Store {
     pub fn open_segment(&self, segment_id: &str) -> Result<Segment> {
         Segment::open(&self.segment_path(segment_id), &self.dir)
     }
+    /// Takes the store's writer lock (`<store>/.lock`, see the crate docs),
+    /// waiting at most 60 s; the error names the lock file. Hold it around a
+    /// read-modify-write of a store file this crate does not write itself
+    /// (e.g. a mirror that installs an organization pointer). Not reentrant:
+    /// while holding it, do not call [`Store::register`],
+    /// [`Store::unregister`], [`write_segment`] or [`org::update_org`],
+    /// which take it themselves.
+    pub fn lock(&self) -> Result<StoreLock> {
+        StoreLock::acquire(&self.dir)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +540,10 @@ pub struct SymbolQuery {
     pub language: Option<Language>,
     pub limit: usize,
     pub offset: usize,
+    /// When the search must stop ([`SegmentError::DeadlineExceeded`]):
+    /// checked before each tantivy segment is scored and before each
+    /// over-fetch round, and per segment of a merged ranking.
+    pub deadline: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -488,6 +566,9 @@ pub struct ContentQuery {
     pub context_lines: u32,
     /// Upper bound on bytes verified; hitting it sets `truncated`.
     pub scan_budget_bytes: u64,
+    /// When the scan must stop ([`SegmentError::DeadlineExceeded`]):
+    /// checked before verifying each candidate file.
+    pub deadline: Option<Instant>,
 }
 
 impl Default for ContentQuery {
@@ -501,6 +582,7 @@ impl Default for ContentQuery {
             max_matches: 100,
             context_lines: 0,
             scan_budget_bytes: 256 * 1024 * 1024,
+            deadline: None,
         }
     }
 }
@@ -639,6 +721,7 @@ pub fn search_symbols_merged(segments: &[&Segment], query: &SymbolQuery) -> Resu
     let stats = symbols::SummedStats { searchers: &searchers };
     let mut all: Vec<(usize, SymbolHit)> = Vec::new();
     for (i, seg) in segments.iter().enumerate() {
+        check_deadline(query.deadline)?;
         let index = seg.inner.symbols();
         let q = symbols::build_query(index.fields(), query);
         let priors: std::sync::Arc<symbols::PriorsBySegment> =
@@ -647,7 +730,8 @@ pub fn search_symbols_merged(segments: &[&Segment], query: &SymbolQuery) -> Resu
         let keep = |_: tantivy::index::SegmentId, doc: u32| {
             (doc as usize) < n && glob.as_ref().is_none_or(|g| g.is_match(seg.inner.node_path(doc)))
         };
-        let hits = symbols::top_hits(&searchers[i], q.as_ref(), &stats, priors, &Default::default(), want, &keep)?;
+        let top = symbols::TopK { want, keep: &keep, deadline: query.deadline };
+        let hits = symbols::top_hits(&searchers[i], q.as_ref(), &stats, priors, &Default::default(), &top)?;
         all.extend(hits.into_iter().map(|h| (i, SymbolHit { node: h.doc, score: h.score })));
     }
     all.sort_by(|a, b| b.1.score.total_cmp(&a.1.score).then(a.0.cmp(&b.0)).then(a.1.node.cmp(&b.1.node)));

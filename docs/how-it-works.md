@@ -910,6 +910,22 @@ component exists because a tool needs it:
 The segment is written to a temp file and atomically renamed; the catalog
 then points the indexed root at it. Query time never reads the working tree.
 
+The store directory holds `catalog.json`, `segments/<id>.rcseg`,
+`packs/<id>.rcpack` with the blob index `packs/index.rcpi`, `orgs/`,
+`refs/`, `tmp/` and `.lock`. Segment ids are
+`<repo-slug>-<commit12>-<unix seconds>-<16 hex digits>` and pack ids
+`<unix seconds>-<16 hex digits>`: 64 random bits, so two indexers writing
+one commit in the same second never collide. A segment's meta lists the
+packs holding its blobs (`packs`: the pack it added plus the packs its
+known blobs came from), so a service store can copy exactly what a
+snapshot needs ([RFC 0008 §5.9](rfcs/0008-service-mode.md)). Several
+indexers may write one store at once: every read-modify-write of
+`catalog.json`, `packs/index.rcpi` and an organization's `org.json`, and
+organization garbage collection, runs under an exclusive file lock on
+`.lock` (a writer waiting more than 60 s fails, naming the lock file);
+parsing, resolution and segment writing run unlocked, and readers never
+lock.
+
 **Ref snapshots** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--implemented)).
 `rueca index [PATH] --ref <name>` indexes a branch, pull request (`pr/<n>`),
 tag or commit of PATH's repository without touching its working tree: the
@@ -1081,6 +1097,178 @@ and outlines read the repository segment of the id they are given; only
 `trace`, `list_contracts` (counterparts) and routing look across
 repositories.
 
+### 4.7 The service store (`rueca-storage`, `rueca-service`)
+
+[RFC 0008](rfcs/0008-service-mode.md) phase 0. A service keeps the store
+of record in object storage and every process keeps a **mirror**: a local
+store directory with the layout above. `rueca-storage` is the object
+layer behind a `Storage` trait (`get`, `get_if_changed`, `get_range`,
+`get_to_file`, `put_new`, `put_new_file`, `put_if`, `list`, `delete`) with
+three backends — `memory://<name>` (shared by name inside a process),
+`file:///dir` (an exclusive lock on `<dir>/.lock`, BLAKE3 e-tags) and
+`s3://bucket/prefix` / `gs://bucket/prefix` (`rusty-s3` signing over
+`ureq` with the platform's TLS roots; `If-None-Match: *` for a create,
+`If-Match` or `x-goog-if-generation-match` for an update) — and
+`cas_update`, a read-modify-write loop over a JSON object that retries on
+a lost race. The bucket holds `store.json`, one `repos/<repo-dir>/catalog.json`
+per repository (its refs, each with its snapshots newest first:
+commit, segment id, packs, bytes, version), that repository's
+`segments/` and `packs/`, and the organization's `orgs/<name>/` exactly
+as on disk (`org.json` pointer, immutable generations, index, profile and
+link files). Immutable objects are only ever created; the catalogs and
+the pointer are written by compare-and-swap, so two indexers never lose a
+registration and no lock exists in the bucket.
+
+`rueca-service` moves things between the two: **publish** uploads the
+packs a snapshot lists (`SegmentMeta.packs`) and its segment, then adds
+the snapshot to the repository catalog — idempotent by `(ref, commit)`,
+trimmed to the retention of its ref kind — and re-uploads any listed pack
+a concurrent collection removed; **pull** downloads a repository's
+snapshots into the mirror and registers them under synthetic roots
+(`<mirror>/repos/<repo-dir>` for the default ref, `<mirror>/refs/<repo-dir>/<ref-slug>`
+for the others, the same places `rueca index --ref` would use) so the
+organization layer and the query engine open them as in local mode;
+**publish_generation** uploads a generation built on the mirror and swaps
+`org.json` by compare-and-swap (a second updater loses and rebuilds);
+**pull_generation** does the reverse behind a conditional GET and writes
+the local pointer last; **collect_garbage** marks every object a catalog
+or a kept generation names, records the rest as candidates once older
+than a grace period (24 h) and deletes a candidate only in a later round,
+a grace after it was recorded, if nothing references it by then —
+publishes take their objects off the candidate list first — expiring
+closed pull requests and over-retention snapshots on the way. `rueca status --store-url <url>` reads a bucket
+directly.
+
+**The query role** (`rueca serve`, crate `rueca-serve`, RFC 0008 phase 1)
+is a replica: its disk cache (`[store].cache_dir`) is such a mirror. A
+watcher calls `pull_generation` every `[store].poll` (5 s) with the
+version of `org.json` it last read — one conditional request when nothing
+changed — and a new generation is downloaded whole, installed, warmed, and
+segments the generation no longer names are evicted above
+`[store].cache_bytes`. Ready means warmed: `/readyz` answers 200 (and names
+a new generation) only after a `list_repositories` and a one-result
+`search_symbols` through the serving engine have opened the organization
+index, its routing profiles and every default segment into the engine's
+caches (`rueca_generation_warm_seconds`), so the first call opens nothing.
+The engine re-reads the local pointer on every call, so a request arriving
+during a later generation's warm-up already reads it and opens what it
+needs itself. `POST /mcp` runs Rueca's own MCP core
+(`RuecaServer::handle`, synchronous) once per request with a fresh
+session; a tool call runs on a blocking thread with the caller's
+`Visibility` — the union of the repository globs its static token or OIDC
+rules grant, matched against the generation's repository ids (none: an
+empty organization) — under the query deadline: the call gets
+`deadline = now + [http].query_deadline` through
+`Engine::respond_with`, and the engine checks it cooperatively where work
+loops (per tantivy segment and over-fetch round of a symbol search, per
+file of a content scan, every 64 items of `trace`'s traversal, outlines
+and the multi-ref collapse), returning `DeadlineExceeded`, which the
+transport answers as JSON-RPC -32001; a blocking thread cannot be
+cancelled from outside, so a `tokio` timeout of the same length is only a
+backstop. Authentication (static
+`rueca_` tokens, OIDC with JWKS discovery), `Host` / `Origin` checks, rate
+limits per IP and per principal, Prometheus metrics and JSON logs sit in
+front of it ([tools.md, *Over HTTP*](tools.md#over-http)).
+
+**The indexer role** (`rueca serve --role indexer`, or `all` with the
+query role in one process; RFC 0008 phase 2) keeps the store current
+without a queue or a database: everything is an object written by
+compare-and-swap. Each repository has a **job object**
+(`jobs/<repo-dir>.json`) holding its *desired state* — ref → commit — a
+state (`pending`, `leased`, `done`, `failed`), a priority (0 never
+indexed, 1 default branch behind, 2 pull request behind, 3 branch
+behind, 4 tag missing) and a lease. One indexer holds
+`leases/org-updater.json` (60 s, renewed every 20 s, taken over 30 s
+after it ends) and runs the **updater**: every `[indexing].updater_tick`
+(5 s) the reconciler gives every `[[repo]]` a catalog and a job, lists
+each repository whose poll is due with `git ls-remote --symref` (the next
+poll comes after half the time since its refs last changed, between 45 s
+and 8 h; at most 8 per host at once; a `429` pauses the host) and merges
+the default branch, the branches and tags matching the configured globs
+and, when enabled, pull request heads into the job — a branch the host
+stopped listing leaves the job and the catalog, a vanished pull request
+gets `closed_at`. Then the updater pulls every repository whose job
+changed into its own mirror, rebuilds the organization with
+`update_org_with` and publishes the next generation (a second updater
+loses the pointer's compare-and-swap and rebuilds on the winner's);
+hourly it expires pull requests and on-demand refs unread for
+`[retention].pr_idle` (query replicas write one `reads/<day>/<hour>-<replica>.json`
+per hour naming the refs their calls read) and collects garbage. Every
+indexer, every `[indexing].discover` (5 s), lists `jobs/`, re-reads the
+objects whose e-tag changed and **leases** the most urgent leasable job
+(pending, a failed one past its back-off of `min(10 min × attempts, 120
+min)`, or a lease that ended more than 30 s ago — the epoch increments)
+with a conditional write; it runs the job's refs, default first, into
+its staging store (`[indexing].facts_dir`, whose `facts/` is the facts
+cache) and publishes each snapshot, renewing the 15-minute lease every 5
+minutes, then finishes the job (`done`, or `pending` again when the
+desired state moved meanwhile; a ref that fails alone backs off alone) or
+fails it when refs failed and none is at its desired commit (so a looping
+on-demand ref never holds back the default branch). A lease another indexer took makes every
+later write of the old holder fail; what it already published is
+idempotent by `(ref, commit)`. Each ref runs in three steps. **Fetch**:
+the repository's bare mirror (`[indexing].mirror_dir/<repo-dir>.git`)
+gets exactly the desired commit, `git fetch --depth=1 --no-tags --atomic
+--no-auto-maintenance --filter=blob:limit=<max_bytes + 1> <url>
++<commit>:refs/rueca/commit/<commit>` with protocol v2, only `https` and
+`ssh` allowed, `GIT_NO_LAZY_FETCH=1` and no prompt; a host that refuses a
+commit by id gets the ref name fetched instead, and a tip that is no
+longer the desired commit means "moved, retry later". Blobs over the
+budget stay on the host; a mirror is never repacked and is re-created
+after `[indexing].mirror_max_age` (7 days). **Export**: the commit's tree
+is read with `gix` from the bare mirror into a scratch directory of the
+staging store; a blob the filter left out is not an error but a gap,
+listed in the file table as `skipped:size` with its blob id and no
+content. **Index**: a child process of the same binary, the hidden
+`rueca index-worker`, reads one JSON request on stdin (the
+`IndexOptions`, the budget, the gaps), indexes into the staging store
+(sharing its facts cache) and writes `{"ok": <report>}` or `{"error":
+{"stage", "message"}}` on stdout, logging JSON lines on stderr that the
+parent forwards. The parent sets `RLIMIT_AS` (24 GiB; not enforced on
+macOS), `RLIMIT_CPU` (4 h) and `RLIMIT_CORE = 0` before `exec` and kills
+the child after `[indexing].worker.wall_time` (30 min): a crash, an
+abort, an allocation storm or a parser that loops fails that ref alone,
+with the signal or limit and the child's last log lines as the reason,
+and the indexer carries on.
+`POST /admin/index {"repo", "ref"}` resolves a tag, branch, `pr/<n>` or
+full commit on the host and adds it to the desired state,
+`DELETE /admin/refs` removes a ref, `GET /admin/jobs` lists the jobs
+(admin role); `/status` adds jobs by state and the queue, `/readyz` of an
+indexer checks the store and `git` ≥ 2.45. Repository URLs must be
+`https` or `ssh` on an `[indexing].hosts` host (private addresses refused
+unless `allow_private_networks`); credentials reach `git` as an
+`http.extraHeader` in its environment, never on its command line.
+
+**Webhooks** cut the latency polling leaves; they are hints, never the
+truth. Each host with a secret in `[indexing].webhooks` gets `POST
+/webhooks/github`, `/webhooks/gitlab` or `/webhooks/bitbucket` on the
+indexer's main listener (a configured route whose secret is not set
+refuses to start). The handler answers within milliseconds and never
+waits on the network: a body over 25 MB is `413`; the signature is
+checked in constant time (GitHub `X-Hub-Signature-256` and Bitbucket
+`X-Hub-Signature`, HMAC-SHA256 of the body; GitLab's Standard Webhooks
+`webhook-signature` over `id.timestamp.body` with a `whsec_` signing
+token, or the legacy `X-Gitlab-Token`, accepted but flagged as weaker at
+start-up), else `401`; a delivery id seen in the last 24 h (100,000 ids)
+is `200 duplicate`; an event that changes nothing indexed or a
+repository not in `[[repo]]` is `202 ignored`; anything else is `202
+accepted` and a background task asks the host with `git ls-remote` what
+the named refs point to now and merges that into the job by
+compare-and-swap, then wakes the indexer's discovery. Payload commits are
+never indexed as such, so duplicated, reordered or truncated deliveries
+converge on the host's state and polling covers a delivery that never
+came (GitHub sends none past 3 tags pushed at once, GitLab none past 3
+refs). Branch pushes set the default branch or a globbed branch (a
+deleted one leaves the job and the catalog), tag pushes a globbed tag
+(tags never expire), pull request openings and updates `pr/<n>` (from
+`refs/pull/<n>/head`, `refs/merge-requests/<n>/head` or, on Bitbucket,
+the source branch), and closings remove `pr/<n>` from the job and set
+its `closed_at`: the snapshot stays served until `[retention].pr_after_close`
+(7 days) and is then expired by the updater's garbage collection. A
+delivery whose confirmation failed (an unreachable host or store) is
+forgotten, so the host's redelivery is heard. `rueca status --store-url`
+lists every ref with its kind, commit, age and `closed_at`.
+
 ## 5. The graph schema
 
 **Node labels** produced by the alpha:
@@ -1149,6 +1337,15 @@ lookup**:
    parameter suffix is optional (`Parser.parse` finds every
    `Parser.parse(…)`);
 3. else `name` → name index, optionally narrowed by `path`.
+
+`Engine::respond_with` runs a call with per-call options: the caller's
+`Visibility` (local mode too: a root of a repository the caller may not
+read does not exist for that call, so it is never selected, listed or
+named in an error; a default root it may not read is ignored) and a
+cooperative deadline, checked when the snapshots are selected and inside
+the loops below; once it has passed the call fails with
+`DeadlineExceeded` ("deadline of 10s exceeded; narrow `repo` or lower
+`limit`"). `Engine::respond` is `respond_with` with neither.
 
 When several nodes match, the pick is deterministic (non-test, exported,
 symbol before container, shorter qualified name, lower id) and the others
@@ -1362,7 +1559,8 @@ protocol versions 2024-11-05 to 2025-11-25, and the stateless 2026-07-28
 lifecycle (`server/discover`, per-request `_meta`). Each `tools/call` makes
 the same engine call as `rueca query`, on its own thread. The behaviour, the
 versions and the transport seam for HTTP are specified in
-[`docs/mcp-protocol.md`](mcp-protocol.md).
+[`docs/mcp-protocol.md`](mcp-protocol.md). `rueca serve` puts the same core
+behind stateless HTTP for a service (§4.7).
 
 ## 7. Confidence: how to read an edge
 

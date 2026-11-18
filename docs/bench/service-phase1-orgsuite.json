@@ -1,0 +1,493 @@
+{
+ "suite": "service",
+ "mode": "org-calibration",
+ "filter": [
+  "astral-sh/ruff",
+  "axios/axios",
+  "burntsushi/ripgrep",
+  "coder/code-server",
+  "expressjs/express",
+  "honojs/hono",
+  "nushell/nushell",
+  "pallets/flask",
+  "preactjs/preact",
+  "psf/requests",
+  "pylint-dev/pylint",
+  "pytest-dev/pytest",
+  "serde-rs/json",
+  "sharkdp/bat",
+  "sphinx-doc/sphinx",
+  "tailwindlabs/tailwindcss",
+  "tokio-rs/axum",
+  "tokio-rs/bytes",
+  "tokio-rs/tokio",
+  "uutils/coreutils",
+  "vitsalis/PyCG",
+  "vuejs/core"
+ ],
+ "binary": {
+  "path": "/private/tmp/rueca-target-service-1/debug/rueca",
+  "version": "rueca 0.1.0-alpha.2",
+  "bytes": 121168000
+ },
+ "args": {
+  "limit": 10,
+  "sample": 20,
+  "repeat": 3
+ },
+ "index": {
+  "seconds": 123.11,
+  "repos": {
+   "psf/requests": {
+    "ok": true,
+    "seconds": 1.5479821249900851,
+    "repo_id": "github.com/psf/requests",
+    "error": null,
+    "docs": 1521,
+    "repo_ms": 1276,
+    "org_ms": 258,
+    "org_repos": 1,
+    "generation": 1,
+    "added": [
+     "github.com/psf/requests"
+    ],
+    "replaced": [],
+    "bytes_copied": 515731
+   },
+   "pallets/flask": {
+    "ok": true,
+    "seconds": 1.1139911669888534,
+    "repo_id": "github.com/pallets/flask",
+    "error": null,
+    "docs": 2641,
+    "repo_ms": 835,
+    "org_ms": 268,
+    "org_repos": 2,
+    "generation": 2,
+    "added": [
+     "github.com/pallets/flask"
+    ],
+    "replaced": [],
+    "bytes_copied": 586833
+   },
+   "pylint-dev/pylint": {
+    "ok": true,
+    "seconds": 8.543729083990911,
+    "repo_id": "github.com/pylint-dev/pylint",
+    "error": null,
+    "docs": 18574,
+    "repo_ms": 5575,
+    "org_ms": 2955,
+    "org_repos": 3,
+    "generation": 3,
+    "added": [
+     "github.com/pylint-dev/pylint"
+    ],
+    "replaced": [],
+    "bytes_copied": 3622621
+   },
+   "pytest-dev/pytest": {
+    "ok": true,
+    "seconds": 7.26612837499124,
+    "repo_id": "github.com/pytest-dev/pytest",
+    "error": null,
+    "docs": 7051,
+    "repo_ms": 2370,
+    "org_ms": 4883,
+    "org_repos": 4,
+    "generation": 4,
+    "added": [
+     "github.com/pytest-dev/pytest"
+    ],
+    "replaced": [],
+    "bytes_copied": 1885653
+   },
+   "sphinx-doc/sphinx": {
+    "ok": true,
+    "seconds": 11.087689042004058,
+    "repo_id": "github.com/sphinx-doc/sphinx",
+    "error": null,
+    "docs": 14773,
+    "repo_ms": 4647,
+    "org_ms": 6427,
+    "org_repos": 5,
+    "generation": 5,
+    "added": [
+     "github.com/sphinx-doc/sphinx"
+    ],
+    "replaced": [],
+    "bytes_copied": 2996257
+   },
+   "tailwindlabs/tailwindcss": {
+    "ok": true,
+    "seconds": 0.4840702910150867,
+    "repo_id": "github.com/tailwindlabs/tailwindcss",
+    "error": null,
+    "docs": 443,
+    "repo_ms": 364,
+    "org_ms": 110,
+    "org_repos": 6,
+    "generation": 6,
+    "added": [
+     "github.com/tailwindlabs/tailwindcss"
+    ],
+    "replaced": [],
+    "bytes_copied": 117642
+   },
+   "coder/code-server": {
+    "ok": true,
+    "seconds": 6.954675707995193,
+    "repo_id": "github.com/coder/code-server",
+    "error": null,
+    "docs": 2613,
+    "repo_ms": 741,
+    "org_ms": 6202,
+    "org_repos": 7,
+    "generation": 7,
+    "added": [
+     "github.com/coder/code-server"
+    ],
+    "replaced": [],
+    "bytes_copied": 637300
+   },
+   "vuejs/core": {
+    "ok": true,
+    "seconds": 4.385429209010908,
+    "repo_id": "github.com/vuejs/core",
+    "error": null,
+    "docs": 14379,
+    "repo_ms": 3835,
+    "org_ms": 538,
+    "org_repos": 8,
+    "generation": 8,
+    "added": [
+     "github.com/vuejs/core"
+    ],
+    "replaced": [],
+    "bytes_copied": 4014383
+   },
+   "preactjs/preact": {
+    "ok": true,
+    "seconds": 1.999545291007962,
+    "repo_id": "github.com/preactjs/preact",
+    "error": null,
+    "docs": 7515,
+    "repo_ms": 1622,
+    "org_ms": 365,
+    "org_repos": 9,
+    "generation": 9,
+    "added": [
+     "github.com/preactjs/preact"
+    ],
+    "replaced": [],
+    "bytes_copied": 1675898
+   },
+   "axios/axios": {
+    "ok": true,
+    "seconds": 5.409681165998336,
+    "repo_id": "github.com/axios/axios",
+    "error": null,
+    "docs": 3117,
+    "repo_ms": 806,
+    "org_ms": 4591,
+    "org_repos": 10,
+    "generation": 10,
+    "added": [
+     "github.com/axios/axios"
+    ],
+    "replaced": [],
+    "bytes_copied": 683677
+   },
+   "tokio-rs/tokio": {
+    "ok": true,
+    "seconds": 3.3969810839917045,
+    "repo_id": "github.com/tokio-rs/tokio",
+    "error": null,
+    "docs": 12738,
+    "repo_ms": 2886,
+    "org_ms": 497,
+    "org_repos": 11,
+    "generation": 11,
+    "added": [
+     "github.com/tokio-rs/tokio"
+    ],
+    "replaced": [],
+    "bytes_copied": 2545778
+   },
+   "sharkdp/bat": {
+    "ok": true,
+    "seconds": 2.917276457999833,
+    "repo_id": "github.com/sharkdp/bat",
+    "error": null,
+    "docs": 4867,
+    "repo_ms": 1980,
+    "org_ms": 924,
+    "org_repos": 12,
+    "generation": 12,
+    "added": [
+     "github.com/sharkdp/bat"
+    ],
+    "replaced": [],
+    "bytes_copied": 1213692
+   },
+   "tokio-rs/axum": {
+    "ok": true,
+    "seconds": 8.340794957999606,
+    "repo_id": "github.com/tokio-rs/axum",
+    "error": null,
+    "docs": 5358,
+    "repo_ms": 1206,
+    "org_ms": 7122,
+    "org_repos": 13,
+    "generation": 13,
+    "added": [
+     "github.com/tokio-rs/axum"
+    ],
+    "replaced": [],
+    "bytes_copied": 938435
+   },
+   "astral-sh/ruff": {
+    "ok": true,
+    "seconds": 28.902877582993824,
+    "repo_id": "github.com/astral-sh/ruff",
+    "error": null,
+    "docs": 52446,
+    "repo_ms": 14713,
+    "org_ms": 14169,
+    "org_repos": 14,
+    "generation": 14,
+    "added": [
+     "github.com/astral-sh/ruff"
+    ],
+    "replaced": [],
+    "bytes_copied": 11006902
+   },
+   "uutils/coreutils": {
+    "ok": true,
+    "seconds": 5.075936790992273,
+    "repo_id": "github.com/uutils/coreutils",
+    "error": null,
+    "docs": 19771,
+    "repo_ms": 4328,
+    "org_ms": 733,
+    "org_repos": 15,
+    "generation": 15,
+    "added": [
+     "github.com/uutils/coreutils"
+    ],
+    "replaced": [],
+    "bytes_copied": 3685665
+   },
+   "nushell/nushell": {
+    "ok": true,
+    "seconds": 8.717601500015007,
+    "repo_id": "github.com/nushell/nushell",
+    "error": null,
+    "docs": 24459,
+    "repo_ms": 5821,
+    "org_ms": 2878,
+    "org_repos": 16,
+    "generation": 16,
+    "added": [
+     "github.com/nushell/nushell"
+    ],
+    "replaced": [],
+    "bytes_copied": 4600811
+   },
+   "burntsushi/ripgrep": {
+    "ok": true,
+    "seconds": 8.500169417005964,
+    "repo_id": "github.com/burntsushi/ripgrep",
+    "error": null,
+    "docs": 4205,
+    "repo_ms": 1166,
+    "org_ms": 7320,
+    "org_repos": 17,
+    "generation": 17,
+    "added": [
+     "github.com/burntsushi/ripgrep"
+    ],
+    "replaced": [],
+    "bytes_copied": 851577
+   },
+   "tokio-rs/bytes": {
+    "ok": true,
+    "seconds": 2.584444292006083,
+    "repo_id": "github.com/tokio-rs/bytes",
+    "error": null,
+    "docs": 862,
+    "repo_ms": 426,
+    "org_ms": 2146,
+    "org_repos": 18,
+    "generation": 18,
+    "added": [
+     "github.com/tokio-rs/bytes"
+    ],
+    "replaced": [],
+    "bytes_copied": 184806
+   }
+  }
+ },
+ "store": {
+  "url": "file:///Users/juanro/Documents/githings/rueca-wt/service/bench/.cache/service/store",
+  "publish_seconds": 8.46,
+  "pull_generation_seconds": 17.81,
+  "generation": 1
+ },
+ "ready": {
+  "listening_seconds": 0.23,
+  "ready_seconds": 8.837,
+  "readyz": {
+   "generation": 1,
+   "warm": "18/18"
+  }
+ },
+ "checks": {
+  "unauthenticated_status": 401,
+  "www_authenticate": "Bearer scope=\"rueca:read\""
+ },
+ "initialize": {
+  "status": 200,
+  "protocol": "2025-06-18",
+  "seconds": 0.0007,
+  "initialized_status": 202
+ },
+ "queries": {
+  "search_symbols": 5,
+  "derived": {
+   "get_symbol": 20,
+   "trace": 20
+  },
+  "seconds": 25.82,
+  "errors": 0,
+  "first_error": null
+ },
+ "client": {
+  "get_symbol": {
+   "n": 60,
+   "p50_ms": 0.68,
+   "p95_ms": 1.52,
+   "max_ms": 4.18
+  },
+  "search_symbols": {
+   "n": 15,
+   "p50_ms": 13.97,
+   "p95_ms": 25.94,
+   "max_ms": 25.94
+  },
+  "trace": {
+   "n": 60,
+   "p50_ms": 0.84,
+   "p95_ms": 1.72,
+   "max_ms": 20.16
+  }
+ },
+ "client_first_pass": {
+  "get_symbol": {
+   "n": 20,
+   "p50_ms": 1.3,
+   "p95_ms": 1.65,
+   "max_ms": 4.18
+  },
+  "search_symbols": {
+   "n": 5,
+   "p50_ms": 20.92,
+   "p95_ms": 25.94,
+   "max_ms": 25.94
+  },
+  "trace": {
+   "n": 20,
+   "p50_ms": 1.5,
+   "p95_ms": 1.83,
+   "max_ms": 20.16
+  }
+ },
+ "server": {
+  "tools": {
+   "get_symbol": {
+    "n": 60,
+    "p50_ms": 0.5,
+    "p95_ms": 0.95,
+    "mean_ms": 0.51
+   },
+   "search_symbols": {
+    "n": 15,
+    "p50_ms": 18.04,
+    "p95_ms": 31.25,
+    "mean_ms": 15.13
+   },
+   "trace": {
+    "n": 60,
+    "p50_ms": 0.5,
+    "p95_ms": 0.95,
+    "mean_ms": 0.62
+   }
+  },
+  "by_scope": {
+   "get_symbol/org": {
+    "n": 60,
+    "p50_ms": 0.5,
+    "p95_ms": 0.95
+   },
+   "search_symbols/org": {
+    "n": 15,
+    "p50_ms": 18.04,
+    "p95_ms": 31.25
+   },
+   "trace/org": {
+    "n": 60,
+    "p50_ms": 0.5,
+    "p95_ms": 0.95
+   }
+  },
+  "requests_total": {
+   "search_symbols": {
+    "ok": 15
+   },
+   "-": {
+    "ok": 2
+   },
+   "get_symbol": {
+    "ok": 60
+   },
+   "trace": {
+    "ok": 60
+   }
+  },
+  "generation": 1.0,
+  "rss_mb": 276.6
+ },
+ "differential": {
+  "json_pass": 45,
+  "text_pass": 45,
+  "total": 45,
+  "first_diff": null,
+  "by_tool": {
+   "search_symbols": {
+    "pass": 5,
+    "total": 5
+   },
+   "get_symbol": {
+    "pass": 20,
+    "total": 20
+   },
+   "trace": {
+    "pass": 20,
+    "total": 20
+   }
+  }
+ },
+ "shutdown": {
+  "exit_code": 0,
+  "shutdown_seconds": 0.023
+ },
+ "sizes": {
+  "binary_bytes": 121168000,
+  "store_bytes": 251114197,
+  "mirror_bytes": 225824721,
+  "replica_cache_bytes": 225819235,
+  "index_store_bytes": 248112929
+ },
+ "status": "ok",
+ "seconds": 186.7
+}

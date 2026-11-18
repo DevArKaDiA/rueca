@@ -1,6 +1,6 @@
 //! `write_segment`: content packs first, then the bundle.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -10,7 +10,7 @@ use roaring::RoaringBitmap;
 use rueca_model::{ResolvedGraph, SnapshotInfo, git_blob_sha};
 
 use crate::bundle::BundleWriter;
-use crate::packs::{BlobIndex, BlobLoc, PackReader, PackWriter, Sha, compress, parse_sha};
+use crate::packs::{BlobIndex, NewPack, PackReader, PackWriter, Sha, compress, parse_sha};
 use crate::{
     ContentSource, FORMAT_VERSION, Result, SegmentError, SegmentMeta, contracts, graph, ngram, priors, store, symbols,
 };
@@ -33,10 +33,17 @@ fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// `<repo-slug>-<commit[..12]>-<unix-ts>-<rand4>`.
+/// `<repo-slug>-<commit[..12]>-<unix-ts>-<rand64>`: 64 random bits (16 hex
+/// digits), so two writers of one commit in one second do not collide
+/// (RFC 0008 §5.2).
 pub(crate) fn segment_id(snap: &SnapshotInfo) -> String {
     let commit = slug(&snap.commit, 12);
-    format!("{}-{}-{}-{:04x}", slug(&snap.repo, 48), commit, now_secs(), fastrand::u16(..))
+    format!("{}-{}-{}-{:016x}", slug(&snap.repo, 48), commit, now_secs(), fastrand::u64(..))
+}
+
+/// `<unix-ts>-<rand64>`, 16 hex digits like [`segment_id`].
+pub(crate) fn pack_id() -> String {
+    format!("{}-{:016x}", now_secs(), fastrand::u64(..))
 }
 
 struct Job {
@@ -51,6 +58,8 @@ struct WorkerOut {
     postings: HashMap<u32, RoaringBitmap>,
     text_files: RoaringBitmap,
     new_blobs: Vec<(Sha, u64, u64, u64)>,
+    /// Packs (positions in the loaded blob index) known blobs were read from.
+    packs_read: BTreeSet<u32>,
     /// `(node, body text)` for the symbol index.
     bodies: Vec<(u32, String)>,
 }
@@ -69,14 +78,16 @@ pub(crate) fn write_segment(
 
     // ---- content packs -------------------------------------------------
     let (index, index_rebuilt) = BlobIndex::load(&packs_dir)?;
-    let jobs = blob_jobs(graph, &index)?;
+    let mut jobs = blob_jobs(graph, &index)?;
+    // Absent blobs (filtered out of a partial clone) have no content to store.
+    jobs.retain(|j| j.known || !contents.absent(&graph.files[j.rep]));
     let work = ContentWork {
         graph,
         contents,
         file_nodes: file_symbol_nodes(graph),
         reader: PackReader::with_index(store_dir, index),
         tmp_dir: &tmp_dir,
-        pack_id: format!("{}-{:08x}", now_secs(), fastrand::u32(..)),
+        pack_id: pack_id(),
         pack: Mutex::new(None),
         next: AtomicUsize::new(0),
         failed: AtomicBool::new(false),
@@ -94,17 +105,13 @@ pub(crate) fn write_segment(
             return Err(e);
         }
     };
-    let mut index = reader.into_index().unwrap_or_default();
+    let index = reader.into_index().unwrap_or_default();
     let (new_pack, content_bytes_added) = finish_pack(pack_writer, &packs_dir, &pack_id)?;
-    if new_pack {
-        let p = index.packs.len() as u32;
-        index.packs.push(pack_id);
-        for &(sha, offset, clen, raw_len) in outs.iter().flat_map(|o| &o.new_blobs) {
-            index.map.insert(sha, BlobLoc { pack: p, offset, clen, raw_len });
-        }
-    }
+    let packs = snapshot_packs(&outs, &index, new_pack.then_some(pack_id.as_str()));
     if new_pack || index_rebuilt {
-        index.save(&packs_dir, &tmp_dir)?;
+        let blobs: Vec<(Sha, u64, u64, u64)> = outs.iter().flat_map(|o| o.new_blobs.iter().copied()).collect();
+        let new = new_pack.then_some(NewPack { id: &pack_id, blobs: &blobs });
+        BlobIndex::commit(store_dir, index, new)?;
     }
     let merged = Merged::from_outputs(outs, graph);
 
@@ -118,6 +125,7 @@ pub(crate) fn write_segment(
         file_count: graph.files.len() as u32,
         bytes: 0,
         content_bytes_added,
+        packs,
     };
     let tmp_path = tmp_dir.join(format!("{id}.rcseg.tmp"));
     match write_bundle(&tmp_path, &tmp_dir, &meta, graph, merged) {
@@ -134,6 +142,14 @@ pub(crate) fn write_segment(
     }
     store::sync_dir(&segments_dir);
     Ok(meta)
+}
+
+/// The packs holding the snapshot's blobs ([`SegmentMeta::packs`]): those
+/// the workers read known blobs from, plus `new_pack`; sorted.
+fn snapshot_packs(outs: &[WorkerOut], index: &BlobIndex, new_pack: Option<&str>) -> Vec<String> {
+    let read = outs.iter().flat_map(|o| &o.packs_read).filter_map(|&p| index.packs.get(p as usize).map(String::as_str));
+    let all: BTreeSet<&str> = read.chain(new_pack).collect();
+    all.into_iter().map(str::to_string).collect()
 }
 
 /// One job per distinct blob of the snapshot, with the files that have it.
@@ -229,6 +245,7 @@ impl ContentWork<'_> {
         if job.known
             && let Ok(c) = self.reader.read(&file.blob_sha)
         {
+            out.packs_read.extend(self.reader.pack_of(&job.sha));
             return Ok(c);
         }
         let c = self.contents.content(file)?;

@@ -21,12 +21,20 @@ rueca-query.workspace = true
 rueca-mcp.workspace = true
 rueca-segment.workspace = true
 rueca-extract.workspace = true
+rueca-service.workspace = true
+rueca-serve = { workspace = true, optional = true }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[features]
+default = ["service"]
+# `rueca serve` (RFC 0008): MCP over HTTP from a service store. Off, the
+# binary has no HTTP stack (axum, tokio).
+service = ["dep:rueca-serve"]
 
 [dev-dependencies]
 assert_cmd = "2"

@@ -5,7 +5,8 @@
 //! `list_repositories`, `list_contracts`) with the response contract of RFC 0005 and the
 //! organization scope of RFC 0006. The MCP server and the CLI both
 //! dispatch through [`Engine::respond`] (or [`Engine::call`] for the JSON
-//! alone), so their behavior is identical; [`tool_definitions`] provides
+//! alone; [`Engine::respond_with`] with a deadline and a visibility per
+//! call), so their behavior is identical; [`tool_definitions`] provides
 //! names, descriptions and JSON input schemas for the MCP layer.
 //!
 //! ```no_run
@@ -106,9 +107,30 @@
 //! repositories only), so results, totals and scores never depend on a
 //! repository the caller cannot read, and a repository named in `repo` that
 //! is not visible is reported exactly like one that does not exist (so are
-//! its refs). `trace` sees link edges through the view: edges into a
+//! its refs); a caller who may read none of them sees an empty organization
+//! (no results, no error naming it). `trace` sees link edges through the view: edges into a
 //! repository read at a ref are remapped to the ref's nodes. Other tools read
-//! the selected entries' segments. Local mode passes [`Visibility::All`].
+//! the selected entries' segments. In local mode the visibility (default
+//! [`Visibility::All`]) applies to the indexed roots: a root of a
+//! repository the caller may not read does not exist for the call (never
+//! selected, listed or named in an error; a default root the caller may
+//! not read is ignored, as if unset).
+//!
+//! # Per-call options (RFC 0008 §6.4–§6.5)
+//!
+//! [`Engine::respond_with`] runs a call with [`RespondOptions`]: the
+//! caller's [`Visibility`] (instead of the engine's) and a **deadline**.
+//! The deadline is cooperative — a blocking thread cannot be cancelled
+//! from outside — and cheap: one `Instant::now()` comparison when the call
+//! selects its snapshots and opens each view, per tantivy segment and per
+//! over-fetch round of a symbol search, per file of `search_code`'s scan,
+//! and every 64 items of `trace`'s traversal, `get_file_outline`'s symbols
+//! and the multi-ref collapse. Once it has passed the call returns
+//! [`DeadlineExceeded`] ("deadline of 10s exceeded; narrow `repo` or lower
+//! `limit`"), which a transport recognizes with `downcast_ref` (`rueca
+//! serve` answers it with JSON-RPC -32001). A deadline that does not pass
+//! changes nothing: the response is byte for byte the one of
+//! [`Engine::respond`], which is `respond_with` with no options.
 //!
 //! # Symbol lookup
 //!
@@ -168,6 +190,7 @@
 mod args;
 pub mod compact;
 mod contracts;
+mod deadline;
 pub mod multiref;
 mod orgsel;
 mod refset;
@@ -179,7 +202,9 @@ mod view;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use std::collections::BTreeSet;
 
@@ -194,7 +219,10 @@ pub use args::{
     SearchSymbolsArgs, TraceArgs,
 };
 pub use compact::render_text;
+pub use deadline::DeadlineExceeded;
 pub use text::split_lines;
+
+use deadline::Deadline;
 
 use view::View;
 
@@ -283,8 +311,8 @@ fn definitions() -> &'static [ToolDef] {
     })
 }
 
-fn schema_for_tool(name: &str) -> &'static Value {
-    &definitions().iter().find(|d| d.name == name).expect("known tool").input_schema
+fn schema_for_tool(name: &str) -> Option<&'static Value> {
+    definitions().iter().find(|d| d.name == name).map(|d| &d.input_schema)
 }
 
 const DESC_SEARCH_SYMBOLS: &str = "Find functions, methods, classes and other definitions by name or by what \
@@ -360,7 +388,26 @@ impl Visibility {
     }
 }
 
+/// Per-call options of [`Engine::respond_with`]. The default (no deadline,
+/// the engine's visibility) is [`Engine::respond`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RespondOptions {
+    /// When the call must stop (RFC 0008 §6.5). The engine checks it where
+    /// work loops and, once it has passed, returns [`DeadlineExceeded`]
+    /// ("deadline of 10s exceeded; narrow `repo` or lower `limit`").
+    pub deadline: Option<Instant>,
+    /// What the caller may read, instead of the engine's own
+    /// [`Engine::visibility`] for this call.
+    pub visibility: Option<Visibility>,
+}
+
 /// The query engine. See the crate docs.
+///
+/// Cloning is cheap and the clones share the opened segments and the
+/// organization index: a service runs each call with the caller's
+/// [`Visibility`] through [`Engine::respond_with`] (or a clone,
+/// [`Engine::with_visibility`]).
+#[derive(Clone)]
 pub struct Engine {
     pub store_dir: PathBuf,
     /// Root used when a request does not name a repository.
@@ -370,9 +417,31 @@ pub struct Engine {
     visibility: Visibility,
     /// How a query's repository relevance weighs organization rankings.
     route: RouteParams,
-    segments: Mutex<HashMap<String, Arc<Segment>>>,
+    segments: Arc<Mutex<HashMap<String, Arc<Segment>>>>,
     /// The last opened generation of the organization index.
-    org_index: Mutex<Option<Arc<OrgIndex>>>,
+    org_index: Arc<Mutex<Option<Arc<OrgIndex>>>>,
+    /// What the caches above opened, shared by the clones ([`Engine::opens`]).
+    opens: Arc<OpenCounters>,
+    /// The deadline of the call this engine runs (set by
+    /// [`Engine::respond_with`] on its per-call copy).
+    deadline: Deadline,
+}
+
+/// What an engine and its clones have opened into their shared caches since
+/// it was created ([`Engine::opens`]): a service checks with it that a
+/// warm-up left nothing for the first call to open.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EngineOpens {
+    /// Organization index generations opened.
+    pub org_index: u64,
+    /// Segments opened (a segment evicted and needed again counts twice).
+    pub segments: u64,
+}
+
+#[derive(Default)]
+struct OpenCounters {
+    org_index: AtomicU64,
+    segments: AtomicU64,
 }
 
 /// The snapshots a call reads, plus the organization context in organization
@@ -404,8 +473,10 @@ impl Engine {
             org: None,
             visibility: Visibility::All,
             route: RouteParams::from_env(),
-            segments: Mutex::new(HashMap::new()),
-            org_index: Mutex::new(None),
+            segments: Arc::new(Mutex::new(HashMap::new())),
+            org_index: Arc::new(Mutex::new(None)),
+            opens: Arc::default(),
+            deadline: Deadline::default(),
         })
     }
 
@@ -440,6 +511,15 @@ impl Engine {
         &self.route
     }
 
+    /// What this engine and its clones have opened so far (the organization
+    /// index generations and the segments of their shared caches).
+    pub fn opens(&self) -> EngineOpens {
+        EngineOpens {
+            org_index: self.opens.org_index.load(Ordering::Relaxed),
+            segments: self.opens.segments.load(Ordering::Relaxed),
+        }
+    }
+
     /// Runs tool `name` with JSON `args` and returns the JSON result described
     /// in `docs/tools.md`. Unknown tools and invalid arguments are errors.
     pub fn call(&self, name: &str, args: Value) -> anyhow::Result<Value> {
@@ -448,10 +528,47 @@ impl Engine {
 
     /// Like [`Engine::call`], with the text rendering of the result.
     pub fn respond(&self, name: &str, args: Value) -> anyhow::Result<Response> {
-        if !TOOL_NAMES.contains(&name) {
-            anyhow::bail!("unknown tool `{name}` (available: {})", TOOL_NAMES.join(", "));
+        self.respond_with(name, args, RespondOptions::default())
+    }
+
+    /// [`Engine::respond`] with per-call options: a deadline and the
+    /// caller's visibility (RFC 0008 §6.4–§6.5). The deadline is
+    /// cooperative: it is checked when the call selects its snapshots, per
+    /// segment and per over-fetch round of a symbol search, per file of
+    /// `search_code`'s scan, and every 64 items of `trace`'s traversal,
+    /// `get_file_outline` and the multi-ref collapse; once it has passed
+    /// the call returns [`DeadlineExceeded`]. Nothing else changes: with a
+    /// deadline that does not pass, the response is the one `respond`
+    /// gives.
+    pub fn respond_with(&self, name: &str, args: Value, opts: RespondOptions) -> anyhow::Result<Response> {
+        let RespondOptions { deadline, visibility } = opts;
+        if deadline.is_none() && visibility.is_none() {
+            return self.dispatch(name, args);
         }
-        let schema = schema_for_tool(name);
+        let call = self.for_call(visibility, Deadline::new(deadline));
+        call.dispatch(name, args).map_err(|err| call.deadline.explain(err))
+    }
+
+    /// A copy of the engine for one call (shares the opened segments and
+    /// the organization index).
+    fn for_call(&self, visibility: Option<Visibility>, deadline: Deadline) -> Engine {
+        Engine {
+            store_dir: self.store_dir.clone(),
+            default_root: self.default_root.clone(),
+            org: self.org.clone(),
+            visibility: visibility.unwrap_or_else(|| self.visibility.clone()),
+            route: self.route,
+            segments: self.segments.clone(),
+            org_index: self.org_index.clone(),
+            opens: self.opens.clone(),
+            deadline,
+        }
+    }
+
+    fn dispatch(&self, name: &str, args: Value) -> anyhow::Result<Response> {
+        let Some(schema) = schema_for_tool(name) else {
+            anyhow::bail!("unknown tool `{name}` (available: {})", TOOL_NAMES.join(", "));
+        };
         match name {
             "search_symbols" => self.search_symbols(args::parse_args(name, schema, args)?),
             "search_code" => self.search_code(args::parse_args(name, schema, args)?),
@@ -461,7 +578,7 @@ impl Engine {
             "get_file_outline" => self.get_file_outline(args::parse_args(name, schema, args)?),
             "list_repositories" => self.list_repositories(args::parse_args(name, schema, args)?),
             "list_contracts" => self.list_contracts(args::parse_args(name, schema, args)?),
-            _ => unreachable!(),
+            _ => anyhow::bail!("unknown tool `{name}` (available: {})", TOOL_NAMES.join(", ")),
         }
     }
 
@@ -483,12 +600,15 @@ impl Engine {
         if matches!(&c.ref_, Some(RefArg::Many(list)) if list.is_empty()) {
             anyhow::bail!("`ref` must not be an empty list (omit it for the default ref)");
         }
+        self.deadline.check()?;
         let store = Store::open(&self.store_dir)?;
         if let Some(name) = &self.org {
             return self.select_org(&store, name, c, id);
         }
-        let entries = store.entries()?;
+        let mut entries = store.entries()?;
         self.evict_stale(entries.iter().map(|e| e.segment_id.as_str()));
+        // A root the caller may not read does not exist for this call.
+        entries.retain(|e| self.visibility.allows(&e.repo));
         if entries.is_empty() {
             anyhow::bail!(
                 "no repositories are indexed in store `{}`; run `rueca index <path>` first",
@@ -502,6 +622,7 @@ impl Engine {
         }
         let mut views = Vec::with_capacity(selected.len());
         for e in selected {
+            self.deadline.check()?;
             views.push(View::new(self.open_cached(&store, &e.segment_id)?, e));
         }
         Ok(Selection { views, org: None, catalog: entries })
@@ -603,8 +724,10 @@ impl Engine {
                 });
             }
         }
-        if entries.is_empty() {
-            anyhow::bail!("organization `{name}` has no repositories you can read");
+        // A caller who may read none of them sees an empty organization
+        // (RFC 0008 §6.4: deny by default, nothing named).
+        if index.generation().repos.is_empty() {
+            anyhow::bail!("organization `{name}` has no repositories");
         }
         Ok((entries, OrgCtx { index, visible, view: OrgSelection::default() }))
     }
@@ -669,6 +792,7 @@ impl Engine {
             return Ok(idx.clone());
         }
         let idx = Arc::new(OrgIndex::open_generation(&self.store_dir, generation)?);
+        self.opens.org_index.fetch_add(1, Ordering::Relaxed);
         *cache = Some(idx.clone());
         Ok(idx)
     }
@@ -759,16 +883,8 @@ impl Engine {
         {
             return Ok(e);
         }
-        if let Some(root) = &self.default_root {
-            return match store.entry_for_path(root)? {
-                Some(e) => Ok(e),
-                None => anyhow::bail!(
-                    "root `{}` is not indexed (run `rueca index {}`); indexed: {}",
-                    root.display(),
-                    root.display(),
-                    roots()
-                ),
-            };
+        if let Some(e) = self.default_root_entry(store, entries)? {
+            return Ok(e);
         }
         // The only root: ref snapshots are not roots of their own.
         let mut own = entries.iter().filter(|e| !e.is_ref_export());
@@ -779,6 +895,25 @@ impl Engine {
             return Ok(entries[0].clone());
         }
         anyhow::bail!("several repositories are indexed; pass `repo` (a root path or repository id): {}", roots())
+    }
+
+    /// The entry of the default root, when there is one and the caller may
+    /// read it; a default root the caller may not read is ignored, as if
+    /// unset (it is never named).
+    fn default_root_entry(&self, store: &Store, entries: &[CatalogEntry]) -> anyhow::Result<Option<CatalogEntry>> {
+        let Some(root) = &self.default_root else { return Ok(None) };
+        match store.entry_for_path(root)? {
+            Some(e) if entries.iter().any(|x| x.root == e.root) => Ok(Some(e)),
+            Some(_) => Ok(None),
+            None => {
+                let roots = entries.iter().map(|e| format!("{} ({})", e.root, e.repo)).collect::<Vec<_>>().join(", ");
+                anyhow::bail!(
+                    "root `{}` is not indexed (run `rueca index {}`); indexed: {roots}",
+                    root.display(),
+                    root.display()
+                )
+            }
+        }
     }
 
     /// Entry whose repository id is `repo`: its working tree (ref snapshots
@@ -816,6 +951,7 @@ impl Engine {
             return Ok(s.clone());
         }
         let seg = Arc::new(store.open_segment(segment_id)?);
+        self.opens.segments.fetch_add(1, Ordering::Relaxed);
         self.segments.lock().unwrap_or_else(|p| p.into_inner()).insert(segment_id.to_string(), seg.clone());
         Ok(seg)
     }

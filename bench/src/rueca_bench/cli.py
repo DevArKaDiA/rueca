@@ -5,6 +5,8 @@
   rueca-bench report [--s2-only]
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
+  rueca-bench service [--small] [--split gated|calibration] [--only REPO ...] [--limit N] [--sample N] [--repeat N] [--keep] [--out FILE] [--bin PATH]
+  rueca-bench service-index [--small] [--split gated|calibration] [--only REPO ...] [--indexers N ...] [--pushes N] [--no-faults] [--keep] [--out FILE] [--bin PATH]
 
 Language families are the manifest `[languages]` keys (python, ecma, php, ...);
 `data` selects the data-format suite (manifest `[[data.repos]]`).
@@ -15,6 +17,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from pathlib import Path
 
 from . import check as check_mod
 from . import contracts as contracts_mod
@@ -23,6 +26,8 @@ from . import health as health_mod
 from . import org as org_mod
 from . import report as report_mod
 from . import s1, s3
+from . import service as service_mod
+from . import service_index as service_index_mod
 from .arms import ARM_NAMES, make_arm
 from .common import RUNS_DIR, WORK_DIR, families, log
 from .prepare import setup
@@ -56,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rp = sub.add_parser("run", help="run arms on suites (resumable)")
     rp.add_argument("--arm", default="all")
-    rp.add_argument("--suite", default="all", help="s1, s3, data, health, org, s2, all, or a comma list")
+    rp.add_argument("--suite", default="all", help="s1, s3, data, health, org, s2, service (not in all), all, or a comma list")
     rp.add_argument("--only", nargs="*", help="instance ids / repos (s1), suite names (s3), or for org: gated / calibration and/or repositories (a smoke run of the multi-repository scenario)")
     rp.add_argument("--workers", type=int, default=2, help="S1 repositories / S3 sets processed in parallel")
     rp.add_argument("--force", action="store_true", help="ignore cached arm outputs")
@@ -69,6 +74,28 @@ def main(argv: list[str] | None = None) -> int:
     kp = sub.add_parser("check", help="regression check (RFC 0004 §7.8): compare a scorecard with the committed one")
     kp.add_argument("--baseline", default=None, help="committed scorecard (default: bench/results/scorecard.json at git HEAD)")
     kp.add_argument("--current", default=None, help="scorecard to check (default: bench/results/scorecard.json)")
+
+    vp = sub.add_parser("service", help="RFC 0008 service suite: `rueca serve` over HTTP on a file:// store, latency, time to ready, differential vs `rueca query`")
+    vp.add_argument("--small", action="store_true", help="two small repositories cut from this checkout (bench/service/small.toml); no setup, about a minute")
+    vp.add_argument("--split", default="gated", choices=["gated", "calibration"], help="organization of the multi-repository scenario to serve")
+    vp.add_argument("--only", nargs="*", help="restrict the organization to these member repositories (e.g. psf/requests pallets/flask)")
+    vp.add_argument("--limit", type=int, default=10, help="search_symbols `limit` of every query")
+    vp.add_argument("--sample", type=int, default=20, help="get_symbol and trace calls derived from the search answers (each)")
+    vp.add_argument("--repeat", type=int, default=3, help="passes over the call list (latency); only the first is checked")
+    vp.add_argument("--keep", action="store_true", help="keep .cache/service (stores, mirror, config, serve.log)")
+    vp.add_argument("--out", default=None, help="report path (default bench/results/service-<UTC timestamp>.json)")
+    vp.add_argument("--bin", default=None, help="rueca binary (default $RUECA_BIN)")
+
+    xp = sub.add_parser("service-index", help="RFC 0008 indexing suite: indexers from a local git daemon, cold index with 1 and N indexers, push → queryable through signed webhooks, fault injection")
+    xp.add_argument("--small", action="store_true", help="the two repositories of bench/service/small.toml; no setup, a few minutes")
+    xp.add_argument("--split", default="gated", choices=["gated", "calibration"], help="organization of the multi-repository scenario")
+    xp.add_argument("--only", nargs="*", help="restrict the organization to these member repositories")
+    xp.add_argument("--indexers", nargs="+", type=int, default=[1, 4], help="indexer counts, one run each (default 1 4); faults run on the last")
+    xp.add_argument("--pushes", type=int, default=10, help="pushes delivered as signed GitHub webhooks per run (push → queryable)")
+    xp.add_argument("--no-faults", action="store_true", help="skip fault injection")
+    xp.add_argument("--keep", action="store_true", help="keep .cache/service-index (host, stores, configs, logs)")
+    xp.add_argument("--out", default=None, help="report path (default bench/results/service-index-<UTC timestamp>.json)")
+    xp.add_argument("--bin", default=None, help="rueca binary, a debug build (default $RUECA_BIN)")
 
     cp = sub.add_parser("clean", help="remove work trees and/or cached arm outputs")
     cp.add_argument("--work", action="store_true")
@@ -91,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         wanted = {x.strip() for x in a.suite.split(",") if x.strip()}
         if "all" in wanted:
             wanted = {"s1", "s3", "data", "health", "org", "s2"}
-        unknown = wanted - {"s1", "s3", "data", "health", "org", "s2"}
+        unknown = wanted - {"s1", "s3", "data", "health", "org", "s2", "service"}
         if unknown:
             raise SystemExit(f"unknown suite(s) {sorted(unknown)}")
         if "health" in wanted and run_code and "rueca" in arms:
@@ -105,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
         if "org" in wanted and not langs:
             # self-contained: the single-repository answers come from the same org run
             org_mod.run_all(arms, force=a.force, only=a.only)
+        if "service" in wanted:
+            service_mod.run_service(only=[r for r in a.only or [] if "/" in r] or None)
         if "s2" in wanted and not langs:
             contracts_mod.run(arms, force=a.force)  # cross-service edges (S2): one organization per group
     elif a.cmd == "report":
@@ -112,6 +141,12 @@ def main(argv: list[str] | None = None) -> int:
             report_mod.publish_s2()
         else:
             report_mod.report()
+    elif a.cmd == "service":
+        out = Path(a.out) if a.out else None
+        service_mod.run_service(small=a.small, split=a.split, only=a.only, limit=a.limit, sample=a.sample, repeat=a.repeat, keep=a.keep, out=out, bin_arg=a.bin)
+    elif a.cmd == "service-index":
+        out = Path(a.out) if a.out else None
+        service_index_mod.run_service_index(small=a.small, split=a.split, only=a.only, indexers=a.indexers, pushes=a.pushes, faults=not a.no_faults, keep=a.keep, out=out, bin_arg=a.bin)
     elif a.cmd == "check":
         return check_mod.main(a.baseline, a.current)
     elif a.cmd == "clean":
