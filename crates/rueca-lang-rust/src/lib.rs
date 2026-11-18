@@ -191,8 +191,8 @@
 //! segment that is not a file (an inline module, a type) and returns the
 //! deepest module file. A `mod x;` inside inline modules (`mod net { mod
 //! tcp; }`) is the file below their directories (`<dir>/net/tcp.rs`),
-//! whether or not a file holds the inline modules. `std`, `core`, `alloc` and third-party crates
-//! resolve to nothing (external).
+//! whether or not a file holds the inline modules. `std`, `core`, `alloc`
+//! and third-party crates resolve to nothing (external).
 //!
 //! # Limitations
 //!

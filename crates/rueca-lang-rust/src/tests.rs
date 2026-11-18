@@ -593,3 +593,14 @@ fn test_module_declarations_are_marked() {
     assert_eq!(f.imports[k - 1].module_alias.as_deref(), Some("mocks"));
     assert!(!f.imports[k - 1].type_only);
 }
+
+/// Truncated macro bodies (unclosed braces, a `cfg_if!` cut in a branch)
+/// never panic the expansion and keep spans inside the file.
+#[test]
+fn truncated_macro_bodies_do_not_panic() {
+    let src = format!("{MACRO_ITEMS}{}", "cfg_if! { if #[cfg(a)] { mod x; } else { fn y() {} } }\n");
+    for end in (0..=src.len()).filter(|&k| src.is_char_boundary(k)) {
+        let f = facts(&src[..end]);
+        assert!(f.definitions.iter().all(|d| d.span.end_byte as usize <= end), "prefix {end}");
+    }
+}

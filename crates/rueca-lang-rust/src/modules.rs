@@ -183,7 +183,6 @@ fn file_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// `dir/rel` (`rel` when `dir` is the repository root).
 /// A `mod x;` declared inside an inline module (`module` `m::x`, see the
 /// crate docs, *Imports*).
 fn is_nested_mod_declaration(import: &Import, segs: &[&str]) -> bool {
@@ -194,6 +193,7 @@ fn is_nested_mod_declaration(import: &Import, segs: &[&str]) -> bool {
         && import.module_alias.as_deref() == segs.last().copied()
 }
 
+/// `dir/rel` (`rel` when `dir` is the repository root).
 fn join(dir: &str, rel: &str) -> String {
     if dir.is_empty() { rel.to_string() } else { format!("{dir}/{rel}") }
 }

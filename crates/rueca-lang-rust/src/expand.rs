@@ -167,7 +167,7 @@ impl Finder<'_> {
         if !in_item_position(node) || is_opaque_macro(&macro_name(node, self.src)) {
             return;
         }
-        let Some(tt) = node.child_by_field_name("macro").and_then(|_| token_tree(node)) else { return };
+        let Some(tt) = node.child_by_field_name("macro").and_then(|_| token_tree(node, self.src)) else { return };
         let regions = if_chain(tt, self.src).unwrap_or_else(|| vec![(tt.start_byte() + 1, tt.end_byte() - 1)]);
         if regions.iter().all(|&(a, b)| is_blank(&self.src[a..b])) {
             return;
@@ -243,10 +243,23 @@ fn macro_name(node: Node<'_>, src: &[u8]) -> String {
     String::from_utf8_lossy(&src[n.start_byte()..n.end_byte()]).into_owned()
 }
 
-fn token_tree(node: Node<'_>) -> Option<Node<'_>> {
+fn token_tree<'t>(node: Node<'t>, src: &[u8]) -> Option<Node<'t>> {
     let mut cursor = node.walk();
     let tt = node.named_children(&mut cursor).find(|c| c.kind() == "token_tree");
-    tt.filter(|t| t.end_byte() >= t.start_byte() + 2)
+    tt.filter(|t| is_delimited(*t, src))
+}
+
+/// Whether token tree `t` has both delimiters in the text (a parse error
+/// can leave the closing one missing).
+fn is_delimited(t: Node<'_>, src: &[u8]) -> bool {
+    let (a, b) = (t.start_byte(), t.end_byte());
+    let close = match src.get(a) {
+        Some(b'{') => b'}',
+        Some(b'(') => b')',
+        Some(b'[') => b']',
+        _ => return false,
+    };
+    b >= a + 2 && src.get(b - 1) == Some(&close)
 }
 
 /// End of the `!` of an invocation.
@@ -300,7 +313,8 @@ fn chain_condition<'t>(tokens: &[Node<'t>], i: usize, text: &impl Fn(&Node<'t>) 
 
 /// The inside of a `{ … }` token tree.
 fn braced(node: Option<&Node<'_>>, src: &[u8]) -> Option<(usize, usize)> {
-    let n = node.filter(|n| n.kind() == "token_tree" && src.get(n.start_byte()) == Some(&b'{'))?;
+    let n =
+        node.filter(|n| n.kind() == "token_tree" && src.get(n.start_byte()) == Some(&b'{') && is_delimited(**n, src))?;
     Some((n.start_byte() + 1, n.end_byte() - 1))
 }
 
