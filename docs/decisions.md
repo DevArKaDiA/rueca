@@ -1,5 +1,76 @@
 # Decisions log
 
+## 2026-11-17 — Rust: value and type namespaces; types bind in scope, another crate's by name only as a guess; test doubles never bind
+
+The same tokio-rs demo, after the pack fix above, still showed resolver
+gaps. `tokio::time::sleep`, `timeout`, `interval`, `tokio::spawn` and
+`tokio::signal::ctrl_c` had no callers in the organization: tokio writes
+`mod sleep; pub use sleep::sleep;`, and a lookup of `sleep` in
+`tokio::time` bound the module, so every call was external. And in the
+joint resolve of a consumer with its dependencies, types were found by name
+in other crates: `impl AsRawHandle for CompletionPort` in mio (the trait
+comes from a glob of `std`) bound tokio's documentation stub of the trait,
+and `Bytes::from(…)` in tonic and axum called hyper's `impl
+From<ReasonPhrase> for Bytes`, the first impl attached to `Bytes`.
+
+- **Two namespaces.** A Rust lookup is for the type namespace (modules,
+  types: path segments, type references) or the value namespace
+  (functions, constants, statics, tuple / unit structs, variants: calls and
+  reads). Among a module's bindings, in their existing order, it takes the
+  first of its namespace, else the first of the other one, so nothing that
+  resolved before stops resolving. A `use` leaf binds both, so the
+  resolver keeps a second binding environment for values where they
+  differ; a bare name prefers an import of its namespace, then an item of
+  the module of its namespace (`mod x;` + `fn x`: `x()` is the function,
+  `x::Y` the module). `IMPORTS` of a leaf go to its type, else its value
+  when the type namespace has only a module. Rejected: a namespace per
+  definition in the pack (the resolver already knows labels; a tuple
+  struct is both).
+- **Types bind in scope.** By name, a Rust type is first looked for in the
+  file's own crate; another crate's type of that name is used only when the
+  own crate has none, and then it is a guess: members found through it are
+  `heuristic` 0.50 (not `type_resolved`), so the link layer drops them as
+  it drops every name match, and a guessed trait or self type never gets an
+  `impl`'s items, `IMPLEMENTS` or `OVERRIDES`. A call result typed from a
+  callee of another crate matched by name is a guess the same way.
+  Rejected: no cross-crate match at all — inside one repository, test and
+  bench crates whose import of the package's library does not resolve
+  (bytes' bench crate `bytes` shadows the library) lost 30–40 calls each.
+- **Own impls first.** When several crates' impls give a type members of
+  one name, the type's own crate's come first (`bytes`'s `Bytes::from`,
+  tokio's `TcpListener::local_addr` over axum's `impl Listener for
+  TcpListener`).
+- **Test doubles never bind.** A module file declared by `#[cfg(test)] mod
+  x;` (or `all(test, …)`; not `any(test, …)`, also built without tests) is
+  test code: the pack adds a `$test` marker import after the `mod`
+  import (the file alone cannot know), and the resolver marks the file's
+  definitions, and those of the files below it, `is_test` (out of by-name
+  matching, never link targets). A module lookup takes a test binding only
+  when nothing else binds the name (`#[cfg(test)] use mocks::spawn_blocking;`
+  next to the real import). One definition twice (`#[cfg]` variants, same
+  label and qualified name) counts once in by-name matches.
+- **Globs deeper than the environment.** A bare name that nothing binds
+  is looked up through the file's globs (`use crate::helpers::*;` over
+  `pub use self::client::*;`), which the binding environment holds one
+  level deep.
+- **Link layer**: an edge whose evidence is in a dependency's file is
+  dropped (a dependency cannot name its consumer). `LINKER_VERSION` 3.
+
+Measured on the tokio-rs demo (8 repositories, `checks`): callers of
+`tokio::time::sleep` 0 → 32, `timeout` 0 → 12, `interval` 0 → 4 (tests
+excluded, default budget); with tests and the whole budget, 80 of the 87
+`time::sleep(` lines of axum, hyper, tonic, tower and tracing lie in a
+resolved caller (the rest: doc comments, `select!` arms), 77 of 77
+`time::timeout(`, 4 of 4 `time::interval(`; `tokio::spawn` 339 of 355 (0
+before), `signal::ctrl_c` 2 of 2. The four mio `CompletionPort` edges into
+tokio's documentation stubs and the 29 calls of hyper's `Bytes.from` are
+gone (the 29 now reach `bytes`'s own `Bytes.from`). tokio → mio stays at
+158 edges, all right (the pack fix had removed the wrong ones: 200 with
+the published binary). Link edges 8,540 → 9,550. Single repositories:
+tokio references resolved 48.3 % → 50.2 %, tracing 49.5 % → 53.8 %;
+callers that now are test code (tonic's `#[cfg(test)] mod xds_e2e;`)
+leave the non-test counts (`watch::channel` 18 → 17).
+
 ## 2026-11-17 — Rust: items inside macro invocation bodies; attribute macros are decorators
 
 A demo over the tokio-rs repositories showed `tokio::spawn`,
