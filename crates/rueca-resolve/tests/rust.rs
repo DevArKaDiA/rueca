@@ -344,3 +344,61 @@ fn rueca_reads_itself() {
         0.9,
     );
 }
+
+fn crate_files(files: &[(&str, &str)]) -> Vec<(String, Vec<u8>)> {
+    files.iter().map(|(p, s)| (p.to_string(), s.as_bytes().to_vec())).collect()
+}
+
+/// Items wrapped in macros (tokio's `cfg_net! { pub mod tcp; pub use …; }`)
+/// are items: the `mod` declarations bind their files and the `pub use`
+/// chain reaches the type through them.
+#[test]
+fn items_inside_macro_bodies_resolve() {
+    let out = build(crate_files(&[
+        ("Cargo.toml", "[package]\nname = \"mini\"\n"),
+        (
+            "src/lib.rs",
+            "macro_rules! cfg_x { ($($i:item)*) => { $($i)* } }\nmod net {\n    cfg_x! {\n        pub mod tcp;\n        pub use tcp::listener::TcpListener;\n    }\n}\nuse crate::net::TcpListener;\nfn f(l: TcpListener) { l.accept(); }\n",
+        ),
+        ("src/net/tcp.rs", "cfg_x! {\n    pub mod listener;\n}\n"),
+        ("src/net/tcp/listener.rs", "pub struct TcpListener;\nimpl TcpListener { pub fn accept(&self) {} }\n"),
+    ]));
+    let g = G(&out.graph);
+    use EdgeKind::*;
+    use Strategy::*;
+    g.imports("src/lib.rs", "src/net/tcp.rs");
+    g.imports("src/net/tcp.rs", "src/net/tcp/listener.rs");
+    assert_eq!(g.module_of("src/net/tcp/listener.rs"), "mini::net::tcp::listener");
+    let ty = "mini::net::tcp::listener::TcpListener";
+    g.has("mini::f", ty, References, ImportResolved, 0.95);
+    g.has("mini::f", &format!("{ty}.accept"), Calls, TypeResolved, 0.85);
+    g.has("mini::net", "mini::cfg_x", Calls, SameModule, 0.9);
+}
+
+/// `#[tk::main]` decorates through the crate's re-export (written inside a
+/// macro) of the proc-macro crate's `#[proc_macro_attribute] pub fn main`.
+#[test]
+fn attribute_macros_decorate() {
+    let out = build(crate_files(&[
+        ("Cargo.toml", "[workspace]\nmembers = [\"tk\", \"tk-macros\", \"app\"]\n"),
+        ("tk-macros/Cargo.toml", "[package]\nname = \"tk-macros\"\n[lib]\nproc-macro = true\n"),
+        (
+            "tk-macros/src/lib.rs",
+            "use proc_macro::TokenStream;\n#[proc_macro_attribute]\npub fn main(args: TokenStream, item: TokenStream) -> TokenStream { item }\n#[proc_macro_attribute]\npub fn main_rt(args: TokenStream, item: TokenStream) -> TokenStream { item }\n",
+        ),
+        ("tk/Cargo.toml", "[package]\nname = \"tk\"\n[dependencies]\ntk-macros = { path = \"../tk-macros\" }\n"),
+        (
+            "tk/src/lib.rs",
+            "macro_rules! cfg_macros { ($($i:item)*) => { $($i)* } }\ncfg_macros! {\n    cfg_rt! {\n        #[cfg(feature = \"rt-multi-thread\")]\n        pub use tk_macros::main;\n        cfg_not_rt_multi_thread! {\n            pub use tk_macros::main_rt as main;\n        }\n    }\n}\n",
+        ),
+        ("app/Cargo.toml", "[package]\nname = \"app\"\n[dependencies]\ntk = { path = \"../tk\" }\n"),
+        ("app/src/main.rs", "#[tk::main]\nasync fn main() {}\n#[tk::main]\nfn other() {}\n"),
+    ]));
+    let g = G(&out.graph);
+    use EdgeKind::*;
+    use Strategy::*;
+    // Decorator → decorated definition, like Python decorators.
+    g.has("tk_macros::main", "app::main", Decorates, ImportResolved, 0.9);
+    g.has("tk_macros::main", "app::other", Decorates, ImportResolved, 0.9);
+    g.lacks("app::main", "tk_macros::main", Calls);
+}

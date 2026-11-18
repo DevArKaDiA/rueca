@@ -184,6 +184,16 @@ fn file_name(path: &str) -> &str {
 }
 
 /// `dir/rel` (`rel` when `dir` is the repository root).
+/// A `mod x;` declared inside an inline module (`module` `m::x`, see the
+/// crate docs, *Imports*).
+fn is_nested_mod_declaration(import: &Import, segs: &[&str]) -> bool {
+    import.relative_level == 1
+        && segs.len() > 1
+        && import.names.is_empty()
+        && !import.type_only
+        && import.module_alias.as_deref() == segs.last().copied()
+}
+
 fn join(dir: &str, rel: &str) -> String {
     if dir.is_empty() { rel.to_string() } else { format!("{dir}/{rel}") }
 }
@@ -516,6 +526,11 @@ impl Crates {
         }
         let segs: Vec<&str> = module.split("::").filter(|s| !s.is_empty()).collect();
         if import.relative_level > 0 {
+            if is_nested_mod_declaration(import, &segs)
+                && let Some(f) = self.nested_module_file(from, &segs)
+            {
+                return Some(f);
+            }
             return self.resolve_relative(from, import.relative_level, &segs);
         }
         match segs.split_first() {
@@ -526,6 +541,14 @@ impl Crates {
             Some((first, rest)) => self.resolve_crate_path(from, module.starts_with("::"), first, rest),
             None => None,
         }
+    }
+
+    /// The file of `mod x;` written inside inline modules (`mod net { mod
+    /// tcp; }` → `<dir>/net/tcp.rs`): the inline modules are directories
+    /// even when no file holds them.
+    fn nested_module_file(&self, from: &str, segs: &[&str]) -> Option<String> {
+        let dir = segs.iter().fold(self.module_dir(from), |d, s| join(&d, s));
+        [format!("{dir}.rs"), format!("{dir}/mod.rs")].into_iter().find(|p| self.paths.contains(p))
     }
 
     /// `self` / `super` paths: `level` 1 is the file's module, each further

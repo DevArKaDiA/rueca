@@ -335,6 +335,146 @@ fn macro_definitions_and_their_bodies() {
     assert_refs(&f, &[(RefKind::Call, "traced", "main"), (RefKind::Call, "$type:Item total", "main")]);
 }
 
+const MACRO_ITEMS: &str = "cfg_net! {
+    pub mod tcp;
+    pub use tcp::listener::TcpListener;
+    /// Spawns a task.
+    pub fn spawn() { helper(); }
+}
+mod m {
+    cfg_rt! {
+        cfg_unstable! { pub struct Deep; }
+        fn inner() -> Deep { Deep }
+    }
+}
+fn outer() {
+    cfg_x! { fn local() {} }
+    println!(\"{}\", value());
+}
+cfg_if::cfg_if! {
+    if #[cfg(unix)] {
+        mod unix;
+        pub use unix::Sys;
+    } else if #[cfg(windows)] {
+        mod windows;
+        pub use windows::Sys;
+    } else {
+        fn fallback() {}
+    }
+}
+cfg_paren!(
+    pub const K: u8 = 1;
+);
+impl S {
+    cfg_y! { pub fn method(&self) {} }
+}
+";
+
+#[test]
+fn items_inside_macro_bodies_are_items() {
+    let f = facts(MACRO_ITEMS);
+    assert_eq!(f.parse_errors, 0);
+    let s = summary(&f);
+    for want in [
+        (Label::Function, "spawn", None),
+        (Label::Module, "m", None),
+        (Label::Struct, "m.Deep", Some("m")),
+        (Label::Function, "m.inner", Some("m")),
+        (Label::Function, "outer.local", Some("outer")),
+        (Label::Function, "fallback", None),
+        (Label::Constant, "K", None),
+        (Label::Method, "S.method", None),
+    ] {
+        assert!(s.contains(&want), "{want:?} not in {s:#?}");
+    }
+    // Exported by their own `pub`; doc, spans and lines are the file's.
+    let spawn = def(&f, "spawn");
+    assert!(spawn.exported && !def(&f, "m.inner").exported);
+    assert_eq!(spawn.doc.as_deref(), Some("Spawns a task."));
+    assert_eq!(spawn.signature.as_deref(), Some("pub fn spawn()"));
+    let off = MACRO_ITEMS.find("spawn()").unwrap() as u32;
+    assert_eq!((spawn.name_span.start_byte, spawn.name_span.start_line), (off, 4));
+    assert_eq!(spawn.name_span.start_col, 11);
+    // Their bodies are code; the macros stay calls, expression macros are
+    // still re-parsed, and nothing is visited twice.
+    assert_refs(
+        &f,
+        &[
+            (RefKind::Call, "helper", "spawn"),
+            (RefKind::Call, "cfg_net", ""),
+            (RefKind::Call, "cfg_rt", "m"),
+            (RefKind::Call, "cfg_unstable", "m"),
+            (RefKind::Call, "cfg_x", "outer"),
+            (RefKind::Call, "value", "outer"),
+            (RefKind::Type, "Deep", "m.inner"),
+        ],
+    );
+    assert_eq!(f.references.iter().filter(|r| r.name == "helper").count(), 1);
+}
+
+#[test]
+fn imports_inside_macro_bodies() {
+    let f = facts(MACRO_ITEMS);
+    let rows: Vec<(String, Vec<String>, Option<String>, bool)> = f
+        .imports
+        .iter()
+        .map(|i| {
+            (i.module.clone(), i.names.iter().map(|n| n.name.clone()).collect(), i.module_alias.clone(), i.reexport)
+        })
+        .collect();
+    let want = |m: &str, names: &[&str], alias: Option<&str>, re: bool| {
+        (m.to_string(), names.iter().map(|s| s.to_string()).collect::<Vec<_>>(), alias.map(str::to_string), re)
+    };
+    for w in [
+        want("tcp", &[], Some("tcp"), false),
+        want("tcp::listener", &["TcpListener"], None, true),
+        want("unix", &[], Some("unix"), false),
+        want("windows", &[], Some("windows"), false),
+        want("unix", &["Sys"], None, true),
+        want("windows", &["Sys"], None, true),
+    ] {
+        assert!(rows.contains(&w), "{w:?} not in {rows:#?}");
+    }
+}
+
+#[test]
+fn macro_bodies_that_are_not_items() {
+    // Expressions, token patterns and token builders stay as they were.
+    let src = "fn f() { assert!(ok()); let v = vec![make()]; }\nquote! { fn not_an_item() {} }\nmacro_rules! m { () => { fn gen() {} } }\nbitflags! { pub struct Flags: u32 { const A = 1; } }\nlet_it! { let x = 1; }\nm!{fn tight() {}}\n";
+    let f = facts(src);
+    assert_refs(&f, &[(RefKind::Call, "ok", "f"), (RefKind::Call, "make", "f")]);
+    let names: Vec<&str> = f.definitions.iter().map(|d| d.qualified_name.as_str()).collect();
+    assert_eq!(names, ["f", "m"]);
+}
+
+#[test]
+fn attribute_macros_are_decorators() {
+    let f = facts(
+        "use tracing::instrument;\n#[tokio::main(flavor = \"current_thread\")]\nasync fn main() {}\n#[tokio::test]\nasync fn t() {}\n#[rstest]\n#[inline]\nfn case() {}\n#[derive(Debug, Serialize)]\n#[serde(rename_all = \"camelCase\")]\npub struct S;\n#[async_trait::async_trait]\npub trait Tr {}\nimpl S {\n    #[instrument(skip(self))]\n    #[allow(dead_code)]\n    fn m(&self) {}\n}\n#[cfg(test)]\n#[rustfmt::skip]\nmod tests {}\n",
+    );
+    assert_refs(
+        &f,
+        &[
+            (RefKind::Decorator, "tokio main", "main"),
+            (RefKind::Decorator, "tokio test", "t"),
+            (RefKind::Decorator, "rstest", "case"),
+            (RefKind::Decorator, "async_trait async_trait", "Tr"),
+            (RefKind::Decorator, "instrument", "S.m"),
+        ],
+    );
+    let decorators: Vec<&str> =
+        f.references.iter().filter(|r| r.kind == RefKind::Decorator).map(|r| r.name.as_str()).collect();
+    assert_eq!(decorators.len(), 5, "{decorators:?}");
+    assert_eq!(def(&f, "main").decorators, ["tokio::main(flavor = \"current_thread\")"]);
+    assert_eq!(def(&f, "case").decorators, ["rstest"]);
+    // Built-in, tool and derive helper attributes are not decorators.
+    assert!(def(&f, "S").decorators.is_empty() && def(&f, "tests").decorators.is_empty());
+    // A test attribute still marks the function as a test; the crate the
+    // macro comes from is a path anchor.
+    assert!(def(&f, "t").is_test && def(&f, "case").is_test && !def(&f, "main").is_test);
+    assert!(f.imports.iter().any(|i| i.type_only && i.module == "tokio"));
+}
+
 #[test]
 fn env_reads() {
     let f = facts(

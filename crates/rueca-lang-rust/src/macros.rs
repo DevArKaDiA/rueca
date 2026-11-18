@@ -20,7 +20,10 @@
 //! macro's callers call the macro).
 //!
 //! Not re-parsed: `stringify!`, `concat!`, `include*!` and `quote!`-style
-//! token builders, whose arguments are not code the compiler resolves.
+//! token builders, whose arguments are not code the compiler resolves, and
+//! bodies that are items (`cfg_net! { pub mod tcp; }`): `expand.rs` has
+//! already opened those in place, so their items are walked as items and
+//! the invocation's token tree is empty here.
 
 use rueca_extract::tree_sitter::{self, Node};
 use rueca_model::RefKind;
