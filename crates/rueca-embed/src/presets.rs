@@ -10,13 +10,16 @@ use serde::Serialize;
 
 use crate::error::{Error, Result};
 
-/// Default query instruction for code retrieval.
-///
-/// Phase 0 sweeps it (RFC 0007 §5.3) against [`QWEN_CODE_INSTRUCTION`] and
-/// [`ISSUE_INSTRUCTION`]; the winner is recorded in `docs/decisions.md`.
-/// Documents carry no instruction, so changing it invalidates no stored
-/// vector (§5.4).
+/// Default query instruction for code retrieval: the issue-shaped one, chosen
+/// by the phase 0 sweep on the S1 calibration split (RFC 0007 §5.3; mean
+/// objective 68.5 against 66.7 for [`QUESTION_INSTRUCTION`] and 68.0 for a
+/// code-search instruction; recorded in `docs/decisions.md`). Documents carry
+/// no instruction, so changing it invalidates no stored vector (§5.4).
 pub const DEFAULT_CODE_INSTRUCTION: &str =
+    "Given a GitHub issue, retrieve the source code functions that must change to fix it";
+
+/// The question-shaped instruction the phase 0 sweep started from.
+pub const QUESTION_INSTRUCTION: &str =
     "Given a natural-language question about a codebase, retrieve the code symbols that answer it";
 
 /// Qwen's own code-retrieval instruction (Qwen3-Embedding `task_prompts.json`),
@@ -359,8 +362,10 @@ const REMOTE_NOTE: &str = "remote API, opt-in (an organization needs `[retrieval
 const BEDROCK_NOTE: &str = "later: needs AWS SigV4 signing and credential resolution (RFC 0007 §3.5)";
 
 /// The instruction of the reranker prompt for code (Qwen3-Reranker's
-/// `<Instruct>:` line), the embedder's code-retrieval instruction.
-pub const RERANK_INSTRUCTION: &str = DEFAULT_CODE_INSTRUCTION;
+/// `<Instruct>:` line). Pinned separately from the embedder's: the phase 0
+/// instruction sweep measured embedders only, so the reranker keeps the
+/// question-shaped text until its own sweep (RFC 0007 §7.5).
+pub const RERANK_INSTRUCTION: &str = QUESTION_INSTRUCTION;
 
 /// A Qwen3-Reranker preset (RFC 0007 §7.5): a causal LM converted with
 /// llama.cpp's `convert_hf_to_gguf.py`, which turns the `yes` / `no` rows
