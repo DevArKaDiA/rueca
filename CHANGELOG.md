@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3](https://github.com/DevArKaDiA/rueca/compare/v0.1.0-alpha.2...v0.1.0-alpha.3) - 2026-11-18
+
+### Added
+
+- *(service)* service store, query role and indexer role (RFC 0008 phases 0–2) ([#66](https://github.com/DevArKaDiA/rueca/pull/66))
+- *(org)* cross-service contract edges (RFC 0006 phase 4) ([#63](https://github.com/DevArKaDiA/rueca/pull/63))
+- *(bench)* organization scenario with ≥ 60 instances ([#60](https://github.com/DevArKaDiA/rueca/pull/60))
+- *(org)* refs over the organization (RFC 0006 phase 3) ([#61](https://github.com/DevArKaDiA/rueca/pull/61))
+- *(rust)* Rust language pack, stable under RFC 0004 floors ([#56](https://github.com/DevArKaDiA/rueca/pull/56))
+
+### Fixed
+
+- *(rust)* macro-wrapped items, value/type namespaces, crate-scoped types, attribute macros ([#68](https://github.com/DevArKaDiA/rueca/pull/68))
+
+### Other
+
+- *(demo)* organization demo on tokio-rs ([#67](https://github.com/DevArKaDiA/rueca/pull/67))
+- *(rfc)* RFC 0007 — semantic search ([#59](https://github.com/DevArKaDiA/rueca/pull/59))
+- *(rfc)* RFC 0008 — service mode ([#62](https://github.com/DevArKaDiA/rueca/pull/62))
+- *(mcp)* own MCP protocol layer, drop rmcp and chrono (RUSTSEC-2026-0543) ([#64](https://github.com/DevArKaDiA/rueca/pull/64))
+
 ## [0.1.0-alpha.2](https://github.com/DevArKaDiA/rueca/releases/tag/v0.1.0-alpha.2) - 2026-10-27
 
 First public release (`0.1.0-alpha.1` was never published). Every language is
