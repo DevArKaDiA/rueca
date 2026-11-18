@@ -67,7 +67,7 @@ pub mod remote;
 pub mod vector;
 
 pub use cache::{CacheState, MODEL_DIR_ENV, ModelCache};
-pub use config::RetrievalConfig;
+pub use config::{Profile, RetrievalConfig};
 pub use error::{Error, Result};
 pub use key::{Backend, EmbedKey, ModelKey, ModelMeta, TEXT_BUILDER_VERSION, VectorEncoding, VectorKey};
 pub use presets::{
