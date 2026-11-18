@@ -184,7 +184,7 @@ pub(crate) fn git(args: &[&str], cwd: Option<&Path>) -> anyhow::Result<()> {
     git_output(args, cwd, &[]).map(|_| ())
 }
 
-/// The `git` runner behind [`git`], returning stdout: `env` is added to the
+/// The `git` runner behind the private `git` helper, returning stdout: `env` is added to the
 /// child's environment after the no-prompt variables (the service passes
 /// `GIT_CONFIG_NOSYSTEM` and credentials as `GIT_CONFIG_COUNT` /
 /// `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, so they never appear on

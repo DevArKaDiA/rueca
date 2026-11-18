@@ -160,7 +160,11 @@ fn a_worker_over_its_address_space_fails_cleanly() {
     let r = runner(mirrors.path(), lim, Some(format!("alloc:main:{bytes}")));
     let err = r.run_ref(&task(&url, "main", &commit, staging.path())).unwrap_err();
     assert_eq!(err.stage, "index");
-    assert!(err.reason.contains("SIGABRT") && err.reason.contains(&format!("allocation of {bytes} bytes")), "{err}");
+    // The worker's stderr tail names the allocation unless a backtrace
+    // (`RUST_BACKTRACE=1`, as in CI) pushed that line out of the tail.
+    let named =
+        err.reason.contains(&format!("allocation of {bytes} bytes")) || err.reason.contains("allocation failed");
+    assert!(err.reason.contains("SIGABRT") && named, "{err}");
     eprintln!("address space: {err}");
     // The parent survives and the next ref runs.
     let ok = runner(mirrors.path(), limits(Duration::from_secs(120)), None);

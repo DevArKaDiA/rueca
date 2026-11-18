@@ -58,6 +58,18 @@ pub fn validate(c: &ServiceConfig, p: &mut Vec<String>) {
     if i.allow_file_urls == Some(true) && !cfg!(debug_assertions) {
         p.push("indexing.allow_file_urls: test-only, refused by release builds".to_string());
     }
+    validate_limits(c, p);
+    for host in i.webhooks.keys() {
+        if rueca_service::webhooks::WebhookHost::parse(host).is_none() {
+            p.push(format!("indexing.webhooks.{host}: unknown host (github, gitlab, bitbucket)"));
+        }
+    }
+    validate_repos(c, p);
+}
+
+/// Ticks, worker limits, concurrency and the polling bounds.
+fn validate_limits(c: &ServiceConfig, p: &mut Vec<String>) {
+    let i = &c.indexing;
     for (key, d) in [("indexing.updater_tick", i.updater_tick), ("indexing.discover", i.discover)] {
         if d.is_some_and(|d| d.0.is_zero()) {
             p.push(format!("{key}: must be positive"));
@@ -73,22 +85,19 @@ pub fn validate(c: &ServiceConfig, p: &mut Vec<String>) {
     if poll.min > poll.max {
         p.push("indexing.poll: min must not exceed max".to_string());
     }
-    for host in i.webhooks.keys() {
-        if rueca_service::webhooks::WebhookHost::parse(host).is_none() {
-            p.push(format!("indexing.webhooks.{host}: unknown host (github, gitlab, bitbucket)"));
-        }
-    }
+}
+
+/// Every `[[repo]]` passes the host policy, parses, and is configured once.
+fn validate_repos(c: &ServiceConfig, p: &mut Vec<String>) {
     let policy = host_policy(c);
     let mut ids = std::collections::BTreeSet::new();
     for r in &c.repo {
-        if let Err(e) = policy.check(&r.url).and_then(|_| repo_spec(r)) {
-            p.push(format!("repo `{}`: {e:#}", r.url));
-            continue;
-        }
-        if let Ok(spec) = repo_spec(r)
-            && !ids.insert(spec.repo.clone())
-        {
-            p.push(format!("repo `{}`: repository `{}` is configured twice", r.url, spec.repo));
+        match policy.check(&r.url).and_then(|_| repo_spec(r)) {
+            Err(e) => p.push(format!("repo `{}`: {e:#}", r.url)),
+            Ok(spec) if !ids.insert(spec.repo.clone()) => {
+                p.push(format!("repo `{}`: repository `{}` is configured twice", r.url, spec.repo));
+            }
+            Ok(_) => {}
         }
     }
 }

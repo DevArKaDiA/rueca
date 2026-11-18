@@ -255,9 +255,20 @@ fn readiness_metrics_and_new_generations() {
         "rueca_generation_lag_seconds",
         "rueca_cache_requests_total{cache=\"segment\",result=\"miss\"}",
         "rueca_cache_bytes{cache=\"segment\"}",
-        "rueca_store_requests_total{op=\"get\",result=\"not_modified\"}",
     ] {
         assert!(metrics.contains(needle), "{needle} not in\n{metrics}");
+    }
+    // The watcher's conditional GET of the pointer answers `not_modified`
+    // on its next tick after generation 2 was pulled; wait for that tick.
+    let needle = "rueca_store_requests_total{op=\"get\",result=\"not_modified\"}";
+    let started = Instant::now();
+    loop {
+        let metrics = get(&format!("{}/metrics", s.ops), &[]).body;
+        if metrics.contains(needle) {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(15), "{needle} not in\n{metrics}");
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
