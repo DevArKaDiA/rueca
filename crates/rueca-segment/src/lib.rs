@@ -362,6 +362,16 @@ pub(crate) fn check_deadline(deadline: Option<Instant>) -> Result<()> {
 /// whose blob is not already present in a content pack.
 pub trait ContentSource: Sync {
     fn content(&self, file: &FileEntry) -> std::io::Result<Vec<u8>>;
+
+    /// Whether `file`'s content is not available at all: a blob a partial
+    /// clone's filter left out (RFC 0008 §7.6), listed as a coverage gap.
+    /// Such a file stays in the file table but has no content in the packs
+    /// (unless a pack already holds its blob), so `content` is never asked
+    /// for it and reading it later fails like a missing blob. Default: no
+    /// file is absent.
+    fn absent(&self, _file: &FileEntry) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

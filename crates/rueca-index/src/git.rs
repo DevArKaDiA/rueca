@@ -58,6 +58,16 @@ pub(crate) fn discover(root: &Path) -> Option<(gix::Repository, String)> {
     Some((repo, prefix.join("/")))
 }
 
+/// [`discover`], else the bare repository at `root` itself (prefix `""`):
+/// what an export reads, a working tree or a service's bare mirror
+/// (RFC 0008 §7.6).
+pub(crate) fn discover_or_bare(root: &Path) -> Option<(gix::Repository, String)> {
+    discover(root).or_else(|| {
+        let repo = gix::open(std::fs::canonicalize(root).ok()?).ok()?;
+        repo.is_bare().then_some((repo, String::new()))
+    })
+}
+
 /// The normalized `remote.origin.url` of a repository.
 pub(crate) fn origin_of(repo: &gix::Repository) -> Option<String> {
     repo.config_snapshot().string("remote.origin.url").and_then(|u| crate::normalize_remote(&u.to_string()))

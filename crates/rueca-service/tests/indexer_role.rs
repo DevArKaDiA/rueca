@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Barrier};
 use std::time::Duration;
 
-use common::{GitHost, commit, open, write};
-use rueca_service::indexer::{InProcessRunner, RefError, RefRun, RefRunner, RefTask, run_job};
+use common::{GitHost, InProcessRunner, commit, open, write};
+use rueca_service::indexer::{RefError, RefRun, RefRunner, RefTask, run_job};
 use rueca_service::jobs::{DesiredRef, JobCache, JobState, desired_update, get_job, lease_job};
 use rueca_service::reads::write_reads;
 use rueca_service::reconcile::{PollPolicy, Reconciler, RepoSpec, read_catalog};

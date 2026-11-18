@@ -78,7 +78,9 @@ pub(crate) fn write_segment(
 
     // ---- content packs -------------------------------------------------
     let (index, index_rebuilt) = BlobIndex::load(&packs_dir)?;
-    let jobs = blob_jobs(graph, &index)?;
+    let mut jobs = blob_jobs(graph, &index)?;
+    // Absent blobs (filtered out of a partial clone) have no content to store.
+    jobs.retain(|j| j.known || !contents.absent(&graph.files[j.rep]));
     let work = ContentWork {
         graph,
         contents,

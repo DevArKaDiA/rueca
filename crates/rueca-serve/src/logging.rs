@@ -72,6 +72,17 @@ pub fn init_logging(telemetry: &TelemetryConfig, filter: Option<&str>) -> LogGua
     }
 }
 
+/// Installs the global subscriber of `rueca index-worker` (RFC 0008 §7.8):
+/// JSON lines on **stderr** (stdout carries the worker's result), filtered
+/// by `filter` (`RUECA_LOG`, default `info`). The parent forwards each line
+/// to its own log.
+pub fn init_worker_logging(filter: Option<&str>) {
+    let filter = filter.and_then(|f| EnvFilter::try_new(f).ok()).unwrap_or_else(|| EnvFilter::new("info"));
+    let layer =
+        tracing_subscriber::fmt::layer().with_writer(std::io::stderr).fmt_fields(JsonFields).event_format(JsonEvent);
+    let _ = tracing_subscriber::registry().with(filter).with(layer).try_init();
+}
+
 /// Collects fields into a JSON object, redacting sensitive ones.
 #[derive(Default)]
 struct JsonVisitor(Map<String, Value>);

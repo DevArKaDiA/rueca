@@ -2,15 +2,21 @@
 //! serve --role all` on `memory://` with a local bare repository as the
 //! code host (`file://`, accepted by debug builds through the test-only
 //! `[indexing].allow_file_urls`): configured → reconciled → leased →
-//! indexed (the in-process stub runner) → published → generation served →
-//! a query answers; then `/admin/*`, `/status` and the metrics; and the
-//! `indexer` role's readiness.
+//! fetched into a bare mirror → indexed in an `index-worker` child process
+//! (the default `ChildRunner`) → published → generation served → a query
+//! answers; then `/admin/*`, `/status` and the metrics; and the `indexer`
+//! role's readiness.
+//!
+//! This binary has no libtest harness (`harness = false`): the runner
+//! starts `<this executable> index-worker`, so `main` hands that
+//! invocation to the worker before running the tests.
 
 mod common;
 
+use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use common::{GitHost, Server, TOKEN_NO_RULES, TOKEN_OPS, delete, get, post};
+use common::{GitHost, Server, TOKEN_NO_RULES, TOKEN_OPS, delete, get, post, run_tests};
 use rueca_serve::Role;
 use serde_json::{Value, json};
 
@@ -61,8 +67,17 @@ fn has_ref(status: &Value, name: &str) -> bool {
     status["repositories"].as_array().is_some_and(|rs| rs.iter().any(|r| r["refs"].to_string().contains(name)))
 }
 
-#[test]
-fn role_all_indexes_publishes_and_serves_a_configured_repository() {
+fn main() -> ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("index-worker") {
+        return ExitCode::from(u8::try_from(rueca_service::worker::worker_main()).unwrap_or(1));
+    }
+    run_tests(&[
+        ("role_all_indexes_publishes_and_serves_a_configured_repository", role_all_indexes_publishes_and_serves),
+        ("the_indexer_role_is_ready_without_a_generation_and_serves_no_mcp", the_indexer_role_is_ready),
+    ])
+}
+
+fn role_all_indexes_publishes_and_serves() {
     let host = GitHost::new("billing", &[INVOICES]);
     let dirs = tempfile::tempdir().unwrap();
     let started = Instant::now();
@@ -105,6 +120,7 @@ fn metrics_present(s: &Server) {
     for needle in [
         r#"rueca_jobs{kind="index",state="done"} 1"#,
         r#"rueca_queue_depth{kind="index",priority="0"} 0"#,
+        r#"rueca_publish_seconds_bucket{stage="fetch""#,
         r#"rueca_publish_seconds_bucket{stage="index""#,
         r#"rueca_publish_seconds_bucket{stage="generation""#,
         r#"rueca_job_seconds_bucket{kind="index",result="done""#,
@@ -134,8 +150,7 @@ fn removal(s: &Server, admin: &[(&str, &str)], body: &str) {
     wait_status(s, |v| !has_ref(v, "v1") && v["generation"].as_u64() >= Some(3));
 }
 
-#[test]
-fn the_indexer_role_is_ready_without_a_generation_and_serves_no_mcp() {
+fn the_indexer_role_is_ready() {
     let host = GitHost::new("payments", &[INVOICES]);
     let dirs = tempfile::tempdir().unwrap();
     let s = Server::start_as("memory://indexer-only", &extra(&host, &dirs), Role::Indexer);

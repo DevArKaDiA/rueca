@@ -11,15 +11,18 @@
 //! attempted ref failed the job fails ([`LeasedJob::fail`]), else it
 //! finishes ([`LeasedJob::finish`]) with the refs that failed alone recorded.
 //!
-//! The runner is a seam: [`InProcessRunner`] is a **stub** that indexes in
-//! this process; phase 2 Part B replaces it with the `rueca index-worker`
-//! child process over bare git mirrors (same trait).
+//! The runner is a seam: [`ChildRunner`] fetches into a bare, blob-filtered
+//! mirror, exports, and indexes in a `rueca index-worker` child process
+//! ([`crate::worker`]) under resource limits; tests substitute in-process
+//! runners.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use rueca_extract::Budget;
+use rueca_index::mirror::Mirror;
 use serde::Serialize;
 
 use crate::catalog::{RefKind, Retention};
@@ -27,7 +30,8 @@ use crate::jobs::{DesiredRef, Job, JobError, LeaseLost, LeasedJob};
 use crate::publish::{PublishReport, publish_snapshot};
 use crate::reconcile::read_catalog;
 use crate::remote::GitAccess;
-use crate::{ServiceStore, repo_dir};
+use crate::worker::{self, WorkerCommand, WorkerRequest};
+use crate::{ServiceStore, repo_dir, unix_now};
 
 /// One ref to index.
 #[derive(Debug, Clone, Copy)]
@@ -268,52 +272,117 @@ fn job_error_default(now: u64) -> JobError {
     JobError { stage: "index".into(), reason: "every ref failed".into(), at: now }
 }
 
-/// **Stub until RFC 0008 phase 2 Part B.** Indexes a ref in this process:
-/// a non-bare scratch repository per repository under `scratch`
-/// (`<repo-dir>.stub`), `git fetch --depth=1 --no-tags <url>
-/// +<commit>:refs/rueca/commit/<commit>` through [`GitAccess`], the tree
-/// exported with [`rueca_index::refs::export`] to the ref's export
-/// directory in the staging store, then [`rueca_index::index_worktree`]
-/// pinned to the ref and commit. No blob filter, no child process, no
-/// resource limits: Part B's runner (`rueca index-worker` over bare
-/// mirrors) replaces it behind [`RefRunner`].
-pub struct InProcessRunner {
-    pub scratch: PathBuf,
+/// The runner of `rueca serve --role indexer|all` (RFC 0008 §7.6–§7.8):
+/// per ref,
+///
+/// 1. **fetch** the commit into the repository's bare mirror
+///    (`<mirrors>/<repo-dir>.git`, [`Mirror`]: depth 1, blobs over the
+///    budget's `max_bytes` filtered out, the ref name as the fallback when
+///    the host refuses a commit want), through [`GitAccess`] (allowlist,
+///    credentials in the environment); mirrors older than `mirror_max_age`
+///    are re-created, and unused ones deleted (checked at most hourly);
+/// 2. **export** the tree from the bare mirror into the ref's export
+///    directory in the staging store ([`rueca_index::refs::export_dir`]),
+///    filtered-out blobs listed as gaps ([`rueca_index::refs::export_with`]);
+/// 3. **index** in a `rueca index-worker` child ([`worker::run_ref`]) with
+///    the staging store as its store (its `facts/` is the facts cache), the
+///    gaps as `skipped:size` files, under [`worker::WorkerLimits`];
+///
+/// then removes the export (the snapshot's content is in its packs).
+/// [`run_job`] publishes the segment.
+pub struct ChildRunner {
+    pub mirrors: PathBuf,
     pub git: GitAccess,
     pub budget: Budget,
     pub threads: Option<usize>,
+    pub worker: WorkerCommand,
+    pub mirror_max_age: Duration,
+    last_sweep: Mutex<Option<Instant>>,
 }
 
-impl InProcessRunner {
-    fn fetch(&self, task: &RefTask<'_>) -> anyhow::Result<PathBuf> {
-        let dir = self.scratch.join(format!("{}.stub", repo_dir(task.repo, None)));
-        if !dir.join(".git").exists() {
-            std::fs::create_dir_all(&dir)?;
-            rueca_index::org::git_output(&["init", "--quiet"], Some(&dir), &[])?;
+/// How often [`ChildRunner`] sweeps unused mirrors.
+const MIRROR_SWEEP: Duration = Duration::from_secs(3600);
+
+impl ChildRunner {
+    pub fn new(mirrors: PathBuf, git: GitAccess, budget: Budget, worker: WorkerCommand) -> ChildRunner {
+        ChildRunner {
+            mirrors,
+            git,
+            budget,
+            threads: None,
+            worker,
+            mirror_max_age: Duration::from_secs(7 * 24 * 3600),
+            last_sweep: Mutex::new(None),
         }
-        let refspec = format!("+{0}:refs/rueca/commit/{0}", task.commit);
-        let args = ["fetch", "--quiet", "--depth=1", "--no-tags", task.url, refspec.as_str()];
-        let d = dir.to_string_lossy().into_owned();
-        let mut with_dir = vec!["-C", d.as_str()];
-        with_dir.extend_from_slice(&args);
-        self.git.run(task.url, &with_dir, None)?;
-        Ok(dir)
+    }
+
+    /// The filter's limit: blobs of more than `max_bytes` stay on the host.
+    fn max_bytes(&self) -> u64 {
+        self.budget.max_bytes as u64
+    }
+
+    /// Deletes mirrors unused for `mirror_max_age`, at most hourly.
+    fn sweep_mirrors(&self) {
+        let mut last = self.last_sweep.lock().unwrap_or_else(|p| p.into_inner());
+        if last.is_some_and(|t| t.elapsed() < MIRROR_SWEEP) {
+            return;
+        }
+        *last = Some(Instant::now());
+        for dir in rueca_index::mirror::expire_mirrors(&self.mirrors, self.mirror_max_age, unix_now()) {
+            tracing::info!(mirror = %dir.display(), "removed an unused git mirror");
+        }
+    }
+
+    fn fetch(&self, task: &RefTask<'_>) -> anyhow::Result<Mirror> {
+        self.git.policy.check_resolved(task.url)?;
+        let inv = self.git.invocation(task.url)?;
+        let dir = self.mirrors.join(format!("{}.git", repo_dir(task.repo, None)));
+        let mirror = Mirror::open_with(&dir, task.url, Some(self.mirror_max_age), unix_now())?
+            .with_git(inv.config_args, inv.env);
+        let fetched = mirror.fetch_commit(task.commit, self.max_bytes(), &fallback_refs(task))?;
+        tracing::debug!(repo = task.repo, r#ref = task.ref_name, commit = task.commit, via = %fetched.via, "fetched");
+        Ok(mirror)
     }
 }
 
-impl RefRunner for InProcessRunner {
+/// The full ref names whose tip may stand in for a refused commit want.
+fn fallback_refs(task: &RefTask<'_>) -> Vec<String> {
+    let name = task.ref_name;
+    if let Some(n) = name.strip_prefix("pr/") {
+        return vec![format!("refs/pull/{n}/head"), format!("refs/merge-requests/{n}/head")];
+    }
+    let hex = name.len() >= 7 && name.bytes().all(|b| b.is_ascii_hexdigit());
+    match task.kind {
+        RefKind::Commit if hex => Vec::new(),
+        RefKind::Tag => vec![format!("refs/tags/{name}"), format!("refs/heads/{name}")],
+        _ => vec![format!("refs/heads/{name}"), format!("refs/tags/{name}")],
+    }
+}
+
+impl RefRunner for ChildRunner {
     fn run_ref(&self, task: &RefTask<'_>) -> Result<RefRun, RefError> {
+        self.sweep_mirrors();
         let mut stages = Vec::new();
         let t = Instant::now();
-        let dir = self.fetch(task).map_err(|e| RefError::new("fetch", &e))?;
+        let mirror = self.fetch(task).map_err(|e| RefError::new("fetch", &e))?;
         stages.push(("fetch", t.elapsed()));
         let t = Instant::now();
         let dest = rueca_index::refs::export_dir(task.store, task.repo, "", task.ref_name);
-        rueca_index::refs::export(&dir, task.commit, &dest).map_err(|e| RefError::new("export", &e))?;
+        let gap = Some(self.max_bytes().saturating_add(1));
+        let export = rueca_index::refs::export_with(mirror.dir(), task.commit, &dest, gap)
+            .map_err(|e| RefError::new("export", &e))?;
+        if !export.absent.is_empty() {
+            tracing::info!(
+                repo = task.repo,
+                r#ref = task.ref_name,
+                gaps = export.absent.len(),
+                "blobs over the size budget left out"
+            );
+        }
         stages.push(("export", t.elapsed()));
         let t = Instant::now();
-        let opts = rueca_index::IndexOptions {
-            root: dest,
+        let options = rueca_index::IndexOptions {
+            root: dest.clone(),
             store: task.store.to_path_buf(),
             repo: Some(task.repo.to_string()),
             budget: self.budget.clone(),
@@ -321,7 +390,11 @@ impl RefRunner for InProcessRunner {
             ref_name: Some(task.ref_name.to_string()),
             commit: Some(task.commit.to_string()),
         };
-        let report = rueca_index::index_worktree(&opts).map_err(|e| RefError::new("index", &e))?;
+        let result = worker::run_ref(&self.worker, &WorkerRequest::new(options, export.absent));
+        if let Err(e) = std::fs::remove_dir_all(&dest) {
+            tracing::debug!(dir = %dest.display(), error = %e, "cannot remove the export");
+        }
+        let report = result?;
         stages.push(("index", t.elapsed()));
         Ok(RefRun { segment: report.segment.id, stages })
     }

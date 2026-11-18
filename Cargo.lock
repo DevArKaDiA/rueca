@@ -3608,6 +3608,7 @@ dependencies = [
  "bytes",
  "fastrand",
  "globset",
+ "libc",
  "rueca-extract",
  "rueca-index",
  "rueca-model",

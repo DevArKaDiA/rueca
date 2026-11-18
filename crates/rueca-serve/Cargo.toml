@@ -66,6 +66,12 @@ otel = [
     "dep:async-trait",
 ]
 
+# The indexer tests' binary is its own `index-worker` (no libtest harness:
+# its `main` dispatches `index-worker` to the worker before running tests).
+[[test]]
+name = "indexer"
+harness = false
+
 [dev-dependencies]
 rueca-model.workspace = true
 tempfile = "3.27.0"

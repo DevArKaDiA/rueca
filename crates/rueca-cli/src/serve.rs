@@ -65,6 +65,23 @@ pub fn cmd_serve(config: Option<PathBuf>, role: Option<&str>, check_config: bool
     }
 }
 
+/// `rueca index-worker` (hidden; RFC 0008 §7.8): the indexer's child
+/// process. Reads one request on stdin, writes the report on stdout, logs
+/// JSON lines on stderr (`RUECA_LOG`, default `info`); see
+/// `rueca_service::worker`.
+#[cfg(feature = "service")]
+pub fn cmd_index_worker() -> ExitCode {
+    let filter = std::env::var("RUECA_LOG").ok();
+    rueca_serve::logging::init_worker_logging(filter.as_deref());
+    ExitCode::from(u8::try_from(rueca_service::worker::worker_main()).unwrap_or(1))
+}
+
+#[cfg(not(feature = "service"))]
+pub fn cmd_index_worker() -> ExitCode {
+    eprintln!("rueca: this build has no `index-worker` (rebuild with the `service` feature)");
+    ExitCode::from(2)
+}
+
 #[cfg(not(feature = "service"))]
 pub fn cmd_serve(_config: Option<PathBuf>, _role: Option<&str>, _check_config: bool, _verbose: u8) -> ExitCode {
     eprintln!("rueca: this build has no `serve` (rebuild with the `service` feature)");

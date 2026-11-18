@@ -50,7 +50,10 @@
 //! `service`, on by default): the query role serves MCP over HTTP from a
 //! service store; the indexer role (`--role indexer`, or `all` for both)
 //! polls the `[[repo]]` repositories, leases and runs index jobs and, on
-//! the leader, publishes organization generations. Configured by `rueca-service.toml` (`--config`, else
+//! the leader, publishes organization generations. It indexes each ref in
+//! a child process of this binary, the hidden `rueca index-worker` (one
+//! JSON request on stdin, the report on stdout, JSON logs on stderr;
+//! `rueca_service::worker`). Configured by `rueca-service.toml` (`--config`, else
 //! `RUECA_CONFIG`); `--check-config` validates the file, its `env:`
 //! references and the store, prints the problems and exits 0 or 1. Its logs
 //! go to stdout as `[telemetry]` says (JSON by default), filtered by
@@ -205,6 +208,11 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         #[command(flatten)]
         remote: service::StoreArgs,
     },
+    /// Service mode (RFC 0008 §7.8), internal: the indexer's child process.
+    /// Reads one index request (JSON) on stdin, writes `{"ok": <report>}`
+    /// or `{"error": …}` on stdout, logs JSON lines on stderr.
+    #[command(name = "index-worker", hide = true)]
+    IndexWorker,
     /// List the cross-repository edges of an organization (--org): the link
     /// layer of RFC 0006 (imports of packages published by another
     /// repository, and the calls, inheritance and references through them;
@@ -251,6 +259,9 @@ fn main() -> ExitCode {
     if let Command::Serve { config, role, check_config } = cli.command {
         return serve::cmd_serve(config, role.as_deref(), check_config, cli.verbose);
     }
+    if let Command::IndexWorker = cli.command {
+        return serve::cmd_index_worker();
+    }
     init_logging(cli.verbose, matches!(cli.command, Command::Mcp { .. }));
     let store = cli.store.clone().unwrap_or_else(Store::default_dir);
     let result = match cli.command {
@@ -279,7 +290,9 @@ fn main() -> ExitCode {
             let cmd = service::PublishCmd { path, repo, ref_name };
             service::cmd_publish(&remote, &store, cli.org.as_deref(), cmd, out)
         }
-        Command::Serve { .. } => Err(anyhow::anyhow!("`serve` is dispatched before logging starts")),
+        Command::Serve { .. } | Command::IndexWorker => {
+            Err(anyhow::anyhow!("`serve` and `index-worker` are dispatched before logging starts"))
+        }
         Command::Pull { repo, generation, remote } => {
             let out = Output { json: cli.json, pretty: cli.pretty };
             service::cmd_pull(&remote, &store, repo.as_deref(), generation, out)

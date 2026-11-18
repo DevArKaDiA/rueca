@@ -10,13 +10,17 @@
 //!
 //! Local directories: `[indexing].facts_dir` is the **staging store** (a
 //! local store the runner indexes into and publishes from; its `facts/`
-//! is the facts cache), `[indexing].mirror_dir` holds the runner's git
-//! repositories and, under `store/`, the updater's mirror of the service
-//! store.
+//! is the facts cache), `[indexing].mirror_dir` holds the runner's bare git
+//! mirrors (`<repo-dir>.git`, re-created after `[indexing].mirror_max_age`,
+//! 7 d) and, under `store/`, the updater's mirror of the service store.
 //!
-//! The runner is [`rueca_service::indexer::InProcessRunner`], a **stub**
-//! until phase 2 Part B's `rueca index-worker` child process; at most
-//! `[indexing].jobs` jobs (default 1) run at once.
+//! The runner is [`rueca_service::indexer::ChildRunner`]: each ref is
+//! fetched into its bare mirror (depth 1, blobs over
+//! `[indexing].budget.max_bytes` left on the host), exported, and indexed by
+//! this binary's hidden `rueca index-worker` subcommand in a child process
+//! limited by `[indexing].worker` (`address_space` 24 GiB — not enforced on
+//! macOS —, `cpu_time` 4 h, `wall_time` 30 min); at most `[indexing].jobs`
+//! jobs (default 1) run at once.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -25,11 +29,12 @@ use std::time::Duration;
 
 use anyhow::Context;
 use rueca_extract::Budget;
-use rueca_service::indexer::{InProcessRunner, JobRun, RefRunner, run_job};
+use rueca_service::indexer::{ChildRunner, JobRun, RefRunner, run_job};
 use rueca_service::jobs::{DesiredRef, Job, JobCache, JobState, LeasedJob, desired_update, get_job, lease_job};
 use rueca_service::reconcile::{PollPolicy, Reconciler, RepoSpec, read_catalog};
 use rueca_service::remote::{GitAccess, HostPolicy, RemoteLister};
 use rueca_service::updater::{TickReport, Updater, UpdaterOptions, expire_refs, unix_now};
+use rueca_service::worker::{WorkerCommand, WorkerLimits, address_space_enforced};
 use rueca_service::{RefKind, Retention, ServiceStore};
 use rueca_storage::Storage;
 use serde_json::{Value, json};
@@ -56,6 +61,9 @@ pub fn validate(c: &ServiceConfig, p: &mut Vec<String>) {
         if d.is_some_and(|d| d.0.is_zero()) {
             p.push(format!("{key}: must be positive"));
         }
+    }
+    if i.worker.as_ref().and_then(|w| w.wall_time).is_some_and(|d| d.0.is_zero()) {
+        p.push("indexing.worker.wall_time: must be positive".to_string());
     }
     if i.jobs == Some(0) || i.ls_remote_concurrency == Some(0) {
         p.push("indexing.jobs and indexing.ls_remote_concurrency must be positive".to_string());
@@ -143,6 +151,34 @@ fn budget(c: &ServiceConfig) -> Budget {
     }
 }
 
+/// `[indexing].worker`, over [`WorkerLimits::default`].
+pub fn worker_limits(c: &ServiceConfig) -> WorkerLimits {
+    let d = WorkerLimits::default();
+    let Some(w) = c.indexing.worker.as_ref() else { return d };
+    WorkerLimits {
+        address_space: w.address_space.map(|Size(s)| s).or(d.address_space),
+        cpu_time: w.cpu_time.map(|x| x.0).or(d.cpu_time),
+        wall_time: w.wall_time.map_or(d.wall_time, |x| x.0),
+    }
+}
+
+/// The runner: [`ChildRunner`] starting this executable's `index-worker`.
+fn child_runner(c: &ServiceConfig, git: GitAccess) -> anyhow::Result<ChildRunner> {
+    let limits = worker_limits(c);
+    if limits.address_space.is_some() && !address_space_enforced() {
+        tracing::warn!(
+            "indexing.worker.address_space is not enforced on this platform (macOS); cpu_time and wall_time are"
+        );
+    }
+    let worker = WorkerCommand::current_exe(limits)?;
+    let mut runner = ChildRunner::new(mirror_dir(c), git, budget(c), worker);
+    runner.threads = c.indexing.threads.filter(|t| *t > 0).map(|t| t as usize);
+    if let Some(age) = c.indexing.mirror_max_age {
+        runner.mirror_max_age = age.0;
+    }
+    Ok(runner)
+}
+
 /// `[indexing].mirror_dir`, by default `<store dir>/service-mirrors`.
 pub fn mirror_dir(c: &ServiceConfig) -> PathBuf {
     c.indexing.mirror_dir.clone().unwrap_or_else(|| rueca_segment::Store::default_dir().join("service-mirrors"))
@@ -216,8 +252,7 @@ impl Indexer {
         let staging = ServiceStore::open_with_storage(storage.clone(), &facts_dir(c), org)?;
         let owner = instance_id();
         let specs = repo_specs(c)?;
-        let threads = i.threads.filter(|t| *t > 0).map(|t| t as usize);
-        let runner = InProcessRunner { scratch: mirrors.clone(), git: (*git).clone(), budget: budget(c), threads };
+        let runner = child_runner(c, (*git).clone())?;
         let updater = if i.org_updater.unwrap_or(true) {
             let svc = ServiceStore::with_storage(storage, &mirrors.join("store"), org)?;
             let lister: Arc<dyn RemoteLister> = git.clone();

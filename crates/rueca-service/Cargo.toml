@@ -26,6 +26,17 @@ fastrand = "2.5.0"
 globset = "0.4.20"
 url = "2.5"
 
+# `setrlimit` for the `rueca index-worker` child (RFC 0008 §7.8); already in
+# the dependency tree.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
+
+# The worker tests' binary is its own `index-worker` (no libtest harness:
+# its `main` dispatches `index-worker` to the worker before running tests).
+[[test]]
+name = "worker"
+harness = false
+
 [dev-dependencies]
 rueca-model.workspace = true
 rueca-query.workspace = true

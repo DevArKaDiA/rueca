@@ -28,7 +28,10 @@
 //!    `export-ignore` / `export-subst` attributes and content filters would
 //!    change files and their blob ids). Symlinks and submodules are not
 //!    exported (the working-tree walk does not index them either). The export
-//!    is written to a temporary directory and swapped in; an owner marker
+//!    is written to a temporary directory and swapped in. [`export_with`]
+//!    also reads a bare repository (a service's mirror, RFC 0008 §7.7) and,
+//!    given a gap size, lists blobs the repository lacks (a partial clone's
+//!    filtered-out blobs) instead of failing. An owner marker
 //!    (`<repo-dir>/.owners/<ref-slug>.json`: repository id, path inside the
 //!    repository, ref) records whose export it is. A commit with no file
 //!    under the root's path is an error, not an empty snapshot.
@@ -63,7 +66,7 @@ use rueca_segment::{CatalogEntry, Store};
 use serde::Serialize;
 use tracing::{info, warn};
 
-use crate::{IndexOptions, IndexReport, PhaseTimings, git, index_worktree};
+use crate::{AbsentFile, IndexOptions, IndexReport, PhaseTimings, git, index_worktree};
 
 /// Hex digits of a commit recorded as its ref name.
 const SHORT_COMMIT: usize = 12;
@@ -440,6 +443,10 @@ impl RefOwner {
 pub struct ExportReport {
     pub files: u64,
     pub bytes: u64,
+    /// Blobs the repository does not have, not written ([`export_with`]
+    /// with a gap size; a partial clone's filtered-out blobs).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub absent: Vec<AbsentFile>,
 }
 
 /// One blob of the exported tree.
@@ -453,10 +460,22 @@ struct ExportEntry {
 /// Regular and executable files only; nothing is written into the
 /// repository. A commit with no such file there is an error (the root's
 /// directory does not exist at that commit), and `dest` is left as it was.
+/// `repo_dir` may also be a bare repository (the whole tree is exported).
+/// A blob the repository does not have is an error.
 pub fn export(repo_dir: &Path, commit: &str, dest: &Path) -> anyhow::Result<ExportReport> {
+    export_with(repo_dir, commit, dest, None)
+}
+
+/// [`export`]; with `gap_size`, a blob the repository does not have (a
+/// partial clone's filter left it out: blobs of at least `gap_size` bytes,
+/// RFC 0008 §7.6) is not an error but listed in [`ExportReport::absent`]
+/// with `gap_size` as its size, to be indexed as a coverage gap
+/// ([`crate::index_worktree_with`]). Objects are read with `gix`, which
+/// never fetches a missing one.
+pub fn export_with(repo_dir: &Path, commit: &str, dest: &Path, gap_size: Option<u64>) -> anyhow::Result<ExportReport> {
     let root = fs::canonicalize(repo_dir).with_context(|| format!("cannot access {}", repo_dir.display()))?;
-    let (repo, prefix) =
-        git::discover(&root).ok_or_else(|| anyhow::anyhow!("{} is not inside a git repository", root.display()))?;
+    let (repo, prefix) = git::discover_or_bare(&root)
+        .ok_or_else(|| anyhow::anyhow!("{} is not inside a git repository", root.display()))?;
     let entries = tree_entries(&repo, commit, &prefix)?;
     if entries.is_empty() {
         let at = if prefix.is_empty() { "the top of the repository".to_string() } else { format!("`{prefix}`") };
@@ -465,7 +484,7 @@ pub fn export(repo_dir: &Path, commit: &str, dest: &Path) -> anyhow::Result<Expo
     let parent = dest.parent().context("export directory has no parent")?;
     fs::create_dir_all(parent)?;
     let tmp = tempfile::Builder::new().prefix(".export-").tempdir_in(parent)?;
-    let report = write_entries(&repo, &entries, tmp.path())?;
+    let report = write_entries(&repo, &entries, tmp.path(), gap_size)?;
     if dest.exists() {
         fs::remove_dir_all(dest).with_context(|| format!("removing the previous export {}", dest.display()))?;
     }
@@ -510,8 +529,14 @@ fn safe_rel(rel: &str) -> bool {
     rel.split('/').all(|c| !matches!(c, "" | "." | ".." | ".git") && !c.contains('\\'))
 }
 
-/// Creates the directories, then writes the blobs in parallel.
-fn write_entries(repo: &gix::Repository, entries: &[ExportEntry], dest: &Path) -> anyhow::Result<ExportReport> {
+/// Creates the directories, then writes the blobs in parallel; with
+/// `gap_size`, missing blobs are listed instead of failing.
+fn write_entries(
+    repo: &gix::Repository,
+    entries: &[ExportEntry],
+    dest: &Path,
+    gap_size: Option<u64>,
+) -> anyhow::Result<ExportReport> {
     let dirs: BTreeSet<&str> = entries.iter().filter_map(|e| e.rel.rsplit_once('/').map(|(d, _)| d)).collect();
     for d in dirs {
         fs::create_dir_all(dest.join(d))?;
@@ -519,19 +544,46 @@ fn write_entries(repo: &gix::Repository, entries: &[ExportEntry], dest: &Path) -
     // gix is built without its `parallel` feature (its handles are not
     // `Sync`): each worker opens the repository once.
     let git_dir = repo.git_dir().to_path_buf();
-    let bytes = entries
+    let written = entries
         .par_iter()
         .map_init(
             || gix::open(&git_dir).map_err(|e| e.to_string()),
-            |repo, e| -> anyhow::Result<u64> {
+            |repo, e| -> anyhow::Result<Option<u64>> {
                 let repo = repo.as_ref().map_err(|err| anyhow::anyhow!("opening {}: {err}", git_dir.display()))?;
-                let blob = repo.find_object(e.oid).map_err(|err| anyhow::anyhow!("reading {}: {err}", e.rel))?;
-                fs::write(dest.join(&e.rel), &blob.data).with_context(|| format!("writing {}", e.rel))?;
-                Ok(blob.data.len() as u64)
+                write_blob(repo, e, dest, gap_size.is_some())
             },
         )
-        .collect::<anyhow::Result<Vec<u64>>>()?;
-    Ok(ExportReport { files: bytes.len() as u64, bytes: bytes.iter().sum() })
+        .collect::<anyhow::Result<Vec<Option<u64>>>>()?;
+    let mut report = ExportReport::default();
+    for (e, w) in entries.iter().zip(&written) {
+        match w {
+            Some(n) => {
+                report.files += 1;
+                report.bytes += n;
+            }
+            None => report.absent.push(AbsentFile {
+                path: e.rel.clone(),
+                blob_sha: e.oid.to_string(),
+                size: gap_size.unwrap_or_default(),
+            }),
+        }
+    }
+    Ok(report)
+}
+
+/// Writes one blob; `None` when the repository does not have it and gaps
+/// are allowed.
+fn write_blob(repo: &gix::Repository, e: &ExportEntry, dest: &Path, gaps: bool) -> anyhow::Result<Option<u64>> {
+    let blob = if gaps {
+        match repo.try_find_object(e.oid).map_err(|err| anyhow::anyhow!("reading {}: {err}", e.rel))? {
+            Some(b) => b,
+            None => return Ok(None),
+        }
+    } else {
+        repo.find_object(e.oid).map_err(|err| anyhow::anyhow!("reading {}: {err}", e.rel))?
+    };
+    fs::write(dest.join(&e.rel), &blob.data).with_context(|| format!("writing {}", e.rel))?;
+    Ok(Some(blob.data.len() as u64))
 }
 
 /// Options of [`index_ref`].

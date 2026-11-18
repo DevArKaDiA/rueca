@@ -264,3 +264,89 @@ impl GitHost {
         git(&self.bare, &["rev-parse", rev])
     }
 }
+
+/// A test runner that indexes in this process (no child process, no blob
+/// filter, no limits): a non-bare scratch repository per repository under
+/// `scratch`, `git fetch --depth=1 --no-tags <url>
+/// +<commit>:refs/rueca/commit/<commit>` through `GitAccess`, the tree
+/// exported to the ref's export directory in the staging store, then
+/// `index_worktree` pinned to the ref and commit. `rueca serve` uses
+/// `ChildRunner`.
+pub struct InProcessRunner {
+    pub scratch: PathBuf,
+    pub git: rueca_service::remote::GitAccess,
+    pub budget: rueca_extract::Budget,
+    pub threads: Option<usize>,
+}
+
+impl InProcessRunner {
+    fn fetch(&self, task: &rueca_service::indexer::RefTask<'_>) -> anyhow::Result<PathBuf> {
+        let dir = self.scratch.join(format!("{}.stub", rueca_service::repo_dir(task.repo, None)));
+        if !dir.join(".git").exists() {
+            std::fs::create_dir_all(&dir)?;
+            rueca_index::org::git_output(&["init", "--quiet"], Some(&dir), &[])?;
+        }
+        let refspec = format!("+{0}:refs/rueca/commit/{0}", task.commit);
+        let d = dir.to_string_lossy().into_owned();
+        let args = ["-C", d.as_str(), "fetch", "--quiet", "--depth=1", "--no-tags", task.url, refspec.as_str()];
+        self.git.run(task.url, &args, None)?;
+        Ok(dir)
+    }
+}
+
+impl rueca_service::indexer::RefRunner for InProcessRunner {
+    fn run_ref(
+        &self,
+        task: &rueca_service::indexer::RefTask<'_>,
+    ) -> Result<rueca_service::indexer::RefRun, rueca_service::indexer::RefError> {
+        use rueca_service::indexer::{RefError, RefRun};
+        let mut stages = Vec::new();
+        let t = std::time::Instant::now();
+        let dir = self.fetch(task).map_err(|e| RefError::new("fetch", &e))?;
+        stages.push(("fetch", t.elapsed()));
+        let t = std::time::Instant::now();
+        let dest = rueca_index::refs::export_dir(task.store, task.repo, "", task.ref_name);
+        rueca_index::refs::export(&dir, task.commit, &dest).map_err(|e| RefError::new("export", &e))?;
+        stages.push(("export", t.elapsed()));
+        let t = std::time::Instant::now();
+        let opts = rueca_index::IndexOptions {
+            root: dest,
+            store: task.store.to_path_buf(),
+            repo: Some(task.repo.to_string()),
+            budget: self.budget.clone(),
+            threads: self.threads,
+            ref_name: Some(task.ref_name.to_string()),
+            commit: Some(task.commit.to_string()),
+        };
+        let report = rueca_index::index_worktree(&opts).map_err(|e| RefError::new("index", &e))?;
+        stages.push(("index", t.elapsed()));
+        Ok(RefRun { segment: report.segment.id, stages })
+    }
+}
+
+/// The `main` of a test binary without the libtest harness: runs `tests`
+/// in order (those whose name contains a non-flag argument, when any is
+/// given), each under `catch_unwind`, and fails when one panicked.
+pub fn run_tests(tests: &[(&str, fn())]) -> std::process::ExitCode {
+    let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
+    let selected: Vec<&(&str, fn())> = tests
+        .iter()
+        .filter(|(name, _)| filters.is_empty() || filters.iter().any(|f| name.contains(f.as_str())))
+        .collect();
+    println!("\nrunning {} tests", selected.len());
+    let mut failed = Vec::new();
+    for (name, test) in selected {
+        let started = std::time::Instant::now();
+        let ok = std::panic::catch_unwind(*test).is_ok();
+        println!("test {name} ... {} ({:.1?})", if ok { "ok" } else { "FAILED" }, started.elapsed());
+        if !ok {
+            failed.push(*name);
+        }
+    }
+    println!(
+        "\ntest result: {}. {} failed: {failed:?}\n",
+        if failed.is_empty() { "ok" } else { "FAILED" },
+        failed.len()
+    );
+    if failed.is_empty() { std::process::ExitCode::SUCCESS } else { std::process::ExitCode::FAILURE }
+}

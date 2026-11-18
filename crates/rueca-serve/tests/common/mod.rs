@@ -403,3 +403,30 @@ pub fn post(url: &str, body: &str, headers: &[(&str, &str)]) -> Reply {
     }
     reply(req.send(body))
 }
+
+/// The `main` of a test binary without the libtest harness: runs `tests`
+/// in order (those whose name contains a non-flag argument, when any is
+/// given), each under `catch_unwind`, and fails when one panicked.
+pub fn run_tests(tests: &[(&str, fn())]) -> std::process::ExitCode {
+    let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
+    let selected: Vec<&(&str, fn())> = tests
+        .iter()
+        .filter(|(name, _)| filters.is_empty() || filters.iter().any(|f| name.contains(f.as_str())))
+        .collect();
+    println!("\nrunning {} tests", selected.len());
+    let mut failed = Vec::new();
+    for (name, test) in selected {
+        let started = Instant::now();
+        let ok = std::panic::catch_unwind(*test).is_ok();
+        println!("test {name} ... {} ({:.1?})", if ok { "ok" } else { "FAILED" }, started.elapsed());
+        if !ok {
+            failed.push(*name);
+        }
+    }
+    println!(
+        "\ntest result: {}. {} failed: {failed:?}\n",
+        if failed.is_empty() { "ok" } else { "FAILED" },
+        failed.len()
+    );
+    if failed.is_empty() { std::process::ExitCode::SUCCESS } else { std::process::ExitCode::FAILURE }
+}

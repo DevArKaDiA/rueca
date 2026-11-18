@@ -1205,9 +1205,30 @@ minutes, then finishes the job (`done`, or `pending` again when the
 desired state moved meanwhile; a ref that fails alone backs off alone) or
 fails it when every ref failed. A lease another indexer took makes every
 later write of the old holder fail; what it already published is
-idempotent by `(ref, commit)`. Today the runner fetches the commit into a
-scratch repository and indexes it in process; the isolated
-`rueca index-worker` child over bare, blob-filtered mirrors replaces it.
+idempotent by `(ref, commit)`. Each ref runs in three steps. **Fetch**:
+the repository's bare mirror (`[indexing].mirror_dir/<repo-dir>.git`)
+gets exactly the desired commit, `git fetch --depth=1 --no-tags --atomic
+--no-auto-maintenance --filter=blob:limit=<max_bytes + 1> <url>
++<commit>:refs/rueca/commit/<commit>` with protocol v2, only `https` and
+`ssh` allowed, `GIT_NO_LAZY_FETCH=1` and no prompt; a host that refuses a
+commit by id gets the ref name fetched instead, and a tip that is no
+longer the desired commit means "moved, retry later". Blobs over the
+budget stay on the host; a mirror is never repacked and is re-created
+after `[indexing].mirror_max_age` (7 days). **Export**: the commit's tree
+is read with `gix` from the bare mirror into a scratch directory of the
+staging store; a blob the filter left out is not an error but a gap,
+listed in the file table as `skipped:size` with its blob id and no
+content. **Index**: a child process of the same binary, the hidden
+`rueca index-worker`, reads one JSON request on stdin (the
+`IndexOptions`, the budget, the gaps), indexes into the staging store
+(sharing its facts cache) and writes `{"ok": <report>}` or `{"error":
+{"stage", "message"}}` on stdout, logging JSON lines on stderr that the
+parent forwards. The parent sets `RLIMIT_AS` (24 GiB; not enforced on
+macOS), `RLIMIT_CPU` (4 h) and `RLIMIT_CORE = 0` before `exec` and kills
+the child after `[indexing].worker.wall_time` (30 min): a crash, an
+abort, an allocation storm or a parser that loops fails that ref alone,
+with the signal or limit and the child's last log lines as the reason,
+and the indexer carries on.
 `POST /admin/index {"repo", "ref"}` resolves a tag, branch, `pr/<n>` or
 full commit on the host and adds it to the desired state,
 `DELETE /admin/refs` removes a ref, `GET /admin/jobs` lists the jobs

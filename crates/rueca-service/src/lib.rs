@@ -185,8 +185,12 @@
 //!   priorities.
 //! - [`indexer`]: [`indexer::run_job`] runs a leased job's refs (default
 //!   first) through a [`indexer::RefRunner`] into the indexer's staging
-//!   store, then [`publish_snapshot`]; [`indexer::InProcessRunner`] is a
-//!   stub until the child-process runner of phase 2 Part B.
+//!   store, then [`publish_snapshot`]; [`indexer::ChildRunner`] fetches each
+//!   ref into a bare, blob-filtered mirror ([`rueca_index::mirror`]),
+//!   exports it and indexes it in a child process.
+//! - [`worker`]: the `rueca index-worker` protocol (stdin request, stdout
+//!   report), the child's entry point and the parent's spawner with
+//!   `setrlimit` and a wall-clock kill.
 //! - [`updater`]: the leader of `leases/org-updater.json` reconciles, runs
 //!   idle expiry ([`reads`]: pull requests and on-demand refs unread for
 //!   [`Retention::pr_idle`]) and [`collect_garbage`] hourly, pulls changed
@@ -197,9 +201,7 @@
 //! - Phase 1 (`rueca serve`): replicas poll [`pull_generation`] with the
 //!   last [`PullGenerationReport::version`] (one conditional request per
 //!   tick) and serve MCP over HTTP from the mirror.
-//! - Phase 2 Parts B and C: bare git mirrors, filtered fetches and the
-//!   `rueca index-worker` child process behind [`indexer::RefRunner`];
-//!   webhooks into [`jobs::desired_update`] (setting
+//! - Phase 2 Part C: webhooks into [`jobs::desired_update`] (setting
 //!   [`RefEntry::closed_at`] on close events).
 //! - Phase 3: `vectors` ([`SnapshotEntry::vectors`]) and their objects,
 //!   `embed` jobs ([`jobs::JobKind::Embed`]), facts in the bucket.
@@ -217,6 +219,7 @@ pub mod reconcile;
 pub mod remote;
 mod status;
 pub mod updater;
+pub mod worker;
 
 use std::collections::BTreeMap;
 use std::fs;

@@ -54,6 +54,12 @@
 //! commit of a repository, exports its tree under `<store>/refs/` and indexes
 //! that tree with this pipeline, the snapshot pinned to the ref
 //! ([`IndexOptions::ref_name`], [`IndexOptions::commit`]).
+//!
+//! Service mode (RFC 0008 §7.6–§7.7): [`mirror`] keeps a bare, shallow,
+//! blob-filtered mirror per repository; [`refs::export_with`] exports a
+//! commit from it, listing the filtered-out blobs as [`AbsentFile`]s, and
+//! [`index_worktree_with`] records them in the file table as `skipped:size`
+//! gaps without content.
 
 use std::collections::HashMap;
 use std::fs;
@@ -75,6 +81,7 @@ mod git;
 #[cfg(test)]
 mod golden;
 pub mod link;
+pub mod mirror;
 pub mod org;
 pub mod refs;
 
@@ -120,7 +127,7 @@ impl IndexOptions {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IndexReport {
     pub segment: SegmentMeta,
     pub root: String,
@@ -146,7 +153,7 @@ pub struct IndexReport {
 }
 
 /// Wall-clock milliseconds per indexing phase.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct PhaseTimings {
     pub walk_ms: u64,
     pub extract_ms: u64,
@@ -238,9 +245,33 @@ const BINARY_SNIFF: usize = 8 * 1024;
 /// writer's content source re-reads (and verifies) files from disk.
 const CONTENT_MEMORY_CAP: u64 = 512 * 1024 * 1024;
 
+/// A file of a ref export whose blob the repository does not have: a blob
+/// a partial clone's filter left out (`--filter=blob:limit=<max_bytes + 1>`,
+/// RFC 0008 §7.6), reported by [`refs::export_with`] instead of written.
+/// [`index_worktree_with`] lists it in the file table as a coverage gap
+/// (`skipped:size`) without content.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AbsentFile {
+    /// Path relative to the export root (`/` separators).
+    pub path: String,
+    /// Git blob id (hex), from the tree.
+    pub blob_sha: String,
+    /// A lower bound of its size (the filter's limit): the real size is
+    /// unknown without the blob.
+    pub size: u64,
+}
+
 /// Indexes the working tree at `opts.root` (including uncommitted changes and
 /// untracked, non-ignored files) and registers the new segment in the store.
 pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
+    index_worktree_with(opts, &[])
+}
+
+/// [`index_worktree`] of a ref export with `absent` files (see
+/// [`AbsentFile`]): each is added to the file table as `skipped:size`
+/// (counted in [`IndexReport::files_skipped`]) with its blob id and no
+/// content, unless the walk found the path on disk.
+pub fn index_worktree_with(opts: &IndexOptions, absent: &[AbsentFile]) -> anyhow::Result<IndexReport> {
     let started = Instant::now();
     let pinned = opts.pinned()?;
     let root = fs::canonicalize(&opts.root).with_context(|| format!("cannot access {}", opts.root.display()))?;
@@ -309,6 +340,11 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
         }
         files.push(l.input);
     }
+    let gaps = absent_inputs(absent, &paths, &registry);
+    let absent_paths: std::collections::HashSet<String> = gaps.iter().map(|g| g.path.clone()).collect();
+    skipped += gaps.len() as u64;
+    files.extend(gaps);
+    files.sort_by(|a, b| a.path.cmp(&b.path));
     // Only files that were read are part of the project (vanished ones are out).
     let project = ProjectFiles { paths: files.iter().map(|f| f.path.clone()).collect(), configs };
     timings.extract_ms = t.elapsed().as_millis() as u64;
@@ -331,7 +367,7 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
 
     // 5. Write and register.
     let t = Instant::now();
-    let source = WorktreeContent { root: &root, contents: std::sync::Mutex::new(contents) };
+    let source = WorktreeContent { root: &root, contents: std::sync::Mutex::new(contents), absent: absent_paths };
     let meta = rueca_segment::write_segment(&out.graph, &source, &opts.store).context("writing segment")?;
     match pinned {
         Some((ref_name, _)) => store.register_ref(&root_str, &meta, ref_name),
@@ -374,6 +410,24 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
         "indexed"
     );
     Ok(report)
+}
+
+/// The file-table rows of `absent` files the walk did not find on disk:
+/// `skipped:size`, no facts, the language a pack would have extracted.
+fn absent_inputs(absent: &[AbsentFile], walked: &[String], registry: &Registry) -> Vec<FileInput> {
+    let cpp = has_cpp(walked);
+    absent
+        .iter()
+        .filter(|a| walked.binary_search(&a.path).is_err())
+        .map(|a| FileInput {
+            path: a.path.clone(),
+            blob_sha: a.blob_sha.clone(),
+            language: Language::header_language(&a.path, cpp).filter(|l| registry.for_language(*l).is_some()),
+            size: a.size,
+            facts: None,
+            status: "skipped:size".to_string(),
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -581,9 +635,15 @@ fn write_cached(path: &Path, facts: &FileFacts) -> anyhow::Result<()> {
 struct WorktreeContent<'a> {
     root: &'a Path,
     contents: std::sync::Mutex<HashMap<String, Vec<u8>>>,
+    /// Paths of [`AbsentFile`]s: no content anywhere.
+    absent: std::collections::HashSet<String>,
 }
 
 impl ContentSource for WorktreeContent<'_> {
+    fn absent(&self, file: &FileEntry) -> bool {
+        self.absent.contains(&file.path)
+    }
+
     fn content(&self, file: &FileEntry) -> std::io::Result<Vec<u8>> {
         let kept = self.contents.lock().unwrap_or_else(|p| p.into_inner()).remove(&file.path);
         if let Some(c) = kept {
