@@ -1056,6 +1056,48 @@ index**, so a question asked of the whole organization gets one ranking.
   picks the entries a call reads — `repo: A, ref: pr/7` is the organization
   with A at `pr/7` and every other repository at its default — and search
   statistics, routing and `trace`'s link edges are computed over that view.
+- **Vectors in the organization** (RFC 0007 §10, phase 3). Vectors travel
+  with each repository segment; nothing is copied into the organization
+  layer. `rueca index --org <file> --embed[=PRESET]` (or a configured
+  preset: `RUECA_EMBED_PRESET`, the file's `[retrieval] preset`, the
+  store's) embeds every member and ref with one preset through the store
+  vector cache, so a member embedded before embeds nothing again and a ref
+  embeds only the text it changed. The generation records the
+  organization's **model** (preset, embed key, model key, width) and its
+  `allow_remote`. At query time the members whose vectors carry that model
+  key are fused; the others rank lexically and are listed in
+  `retrieval.lexical` with their reason in `retrieval.lexical_reasons` (no
+  vectors, or vectors of another model). A generation without a recorded
+  model (built lexically, or before phase 3) falls back to the embed key
+  most selected snapshots share. `rueca index --org`, `rueca status` and
+  `rueca links --org` print each entry's coverage (`fused`, `other model`,
+  `no vectors`).
+- **Centroid routing.** A routing profile (format 2) also holds the entry's
+  **embedding centroid**: the mean of its dequantized symbol vectors,
+  re-normalized, at the segment's width. When a hybrid query has a vector,
+  the cosine between it and each centroid of the same embed key is a third
+  routing signal, min-max normalized over the visible repositories; a
+  repository with a centroid mixes the three signals as `(2(1 − mu)·terms
+  + 2mu·doc + w·centroid) / (2 + w)` (`w` = `RUECA_ORG_ROUTE_CENTROID`, or
+  `[retrieval] route_centroid`, or `centroid=` in `RUECA_ORG_ROUTE`;
+  default 1, equal weights at `mu` = 0.5), one without keeps the
+  two-signal mix, and the prior's shape is unchanged. Fewer than two
+  centroids give no signal. The weight is the bench's to sweep.
+- **Remote presets are opt-in per organization.** A `remote:` preset
+  (§10, *Remote presets*) embeds or reranks an organization's code only
+  when its file sets `[retrieval] allow_remote = true` (default `false`):
+  `rueca index --org` refuses it otherwise, a plain `rueca index` of a
+  member root with a remote preset is refused while an organization that
+  does not allow them holds that root, and the query engine never sends a
+  query or reranker candidates of such an organization to a provider (it
+  ranks lexically with a warning, or errors when the call asked for the
+  mode). A repository outside any organization opts in by naming the
+  preset.
+- **Dense scan at organization scale.** The exhaustive int8 scan stays:
+  over 21 segments × 50,000 vectors × 1,024 dimensions (1.05M vectors) it
+  takes 74 ms on one thread (70 ns per row) and 8.3 ms with the views of
+  a call scanned in parallel, which `search_symbols` now does (at most one
+  thread per core); no ANN index is built (`docs/decisions.md`, phase 3).
 - **Across repositories at query time.** `trace` follows link edges in
   both directions: callers of a library function include its callers in
   other repositories, each node carrying its snapshot (`s`). A link edge is
@@ -1477,7 +1519,10 @@ symbol vectors to the index (`rueca index --embed`) and the `hybrid` and
 `semantic` modes of `search_symbols` (*Indexing with vectors* and *Hybrid
 search* below). Phase 2 adds graph expansion, a centrality prior and a
 cross-encoder reranker after that first stage, all off by default until
-the bench's sweep decides (*Graph signals* and *Reranker* below).
+the bench's sweep decides (*Graph signals* and *Reranker* below). Phase 3
+adds the organization scope (one model per organization, centroid
+routing: §4.6), remote presets, the service profile and `rueca query
+--batch` (*Remote presets*, *Configuration* and *Commands* below).
 
 **Crate.** `rueca-embed` owns presets, weights and runtimes behind two
 traits: `Embedder` (`embed` of a batch of documents and queries into
@@ -1498,7 +1543,9 @@ lexical-only binary. `cuda` is an opt-in feature for service builds.
 | `qwen3-0.6b-q4` | `Q4_K_M` converted by Rueca from the official `f16` | unavailable until published; a local file with the pinned sha256 loads |
 | `qwen3-4b-q4`, `qwen3-4b-q8`, `qwen3-8b-q4`, `qwen3-8b-q8` | official `Q4_K_M` / `Q8_0` | available (GPU) |
 | `coderank-137m`, `gte-modernbert-149m` | NomicBERT / ModernBERT; llama.cpp supports both architectures, Rueca must convert them | planned |
-| `remote:…` | provider APIs | phase 3 |
+| `remote:voyage/…`, `remote:openai/…`, `remote:gemini/…` | provider APIs (*Remote presets* below) | remote, opt-in |
+| `remote:voyage/rerank-2.5`, `remote:cohere/rerank-v3.5` (rerankers) | provider APIs | remote, opt-in |
+| `remote:bedrock/…` | Amazon Bedrock | later (SigV4) |
 | `qwen3-reranker-0.6b-q8` (reranker) | Qwen3-Reranker-0.6B, `Q8_0` converted by Rueca with its classifier head | unavailable until published; `rueca models import` registers a local conversion (*Reranker* below) |
 | `qwen3-reranker-4b-q4`, `mxbai-rerank-large-v2` (rerankers) | to convert | planned |
 
@@ -1550,13 +1597,17 @@ width and the vector encoding. The query instruction is in neither key
 (documents carry none), nor are the runtime, its version, the backend or
 the CPU level: those go to the audit record that `rueca embed --info`
 prints (`model_sha256`, `quantization`, `dims`, `pooling`, `runtime`,
-`runtime_version`, `backend` = `metal` | `cpu` | `cuda`, `cpu_level` =
+`runtime_version`, `backend` = `metal` | `cpu` | `cuda` | `remote`, `cpu_level` =
 `neon` or the x86-64 psABI level, batch and micro-batch sizes, threads).
 
 **Commands.**
 
 ```sh
 rueca index . --embed                 # index with symbol vectors (default preset)
+rueca index . --embed=remote:voyage/voyage-code-3   # through a provider (VOYAGE_API_KEY)
+rueca index --org rueca-org.toml --embed            # every member and ref with the organization's model
+rueca index . --ref feature/x --embed               # a ref: only the text it changed is embedded
+rueca query --batch requests.jsonl    # {"tool","args"} per line → one answer per line, one process
 rueca models list                     # presets, status, what the cache holds
 rueca models pull qwen3-0.6b-q8       # download and verify
 rueca models path qwen3-0.6b-q8       # where the file lives
@@ -1810,8 +1861,40 @@ Metal kernels are cached (`rueca rerank --timing`); a load that compiles
 them took 9.4 s here.
 Other presets: `qwen3-reranker-4b-q4` (a Rueca conversion to come, split
 under the 2 GiB release-asset limit) and `mxbai-rerank-large-v2` are
-planned; `remote:voyage/rerank-3` and `remote:cohere/rerank-3.5` are
-phase 3.
+planned; the remote rerankers are below.
+
+**Remote presets** (RFC 0007 §3.5; `rueca-embed` `remote`, feature
+`remote`, part of `embeddings`). `remote:<provider>/<model>` names an
+embedder or a reranker (a model starting with `rerank`) behind an API; any
+model of the provider works, the manifest lists the compared ones.
+
+| Provider | Embeddings | Rerank | Key | Batch per request |
+|---|---|---|---|---|
+| `voyage` | `POST /v1/embeddings`, `input_type` `query` / `document`, `output_dimension` | `POST /v1/rerank` | `VOYAGE_API_KEY` | 256 texts, ~100K tokens |
+| `openai` | `POST /v1/embeddings`, `dimensions` | — | `OPENAI_API_KEY` | 512 texts, ~250K tokens |
+| `gemini` | `POST /v1beta/models/<model>:batchEmbedContents`, `taskType` `CODE_RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT`, `outputDimensionality` | — | `GEMINI_API_KEY` (`x-goog-api-key`) | 100 texts |
+| `cohere` | — | `POST /v2/rerank` | `COHERE_API_KEY` | — |
+| `bedrock` | later: AWS SigV4 signing and credential resolution need the AWS SDK or a hand-written signer | — | — | — |
+
+Tokens are estimated at 4 characters each (no tokenizer); the width is
+`dims` (`--dims`, `[retrieval] dims`), else the model's default (Voyage
+1,024, OpenAI `text-embedding-3-large` 3,072, Gemini
+`gemini-embedding-001` 3,072), sent only when it differs; every vector is
+L2-normalized on arrival. A 429, a 5xx or a transport error is retried
+up to 5 times with exponential backoff from 0.5 s (capped at 30 s), or
+after the answer's `Retry-After` seconds; other errors fail at once with
+the provider's message. `RUECA_VOYAGE_BASE_URL`, `RUECA_OPENAI_BASE_URL`,
+`RUECA_GEMINI_BASE_URL` and `RUECA_COHERE_BASE_URL` point a provider at a
+proxy or a compatible server. The *embed key* of a remote preset hashes
+provider, model, API version, width, text builder version and token
+budget; providers publish no weights version, so a model changed behind
+its name is not detected. The vectors pass, the store vector cache and
+hybrid search treat remote vectors like local ones (`backend: remote` in
+the audit record). Privacy: an organization's code goes to a provider
+only when its `rueca-org.toml` sets `[retrieval] allow_remote = true`
+(§4.6); a repository outside any organization opts in by naming the
+preset. The tests run against a local mock server; no real API is
+called.
 
 **Configuration.** `<store>/rueca.toml`:
 
@@ -1828,15 +1911,39 @@ centrality_beta = 0.0      # centrality prior exponent (0: off)
 rerank = false             # rerank when a call does not say
 rerank_k = 50
 rerank_preset = "qwen3-reranker-0.6b-q8"
+route_centroid = 1.0       # weight of the centroid routing signal (§4.6)
+```
+
+The same `[retrieval]` table in `rueca-org.toml` configures an
+organization (its `preset` and `dims` are the organization's model) and,
+only there, `allow_remote = true` lets a `remote:` preset see its code
+(default `false`; the store file rejects the key).
+
+**Profiles.** Unset keys take the defaults of the profile in effect,
+`RUECA_PROFILE`: `local` (the default) keeps the built-in defaults below;
+`service` (RFC 0008 service mode, RFC 0007 §8.3) embeds with
+`qwen3-4b-q4` when the build runs models on a GPU (`cuda`, or Metal on
+Apple silicon) and stays lexical on a CPU-only build, with `rerank =
+false` and `rerank_k = 50`:
+
+```toml
+# what RUECA_PROFILE=service means on a GPU build
+[retrieval]
+preset = "qwen3-4b-q4"
+rerank = false   # turned on only once the reranker's gate (RFC 0007 §7.5, §11.2) holds on the bench
+rerank_k = 50
 ```
 
 Precedence: the argument (`--embed=PRESET`, `--no-embed`; `rerank`,
 `rerank_k`), the environment (`RUECA_EMBED_PRESET`, `RUECA_FUSION_*`,
 `RUECA_EXPAND`, `RUECA_EXPAND_DECAY`, `RUECA_EXPAND_SEEDS`,
 `RUECA_EXPAND_PER_SEED`, `RUECA_EXPAND_TOTAL`, `RUECA_CENTRALITY_BETA`,
-`RUECA_RERANK` (`1` / `0`), `RUECA_RERANK_K`, `RUECA_RERANK_PRESET`), the
-file, the default (no embedding; α 0.5, N 100, min-max; no expansion,
-β 0, no reranking). `rueca status` shows the preset that embedded each
+`RUECA_RERANK` (`1` / `0`), `RUECA_RERANK_K`, `RUECA_RERANK_PRESET`,
+`RUECA_ORG_ROUTE_CENTROID`), the organization file (indexing), the store
+file, the profile's defaults, the built-in default (no embedding; α 0.5,
+N 100, min-max; no expansion, β 0, no reranking; centroid weight 1).
+Without `--embed`, `rueca index` (and the MCP server's first-start index)
+embeds only when a preset is configured: embedding stays opt-in. `rueca status` shows the preset that embedded each
 snapshot (`VECTORS`, `-` for a lexical one).
 
 **Fallback runtime.** RFC 0007 §4.2 names `fastembed` (candle) as the

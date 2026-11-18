@@ -1,5 +1,104 @@
 # Decisions log
 
+## 2026-11-17 — Phase 3: organization scope, centroid routing, remote presets
+
+RFC 0007 phase 3 (Rust side). Organizations embed with one model,
+routing gains the embedding centroid, `remote:` presets call provider
+APIs behind an organization-level privacy switch, the service profile
+gets its GPU defaults, and `rueca query --batch` serves the bench's warm
+latency row. The §11.2 rows (organization File Acc@5 ≥ 0.85×, impact
+hit@10, hybrid p95 ≤ 300 ms warm) are the bench's to measure.
+
+Choices and deviations from the RFC:
+
+- **One model key per organization, recorded in the generation**
+  (`OrgGeneration.model`: preset, embed key, model key, width; plus
+  `allow_remote`). `rueca index --org --embed[=P]` (or a configured
+  preset: argument, `RUECA_EMBED_PRESET`, the file's `[retrieval]`, the
+  store's and its profile, default) embeds every member and ref through
+  the store vector cache. Fusion compares **model keys**, strictly: a
+  member embedded with the same model at another width ranks lexically
+  (phase 1 compared embed keys and truncated the query). Without a
+  recorded model the phase 1 rule (the embed key most snapshots share)
+  stands. A plain `rueca index <member>` keeps the generation's model.
+- **Reasons** go to a new `retrieval.lexical_reasons` object (`no
+  vectors`, `vectors of another model (preset:key)`) next to the
+  unchanged `lexical` list, rather than turning `lexical` into objects.
+- **Coverage** is computed when shown (`rueca index --org`, `status`,
+  `links --org`: each entry `fused`, `other model` or `no vectors`) by
+  reading each segment's `vectors.meta`, not stored per entry: older
+  generations show it too, and the update path opens no extra segment.
+- **Centroid**: the mean of the dequantized int8 rows, re-normalized, at
+  the segment's width, in the routing profile (format 2, so every profile
+  is recomputed once). The third signal mixes as `(2(1 − mu)·terms +
+  2mu·doc + w·centroid) / (2 + w)` with `w` = `RUECA_ORG_ROUTE_CENTROID`
+  / `[retrieval] route_centroid` / `centroid=` in `RUECA_ORG_ROUTE`,
+  default 1 (equal weights at `mu` = 0.5); a repository without a
+  centroid keeps the two-signal mix, and fewer than two centroids give no
+  signal. The prior is unchanged. `list_repositories` with `query` routes
+  without a vector (it embeds nothing).
+- **ANN not needed at ≤ 1.05M vectors; `usearch` not added.** Measured
+  (`crates/rueca-segment/tests/dense_scale.rs`, release, M1 Pro, 14
+  hardware threads, CPU shared with a running benchmark): the scan kernel
+  over 21 segments × 50,000 × 1,024 int8 rows (1.05M vectors, 1.08 GB)
+  takes 74.0 ms p50 / 75.3 ms p95 on one thread (70 ns per row; 50k:
+  3.5 ms, 300k: 21.3 ms, 550k: 39.1 ms) and 8.3 / 8.6 ms with one thread
+  per segment. Both are far under the 300 ms hybrid floor at the bench's
+  organization sizes; at 70 ns per row a single thread would reach the
+  floor near 4M vectors and the parallel scan near 30M. `search_symbols`
+  now scans the views of a call in parallel (at most one thread per
+  core). §6.4's 2M threshold is not needed; revisit when an organization
+  exceeds ~10M vectors or service-mode p95 says otherwise.
+- **Remote presets**: Voyage (`/v1/embeddings` with `input_type` and
+  `output_dimension`; `/v1/rerank`), OpenAI (`/v1/embeddings`,
+  `dimensions`), Gemini (`batchEmbedContents`, `taskType`
+  `CODE_RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT`, `outputDimensionality`)
+  and Cohere (`/v2/rerank`) on the existing `ureq` + rustls agent, as a
+  `remote` feature inside `embeddings`. Any model of a provider is
+  accepted, not only the manifest's. Batches: Voyage 256 texts / ~100K
+  tokens, OpenAI 512 / ~250K, Gemini 100 (tokens estimated at 4
+  characters). Retries: 5 attempts, backoff 0.5 s doubling to 30 s or
+  `Retry-After`, on 429 / 5xx / transport errors. Embed key = BLAKE3 of
+  provider, model, API version, width, text builder version, token
+  budget (the width is keyed: a provider's output depends on the width
+  asked for). No provider publishes a weights version, so a model
+  changed behind its name goes unnoticed; the RFC's "date of first use"
+  is not recorded. The manifest's rerank names become the providers'
+  real ids (`remote:voyage/rerank-2.5`, `remote:cohere/rerank-v3.5`
+  instead of `rerank-3` / `rerank-3.5`). **Bedrock is deferred**
+  (`later`): SigV4 is cheap with `sha2`, but credential resolution
+  (profiles, SSO, session tokens, IMDS) is not without the AWS SDK; an
+  OpenAI-compatible gateway covers it meanwhile.
+- **Privacy gate**: `[retrieval] allow_remote` is read from
+  `rueca-org.toml` only (the store file rejects it). `rueca index --org`
+  refuses a remote preset without it; a plain `rueca index` with a remote
+  preset is refused while an organization that does not allow them holds
+  the root (recorded `allow_remote` in its generation); the query engine
+  sends neither a query nor reranker candidates of such an organization
+  to a provider (lexical with a warning, an error when asked for). A
+  repository outside any organization opts in by naming the preset.
+- **Service-mode defaults** plug into the `[retrieval]` configuration as
+  a profile (`RUECA_PROFILE=service`; RFC 0008's `rueca serve` is not
+  implemented yet, it will select it): unset keys take `qwen3-4b-q4` on a
+  GPU build (`cuda`, or Metal on Apple silicon), no preset (lexical) on a
+  CPU-only build (RFC 0008 §7.11), `rerank = false` until the reranker's
+  gate holds, `rerank_k = 50`. The local profile is unchanged.
+- **Embedding stays opt-in**: without `--embed`, `IndexOptions` applies
+  the configured preset unless `no_embed`, which is how the MCP server's
+  first-start index (source unchanged) honours `[retrieval] preset` and
+  `RUECA_EMBED_PRESET`.
+- **Refs**: `rueca index --ref` takes `--embed`; a branch differing from
+  the indexed tree in one file embeds that file's symbols only (test:
+  7 units, 2 embedded, both in the changed file, 5 cached).
+- **`rueca query --batch FILE|-`**: one engine for every `{"tool",
+  "args"}` line, each answer exactly what `rueca query` prints, one line
+  per request, flushed (the contract `bench/src/rueca_bench/arms/batch.py`
+  codes against).
+
+Also: SonarQube's gate failed on PR #65 with one rust:S3776 (cognitive
+complexity 16 in `index_worktree_with`); the extract tally moved into
+`Collected::from_loaded`.
+
 ## 2026-11-17 — Phase 2: graph expansion, centrality prior and the reranker stage
 
 RFC 0007 phase 2 (Rust side). `search_symbols` gains a second half after
