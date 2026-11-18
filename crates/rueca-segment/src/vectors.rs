@@ -328,16 +328,40 @@ impl Vectors {
     /// exhaustive scan: `(node, score)` by score descending, then node id.
     /// A query of the wrong width matches nothing.
     pub fn top_n(&self, query: &[f32], n: usize, keep: impl Fn(NodeId) -> bool) -> Vec<(NodeId, f32)> {
-        let d = self.dims();
-        if query.len() != d || n == 0 {
+        let rows = Int8Rows { nodes: self.nodes(), scales: self.scales(), data: self.data(), dims: self.dims() };
+        rows.top_n(query, n, keep)
+    }
+}
+
+/// int8 rows with a per-row scale and their node ids: the matrix the
+/// exhaustive dense scan reads (RFC 0007 §6.4), borrowed from a segment or
+/// built in memory (the organization-scale measurement).
+#[derive(Debug, Clone, Copy)]
+pub struct Int8Rows<'a> {
+    /// Node id of each row, ascending.
+    pub nodes: &'a [u32],
+    /// Scale of each row.
+    pub scales: &'a [f32],
+    /// `nodes.len() × dims` components, row-major.
+    pub data: &'a [i8],
+    /// Components per row.
+    pub dims: usize,
+}
+
+impl Int8Rows<'_> {
+    /// The `n` best rows for `query` among the nodes `keep` accepts:
+    /// `(node, score)` by score descending, then node id. A query of the
+    /// wrong width matches nothing.
+    pub fn top_n(&self, query: &[f32], n: usize, keep: impl Fn(NodeId) -> bool) -> Vec<(NodeId, f32)> {
+        let d = self.dims;
+        if query.len() != d || n == 0 || d == 0 {
             return Vec::new();
         }
-        let scales = self.scales();
         let mut scored: Vec<(NodeId, f32)> = self
-            .nodes()
+            .nodes
             .iter()
-            .zip(self.data().chunks_exact(d))
-            .zip(scales)
+            .zip(self.data.chunks_exact(d))
+            .zip(self.scales)
             .filter(|((node, _), _)| keep(**node))
             .map(|((node, row), s)| (*node, dot_i8(row, query) * s))
             .collect();

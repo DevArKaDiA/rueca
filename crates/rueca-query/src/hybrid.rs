@@ -484,13 +484,8 @@ impl Engine {
                 by_key.insert((vi, n), c);
             }
         }
-        for (vi, v) in views.iter().enumerate() {
-            let (Some(vecs), Some(q)) = (dense.vectors[vi], dense.queries[vi].as_deref()) else { continue };
-            if !ranked.routed[vi] {
-                continue;
-            }
-            let keep = v.seg.symbol_filter(base)?;
-            for (n, cos) in vecs.top_n(q, pool, keep) {
+        for (vi, list) in dense_lists(sel, base, dense, &ranked.routed, pool)? {
+            for (n, cos) in list {
                 let c = by_key.entry((vi, n)).or_insert_with(|| blank(vi, n));
                 c.cos = Some(cos);
                 c.in_dense = true;
@@ -528,6 +523,46 @@ impl Engine {
             });
         }
     }
+}
+
+/// One view's dense top N: (view, [(node, cosine)]).
+type DenseList = (usize, Vec<(NodeId, f32)>);
+
+/// The dense top `pool` of every routed view with vectors, under the
+/// call's filters. Several views are scanned in parallel, at most one
+/// thread per core: at organization scale (21 × 50,000 × 1,024) the scan
+/// takes 8 ms instead of 74 ms on one thread (`docs/decisions.md`, phase 3).
+fn dense_lists(
+    sel: &Selection,
+    base: &SymbolQuery,
+    dense: &Dense<'_>,
+    routed: &[bool],
+    pool: usize,
+) -> anyhow::Result<Vec<DenseList>> {
+    let jobs: Vec<(usize, &Vectors, &[f32])> = (0..sel.views.len())
+        .filter(|&vi| routed[vi])
+        .filter_map(|vi| Some((vi, dense.vectors[vi]?, dense.queries[vi].as_deref()?)))
+        .collect();
+    let scan = |&(vi, vecs, q): &(usize, &Vectors, &[f32])| -> anyhow::Result<DenseList> {
+        let keep = sel.views[vi].seg.symbol_filter(base)?;
+        Ok((vi, vecs.top_n(q, pool, keep)))
+    };
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(jobs.len());
+    if threads < 2 {
+        return jobs.iter().map(scan).collect();
+    }
+    let scan = &scan;
+    std::thread::scope(|s| {
+        let handles: Vec<_> = jobs
+            .chunks(jobs.len().div_ceil(threads))
+            .map(|chunk| s.spawn(move || chunk.iter().map(scan).collect::<anyhow::Result<Vec<DenseList>>>()))
+            .collect();
+        let mut out = Vec::with_capacity(jobs.len());
+        for h in handles {
+            out.extend(h.join().map_err(|_| anyhow::anyhow!("a dense scan thread panicked"))??);
+        }
+        Ok(out)
+    })
 }
 
 /// Full-precision cosines of `nodes` from the store cache (truncated to the
