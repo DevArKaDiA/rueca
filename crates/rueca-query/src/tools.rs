@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use rueca_model::{EdgeKind, FileId, Label, NodeId, SymbolIdParts};
-use rueca_segment::org::{LinkDir, OrgScope, OrgSlot, RouteMode};
+use rueca_segment::org::{LinkDir, OrgScope, OrgSlot, RouteMode, RouteQuery};
 use rueca_segment::{CatalogEntry, ContentMatch, ContentQuery, EdgeRef, Segment, SymbolQuery};
 
 use crate::args::{
@@ -297,10 +297,21 @@ impl Engine {
     /// 0006 §6) — the organization index, or the snapshots' indexes scored
     /// with summed statistics — with the routing it applied per view.
     pub(crate) fn rank_symbols_routed(&self, sel: &Selection, base: &SymbolQuery) -> anyhow::Result<Ranked> {
+        self.rank_symbols_routed_with(sel, base, None)
+    }
+
+    /// [`Engine::rank_symbols_routed`] with the query's vector for the
+    /// routing's centroid signal (RFC 0007 §10).
+    pub(crate) fn rank_symbols_routed_with(
+        &self,
+        sel: &Selection,
+        base: &SymbolQuery,
+        qvec: Option<RouteQuery<'_>>,
+    ) -> anyhow::Result<Ranked> {
         let views = &sel.views;
         let unrouted = |hits| Ranked { hits, boost: vec![1.0; views.len()], routed: vec![true; views.len()] };
         Ok(match &sel.org {
-            Some(org) => self.org_ranked(org, views, base)?,
+            Some(org) => self.org_ranked(org, views, base, qvec)?,
             None if views.len() == 1 => unrouted(
                 views[0].seg.search_symbols(base)?.into_iter().map(|h| (0, h.node, f32_to_f64(h.score))).collect(),
             ),
@@ -318,12 +329,18 @@ impl Engine {
 
     /// The organization index ranking over the selected entries, seen from
     /// the call's view (statistics, routing).
-    fn org_ranked(&self, org: &OrgCtx, views: &[View], base: &SymbolQuery) -> anyhow::Result<Ranked> {
+    fn org_ranked(
+        &self,
+        org: &OrgCtx,
+        views: &[View],
+        base: &SymbolQuery,
+        qvec: Option<RouteQuery<'_>>,
+    ) -> anyhow::Result<Ranked> {
         let mut selected: Vec<(usize, &Segment)> =
             views.iter().filter_map(|v| v.org_repo().map(|i| (i, v.seg.as_ref()))).collect();
         let view_of: HashMap<OrgSlot, usize> =
             views.iter().enumerate().filter_map(|(vi, v)| v.org_slot.map(|s| (s, vi))).collect();
-        let boost = self.route_boost(org, &base.text, &mut selected)?;
+        let boost = self.route_boost(org, &base.text, &mut selected, qvec)?;
         let scope = OrgScope { visible: &org.visible, selected: &selected, view: Some(&org.view) };
         let local_stats = self.route.local_stats && self.route.mode != RouteMode::Off;
         let hits = org
@@ -349,12 +366,13 @@ impl Engine {
         org: &OrgCtx,
         text: &str,
         selected: &mut Vec<(usize, &Segment)>,
+        qvec: Option<RouteQuery<'_>>,
     ) -> anyhow::Result<HashMap<usize, f32>> {
         let repos: BTreeSet<usize> = selected.iter().map(|(i, _)| *i).collect();
         if repos.len() < 2 || self.route.mode == RouteMode::Off {
             return Ok(HashMap::new());
         }
-        let routes = org.index.route_view(text, &org.visible, &org.view, &self.route)?;
+        let routes = org.index.route_view_with(text, &org.visible, &org.view, &self.route, qvec)?;
         if self.route.mode == RouteMode::Top {
             let keep: HashSet<usize> = routes
                 .iter()

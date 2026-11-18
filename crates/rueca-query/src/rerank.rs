@@ -161,7 +161,7 @@ impl Engine {
         req: RerankRequest,
         retrieval: &mut Retrieval,
     ) -> anyhow::Result<()> {
-        let reranker = match self.reranker() {
+        let reranker = match self.remote_allowed(sel, &self.rerank.preset).and_then(|()| self.reranker()) {
             Ok(r) => r,
             Err(e) if req.explicit => return Err(e.context("reranking unavailable")),
             Err(e) => {
@@ -180,6 +180,21 @@ impl Engine {
         let (preset, model_key) = (reranker.preset().to_string(), reranker.model_key().to_string());
         retrieval.reranker = Some(RerankInfo { preset, model_key, k, ms });
         Ok(())
+    }
+
+    /// Refuses a `remote:` preset when the call reads an organization that
+    /// does not allow them (RFC 0007 §3.5): its code and queries would go
+    /// to the provider. A repository outside any organization opts in by
+    /// naming the preset.
+    pub(crate) fn remote_allowed(&self, sel: &Selection, preset: &str) -> anyhow::Result<()> {
+        match &sel.org {
+            Some(o) if rueca_embed::is_remote_preset(preset) && !o.index.generation().allow_remote => anyhow::bail!(
+                "organization `{}` does not allow remote presets (`{preset}`); set `[retrieval] allow_remote = true` \
+                 in its rueca-org.toml and re-index it",
+                o.index.generation().name
+            ),
+            _ => Ok(()),
+        }
     }
 
     /// The process's reranker for the configured preset, loaded once (a

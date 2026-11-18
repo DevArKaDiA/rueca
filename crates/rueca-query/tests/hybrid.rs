@@ -9,11 +9,12 @@ use std::sync::Arc;
 
 use rueca_embed::hashing::HashingEmbedder;
 use rueca_embed::{Embedder, ModelMeta};
-use rueca_index::org::{OrgConfig, OrgIndexOptions, index_org, update_orgs_containing};
+use rueca_index::org::{OrgConfig, OrgIndexOptions, index_org, index_org_with, update_orgs_containing};
 use rueca_index::vectors::TEXT_BUILDER_VERSION;
 use rueca_index::{EmbedConfig, EmbedderLoader, IndexOptions, index_worktree_with};
 use rueca_query::{Engine, QueryEmbedderLoader};
 use rueca_segment::VectorsMeta;
+use rueca_segment::org::{OrgIndex, OrgSelection, RouteParams, RouteQuery};
 use serde_json::{Value, json};
 
 const DIMS: usize = 256;
@@ -220,3 +221,135 @@ fn organization_with_a_lexical_member() {
     assert!(!names(&s).contains(&"settings_where_read".to_string()));
     assert!(s["retrieval"]["warnings"][0].as_str().unwrap().contains("local/other"));
 }
+
+fn org_options(file: &Path, store: &Path) -> OrgIndexOptions {
+    OrgIndexOptions {
+        config: OrgConfig::load(file).unwrap(),
+        store: store.to_path_buf(),
+        budget: Default::default(),
+        threads: Some(2),
+        only: None,
+    }
+}
+
+#[test]
+fn organization_model_key_decides_who_is_fused() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = fs::canonicalize(dir.path()).unwrap();
+    let store = base.join("store");
+    app(&base.join("app"));
+    write(&base.join("other"), "other/settings.py", "def settings_where_read(x):\n    return x\n");
+    let file = base.join("rueca-org.toml");
+    let text =
+        "name = \"acme\"\n[[repo]]\npath = \"app\"\n[[repo]]\npath = \"other\"\n[retrieval]\npreset = \"hashing\"\n";
+    fs::write(&file, text).unwrap();
+    // The organization's preset embeds every member.
+    let report = index_org_with(&org_options(&file, &store), &IndexLoader).unwrap();
+    let model = report.model.clone().expect("the organization records its model");
+    assert_eq!((model.preset.as_str(), model.dims), ("hashing", DIMS));
+    assert!(report.indexed.iter().all(|r| r.vectors.as_ref().is_some_and(|v| v.embedded > 0)));
+    assert!(report.vectors.iter().all(|m| m.status == "fused"), "{:?}", report.vectors);
+    // A second run reuses every vector.
+    let again = index_org_with(&org_options(&file, &store), &IndexLoader).unwrap();
+    assert!(again.indexed.iter().all(|r| r.vectors.as_ref().is_some_and(|v| v.embedded == 0)));
+    // One member re-embedded at another width: another model key.
+    let cfg = EmbedConfig { preset: "hashing".into(), dims: Some(64), ..EmbedConfig::default() };
+    let opts =
+        IndexOptions { root: base.join("other"), store: store.clone(), embed: Some(cfg), ..IndexOptions::default() };
+    index_worktree_with(&opts, &IndexLoader).unwrap();
+    update_orgs_containing(&store, &base.join("other")).unwrap();
+    let g = rueca_segment::org::current_generation(&store, "acme").unwrap().unwrap();
+    assert_eq!(g.model.as_ref(), Some(&model), "a plain re-index keeps the organization's model");
+    let coverage = rueca_index::org::vector_coverage(&store, &g).unwrap();
+    assert_eq!(coverage.iter().find(|m| m.repo == "local/other").unwrap().status, "other model");
+    let e =
+        Engine::for_org(store.clone(), "acme").unwrap().with_query_embedder(Arc::new(QueryLoader { weights: true }));
+    let r = e.call("search_symbols", json!({"query": QUESTION, "limit": 10})).unwrap();
+    assert_eq!(r["retrieval"]["mode"], "hybrid", "{}", r["retrieval"]);
+    assert_eq!(r["retrieval"]["lexical"], json!(["local/other"]));
+    let why = r["retrieval"]["lexical_reasons"]["local/other"].as_str().unwrap();
+    assert!(why.starts_with("vectors of another model (hashing:"), "{why}");
+    assert!(names(&r).contains(&"settings_where_read".to_string()));
+}
+
+#[test]
+fn remote_presets_need_the_organization_to_allow_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = fs::canonicalize(dir.path()).unwrap();
+    let store = base.join("store");
+    app(&base.join("app"));
+    let file = base.join("rueca-org.toml");
+    let members = "name = \"acme\"\n[[repo]]\npath = \"app\"\n";
+    fs::write(&file, format!("{members}[retrieval]\npreset = \"remote:voyage/voyage-code-3\"\n")).unwrap();
+    let err = index_org_with(&org_options(&file, &store), &IndexLoader).unwrap_err();
+    assert!(format!("{err:#}").contains("allow_remote = true"), "{err:#}");
+    // Built lexically, the organization forbids remote presets for its
+    // members too: a plain index of one with a remote preset is refused.
+    fs::write(&file, members).unwrap();
+    index_org(&org_options(&file, &store)).unwrap();
+    let cfg = EmbedConfig { preset: "remote:openai/text-embedding-3-large".into(), ..EmbedConfig::default() };
+    let opts =
+        IndexOptions { root: base.join("app"), store: store.clone(), embed: Some(cfg), ..IndexOptions::default() };
+    let err = index_worktree_with(&opts, &IndexLoader).unwrap_err();
+    assert!(format!("{err:#}").contains("organization `acme`"), "{err:#}");
+}
+
+/// Two repositories no query word reaches lexically; the hashing model's
+/// synonyms tie the query to one of them.
+#[test]
+fn centroid_routing_follows_the_query_vector() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = fs::canonicalize(dir.path()).unwrap();
+    let store = base.join("store");
+    write(
+        &base.join("billing"),
+        "billing/invoice.py",
+        "def issue_invoice(account):\n    return payment(account)\n\n\ndef refund_payment(invoice):\n    return invoice\n",
+    );
+    write(
+        &base.join("ui"),
+        "ui/widget.py",
+        "def draw_widget(canvas):\n    return canvas\n\n\ndef paint_canvas(c):\n    return c\n",
+    );
+    let file = base.join("rueca-org.toml");
+    let text =
+        "name = \"acme\"\n[[repo]]\npath = \"billing\"\n[[repo]]\npath = \"ui\"\n[retrieval]\npreset = \"hashing\"\n";
+    fs::write(&file, text).unwrap();
+    index_org_with(&org_options(&file, &store), &IndexLoader).unwrap();
+    let idx = OrgIndex::open(&store, "acme").unwrap();
+    let g = idx.generation();
+    let (billing, ui) = (g.repo_index("local/billing").unwrap(), g.repo_index("local/ui").unwrap());
+    let c = idx.profile(billing).and_then(|p| p.centroid.clone()).expect("billing has a centroid");
+    assert_eq!(c.dims, DIMS);
+    assert!((c.vector.iter().map(|x| x * x).sum::<f32>() - 1.0).abs() < 1e-4);
+    // "charge the customer": nothing lexical; the model reads invoice, account.
+    let q = HashingEmbedder::new(DIMS, TEXT_BUILDER_VERSION, rueca_embed::DEFAULT_MAX_TOKENS)
+        .with_synonyms(&[("charge", "invoice"), ("customer", "account")])
+        .embed_query("charge the customer")
+        .unwrap();
+    let key = g.model.as_ref().unwrap().embed_key.clone();
+    let vis = [billing, ui];
+    let params = RouteParams::default();
+    let view = OrgSelection::default();
+    let flat = idx.route_view(QUESTION_NONE, &vis, &view, &params).unwrap();
+    assert!(flat.iter().all(|r| r.score == flat[0].score && r.centroid.is_none()), "{flat:?}");
+    let routes = idx
+        .route_view_with(QUESTION_NONE, &vis, &view, &params, Some(RouteQuery { embed_key: &key, vector: &q }))
+        .unwrap();
+    assert_eq!(routes[0].repo, billing, "{routes:?}");
+    assert_eq!((routes[0].centroid, routes[1].centroid), (Some(1.0), Some(0.0)));
+    assert!(routes[1].score < routes[0].score);
+    // Weight 0 turns the signal off; a vector of another model is ignored.
+    let off = RouteParams { centroid: 0.0, ..params };
+    let r = idx
+        .route_view_with(QUESTION_NONE, &vis, &view, &off, Some(RouteQuery { embed_key: &key, vector: &q }))
+        .unwrap();
+    assert!(r.iter().all(|x| x.centroid.is_none()));
+    let r = idx
+        .route_view_with(QUESTION_NONE, &vis, &view, &params, Some(RouteQuery { embed_key: "x", vector: &q }))
+        .unwrap();
+    assert!(r.iter().all(|x| x.centroid.is_none()));
+}
+
+/// A query whose words no repository holds.
+const QUESTION_NONE: &str = "charge the customer";

@@ -434,7 +434,7 @@ impl Engine {
             default_root,
             org: None,
             visibility: Visibility::All,
-            route: RouteParams::from_env(),
+            route: RouteParams::resolve(config.route_centroid),
             segments: Mutex::new(HashMap::new()),
             org_index: Mutex::new(None),
             fusion: FusionParams::resolve(&config),

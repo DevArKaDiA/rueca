@@ -12,8 +12,14 @@
 //! - **Fusion** (§7.2): `s = (α·b̂ + (1 − α)·d̂) · prior · route`, `b̂` and
 //!   `d̂` normalized ([`Norm`], min-max over each list's top N by default);
 //!   BM25 is 0 outside its top N. A snapshot
-//!   without vectors (or with another embed key) is scored lexically,
-//!   `s = b̂ · prior · route` (§10), and listed in `retrieval.lexical`.
+//!   without vectors for the call's model is scored lexically,
+//!   `s = b̂ · prior · route` (§10), and listed in `retrieval.lexical`
+//!   (with its reason in `retrieval.lexical_reasons`). The call's model is
+//!   the organization's (its generation's model key, RFC 0007 §10), else
+//!   the embed key most selected snapshots share. An organization that
+//!   does not allow remote presets never sends a query to one.
+//! - **Routing** (organizations): the query vector joins the repository
+//!   routing as the embedding-centroid signal.
 //!   `semantic` is `d̂ · prior · route` over the dense candidates only.
 //!   Ties break by (snapshot, node).
 //! - **Degradation** (§7.7): with no `mode`, hybrid when a selected snapshot
@@ -27,6 +33,7 @@ use std::sync::Arc;
 
 use rueca_embed::{EmbedOptions, Embedder, RetrievalConfig};
 use rueca_model::NodeId;
+use rueca_segment::org::RouteQuery;
 use rueca_segment::vcache::{VectorCache, vector_root};
 use rueca_segment::vectors::truncate_normalize;
 use rueca_segment::{SymbolQuery, Vectors, VectorsMeta};
@@ -149,6 +156,8 @@ pub(crate) struct Retrieval {
     pub alpha: Option<f32>,
     /// Snapshots (repository ids) ranked without vectors in a fused answer.
     pub lexical: Vec<String>,
+    /// Why each of `lexical` has no vectors for the call's model.
+    pub lexical_reasons: Vec<(String, String)>,
     /// Graph expansion: the edge set and how many neighbours joined.
     pub expansion: Option<(ExpandEdges, usize)>,
     /// Centrality prior exponent, when not 0.
@@ -174,6 +183,11 @@ impl Retrieval {
         }
         if !self.lexical.is_empty() {
             m.insert("lexical".into(), json!(self.lexical));
+        }
+        if !self.lexical_reasons.is_empty() {
+            let reasons: serde_json::Map<String, Value> =
+                self.lexical_reasons.iter().map(|(r, why)| (r.clone(), json!(why))).collect();
+            m.insert("lexical_reasons".into(), Value::Object(reasons));
         }
         if let Some((edges, added)) = self.expansion {
             m.insert("expansion".into(), json!({"edges": edges.as_str(), "added": added}));
@@ -278,6 +292,8 @@ struct Dense<'s> {
     vectors: Vec<Option<&'s Vectors>>,
     /// The query at each served view's width.
     queries: Vec<Option<Vec<f32>>>,
+    /// The query vector at the model's width.
+    query: Vec<f32>,
     meta: VectorsMeta,
 }
 
@@ -345,7 +361,9 @@ impl Engine {
         };
         let limit = if base.limit == 0 { 20 } else { base.limit };
         let pool = self.fusion.n.max(base.offset.saturating_add(limit));
-        let ranked = self.rank_symbols_routed(sel, &SymbolQuery { offset: 0, limit: pool, ..base.clone() })?;
+        let qvec = RouteQuery { embed_key: &dense.meta.embed_key, vector: &dense.query };
+        let ranked =
+            self.rank_symbols_routed_with(sel, &SymbolQuery { offset: 0, limit: pool, ..base.clone() }, Some(qvec))?;
         let cands = self.candidates(sel, base, &dense, &ranked, pool, semantic)?;
         let alpha = if semantic { 0.0 } else { self.fusion.alpha };
         retrieval.mode = if semantic { "semantic" } else { "hybrid" };
@@ -380,13 +398,20 @@ impl Engine {
                 }
             }
         }
-        let Some(meta) = active_model(&all) else {
+        let org_model = sel.org.as_ref().and_then(|o| o.index.generation().model.clone());
+        let Some(meta) = active_model(&all, org_model.as_ref()) else {
             anyhow::ensure!(
                 !explicit,
-                "no vectors in the selected snapshots: index them with `rueca index --embed` (or use `mode: \"lexical\"`)"
+                "no vectors {} in the selected snapshots: index them with `rueca index --embed` (or use `mode: \"lexical\"`)",
+                if org_model.is_some() { "of the organization's model" } else { "" }
             );
             return Ok(Setup::Lexical(Retrieval::lexical(warnings)));
         };
+        if let Err(e) = self.remote_allowed(sel, &meta.preset) {
+            anyhow::ensure!(!explicit, "{e:#}");
+            warnings.push(format!("ranked lexically: {e:#}"));
+            return Ok(Setup::Lexical(Retrieval::lexical(warnings)));
+        }
         let query = match self.query_embedder(&meta).and_then(|e| Ok(e.embed_query(text)?)) {
             Ok(q) => q,
             Err(e) if explicit => return Err(e.context("semantic search unavailable")),
@@ -395,14 +420,24 @@ impl Engine {
                 return Ok(Setup::Lexical(Retrieval::lexical(warnings)));
             }
         };
-        let vectors: Vec<Option<&Vectors>> =
-            all.into_iter().map(|x| x.filter(|x| x.meta().embed_key == meta.embed_key)).collect();
+        let fused = |x: &&Vectors| match &org_model {
+            Some(m) => x.meta().model_key == m.model_key,
+            None => x.meta().embed_key == meta.embed_key,
+        };
+        let vectors: Vec<Option<&Vectors>> = all.iter().map(|x| x.filter(fused)).collect();
         let queries = vectors.iter().map(|x| x.map(|x| truncate_normalize(&query, x.dims()))).collect();
-        let lexical: Vec<String> =
-            sel.views.iter().zip(&vectors).filter(|(_, x)| x.is_none()).map(|(v, _)| v.repo().to_string()).collect();
+        let reasons: Vec<(String, String)> = sel
+            .views
+            .iter()
+            .zip(all.iter().zip(&vectors))
+            .filter(|(_, (_, x))| x.is_none())
+            .map(|(v, (had, _))| (v.repo().to_string(), lexical_reason(*had)))
+            .collect();
+        let lexical = reasons.iter().map(|(r, _)| r.clone()).collect();
         let model = Some(format!("{}:{}", meta.preset, short(&meta.model_key)));
-        let r = Retrieval { mode: "hybrid", model, lexical, warnings, ..Retrieval::default() };
-        Ok(Setup::Dense(Box::new(Dense { vectors, queries, meta }), r))
+        let r =
+            Retrieval { mode: "hybrid", model, lexical, lexical_reasons: reasons, warnings, ..Retrieval::default() };
+        Ok(Setup::Dense(Box::new(Dense { vectors, queries, query, meta }), r))
     }
 
     /// The process's embedder for `meta`'s embed key, loaded once (a
@@ -511,9 +546,23 @@ fn rescore(cache: &VectorCache, v: &Vectors, q: &[f32], nodes: &[NodeId]) -> any
         .collect())
 }
 
-/// The vectors meta of the model most selected views share (ties: the
-/// first view's), if any view has vectors.
-fn active_model(all: &[Option<&Vectors>]) -> Option<VectorsMeta> {
+/// Why a snapshot is ranked lexically: it has no vectors, or vectors of
+/// another model.
+fn lexical_reason(had: Option<&Vectors>) -> String {
+    match had {
+        None => "no vectors".into(),
+        Some(v) => format!("vectors of another model ({}:{})", v.meta().preset, short(&v.meta().model_key)),
+    }
+}
+
+/// The vectors meta of the call's model: the organization's (`org`, the
+/// first view whose vectors have its model key), else the model most
+/// selected views share (ties: the first view's); `None` when no view has
+/// vectors for it.
+fn active_model(all: &[Option<&Vectors>], org: Option<&rueca_segment::org::OrgModel>) -> Option<VectorsMeta> {
+    if let Some(m) = org {
+        return all.iter().flatten().find(|v| v.meta().model_key == m.model_key).map(|v| (*v).meta().clone());
+    }
     let mut counts: Vec<(&str, usize, &VectorsMeta)> = Vec::new();
     for v in all.iter().flatten() {
         let m = v.meta();
