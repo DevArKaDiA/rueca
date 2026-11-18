@@ -7,6 +7,7 @@ mod common;
 use std::time::{Duration, Instant};
 
 use common::{BILLING, CORE, Publisher, Server, TOKEN, TOKEN_NO_RULES, get, populated, post};
+use rueca_query::EngineOpens;
 use serde_json::{Value, json};
 
 const META_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
@@ -258,6 +259,47 @@ fn readiness_metrics_and_new_generations() {
     ] {
         assert!(metrics.contains(needle), "{needle} not in\n{metrics}");
     }
+}
+
+/// Ready means warm: `/readyz` answers 200 only once the engine that serves
+/// calls has opened the generation's organization index and every default
+/// segment, so the first `search_symbols` after it opens nothing; a new
+/// generation is warmed before `/readyz` names it.
+#[test]
+fn ready_means_warm() {
+    let url = "memory://serve-warm";
+    let s = Server::start(url, "");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(get(&format!("{}/readyz", s.ops), &[]).status, 503);
+    let mut p = populated(url);
+    assert_eq!(s.wait_ready()["generation"], 1);
+    let serving = s.state().serving().unwrap();
+    let warm = EngineOpens { org_index: 1, segments: 3 };
+    assert_eq!(serving.engine.opens(), warm, "ready before the warm-up finished");
+    let r = s.call(TOKEN, "search_symbols", json!({"query": "invoice"}));
+    assert!(r.body.contains("issue_invoice"), "{}", r.body);
+    assert_eq!(serving.engine.opens(), warm, "the first call after readiness opened something");
+    let metrics = get(&format!("{}/metrics", s.ops), &[]).body;
+    assert!(metrics.contains("rueca_generation_warm_seconds_count 1"), "{metrics}");
+
+    // Generation 2 adds a repository: when `/readyz` names it, its index and
+    // the new segment are open (the three unchanged segments stay open).
+    p.snapshot("github.com/acme/shipping", &[("ship/labels.py", "def print_label(parcel):\n    return parcel\n")]);
+    let repos =
+        ["github.com/acme/billing", "github.com/acme/core", "github.com/hidden/secret", "github.com/acme/shipping"];
+    assert_eq!(p.generation(&repos), 2);
+    let started = Instant::now();
+    while get(&format!("{}/readyz", s.ops), &[]).json()["generation"] != 2 {
+        assert!(started.elapsed() < Duration::from_secs(30), "generation 2 never served");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let warm = EngineOpens { org_index: 2, segments: 4 };
+    assert_eq!(serving.engine.opens(), warm, "generation 2 ready before its warm-up finished");
+    let r = s.call(TOKEN, "search_symbols", json!({"query": "label"}));
+    assert!(r.body.contains("print_label"), "{}", r.body);
+    assert_eq!(serving.engine.opens(), warm);
+    let metrics = get(&format!("{}/metrics", s.ops), &[]).body;
+    assert!(metrics.contains("rueca_generation_warm_seconds_count 2"), "{metrics}");
 }
 
 /// (g) Over the principal's burst: 429 with `Retry-After`.

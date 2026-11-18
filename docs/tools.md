@@ -673,8 +673,8 @@ transport and the caller's visibility differ.
   timeout of the same length around the call is the backstop and gives
   the same error. `rueca mcp` (stdio) and `rueca query` have no deadline.
 - **Operations** (`[http].ops_listen`, no auth): `/healthz`, `/readyz`
-  (`503` until a generation is served, then `{"generation": n, "warm":
-  "k/m"}`), `/metrics` (Prometheus). `GET /status` on the main listener
+  (`503` until a generation is served and the engine warmed on it, then
+  `{"generation": n, "warm": "k/m"}`), `/metrics` (Prometheus). `GET /status` on the main listener
   (`rueca:read`): generation, lag, and the caller's repositories with their
   refs and commits.
 

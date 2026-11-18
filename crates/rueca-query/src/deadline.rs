@@ -35,6 +35,9 @@ impl std::error::Error for DeadlineExceeded {}
 /// `1ms`, `250ms`, `10s`, `2.5s`: milliseconds under a second, else
 /// seconds to a tenth.
 pub(crate) fn format_duration(d: Duration) -> String {
+    if !d.is_zero() && d < Duration::from_millis(1) {
+        return format!("{}us", d.as_micros().max(1));
+    }
     let ms = d.as_millis() + u128::from(d.subsec_nanos() % 1_000_000 >= 500_000);
     if ms < 1000 {
         return format!("{ms}ms");
@@ -97,7 +100,8 @@ mod tests {
     fn durations() {
         let cases = [
             (Duration::ZERO, "0ms"),
-            (Duration::from_micros(999), "1ms"),
+            (Duration::from_nanos(1), "1us"),
+            (Duration::from_micros(999), "999us"),
             (Duration::from_millis(250), "250ms"),
             (Duration::from_millis(9_998), "10s"),
             (Duration::from_secs(10), "10s"),

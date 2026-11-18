@@ -5,19 +5,34 @@
 //! [`pull_generation`] with the version of `org.json` it last read: one
 //! conditional request when nothing changed. A new generation is downloaded
 //! whole (`pull_generation` fetches every segment, pack and organization
-//! file it names, defaults and refs), installed under the mirror's lock, and
-//! the engine reads it on its next call (it re-reads the local pointer per
-//! call). Then:
+//! file it names, defaults and refs) and installed under the mirror's lock.
+//! Then:
 //!
-//! - **readiness**: the organization index of the generation is opened
-//!   (`ready_when = "index"`); with `"warm"` every default segment is also
-//!   opened and verified (timed into `rueca_segment_open_seconds`);
+//! - **warm-up**: through the engine that serves calls, with
+//!   `Visibility::All`, `list_repositories` and a one-result
+//!   `search_symbols` open the generation's organization index (its tantivy
+//!   segments and routing profiles) and every default segment into the
+//!   engine's caches, so the first call after readiness opens nothing.
+//!   Timed into `rueca_generation_warm_seconds` and the `serving generation`
+//!   log line (`warm_ms`);
+//! - **readiness**: only once the warm-up finished is the generation
+//!   published (`/readyz`, `/status`, `rueca_generation`); with
+//!   `ready_when = "warm"` every default segment is also opened and verified
+//!   again (timed into `rueca_segment_open_seconds`);
 //! - **eviction**: when the mirror's segments, packs and organization files
 //!   exceed `[store].cache_bytes`, segment files that the current generation
 //!   does not name are deleted, least recently accessed first. Limits:
 //!   packs and superseded organization index files are never evicted, and
 //!   the current generation is never evicted even when it alone exceeds the
 //!   budget.
+//!
+//! **A generation change** keeps `/readyz` on the old generation until the
+//! new one is warm, but not the engine: it re-reads the local pointer on
+//! every call, and `pull_generation` writes that pointer before the warm-up
+//! starts. A call arriving in between reads the new generation and opens
+//! what it needs itself (calls meanwhile wait on the engine's
+//! organization-index lock, not on a second open); segments the two
+//! generations share stay open.
 //!
 //! The organization is `[org].name`, else the one the store's `store.json`
 //! names; until the store has a `store.json` and a generation the app is not
@@ -28,12 +43,12 @@ use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
 use rueca_mcp::RuecaServer;
-use rueca_query::Engine;
-use rueca_segment::org::{OrgGeneration, OrgIndex, current_generation, org_dir};
+use rueca_query::{Engine, RespondOptions, Visibility};
+use rueca_segment::org::{OrgGeneration, current_generation, org_dir};
 use rueca_service::{PullGenerationReport, ServiceStore, pull_generation};
 use rueca_storage::{ObjectVersion, Storage};
 
@@ -44,10 +59,16 @@ use crate::metrics::Metrics;
 use crate::store::CountingStorage;
 use crate::visibility::VisibilityCache;
 
+/// The `search_symbols` query of the warm-up: any short query searches
+/// every repository's segment of the organization index.
+const WARM_QUERY: &str = "main";
+
 /// What serves MCP once the organization is known.
 pub struct Serving {
     pub svc: ServiceStore,
     pub server: RuecaServer,
+    /// The engine `server` runs (a clone: same caches), for the warm-up.
+    pub engine: Engine,
     pub org: String,
 }
 
@@ -153,7 +174,10 @@ impl AppState {
         let Some(report) = pull_generation(&serving.svc, known.as_ref())? else {
             return Ok(());
         };
-        let current = self.install(&serving, &report)?;
+        let dir = &serving.svc.local.dir;
+        let g = current_generation(dir, &serving.org)?.context("the pulled generation is not installed")?;
+        let warm_up = self.warm_up(&serving, &g)?;
+        let current = self.install(&serving, &report, g)?;
         *known = Some(report.version.clone());
         tracing::info!(
             org = %serving.org,
@@ -162,6 +186,7 @@ impl AppState {
             segments_downloaded = report.segments_downloaded,
             bytes_downloaded = report.bytes_downloaded,
             warm = %format!("{}/{}", current.warm.0, current.warm.1),
+            warm_ms = u64::try_from(warm_up.as_millis()).unwrap_or(u64::MAX),
             "serving generation"
         );
         *self.current.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(current));
@@ -186,16 +211,34 @@ impl AppState {
         };
         let svc = ServiceStore::with_storage(self.storage.clone(), &self.config.store.cache_dir, &org)?;
         let engine = Engine::for_org(svc.local.dir.clone(), &org)?;
-        let serving = Arc::new(Serving { svc, server: RuecaServer::new(engine), org });
+        let serving = Arc::new(Serving { svc, server: RuecaServer::new(engine.clone()), engine, org });
         *self.serving.write().unwrap_or_else(|p| p.into_inner()) = Some(serving.clone());
         Ok(serving)
     }
 
-    /// Opens what readiness requires and records the cache metrics.
-    fn install(&self, serving: &Serving, report: &PullGenerationReport) -> anyhow::Result<Current> {
-        let dir = &serving.svc.local.dir;
-        let g = current_generation(dir, &serving.org)?.context("the pulled generation is not installed")?;
-        OrgIndex::open_generation(dir, g.clone()).context("opening the organization index")?;
+    /// Opens the installed generation `g` through the serving engine (see
+    /// the module docs, *warm-up*) and times it. An organization without
+    /// repositories has nothing to open.
+    fn warm_up(&self, serving: &Serving, g: &OrgGeneration) -> anyhow::Result<Duration> {
+        let started = Instant::now();
+        if g.repos.is_empty() {
+            return Ok(started.elapsed());
+        }
+        let opts = || RespondOptions { visibility: Some(Visibility::All), ..RespondOptions::default() };
+        let engine = &serving.engine;
+        engine
+            .respond_with("list_repositories", serde_json::json!({}), opts())
+            .context("warm-up: list_repositories")?;
+        let search = serde_json::json!({"query": WARM_QUERY, "limit": 1});
+        engine.respond_with("search_symbols", search, opts()).context("warm-up: search_symbols")?;
+        let took = started.elapsed();
+        self.metrics.histogram("rueca_generation_warm_seconds", &[]).record(took.as_secs_f64());
+        Ok(took)
+    }
+
+    /// The installed generation `g` as served: with `ready_when = "warm"`
+    /// its default segments verified, and the cache metrics recorded.
+    fn install(&self, serving: &Serving, report: &PullGenerationReport, g: OrgGeneration) -> anyhow::Result<Current> {
         let defaults: Vec<&str> = g.repos.iter().map(|r| r.default.segment_id.as_str()).collect();
         let present = defaults.iter().filter(|id| serving.svc.local.segment_path(id).exists()).count();
         if self.config.store.ready_when == ReadyWhen::Warm {

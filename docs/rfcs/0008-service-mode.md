@@ -1,6 +1,6 @@
 # RFC 0008 — Service mode
 
-- Status: Draft; phase 0 (§10.1) is implemented
+- Status: Draft; phases 0–1 (§10.1–§10.2) are implemented
 - Created: 2026-11-17
 - Depends on: RFC 0001 (§8 storage, §13 security, §14 deployment modes),
   RFC 0004 (latency floor), RFC 0005 (envelope, pinned ids, `repo` /
@@ -1387,7 +1387,7 @@ repository names. Code reaches an embedding provider only with
 | Phase | Delivers | Acceptance |
 |---|---|---|
 | 0. Storage abstraction, CAS catalog — **implemented (§10.1)** | `Storage` trait (local, `object_store`); per-repository catalogs; CAS pointer; local file lock; mark-and-sweep GC with grace; `packs` in segment meta; 64-bit id suffixes | Local-mode tests and bench numbers unchanged; the store round-trips through the in-memory `object_store`; two concurrent indexers never lose a registration (test); GC never deletes a referenced object (test); `rueca status` works against a bucket |
-| 1. `rueca serve`, query path | MCP over HTTP, stateless; static tokens + OIDC; visibility rules; deadline; rate limits; health, readiness, metrics, traces, `/status`; configuration file; Dockerfiles and image workflow; disk cache | Three MCP clients (Claude Code, VS Code, Cursor) complete `search_symbols` → `get_symbol` → `trace` over HTTP; differential test service == local; unauthenticated → 401 with PRM; a principal without rules sees an empty organization; lexical p95 ≤ 100 ms on the organization suite; time to ready reported |
+| 1. `rueca serve`, query path — **implemented (§10.2)** | MCP over HTTP, stateless; static tokens + OIDC; visibility rules; deadline; rate limits; health, readiness, metrics, traces, `/status`; configuration file; Dockerfiles and image workflow; disk cache | Three MCP clients (Claude Code, VS Code, Cursor) complete `search_symbols` → `get_symbol` → `trace` over HTTP; differential test service == local; unauthenticated → 401 with PRM; a principal without rules sees an empty organization; lexical p95 ≤ 100 ms on the organization suite; time to ready reported |
 | 2. Indexer role | Jobs and leases; reconciler; mirrors and filtered fetch; webhooks for three hosts; adaptive polling; refs lifecycle and expiry; `rueca index-worker`; updater lease | Organization suite indexed from URLs by 1 and 4 indexers with equal results; push → queryable p95 ≤ 5 min; a looping-parser fixture fails only its job; duplicate webhooks coalesce (test); a taken lease never corrupts the catalog (test); a PR ref expires by policy (test) |
 | 3. Embeddings and inventory | `embed` jobs on GPU indexers or a self-run endpoint; vector cache in the bucket; inventory discovery for the three hosts; cost report | Organization suite embedded on one GPU within RFC 0007 §5.6's estimate band; a CPU-only deployment serves lexical with the envelope's `lexical` list; inventory adds and removes repositories on reconcile (test); cost per repository reported |
 | 4. Scale, on measured need | Hotcache / range reads; shared segment writes or delta segments; pack compaction; a Postgres catalog if CAS contention is measured; ANN threshold (RFC 0007 phase 3) | Each starts on its trigger: time to ready > 60 s; ref re-index cost; pack live fraction; `rueca_cas_conflicts_total`; scope above RFC 0007 §6.4's threshold |
@@ -1442,6 +1442,81 @@ publishes: 0 live objects deleted; `rueca-storage` against MinIO: the
 ignored integration test (create, stale update, conditional get, list,
 multipart, delete) passes. Local-mode tests are unchanged; the bench was
 not re-run (the writer gained one JSON field).
+
+### 10.2 Phase 1 — implemented
+
+`rueca serve --config rueca-service.toml [--role query|all]` in a new
+crate `rueca-serve`: the stateless `POST /mcp` on `axum` 0.8 calling
+`rueca-mcp`'s `handle` per request, the authentication layer, visibility
+rules, deadlines, rate limits, `/healthz` / `/readyz` / `/metrics` /
+`/status`, JSON logs, the generation watcher over the phase-0 store, the
+configuration file with `env:` secret references and
+`--check-config`; `Engine::respond_with` (cooperative deadline, visibility
+per call, also in local mode); a multi-stage `Dockerfile` with a
+container workflow (build and smoke, no push); and the `service` bench
+suite. Choices and deviations:
+
+- **Dependencies** (all `cargo deny` clean, no advisory ignores): `axum`,
+  `tokio`, `tower`, `tower-http` (`limit`, `timeout`), `jsonwebtoken` 12
+  with `rust_crypto` (no aws-lc-sys), `globset`, `subtle`, `governor` 0.10
+  used directly (`tower_governor`'s IP extractor trusts forwarding headers
+  from any peer; Rueca honours them only from `[http].trusted_proxies`),
+  `metrics` 0.24 with the Prometheus text rendered from the app's own
+  registry (no `http-listener`), JWKS fetched with the `ureq` client
+  `rueca-storage` already has. OpenTelemetry (`opentelemetry` 0.33,
+  `tracing-opentelemetry` 0.34) is an optional feature `otel`, OTLP/HTTP
+  over `ureq`, tested against a fake collector only.
+- **Keys honoured**: `[store]` (plus `poll`, the watcher tick), `[org].name`,
+  `[http]` (plus `ip_rate_limit`, `trusted_proxies`), `[auth]`,
+  `[telemetry]`; `[[repo]]`, `[org].inventory`, `[indexing]`,
+  `[retention]` and `[retrieval]` are parsed and validated (secrets
+  resolved) but drive nothing until phases 2–3.
+- **Errors**: deadline expiry is JSON-RPC `-32001`, "not ready yet"
+  `-32002`, `request_timeout` answers 503; a token in the query string is
+  400; `WWW-Authenticate` carries `resource_metadata` only when an OIDC
+  issuer is configured (no PRM without one).
+- **Watcher**: `pull_generation` downloads the generation's files eagerly
+  (`ready_when = "warm"` adds opening and verifying the default segments);
+  eviction by `cache_bytes` covers segment files; `Engine` is `Clone`
+  with shared caches and `RuecaServer::with_visibility` /
+  `ToolCall::run_with` carry the caller's visibility and deadline (the
+  stdio path is unchanged). A principal without a matching rule sees an
+  empty organization (not an error).
+- **Deadline checks**: per selected segment, per tantivy segment and
+  over-fetch round in `top_hits`, per candidate file in `search_code`, and
+  every 64 items in `trace`, outlines and the multi-ref collapse; the
+  outer `tokio` timeout stays as a backstop with the same error.
+- **Image**: `gcr.io/distroless/cc-debian13:nonroot` with `git` 2.47.3,
+  its HTTPS helper and their libraries copied from `debian:trixie-slim`
+  (102 MB on disk, ≈ 35 MB compressed, of which the binary is 35.4 MB);
+  no shell and no ssh, so `ssh://` remotes and credential helpers need
+  the slim variant (phase 2 decides).
+
+Measured (debug build, the `service` suite's `--small` organization —
+two small repositories, 52 queries): time to ready 0.38–0.41 s;
+differential 52 / 52 JSON and 52 / 52 text byte-equal against `rueca
+query` on the same mirror; server-side p50 / p95: `search_symbols`
+1.3 / 2.5 ms, `get_symbol` 0.5 / 1.0 ms, `trace` 0.5–0.6 / 1.4–2.0 ms
+(client-side within 1 ms of those; one cold `search_symbols` at 33 ms).
+Clients over HTTP: Claude Code (`--mcp-config` with `"type": "http"` and
+a bearer header, one-shot `claude -p`) completed `search_symbols` →
+`get_symbol` → `trace` against `rueca serve`, the server logging the
+three calls with `outcome: ok`; VS Code's and Cursor's flows (legacy
+`initialize` with `MCP-Protocol-Version` on later requests, `GET /mcp`
+answered 405) are covered by the HTTP tests and documented in
+`docs/tools.md`; Cursor itself was not installed on the test machine
+and VS Code was not driven interactively.
+
+On 18 repositories of the organization suite (the cached members of the
+calibration split, 5 S1 queries × 3 passes, 20 derived `get_symbol` and
+`trace` calls each, debug build, one laptop): time to ready 8.8 s
+(download, verify, and warm the engine — before the warm-up landed the
+first query paid the segment opens, 2.2 s, which is why `/readyz` now
+means warmed); server-side p50 / p95: `search_symbols` 18 / 31 ms,
+`get_symbol` 0.5 / 1.0 ms, `trace` 0.5 / 1.0 ms (client-side 14 / 26
+ms, 0.7 / 1.5 ms, 0.8 / 1.7 ms); differential 45 / 45 JSON and 45 / 45
+text. The lexical p95 floor (≤ 100 ms) holds in a debug build; the
+20 ms target is to be measured in release.
 
 ## 11. Amendments
 

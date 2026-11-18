@@ -7,25 +7,26 @@ use std::time::Duration;
 
 use serde::{Deserialize, Deserializer};
 
-/// A duration written as an integer and a unit: `ms`, `s`, `m`, `h`, `d`
-/// (`"45s"`, `"8h"`, `"7d"`). One unit per value; `"0"` alone is zero.
+/// A duration written as an integer and a unit: `us`, `ms`, `s`, `m`, `h`,
+/// `d` (`"45s"`, `"8h"`, `"7d"`). One unit per value; `"0"` alone is zero.
 pub fn parse_duration(text: &str) -> Result<Duration, String> {
     let t = text.trim();
     if t == "0" {
         return Ok(Duration::ZERO);
     }
     let split =
-        t.find(|c: char| !c.is_ascii_digit()).ok_or_else(|| format!("`{text}` has no unit (ms, s, m, h, d)"))?;
+        t.find(|c: char| !c.is_ascii_digit()).ok_or_else(|| format!("`{text}` has no unit (us, ms, s, m, h, d)"))?;
     let (num, unit) = t.split_at(split);
     let n: u64 = num.parse().map_err(|_| format!("`{text}` is not a duration (e.g. \"12s\", \"500ms\", \"7d\")"))?;
     let secs = |k: u64| n.checked_mul(k).map(Duration::from_secs);
     let d = match unit.trim() {
+        "us" => Some(Duration::from_micros(n)),
         "ms" => Some(Duration::from_millis(n)),
         "s" => secs(1),
         "m" => secs(60),
         "h" => secs(3600),
         "d" => secs(86_400),
-        other => return Err(format!("`{text}`: unknown duration unit `{other}` (ms, s, m, h, d)")),
+        other => return Err(format!("`{text}`: unknown duration unit `{other}` (us, ms, s, m, h, d)")),
     };
     d.ok_or_else(|| format!("`{text}` is too large"))
 }

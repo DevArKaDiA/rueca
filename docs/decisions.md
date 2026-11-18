@@ -164,6 +164,28 @@ Still open for the resolver: a module and a function with one name
 (`mod spawn; pub use spawn::spawn;`) bind the module, so `tokio::spawn(…)`
 calls stay unresolved.
 
+## 2026-11-17 — Service query role: Rueca's own HTTP transport and auth layer, governor over tower_governor
+
+RFC 0008 phase 1. `rueca serve` answers MCP over a stateless `POST /mcp`
+on `axum`, calling the own MCP layer's `handle` once per request with a
+fresh or a legacy `Session` (no sessions, no SSE, JSON only), so any
+replica answers any request. The resource-server side of MCP
+authorization is Rueca's: static API tokens hashed in the file and OIDC
+bearer JWTs validated against the issuer's JWKS (`jsonwebtoken` with the
+pure-Rust `rust_crypto` backend; no aws-lc-sys), protected resource
+metadata, 401 / 403 challenges; a principal maps to the existing
+`Visibility` by configured rules, deny by default, and the engine runs
+every call with that visibility and a cooperative deadline
+(`Engine::respond_with`, checked inside the search, trace, scan and
+collapse loops). `governor` is used directly rather than
+`tower_governor`, whose IP key extractor trusts `X-Forwarded-For` from
+any peer; forwarding headers count only from `[http].trusted_proxies`.
+Prometheus text is rendered from the app's own `metrics` registry;
+OpenTelemetry is an optional feature. The image is distroless with `git`
+copied in; it has no shell or ssh. Verified: byte-equal answers against
+local mode, Claude Code over HTTP, sub-3 ms server p95 on the small
+organization in a debug build.
+
 ## 2026-11-17 — Service store: rusty-s3 and own backends instead of object_store
 
 RFC 0008 phase 0. `object_store` 0.14.2, the crate RFC 0008 §5.10 chose,

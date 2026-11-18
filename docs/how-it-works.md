@@ -1143,11 +1143,16 @@ directly.
 is a replica: its disk cache (`[store].cache_dir`) is such a mirror. A
 watcher calls `pull_generation` every `[store].poll` (5 s) with the
 version of `org.json` it last read — one conditional request when nothing
-changed — and a new generation is downloaded whole, installed, its
-organization index opened (then `/readyz` answers 200), and segments the
-generation no longer names are evicted above `[store].cache_bytes`. The
-engine re-reads the local pointer on every call, so the next request sees
-the new generation. `POST /mcp` runs Rueca's own MCP core
+changed — and a new generation is downloaded whole, installed, warmed, and
+segments the generation no longer names are evicted above
+`[store].cache_bytes`. Ready means warmed: `/readyz` answers 200 (and names
+a new generation) only after a `list_repositories` and a one-result
+`search_symbols` through the serving engine have opened the organization
+index, its routing profiles and every default segment into the engine's
+caches (`rueca_generation_warm_seconds`), so the first call opens nothing.
+The engine re-reads the local pointer on every call, so a request arriving
+during a later generation's warm-up already reads it and opens what it
+needs itself. `POST /mcp` runs Rueca's own MCP core
 (`RuecaServer::handle`, synchronous) once per request with a fresh
 session; a tool call runs on a blocking thread with the caller's
 `Visibility` — the union of the repository globs its static token or OIDC

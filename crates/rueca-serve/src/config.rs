@@ -156,10 +156,12 @@ pub struct StoreConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReadyWhen {
-    /// Ready once the organization index is open.
+    /// Ready once the serving engine is warm: the organization index and
+    /// every default segment open in its caches (see `state`, *warm-up*).
     #[default]
     Index,
-    /// Ready once every default segment is also open.
+    /// Also opens and verifies every default segment again, timed into
+    /// `rueca_segment_open_seconds`.
     Warm,
 }
 
@@ -570,6 +572,11 @@ impl ServiceConfig {
                 _ => p.push(format!("http.canonical_url: `{u}` is not an absolute http(s) URL")),
             }
         }
+        Self::validate_http_lists(h, p);
+        Self::validate_http_limits(h, p);
+    }
+
+    fn validate_http_lists(h: &HttpConfig, p: &mut Vec<String>) {
         for o in &h.allowed_origins {
             if url::Url::parse(o).map_or(true, |u| u.host_str().is_none()) {
                 p.push(format!("http.allowed_origins: `{o}` is not an origin (scheme://host[:port])"));
@@ -580,6 +587,9 @@ impl ServiceConfig {
                 p.push(format!("http.trusted_proxies: `{proxy}` is not an IP address or CIDR block"));
             }
         }
+    }
+
+    fn validate_http_limits(h: &HttpConfig, p: &mut Vec<String>) {
         for (key, rl) in [("http.rate_limit", h.rate_limit), ("http.ip_rate_limit", h.ip_rate_limit)] {
             if rl.per_second == 0 || rl.burst == 0 {
                 p.push(format!("{key}: per_second and burst must be positive"));

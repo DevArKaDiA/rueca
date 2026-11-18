@@ -28,6 +28,7 @@ const HELP: &[(&str, &str)] = &[
     ("rueca_cache_requests_total", "Disk cache lookups by cache and result (hit, miss)"),
     ("rueca_cache_bytes", "Bytes held by the disk cache, by cache"),
     ("rueca_segment_open_seconds", "Time to open and verify a segment"),
+    ("rueca_generation_warm_seconds", "Time to warm the engine on a new generation before serving it"),
     ("rueca_store_requests_total", "Object storage requests by operation and result"),
 ];
 

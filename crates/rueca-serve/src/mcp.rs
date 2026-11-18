@@ -151,7 +151,7 @@ async fn call_tool(
     let task_span = span.clone();
     let task = tokio::task::spawn_blocking(move || task_span.in_scope(|| call.run_with(&server, opts)));
     let (outcome, response) = match tokio::time::timeout(deadline, task).await {
-        Ok(Ok(out)) => (outcome_of(&out), json_response(StatusCode::OK, out.to_json())),
+        Ok(Ok(out)) => (outcome_of(&out), json_response(StatusCode::OK, name_budget(out, deadline).to_json())),
         Ok(Err(join)) => {
             tracing::error!(error = %join, "tool call task failed");
             let err = ErrorObject::new(code::INTERNAL_ERROR, format!("internal error in `{tool}`"));
@@ -161,6 +161,18 @@ async fn call_tool(
     };
     st.metrics.mcp_request(&tool, outcome, scope, Some(started.elapsed()));
     (outcome, response)
+}
+
+/// An engine deadline error names the configured budget, not the time
+/// that was left when the call started (zero once the deadline has
+/// passed before the engine's first check).
+fn name_budget(out: Outgoing, deadline: Duration) -> Outgoing {
+    match out {
+        Outgoing::Error { id, error } if error.code == code::DEADLINE => {
+            Outgoing::Error { id, error: deadline_error(deadline) }
+        }
+        other => other,
+    }
 }
 
 /// The error of a call that ran past `deadline` (the same message the

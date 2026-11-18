@@ -6,7 +6,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use common::{Server, TOKEN, get, populated};
+use common::{BILLING, Publisher, Server, TOKEN, get, populated};
 use rueca_query::{DeadlineExceeded, RespondOptions};
 use serde_json::{Value, json};
 
@@ -55,21 +55,23 @@ fn a_generous_deadline_changes_nothing() {
     }
 }
 
-/// `query_deadline = "1ms"`: `search_symbols` over the organization is
-/// stopped by the engine and answered with -32001 naming the deadline.
+/// `query_deadline = "1us"`: the deadline has passed before the engine's
+/// first check, so `search_symbols` is answered with -32001 naming it,
+/// deterministically, however small the organization.
 #[test]
 fn a_short_query_deadline_is_a_json_rpc_error() {
-    let _p = populated("memory://deadline-http");
-    let s = Server::start("memory://deadline-http", "query_deadline = \"1ms\"");
+    let url = "memory://deadline-http";
+    let mut p = Publisher::new(url);
+    p.snapshot("github.com/acme/billing", &[BILLING]);
+    assert_eq!(p.generation(&["github.com/acme/billing"]), 1);
+    let s = Server::start(url, "query_deadline = \"1us\"");
     s.wait_ready();
-    let reply = (0..20)
-        .map(|_| s.call(TOKEN, "search_symbols", json!({"query": "invoice order", "limit": 50})))
-        .find(|r| r.json()["error"]["code"] == -32001);
-    let Some(r) = reply else { panic!("no call exceeded 1 ms") };
+    let r = s.call(TOKEN, "search_symbols", json!({"query": "invoice order", "limit": 50}));
     assert_eq!(r.status, 200, "{}", r.body);
     let v = r.json();
     assert_eq!(v["id"], 7);
-    assert_eq!(v["error"]["message"], "deadline of 1ms exceeded; narrow `repo` or lower `limit`", "{v}");
+    assert_eq!(v["error"]["code"], -32001, "{v}");
+    assert_eq!(v["error"]["message"], "deadline of 1us exceeded; narrow `repo` or lower `limit`", "{v}");
     let metrics = get(&format!("{}/metrics", s.ops), &[]).body;
     assert!(metrics.contains("rueca_mcp_requests_total{tool=\"search_symbols\",outcome=\"deadline\"}"), "{metrics}");
 }

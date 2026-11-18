@@ -202,6 +202,7 @@ mod view;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
@@ -419,9 +420,28 @@ pub struct Engine {
     segments: Arc<Mutex<HashMap<String, Arc<Segment>>>>,
     /// The last opened generation of the organization index.
     org_index: Arc<Mutex<Option<Arc<OrgIndex>>>>,
+    /// What the caches above opened, shared by the clones ([`Engine::opens`]).
+    opens: Arc<OpenCounters>,
     /// The deadline of the call this engine runs (set by
     /// [`Engine::respond_with`] on its per-call copy).
     deadline: Deadline,
+}
+
+/// What an engine and its clones have opened into their shared caches since
+/// it was created ([`Engine::opens`]): a service checks with it that a
+/// warm-up left nothing for the first call to open.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EngineOpens {
+    /// Organization index generations opened.
+    pub org_index: u64,
+    /// Segments opened (a segment evicted and needed again counts twice).
+    pub segments: u64,
+}
+
+#[derive(Default)]
+struct OpenCounters {
+    org_index: AtomicU64,
+    segments: AtomicU64,
 }
 
 /// The snapshots a call reads, plus the organization context in organization
@@ -455,6 +475,7 @@ impl Engine {
             route: RouteParams::from_env(),
             segments: Arc::new(Mutex::new(HashMap::new())),
             org_index: Arc::new(Mutex::new(None)),
+            opens: Arc::default(),
             deadline: Deadline::default(),
         })
     }
@@ -488,6 +509,15 @@ impl Engine {
 
     pub fn routing(&self) -> &RouteParams {
         &self.route
+    }
+
+    /// What this engine and its clones have opened so far (the organization
+    /// index generations and the segments of their shared caches).
+    pub fn opens(&self) -> EngineOpens {
+        EngineOpens {
+            org_index: self.opens.org_index.load(Ordering::Relaxed),
+            segments: self.opens.segments.load(Ordering::Relaxed),
+        }
     }
 
     /// Runs tool `name` with JSON `args` and returns the JSON result described
@@ -530,6 +560,7 @@ impl Engine {
             route: self.route,
             segments: self.segments.clone(),
             org_index: self.org_index.clone(),
+            opens: self.opens.clone(),
             deadline,
         }
     }
@@ -761,6 +792,7 @@ impl Engine {
             return Ok(idx.clone());
         }
         let idx = Arc::new(OrgIndex::open_generation(&self.store_dir, generation)?);
+        self.opens.org_index.fetch_add(1, Ordering::Relaxed);
         *cache = Some(idx.clone());
         Ok(idx)
     }
@@ -919,6 +951,7 @@ impl Engine {
             return Ok(s.clone());
         }
         let seg = Arc::new(store.open_segment(segment_id)?);
+        self.opens.segments.fetch_add(1, Ordering::Relaxed);
         self.segments.lock().unwrap_or_else(|p| p.into_inner()).insert(segment_id.to_string(), seg.clone());
         Ok(seg)
     }
