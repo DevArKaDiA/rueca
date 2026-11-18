@@ -94,6 +94,66 @@ impl EmbedConfig {
     }
 }
 
+/// What a run asks of the vectors pass (`rueca index [--embed[=P] |
+/// --no-embed]`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum EmbedRequest {
+    /// The configured preset, if any (`RUECA_EMBED_PRESET`, the
+    /// organization file, `<store>/rueca.toml` and its profile defaults);
+    /// a failure warns and the run stays lexical.
+    #[default]
+    Configured,
+    /// `--embed[=PRESET]`: that preset, else the configured one, else the
+    /// default; a failure is an error.
+    Required(Option<String>),
+    /// `--no-embed`: lexical, whatever is configured.
+    Off,
+}
+
+/// The embedding of a run: `request` against the configuration
+/// (precedence: argument, environment, organization file, store file and
+/// its profile, built-in default; RFC 0007 §8.3). `org` is the
+/// organization's `[retrieval]` when the run indexes for one: a `remote:`
+/// preset then needs its `allow_remote = true` (RFC 0007 §3.5).
+///
+/// # Errors
+///
+/// An invalid store file; a remote preset the organization forbids.
+pub fn resolve_embed(
+    store: &Path,
+    request: &EmbedRequest,
+    org: Option<(&str, &rueca_embed::RetrievalConfig)>,
+) -> anyhow::Result<Option<EmbedConfig>> {
+    if *request == EmbedRequest::Off {
+        return Ok(None);
+    }
+    let file = rueca_embed::RetrievalConfig::load(store)?;
+    let file = match org {
+        Some((_, o)) => o.clone().or(file),
+        None => file,
+    };
+    let env = std::env::var("RUECA_EMBED_PRESET").ok().filter(|p| !p.is_empty());
+    let configured = env.or_else(|| file.preset.clone()).filter(|p| p != "off");
+    let (preset, required) = match request {
+        EmbedRequest::Required(Some(p)) => (p.clone(), true),
+        EmbedRequest::Required(None) => (configured.unwrap_or_else(|| rueca_embed::DEFAULT_PRESET.to_string()), true),
+        _ => match configured {
+            Some(p) => (p, false),
+            None => return Ok(None),
+        },
+    };
+    if let Some((name, o)) = org
+        && rueca_embed::is_remote_preset(&preset)
+        && !o.remote_allowed()
+    {
+        anyhow::bail!(
+            "organization `{name}` does not allow remote presets (`{preset}` would send its code to the provider): \
+             set `[retrieval] allow_remote = true` in its rueca-org.toml to opt in"
+        );
+    }
+    Ok(Some(EmbedConfig { preset, dims: file.dims, required, ..EmbedConfig::default() }))
+}
+
 /// Where the indexer gets its embedder; tests inject a deterministic one.
 pub trait EmbedderLoader: Sync {
     /// The model record, without loading the model.

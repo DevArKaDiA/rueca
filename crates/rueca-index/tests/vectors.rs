@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rueca_embed::hashing::HashingEmbedder;
 use rueca_embed::{Embedder, ModelMeta};
+use rueca_index::refs::{RefIndexOptions, index_ref_with};
 use rueca_index::vectors::TEXT_BUILDER_VERSION;
 use rueca_index::{EmbedConfig, EmbedderLoader, IndexOptions, IndexReport, index_worktree_with};
 use rueca_segment::Store;
@@ -205,4 +206,60 @@ fn open_cost_on_this_repository() {
         lexical.segment.bytes as f64 / 1e6,
         hybrid.segment.bytes as f64 / 1e6,
     );
+}
+
+/// Runs git in `dir` with a fixed identity; `false` when it fails or git is
+/// missing.
+fn git(dir: &Path, args: &[&str]) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
+        .args(args)
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// RFC 0007 §11.2, "re-index after a one-file change": a branch that
+/// differs from the indexed working tree in one file embeds only that
+/// file's symbols, every other vector coming from the store cache.
+#[test]
+fn a_ref_embeds_only_the_file_it_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = fs::canonicalize(dir.path()).unwrap();
+    let (root, store) = (base.join("repo"), base.join("store"));
+    fs::create_dir_all(&root).unwrap();
+    if !git(&root, &["init", "-q"]) {
+        eprintln!("git not available; skipping");
+        return;
+    }
+    assert!(git(&root, &["symbolic-ref", "HEAD", "refs/heads/main"]));
+    repo(&root);
+    assert!(git(&root, &["add", "-A"]) && git(&root, &["commit", "-q", "-m", "one"]));
+    assert!(git(&root, &["checkout", "-q", "-b", "feature"]));
+    let draw = "def draw_widget(canvas):\n    canvas.paint(fast=True)\n\n\ndef erase_widget(canvas):\n    canvas.clear()\n\nLIMIT = 3\n";
+    write(&root, "app/draw.py", draw);
+    assert!(git(&root, &["commit", "-q", "-am", "draw"]) && git(&root, &["checkout", "-q", "main"]));
+    let loader = Hashing::new(32);
+    let main = index_worktree_with(&opts(&root, &store, embed(None)), &loader).unwrap();
+    assert_eq!(main.vectors.unwrap().embedded, 6);
+    let r = RefIndexOptions {
+        root: root.clone(),
+        name: "feature".into(),
+        store: store.clone(),
+        embed: embed(None),
+        no_embed: true,
+        ..RefIndexOptions::default()
+    };
+    let report = index_ref_with(&r, &loader).unwrap();
+    let v = report.index.vectors.clone().expect("the ref is embedded");
+    let seg = Store::open(&store).unwrap().open_segment(&report.index.segment.id).unwrap();
+    let vecs = seg.vectors().unwrap().unwrap();
+    let in_draw =
+        vecs.nodes().iter().filter(|&&n| seg.node(n).file.is_some_and(|f| seg.file(f).path == "app/draw.py")).count();
+    eprintln!(
+        "ref feature: {} units, {} embedded ({} in app/draw.py), {} cached",
+        v.units, v.embedded, in_draw, v.cached
+    );
+    assert_eq!((v.units, v.embedded, v.cached, in_draw), (7, 2, 5, 2));
 }

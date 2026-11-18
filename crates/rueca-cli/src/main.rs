@@ -119,10 +119,14 @@ enum Command {
         #[arg(long, requires = "ref_name")]
         remove: bool,
         /// Embed the symbols for hybrid search (RFC 0007): with a preset, or
-        /// the configured one (`RUECA_EMBED_PRESET`, `[retrieval] preset` in
-        /// `<store>/rueca.toml`), else the default. The lexical segment is
-        /// published first; vectors are cached in the store, so a re-index
-        /// embeds only new text. Missing weights are an error (`rueca models pull`).
+        /// the configured one (`RUECA_EMBED_PRESET`, `[retrieval] preset` of
+        /// the organization file or of `<store>/rueca.toml`), else the
+        /// default. The lexical segment is published first; vectors are
+        /// cached in the store, so a re-index (or a ref) embeds only new
+        /// text. With --org every member and ref is embedded with the
+        /// organization's model. Missing weights are an error (`rueca models
+        /// pull`); a `remote:` preset in an organization needs its
+        /// `[retrieval] allow_remote = true`.
         #[arg(long, value_name = "PRESET", num_args = 0..=1, require_equals = true, default_missing_value = "", conflicts_with = "no_embed")]
         embed: Option<String>,
         /// Do not embed, even when a preset is configured.
@@ -210,21 +214,21 @@ fn main() -> ExitCode {
     init_logging(cli.verbose, matches!(cli.command, Command::Mcp { .. }));
     let store = cli.store.clone().unwrap_or_else(Store::default_dir);
     let result = match cli.command {
-        Command::Index { path, repo, threads, ref_name, remove, embed, no_embed } => match (cli.org, ref_name) {
-            (Some(org), Some(name)) => {
-                let out = Output { json: cli.json, pretty: cli.pretty };
-                cmd_index_org_ref(&store, &org, RefCmd { path, repo, name, remove, threads }, out)
+        Command::Index { path, repo, threads, ref_name, remove, embed, no_embed } => {
+            let out = Output { json: cli.json, pretty: cli.pretty };
+            let request = embed_request(embed, no_embed);
+            match (cli.org, ref_name) {
+                (Some(org), Some(name)) => {
+                    cmd_index_org_ref(&store, &org, RefCmd { path, repo, name, remove, threads, embed: request }, out)
+                }
+                (Some(org), None) => cmd_index_org(&store, &org, OrgCmd { path, repo, threads, embed: request }, out),
+                (None, Some(name)) => {
+                    cmd_index_ref(&store, RefCmd { path, repo, name, remove, threads, embed: request }, out)
+                }
+                (None, None) => rueca_index::resolve_embed(&store, &request, None)
+                    .and_then(|embed| cmd_index(&store, IndexCmd { path, repo, threads, embed }, out)),
             }
-            (Some(org), None) => cmd_index_org(&store, &org, path, repo, cli.json, cli.pretty, threads),
-            (None, Some(name)) => {
-                let out = Output { json: cli.json, pretty: cli.pretty };
-                cmd_index_ref(&store, RefCmd { path, repo, name, remove, threads }, out)
-            }
-            (None, None) => embed_config(&store, embed, no_embed).and_then(|embed| {
-                let out = Output { json: cli.json, pretty: cli.pretty };
-                cmd_index(&store, IndexCmd { path, repo, threads, embed }, out)
-            }),
-        },
+        }
         Command::Query { tool, args, text } => {
             return cmd_query(&store, cli.root, cli.org.as_deref(), &tool, args, cli.pretty, text);
         }
@@ -282,29 +286,16 @@ struct IndexCmd {
     embed: Option<rueca_index::EmbedConfig>,
 }
 
-/// How `rueca index` embeds: `--embed[=PRESET]` (required), else a
-/// configured preset (`RUECA_EMBED_PRESET`, then `[retrieval] preset` of
-/// `<store>/rueca.toml`; a failure warns and indexes lexically), else not.
-fn embed_config(
-    store: &Path,
-    flag: Option<String>,
-    no_embed: bool,
-) -> anyhow::Result<Option<rueca_index::EmbedConfig>> {
-    if no_embed {
-        return Ok(None);
+/// What `rueca index` asks of the vectors pass: `--no-embed`, `--embed`
+/// (`=PRESET`: that preset; bare: the configured one, else the default;
+/// failures are errors), else the configured preset if any
+/// ([`rueca_index::resolve_embed`]).
+fn embed_request(flag: Option<String>, no_embed: bool) -> rueca_index::EmbedRequest {
+    match (flag, no_embed) {
+        (_, true) => rueca_index::EmbedRequest::Off,
+        (Some(p), false) => rueca_index::EmbedRequest::Required(Some(p).filter(|p| !p.is_empty())),
+        (None, false) => rueca_index::EmbedRequest::Configured,
     }
-    let file = rueca_embed::RetrievalConfig::load(store)?;
-    let env = std::env::var("RUECA_EMBED_PRESET").ok().filter(|p| !p.is_empty());
-    let configured = env.or_else(|| file.preset.clone()).filter(|p| p != "off");
-    let (preset, required) = match flag {
-        Some(p) if !p.is_empty() => (p, true),
-        Some(_) => (configured.unwrap_or_else(|| rueca_embed::DEFAULT_PRESET.to_string()), true),
-        None => match configured {
-            Some(p) => (p, false),
-            None => return Ok(None),
-        },
-    };
-    Ok(Some(rueca_index::EmbedConfig { preset, dims: file.dims, required, ..rueca_index::EmbedConfig::default() }))
 }
 
 fn cmd_index(store: &Path, cmd: IndexCmd, out: Output) -> anyhow::Result<()> {
@@ -322,6 +313,7 @@ fn cmd_index(store: &Path, cmd: IndexCmd, out: Output) -> anyhow::Result<()> {
         budget: rueca_extract::Budget::default(),
         threads,
         embed,
+        no_embed: true,
         ..rueca_index::IndexOptions::default()
     };
     let report = rueca_index::index_worktree(&opts)?;
@@ -394,6 +386,15 @@ struct RefCmd {
     name: String,
     remove: bool,
     threads: Option<usize>,
+    embed: rueca_index::EmbedRequest,
+}
+
+/// `rueca index --org FILE [PATH]`.
+struct OrgCmd {
+    path: Option<PathBuf>,
+    repo: Option<String>,
+    threads: Option<usize>,
+    embed: rueca_index::EmbedRequest,
 }
 
 /// Indexes (or removes) a ref snapshot of PATH's repository (RFC 0006 §9.3).
@@ -425,6 +426,9 @@ fn cmd_index_ref(store: &Path, cmd: RefCmd, out: Output) -> anyhow::Result<()> {
         repo: cmd.repo,
         budget: rueca_extract::Budget::default(),
         threads: cmd.threads,
+        embed: rueca_index::resolve_embed(store, &cmd.embed, None)?,
+        no_embed: true,
+        org: None,
     })?;
     // Organizations holding the repository list the ref (RFC 0006 §9.3):
     // only its entry changes.
@@ -502,23 +506,16 @@ fn org_arg(arg: &str) -> anyhow::Result<(String, Option<rueca_index::org::OrgCon
     Ok((arg.to_string(), None))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn cmd_index_org(
-    store: &Path,
-    org: &str,
-    path: Option<PathBuf>,
-    repo: Option<String>,
-    json: bool,
-    pretty: bool,
-    threads: Option<usize>,
-) -> anyhow::Result<()> {
+fn cmd_index_org(store: &Path, org: &str, cmd: OrgCmd, out: Output) -> anyhow::Result<()> {
+    let OrgCmd { path, repo, threads, embed } = cmd;
     if repo.is_some() {
         anyhow::bail!("`--repo` cannot be combined with `--org`; set `id` on the `[[repo]]` in the organization file");
     }
     let (_, config) = org_arg(org)?;
-    let Some(config) = config else {
+    let Some(mut config) = config else {
         anyhow::bail!("`rueca index --org` needs the organization file (`rueca-org.toml`), not a name");
     };
+    config.embed = embed;
     let report = rueca_index::org::index_org(&rueca_index::org::OrgIndexOptions {
         config,
         store: store.to_path_buf(),
@@ -526,8 +523,8 @@ fn cmd_index_org(
         threads,
         only: path,
     })?;
-    if json {
-        println!("{}", render(&serde_json::to_value(&report)?, pretty));
+    if out.json {
+        println!("{}", render(&serde_json::to_value(&report)?, out.pretty));
         return Ok(());
     }
     for r in &report.indexed {
@@ -543,6 +540,9 @@ fn cmd_index_org(
             r.segment.edge_count,
             r.duration_ms
         );
+        if let Some(v) = &r.vectors {
+            println!("  vectors: {} symbols ({}): {} cached, {} embedded", v.units, v.preset, v.cached, v.embedded);
+        }
     }
     for r in &report.refs {
         println!(
@@ -559,7 +559,35 @@ fn cmd_index_org(
         println!("  ref not indexed: {e}");
     }
     print_org_update(&report.update);
+    print_coverage(report.model.as_ref(), &report.vectors);
     Ok(())
+}
+
+/// The vector coverage of an organization: its model and, per entry, the
+/// status of its vectors (RFC 0007 §10).
+fn print_coverage(model: Option<&rueca_segment::org::OrgModel>, rows: &[rueca_index::org::MemberVectors]) {
+    if model.is_none() && rows.iter().all(|r| r.rows == 0) {
+        return;
+    }
+    let fused = rows.iter().filter(|r| r.status == "fused").count();
+    match model {
+        Some(m) => println!(
+            "  vectors:    model {} ({}, {} dims): {fused}/{} entries fused",
+            m.preset,
+            m.model_key.get(..8).unwrap_or(&m.model_key),
+            m.dims,
+            rows.len()
+        ),
+        None => println!("  vectors:    no organization model recorded; {fused}/{} entries have vectors", rows.len()),
+    }
+    for r in rows.iter().filter(|r| r.status != "fused") {
+        let label = match &r.ref_name {
+            Some(x) => format!("{}@{x}", r.repo),
+            None => r.repo.clone(),
+        };
+        let what = r.preset.as_deref().map(|p| format!(" ({p})")).unwrap_or_default();
+        println!("    {label}: {}{what}, ranked lexically", r.status);
+    }
 }
 
 /// `rueca index --org FILE PATH --ref NAME [--remove]`: one ref of one
@@ -569,9 +597,10 @@ fn cmd_index_org_ref(store: &Path, org: &str, cmd: RefCmd, out: Output) -> anyho
         anyhow::bail!("`--repo` cannot be combined with `--org`; set `id` on the `[[repo]]` in the organization file");
     }
     let (_, config) = org_arg(org)?;
-    let Some(config) = config else {
+    let Some(mut config) = config else {
         anyhow::bail!("`rueca index --org` needs the organization file (`rueca-org.toml`), not a name");
     };
+    config.embed = cmd.embed;
     let opts = rueca_index::org::OrgIndexOptions {
         config,
         store: store.to_path_buf(),
@@ -765,8 +794,10 @@ fn cmd_links(store: &Path, org: &str, cmd: LinksCmd<'_>, out: Output) -> anyhow:
         view.set(i, slots.clone());
     }
     let edges = link_rows(&idx, &st, &slots, &view)?;
+    let coverage = rueca_index::org::vector_coverage(store, g)?;
     if out.json {
-        println!("{}", render(&json!({"org": name, "generation": g.generation, "edges": edges}), out.pretty));
+        let v = json!({"org": name, "generation": g.generation, "edges": edges, "model": g.model, "vectors": coverage});
+        println!("{}", render(&v, out.pretty));
         return Ok(());
     }
     for e in &edges {
@@ -786,6 +817,7 @@ fn cmd_links(store: &Path, org: &str, cmd: LinksCmd<'_>, out: Output) -> anyhow:
         );
     }
     println!("{} cross-repository edges in organization `{name}` (generation {})", edges.len(), g.generation);
+    print_coverage(g.model.as_ref(), &coverage);
     Ok(())
 }
 
@@ -929,8 +961,8 @@ fn ref_label(branch: Option<&str>, commit: &str) -> String {
 }
 
 /// The `status` row of an organization.
-fn org_row(g: &OrgGeneration, now: u64) -> Value {
-    json!({
+fn org_row(store: &Path, g: &OrgGeneration, now: u64) -> Value {
+    let mut row = json!({
         "name": g.name,
         "generation": g.generation,
         "created_at": g.created_at,
@@ -952,7 +984,19 @@ fn org_row(g: &OrgGeneration, now: u64) -> Value {
                 "index_bytes": x.entry.index_bytes,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
-    })
+    });
+    if let Some(m) = &g.model {
+        row["model"] = json!(m);
+    }
+    if g.allow_remote {
+        row["allow_remote"] = json!(true);
+    }
+    match rueca_index::org::vector_coverage(store, g) {
+        Ok(v) if g.model.is_some() || v.iter().any(|r| r.rows > 0) => row["vectors"] = json!(v),
+        Ok(_) => {}
+        Err(e) => row["vectors_error"] = json!(format!("{e:#}")),
+    }
+    row
 }
 
 fn cmd_status(store: &Path, json: bool, pretty: bool) -> anyhow::Result<()> {
@@ -962,7 +1006,7 @@ fn cmd_status(store: &Path, json: bool, pretty: bool) -> anyhow::Result<()> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let rows: Vec<Value> = entries.iter().map(|e| root_row(&st, e, now)).collect();
     let orgs = rueca_segment::org::list_orgs(store)?;
-    let org_rows: Vec<Value> = orgs.iter().map(|g| org_row(g, now)).collect();
+    let org_rows: Vec<Value> = orgs.iter().map(|g| org_row(store, g, now)).collect();
     if json {
         println!("{}", render(&json!({ "store": store, "roots": rows, "orgs": org_rows }), pretty));
         return Ok(());
@@ -977,6 +1021,10 @@ fn cmd_status(store: &Path, json: bool, pretty: bool) -> anyhow::Result<()> {
     }
     for g in &orgs {
         print_org(g, now);
+        match rueca_index::org::vector_coverage(store, g) {
+            Ok(rows) => print_coverage(g.model.as_ref(), &rows),
+            Err(e) => eprintln!("rueca: vector coverage of {}: {e:#}", g.name),
+        }
     }
     Ok(())
 }

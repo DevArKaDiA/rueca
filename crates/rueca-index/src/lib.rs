@@ -84,7 +84,7 @@ pub mod org;
 pub mod refs;
 pub mod vectors;
 
-pub use vectors::{EmbedConfig, EmbedderLoader, PresetLoader, VectorsReport};
+pub use vectors::{EmbedConfig, EmbedRequest, EmbedderLoader, PresetLoader, VectorsReport, resolve_embed};
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct IndexOptions {
@@ -111,9 +111,21 @@ pub struct IndexOptions {
     #[serde(default)]
     pub commit: Option<String>,
     /// Embed the snapshot's symbols (RFC 0007 §5.6, [`vectors`]); `None`
-    /// indexes lexically only.
+    /// embeds with the configured preset ([`EmbedRequest::Configured`]:
+    /// `RUECA_EMBED_PRESET`, `[retrieval] preset`), if any, unless
+    /// [`IndexOptions::no_embed`].
     #[serde(default)]
     pub embed: Option<EmbedConfig>,
+    /// With `embed` = `None`: index lexically, whatever is configured
+    /// (`--no-embed`, or a caller that resolved the embedding itself).
+    #[serde(default)]
+    pub no_embed: bool,
+    /// The organization this run indexes for (set by [`org::index_org`],
+    /// which checked its own `allow_remote`); every other organization
+    /// holding the root still forbids a `remote:` preset unless it allows
+    /// them.
+    #[serde(default)]
+    pub org: Option<String>,
 }
 
 impl IndexOptions {
@@ -325,8 +337,8 @@ pub fn index_worktree_with(opts: &IndexOptions, loader: &dyn EmbedderLoader) -> 
     // 5. Write and register; with vectors, lexical first unless every
     // vector is cached (RFC 0007 §5.6).
     let t = Instant::now();
-    let pass = match &opts.embed {
-        Some(cfg) => prepare_vectors(&out.graph, &root, &contents, cfg, loader, &opts.store)?,
+    let pass = match run_embedding(opts, &root)? {
+        Some(cfg) => prepare_vectors(&out.graph, &root, &contents, &cfg, loader, &opts.store)?,
         None => None,
     };
     let embed_prepare_ms = t.elapsed().as_millis() as u64;
@@ -378,6 +390,28 @@ pub fn index_worktree_with(opts: &IndexOptions, loader: &dyn EmbedderLoader) -> 
         "indexed"
     );
     Ok(report)
+}
+
+/// The embedding of a run: `opts.embed`, else the configured one unless
+/// `opts.no_embed`; a `remote:` preset is refused when an organization
+/// holding `root` (other than `opts.org`) does not allow remote presets.
+fn run_embedding(opts: &IndexOptions, root: &Path) -> anyhow::Result<Option<EmbedConfig>> {
+    let cfg = match (&opts.embed, opts.no_embed) {
+        (Some(c), _) => Some(c.clone()),
+        (None, true) => None,
+        (None, false) => resolve_embed(&opts.store, &EmbedRequest::Configured, None)?,
+    };
+    if let Some(c) = cfg.as_ref().filter(|c| rueca_embed::is_remote_preset(&c.preset))
+        && let Some(name) = org::forbidding_remote(&opts.store, root, opts.org.as_deref())?
+    {
+        anyhow::bail!(
+            "`{}` is a member of organization `{name}`, which does not allow remote presets: `{}` would send its \
+             code to the provider (set `[retrieval] allow_remote = true` in its rueca-org.toml to opt in)",
+            root.display(),
+            c.preset
+        );
+    }
+    Ok(cfg)
 }
 
 /// The vectors pass up to the cache lookup, or `None` when the run stays
