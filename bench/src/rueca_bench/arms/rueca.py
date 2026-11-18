@@ -34,6 +34,20 @@ Stores stay per instance, but every call shares one Rust vector cache
 `<bench cache>/rueca-vectors`), so a commit re-embeds only the symbols whose
 canonical text changed; model weights come from `$RUECA_MODEL_DIR`, else
 the default store's `models/` (`$RUECA_HOME`, else `~/.cache/rueca`).
+
+**Second stage** (RFC 0007 phase 2): graph expansion (`RUECA_EXPAND` =
+`off` | `calls` | `calls+contains` | `calls+contains+imports`,
+`RUECA_EXPAND_DECAY`), the centrality prior (`RUECA_CENTRALITY_BETA`) and
+the reranker (`RUECA_RERANK` = 1 → the tool arguments `rerank: true`,
+`rerank_k` = `RUECA_RERANK_K`; `RUECA_RERANK_PRESET`). They run in every
+mode, lexical included: a lexical setting with any of them on is the
+`rueca-lexical` arm (`runs/<suite>/rueca-lexical/lexical-<stage 2 tag>/`).
+A non-default value adds to the tag (`-x<edges>-d<decay>`, `-b<β>`,
+`-r<K>[-<preset>]`), so existing run directories keep their names.
+Expansion and β reach the binary as environment variables (explicit on
+every call of a non-plain setting), the reranker as tool arguments, so
+settings that differ only in the reranker share one `rueca query --batch`
+process (`arms/batch.py`).
 """
 
 from __future__ import annotations
@@ -51,6 +65,7 @@ from ..common import CACHE, count_tokens, run, safe_name, sha256_file
 from ..efficiency import json_prefix_tokens, text_prefix_tokens
 from ..embed import DEFAULT_PRESET
 from .base import Arm, CallResult, Handle, is_callable_label, line_distance, line_match
+from .batch import BatchRun, batch_timeout, run_batch
 from .grep import scored
 
 # Scoring calls must never be cut by the RFC 0005 token budget.
@@ -235,8 +250,18 @@ NORMS = ("minmax", "theoretical")
 DEFAULT_ALPHA = 0.5
 DEFAULT_FUSION_N = 100
 DEFAULT_NORM = "minmax"
+# Second stage (RFC 0007 §7.3–§7.5), in cost order: the plateau rule of the
+# phase 2 sweep prefers an earlier edge set.
+EXPANDS = ("off", "calls", "calls+contains", "calls+contains+imports")
+DEFAULT_DECAY = 0.5
+DEFAULT_RERANK_K = 50
+DEFAULT_RERANK_PRESET = "qwen3-reranker-0.6b-q8"
+STAGE2_ENV = ("RUECA_EXPAND", "RUECA_EXPAND_DECAY", "RUECA_CENTRALITY_BETA", "RUECA_RERANK", "RUECA_RERANK_K", "RUECA_RERANK_PRESET")
+_TRUE = ("1", "true", "on", "yes")
 # Indexing with vectors embeds a repository's first commit from scratch.
 EMBED_INDEX_TIMEOUT = 7200.0
+# A reranked query takes seconds (K = 50 on a CPU: ≈ 16 s).
+RERANK_CALL_TIMEOUT = 600.0
 
 
 def rueca_vector_dir() -> Path:
@@ -253,15 +278,27 @@ def rueca_model_dir() -> Path:
     return Path(home) / "models"
 
 
+def _stage2_defaults() -> dict[str, str]:
+    """The binary's own defaults of the second stage: every stage off."""
+    return {"RUECA_EXPAND": "off", "RUECA_EXPAND_DECAY": f"{DEFAULT_DECAY:g}", "RUECA_CENTRALITY_BETA": "0", "RUECA_RERANK": "0", "RUECA_RERANK_K": str(DEFAULT_RERANK_K), "RUECA_RERANK_PRESET": DEFAULT_RERANK_PRESET}
+
+
 @dataclass(frozen=True)
 class RuecaConfig:
-    """What the arm asks for: retrieval mode, embedding preset and fusion knobs."""
+    """What the arm asks for: retrieval mode, embedding preset, fusion knobs
+    and the second stage (expansion, centrality prior, reranker)."""
 
     mode: str = "lexical"
     preset: str = DEFAULT_PRESET
     alpha: float = DEFAULT_ALPHA
     fusion_n: int = DEFAULT_FUSION_N
     norm: str = DEFAULT_NORM
+    expand: str = "off"
+    decay: float = DEFAULT_DECAY
+    beta: float = 0.0
+    rerank: bool = False
+    rerank_k: int = DEFAULT_RERANK_K
+    rerank_preset: str = DEFAULT_RERANK_PRESET
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -270,6 +307,10 @@ class RuecaConfig:
             raise ValueError(f"fusion normalization {self.norm!r}: choose from {NORMS}")
         if not 0.0 <= self.alpha <= 1.0 or self.fusion_n < 1:
             raise ValueError(f"fusion alpha {self.alpha} must be in [0, 1] and N {self.fusion_n} at least 1")
+        if self.expand not in EXPANDS:
+            raise ValueError(f"expansion {self.expand!r}: choose from {EXPANDS}")
+        if not 0.0 <= self.decay <= 1.0 or self.beta < 0.0 or not 1 <= self.rerank_k <= 200:
+            raise ValueError(f"decay {self.decay} must be in [0, 1], beta {self.beta} at least 0, rerank K {self.rerank_k} in 1..200")
 
     @classmethod
     def from_env(cls, mode: str | None = None) -> "RuecaConfig":
@@ -280,6 +321,12 @@ class RuecaConfig:
             alpha=float(env("RUECA_FUSION_ALPHA") or DEFAULT_ALPHA),
             fusion_n=int(env("RUECA_FUSION_N") or DEFAULT_FUSION_N),
             norm=env("RUECA_FUSION_NORM") or DEFAULT_NORM,
+            expand=env("RUECA_EXPAND") or "off",
+            decay=float(env("RUECA_EXPAND_DECAY") or DEFAULT_DECAY),
+            beta=float(env("RUECA_CENTRALITY_BETA") or 0.0),
+            rerank=(env("RUECA_RERANK") or "").strip().lower() in _TRUE,
+            rerank_k=int(env("RUECA_RERANK_K") or DEFAULT_RERANK_K),
+            rerank_preset=env("RUECA_RERANK_PRESET") or DEFAULT_RERANK_PRESET,
         )
 
     @property
@@ -287,31 +334,76 @@ class RuecaConfig:
         return self.mode != "lexical"
 
     @property
+    def stage2(self) -> bool:
+        """Any second stage on (expansion, centrality prior, reranker)."""
+        return self.expand != "off" or self.beta > 0 or self.rerank
+
+    @property
+    def plain(self) -> bool:
+        """Today's lexical arm: no vectors, no second stage."""
+        return not self.embeds and not self.stage2
+
+    @property
     def arm_name(self) -> str:
-        return f"rueca-{self.mode}" if self.embeds else "rueca"
+        if self.embeds:
+            return f"rueca-{self.mode}"
+        return "rueca-lexical" if self.stage2 else "rueca"
+
+    def stage2_tag(self) -> str:
+        """`-x<edges>-d<decay>`, `-b<β>`, `-r<K>[-<preset>]` for the stages on."""
+        out = ""
+        if self.expand != "off":
+            out += f"-x{self.expand}-d{self.decay:g}"
+        if self.beta > 0:
+            out += f"-b{self.beta:g}"
+        if self.rerank:
+            out += f"-r{self.rerank_k}" + ("" if self.rerank_preset == DEFAULT_RERANK_PRESET else f"-{self.rerank_preset}")
+        return out
 
     def tag(self) -> str:
-        return f"{self.preset}-a{self.alpha:g}-n{self.fusion_n}-{self.norm}"
+        first = f"{self.preset}-a{self.alpha:g}-n{self.fusion_n}-{self.norm}" if self.embeds else "lexical"
+        return first + self.stage2_tag()
+
+    def label(self) -> str:
+        """`arm:tag` (a `compare` column) or `rueca`."""
+        return "rueca" if self.plain else f"{self.arm_name}:{self.tag()}"
 
     def run_label(self) -> str:
         """Directory of the outputs under `runs/<suite>/`: `rueca` (lexical,
         as before) or `rueca-<mode>/<tag>`."""
-        return f"{self.arm_name}/{self.tag()}" if self.embeds else self.arm_name
+        return self.arm_name if self.plain else f"{self.arm_name}/{self.tag()}"
 
     def env(self) -> dict[str, str]:
-        """Environment of every `rueca` call (empty for lexical)."""
-        if not self.embeds:
-            return {}
-        return {
-            "RUECA_FUSION_ALPHA": f"{self.alpha:g}",
-            "RUECA_FUSION_N": str(self.fusion_n),
-            "RUECA_FUSION_NORM": self.norm,
-            "RUECA_VECTOR_DIR": str(rueca_vector_dir()),
-            "RUECA_MODEL_DIR": str(rueca_model_dir()),
-        }
+        """Environment of every `rueca` call. Plain lexical: empty, unless the
+        caller's environment sets a second-stage knob, which is then turned
+        off explicitly (today's arm never expands by accident). Otherwise the
+        second stage is always explicit (the reranker itself is a tool
+        argument: `RUECA_RERANK` stays 0) and, with vectors, the fusion knobs
+        and the shared vector cache."""
+        if self.plain:
+            return {k: v for k, v in _stage2_defaults().items() if k in os.environ}
+        out = {**_stage2_defaults(), "RUECA_EXPAND": self.expand, "RUECA_EXPAND_DECAY": f"{self.decay:g}", "RUECA_CENTRALITY_BETA": f"{self.beta:g}", "RUECA_RERANK_PRESET": self.rerank_preset, "RUECA_MODEL_DIR": str(rueca_model_dir())}
+        if self.embeds:
+            out.update(RUECA_FUSION_ALPHA=f"{self.alpha:g}", RUECA_FUSION_N=str(self.fusion_n), RUECA_FUSION_NORM=self.norm, RUECA_VECTOR_DIR=str(rueca_vector_dir()))
+        return out
+
+    def query_args(self) -> dict[str, Any]:
+        """Arguments every `search_symbols` call of this setting adds."""
+        out: dict[str, Any] = {"mode": self.mode} if self.embeds else {}
+        if self.rerank:
+            out.update(rerank=True, rerank_k=self.rerank_k)
+        return out
 
     def describe(self) -> str:
-        return f"mode {self.mode}, preset {self.preset}, alpha {self.alpha:g}, N {self.fusion_n}, {self.norm}" if self.embeds else "mode lexical"
+        first = f"mode {self.mode}, preset {self.preset}, alpha {self.alpha:g}, N {self.fusion_n}, {self.norm}" if self.embeds else "mode lexical"
+        parts = [first]
+        if self.expand != "off":
+            parts.append(f"expand {self.expand} decay {self.decay:g}")
+        if self.beta > 0:
+            parts.append(f"centrality beta {self.beta:g}")
+        if self.rerank:
+            parts.append(f"rerank {self.rerank_preset} K {self.rerank_k}")
+        return ", ".join(parts)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -345,34 +437,81 @@ class RuecaArm(Arm):
     def __init__(self, call_timeout: float = 120.0, index_timeout: float = 1800.0, config: RuecaConfig | None = None):
         self.config = config or RuecaConfig()
         self.name = self.config.arm_name
-        self.call_timeout = call_timeout
+        self.call_timeout = max(call_timeout, RERANK_CALL_TIMEOUT) if self.config.rerank else call_timeout
         self.index_timeout = max(index_timeout, EMBED_INDEX_TIMEOUT) if self.config.embeds else index_timeout
         self.bin = rueca_binary()
         self._contract: str | None = None
         self._bin_version: str | None = None
+        self._help: dict[str, str] = {}
+        # answers fetched by `prefetch` (one `rueca query --batch`), popped by `call`
+        self._memo: dict[tuple, tuple[Any, float, str | None, str]] = {}
 
     def with_config(self, config: RuecaConfig) -> "RuecaArm":
         """The same binary under another setting (a sweep): shares the
-        detected contract and version, queries an index built by any
+        detected contract, version and prefetched answers (keyed by the
+        setting's environment and arguments), queries an index built by any
         setting with the same preset."""
         other = copy.copy(self)
         other.config = config
         other.name = config.arm_name
+        if config.rerank:
+            other.call_timeout = max(self.call_timeout, RERANK_CALL_TIMEOUT)
         return other
+
+    def env_groups(self, configs: list[RuecaConfig]) -> list[list[RuecaConfig]]:
+        """Settings that share one process environment (they differ only in
+        tool arguments, the reranker), in order: one `--batch` per group."""
+        groups: dict[str, list[RuecaConfig]] = {}
+        for cfg in configs:
+            groups.setdefault(json.dumps(cfg.env(), sort_keys=True), []).append(cfg)
+        return list(groups.values())
+
+    def help_text(self, command: str) -> str:
+        """`rueca <command> --help` (cached)."""
+        if command not in self._help:
+            res = run([self.bin, command, "--help"], timeout=30)
+            self._help[command] = res.stdout + res.stderr
+        return self._help[command]
+
+    @property
+    def supports_batch(self) -> bool:
+        """`rueca query --batch` (RFC 0007 phase 3, `arms/batch.py`)."""
+        return bool(self.bin) and "--batch" in self.help_text("query")
+
+    def cpu_switch(self) -> tuple[list[str], dict[str, str]] | None:
+        """How `rueca query` is told to run its models on the CPU: a `--cpu`
+        flag, else a `RUECA_EMBED_CPU` variable its help names; None when the
+        binary exposes neither (then only the default backend is measured)."""
+        text = self.help_text("query")
+        if "--cpu" in text:
+            return ["--cpu"], {}
+        if "RUECA_EMBED_CPU" in text:
+            return [], {"RUECA_EMBED_CPU": "1"}
+        return None
+
+    def _weights(self, preset: str) -> Path | None:
+        res = run([self.bin, "models", "path", preset], timeout=30, env=self.config.env())
+        return Path(res.stdout.strip()) if res.rc == 0 and res.stdout.strip() else None
 
     def preflight(self) -> None:
         """Non-lexical modes: the binary must index with `--embed` and the
-        preset's weights must be on disk, before any instance runs (a
-        failed index is recorded and never retried)."""
-        if not self.config.embeds:
-            return
-        res = run([self.bin, "index", "--help"], timeout=30)
-        if "--embed" not in res.stdout + res.stderr:
-            raise RuntimeError("`rueca index` has no --embed flag (a binary from before RFC 0007 phase 1)")
-        res = run([self.bin, "models", "path", self.config.preset], timeout=30, env=self.config.env())
-        weights = Path(res.stdout.strip()) if res.rc == 0 and res.stdout.strip() else None
-        if weights is None or not weights.exists():
-            raise RuntimeError(f"no weights for {self.config.preset} under {rueca_model_dir()}: run `rueca models pull {self.config.preset}` (or set RUECA_MODEL_DIR)")
+        preset's weights must be on disk; a reranked setting needs the
+        reranker's weights. Checked before any instance runs (a failed index
+        is recorded and never retried)."""
+        if self.config.embeds:
+            if "--embed" not in self.help_text("index"):
+                raise RuntimeError("`rueca index` has no --embed flag (a binary from before RFC 0007 phase 1)")
+            weights = self._weights(self.config.preset)
+            if weights is None or not weights.exists():
+                raise RuntimeError(f"no weights for {self.config.preset} under {rueca_model_dir()}: run `rueca models pull {self.config.preset}` (or set RUECA_MODEL_DIR)")
+        if self.config.rerank:
+            weights = self._weights(self.config.rerank_preset)
+            if weights is None or not weights.exists():
+                raise RuntimeError(f"no reranker weights for {self.config.rerank_preset} under {rueca_model_dir()}: `rueca models import` / `rueca models pull {self.config.rerank_preset}`")
+
+    def index_args(self) -> list[str]:
+        """`--embed=<preset>` for a setting with vectors."""
+        return [f"--embed={self.config.preset}"] if self.config.embeds else []
 
     def available(self) -> tuple[bool, str]:
         if not self.bin:
@@ -400,7 +539,7 @@ class RuecaArm(Arm):
             # produced each language's numbers.
             label = os.environ.get("RUECA_BIN_LABEL")
             self._bin_version = f"{ver} (binary sha256 {sha256_file(Path(self.bin))[:12]}, {self.contract} contract{', ' + label if label else ''}"
-        return self._bin_version + (f"; {self.config.describe()})" if self.config.embeds else ")")
+        return self._bin_version + (")" if self.config.plain else f"; {self.config.describe()})")
 
     def _store(self, key: str) -> Path:
         return CACHE / "rueca-store" / safe_name(key)
@@ -428,15 +567,15 @@ class RuecaArm(Arm):
         and the call retried (contract drift between branches). `org`: an
         organization file (RFC 0006), served instead of `root`."""
         args = self._args(args, mode, text)
+        if not text:
+            hit = self._memo.pop(self._memo_key(tool, args, root, store, org), None)
+            if hit is not None:
+                return hit
         for _ in range(2):
             cmd = [self.bin, "query", tool, json.dumps(args)]
             if text:
                 cmd.append("--text")
-            if root is not None:
-                cmd += ["--root", str(root)]
-            if org is not None:
-                cmd += ["--org", str(org)]
-            cmd += ["--store", str(store)]
+            cmd += self._place(root, store, org)
             res = run(cmd, timeout=self.call_timeout, env=self.config.env() or None)
             if res.timed_out:
                 return None, res.seconds, f"timeout after {res.seconds:.0f}s", ""
@@ -456,6 +595,35 @@ class RuecaArm(Arm):
                 return data, res.seconds, f"rc={res.rc}: {msg}", out
             return data, res.seconds, None, out
         return None, 0.0, "argument retry exhausted", ""
+
+    @staticmethod
+    def _place(root: Path | None, store: Path, org: Path | None) -> list[str]:
+        out = ["--root", str(root)] if root is not None else []
+        if org is not None:
+            out += ["--org", str(org)]
+        return out + ["--store", str(store)]
+
+    def _memo_key(self, tool: str, args: dict[str, Any], root: Path | None, store: Path, org: Path | None) -> tuple:
+        env = json.dumps(self.config.env(), sort_keys=True)
+        return (tool, json.dumps(args, sort_keys=True), str(root), str(store), str(org), env)
+
+    def prefetch(self, requests: list[tuple[str, dict[str, Any], str]], root: Path | None, store: Path, org: Path | None = None, extra: tuple[list[str], dict[str, str]] | None = None) -> BatchRun | None:
+        """Answer `requests` ((tool, args, call mode) as `call` would build
+        them) in one `rueca query --batch` process; successful answers wait
+        in the memo for the matching `call`. None without batch support.
+        `extra`: flags and environment added to the process (a backend
+        switch)."""
+        if not requests or not self.supports_batch:
+            return None
+        built = [(tool, self._args(args, mode, False)) for tool, args, mode in requests]
+        flags, env = extra or ([], {})
+        cmd = [self.bin, "query", *flags, *self._place(root, store, org)]
+        res = run_batch(cmd, built, {**self.config.env(), **env}, batch_timeout(self.call_timeout, len(built)))
+        if extra is None:
+            for (tool, args), line in zip(built, res.lines, strict=True):
+                if line.error is None:
+                    self._memo[self._memo_key(tool, args, root, store, org)] = (line.data, line.seconds, None, line.raw)
+        return res
 
     def _query_raw(self, h: Handle, tool: str, args: dict[str, Any]) -> tuple[Any, float, str | None, str]:
         return self.call(tool, args, h.root, h.state["store"])
@@ -486,9 +654,7 @@ class RuecaArm(Arm):
         shutil.rmtree(store, ignore_errors=True)
         store.mkdir(parents=True, exist_ok=True)
         h = Handle(self.name, key, root, language, state={"store": store})
-        cmd = [self.bin, "index", str(root), "--store", str(store), "--json"]
-        if self.config.embeds:
-            cmd.append(f"--embed={self.config.preset}")
+        cmd = [self.bin, "index", str(root), "--store", str(store), "--json", *self.index_args()]
         res = run(cmd, timeout=self.index_timeout, env=self.config.env() or None)
         h.index_seconds = res.seconds
         if res.timed_out or res.rc != 0:
@@ -505,11 +671,21 @@ class RuecaArm(Arm):
         return h
 
     def _mode_args(self, args: dict[str, Any]) -> dict[str, Any]:
-        """`mode` for a non-lexical setting; lexical requests stay as they were."""
-        return {**args, "mode": self.config.mode} if self.config.embeds else args
+        """`mode` for a non-lexical setting and the reranker's arguments;
+        plain lexical requests stay as they were."""
+        return {**args, **self.config.query_args()}
+
+    def eff_args(self, query: str, limit: int = 10, repo: str | None = None) -> dict[str, Any]:
+        """The agent's `search_symbols` request of `search_eff`."""
+        args = self._mode_args({"query": query, "limit": limit})
+        return {**args, "repo": repo} if repo is not None else args
+
+    def search_args(self, query: str, limit: int) -> dict[str, Any]:
+        """The scoring `search_symbols` request of `localize`."""
+        return self._mode_args({"query": query, "limit": min(limit, 200)})
 
     def _search(self, h: Handle, query: str, limit: int, text: bool = True) -> CallResult:
-        args = self._mode_args({"query": query, "limit": min(limit, 200)})
+        args = self.search_args(query, limit)
         data, secs, err, raw = self._query_raw(h, "search_symbols", args)
         if err:
             return CallResult(False, secs, error=err)
@@ -521,9 +697,7 @@ class RuecaArm(Arm):
         """The search an agent would issue (limit `limit`, every other
         argument at its default): parsed items in rendered order, the tokens
         an agent reads, and the prefix cost after each item."""
-        args: dict[str, Any] = self._mode_args({"query": query, "limit": limit})
-        if repo is not None:
-            args["repo"] = repo
+        args = self.eff_args(query, limit, repo)
         r = h.root if h is not None else root
         st = h.state["store"] if h is not None else store
         data, secs, err, raw = self.call("search_symbols", args, r, st, mode="agent", org=org)
@@ -551,7 +725,7 @@ class RuecaArm(Arm):
             if is_callable_label(hit["label"]):
                 funcs.append(hit)
         res.extra.update({"files": files, "functions": funcs})
-        if self.config.embeds:
+        if not self.config.plain:
             sc = hit_scores(res.hits, funcs)
             if sc is not None:
                 res.extra["scores"] = sc
