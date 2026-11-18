@@ -38,7 +38,7 @@ Choices and deviations from the RFC:
   signal. The prior is unchanged. `list_repositories` with `query` routes
   without a vector (it embeds nothing).
 - **ANN not needed at ≤ 1.05M vectors; `usearch` not added.** Measured
-  (`crates/rueca-segment/tests/dense_scale.rs`, release, M1 Pro, 14
+  (`crates/rueca-segment/tests/dense_scale.rs`, release, M4 Pro, 14
   hardware threads, CPU shared with a running benchmark): the scan kernel
   over 21 segments × 50,000 × 1,024 int8 rows (1.05M vectors, 1.08 GB)
   takes 74.0 ms p50 / 75.3 ms p95 on one thread (70 ns per row; 50k:
