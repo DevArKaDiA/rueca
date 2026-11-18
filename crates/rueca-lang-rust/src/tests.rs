@@ -572,3 +572,24 @@ fn unsupported_language_is_an_error() {
     let r = RustPack::default().extract("x.go", Language::Go, b"package x", &Budget::default());
     assert!(matches!(r, Err(ExtractError::Unsupported(Language::Go))));
 }
+
+/// `#[cfg(test)] mod x;` (or `all(test, …)`, also inside a test module) is
+/// followed by a `$test` marker import for the resolver; `any(test, …)` is
+/// not test-only and has none.
+#[test]
+fn test_module_declarations_are_marked() {
+    let f = facts(
+        "#[cfg(test)]\nmod mocks;\n#[cfg(all(test, unix))]\nmod unix_mocks;\n#[cfg(any(test, feature = \"x\"))]\npub mod helpers;\nmod real;\n#[cfg(test)]\nmod tests { mod fixtures; }\n",
+    );
+    let marked: Vec<(&str, u32)> = f
+        .imports
+        .iter()
+        .filter(|i| i.type_only && i.module_alias.as_deref() == Some("$test"))
+        .map(|i| (i.module.as_str(), i.relative_level))
+        .collect();
+    assert_eq!(marked, [("mocks", 1), ("unix_mocks", 1), ("tests::fixtures", 1)]);
+    // The `mod` import itself is unchanged and comes first.
+    let k = f.imports.iter().position(|i| i.module_alias.as_deref() == Some("$test")).unwrap();
+    assert_eq!(f.imports[k - 1].module_alias.as_deref(), Some("mocks"));
+    assert!(!f.imports[k - 1].type_only);
+}

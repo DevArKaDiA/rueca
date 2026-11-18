@@ -464,6 +464,47 @@ impl Want {
     }
 }
 
+/// The namespace a module lookup is for. Rust keeps two (the `rust` module
+/// docs): types and modules, and values (functions, constants, statics,
+/// tuple-struct and variant constructors), so `mod sleep;` and the `fn
+/// sleep` it re-exports share a name. Other languages have one: their
+/// lookups are all `Type`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Ns {
+    /// Modules and types: path segments, type references.
+    Type,
+    /// Functions, constants, statics, constructors: calls and reads.
+    Value,
+}
+
+impl Ns {
+    pub(crate) fn of(kind: RefKind) -> Ns {
+        match kind {
+            RefKind::Call | RefKind::New | RefKind::Decorator | RefKind::Read | RefKind::Write => Ns::Value,
+            _ => Ns::Type,
+        }
+    }
+
+    pub(crate) fn of_want(want: Want) -> Ns {
+        if want == Want::Type { Ns::Type } else { Ns::Value }
+    }
+
+    /// The member lookup of this namespace.
+    pub(crate) fn want(self) -> Want {
+        match self {
+            Ns::Type => Want::Type,
+            Ns::Value => Want::Value,
+        }
+    }
+}
+
+/// The lookups of a chain (module, name, namespace), against cycles.
+pub(crate) type Visited = Vec<(FileId, String, Ns)>;
+
+/// A memoized module lookup: (module, name, reached through `export *`,
+/// namespace).
+type LookupKey = (FileId, String, bool, Ns);
+
 /// Resolves a snapshot. `files` may be in any order; the resolver sorts by path.
 pub fn resolve(
     snapshot: SnapshotInfo,
@@ -669,9 +710,15 @@ struct Resolver<'a> {
     rust_depth: std::cell::Cell<usize>,
     /// Rust `macro_rules!` definitions by name.
     rust_macros: HashMap<String, Vec<NodeId>>,
+    /// Per Rust file, the names its imports bind in the value namespace
+    /// where that differs from [`Resolver::envs`] (the type namespace).
+    rust_value_envs: Vec<Env>,
+    /// Rust module files that are test code (declared by `#[cfg(test)] mod
+    /// x;`, or below one).
+    rust_test_files: HashSet<FileId>,
 
-    /// Key: (module, name, reached through `export *`).
-    lookup_memo: RefCell<HashMap<(FileId, String, bool), Option<Target>>>,
+    /// Key: (module, name, reached through `export *`, namespace).
+    lookup_memo: RefCell<HashMap<LookupKey, Option<Target>>>,
     module_memo: RefCell<HashMap<(FileId, u32, String), Option<FileId>>>,
 
     edges: BTreeMap<(NodeId, EdgeKind, NodeId), EdgeMeta>,
@@ -1104,6 +1151,8 @@ impl<'a> Resolver<'a> {
             rust_blanket: HashSet::new(),
             rust_depth: std::cell::Cell::new(0),
             rust_macros: HashMap::new(),
+            rust_value_envs: Vec::new(),
+            rust_test_files: HashSet::new(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
@@ -1112,6 +1161,7 @@ impl<'a> Resolver<'a> {
         r.build_packages();
         r.build_nodes(snapshot);
         r.build_tables();
+        r.rust_test_modules();
         r.build_php_index();
         r.build_env_nodes();
         r.build_hook_tables();
@@ -1505,8 +1555,14 @@ impl<'a> Resolver<'a> {
 
     /// Looks `name` up in module `f`: own definitions, re-exports, (Python)
     /// import bindings and submodules. Transitive, cycle-safe, bounded.
-    fn lookup_in_module(&self, f: FileId, name: &str, visited: &mut Vec<(FileId, String)>) -> Option<Target> {
-        self.lookup_in_module_as(f, name, false, visited)
+    fn lookup_in_module(&self, f: FileId, name: &str, visited: &mut Visited) -> Option<Target> {
+        self.lookup_in_module_as(f, name, false, Ns::Type, visited)
+    }
+
+    /// [`Self::lookup_in_module`] in namespace `ns` (Rust; one namespace
+    /// elsewhere).
+    fn lookup_in_module_ns(&self, f: FileId, name: &str, ns: Ns, visited: &mut Visited) -> Option<Target> {
+        self.lookup_in_module_as(f, name, false, ns, visited)
     }
 
     /// `via_star`: reached through an ECMAScript `export *`, where only
@@ -1516,19 +1572,25 @@ impl<'a> Resolver<'a> {
         f: FileId,
         name: &str,
         via_star: bool,
-        visited: &mut Vec<(FileId, String)>,
+        ns: Ns,
+        visited: &mut Visited,
     ) -> Option<Target> {
         let via_star = via_star && !self.is_python(f);
-        let memo_key = (f, name.to_string(), via_star);
+        let ns = if self.is_rust(f) { ns } else { Ns::Type };
+        let memo_key = (f, name.to_string(), via_star, ns);
         if let Some(v) = self.lookup_memo.borrow().get(&memo_key) {
             return v.clone();
         }
-        let key = (f, memo_key.1.clone());
+        let key = (f, memo_key.1.clone(), ns);
         if visited.len() > MAX_DEPTH || visited.contains(&key) {
             return None;
         }
         visited.push(key);
-        let result = self.lookup_in_module_uncached(f, name, via_star, visited);
+        let result = if self.is_rust(f) {
+            self.rust_lookup(f, name, ns, visited)
+        } else {
+            self.lookup_in_module_uncached(f, name, via_star, visited)
+        };
         visited.pop();
         if visited.is_empty() {
             self.lookup_memo.borrow_mut().insert(memo_key, result.clone());
@@ -1541,11 +1603,8 @@ impl<'a> Resolver<'a> {
         f: FileId,
         name: &str,
         via_star: bool,
-        visited: &mut Vec<(FileId, String)>,
+        visited: &mut Visited,
     ) -> Option<Target> {
-        if self.is_rust(f) {
-            return self.rust_lookup(f, name, visited);
-        }
         if let Some(n) = self.module_def(f, name) {
             return Some(Target::Symbol(n));
         }
@@ -1587,7 +1646,7 @@ impl<'a> Resolver<'a> {
         &self,
         f: FileId,
         name: &str,
-        visited: &mut Vec<(FileId, String)>,
+        visited: &mut Visited,
     ) -> ControlFlow<Option<Target>, Vec<Option<FileId>>> {
         let mut stars = Vec::new();
         for (k, imp) in self.imports(f).iter().enumerate() {
@@ -1607,7 +1666,7 @@ impl<'a> Resolver<'a> {
         target: Option<FileId>,
         name: &str,
         stars: &mut Vec<Option<FileId>>,
-        visited: &mut Vec<(FileId, String)>,
+        visited: &mut Visited,
     ) -> ControlFlow<Option<Target>> {
         if imp.names.is_empty() {
             return match reexported_alias(imp.module_alias.as_deref(), name, target, stars) {
@@ -1633,16 +1692,10 @@ impl<'a> Resolver<'a> {
 
     /// `name` through the star re-exports of a module (`export * from`): the
     /// first project binding.
-    fn star_reexport(
-        &self,
-        stars: Vec<Option<FileId>>,
-        name: &str,
-        visited: &mut Vec<(FileId, String)>,
-    ) -> Option<Target> {
-        stars
-            .into_iter()
-            .flatten()
-            .find_map(|t| self.lookup_in_module_as(t, name, true, visited).filter(|found| *found != Target::External))
+    fn star_reexport(&self, stars: Vec<Option<FileId>>, name: &str, visited: &mut Visited) -> Option<Target> {
+        stars.into_iter().flatten().find_map(|t| {
+            self.lookup_in_module_as(t, name, true, Ns::Type, visited).filter(|found| *found != Target::External)
+        })
     }
 
     /// Names bound by `f`'s own imports (last binding wins): Python package
@@ -1656,7 +1709,7 @@ impl<'a> Resolver<'a> {
         f: FileId,
         name: &str,
         via_star: bool,
-        visited: &mut Vec<(FileId, String)>,
+        visited: &mut Visited,
     ) -> Option<Option<Target>> {
         if via_star || self.package_of[f as usize].is_some() {
             return None;
@@ -1679,7 +1732,7 @@ impl<'a> Resolver<'a> {
         f: FileId,
         k: usize,
         want: Option<&str>,
-        visited: &mut Vec<(FileId, String)>,
+        visited: &mut Visited,
     ) -> Vec<(String, Option<Target>)> {
         let imp = &self.imports(f)[k];
         let target = self.import_targets[f as usize][k];
@@ -1769,7 +1822,7 @@ impl<'a> Resolver<'a> {
         imp: &Import,
         n: &ImportedName,
         target: Option<FileId>,
-        visited: &mut Vec<(FileId, String)>,
+        visited: &mut Visited,
     ) -> Option<Target> {
         let python = self.is_python(f);
         let bound = match target {
@@ -1788,14 +1841,7 @@ impl<'a> Resolver<'a> {
 
     /// `name` in module `t`; `C.m` outside Python is a member of an
     /// imported type (Java `import static`).
-    fn imported_member(
-        &self,
-        f: FileId,
-        t: FileId,
-        name: &str,
-        python: bool,
-        visited: &mut Vec<(FileId, String)>,
-    ) -> Option<Target> {
+    fn imported_member(&self, f: FileId, t: FileId, name: &str, python: bool, visited: &mut Visited) -> Option<Target> {
         match name.split_once('.') {
             Some((head, rest)) if !python => match self.lookup_in_module(t, head, visited) {
                 Some(Target::Symbol(c)) => self.walk(f, Target::Symbol(c), &rest.split('.').collect::<Vec<_>>()),
@@ -1808,6 +1854,10 @@ impl<'a> Resolver<'a> {
     fn build_envs(&mut self) {
         let envs = (0..self.files.len()).map(|i| self.env_of(i as FileId)).collect();
         self.envs = envs;
+        let values = (0..self.files.len() as FileId)
+            .map(|f| if self.is_rust(f) { self.rust_value_env(f) } else { Env::new() })
+            .collect();
+        self.rust_value_envs = values;
     }
 
     /// The names bound by the imports of `fid`. PHP names arrive fully
@@ -1819,7 +1869,7 @@ impl<'a> Resolver<'a> {
             return env;
         }
         if self.is_rust(fid) {
-            return self.rust_env(fid);
+            return self.rust_env(fid, Ns::Type);
         }
         let python = self.is_python(fid);
         for (k, imp) in self.imports(fid).iter().enumerate() {
@@ -2070,15 +2120,31 @@ impl<'a> Resolver<'a> {
     /// Records `member` (a definition with `label`) under `name` in the
     /// slot of its kind (see [`MemberSlots`]); the first one wins.
     pub(crate) fn add_member(&mut self, owner: NodeId, name: &str, member: NodeId, label: Label) {
+        let current = self.members.get(&owner).and_then(|m| m.get(name)).and_then(|s| Self::slot_of(s, label));
+        // Rust: the type's own crate's impls first (`impl From<X> for
+        // Bytes` in the crate of `Bytes`, not in a crate using it).
+        if current.is_some_and(|old| !self.rust_own_impl_first(owner, old, member)) {
+            return;
+        }
         let slots = self.members.entry(owner).or_default().entry(name.to_string()).or_default();
-        let slot = if label.is_callable() {
-            &mut slots.callable
+        if label.is_callable() {
+            slots.callable = Some(member);
         } else if label.is_type() {
-            &mut slots.ty
+            slots.ty = Some(member);
         } else {
-            &mut slots.value
-        };
-        slot.get_or_insert(member);
+            slots.value = Some(member);
+        }
+    }
+
+    /// The slot of [`MemberSlots`] a member with `label` goes to.
+    fn slot_of(s: &MemberSlots, label: Label) -> Option<NodeId> {
+        if label.is_callable() {
+            s.callable
+        } else if label.is_type() {
+            s.ty
+        } else {
+            s.value
+        }
     }
 
     /// Member `name` of class `class` for a lookup of kind `want`, searching
@@ -2100,7 +2166,10 @@ impl<'a> Resolver<'a> {
                 self.find_member_rec(class, name, slot, 0, &mut visited).map(|(n, d)| (n, d > 0))
             })
             .or_else(|| {
-                self.is_rust_module(class).then(|| self.rust_module_member(class, name)).flatten().map(|n| (n, false))
+                self.is_rust_module(class)
+                    .then(|| self.rust_module_member(class, name, Ns::of_want(want)))
+                    .flatten()
+                    .map(|n| (n, false))
             })
     }
 
@@ -2218,7 +2287,12 @@ impl<'a> Resolver<'a> {
             arity: None,
             arg_types: None,
         };
-        let Outcome::Hit(target, strategy, confidence) = self.resolve_item(site.file, &item, site.scope) else {
+        let outcome = match self.resolve_item(site.file, &item, site.scope) {
+            // Rust: a trait of another crate matched by name alone is unknown.
+            Outcome::Hit(t, s, _) if self.rust_guessed(site.file, t, s) => Outcome::Miss,
+            other => other,
+        };
+        let Outcome::Hit(target, strategy, confidence) = outcome else {
             // A parent, trait or interface outside the project.
             if site.php {
                 self.php.open.insert(site.class);
@@ -2344,16 +2418,24 @@ impl<'a> Resolver<'a> {
         if let Some(hit) = self.namespace_scope(f, scope, name) {
             return hit;
         }
-        // 3. Imported binding.
-        if let Some(hit) = self.imported_name(f, item) {
+        // 3, 4. Imported binding, else same module.
+        if let Some(hit) = self.scope_name(f, item) {
             return hit;
-        }
-        // 4. Same module (the whole package for package-scoped packs).
-        if let Some(n) = self.module_def(f, name) {
-            return Outcome::Hit(n, Strategy::SameModule, 0.9);
         }
         // 6. Unique name.
         self.unique_name(f, item.kind, name, false)
+    }
+
+    /// Strategies 3 (imported binding) and 4 (same module: the whole
+    /// package for package-scoped packs); Rust per namespace.
+    fn scope_name(&self, f: FileId, item: &RefItem<'_>) -> Option<Outcome> {
+        if self.is_rust(f) {
+            return self.rust_scope_name(f, item);
+        }
+        if let Some(hit) = self.imported_name(f, item) {
+            return Some(hit);
+        }
+        self.module_def(f, item.name).map(|n| Outcome::Hit(n, Strategy::SameModule, 0.9))
     }
 
     /// Strategy 3 for a bare name: its import binding, if any.
@@ -2453,7 +2535,8 @@ impl<'a> Resolver<'a> {
     /// 3. Receiver bound by an import, walked along `rest`.
     fn member_of_import(&self, f: FileId, item: &RefItem<'_>, start: &Target, rest: &[&str]) -> Option<Outcome> {
         match self.walk(f, start.clone(), rest) {
-            Some(Target::Module(m)) => match self.lookup_in_module(m, item.name, &mut Vec::new()) {
+            Some(Target::Module(m)) => match self.lookup_in_module_ns(m, item.name, Ns::of(item.kind), &mut Vec::new())
+            {
                 Some(Target::Symbol(n)) => Some(Outcome::Hit(n, Strategy::ImportResolved, 0.9)),
                 Some(_) => Some(Outcome::External),
                 None => None,
@@ -2508,24 +2591,36 @@ impl<'a> Resolver<'a> {
         if with_receiver && (name.chars().count() < 4 || BUILTIN_METHODS.contains(&name)) {
             return Outcome::Miss;
         }
-        let family = self.families[f as usize];
         let Some(cands) = self.by_name.get(name) else { return self.rust_macro_by_name(f, kind, name) };
-        let mut found = None;
-        for &n in cands {
-            let node = &self.nodes[n as usize];
-            let same_family = node.language.map(|l| l.family()) == family;
-            if same_family && compatible(kind, node.label, with_receiver) {
-                if found.is_some() {
-                    return Outcome::Miss;
-                }
-                found = Some(n);
-            }
+        let all: Vec<NodeId> =
+            cands.iter().copied().filter(|&n| self.name_candidate(f, kind, n, with_receiver)).collect();
+        // Rust types: the file's own crate first.
+        let near: Vec<NodeId> = all.iter().copied().filter(|&n| self.rust_same_crate_name(f, kind, n)).collect();
+        let pool = if near.is_empty() { all } else { near };
+        let Some(&first) = pool.first() else { return self.rust_macro_by_name(f, kind, name) };
+        // One definition twice (`#[cfg]` variants of one module) is one.
+        if pool.iter().any(|&n| !self.same_definition(first, n)) {
+            return Outcome::Miss;
         }
-        match found {
-            Some(n) if with_receiver => Outcome::Hit(n, Strategy::Heuristic, 0.5),
-            Some(n) => Outcome::Hit(n, Strategy::UniqueName, 0.6),
-            None => self.rust_macro_by_name(f, kind, name),
+        if with_receiver {
+            Outcome::Hit(first, Strategy::Heuristic, 0.5)
+        } else {
+            Outcome::Hit(first, Strategy::UniqueName, 0.6)
         }
+    }
+
+    /// Whether node `n` may be the by-name target of a `kind` reference
+    /// written in `f`: same language family and a compatible label.
+    fn name_candidate(&self, f: FileId, kind: RefKind, n: NodeId, with_receiver: bool) -> bool {
+        let node = &self.nodes[n as usize];
+        node.language.map(|l| l.family()) == self.families[f as usize] && compatible(kind, node.label, with_receiver)
+    }
+
+    /// Whether two nodes are one definition: same label and qualified name
+    /// (the variants of a module under `#[cfg]`, one file each).
+    pub(crate) fn same_definition(&self, a: NodeId, b: NodeId) -> bool {
+        let (x, y) = (&self.nodes[a as usize], &self.nodes[b as usize]);
+        x.label == y.label && x.qualified_name == y.qualified_name
     }
 
     /// The definition a decorator reference applies to: the first decorated

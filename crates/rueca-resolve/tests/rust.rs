@@ -338,7 +338,7 @@ fn rueca_reads_itself() {
     g.has("rueca_resolve::resolve", "rueca_resolve::rust::Resolver.rust_import_edges", Calls, TypeResolved, 0.85);
     g.has(
         "rueca_resolve::rust::Resolver.rust_env",
-        "rueca_resolve::rust::Resolver.rust_import_binding",
+        "rueca_resolve::rust::Resolver.rust_bound",
         Calls,
         TypeResolved,
         0.9,
@@ -401,4 +401,116 @@ fn attribute_macros_decorate() {
     g.has("tk_macros::main", "app::main", Decorates, ImportResolved, 0.9);
     g.has("tk_macros::main", "app::other", Decorates, ImportResolved, 0.9);
     g.lacks("app::main", "tk_macros::main", Calls);
+}
+
+/// Rust's two namespaces: `mod sleep; pub use sleep::sleep;` binds the
+/// module for paths and types, the function for calls (also through a
+/// `use` of the leaf, a module path and a call result); a `mod x;` next to
+/// a `fn x` in one module splits the same way.
+#[test]
+fn values_and_types_have_their_own_namespaces() {
+    let out = build(crate_files(&[
+        ("Cargo.toml", "[package]\nname = \"mini\"\n"),
+        ("src/lib.rs", "pub mod time;\nmod app;\nmod same;\n"),
+        ("src/time/mod.rs", "mod sleep;\npub use sleep::{sleep, Sleep};\n"),
+        (
+            "src/time/sleep.rs",
+            "pub struct Sleep { at: u64 }\nimpl Sleep { pub fn reset(&self) {} }\npub fn sleep(d: u64) -> Sleep { Sleep { at: d } }\n",
+        ),
+        (
+            "src/app.rs",
+            "use crate::time::sleep;\nuse crate::time;\nfn a() { sleep(1); }\nfn b() { crate::time::sleep(1); }\nfn c() { time::sleep(1); }\nfn d(s: time::sleep::Sleep) { s.reset(); }\nfn e() { time::sleep(1).reset(); }\n",
+        ),
+        ("src/same.rs", "mod x;\npub fn x() {}\nfn f() { x(); }\nfn g(y: x::Y) {}\n"),
+        ("src/same/x.rs", "pub struct Y;\n"),
+    ]));
+    let g = G(&out.graph);
+    use EdgeKind::*;
+    use Strategy::*;
+    let sleep = "mini::time::sleep::sleep";
+    g.has("mini::app::a", sleep, Calls, ImportResolved, 0.95);
+    g.has("mini::app::b", sleep, Calls, ImportResolved, 0.9);
+    g.has("mini::app::c", sleep, Calls, ImportResolved, 0.9);
+    g.has("mini::app::e", sleep, Calls, ImportResolved, 0.9);
+    g.has("mini::app::d", "mini::time::sleep::Sleep", References, ImportResolved, 0.9);
+    g.has("mini::app::d", "mini::time::sleep::Sleep.reset", Calls, TypeResolved, 0.85);
+    g.has("mini::app::e", "mini::time::sleep::Sleep.reset", Calls, TypeResolved, 0.85);
+    g.imports("src/app.rs", "src/time/sleep.rs");
+    g.has("mini::same::f", "mini::same::x", Calls, SameModule, 0.9);
+    g.has("mini::same::g", "mini::same::x::Y", References, ImportResolved, 0.9);
+}
+
+/// Three crates of one snapshot share type names: a type resolves in the
+/// scope of the file that names it (its items, imports, paths, its own
+/// crate by name), never by name in another crate; an `impl` attaches to
+/// the type its file sees; a type's own crate's impls come first; test
+/// doubles (`#[cfg(test)]` modules, inline or files) never bind for other
+/// code.
+#[test]
+fn types_resolve_in_scope_across_crates() {
+    let out = build(crate_files(&[
+        ("Cargo.toml", "[workspace]\nmembers = [\"io\", \"rt\", \"app\", \"bytes\", \"a-hyper\", \"web\"]\n"),
+        ("io/Cargo.toml", "[package]\nname = \"io\"\n"),
+        ("io/src/lib.rs", "pub mod net;\npub mod port;\npub struct Mystery;\nimpl Mystery { pub fn go(&self) {} }\n"),
+        ("io/src/net.rs", "pub struct TcpStream;\nimpl TcpStream { pub fn peek(&self) {} }\n"),
+        (
+            "io/src/port.rs",
+            "use std::os::windows::io::*;\npub struct Port;\nimpl AsRawHandle for Port { fn as_raw_handle(&self) -> u32 { 0 } }\n",
+        ),
+        ("rt/Cargo.toml", "[package]\nname = \"rt\"\n[dependencies]\nio = { path = \"../io\" }\n"),
+        (
+            "rt/src/lib.rs",
+            "pub mod net;\npub mod task;\npub mod fs;\npub mod doc;\nmod hidden;\npub trait AsyncRead { fn poll_read(&self); }\n",
+        ),
+        (
+            "rt/src/net.rs",
+            "use crate::AsyncRead;\npub struct TcpStream { io: io::net::TcpStream }\nimpl TcpStream { pub fn peek(&self) {} }\nimpl AsyncRead for TcpStream { fn poll_read(&self) {} }\nfn f(s: TcpStream) { s.peek(); }\nfn g(m: Mystery) { m.go(); }\nfn h(l: Local) { l.run(); }\nfn k(s: Spawner) { s.spawn_it(); }\n",
+        ),
+        ("rt/src/hidden.rs", "pub struct Local;\nimpl Local { pub fn run(&self) {} }\n"),
+        ("rt/src/task.rs", "pub struct JoinHandle;\n"),
+        ("rt/src/fs.rs", "#[cfg(test)]\nmod mocks { pub struct JoinHandle; }\n#[cfg(test)]\nmod spawn_mocks;\n"),
+        ("rt/src/fs/spawn_mocks.rs", "pub struct Spawner;\nimpl Spawner { pub fn spawn_it(&self) {} }\n"),
+        ("rt/src/doc.rs", "pub mod os { pub trait AsRawHandle { fn as_raw_handle(&self) -> u32; } }\n"),
+        ("app/Cargo.toml", "[package]\nname = \"app\"\n[dependencies]\nrt = { path = \"../rt\" }\n"),
+        (
+            "app/src/lib.rs",
+            "use rt::task::JoinHandle;\npub trait TaskHandle { fn abort(&self); }\nimpl TaskHandle for JoinHandle { fn abort(&self) {} }\n",
+        ),
+        ("bytes/Cargo.toml", "[package]\nname = \"bytes\"\n"),
+        (
+            "bytes/src/lib.rs",
+            "pub struct Bytes;\nimpl From<Vec<u8>> for Bytes { fn from(v: Vec<u8>) -> Bytes { Bytes } }\n",
+        ),
+        ("a-hyper/Cargo.toml", "[package]\nname = \"hyper\"\n[dependencies]\nbytes = { path = \"../bytes\" }\n"),
+        (
+            "a-hyper/src/lib.rs",
+            "use bytes::Bytes;\npub struct Reason;\nimpl From<Reason> for Bytes { fn from(r: Reason) -> Bytes { Bytes } }\n",
+        ),
+        ("web/Cargo.toml", "[package]\nname = \"web\"\n[dependencies]\nbytes = { path = \"../bytes\" }\n"),
+        ("web/src/lib.rs", "use bytes::Bytes;\nfn f() { Bytes::from(Vec::new()); }\n"),
+    ]));
+    let g = G(&out.graph);
+    use EdgeKind::*;
+    use Strategy::*;
+    // The file's own type, not the same-named type of a dependency.
+    g.has("rt::net::f", "rt::net::TcpStream.peek", Calls, TypeResolved, 0.85);
+    g.lacks("rt::net::f", "io::net::TcpStream.peek", Calls);
+    g.has("rt::net::TcpStream", "rt::AsyncRead", Implements, ImportResolved, 0.95);
+    g.lacks("io::net::TcpStream", "rt::AsyncRead", Implements);
+    // By name: the file's crate first; another crate's type only when the
+    // own crate has none, as a guess (`heuristic`, which links drop).
+    g.has("rt::net::h", "rt::hidden::Local.run", Calls, TypeResolved, 0.85);
+    g.has("rt::net::g", "io::Mystery.go", Calls, Heuristic, 0.5);
+    // A trait the file cannot see (a glob of `std`) is not another crate's
+    // same-named trait.
+    g.lacks("io::port::Port", "rt::doc::os.AsRawHandle", Implements);
+    g.lacks("io::port::Port.as_raw_handle", "rt::doc::os.AsRawHandle.as_raw_handle", Overrides);
+    // Test doubles.
+    g.has("rt::task::JoinHandle", "app::TaskHandle", Implements, SameModule, 0.9);
+    g.lacks("rt::fs::mocks.JoinHandle", "app::TaskHandle", Implements);
+    assert!(out.graph.nodes[g.id("rt::fs::spawn_mocks::Spawner") as usize].is_test);
+    g.lacks("rt::net::k", "rt::fs::spawn_mocks::Spawner.spawn_it", Calls);
+    // A type's own crate's impls first.
+    g.has("web::f", "bytes::Bytes.from", Calls, ImportResolved, 0.85);
+    g.lacks("web::f", "hyper::Bytes.from", Calls);
 }

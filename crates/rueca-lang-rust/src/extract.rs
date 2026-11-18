@@ -166,6 +166,22 @@ impl Attrs {
         })
     }
 
+    /// `#[cfg(test)]` or `#[cfg(all(test, …))]`: compiled for tests only
+    /// (not `any(test, feature = "…")`).
+    fn is_cfg_test_only(&self) -> bool {
+        self.0.iter().any(|a| {
+            let Some(rest) = a.strip_prefix("cfg").map(str::trim_start) else { return false };
+            let Some(pred) = rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')).map(str::trim) else {
+                return false;
+            };
+            pred == "test"
+                || (pred.starts_with("all(")
+                    && !pred.contains("any(")
+                    && !pred.contains("not(")
+                    && pred.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == "test"))
+        })
+    }
+
     /// `#[path = "…"]`.
     fn path(&self) -> Option<String> {
         self.0.iter().find_map(|a| {
@@ -845,4 +861,17 @@ fn generic_params(node: Node<'_>, src: &[u8]) -> Vec<String> {
 /// `#[path = "…"]` of a `mod` item (`uses.rs`).
 pub(crate) fn mod_path_attr(node: Node<'_>, src: &[u8]) -> Option<String> {
     attrs_and_doc(node, src).0.path()
+}
+
+/// Whether a `mod` item is compiled for tests only: `#[cfg(test)]` (or
+/// `all(test, …)`) on it or on an inline module around it (`uses.rs`).
+pub(crate) fn mod_is_cfg_test(node: Node<'_>, src: &[u8]) -> bool {
+    let mut cur = Some(node);
+    while let Some(n) = cur {
+        if n.kind() == "mod_item" && attrs_and_doc(n, src).0.is_cfg_test_only() {
+            return true;
+        }
+        cur = n.parent();
+    }
+    false
 }

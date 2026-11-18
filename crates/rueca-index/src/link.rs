@@ -67,7 +67,9 @@
 //! name-matching rungs (`unique_name`, `heuristic`), which have no import
 //! behind them across repositories, and edges into a dependency's tests or
 //! into a dependency definition the consumer defines itself (same label and
-//! qualified name: a stub or a vendored copy — the consumer's own wins). Nodes are mapped back to the
+//! qualified name: a stub or a vendored copy — the consumer's own wins), and
+//! edges written in a dependency's file (a dependency cannot name its
+//! consumer: such an edge is a name the joint resolve bound wrongly). Nodes are mapped back to the
 //! repositories' own segments by (label, qualified name, path); a folder
 //! import of a dependency's root package maps to its `Repository` node.
 
@@ -89,8 +91,9 @@ use crate::default_registry;
 
 /// Version of the analysis and link output (part of every profile and link
 /// set; bumping it recomputes them). 2: contract keys in the analysis and
-/// contract edges in the link sets (RFC 0006 phase 4).
-pub const LINKER_VERSION: u32 = 2;
+/// contract edges in the link sets (RFC 0006 phase 4). 3: no edge written
+/// in a dependency's file.
+pub const LINKER_VERSION: u32 = 3;
 
 /// Path prefix of mounted dependencies in a link resolution.
 const MOUNT: &str = "@rueca-org/";
@@ -824,13 +827,13 @@ fn crossing_edges(
             continue;
         }
         let mut meta = e.meta;
-        meta.evidence = meta.evidence.and_then(|(f, span)| {
-            let path = graph.files.get(f as usize)?.path.as_str();
-            if ctx.mount_of(path).is_some() {
-                return None;
-            }
-            consumer.file_by_path(path).map(|fid| (fid, span))
-        });
+        let evidence = meta.evidence.and_then(|(f, span)| Some((graph.files.get(f as usize)?.path.as_str(), span)));
+        if evidence.is_some_and(|(path, _)| ctx.mount_of(path).is_some()) {
+            // A dependency's code cannot name its consumer: a name bound
+            // into the consumer from there is a mistake of the joint resolve.
+            continue;
+        }
+        meta.evidence = evidence.and_then(|(path, span)| consumer.file_by_path(path).map(|fid| (fid, span)));
         let edge = LinkEdge { src, dep: k as u32, dst, kind: e.kind, meta, reversed };
         keep_most_confident(&mut best, edge);
     }

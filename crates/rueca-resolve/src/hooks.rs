@@ -343,10 +343,33 @@ fn split_qualified(t: &str) -> Option<(&str, &str)> {
 pub(crate) type StarNames = std::rc::Rc<Vec<(String, NodeId)>>;
 
 /// Outcome of resolving a type name.
+#[derive(Clone, Copy)]
 pub(crate) enum TypeLookup {
     Found(NodeId),
+    /// A Rust type of another crate matched by name alone (the `rust`
+    /// module docs): members found through it are `heuristic`.
+    ByName(NodeId),
     External,
     Unknown,
+}
+
+impl TypeLookup {
+    /// The same type, as a guess.
+    pub(crate) fn guessed(self) -> TypeLookup {
+        match self {
+            TypeLookup::Found(t) => TypeLookup::ByName(t),
+            other => other,
+        }
+    }
+
+    /// The edge to member `n` of the type: `type_resolved` 0.85, or
+    /// `heuristic` 0.50 through a guessed type.
+    pub(crate) fn member_hit(self, n: NodeId) -> Outcome {
+        match self {
+            TypeLookup::ByName(_) => Outcome::Hit(n, Strategy::Heuristic, 0.5),
+            _ => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+        }
+    }
 }
 
 /// Deepest macro-in-macro nesting followed by [`Resolver::expand_macro_calls`].
@@ -1098,18 +1121,21 @@ impl<'a> Resolver<'a> {
         let Some(mut ty) = self.enclosing_type(f, scope).or_else(|| self.receiver_type_from_name(f, scope)) else {
             return fallback();
         };
+        // A guessed type anywhere in the chain makes the member a guess.
+        let mut via = TypeLookup::Found(ty);
         for (k, seg) in chain.split('.').enumerate() {
             let Some((member, _)) = self.find_member(ty, seg, Want::Value) else {
                 return if k == 0 { fallback() } else { Outcome::Miss };
             };
             match self.member_type(self.prefer_body(member)) {
                 TypeLookup::Found(t) => ty = t,
+                TypeLookup::ByName(t) => (ty, via) = (t, TypeLookup::ByName(t)),
                 TypeLookup::External => return Outcome::External,
                 TypeLookup::Unknown => return fallback(),
             }
         }
         match self.find_member(ty, item.name, Want::of(item.kind)) {
-            Some((n, _)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+            Some((n, _)) => via.member_hit(n),
             None if self.type_is_open(ty) => Outcome::External,
             None => Outcome::Miss,
         }
@@ -1220,6 +1246,9 @@ impl<'a> Resolver<'a> {
             None => self.resolve_item(f, &item(t, None), scope),
         };
         match outcome {
+            Outcome::Hit(n, s, _) if is_type(n) && self.rust_guessed(f, n, s) => {
+                TypeLookup::ByName(self.prefer_body(n))
+            }
             Outcome::Hit(n, _, _) if is_type(n) => TypeLookup::Found(self.prefer_body(n)),
             Outcome::External => TypeLookup::External,
             _ if self.packs[f as usize].is_some_and(|p| p.is_builtin(t)) => TypeLookup::External,
@@ -1231,9 +1260,10 @@ impl<'a> Resolver<'a> {
     /// member missing from an open type (a base outside the project) is
     /// external; an unknown `T` falls back to the unique-method rung.
     pub(crate) fn resolve_typed(&self, f: FileId, item: &RefItem<'_>, scope: Option<LocalDefId>, ty: &str) -> Outcome {
-        match self.resolve_type_text(f, scope, ty) {
-            TypeLookup::Found(t) => match self.find_member(t, item.name, Want::of(item.kind)) {
-                Some((n, _)) => Outcome::Hit(n, Strategy::TypeResolved, 0.85),
+        let lookup = self.resolve_type_text(f, scope, ty);
+        match lookup {
+            TypeLookup::Found(t) | TypeLookup::ByName(t) => match self.find_member(t, item.name, Want::of(item.kind)) {
+                Some((n, _)) => lookup.member_hit(n),
                 None if self.type_is_open(t) => Outcome::External,
                 None => Outcome::Miss,
             },

@@ -86,6 +86,11 @@
 //!   `#[tokio::test]` and any `…::test`, `#[bench]`, `#[rstest]`,
 //!   `#[test_case(…)]`), everything inside a `#[cfg(test)]` module, and
 //!   every definition of a file under a `tests/` or `benches/` directory.
+//!   A module file declared by `#[cfg(test)] mod x;` (or `all(test, …)`,
+//!   not `any(test, …)`: such a module is also built without tests) is
+//!   test code too, which the file alone does not show: the declaring
+//!   file's `$test` marker import (*Imports*) lets the resolver mark its
+//!   definitions.
 //!   Because this depends on the path, [`LanguagePack::facts_depend_on_path`]
 //!   is true.
 //!
@@ -170,6 +175,7 @@
 //! | `mod x;` (inside `mod m { … }`: `m::x`) | `x` | 1 | | `x` |
 //! | `use` / `mod` inside a macro body that is items (`cfg_net! { pub mod tcp; pub use tcp::X; }`) | as above, at their place | | | |
 //! | `#[path = "p.rs"] mod x;` | `"p.rs"` | 1 | | `x` |
+//! | `#[cfg(test)] mod x;` (or `all(test, …)`; also inside such a module) | the `mod x;` import, then a marker: as above | 1 | | `$test`, `type_only: true` |
 //! | `extern crate foo as bar;` | `::foo` | 0 | | `bar` |
 //! | a path anchor used in code (`crate`, `super`, `serde_json`) | `crate` / *(empty)* / `serde_json` | 0 / 2 / 0 | | the anchor (`super$1` for `super`), `type_only: true` |
 //!
