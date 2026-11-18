@@ -1,5 +1,49 @@
 # Decisions log
 
+## 2026-11-18 — Rust: a `use` leaf before its module; the bench after the Rust fixes
+
+hyper 0.14 writes `pub use self::to_bytes::to_bytes;` before `mod
+to_bytes;`. A module lookup stopped at the first binding of the name, the
+`use` leaf, whose own path needs the module (a cycle, so not found), and
+gave up: `hyper::body::to_bytes(…)` stayed unresolved (12 labelled axum →
+hyper uses). A binding whose target is not found no longer hides a later
+one; the lookup still gives up when no binding of the name is found.
+
+Bench with the branch binary (Rust arm only; other languages carried):
+
+- **Cross-repository edges** (RFC 0006 §8): 12 pairs 98.3 / 74.9 → 99.4 /
+  94.7; without Rust 99.8 / 96.2 → 100.0 / 96.2 (five wrong carbon edges
+  gone: edges written in a dependency's file); Rust alone 94.5 / 53.2 →
+  98.3 / 93.1. Per pair, P / R: axum → tokio 92.9 / 14.1 → 98.0 / 95.6,
+  axum → hyper 100 / 54.4 → 90.4 / 94.7, axum → tower 100 / 82.7 → 100 /
+  89.8, tokio → mio 81.0 / 87.5 → 99.4 / 93.8. The 19 Rust edges counted
+  wrong were read one by one: methods of values a library call returned
+  (`Server::bind(..).serve(..)`, `Client::builder().build(..)`,
+  `tokio::spawn(..).abort()`, `rt.block_on`), all right, which the labeler
+  cannot see. Of the 36 Rust uses still missed, 20 are methods of tower's
+  `ServiceExt` (blanket `impl<T: Service> ServiceExt for T`).
+- **S3 Rust** (serde_json + ripgrep): callers / callees precision 98.5 /
+  98.0 unchanged, recall 87.8 / 87.1 → 86.8 / 87.1 (inside the interval;
+  `rueca-bench check` passes). Every lost edge (44, ripgrep) touches
+  `grep-searcher`'s `testutil.rs`, declared `#[cfg(test)] mod testutil;`:
+  now test code, so the default `trace` leaves it out, while the S3 gold
+  only skips test paths and inline `#[cfg(test)]` items. Rust micro F1
+  99.2 unchanged; S1 Rust File Acc@5 62.8, Function Acc@10 39.0
+  unchanged.
+- **tokio-rs demo** (8 repositories, published binary → branch): link
+  edges 6,199 → 9,550 (847 `DECORATES` from `tokio_macros`); `get_symbol`
+  finds `TcpListener`, `UdpSocket`, `spawn`, `AsyncReadExt` (none before);
+  callers of `sleep` / `timeout` / `interval` 0 / 0 / 0 → 32 / 12 / 4,
+  `tokio::spawn` 0 → 92 (514 with tests), `TcpListener.accept` 0 → 34;
+  hyper's `Bytes.from` as a call target 29 → 0; tokio → mio 200 → 158
+  edges, its 24 `type_resolved` calls all right (`self.registry`,
+  `self.poll`, `mio::event::Event`, `SourceFd`); edges written in a
+  dependency's file 19 (13 wrong) → 13 `IMPLEMENTS`, all `impl LocalTrait
+  for ForeignType`. Index 7.4 s → 8.0 s, store 134 → 138 MB. Re-indexing
+  the unchanged organization still replaces all 8 segments (the segment id
+  holds the time and a random suffix, `rueca-segment/src/writer.rs`): left
+  open.
+
 ## 2026-11-17 — Rust: value and type namespaces; types bind in scope, another crate's by name only as a guess; test doubles never bind
 
 The same tokio-rs demo, after the pack fix above, still showed resolver
