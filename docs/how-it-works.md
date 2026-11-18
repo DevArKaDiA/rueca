@@ -1203,7 +1203,8 @@ its staging store (`[indexing].facts_dir`, whose `facts/` is the facts
 cache) and publishes each snapshot, renewing the 15-minute lease every 5
 minutes, then finishes the job (`done`, or `pending` again when the
 desired state moved meanwhile; a ref that fails alone backs off alone) or
-fails it when every ref failed. A lease another indexer took makes every
+fails it when refs failed and none is at its desired commit (so a looping
+on-demand ref never holds back the default branch). A lease another indexer took makes every
 later write of the old holder fail; what it already published is
 idempotent by `(ref, commit)`. Each ref runs in three steps. **Fetch**:
 the repository's bare mirror (`[indexing].mirror_dir/<repo-dir>.git`)
@@ -1237,6 +1238,36 @@ indexer checks the store and `git` ≥ 2.45. Repository URLs must be
 `https` or `ssh` on an `[indexing].hosts` host (private addresses refused
 unless `allow_private_networks`); credentials reach `git` as an
 `http.extraHeader` in its environment, never on its command line.
+
+**Webhooks** cut the latency polling leaves; they are hints, never the
+truth. Each host with a secret in `[indexing].webhooks` gets `POST
+/webhooks/github`, `/webhooks/gitlab` or `/webhooks/bitbucket` on the
+indexer's main listener (a configured route whose secret is not set
+refuses to start). The handler answers within milliseconds and never
+waits on the network: a body over 25 MB is `413`; the signature is
+checked in constant time (GitHub `X-Hub-Signature-256` and Bitbucket
+`X-Hub-Signature`, HMAC-SHA256 of the body; GitLab's Standard Webhooks
+`webhook-signature` over `id.timestamp.body` with a `whsec_` signing
+token, or the legacy `X-Gitlab-Token`, accepted but flagged as weaker at
+start-up), else `401`; a delivery id seen in the last 24 h (100,000 ids)
+is `200 duplicate`; an event that changes nothing indexed or a
+repository not in `[[repo]]` is `202 ignored`; anything else is `202
+accepted` and a background task asks the host with `git ls-remote` what
+the named refs point to now and merges that into the job by
+compare-and-swap, then wakes the indexer's discovery. Payload commits are
+never indexed as such, so duplicated, reordered or truncated deliveries
+converge on the host's state and polling covers a delivery that never
+came (GitHub sends none past 3 tags pushed at once, GitLab none past 3
+refs). Branch pushes set the default branch or a globbed branch (a
+deleted one leaves the job and the catalog), tag pushes a globbed tag
+(tags never expire), pull request openings and updates `pr/<n>` (from
+`refs/pull/<n>/head`, `refs/merge-requests/<n>/head` or, on Bitbucket,
+the source branch), and closings remove `pr/<n>` from the job and set
+its `closed_at`: the snapshot stays served until `[retention].pr_after_close`
+(7 days) and is then expired by the updater's garbage collection. A
+delivery whose confirmation failed (an unreachable host or store) is
+forgotten, so the host's redelivery is heard. `rueca status --store-url`
+lists every ref with its kind, commit, age and `closed_at`.
 
 ## 5. The graph schema
 

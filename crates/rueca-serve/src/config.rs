@@ -4,8 +4,8 @@
 //!
 //! Every role honours `[store]`, `[org].name`, `[http]`, `[auth]` and
 //! `[telemetry]`; the indexer role (`indexer`, `all`, phase 2) also
-//! `[[repo]]`, `[indexing]` and `[retention]`. `[org].inventory`,
-//! `[indexing].webhooks` and `[retrieval]` are parsed and type-checked (their
+//! `[[repo]]`, `[indexing]` (with `webhooks`) and `[retention]`.
+//! `[org].inventory` and `[retrieval]` are parsed and type-checked (their
 //! secrets resolved) but drive nothing yet
 //! ([`ServiceConfig::unused_sections`]). Repository URLs are checked
 //! against the `[indexing].hosts` allowlist (RFC 0008 §9.2) by every role.
@@ -350,8 +350,9 @@ pub struct IndexingConfig {
     /// in phase 2).
     pub discover: Option<Dur>,
     /// Accept `file://` repository URLs (a local bare repository as the
-    /// code host). **Tests only**: honoured by debug builds; a release
-    /// build refuses a configuration that sets it.
+    /// code host) and `git://` URLs (a local `git daemon`, as the bench
+    /// harness serves its repositories). **Tests only**: honoured by debug
+    /// builds; a release build refuses a configuration that sets it.
     pub allow_file_urls: Option<bool>,
     pub jobs: Option<u32>,
     pub threads: Option<u32>,
@@ -370,6 +371,11 @@ pub struct IndexingConfig {
     pub allow_private_networks: Option<bool>,
     #[serde(default)]
     pub credentials: BTreeMap<String, Secret>,
+    /// Webhook secrets by host (`github`, `gitlab`, `bitbucket`): each one
+    /// configured opens `POST /webhooks/<host>` (indexer roles); a route
+    /// whose secret is not set refuses to start. GitLab: a signing token
+    /// (`whsec_…`, Standard Webhooks `webhook-signature`) or a legacy secret
+    /// token (`X-Gitlab-Token`, flagged as weaker at start-up).
     #[serde(default)]
     pub webhooks: BTreeMap<String, Secret>,
 }
@@ -670,10 +676,10 @@ impl ServiceConfig {
         if self.org.inventory.is_some() {
             out.push("[org].inventory (phase 3)");
         }
-        if !self.indexing.webhooks.is_empty() {
-            out.push("[indexing].webhooks (phase 2, webhooks)");
-        }
         if role == Role::Query {
+            if !self.indexing.webhooks.is_empty() {
+                out.push("[indexing].webhooks (indexer role)");
+            }
             let i = &self.indexing;
             if !self.repo.is_empty() {
                 out.push("[[repo]] (indexer role)");
@@ -849,7 +855,7 @@ prometheus = true
         assert!(!format!("{c:?}").contains("ghp_x"), "secrets never print");
         assert_eq!(c.validate(), Vec::<String>::new());
         assert_eq!(c.unused_sections(Role::Query).len(), 6);
-        assert_eq!(c.unused_sections(Role::All).len(), 3);
+        assert_eq!(c.unused_sections(Role::All).len(), 2, "webhooks are the indexer role's");
     }
 
     #[test]

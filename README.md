@@ -248,6 +248,47 @@ claude mcp add --transport http rueca https://rueca.acme.internal/mcp --header "
 "https://rueca.acme.internal/mcp", "headers": {"Authorization": "Bearer
 …"}}}}`.)
 
+Running the service: `rueca serve --role all` indexes the configured
+repositories from their URLs into an object store, keeps them current
+(adaptive polling, plus signed webhooks pointed at
+`https://<host>/webhooks/github`, `/gitlab` or `/bitbucket`) and serves
+them; `--role query` and `--role indexer` split the two for scale
+([configuration](docs/rfcs/0008-service-mode.md#44-configuration)):
+
+```toml
+# rueca-service.toml
+[store]
+url = "s3://acme-rueca/prod"          # or file:///var/lib/rueca/store
+cache_dir = "/var/cache/rueca"
+
+[org]
+name = "acme"
+
+[[repo]]
+url = "https://github.com/acme/billing.git"
+branches = ["release/*"]
+tags = "v*"
+prs = true
+
+[auth]
+admins = ["token:ops"]
+
+[[auth.token]]
+name = "ops"
+hash = "sha256:…"                     # sha256 of the rueca_… token
+repos = ["github.com/acme/*"]
+
+[indexing]
+credentials = { "github.com" = "env:GITHUB_TOKEN" }
+webhooks = { github = "env:RUECA_GITHUB_WEBHOOK_SECRET" }
+```
+
+```sh
+rueca serve --config rueca-service.toml --check-config
+rueca serve --config rueca-service.toml --role all
+rueca status --store-url s3://acme-rueca/prod      # repositories, refs, commits, closed pull requests
+```
+
 Recommended agent flow: `search_symbols` → `get_symbol` / `get_snippet` →
 `trace`; `search_code` for literals and config.
 
@@ -359,7 +400,7 @@ absolute floors and aspirational targets).
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
 | **Retrieval** | Semantic search inside `search_symbols` ([RFC 0007](docs/rfcs/0007-semantic-search.md)): embedding presets (Qwen3-Embedding 0.6B / 4B / 8B in several quantizations, CodeRankEmbed, remote APIs opt-in; default preset `qwen3-0.6b-q8`, which phase 0 may change by a stated rule), weights downloaded on first use; vectors keyed by content hash, cached in the store and reused across branches, worktrees and repositories; two stages — BM25 + vectors + graph neighbours fused by a convex combination, then an optional reranker, off by default locally and on in service mode only if it passes its gate — measured on CoIR, the S1 localization suite (`raw` and `kw`) and the organization suite (localization and impact) | 🗺️ next (design) |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
-| **Service mode** | One container, segments in object storage, MCP over HTTP, organization-wide indexing with GPU for embeddings ([RFC 0008](docs/rfcs/0008-service-mode.md)): one image with `query` / `indexer` roles, per-repository catalogs and packs written by compare-and-swap (no lock, no database), stateless Streamable HTTP with OIDC or static tokens and deny-by-default visibility, webhooks as hints over adaptive polling, child-process isolation per ref, retention for branches and PRs | 🚧 phases 0–1 landed (`rueca-storage`: memory / file / S3-compatible stores with compare-and-swap; `rueca-service`: publish, pull, generations, garbage collection; `rueca serve`: the query role — stateless MCP over HTTP, static tokens and OIDC, visibility rules, deadlines, rate limits, health and metrics, the container image); phase 2 in progress: `rueca serve --role indexer\|all` with job objects and leases, the reconciler with adaptive polling, the updater publishing generations, idle expiry, `/admin/*`, each ref fetched into a bare, blob-filtered mirror and indexed in an isolated `rueca index-worker` child under resource limits; next: webhooks |
+| **Service mode** | One container, segments in object storage, MCP over HTTP, organization-wide indexing with GPU for embeddings ([RFC 0008](docs/rfcs/0008-service-mode.md)): one image with `query` / `indexer` roles, per-repository catalogs and packs written by compare-and-swap (no lock, no database), stateless Streamable HTTP with OIDC or static tokens and deny-by-default visibility, webhooks as hints over adaptive polling, child-process isolation per ref, retention for branches and PRs | 🚧 phases 0–1 landed (`rueca-storage`: memory / file / S3-compatible stores with compare-and-swap; `rueca-service`: publish, pull, generations, garbage collection; `rueca serve`: the query role — stateless MCP over HTTP, static tokens and OIDC, visibility rules, deadlines, rate limits, health and metrics, the container image); phase 2 in progress: `rueca serve --role indexer\|all` with job objects and leases, the reconciler with adaptive polling, the updater publishing generations, idle expiry, `/admin/*`, each ref fetched into a bare, blob-filtered mirror and indexed in an isolated `rueca index-worker` child under resource limits, signed webhooks for GitHub, GitLab and Bitbucket Cloud confirmed with `ls-remote`, pull request refs from open to expiry, the indexing bench suite (`rueca-bench service-index`) |
 | **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | ✅ phases 1–4 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges, Cargo included; refs / branches / PRs over the organization with `--ref` and `refs = [...]`, collapse across refs; contracts: HTTP / OpenAPI / protobuf-gRPC edges across repositories, `list_contracts`) |
 | **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
 | **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |

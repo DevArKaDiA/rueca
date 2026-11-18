@@ -2,7 +2,8 @@
 //! the code host (`file://`, allowed by the test-only policy flag), the
 //! reconciler polling it, an indexer leasing and running its job with the
 //! in-process stub runner, the updater publishing generations, two updaters
-//! electing one leader, and idle expiry under an injected clock.
+//! electing one leader, idle expiry under an injected clock, and a pull
+//! request opened and closed by webhooks expiring after `pr_after_close`.
 
 mod common;
 
@@ -17,6 +18,7 @@ use rueca_service::reads::write_reads;
 use rueca_service::reconcile::{PollPolicy, Reconciler, RepoSpec, read_catalog};
 use rueca_service::remote::{GitAccess, HostPolicy};
 use rueca_service::updater::{UPDATER_LEASE_SECS, UPDATER_SKEW_SECS, Updater, UpdaterOptions};
+use rueca_service::webhooks::{Hint, Parsed, WebhookHost, apply_hint, parse};
 use rueca_service::{PullWhich, RefKind, Retention, ServiceStore, publish_snapshot, pull_generation, pull_repo};
 
 const NOW: u64 = 1_800_000_000;
@@ -242,4 +244,61 @@ fn idle_pull_requests_and_commits_expire_by_reads() {
     let pulled = pull_repo(&up.svc, repo, PullWhich::All).unwrap();
     assert_eq!(pulled.refs.iter().map(|r| r.ref_name.as_str()).collect::<Vec<_>>(), ["main"]);
     eprintln!("idle expiry: unread pr/1 and the on-demand commit expired at t0+14d; pr/2 (read on day 10) at day 24");
+}
+
+/// A GitHub `pull_request` delivery for `number` with `action`.
+fn pr_hint(host: &GitHost, number: u64, action: &str) -> Hint {
+    let body = serde_json::json!({
+        "action": action,
+        "number": number,
+        "pull_request": {"number": number, "head": {"sha": host.commit("main")}},
+        "repository": {"clone_url": host.url()},
+    });
+    match parse(WebhookHost::GitHub, "pull_request", body.to_string().as_bytes()).unwrap() {
+        Parsed::Hint(h) => h,
+        Parsed::Ignored(why) => panic!("ignored: {why}"),
+    }
+}
+
+#[test]
+fn a_pull_request_opened_and_closed_by_webhooks_expires_after_pr_after_close() {
+    let host = GitHost::new("billing", &[INVOICES]);
+    host.push_ref("refs/pull/7/head");
+    let url = "memory://indexer-role-pr-lifecycle";
+    let (udir, sdir, scratch) =
+        (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let spec = RepoSpec::new(&host.url(), None, &[], &[], true).unwrap();
+    let mut up = updater(url, udir.path(), "indexer-1/aaaa", vec![spec.clone()]);
+    up.options.retention.pr_idle = Duration::ZERO;
+    let staging = open(url, sdir.path());
+    let storage = staging.storage.as_ref();
+    up.tick(NOW).unwrap();
+    assert_eq!(index_next(&staging, &runner(scratch.path()), NOW + 1).result, "done");
+
+    // Opened: confirmed on the host (refs/pull/7/head), desired, indexed.
+    let opened = apply_hint(storage, &spec, &access(), &pr_hint(&host, 7, "opened"), NOW + 2).unwrap();
+    assert!(opened.changed, "{opened:?}");
+    let job = get_job(storage, &spec.repo).unwrap().unwrap();
+    assert_eq!((job.state, job.priority, job.desired["pr/7"].kind), (JobState::Pending, 2, RefKind::Pr));
+    let run = index_next(&staging, &runner(scratch.path()), NOW + 3);
+    assert_eq!(order(&run), [("main", "present"), ("pr/7", "indexed")]);
+
+    // Closed: out of the desired state, `closed_at` in the catalog; still served.
+    let closed = apply_hint(storage, &spec, &access(), &pr_hint(&host, 7, "closed"), NOW + 10).unwrap();
+    assert!(closed.changed);
+    assert!(!get_job(storage, &spec.repo).unwrap().unwrap().desired.contains_key("pr/7"));
+    let catalog = read_catalog(storage, &spec.repo).unwrap().unwrap();
+    assert_eq!(catalog.refs["pr/7"].closed_at, Some(NOW + 10));
+
+    // The updater expires it once `pr_after_close` (7 d) has passed, not before.
+    let week = Retention::default().pr_after_close.as_secs();
+    let r = up.tick(NOW + 10 + week - 1).unwrap();
+    assert!(r.gc.unwrap().refs_expired.is_empty());
+    assert!(read_catalog(storage, &spec.repo).unwrap().unwrap().refs.contains_key("pr/7"));
+    let r = up.tick(NOW + 10 + week + 3600).unwrap();
+    assert_eq!(r.gc.unwrap().refs_expired, [format!("{}@pr/7", spec.repo)]);
+    let catalog = read_catalog(storage, &spec.repo).unwrap().unwrap();
+    assert!(!catalog.refs.contains_key("pr/7") && catalog.removed.iter().any(|x| x.ref_name == "pr/7"));
+    let job = get_job(storage, &spec.repo).unwrap().unwrap();
+    assert_eq!(job.state, JobState::Done, "nothing brings the closed pull request back");
 }

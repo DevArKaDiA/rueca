@@ -60,6 +60,7 @@ use crate::limits::{HostGuard, Limits};
 use crate::metrics::Metrics;
 use crate::store::CountingStorage;
 use crate::visibility::VisibilityCache;
+use crate::webhooks::Webhooks;
 
 /// The `search_symbols` query of the warm-up: any short query searches
 /// every repository's segment of the organization index.
@@ -98,6 +99,8 @@ pub struct AppState {
     pub visibility: VisibilityCache,
     /// The indexer role (`indexer`, `all`).
     pub indexer: Option<Arc<Indexer>>,
+    /// Webhook receivers of the indexer role (`[indexing].webhooks`).
+    pub webhooks: Option<Arc<Webhooks>>,
     /// Read evidence of the query role (`reads/`, RFC 0008 §5.8); `None`
     /// with `[retention].pr_idle = "0"` or in the indexer role.
     pub reads: Option<ReadsRecorder>,
@@ -122,11 +125,16 @@ impl AppState {
                 Some(Arc::new(Indexer::new(&config, storage.clone(), &org, metrics.clone())?))
             }
         };
+        let webhooks = match role {
+            Role::Query => None,
+            Role::Indexer | Role::All => Webhooks::new(&config)?.map(Arc::new),
+        };
         let idle = crate::indexer::retention(&config).pr_idle;
         let reads = (role != Role::Indexer && !idle.is_zero())
             .then(|| ReadsRecorder::new(&crate::indexer::instance_id().replace('/', "-")));
         Ok(AppState {
             indexer,
+            webhooks,
             reads,
             role,
             metrics,

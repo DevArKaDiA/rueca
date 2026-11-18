@@ -77,6 +77,16 @@ impl RepoSpec {
         })
     }
 
+    /// Whether branch `name` matches the `branches` globs.
+    pub fn branch_matches(&self, name: &str) -> bool {
+        self.branch_globs.iter().any(|g| g.is_match(name))
+    }
+
+    /// Whether tag `name` matches the `tags` globs.
+    pub fn tag_matches(&self, name: &str) -> bool {
+        self.tag_globs.iter().any(|g| g.is_match(name))
+    }
+
     /// The host the repository is polled on (empty for `file://`).
     pub fn host(&self) -> String {
         RemoteUrl::parse(&self.url).map(|u| u.host).unwrap_or_default()
@@ -149,11 +159,11 @@ pub fn desired_from(spec: &RepoSpec, remote: &RemoteRefs, pr_heads: bool) -> any
 /// The ref name and kind a listed ref is desired as, if any.
 fn classify(spec: &RepoSpec, full: &str, default: &str, pr_heads: bool) -> Option<(String, RefKind)> {
     if let Some(b) = full.strip_prefix("refs/heads/") {
-        let wanted = b != default && spec.branch_globs.iter().any(|g| g.is_match(b));
+        let wanted = b != default && spec.branch_matches(b);
         return wanted.then(|| (b.to_string(), RefKind::Branch));
     }
     if let Some(t) = full.strip_prefix("refs/tags/") {
-        return spec.tag_globs.iter().any(|g| g.is_match(t)).then(|| (t.to_string(), RefKind::Tag));
+        return spec.tag_matches(t).then(|| (t.to_string(), RefKind::Tag));
     }
     if !(spec.prs && pr_heads) {
         return None;

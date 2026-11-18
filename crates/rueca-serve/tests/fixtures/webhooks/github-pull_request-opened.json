@@ -1,0 +1,12 @@
+{
+  "action": "opened",
+  "number": 7,
+  "pull_request": {
+    "number": 7,
+    "state": "open",
+    "merged": false,
+    "head": {"ref": "feature", "sha": "0000000000000000000000000000000000000003", "repo": {"full_name": "acme/billing"}},
+    "base": {"ref": "main", "sha": "0000000000000000000000000000000000000002"}
+  },
+  "repository": {"full_name": "acme/billing", "clone_url": "REPO_URL", "default_branch": "main"}
+}

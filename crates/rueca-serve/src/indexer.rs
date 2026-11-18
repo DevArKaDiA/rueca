@@ -34,6 +34,7 @@ use rueca_service::jobs::{DesiredRef, Job, JobCache, JobState, LeasedJob, desire
 use rueca_service::reconcile::{PollPolicy, Reconciler, RepoSpec, read_catalog};
 use rueca_service::remote::{GitAccess, HostPolicy, RemoteLister};
 use rueca_service::updater::{TickReport, Updater, UpdaterOptions, expire_refs, unix_now};
+use rueca_service::webhooks::{Applied, Hint, apply_hint};
 use rueca_service::worker::{WorkerCommand, WorkerLimits, address_space_enforced};
 use rueca_service::{RefKind, Retention, ServiceStore};
 use rueca_storage::Storage;
@@ -71,6 +72,11 @@ pub fn validate(c: &ServiceConfig, p: &mut Vec<String>) {
     let poll = poll_policy(c);
     if poll.min > poll.max {
         p.push("indexing.poll: min must not exceed max".to_string());
+    }
+    for host in i.webhooks.keys() {
+        if rueca_service::webhooks::WebhookHost::parse(host).is_none() {
+            p.push(format!("indexing.webhooks.{host}: unknown host (github, gitlab, bitbucket)"));
+        }
     }
     let policy = host_policy(c);
     let mut ids = std::collections::BTreeSet::new();
@@ -236,6 +242,10 @@ pub struct Indexer {
     summary: RwLock<JobsSummary>,
     git_version: Result<(u32, u32), String>,
     metrics: Metrics,
+    /// Wakes job discovery before its period (a confirmed webhook).
+    pub wake: tokio::sync::Notify,
+    /// Wakes the updater before its tick (a job finished here).
+    pub wake_updater: tokio::sync::Notify,
 }
 
 impl Indexer {
@@ -278,11 +288,24 @@ impl Indexer {
             git_version: git_version(),
             metrics,
             owner,
+            wake: tokio::sync::Notify::new(),
+            wake_updater: tokio::sync::Notify::new(),
         })
     }
 
     pub fn has_updater(&self) -> bool {
         self.updater.is_some()
+    }
+
+    /// The configured repositories (`[[repo]]`).
+    pub fn specs(&self) -> &[RepoSpec] {
+        &self.specs
+    }
+
+    /// Confirms a webhook hint with `git ls-remote` and merges it into the
+    /// job of `spec` ([`rueca_service::webhooks::apply_hint`]).
+    pub fn apply_hint(&self, spec: &RepoSpec, hint: &Hint, now: u64) -> anyhow::Result<Applied> {
+        apply_hint(self.storage(), spec, self.git.as_ref(), hint, now)
     }
 
     pub fn summary(&self) -> JobsSummary {
@@ -355,7 +378,12 @@ impl Indexer {
     pub fn run(&self, leased: LeasedJob) {
         let repo = leased.repo().to_string();
         match run_job(&self.staging, leased, self.runner.as_ref(), &self.retention, &unix_now) {
-            Ok(run) => self.record_run(&run),
+            Ok(run) => {
+                self.record_run(&run);
+                if run.refs.iter().any(|r| r.result == "indexed") {
+                    self.wake_updater.notify_one();
+                }
+            }
             Err(e) => {
                 tracing::error!(repo, error = %format!("{e:#}"), "job failed to run");
                 self.metrics.histogram("rueca_job_seconds", &[("kind", "index"), ("result", "error")]).record(0.0);

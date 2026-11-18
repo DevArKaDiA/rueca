@@ -212,8 +212,20 @@ log_format = "pretty"
     let mut config = ServiceConfig::parse(&text).unwrap();
     let problems = config.validate();
     assert!(problems.is_empty(), "{problems:?}");
-    let _ = config.resolve_secrets(&|_| None);
+    let _ = config.resolve_secrets(&test_env);
     Loaded { config, role, path: PathBuf::from("test.toml") }
+}
+
+/// The environment `env:` references resolve against in tests: the webhook
+/// secrets `RUECA_TEST_<HOST>_SECRET` ([`webhook_secret`]).
+pub fn test_env(name: &str) -> Option<String> {
+    let host = name.strip_prefix("RUECA_TEST_")?.strip_suffix("_SECRET")?;
+    Some(webhook_secret(&host.to_ascii_lowercase()))
+}
+
+/// The test webhook secret of `host`.
+pub fn webhook_secret(host: &str) -> String {
+    format!("{host}-webhook-secret")
 }
 
 /// `extra` lines before the first table header go into `[http]`.
@@ -373,6 +385,40 @@ impl GitHost {
 
     pub fn url(&self) -> String {
         format!("file://{}", self.bare.display())
+    }
+
+    /// Commits `files` in the source repository and pushes `main`; the
+    /// new commit.
+    pub fn push(&self, files: &[(&str, &str)]) -> String {
+        let src = self.dir.path().join("src");
+        for (path, text) in files {
+            let p = src.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, text).unwrap();
+        }
+        GitHost::git(&src, &["add", "-A"]);
+        GitHost::git(&src, &["commit", "--quiet", "-m", "change"]);
+        let bare = self.bare.to_string_lossy().into_owned();
+        GitHost::git(&src, &["push", "--quiet", &bare, "main"]);
+        self.rev_parse("main")
+    }
+
+    /// Points `refname` on the host at `main`'s commit (`refs/...`).
+    pub fn set_ref(&self, refname: &str) {
+        let main = self.rev_parse("main");
+        GitHost::git(&self.bare, &["update-ref", refname, &main]);
+    }
+
+    /// Deletes `refname` on the host.
+    pub fn delete_ref(&self, refname: &str) {
+        GitHost::git(&self.bare, &["update-ref", "-d", refname]);
+    }
+
+    /// The commit of `rev` on the host.
+    pub fn rev_parse(&self, rev: &str) -> String {
+        let out =
+            std::process::Command::new("git").arg("-C").arg(&self.bare).args(["rev-parse", rev]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
     fn git(dir: &Path, args: &[&str]) {

@@ -1,0 +1,7 @@
+{
+  "ref": "v2",
+  "ref_type": "tag",
+  "master_branch": "main",
+  "pusher_type": "user",
+  "repository": {"full_name": "acme/billing", "clone_url": "REPO_URL", "default_branch": "main"}
+}

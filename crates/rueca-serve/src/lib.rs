@@ -25,6 +25,10 @@
 //!   leasing every `[indexing].discover`, the job runner, the updater loop
 //!   every `[indexing].updater_tick` when `[indexing].org_updater` (default
 //!   true), `/admin/*`, its readiness (store readable, `git` ≥ 2.45).
+//!   A job that indexed something wakes the updater before its tick.
+//! - [`webhooks`]: `POST /webhooks/{github,gitlab,bitbucket}` (§7.3) on the
+//!   indexer roles: signature, delivery-id dedupe, `202` then a background
+//!   `ls-remote` confirmation merged into the job, which wakes discovery.
 //! - Read evidence (§5.8): the query role records the refs tool calls name
 //!   and writes one `reads/<yyyy-mm-dd>/<hh>-<replica>.json` per hour
 //!   (`[retention].pr_idle = "0"` disables it).
@@ -50,6 +54,7 @@ pub mod state;
 pub mod store;
 pub mod units;
 pub mod visibility;
+pub mod webhooks;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -175,6 +180,7 @@ async fn discover_jobs(idx: Arc<indexer::Indexer>, mut stopped: watch::Receiver<
         lease_while_free(&idx, &permits).await;
         tokio::select! {
             _ = tokio::time::sleep(idx.discover) => {}
+            _ = idx.wake.notified() => {}
             _ = stopped.wait_for(|s| *s) => return,
         }
     }
@@ -203,6 +209,7 @@ async fn run_updater(idx: Arc<indexer::Indexer>, mut stopped: watch::Receiver<bo
         }
         tokio::select! {
             _ = tokio::time::sleep(idx.updater_tick) => {}
+            _ = idx.wake_updater.notified() => {}
             _ = stopped.wait_for(|s| *s) => return,
         }
     }

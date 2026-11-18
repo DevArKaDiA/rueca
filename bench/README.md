@@ -138,6 +138,17 @@ RUECA_BIN=$PWD/target/release/rueca uv run --project bench rueca-bench service  
 `bench/results/service-<UTC timestamp>.json`; the method is under *Suites →
 Service*.
 
+```sh
+cargo build -p rueca                                  # a debug build: test-only flags
+RUECA_BIN=$PWD/target/debug/rueca uv run --project bench rueca-bench service-index --small --indexers 1 2   # a few minutes
+RUECA_BIN=$PWD/target/debug/rueca uv run --project bench rueca-bench service-index                          # the gated organization, 1 and 4 indexers
+```
+
+`service-index [--small] [--split gated|calibration] [--only REPO ...]
+[--indexers N ...] [--pushes N] [--no-faults] [--keep] [--out FILE] [--bin
+PATH]` writes `bench/results/service-index-<UTC timestamp>.json`; the
+method is under *Suites → Service indexing*.
+
 ### Sharing a cache between checkouts
 
 `RUECA_BENCH_CACHE` moves the whole cache. `RUECA_BENCH_SHARED_CACHE` points at
@@ -1302,10 +1313,69 @@ run unless `--keep`).
    directory and the indexing store (bytes); server RSS after the calls;
    the shutdown (SIGTERM → exit code, seconds).
 
-Not yet (RFC 0008 §8.2, later phases): indexers and `--role all`, a local
-git HTTP server, webhooks and push-to-queryable, fault injection, an
-S3-compatible store, concurrent clients. Latency is measured with one
-client and one connection.
+Not yet (RFC 0008 §8.2, later phases): an S3-compatible store, concurrent
+clients. Latency is measured with one client and one connection. Indexers,
+webhooks and faults are the next suite's.
+
+### Service indexing (RFC 0008 §8.2–§8.3 phase 2, `service_index.py`)
+
+The indexer role end to end: the organization indexed from URLs by 1 and N
+indexers, push → queryable through signed webhooks, and fault injection.
+Self-contained in `.cache/service-index/` (removed unless `--keep`). The
+binary must be a **debug** build (`cargo build -p rueca`): the local git
+host is reached through the test-only `[indexing].allow_file_urls`, and
+the looping-parser fixture (`RUECA_TEST_WORKER_FAULT`) exists only in
+debug builds.
+
+1. **Members.** `--small`: the two repositories of
+   `bench/service/small.toml`, one commit each. Otherwise the split's
+   members (`--only` restricts), each cut at its pin into a one-commit
+   repository with `git archive` (needs `setup`).
+2. **Local baseline.** `rueca index <member>` once per member, timed one
+   at a time; the sum is the reference for the cold index.
+3. **Git host.** Bare clones (`uploadpack.allowFilter = true`) served by
+   `git daemon --export-all --base-path` on an ephemeral loopback port:
+   `git://127.0.0.1:<port>/<name>.git`, protocol v2, blob filters and
+   commit wants work as on a hosted server. Chosen over `git http-backend`
+   behind a CGI shim: one process, no Python server, the same on macOS and
+   Linux; the cost is that `git://` is accepted only by the test flag.
+4. **Runs** (`--indexers`, default `1 4`; fresh host and `file://` store
+   each): N = 1 runs one `rueca serve --role all`; N > 1 one `--role
+   query` replica and N `--role indexer` processes, `org_updater` on the
+   first only. Discovery, the updater tick and the replica's poll are 1 s;
+   polling of the host waits at least 5 min, so pushes travel by webhook;
+   `worker.wall_time` is 15 s (or 4 × the slowest local index).
+   - **Cold index**: process start → every member's commit served by the
+     replica (`/status`), next to the local sum; `rueca status
+     --store-url` catalogs and the suite's `search_symbols` answers are
+     compared with the first run's (`equal_to_first`).
+   - **Push → queryable** (`--pushes`, 10): a commit adding a function
+     `rueca_push_marker_<run>_<i>`, pushed to the host, then a signed GitHub
+     `push` delivery (`X-Hub-Signature-256`, a fresh `X-GitHub-Delivery`)
+     to one indexer, round robin; from the delivery to the first
+     `search_symbols` answer naming the function (polled every 100 ms).
+     p50 / p95 (nearest rank) and `rueca_publish_seconds` per stage
+     (`fetch`, `export`, `index`, `upload`, `generation`) over the pushes
+     alone: bucket deltas of every indexer's `/metrics`, quantiles as
+     `histogram_quantile`, as precise as the buckets.
+5. **Faults** (the last run; `--no-faults` skips), each `ok` with its
+   evidence: `looping_parser` (an on-demand ref whose worker spins is
+   killed at the wall-clock limit and fails alone), `worker_killed` (a
+   worker SIGKILLed from outside: the ref fails alone, the indexer lives),
+   `lease_taken` (the job object rewritten mid-job with a forged, expired
+   lease of epoch + 1: the running indexer loses its finish, another lease
+   re-runs the job, the served default commit never regresses),
+   `webhooks_duplicate_reordered` (newest delivery first, then the older,
+   then the newest again: `accepted`, `accepted`, `duplicate`; the newest
+   commit is served and stays), `storage_unwritable` (`chmod -R a-w` on the
+   store for 8 s around a delivery: its confirmation fails and is
+   forgotten, the redelivery with the same id after the window is accepted
+   and the commit becomes queryable). Not injected: a bucket answering 409
+   or 503, which needs an S3-compatible store.
+
+Output: `bench/results/service-index-<UTC timestamp>.json`: `local`,
+`runs[]` (`cold`, `catalog`, `answers`, `push`, `faults`, `equal_to_first`)
+and the summary printed at the end.
 
 ## Datasets, tools and licences
 

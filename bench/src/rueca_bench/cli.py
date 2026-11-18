@@ -6,6 +6,7 @@
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
   rueca-bench service [--small] [--split gated|calibration] [--only REPO ...] [--limit N] [--sample N] [--repeat N] [--keep] [--out FILE] [--bin PATH]
+  rueca-bench service-index [--small] [--split gated|calibration] [--only REPO ...] [--indexers N ...] [--pushes N] [--no-faults] [--keep] [--out FILE] [--bin PATH]
 
 Language families are the manifest `[languages]` keys (python, ecma, php, ...);
 `data` selects the data-format suite (manifest `[[data.repos]]`).
@@ -26,6 +27,7 @@ from . import org as org_mod
 from . import report as report_mod
 from . import s1, s3
 from . import service as service_mod
+from . import service_index as service_index_mod
 from .arms import ARM_NAMES, make_arm
 from .common import RUNS_DIR, WORK_DIR, families, log
 from .prepare import setup
@@ -84,6 +86,17 @@ def main(argv: list[str] | None = None) -> int:
     vp.add_argument("--out", default=None, help="report path (default bench/results/service-<UTC timestamp>.json)")
     vp.add_argument("--bin", default=None, help="rueca binary (default $RUECA_BIN)")
 
+    xp = sub.add_parser("service-index", help="RFC 0008 indexing suite: indexers from a local git daemon, cold index with 1 and N indexers, push → queryable through signed webhooks, fault injection")
+    xp.add_argument("--small", action="store_true", help="the two repositories of bench/service/small.toml; no setup, a few minutes")
+    xp.add_argument("--split", default="gated", choices=["gated", "calibration"], help="organization of the multi-repository scenario")
+    xp.add_argument("--only", nargs="*", help="restrict the organization to these member repositories")
+    xp.add_argument("--indexers", nargs="+", type=int, default=[1, 4], help="indexer counts, one run each (default 1 4); faults run on the last")
+    xp.add_argument("--pushes", type=int, default=10, help="pushes delivered as signed GitHub webhooks per run (push → queryable)")
+    xp.add_argument("--no-faults", action="store_true", help="skip fault injection")
+    xp.add_argument("--keep", action="store_true", help="keep .cache/service-index (host, stores, configs, logs)")
+    xp.add_argument("--out", default=None, help="report path (default bench/results/service-index-<UTC timestamp>.json)")
+    xp.add_argument("--bin", default=None, help="rueca binary, a debug build (default $RUECA_BIN)")
+
     cp = sub.add_parser("clean", help="remove work trees and/or cached arm outputs")
     cp.add_argument("--work", action="store_true")
     cp.add_argument("--runs", nargs="*", help="arm names whose cached outputs to delete")
@@ -131,6 +144,9 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "service":
         out = Path(a.out) if a.out else None
         service_mod.run_service(small=a.small, split=a.split, only=a.only, limit=a.limit, sample=a.sample, repeat=a.repeat, keep=a.keep, out=out, bin_arg=a.bin)
+    elif a.cmd == "service-index":
+        out = Path(a.out) if a.out else None
+        service_index_mod.run_service_index(small=a.small, split=a.split, only=a.only, indexers=a.indexers, pushes=a.pushes, faults=not a.no_faults, keep=a.keep, out=out, bin_arg=a.bin)
     elif a.cmd == "check":
         return check_mod.main(a.baseline, a.current)
     elif a.cmd == "clean":

@@ -7,8 +7,10 @@
 //! limiter (429) → `[http].request_timeout` (503) → the handler.
 //! By role (RFC 0008 §4.2): `/mcp` and the PRM are the query role's (and
 //! `all`'s); `/admin/*` ([`crate::admin`]) the indexer role's (and
-//! `all`'s); elsewhere they answer 404. `/webhooks/*` come in phase 2 Part
-//! C.
+//! `all`'s); elsewhere they answer 404. `/webhooks/<host>`
+//! ([`crate::webhooks`]) are the indexer role's too, one per host with a
+//! secret, outside authentication and the `[http].max_body_bytes` limit
+//! (their own 25 MB limit and signature instead).
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -28,6 +30,7 @@ use crate::auth::{Challenge, Principal, is_admin};
 use crate::config::{Role, SCOPE_ADMIN, SCOPE_READ};
 use crate::mcp::{self, json_response};
 use crate::state::AppState;
+use rueca_service::webhooks::WebhookHost;
 
 /// The main listener's router.
 pub fn main_router(st: Arc<AppState>) -> Router {
@@ -45,16 +48,40 @@ pub fn main_router(st: Arc<AppState>) -> Router {
     let protected = protected
         .route_layer(TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, st.config.http.request_timeout.0))
         .route_layer(middleware::from_fn_with_state(st.clone(), authenticate));
-    Router::new()
+    let api = Router::new()
         .merge(protected)
         .route("/.well-known/oauth-protected-resource", get(prm))
         .route("/.well-known/oauth-protected-resource/mcp", get(prm))
+        .layer(RequestBodyLimitLayer::new(max_body));
+    Router::new()
+        .merge(api)
+        .merge(webhook_routes(&st))
         .layer(middleware::from_fn_with_state(st.clone(), limit_ip))
-        .layer(RequestBodyLimitLayer::new(max_body))
         .layer(axum::extract::DefaultBodyLimit::disable())
         .layer(middleware::from_fn_with_state(st.clone(), guard))
         .layer(middleware::from_fn(log_request))
         .with_state(st)
+}
+
+/// `POST /webhooks/<host>` for every host with a secret (indexer roles):
+/// no bearer authentication (the signature is checked by the handler),
+/// their own body limit ([`crate::webhooks::MAX_BODY`]) and the request
+/// timeout.
+fn webhook_routes(st: &Arc<AppState>) -> Router<Arc<AppState>> {
+    let mut r = Router::new();
+    let hosts = st.webhooks.as_ref().map(|w| w.hosts()).unwrap_or_default();
+    if hosts.is_empty() {
+        return r;
+    }
+    for host in hosts {
+        let handler = match host {
+            WebhookHost::GitHub => post(crate::webhooks::github),
+            WebhookHost::GitLab => post(crate::webhooks::gitlab),
+            WebhookHost::Bitbucket => post(crate::webhooks::bitbucket),
+        };
+        r = r.route(&format!("/webhooks/{}", host.as_str()), handler);
+    }
+    r.route_layer(TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, st.config.http.request_timeout.0))
 }
 
 /// The ops listener's router.

@@ -1,0 +1,6 @@
+{
+  "zen": "Keep it logically awesome.",
+  "hook_id": 30,
+  "hook": {"type": "Repository", "events": ["push", "pull_request"]},
+  "repository": {"full_name": "acme/billing", "clone_url": "REPO_URL"}
+}

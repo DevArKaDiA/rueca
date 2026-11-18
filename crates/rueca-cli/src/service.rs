@@ -85,13 +85,15 @@ fn print_status(url: &str, st: &ServiceStatus) {
     let generation = st.generation.map_or_else(|| "no generation".to_string(), |g| format!("generation {g}"));
     println!("{url}: organization {} ({generation}), {} objects, {}", st.org, st.objects, human_bytes(st.bytes));
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let mut rows = vec![["REPO", "REF", "KIND", "SNAPSHOTS", "COMMIT", "AGE"].map(str::to_string)];
+    let mut rows = vec![["REPO", "REF", "KIND", "SNAPSHOTS", "COMMIT", "AGE", "CLOSED"].map(str::to_string)];
     for r in &st.repos {
         for (i, x) in r.refs.iter().enumerate() {
             let repo = if i == 0 { r.repo.clone() } else { String::new() };
-            let age = x.indexed_at.map_or_else(String::new, |t| human_age(now.saturating_sub(t)));
+            let age = |t: Option<u64>| t.map_or_else(String::new, |t| human_age(now.saturating_sub(t)));
             let commit = x.commit.as_deref().map_or("", short).to_string();
-            rows.push([repo, x.ref_name.clone(), x.kind.as_str().into(), x.snapshots.to_string(), commit, age]);
+            let kind = x.kind.as_str().into();
+            let (indexed, closed) = (age(x.indexed_at), age(x.closed_at));
+            rows.push([repo, x.ref_name.clone(), kind, x.snapshots.to_string(), commit, indexed, closed]);
         }
     }
     print_table(&rows);

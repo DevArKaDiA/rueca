@@ -7,9 +7,11 @@
 //! satisfied without work; a ref backing off after failing alone is
 //! skipped; the lease is renewed between refs when due, and a lost lease
 //! stops the run without writing the job (what was published stays: a
-//! duplicated publish is idempotent by `(ref, commit)`). When every
-//! attempted ref failed the job fails ([`LeasedJob::fail`]), else it
-//! finishes ([`LeasedJob::finish`]) with the refs that failed alone recorded.
+//! duplicated publish is idempotent by `(ref, commit)`). When refs failed
+//! and none is at its desired commit (indexed or already present) the job
+//! fails ([`LeasedJob::fail`]), else it finishes ([`LeasedJob::finish`])
+//! with the refs that failed alone recorded: a looping on-demand ref next to
+//! a served default branch backs off alone and never delays the default.
 //!
 //! The runner is a seam: [`ChildRunner`] fetches into a bare, blob-filtered
 //! mirror, exports, and indexes in a `rueca index-worker` child process
@@ -128,8 +130,10 @@ pub fn run_job(
         run.seconds = started.elapsed().as_secs_f64();
         return Ok(run);
     };
-    let attempted = run.refs.iter().filter(|r| r.result == "indexed" || r.result == "failed").count();
-    let outcome = if attempted > 0 && failed.len() == attempted {
+    // The whole job fails only when no ref is at its desired commit: a ref
+    // that fails next to a served one (an on-demand ref whose parser loops)
+    // fails alone, so it never holds back the default branch.
+    let outcome = if !failed.is_empty() && indexed.is_empty() {
         let first = failed.values().next().cloned().unwrap_or_else(|| job_error_default(clock()));
         leased.fail(storage, &first.stage, &first.reason, clock())
     } else {

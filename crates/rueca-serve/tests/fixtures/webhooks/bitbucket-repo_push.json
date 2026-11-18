@@ -1,0 +1,22 @@
+{
+  "actor": {"display_name": "Octo Cat"},
+  "repository": {
+    "full_name": "acme/billing",
+    "name": "billing",
+    "links": {"html": {"href": "REPO_URL"}}
+  },
+  "push": {
+    "changes": [
+      {
+        "new": {"type": "branch", "name": "main", "target": {"type": "commit", "hash": "000000000002"}},
+        "old": {"type": "branch", "name": "main", "target": {"type": "commit", "hash": "000000000001"}},
+        "created": false, "closed": false, "forced": false, "truncated": false
+      },
+      {
+        "new": null,
+        "old": {"type": "branch", "name": "release/1", "target": {"type": "commit", "hash": "000000000001"}},
+        "created": false, "closed": true, "forced": false, "truncated": false
+      }
+    ]
+  }
+}

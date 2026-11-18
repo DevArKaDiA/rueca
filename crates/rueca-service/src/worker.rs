@@ -49,8 +49,9 @@
 //! `RUECA_TEST_WORKER_FAULT` ([`FAULT_ENV`]) is read by the worker only
 //! when compiled with `debug_assertions` (tests and `cargo build` without
 //! `--release`; release binaries ignore it): `loop:<ref>` makes the worker
-//! spin forever when the request's `ref_name` is `<ref>` (a parser that
-//! ignores its budget), `alloc:<ref>:<bytes>` makes it allocate `<bytes>`
+//! spin forever when the request's `ref_name` is `<ref>` (or starts with
+//! it, when `<ref>` ends in `*`: the bench harness's `loop-*`) (a parser
+//! that ignores its budget), `alloc:<ref>:<bytes>` makes it allocate `<bytes>`
 //! (an allocation storm: with `RLIMIT_AS` below it, the allocation fails and
 //! the worker aborts).
 
@@ -194,7 +195,11 @@ fn test_fault(ref_name: Option<&str>) {
     let Ok(spec) = std::env::var(FAULT_ENV) else { return };
     let mut parts = spec.splitn(3, ':');
     let (Some(mode), Some(target)) = (parts.next(), parts.next()) else { return };
-    if ref_name != Some(target) {
+    let hit = match target.strip_suffix('*') {
+        Some(prefix) => ref_name.is_some_and(|r| r.starts_with(prefix)),
+        None => ref_name == Some(target),
+    };
+    if !hit {
         return;
     }
     match mode {

@@ -4,8 +4,9 @@
 //! Every `git` run goes through the indexer's git runner
 //! ([`rueca_index::org::git_output`]: `GIT_TERMINAL_PROMPT=0`, empty
 //! `GIT_ASKPASS`) with `GIT_CONFIG_NOSYSTEM=1`, `protocol.allow=never` and
-//! only `https` and `ssh` allowed (`file` too when [`HostPolicy::allow_file_urls`]
-//! is set, for tests). A host's credential becomes `http.extraHeader =
+//! only `https` and `ssh` allowed (`file` and `git` too when
+//! [`HostPolicy::allow_file_urls`] is set, for tests and the bench's local
+//! `git daemon`). A host's credential becomes `http.extraHeader =
 //! Authorization: Bearer <token>` passed as `GIT_CONFIG_COUNT` /
 //! `GIT_CONFIG_KEY_0` / `GIT_CONFIG_VALUE_0` in the child's environment:
 //! never on the command line, in a URL or in a repository's config.
@@ -29,8 +30,10 @@ pub struct HostPolicy {
     /// Addresses in loopback, link-local, private and metadata ranges are
     /// refused unless this is set.
     pub allow_private_networks: bool,
-    /// `file://` URLs (a local bare repository as the "host"): tests only;
-    /// the configuration accepts it only in debug builds.
+    /// `file://` URLs (a local bare repository as the "host") and `git://`
+    /// URLs (a local `git daemon`, still subject to `hosts` and the private
+    /// address check): tests and the bench harness only; the configuration
+    /// accepts it only in debug builds.
     pub allow_file_urls: bool,
 }
 
@@ -67,8 +70,10 @@ impl HostPolicy {
         let r = RemoteUrl::parse(url)?;
         match r.scheme.as_str() {
             "file" if self.allow_file_urls => return Ok(r),
-            "file" => bail!("`{url}`: file URLs are allowed only in tests (`[indexing].allow_file_urls`)"),
-            "https" | "ssh" => {}
+            "file" | "git" if !self.allow_file_urls => {
+                bail!("`{url}`: {} URLs are allowed only in tests (`[indexing].allow_file_urls`)", r.scheme)
+            }
+            "https" | "ssh" | "git" => {}
             other => bail!("`{url}`: scheme `{other}` is not allowed (https, ssh)"),
         }
         if !self.hosts.iter().any(|h| h.eq_ignore_ascii_case(&r.host)) {
@@ -155,6 +160,7 @@ impl GitAccess {
         config_args.push("protocol.ssh.allow=always".into());
         if self.policy.allow_file_urls {
             config_args.push("protocol.file.allow=always".into());
+            config_args.push("protocol.git.allow=always".into());
         }
         let mut env = vec![("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string())];
         if let Some(token) = self.credentials.get(&r.host) {
@@ -264,9 +270,13 @@ mod tests {
         assert!(err("https://gitlab.com/a/b").contains("not in [indexing].hosts"));
         assert!(err("http://github.com/a/b").contains("scheme `http`"));
         assert!(err("file:///tmp/x.git").contains("only in tests"));
+        assert!(err("git://github.com/a/b.git").contains("only in tests"));
         assert!(err("https://10.1.2.3/a/b").contains("private address"));
         let open = HostPolicy { allow_private_networks: true, allow_file_urls: true, ..policy() };
         assert!(open.check("https://10.1.2.3/a/b").is_ok() && open.check("file:///tmp/x.git").is_ok());
+        assert!(open.check("git://10.1.2.3:9418/a/b.git").is_ok(), "a local git daemon in tests");
+        let no_private = HostPolicy { allow_file_urls: true, ..policy() };
+        assert!(no_private.check("git://10.1.2.3/a/b.git").is_err(), "git:// still checks private addresses");
     }
 
     #[test]

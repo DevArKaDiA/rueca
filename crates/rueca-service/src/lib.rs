@@ -195,14 +195,17 @@
 //!   idle expiry ([`reads`]: pull requests and on-demand refs unread for
 //!   [`Retention::pr_idle`]) and [`collect_garbage`] hourly, pulls changed
 //!   repositories and publishes generations.
+//! - [`webhooks`]: a code host's delivery parsed into a hint (repository,
+//!   refs), confirmed with `git ls-remote` and merged into the job's
+//!   desired state ([`jobs::desired_update`]); close events set
+//!   [`RefEntry::closed_at`], which garbage collection expires after
+//!   [`Retention::pr_after_close`].
 //!
 //! # Phases
 //!
 //! - Phase 1 (`rueca serve`): replicas poll [`pull_generation`] with the
 //!   last [`PullGenerationReport::version`] (one conditional request per
 //!   tick) and serve MCP over HTTP from the mirror.
-//! - Phase 2 Part C: webhooks into [`jobs::desired_update`] (setting
-//!   [`RefEntry::closed_at`] on close events).
 //! - Phase 3: `vectors` ([`SnapshotEntry::vectors`]) and their objects,
 //!   `embed` jobs ([`jobs::JobKind::Embed`]), facts in the bucket.
 
@@ -219,6 +222,7 @@ pub mod reconcile;
 pub mod remote;
 mod status;
 pub mod updater;
+pub mod webhooks;
 pub mod worker;
 
 use std::collections::BTreeMap;

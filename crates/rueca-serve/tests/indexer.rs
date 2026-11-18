@@ -74,6 +74,8 @@ fn main() -> ExitCode {
     run_tests(&[
         ("role_all_indexes_publishes_and_serves_a_configured_repository", role_all_indexes_publishes_and_serves),
         ("the_indexer_role_is_ready_without_a_generation_and_serves_no_mcp", the_indexer_role_is_ready),
+        ("webhooks_verify_dedupe_confirm_and_reach_queries", webhooks_end_to_end),
+        ("a_webhook_route_without_its_secret_refuses_to_start", webhook_without_secret),
     ])
 }
 
@@ -162,4 +164,165 @@ fn the_indexer_role_is_ready() {
     // It still indexes and publishes: the job finishes.
     let st = wait_status(&s, |v| v["jobs"]["index.done"] == 1);
     assert_eq!(st["role"], "indexer");
+}
+
+const REFUNDS: (&str, &str) = ("billing/refunds.py", "def refund_payment(p):\n    return p\n");
+
+fn webhook_config(host: &GitHost, dirs: &tempfile::TempDir) -> String {
+    extra(host, dirs).replace(
+        &format!("url = \"{}\"\n", host.url()),
+        &format!("url = \"{}\"\nbranches = [\"release/*\"]\ntags = \"v*\"\nprs = true\n", host.url()),
+    ) + r#"webhooks = { github = "env:RUECA_TEST_GITHUB_SECRET", gitlab = "env:RUECA_TEST_GITLAB_SECRET", bitbucket = "env:RUECA_TEST_BITBUCKET_SECRET" }
+"#
+}
+
+fn fixture(name: &str, url: &str) -> String {
+    let path = format!("{}/tests/fixtures/webhooks/{name}.json", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path).unwrap().replace("REPO_URL", url)
+}
+
+fn hmac_hex(key: &str, body: &str) -> String {
+    use hmac::{KeyInit, Mac};
+    let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(key.as_bytes()).unwrap();
+    mac.update(body.as_bytes());
+    mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Posts `body` to `/webhooks/<host>` signed as that host signs it
+/// (`sign = false`: a wrong signature), with delivery id `id`.
+fn deliver(s: &Server, host: &str, event: &str, id: &str, body: &str, sign: bool) -> common::Reply {
+    let secret = if sign { common::webhook_secret(host) } else { "wrong".to_string() };
+    let sig = format!("sha256={}", hmac_hex(&secret, body));
+    let headers: Vec<(&str, &str)> = match host {
+        "github" => vec![("x-github-event", event), ("x-github-delivery", id), ("x-hub-signature-256", &sig)],
+        "gitlab" => vec![("x-gitlab-event", event), ("idempotency-key", id), ("x-gitlab-token", &secret)],
+        _ => vec![("x-event-key", event), ("x-request-uuid", id), ("x-hub-signature", &sig)],
+    };
+    post(&format!("{}/webhooks/{host}", s.base), body, &headers)
+}
+
+/// Polls `GET /admin/jobs` until the job's `desired` satisfies `pred`.
+fn wait_desired(s: &Server, pred: impl Fn(&Value) -> bool) -> Value {
+    let auth = bearer(TOKEN_OPS);
+    let started = Instant::now();
+    loop {
+        let jobs = get(&format!("{}/admin/jobs", s.base), &[("authorization", &auth)]).json();
+        let desired = jobs["jobs"][0]["desired"].clone();
+        if pred(&desired) {
+            return desired;
+        }
+        assert!(started.elapsed() < Duration::from_secs(30), "desired never matched: {desired}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn webhooks_end_to_end() {
+    let host = GitHost::new("billing", &[INVOICES]);
+    host.set_ref("refs/heads/release/1");
+    let dirs = tempfile::tempdir().unwrap();
+    let s = Server::start_as("memory://indexer-webhooks", &webhook_config(&host, &dirs), Role::All);
+    s.wait_ready();
+    let url = host.url();
+    refusals_and_ignored(&s, &url);
+
+    // A push: 202, a duplicate is 200, and the commit becomes queryable.
+    let moved = host.push(&[REFUNDS]);
+    let push = fixture("github-push", &url);
+    let started = Instant::now();
+    assert_eq!(deliver(&s, "github", "push", "d-1", &push, true).json()["result"], "accepted");
+    let dup = deliver(&s, "github", "push", "d-1", &push, true);
+    assert_eq!((dup.status, dup.json()["result"].as_str()), (200, Some("duplicate")));
+    wait_desired(&s, |d| d["main"]["commit"] == moved.as_str());
+    wait_status(&s, |v| v.to_string().contains(&moved));
+    let r = s.call(TOKEN_OPS, "search_symbols", json!({"query": "refund payment"}));
+    assert!(r.body.contains("refund_payment"), "{}", r.body);
+    eprintln!("webhooks: push → queryable in {:?}", started.elapsed());
+
+    pull_requests(&s, &host, &url);
+    other_hosts(&s, &host, &url);
+    let metrics = get(&format!("{}/metrics", s.ops), &[]).body;
+    for needle in [
+        r#"rueca_webhook_deliveries_total{host="github",result="accepted"}"#,
+        r#"rueca_webhook_deliveries_total{host="github",result="duplicate"} 1"#,
+        r#"rueca_webhook_deliveries_total{host="github",result="unauthorized"} 2"#,
+        r#"rueca_webhook_deliveries_total{host="github",result="too_large"} 1"#,
+        r#"rueca_webhook_confirmations_total{host="gitlab",result="changed"}"#,
+    ] {
+        assert!(metrics.contains(needle), "{needle} not in\n{metrics}");
+    }
+}
+
+/// Bad or missing signatures, an oversized body, a ping, an unknown
+/// repository.
+fn refusals_and_ignored(s: &Server, url: &str) {
+    let push = fixture("github-push", url);
+    assert_eq!(deliver(s, "github", "push", "x-1", &push, false).status, 401);
+    let unsigned = post(&format!("{}/webhooks/github", s.base), &push, &[("x-github-event", "push")]);
+    assert_eq!(unsigned.status, 401);
+    assert!(oversized(s).starts_with("HTTP/1.1 413"), "a declared body over 25 MB is refused unread");
+    let ping = deliver(s, "github", "ping", "x-3", &fixture("github-ping", url), true);
+    assert_eq!((ping.status, ping.json()["result"].as_str()), (202, Some("ignored")));
+    let foreign = fixture("github-push", "https://github.com/acme/elsewhere.git");
+    let r = deliver(s, "github", "push", "x-4", &foreign, true);
+    assert_eq!((r.status, r.json()["result"].as_str()), (202, Some("ignored")));
+    assert_eq!(deliver(s, "github", "push", "x-5", "{nope", true).status, 400);
+}
+
+/// Declares a 25 MB + 1 body and sends none: the status line.
+fn oversized(s: &Server) -> String {
+    use std::io::{Read, Write};
+    let addr = s.base.trim_start_matches("http://");
+    let mut conn = std::net::TcpStream::connect(addr).unwrap();
+    let head = format!(
+        "POST /webhooks/github HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        25 * 1024 * 1024 + 1
+    );
+    conn.write_all(head.as_bytes()).unwrap();
+    let mut buf = [0u8; 64];
+    let n = conn.read(&mut buf).unwrap();
+    String::from_utf8_lossy(&buf[..n]).to_string()
+}
+
+/// Opened → `pr/7` desired and served; closed → out of the desired state,
+/// `closed_at` in the catalog.
+fn pull_requests(s: &Server, host: &GitHost, url: &str) {
+    host.set_ref("refs/pull/7/head");
+    let opened = fixture("github-pull_request-opened", url);
+    assert_eq!(deliver(s, "github", "pull_request", "pr-1", &opened, true).status, 202);
+    wait_desired(s, |d| d["pr/7"]["kind"] == "pr");
+    wait_status(s, |v| has_ref(v, "pr/7"));
+    let closed = fixture("github-pull_request-closed", url);
+    assert_eq!(deliver(s, "github", "pull_request", "pr-2", &closed, true).status, 202);
+    wait_desired(s, |d| d.get("pr/7").is_none());
+    let idx = s.state().indexer.clone().unwrap();
+    let catalog =
+        rueca_service::reconcile::read_catalog(idx.staging.storage.as_ref(), "local/billing").unwrap().unwrap();
+    assert!(catalog.refs["pr/7"].closed_at.is_some(), "{:?}", catalog.refs["pr/7"]);
+}
+
+/// GitLab (legacy token) and Bitbucket deliveries.
+fn other_hosts(s: &Server, host: &GitHost, url: &str) {
+    host.set_ref("refs/tags/v2");
+    let tag = fixture("gitlab-tag_push", url);
+    assert_eq!(deliver(s, "gitlab", "Tag Push Hook", "gl-1", &tag, false).status, 401);
+    assert_eq!(deliver(s, "gitlab", "Tag Push Hook", "gl-1", &tag, true).status, 202);
+    wait_desired(s, |d| d["v2"]["kind"] == "tag");
+    host.delete_ref("refs/heads/release/1");
+    let push = fixture("bitbucket-repo_push", url);
+    assert_eq!(deliver(s, "bitbucket", "repo:push", "bb-1", &push, true).status, 202);
+    wait_desired(s, |d| d.get("release/1").is_none() && d["main"].is_object());
+}
+
+fn webhook_without_secret() {
+    let host = GitHost::new("ledger", &[INVOICES]);
+    let dirs = tempfile::tempdir().unwrap();
+    let text = webhook_config(&host, &dirs).replace("RUECA_TEST_GITHUB_SECRET", "RUECA_UNSET_VARIABLE");
+    let cache = tempfile::tempdir().unwrap();
+    let loaded = common::config_as("memory://indexer-webhook-unset", cache.path(), &text, Role::All);
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let err = match rt.block_on(rueca_serve::start(loaded)) {
+        Ok(_) => panic!("started without the webhook secret"),
+        Err(e) => format!("{e:#}"),
+    };
+    assert!(err.contains("indexing.webhooks.github") && err.contains("refuses to start"), "{err}");
 }

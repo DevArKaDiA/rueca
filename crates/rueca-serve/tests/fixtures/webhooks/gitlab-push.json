@@ -1,0 +1,17 @@
+{
+  "object_kind": "push",
+  "event_name": "push",
+  "before": "0000000000000000000000000000000000000001",
+  "after": "0000000000000000000000000000000000000002",
+  "ref": "refs/heads/main",
+  "checkout_sha": "0000000000000000000000000000000000000002",
+  "project_id": 15,
+  "project": {
+    "id": 15,
+    "path_with_namespace": "acme/billing",
+    "default_branch": "main",
+    "web_url": "https://gitlab.com/acme/billing",
+    "git_http_url": "REPO_URL"
+  },
+  "total_commits_count": 1
+}

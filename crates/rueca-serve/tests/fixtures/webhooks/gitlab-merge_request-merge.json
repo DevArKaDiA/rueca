@@ -1,0 +1,14 @@
+{
+  "object_kind": "merge_request",
+  "event_type": "merge_request",
+  "project": {"id": 15, "path_with_namespace": "acme/billing", "git_http_url": "REPO_URL"},
+  "object_attributes": {
+    "iid": 7,
+    "action": "merge",
+    "state": "merged",
+    "source_branch": "feature",
+    "target_branch": "main",
+    "source_project_id": 15,
+    "target_project_id": 15
+  }
+}

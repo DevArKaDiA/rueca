@@ -38,6 +38,10 @@ jsonwebtoken = { version = "12", default-features = false, features = ["rust_cry
 globset = "0.4.20"
 sha2 = "0.11.1"
 subtle = "2.6.1"
+# Webhook signatures (RFC 0008 §7.3): HMAC-SHA256, constant-time verify;
+# Standard Webhooks keys and signatures are base64. Both already in the tree.
+hmac = "0.13.0"
+base64 = "0.22.1"
 ureq = { version = "3.5.2", default-features = false, features = ["rustls-no-provider"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8.5"

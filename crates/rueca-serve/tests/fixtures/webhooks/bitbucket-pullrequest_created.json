@@ -1,0 +1,14 @@
+{
+  "actor": {"display_name": "Octo Cat"},
+  "repository": {"full_name": "acme/billing", "links": {"html": {"href": "REPO_URL"}}},
+  "pullrequest": {
+    "id": 7,
+    "state": "OPEN",
+    "source": {
+      "branch": {"name": "feature"},
+      "commit": {"hash": "000000000003"},
+      "repository": {"full_name": "acme/billing"}
+    },
+    "destination": {"branch": {"name": "main"}, "repository": {"full_name": "acme/billing"}}
+  }
+}

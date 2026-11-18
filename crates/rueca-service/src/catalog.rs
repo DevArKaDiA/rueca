@@ -268,6 +268,12 @@ impl RepoCatalog {
         }
     }
 
+    /// Clears the `closed_at` of pull request `ref_name` (reopened);
+    /// whether it was set.
+    pub fn reopen_pr(&mut self, ref_name: &str) -> bool {
+        self.refs.get_mut(ref_name).is_some_and(|e| e.closed_at.take().is_some())
+    }
+
     /// Every snapshot of every ref.
     pub fn snapshots(&self) -> impl Iterator<Item = &SnapshotEntry> + '_ {
         self.refs.values().flat_map(|r| r.snapshots.iter())

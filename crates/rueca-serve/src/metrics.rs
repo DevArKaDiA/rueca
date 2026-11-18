@@ -36,6 +36,14 @@ const HELP: &[(&str, &str)] = &[
     ("rueca_publish_seconds", "Indexing pipeline stage time (fetch, export, index, upload, generation)"),
     ("rueca_cas_conflicts_total", "Compare-and-swap writes lost to another writer, by object (catalog, job, pointer)"),
     ("rueca_gc_deleted_bytes_total", "Bytes deleted by garbage collection, by object class"),
+    (
+        "rueca_webhook_deliveries_total",
+        "Webhook deliveries by host and answer (accepted, ignored, duplicate, unauthorized, too_large, invalid)",
+    ),
+    (
+        "rueca_webhook_confirmations_total",
+        "Webhook hints confirmed with ls-remote, by host and result (changed, unchanged, failed)",
+    ),
 ];
 
 /// The app's metric registry.

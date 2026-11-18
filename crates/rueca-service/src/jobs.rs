@@ -20,7 +20,7 @@
 //! own back-off and counts as handled until the back-off passes or its
 //! desired commit moves; every desired ref handled → `done` (attempts reset),
 //! else (the desired state moved during the run) → `pending`. **Fail**
-//! (every attempted ref failed): `attempts + 1`, `failed`, `not_before = now
+//! (refs failed and none is at its desired commit): `attempts + 1`, `failed`, `not_before = now
 //! + min(10 min × attempts, 120 min)` (Zoekt's schedule), `last_error`.
 //!
 //! The lease owner survives `done`, so a later lease can prefer the indexer
