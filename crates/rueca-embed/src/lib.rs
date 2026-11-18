@@ -16,11 +16,13 @@
 //!   `embeddings`), verifies their sha256 once and refuses a mismatch.
 //! - The llama.cpp backend (`backend::llama`, feature `embeddings`, default
 //!   on; Metal on Apple silicon, `cuda` as an opt-in feature) loads a GGUF
-//!   file, tokenizes with the tokenizer inside it, pools the last token and
-//!   L2-normalizes; with `dims` below the model width it truncates
+//!   file, tokenizes with the tokenizer inside it, pools (the preset's
+//!   pooling) and L2-normalizes; with `dims` below the model width it truncates
 //!   (Matryoshka) and re-normalizes.
 //! - Queries get the preset's instruction, Qwen3's `Instruct: {task}\nQuery:{query}`
-//!   ([`presets::DEFAULT_CODE_INSTRUCTION`] by default); documents get none.
+//!   ([`presets::DEFAULT_CODE_INSTRUCTION`] by default), or an encoder's
+//!   fixed prefix (CodeRankEmbed); documents get none. Pooling follows the
+//!   preset: last token (Qwen3), `[CLS]` (BERT-family encoders) or mean.
 //!
 //! # Determinism (RFC 0007 §9)
 //!
@@ -127,7 +129,9 @@ pub struct EmbedOptions {
     pub threads: Option<usize>,
     /// Run on the CPU even when a GPU backend is compiled in.
     pub cpu: bool,
-    /// Query instruction for `Instruct` presets; `None` uses the preset's.
+    /// Query instruction for `Instruct` presets; for `Prefix` presets
+    /// (encoders) the whole query prefix, used verbatim. `None` uses the
+    /// preset's.
     pub query_instruction: Option<String>,
     /// Version of the text builder that produced the documents, keyed in
     /// the [`EmbedKey`]: [`TEXT_BUILDER_VERSION`] (0) for caller text, the
@@ -173,7 +177,10 @@ impl EmbedOptions {
         Ok(dims)
     }
 
-    /// The query prefix in effect for a preset.
+    /// The query prefix in effect for a preset: Qwen3's `Instruct:` template
+    /// around the instruction, or an encoder's fixed prefix (CodeRankEmbed's
+    /// `Represent this query for searching relevant code: `), which
+    /// [`EmbedOptions::query_instruction`] replaces verbatim when set.
     #[must_use]
     pub fn query_prefix(&self, preset: &Preset) -> String {
         match preset.query {
@@ -181,7 +188,7 @@ impl EmbedOptions {
                 let task = self.query_instruction.as_deref().unwrap_or(instruction);
                 format!("Instruct: {task}\nQuery:")
             }
-            QueryStyle::Prefix { prefix } => prefix.to_string(),
+            QueryStyle::Prefix { prefix } => self.query_instruction.as_deref().unwrap_or(prefix).to_string(),
         }
     }
 }
@@ -410,6 +417,34 @@ mod tests {
         let q = EmbedInput::query("where is login");
         assert_eq!(model_input(&q, &o.query_prefix(p), ""), "Instruct: Find it\nQuery:where is login");
         assert_eq!(model_input(&EmbedInput::document("fn a()"), "x", ""), "fn a()");
+    }
+
+    #[test]
+    fn query_prefix_of_an_encoder_is_the_fixed_prefix() {
+        let p = preset("coderank-137m").unwrap();
+        let mut o = EmbedOptions::default();
+        assert_eq!(o.query_prefix(p), presets::CODERANK_QUERY_PREFIX);
+        let q = EmbedInput::query("where is login");
+        assert_eq!(
+            model_input(&q, &o.query_prefix(p), p.document_prefix),
+            "Represent this query for searching relevant code: where is login"
+        );
+        assert_eq!(model_input(&EmbedInput::document("fn a()"), &o.query_prefix(p), p.document_prefix), "fn a()");
+        o.query_instruction = Some("Find: ".into());
+        assert_eq!(o.query_prefix(p), "Find: ");
+        assert!(!o.query_prefix(p).contains("Instruct"));
+        let meta = model_meta(
+            p,
+            &EmbedOptions::default(),
+            RuntimeInfo { runtime: "x", version: "", backend: Backend::Cpu, threads: 1 },
+        )
+        .unwrap();
+        assert_eq!((meta.dims, meta.max_dims, meta.pooling), (768, 768, presets::Pooling::Cls));
+        assert_eq!(meta.query_prefix, presets::CODERANK_QUERY_PREFIX);
+        let long = EmbedOptions { max_tokens: 8192, ..EmbedOptions::default() };
+        assert!(long.output_dims(p).is_ok());
+        let longer = EmbedOptions { max_tokens: 8193, ..EmbedOptions::default() };
+        assert!(longer.output_dims(p).is_err());
     }
 
     #[test]

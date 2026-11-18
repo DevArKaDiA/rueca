@@ -98,8 +98,8 @@ finds what an agent names, not what it describes.
 | `qwen3-0.6b-f16` | same, official `f16` | 0.6B | 1024 | 32k | Apache-2.0 | 1,198 MB | reference | optional; reference for rank overlap |
 | `qwen3-4b-q4` / `-q8` | Qwen3-Embedding-4B, official `Q4_K_M` / `Q8_0` | 4B | 2560 | 32k | Apache-2.0 | 2,497 / 4,280 MB | MTEB-Code 80.06 (Qwen3 report) | optional; GPU |
 | `qwen3-8b-q4` / `-q8` | Qwen3-Embedding-8B, official `Q4_K_M` / `Q8_0` | 8B | 4096 | 32k | Apache-2.0 | 4,677 / 8,047 MB | MTEB-Code 80.68 (same) | optional; GPU, service mode |
-| `coderank-137m` | CodeRankEmbed | 137M | 768 *(unverified)* | 8192 | MIT | ≈ 275 MB at f16 *(estimate: 2 bytes per parameter)* | CoIR 60.1 ([card](https://huggingface.co/nomic-ai/CodeRankEmbed)); Lite File Acc@5 84.7, Fn Acc@10 58.8 (LocAgent) | optional; runtime path confirmed in phase 0 |
-| `gte-modernbert-149m` | gte-modernbert-base | 149M | 768 | 8192 | Apache-2.0 | ≈ 300 MB at f16 *(estimate)* | CoIR 71.5 ([Granite R2](https://arxiv.org/html/2508.21085), Table 11; CoIR training data *(unverified)*) | candidate "fast" preset; runtime path *(unverified)* |
+| `coderank-137m` / `-q8` | CodeRankEmbed, `f16` / `Q8_0` converted and hosted by Rueca | 137M | 768 | 8192 | MIT | 274 / 146 MB | CoIR 60.1 ([card](https://huggingface.co/nomic-ai/CodeRankEmbed)); Lite File Acc@5 84.7, Fn Acc@10 58.8 (LocAgent) | optional; runtime path confirmed in phase 0 (cosine ≥ 0.99999 to `sentence-transformers` at `f16`) |
+| `gte-modernbert-149m` | gte-modernbert-base, `f16` converted and hosted by Rueca | 149M | 768 | 8192 | Apache-2.0 | 300 MB | CoIR 71.5 ([Granite R2](https://arxiv.org/html/2508.21085), Table 11; CoIR training data *(unverified)*) | candidate "fast" preset; runtime path confirmed in phase 0 (cosine ≥ 0.99999) |
 | `remote:<provider>/<model>` | API (§3.5) | — | per provider | — | provider terms | — | per provider | opt-in |
 
 Official sizes are Hugging Face file sizes; MTEB-Code is the 12-task

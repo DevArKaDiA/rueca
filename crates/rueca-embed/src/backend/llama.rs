@@ -1,7 +1,8 @@
 //! llama.cpp backend through `llama-cpp-2` (RFC 0007 §4).
 //!
 //! One model per process; each [`Embedder::embed`] call creates a context
-//! (embeddings on, last-token pooling, unified KV cache, micro-batch equal
+//! (embeddings on, the preset's pooling: last token for Qwen3, first token
+//! (`[CLS]`) for BERT-family encoders; unified KV cache, micro-batch equal
 //! to the batch so every input fits one micro-batch), fills batches in
 //! [`batch_order`] and returns the vectors in input order. Contexts are
 //! created under a lock: llama.cpp may mutate the model while creating one.
@@ -58,10 +59,27 @@ pub struct LlamaEmbedder {
     meta: ModelMeta,
     query_prefix: String,
     document_prefix: &'static str,
+    pooling: LlamaPoolingType,
     bos: Option<LlamaToken>,
     eos: Option<LlamaToken>,
     gpu: bool,
     lock: Mutex<()>,
+}
+
+/// The llama.cpp pooling of a local preset.
+///
+/// # Errors
+///
+/// [`Error::Invalid`] for [`Pooling::Provider`] (remote presets only).
+pub(crate) fn pooling_type(preset: &Preset) -> Result<LlamaPoolingType> {
+    match preset.pooling {
+        Pooling::Last => Ok(LlamaPoolingType::Last),
+        Pooling::Cls => Ok(LlamaPoolingType::Cls),
+        Pooling::Mean => Ok(LlamaPoolingType::Mean),
+        Pooling::Provider => {
+            Err(Error::Invalid(format!("`{}`: provider pooling has no llama.cpp equivalent", preset.name)))
+        }
+    }
 }
 
 impl LlamaEmbedder {
@@ -73,9 +91,7 @@ impl LlamaEmbedder {
     /// preset's width, runtime failures.
     pub fn load(preset: &'static Preset, weights: &Path, opts: EmbedOptions) -> Result<Self> {
         opts.output_dims(preset)?;
-        if preset.pooling != Pooling::Last {
-            return Err(Error::Invalid(format!("`{}`: only last-token pooling is wired in phase 0", preset.name)));
-        }
+        let pooling = pooling_type(preset)?;
         let backend = backend()?;
         let gpu = !opts.cpu && backend.supports_gpu_offload();
         let layers = if gpu { ALL_LAYERS } else { 0 };
@@ -95,6 +111,7 @@ impl LlamaEmbedder {
             meta,
             query_prefix,
             document_prefix: preset.document_prefix,
+            pooling,
             bos,
             eos,
             gpu,
@@ -108,7 +125,8 @@ impl LlamaEmbedder {
 
     /// Tokenizes without special tokens, cuts to the budget, then adds the
     /// model's BOS / EOS (Qwen3 appends `<|endoftext|>`, which its
-    /// last-token pooling reads).
+    /// last-token pooling reads; BERT encoders wrap the text in `[CLS]` …
+    /// `[SEP]` and pool `[CLS]`).
     fn tokens(&self, text: &str) -> Vec<LlamaToken> {
         let mut body = self.model.vocab().tokenize(text.as_bytes(), false, false);
         let specials = usize::from(self.bos.is_some()) + usize::from(self.eos.is_some());
@@ -130,7 +148,7 @@ impl LlamaEmbedder {
             .with_n_seq_max(MAX_SEQS as u32)
             .with_kv_unified(true)
             .with_embeddings(true)
-            .with_pooling_type(LlamaPoolingType::Last)
+            .with_pooling_type(self.pooling)
             .with_n_threads(threads)
             .with_n_threads_batch(threads)
             .with_offload_kqv(self.gpu)
@@ -258,4 +276,20 @@ fn performance_cores() -> Option<usize> {
 #[cfg(not(target_os = "macos"))]
 fn performance_cores() -> Option<usize> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presets::preset;
+
+    #[test]
+    fn pooling_follows_the_preset() {
+        assert_eq!(pooling_type(preset("qwen3-0.6b-q8").unwrap()).unwrap(), LlamaPoolingType::Last);
+        assert_eq!(pooling_type(preset("coderank-137m").unwrap()).unwrap(), LlamaPoolingType::Cls);
+        assert_eq!(pooling_type(preset("gte-modernbert-149m").unwrap()).unwrap(), LlamaPoolingType::Cls);
+        let mean = Preset { pooling: Pooling::Mean, ..*preset("coderank-137m").unwrap() };
+        assert_eq!(pooling_type(&mean).unwrap(), LlamaPoolingType::Mean);
+        assert!(pooling_type(preset("remote:voyage/voyage-code-3").unwrap()).is_err());
+    }
 }

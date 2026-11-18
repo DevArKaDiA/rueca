@@ -291,32 +291,67 @@ enum Qwen {
     B8,
 }
 
-/// A preset without a pinned file yet (phase 0 model sweep).
-const fn planned(
-    name: &'static str,
+/// An upstream encoder model (BERT family): repository, revision, license,
+/// pooling and query style.
+#[derive(Clone, Copy)]
+struct Encoder {
     model: &'static str,
     revision: &'static str,
     license: &'static str,
     pooling: Pooling,
     query: QueryStyle,
+}
+
+/// CodeRankEmbed (NomicBERT, 137M, 768 dims, 8,192 tokens, CLS pooling;
+/// queries get the model card's prefix, documents none).
+const CODERANK: Encoder = Encoder {
+    model: "nomic-ai/CodeRankEmbed",
+    revision: "3c4b60807d71f79b43f3c4363786d9493691f8b1",
+    license: "MIT",
+    pooling: Pooling::Cls,
+    query: QueryStyle::Prefix { prefix: CODERANK_QUERY_PREFIX },
+};
+
+/// CodeRankEmbed's query prefix (`config_sentence_transformers.json`,
+/// prompt `query`).
+pub const CODERANK_QUERY_PREFIX: &str = "Represent this query for searching relevant code: ";
+
+/// gte-modernbert-base (ModernBERT, 149M, 768 dims, 8,192 tokens, CLS
+/// pooling, no prefix).
+const GTE_MODERNBERT: Encoder = Encoder {
+    model: "Alibaba-NLP/gte-modernbert-base",
+    revision: "e7f32e3c00f91d699e8c43b53106206bcc72bb22",
+    license: "Apache-2.0",
+    pooling: Pooling::Cls,
+    query: QueryStyle::Prefix { prefix: "" },
+};
+
+/// An encoder preset: 768 dims (no Matryoshka range), 8,192 tokens of
+/// context, documents without a prefix.
+const fn encoder(
+    name: &'static str,
+    upstream: Encoder,
+    quantization: &'static str,
+    status: PresetStatus,
+    weights: Option<WeightsFile>,
     note: &'static str,
 ) -> Preset {
     Preset {
         name,
-        model,
-        revision,
-        license,
+        model: upstream.model,
+        revision: upstream.revision,
+        license: upstream.license,
         kind: PresetKind::Local,
         role: Role::Embedder,
-        status: PresetStatus::Planned,
-        quantization: "F16",
+        status,
+        quantization,
         dims: 768,
         min_dims: 768,
         context: 8192,
-        pooling,
-        query,
+        pooling: upstream.pooling,
+        query: upstream.query,
         document_prefix: "",
-        weights: None,
+        weights,
         note,
     }
 }
@@ -499,24 +534,50 @@ pub static PRESETS: &[Preset] = &[
         },
         "official Q8_0; GPU, service mode",
     ),
-    planned(
+    encoder(
         "coderank-137m",
-        "nomic-ai/CodeRankEmbed",
-        "3c4b60807d71f79b43f3c4363786d9493691f8b1",
-        "MIT",
-        Pooling::Cls,
-        QueryStyle::Prefix { prefix: "Represent this query for searching relevant code: " },
-        "NomicBERT architecture (supported by llama.cpp as `nomic-bert`); needs a Rueca-hosted GGUF conversion",
+        CODERANK,
+        "F16",
+        PresetStatus::Unavailable,
+        Some(WeightsFile {
+            file_name: "CodeRankEmbed-F16.gguf",
+            url: "https://github.com/DevArKaDiA/rueca-models/releases/download/coderankembed-f16-v1/CodeRankEmbed-F16.gguf",
+            sha256: CODERANK_F16_SHA256,
+            bytes: CODERANK_F16_BYTES,
+        }),
+        "Rueca conversion (convert_hf_to_gguf.py --outtype f16, llama.cpp d81235049384; NomicBERT, CLS pooling), \
+         not published yet: convert locally (docs/how-it-works.md §10, Encoder presets) and register the file \
+         with `rueca models import coderank-137m <file>`, or pull once published",
     ),
-    planned(
+    encoder(
+        "coderank-137m-q8",
+        CODERANK,
+        "Q8_0",
+        PresetStatus::Unavailable,
+        Some(WeightsFile {
+            file_name: "CodeRankEmbed-Q8_0.gguf",
+            url: "https://github.com/DevArKaDiA/rueca-models/releases/download/coderankembed-q8_0-v1/CodeRankEmbed-Q8_0.gguf",
+            sha256: CODERANK_Q8_SHA256,
+            bytes: CODERANK_Q8_BYTES,
+        }),
+        "Rueca conversion (convert_hf_to_gguf.py --outtype q8_0, llama.cpp d81235049384), not published yet: \
+         convert locally (docs/how-it-works.md §10, Encoder presets) and register the file with \
+         `rueca models import coderank-137m-q8 <file>`, or pull once published",
+    ),
+    encoder(
         "gte-modernbert-149m",
-        "Alibaba-NLP/gte-modernbert-base",
-        "e7f32e3c00f91d699e8c43b53106206bcc72bb22",
-        "Apache-2.0",
-        Pooling::Cls,
-        QueryStyle::Prefix { prefix: "" },
-        "ModernBERT architecture (llama.cpp `modern-bert`, ggml-org/llama.cpp#15641 and #18330); \
-         needs a Rueca-hosted GGUF conversion",
+        GTE_MODERNBERT,
+        "F16",
+        PresetStatus::Unavailable,
+        Some(WeightsFile {
+            file_name: "gte-modernbert-base-F16.gguf",
+            url: "https://github.com/DevArKaDiA/rueca-models/releases/download/gte-modernbert-base-f16-v1/gte-modernbert-base-F16.gguf",
+            sha256: GTE_MODERNBERT_F16_SHA256,
+            bytes: GTE_MODERNBERT_F16_BYTES,
+        }),
+        "Rueca conversion (convert_hf_to_gguf.py --outtype f16, llama.cpp d81235049384; ModernBERT, CLS pooling, \
+         no prefix), not published yet: convert locally (docs/how-it-works.md §10, Encoder presets) and register \
+         the file with `rueca models import gte-modernbert-149m <file>`, or pull once published",
     ),
     qwen_reranker(
         "qwen3-reranker-0.6b-q8",
@@ -585,6 +646,22 @@ const RERANK_06_SHA256: &str = "def2f55d8729597c9456a441f9cc7781bbbbc1ac5ce8592a
 /// Size of that conversion.
 const RERANK_06_BYTES: u64 = 639_153_376;
 
+/// sha256 of the Rueca conversion of CodeRankEmbed to `F16` (reproducible:
+/// two runs give the same file); the release asset must match it.
+const CODERANK_F16_SHA256: &str = "8017b5bca09c111b5264cd686274b361aa54213a10cdf307eced3a3a0940444c";
+/// Size of that conversion.
+const CODERANK_F16_BYTES: u64 = 274_181_632;
+/// sha256 of the Rueca conversion of CodeRankEmbed to `Q8_0` (reproducible).
+const CODERANK_Q8_SHA256: &str = "829cc983d0c54aec5705ee6a3cdf12f6f87db145300d88ec2145bc235d94be9a";
+/// Size of that conversion.
+const CODERANK_Q8_BYTES: u64 = 146_033_152;
+
+/// sha256 of the Rueca conversion of gte-modernbert-base to `F16` (the
+/// upstream weights are `float16`; reproducible).
+const GTE_MODERNBERT_F16_SHA256: &str = "a17fb60a5a2d8b6f171f846c834876fdaac3626e78a0b199c3e335adfff9eafe";
+/// Size of that conversion.
+const GTE_MODERNBERT_F16_BYTES: u64 = 299_877_088;
+
 /// Whether `name` is a `remote:` preset (RFC 0007 §3.5), listed or not.
 #[must_use]
 pub fn is_remote_preset(name: &str) -> bool {
@@ -638,5 +715,20 @@ mod tests {
         assert_eq!(w.sha256, "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439");
         assert_eq!(w.bytes, 639_150_592);
         assert_eq!((p.dims, p.pooling, p.status), (1024, Pooling::Last, PresetStatus::Available));
+    }
+
+    #[test]
+    fn coderank_is_a_cls_encoder_with_a_query_prefix() {
+        for name in ["coderank-137m", "coderank-137m-q8"] {
+            let p = preset(name).unwrap();
+            assert_eq!((p.dims, p.min_dims, p.context, p.pooling), (768, 768, 8192, Pooling::Cls), "{name}");
+            assert_eq!(p.query, QueryStyle::Prefix { prefix: CODERANK_QUERY_PREFIX }, "{name}");
+            assert_eq!((p.document_prefix, p.status), ("", PresetStatus::Unavailable), "{name}");
+            assert!(p.weights.is_some() && p.pullable().is_err(), "{name}");
+        }
+        assert_eq!(preset("coderank-137m").unwrap().weights.unwrap().sha256, CODERANK_F16_SHA256);
+        let gte = preset("gte-modernbert-149m").unwrap();
+        assert_eq!((gte.pooling, gte.query, gte.dims), (Pooling::Cls, QueryStyle::Prefix { prefix: "" }, 768));
+        assert_eq!(gte.status, PresetStatus::Unavailable);
     }
 }

@@ -50,7 +50,8 @@ pub struct EmbedArgs {
     /// Worker threads (default: physical cores).
     #[arg(long, value_name = "N")]
     threads: Option<usize>,
-    /// Query instruction (default: the preset's).
+    /// Query instruction (default: the preset's); for an encoder preset
+    /// (`coderank-137m`) the whole query prefix, used verbatim.
     #[arg(long, value_name = "TEXT")]
     instruction: Option<String>,
     /// JSON lines input.

@@ -309,7 +309,7 @@ mod tests {
         fs::write(&src, b"not a model").unwrap();
         let err = cache.import(p, &src).unwrap_err().to_string();
         assert!(err.contains("bytes"), "{err}");
-        assert!(matches!(cache.import(preset("coderank-137m").unwrap(), &src), Err(Error::Unavailable { .. })));
+        assert!(matches!(cache.import(preset("qwen3-reranker-4b-q4").unwrap(), &src), Err(Error::Unavailable { .. })));
         assert_eq!(cache.state(p), CacheState::Missing);
         // A file already in place is verified where it is.
         assert!(same_file(&src, &src));
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn remote_and_planned_presets_have_no_weights() {
         let cache = ModelCache::new("/nonexistent");
-        for name in ["coderank-137m", "remote:voyage/voyage-code-4"] {
+        for name in ["qwen3-reranker-4b-q4", "remote:voyage/voyage-code-4"] {
             let p = preset(name).unwrap();
             assert_eq!(cache.state(p), CacheState::NotApplicable);
             assert!(matches!(cache.resolve(p), Err(Error::Unavailable { .. })));

@@ -1,5 +1,42 @@
 # Decisions log
 
+## 2026-11-17 — Encoder presets (CodeRankEmbed) through llama.cpp
+
+RFC 0007 phase 0 model comparison: `coderank-137m` (and
+`gte-modernbert-149m`) run through the existing llama.cpp backend, so
+the bench's `vector` arm can measure them on the calibration split
+(`RUECA_BENCH_VECTOR_PRESET=coderank-137m`).
+
+- **Pooling per preset.** The backend sets llama.cpp's pooling from the
+  manifest (`last` for Qwen3, `cls` for the encoders, `mean` wired for
+  later presets) instead of refusing anything but last-token pooling.
+  Pooling was already in the embed key, so no stored vector changes.
+- **Query prefix.** Encoders use `QueryStyle::Prefix` (CodeRankEmbed:
+  `Represent this query for searching relevant code: `; gte-modernbert:
+  none), not the `Instruct:` template. `--instruction` on a prefix preset
+  replaces the prefix verbatim instead of being ignored, so an
+  instruction sweep can still vary it.
+- **Rueca conversions, as for the reranker.** llama.cpp's converter at
+  the vendored commit (d81235049384) handles both architectures in one
+  try: CodeRankEmbed `f16` (274,181,632 bytes, sha256 `8017b5bc…444c`) and
+  `Q8_0` (146,033,152, `829cc983…be9a`, preset `coderank-137m-q8`),
+  gte-modernbert-base `f16` (299,877,088, `a17fb60a…eafe`); reproducible.
+  Status `unavailable` with release URLs in DevArKaDiA/rueca-models until
+  published; `rueca models import` registers a local conversion.
+  `coderank-137m` is the `f16` file: at 274 MB the size saving of `Q8_0`
+  is small and `f16` matches the reference exactly.
+- **Context.** The converter records a 2,048-token training context for
+  NomicBERT (its rule for nomic-embed v1 / v1.5); the preset keeps the
+  card's 8,192 (rotary positions, no table), and a 5,481-token input
+  matched `sentence-transformers` at cosine 0.999999. The default budget
+  stays 512.
+- **Validation** (2 queries, 3 code documents, against
+  `sentence-transformers`): `f16` cosine ≥ 0.99999 on Metal and CPU for
+  both models, `Q8_0` ≥ 0.9976; every query ranks the 3 documents as the
+  reference does. Throughput on a shared M-series GPU / CPU (`--bench --runs 3`,
+  ~210-token inputs): `coderank-137m` 7,011 tokens/s Metal, 4,562 CPU;
+  `gte-modernbert-149m` 4,223 and 4,160.
+
 ## 2026-11-17 — Phase 3: organization scope, centroid routing, remote presets
 
 RFC 0007 phase 3 (Rust side). Organizations embed with one model,

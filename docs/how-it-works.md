@@ -1542,7 +1542,8 @@ lexical-only binary. `cuda` is an opt-in feature for service builds.
 | `qwen3-0.6b-f16` | same, official `f16` | reference for rank overlap |
 | `qwen3-0.6b-q4` | `Q4_K_M` converted by Rueca from the official `f16` | unavailable until published; a local file with the pinned sha256 loads |
 | `qwen3-4b-q4`, `qwen3-4b-q8`, `qwen3-8b-q4`, `qwen3-8b-q8` | official `Q4_K_M` / `Q8_0` | available (GPU) |
-| `coderank-137m`, `gte-modernbert-149m` | NomicBERT / ModernBERT; llama.cpp supports both architectures, Rueca must convert them | planned |
+| `coderank-137m`, `coderank-137m-q8` | CodeRankEmbed (NomicBERT encoder, CLS pooling, query prefix), `f16` / `Q8_0` converted by Rueca | unavailable until published; `rueca models import` registers a local conversion (*Encoder presets* below) |
+| `gte-modernbert-149m` | gte-modernbert-base (ModernBERT encoder, CLS pooling, no prefix), `f16` converted by Rueca | same |
 | `remote:voyage/…`, `remote:openai/…`, `remote:gemini/…` | provider APIs (*Remote presets* below) | remote, opt-in |
 | `remote:voyage/rerank-2.5`, `remote:cohere/rerank-v3.5` (rerankers) | provider APIs | remote, opt-in |
 | `remote:bedrock/…` | Amazon Bedrock | later (SigV4) |
@@ -1551,10 +1552,13 @@ lexical-only binary. `cuda` is an opt-in feature for service builds.
 
 Each local preset pins the file's URL at an upstream revision, its sha256
 and size, the quantization, the width (with its Matryoshka range), the
-context, the pooling (last token for Qwen3) and the query format. Qwen3
+context, the pooling (last token for Qwen3, the first token `[CLS]` for
+the BERT-family encoders, mean available) and the query format. Qwen3
 queries are `Instruct: {instruction}\nQuery:{query}` with a code-search
 instruction by default (`--instruction` overrides it for the phase 0
-sweep); documents get no prefix.
+sweep); encoder queries get a fixed prefix (CodeRankEmbed: `Represent
+this query for searching relevant code: `; gte-modernbert: none), which
+`--instruction` replaces verbatim; documents get no prefix.
 
 The `qwen3-0.6b-q4` file is made with llama.cpp's own tool at the commit
 `llama-cpp-2` vendors, and is byte-for-byte reproducible:
@@ -1563,6 +1567,74 @@ The `qwen3-0.6b-q4` file is made with llama.cpp's own tool at the commit
 llama-quantize Qwen3-Embedding-0.6B-f16.gguf Qwen3-Embedding-0.6B-Q4_K_M.gguf Q4_K_M
 # llama.cpp d81235049384 → sha256 44f67b5875def0e90ae67247b141a5a861538efb8d8b0f783eef3d94211d9dcd
 ```
+
+**Encoder presets.** CodeRankEmbed (`coderank-137m`, MIT; NomicBERT,
+the Arctic-embed-m-long encoder: 12 layers, rotary positions, 768 dims,
+8,192 tokens) and gte-modernbert-base (`gte-modernbert-149m`,
+Apache-2.0; ModernBERT: 22 layers, alternating local and global
+attention, 768 dims, 8,192 tokens) run through the same llama.cpp
+backend. Both read the `[CLS]` state (llama.cpp `CLS` pooling, set from
+the preset, and also the pooling the converter records in the GGUF), have
+no Matryoshka range (768 only), wrap every input in the tokenizer's
+`[CLS]` … `[SEP]` (WordPiece, lower-cased, for CodeRankEmbed; BPE for
+ModernBERT; both embedded in the GGUF by the converter) and cut the body
+so the budget holds both. Attention is bidirectional, so llama.cpp runs
+them without a KV cache, every sequence of a batch in one micro-batch, as
+for Qwen3. The converter records a 2,048-token training context for
+NomicBERT (its rule for nomic-embed v1 / v1.5, whose config has the same
+`n_positions` 8192 / `max_trained_positions` 2048); CodeRankEmbed's card
+and `sentence-transformers` use 8,192 and llama.cpp runs a longer context
+with a warning: a 5,481-token input matched the reference at cosine
+0.999999.
+
+The files are Rueca conversions, `unavailable` until their release
+assets are published; convert them locally and register them (the same
+converter checkout as the reranker's, *Reranker* below):
+
+```sh
+# nomic-ai/CodeRankEmbed at revision 3c4b60807d71f79b43f3c4363786d9493691f8b1
+mkdir -p CodeRankEmbed/1_Pooling && cd CodeRankEmbed
+for f in README.md config.json config_sentence_transformers.json modules.json sentence_bert_config.json \
+    special_tokens_map.json tokenizer.json tokenizer_config.json vocab.txt 1_Pooling/config.json model.safetensors; do
+  curl -sSfL -o $f https://huggingface.co/nomic-ai/CodeRankEmbed/resolve/3c4b60807d71f79b43f3c4363786d9493691f8b1/$f
+done
+cd ..
+uv run --no-project --with torch --with transformers --with numpy --with sentencepiece --with safetensors \
+  python llama.cpp/convert_hf_to_gguf.py CodeRankEmbed --outtype f16 --outfile CodeRankEmbed-F16.gguf
+# 274,181,632 bytes, sha256 8017b5bca09c111b5264cd686274b361aa54213a10cdf307eced3a3a0940444c
+# --outtype q8_0 --outfile CodeRankEmbed-Q8_0.gguf:
+# 146,033,152 bytes, sha256 829cc983d0c54aec5705ee6a3cdf12f6f87db145300d88ec2145bc235d94be9a
+rueca models import coderank-137m CodeRankEmbed-F16.gguf
+rueca models import coderank-137m-q8 CodeRankEmbed-Q8_0.gguf
+
+# Alibaba-NLP/gte-modernbert-base at revision e7f32e3c00f91d699e8c43b53106206bcc72bb22
+# (README.md config.json config_sentence_transformers.json modules.json special_tokens_map.json
+#  tokenizer.json tokenizer_config.json 1_Pooling/config.json model.safetensors), then
+uv run --no-project --with torch --with transformers --with numpy --with sentencepiece --with safetensors \
+  python llama.cpp/convert_hf_to_gguf.py gte-modernbert-base --outtype f16 --outfile gte-modernbert-base-F16.gguf
+# 299,877,088 bytes, sha256 a17fb60a5a2d8b6f171f846c834876fdaac3626e78a0b199c3e335adfff9eafe
+rueca models import gte-modernbert-149m gte-modernbert-base-F16.gguf
+```
+
+Every conversion is reproducible (two runs, same file). The upstream
+gte-modernbert weights are `float16`, so its `f16` file loses nothing.
+Validated against `sentence-transformers` on 2 queries and 3 code
+documents (CodeRankEmbed: float32, `trust_remote_code`, transformers
+4.45.1 as its config records, the model card's `query` prompt;
+gte-modernbert: its `float16` weights): cosine to the reference
+
+| Preset | Metal | `--cpu` | ranking of the 3 documents per query |
+|---|---|---|---|
+| `coderank-137m` (`f16`) | ≥ 0.99999 | ≥ 0.99999 | equal |
+| `coderank-137m-q8` | ≥ 0.9984 | ≥ 0.9976 | equal |
+| `gte-modernbert-149m` (`f16`) | ≥ 0.99999 | ≥ 0.99999 | equal |
+
+Throughput (`rueca embed --preset P --bench --runs 3`, 2,000 inputs of
+about 210 tokens, batch 512, median of 3; M-series GPU and 10 performance
+cores, both shared with a running benchmark, so read them as lower
+bounds): `coderank-137m` 7,011 tokens/s on Metal (runs 72.0, 49.9,
+59.9 s), 4,562 on `--cpu` (runs 80.8, 92.0, 102.5 s); `gte-modernbert-149m`
+(22 layers) 4,223 on Metal and 4,160 on `--cpu`.
 
 **Weights cache.** Never in the binary:
 
@@ -1581,7 +1653,8 @@ use. A missing file is an error naming the preset, the URL,
 **Embedding.** Inputs are tokenized with the tokenizer inside the GGUF
 file, cut to the token budget (512 by default, special tokens included;
 Qwen3 ends every input with `<|endoftext|>`, which last-token pooling
-reads), packed into batches of 512 tokens by default (`--batch`; every
+reads; encoders begin with `[CLS]`, which CLS pooling reads, and end with
+`[SEP]`), packed into batches of 512 tokens by default (`--batch`; every
 input fits one micro-batch: 512 tokens keep the default model near 1.0 GB
 of memory where 2,048 took 2.2 GB, for about 4% less throughput, measured
 in phase 0), pooled, L2-normalized and, with `--dims`, truncated and
