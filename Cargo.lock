@@ -3572,6 +3572,8 @@ dependencies = [
  "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "rueca-extract",
+ "rueca-index",
  "rueca-mcp",
  "rueca-model",
  "rueca-query",
@@ -3605,6 +3607,8 @@ dependencies = [
  "blake3",
  "bytes",
  "fastrand",
+ "globset",
+ "rueca-extract",
  "rueca-index",
  "rueca-model",
  "rueca-query",
@@ -3615,6 +3619,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+ "url",
 ]
 
 [[package]]

@@ -49,11 +49,13 @@ use anyhow::{Context, bail};
 use rueca_mcp::RuecaServer;
 use rueca_query::{Engine, RespondOptions, Visibility};
 use rueca_segment::org::{OrgGeneration, current_generation, org_dir};
+use rueca_service::reads::{ReadsRecorder, write_reads};
 use rueca_service::{PullGenerationReport, ServiceStore, pull_generation};
 use rueca_storage::{ObjectVersion, Storage};
 
 use crate::auth::{AuthChain, Authenticator};
 use crate::config::{ReadyWhen, Role, ServiceConfig};
+use crate::indexer::Indexer;
 use crate::limits::{HostGuard, Limits};
 use crate::metrics::Metrics;
 use crate::store::CountingStorage;
@@ -94,6 +96,11 @@ pub struct AppState {
     pub guard: HostGuard,
     pub limits: Limits,
     pub visibility: VisibilityCache,
+    /// The indexer role (`indexer`, `all`).
+    pub indexer: Option<Arc<Indexer>>,
+    /// Read evidence of the query role (`reads/`, RFC 0008 §5.8); `None`
+    /// with `[retention].pr_idle = "0"` or in the indexer role.
+    pub reads: Option<ReadsRecorder>,
     storage: Arc<dyn Storage>,
     serving: RwLock<Option<Arc<Serving>>>,
     current: RwLock<Option<Arc<Current>>>,
@@ -108,7 +115,19 @@ impl AppState {
         let storage: Arc<dyn Storage> = Arc::new(CountingStorage::new(backend, metrics.clone()));
         let resource = config.resource_url();
         let chain = AuthChain::new(&config.auth, &resource)?;
+        let indexer = match role {
+            Role::Query => None,
+            Role::Indexer | Role::All => {
+                let org = indexer_org(&config, storage.as_ref())?;
+                Some(Arc::new(Indexer::new(&config, storage.clone(), &org, metrics.clone())?))
+            }
+        };
+        let idle = crate::indexer::retention(&config).pr_idle;
+        let reads = (role != Role::Indexer && !idle.is_zero())
+            .then(|| ReadsRecorder::new(&crate::indexer::instance_id().replace('/', "-")));
         Ok(AppState {
+            indexer,
+            reads,
             role,
             metrics,
             issuers: chain.issuers(),
@@ -154,8 +173,33 @@ impl AppState {
         Some(format!("{}/.well-known/oauth-protected-resource{path}", u.origin().ascii_serialization()))
     }
 
+    /// Records the refs a tool call reads (RFC 0008 §5.8); writes the
+    /// previous hour's object when the hour turned (blocking).
+    pub fn note_read(&self, args: &serde_json::Value) {
+        let Some(rec) = &self.reads else { return };
+        if let Some((hour, pairs)) = rec.record(args, unix_now()) {
+            self.write_reads(rec, hour, &pairs);
+        }
+    }
+
+    /// Writes the read pairs of an hour that ended (`all`: the current
+    /// hour's too, at shutdown).
+    pub fn flush_reads(&self, all: bool) {
+        let Some(rec) = &self.reads else { return };
+        if let Some((hour, pairs)) = rec.take(unix_now(), all) {
+            self.write_reads(rec, hour, &pairs);
+        }
+    }
+
+    fn write_reads(&self, rec: &ReadsRecorder, hour: u64, pairs: &BTreeSet<(String, String)>) {
+        if let Err(e) = write_reads(self.storage.as_ref(), rec.replica(), hour, pairs) {
+            tracing::warn!(error = %format!("{e:#}"), "writing read evidence failed");
+        }
+    }
+
     /// One watcher tick (blocking): see the module docs.
     pub fn tick(&self, known: &mut Option<ObjectVersion>) {
+        self.flush_reads(false);
         let outcome = self.try_tick(known);
         match &outcome {
             Ok(()) => *self.last_error.lock().unwrap_or_else(|p| p.into_inner()) = None,
@@ -326,6 +370,15 @@ impl AppState {
             self.metrics.gauge("rueca_generation_lag_seconds", &[]).set(lag as f64);
         }
     }
+}
+
+/// The organization of the indexer role: `[org].name` (creating
+/// `store.json` if needed), else the one the store's `store.json` names.
+fn indexer_org(config: &ServiceConfig, storage: &dyn Storage) -> anyhow::Result<String> {
+    if let Some(name) = &config.org.name {
+        return Ok(name.clone());
+    }
+    read_store_org(storage)?.context("the indexer role needs [org].name (the store has no store.json yet)")
 }
 
 /// The organization `store.json` names (`None`: not a store yet).

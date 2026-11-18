@@ -16,6 +16,8 @@ use serde_json::{Value, json};
 
 pub const TOKEN: &str = "rueca_test_all_repositories";
 pub const TOKEN_NO_RULES: &str = "rueca_test_no_rules";
+/// An admin token that sees every repository.
+pub const TOKEN_OPS: &str = "rueca_test_ops";
 
 struct Mem(HashMap<String, Vec<u8>>);
 
@@ -160,8 +162,13 @@ pub fn populated(url: &str) -> Publisher {
 }
 
 /// A configuration: `memory://` store `url`, ephemeral ports, a fast
-/// watcher, two static tokens, plus `extra` TOML appended.
+/// watcher, three static tokens, plus `extra` TOML appended.
 pub fn config(url: &str, cache: &Path, extra: &str) -> Loaded {
+    config_as(url, cache, extra, Role::Query)
+}
+
+/// [`config`] for `role`.
+pub fn config_as(url: &str, cache: &Path, extra: &str, role: Role) -> Loaded {
     let text = format!(
         r#"
 [store]
@@ -175,7 +182,7 @@ ops_listen = "127.0.0.1:0"
 {http}
 
 [auth]
-admins = ["token:all"]
+admins = ["token:all", "token:ops"]
 
 [[auth.token]]
 name = "all"
@@ -186,6 +193,11 @@ repos = ["github.com/acme/*"]
 name = "none"
 hash = "{none}"
 
+[[auth.token]]
+name = "ops"
+hash = "{ops}"
+repos = ["**"]
+
 [telemetry]
 log_format = "pretty"
 {rest}
@@ -194,13 +206,14 @@ log_format = "pretty"
         http = extra_http(extra),
         all = rueca_serve::auth::hash_token(TOKEN),
         none = rueca_serve::auth::hash_token(TOKEN_NO_RULES),
+        ops = rueca_serve::auth::hash_token(TOKEN_OPS),
         rest = extra_rest(extra),
     );
     let mut config = ServiceConfig::parse(&text).unwrap();
     let problems = config.validate();
     assert!(problems.is_empty(), "{problems:?}");
     let _ = config.resolve_secrets(&|_| None);
-    Loaded { config, role: Role::Query, path: PathBuf::from("test.toml") }
+    Loaded { config, role, path: PathBuf::from("test.toml") }
 }
 
 /// `extra` lines before the first table header go into `[http]`.
@@ -226,8 +239,13 @@ pub struct Server {
 
 impl Server {
     pub fn start(url: &str, extra: &str) -> Server {
+        Server::start_as(url, extra, Role::Query)
+    }
+
+    /// A server of `role`.
+    pub fn start_as(url: &str, extra: &str, role: Role) -> Server {
         let cache = tempfile::tempdir().unwrap();
-        let loaded = config(url, cache.path(), extra);
+        let loaded = config_as(url, cache.path(), extra, role);
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
         let running = rt.block_on(rueca_serve::start(loaded)).unwrap();
         Server {
@@ -317,6 +335,65 @@ pub fn get(url: &str, headers: &[(&str, &str)]) -> Reply {
         req = req.header(*k, *v);
     }
     reply(req.call())
+}
+
+/// `DELETE` with a JSON body.
+pub fn delete(url: &str, body: &str, headers: &[(&str, &str)]) -> Reply {
+    let mut req = agent().delete(url).header("content-type", "application/json");
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    reply(req.force_send_body().send(body))
+}
+
+/// A local code host: a repository committed in `src` and cloned bare to
+/// `<name>.git`, served as a `file://` URL.
+pub struct GitHost {
+    pub dir: tempfile::TempDir,
+    pub bare: PathBuf,
+}
+
+impl GitHost {
+    pub fn new(name: &str, files: &[(&str, &str)]) -> GitHost {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        for (path, text) in files {
+            let p = src.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, text).unwrap();
+        }
+        GitHost::git(&src, &["init", "--quiet", "-b", "main"]);
+        GitHost::git(&src, &["add", "-A"]);
+        GitHost::git(&src, &["commit", "--quiet", "-m", "first"]);
+        GitHost::git(&src, &["tag", "v1"]);
+        GitHost::git(dir.path(), &["clone", "--quiet", "--bare", "src", &format!("{name}.git")]);
+        let bare = dir.path().join(format!("{name}.git"));
+        GitHost { dir, bare }
+    }
+
+    pub fn url(&self) -> String {
+        format!("file://{}", self.bare.display())
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+            ])
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
 }
 
 pub fn post(url: &str, body: &str, headers: &[(&str, &str)]) -> Reply {

@@ -1,4 +1,4 @@
-//! The query role's metrics (RFC 0008 §6.6), rendered as Prometheus text on
+//! The service's metrics (RFC 0008 §6.6), rendered as Prometheus text on
 //! `/metrics`: `metrics` 0.24 handles over a `metrics-exporter-prometheus`
 //! recorder that belongs to the app (not installed globally, so several
 //! apps in one process, as in the tests, keep separate registries).
@@ -30,6 +30,12 @@ const HELP: &[(&str, &str)] = &[
     ("rueca_segment_open_seconds", "Time to open and verify a segment"),
     ("rueca_generation_warm_seconds", "Time to warm the engine on a new generation before serving it"),
     ("rueca_store_requests_total", "Object storage requests by operation and result"),
+    ("rueca_jobs", "Job objects by kind and state (as of the last discovery)"),
+    ("rueca_queue_depth", "Leasable jobs by kind and priority (0 never indexed … 4 tag missing, failed)"),
+    ("rueca_job_seconds", "Job run time by kind and result (done, pending, failed, lost, error)"),
+    ("rueca_publish_seconds", "Indexing pipeline stage time (fetch, export, index, upload, generation)"),
+    ("rueca_cas_conflicts_total", "Compare-and-swap writes lost to another writer, by object (catalog, job, pointer)"),
+    ("rueca_gc_deleted_bytes_total", "Bytes deleted by garbage collection, by object class"),
 ];
 
 /// The app's metric registry.

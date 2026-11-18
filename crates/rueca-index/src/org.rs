@@ -181,10 +181,22 @@ pub fn clone_dir(store: &Path, org_name: &str, url: &str) -> PathBuf {
 /// gix is not used for), failing with its stderr. Credentials come from the
 /// user's credential helpers; git never prompts.
 pub(crate) fn git(args: &[&str], cwd: Option<&Path>) -> anyhow::Result<()> {
+    git_output(args, cwd, &[]).map(|_| ())
+}
+
+/// The `git` runner behind [`git`], returning stdout: `env` is added to the
+/// child's environment after the no-prompt variables (the service passes
+/// `GIT_CONFIG_NOSYSTEM` and credentials as `GIT_CONFIG_COUNT` /
+/// `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, so they never appear on
+/// the command line). A failure names the arguments and git's stderr.
+pub fn git_output(args: &[&str], cwd: Option<&Path>, env: &[(&str, &str)]) -> anyhow::Result<String> {
     let mut cmd = Command::new("git");
     // Never wait on a prompt: no terminal prompt, no askpass helper (an
     // empty `GIT_ASKPASS` also overrides `core.askPass` and `SSH_ASKPASS`).
     cmd.env("GIT_TERMINAL_PROMPT", "0").env("GIT_ASKPASS", "");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     if let Some(d) = cwd {
         cmd.arg("-C").arg(d);
     }
@@ -192,7 +204,7 @@ pub(crate) fn git(args: &[&str], cwd: Option<&Path>) -> anyhow::Result<()> {
     if !out.status.success() {
         anyhow::bail!("git {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
     }
-    Ok(())
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Clones `url` into `dir`, or refreshes an existing clone to the remote's

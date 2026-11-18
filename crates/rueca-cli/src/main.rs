@@ -46,9 +46,11 @@
 //! experimental `publish` and `pull` commands move snapshots between the
 //! local store and a service store (see `service.rs`).
 //!
-//! `serve` runs the service mode's query role (RFC 0008 phase 1, crate
-//! `rueca-serve`, feature `service`, on by default): MCP over HTTP from a
-//! service store, configured by `rueca-service.toml` (`--config`, else
+//! `serve` runs the service mode (RFC 0008, crate `rueca-serve`, feature
+//! `service`, on by default): the query role serves MCP over HTTP from a
+//! service store; the indexer role (`--role indexer`, or `all` for both)
+//! polls the `[[repo]]` repositories, leases and runs index jobs and, on
+//! the leader, publishes organization generations. Configured by `rueca-service.toml` (`--config`, else
 //! `RUECA_CONFIG`); `--check-config` validates the file, its `env:`
 //! references and the store, prints the problems and exits 0 or 1. Its logs
 //! go to stdout as `[telemetry]` says (JSON by default), filtered by
@@ -159,14 +161,15 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         #[command(flatten)]
         remote: service::StoreArgs,
     },
-    /// Serve MCP over HTTP from a service store (RFC 0008): the query role.
+    /// Service mode (RFC 0008): serve MCP over HTTP from a service store
+    /// (query role) and/or keep it indexed (indexer role).
     /// Configuration: `rueca-service.toml` (--config, else $RUECA_CONFIG).
     Serve {
         /// The service configuration file (`rueca-service.toml`).
         #[arg(long, value_name = "FILE")]
         config: Option<PathBuf>,
-        /// `query` (default, else $RUECA_ROLE), `indexer` or `all`; phase 1
-        /// runs only the query loops.
+        /// `query` (default, else $RUECA_ROLE), `indexer` or `all` (both in
+        /// one process).
         #[arg(long, value_name = "ROLE")]
         role: Option<String>,
         /// Validate the configuration, its secrets and the store, print the

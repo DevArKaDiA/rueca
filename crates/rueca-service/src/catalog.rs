@@ -121,7 +121,8 @@ pub struct Retention {
     /// A closed pull request expires this long after `closed_at`.
     pub pr_after_close: Duration,
     /// An unread pull request (or on-demand ref) expires after this long
-    /// idle. Needs `reads/` evidence: carried, applied from phase 2.
+    /// idle, judged from `reads/` evidence by the updater
+    /// ([`crate::updater::Updater::expire_idle`]); zero disables it.
     pub pr_idle: Duration,
     /// Unreferenced objects younger than this are never deleted.
     pub grace: Duration,
@@ -204,7 +205,8 @@ impl RepoCatalog {
     ///
     /// Expiry: a pull request whose `closed_at` is at least
     /// [`Retention::pr_after_close`] old. Idle expiry
-    /// ([`Retention::pr_idle`]) needs read evidence and is phase 2.
+    /// ([`Retention::pr_idle`]) needs read evidence: the updater applies it
+    /// ([`crate::updater::Updater::expire_idle`]).
     pub fn apply_retention(&mut self, retention: &Retention, now: u64) -> (Vec<String>, bool) {
         let mut changed = false;
         for entry in self.refs.values_mut() {
@@ -231,6 +233,39 @@ impl RepoCatalog {
         }
         let changed = changed || !expired.is_empty();
         (expired, changed)
+    }
+
+    /// The commit at the head of ref `ref_name` (what queries read).
+    pub fn head_commit(&self, ref_name: &str) -> Option<&str> {
+        self.refs.get(ref_name).and_then(|r| r.snapshots.first()).map(|s| s.commit.as_str())
+    }
+
+    /// Moves ref `ref_name` to `removed` at `now` (phase 2: expiry by the
+    /// refs lifecycle, `DELETE /admin/refs`); whether it was there. Its
+    /// objects go at the next sweep past the grace.
+    pub fn remove_ref(&mut self, ref_name: &str, now: u64) -> bool {
+        if self.refs.remove(ref_name).is_none() {
+            return false;
+        }
+        self.removed.retain(|r| r.ref_name != ref_name);
+        self.removed.push(Removed { ref_name: ref_name.to_string(), at: now });
+        if self.removed.len() > REMOVED_KEPT {
+            let excess = self.removed.len() - REMOVED_KEPT;
+            self.removed.drain(..excess);
+        }
+        true
+    }
+
+    /// Records that pull request `ref_name` closed at `now` (kept when
+    /// already set); whether anything changed.
+    pub fn close_pr(&mut self, ref_name: &str, now: u64) -> bool {
+        match self.refs.get_mut(ref_name) {
+            Some(e) if e.kind == RefKind::Pr && e.closed_at.is_none() => {
+                e.closed_at = Some(now);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Every snapshot of every ref.

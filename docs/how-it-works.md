@@ -1168,8 +1168,54 @@ cancelled from outside, so a `tokio` timeout of the same length is only a
 backstop. Authentication (static
 `rueca_` tokens, OIDC with JWKS discovery), `Host` / `Origin` checks, rate
 limits per IP and per principal, Prometheus metrics and JSON logs sit in
-front of it ([tools.md, *Over HTTP*](tools.md#over-http)). The indexer
-role (jobs, webhooks, the updater) is phase 2.
+front of it ([tools.md, *Over HTTP*](tools.md#over-http)).
+
+**The indexer role** (`rueca serve --role indexer`, or `all` with the
+query role in one process; RFC 0008 phase 2) keeps the store current
+without a queue or a database: everything is an object written by
+compare-and-swap. Each repository has a **job object**
+(`jobs/<repo-dir>.json`) holding its *desired state* — ref → commit — a
+state (`pending`, `leased`, `done`, `failed`), a priority (0 never
+indexed, 1 default branch behind, 2 pull request behind, 3 branch
+behind, 4 tag missing) and a lease. One indexer holds
+`leases/org-updater.json` (60 s, renewed every 20 s, taken over 30 s
+after it ends) and runs the **updater**: every `[indexing].updater_tick`
+(5 s) the reconciler gives every `[[repo]]` a catalog and a job, lists
+each repository whose poll is due with `git ls-remote --symref` (the next
+poll comes after half the time since its refs last changed, between 45 s
+and 8 h; at most 8 per host at once; a `429` pauses the host) and merges
+the default branch, the branches and tags matching the configured globs
+and, when enabled, pull request heads into the job — a branch the host
+stopped listing leaves the job and the catalog, a vanished pull request
+gets `closed_at`. Then the updater pulls every repository whose job
+changed into its own mirror, rebuilds the organization with
+`update_org_with` and publishes the next generation (a second updater
+loses the pointer's compare-and-swap and rebuilds on the winner's);
+hourly it expires pull requests and on-demand refs unread for
+`[retention].pr_idle` (query replicas write one `reads/<day>/<hour>-<replica>.json`
+per hour naming the refs their calls read) and collects garbage. Every
+indexer, every `[indexing].discover` (5 s), lists `jobs/`, re-reads the
+objects whose e-tag changed and **leases** the most urgent leasable job
+(pending, a failed one past its back-off of `min(10 min × attempts, 120
+min)`, or a lease that ended more than 30 s ago — the epoch increments)
+with a conditional write; it runs the job's refs, default first, into
+its staging store (`[indexing].facts_dir`, whose `facts/` is the facts
+cache) and publishes each snapshot, renewing the 15-minute lease every 5
+minutes, then finishes the job (`done`, or `pending` again when the
+desired state moved meanwhile; a ref that fails alone backs off alone) or
+fails it when every ref failed. A lease another indexer took makes every
+later write of the old holder fail; what it already published is
+idempotent by `(ref, commit)`. Today the runner fetches the commit into a
+scratch repository and indexes it in process; the isolated
+`rueca index-worker` child over bare, blob-filtered mirrors replaces it.
+`POST /admin/index {"repo", "ref"}` resolves a tag, branch, `pr/<n>` or
+full commit on the host and adds it to the desired state,
+`DELETE /admin/refs` removes a ref, `GET /admin/jobs` lists the jobs
+(admin role); `/status` adds jobs by state and the queue, `/readyz` of an
+indexer checks the store and `git` ≥ 2.45. Repository URLs must be
+`https` or `ssh` on an `[indexing].hosts` host (private addresses refused
+unless `allow_private_networks`); credentials reach `git` as an
+`http.extraHeader` in its environment, never on its command line.
 
 ## 5. The graph schema
 

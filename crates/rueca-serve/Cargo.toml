@@ -1,6 +1,6 @@
 [package]
 name = "rueca-serve"
-description = "Rueca service mode, query role: MCP over stateless Streamable HTTP with authentication, visibility, rate limits and health endpoints"
+description = "Rueca service mode: the query role (MCP over stateless Streamable HTTP with authentication, visibility, rate limits and health endpoints) and the indexer role (jobs, leases, the reconciler, the updater)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,8 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+rueca-extract.workspace = true
+rueca-index.workspace = true
 rueca-mcp.workspace = true
 rueca-query.workspace = true
 rueca-segment.workspace = true

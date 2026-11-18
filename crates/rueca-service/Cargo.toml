@@ -1,6 +1,6 @@
 [package]
 name = "rueca-service"
-description = "Rueca service mode, phase 0: publish local segments to object storage, pull them into a local mirror, organization generations and garbage collection"
+description = "Rueca service mode: publish local segments to object storage, pull them into a local mirror, organization generations, garbage collection, jobs, leases, the reconciler and the updater"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,7 @@ rust-version.workspace = true
 rueca-storage.workspace = true
 rueca-segment.workspace = true
 rueca-index.workspace = true
+rueca-extract.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,6 +22,9 @@ bytes = "1.12.1"
 blake3 = "1.8.7"
 tempfile = "3.27.0"
 fastrand = "2.5.0"
+# Ref globs of `[[repo]]` (`release/*`) and repository URLs (RFC 0008 §9.2).
+globset = "0.4.20"
+url = "2.5"
 
 [dev-dependencies]
 rueca-model.workspace = true

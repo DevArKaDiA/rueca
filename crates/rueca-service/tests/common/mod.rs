@@ -107,14 +107,14 @@ pub fn open(url: &str, dir: &Path) -> ServiceStore {
     ServiceStore::open(url, &BTreeMap::new(), dir, "acme").unwrap()
 }
 
-/// Delegates to a backend; reading a catalog sleeps first, so concurrent
-/// compare-and-swaps of one catalog overlap.
+/// Delegates to a backend; reading a catalog or a job object sleeps
+/// first, so concurrent compare-and-swaps of one object overlap.
 pub struct SlowCatalogs(pub Arc<dyn Storage>, pub Duration);
 
 impl Storage for SlowCatalogs {
     fn get(&self, path: &str) -> anyhow::Result<Option<Versioned<Bytes>>> {
         let v = self.0.get(path);
-        if path.ends_with("catalog.json") {
+        if path.ends_with("catalog.json") || path.starts_with("jobs/") {
             std::thread::sleep(self.1);
         }
         v
@@ -187,5 +187,80 @@ impl Storage for DeleteOnCatalogWrite {
     }
     fn local_path(&self, path: &str) -> Option<PathBuf> {
         self.0.local_path(path)
+    }
+}
+
+/// A local "code host": a working repository `src` and its bare clone
+/// `<name>.git`, served as a `file://` URL.
+pub struct GitHost {
+    pub dir: tempfile::TempDir,
+    pub src: PathBuf,
+    pub bare: PathBuf,
+}
+
+/// Runs `git` in `dir` with a fixed identity; stdout, trimmed.
+pub fn git(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"])
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+impl GitHost {
+    /// A repository `name` with `files` committed on `main`.
+    pub fn new(name: &str, files: &[(&str, &str)]) -> GitHost {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        git(&src, &["init", "--quiet", "-b", "main"]);
+        let bare = dir.path().join(format!("{name}.git"));
+        let host = GitHost { src, bare, dir };
+        host.write(files);
+        git(&host.src, &["commit", "--quiet", "-m", "first"]);
+        git(host.dir.path(), &["clone", "--quiet", "--bare", "src", &format!("{name}.git")]);
+        host
+    }
+
+    pub fn url(&self) -> String {
+        format!("file://{}", self.bare.display())
+    }
+
+    fn write(&self, files: &[(&str, &str)]) {
+        for (path, text) in files {
+            let p = self.src.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, text).unwrap();
+        }
+        git(&self.src, &["add", "-A"]);
+    }
+
+    /// Commits `files` on `main` and pushes; the new commit.
+    pub fn push(&self, files: &[(&str, &str)]) -> String {
+        self.write(files);
+        git(&self.src, &["commit", "--quiet", "-m", "change"]);
+        let bare = self.bare.to_string_lossy().into_owned();
+        git(&self.src, &["push", "--quiet", &bare, "main"]);
+        self.commit("main")
+    }
+
+    /// Pushes `main`'s commit as branch or tag `refname` (`refs/...`).
+    pub fn push_ref(&self, refname: &str) {
+        let bare = self.bare.to_string_lossy().into_owned();
+        git(&self.src, &["push", "--quiet", &bare, &format!("main:{refname}")]);
+    }
+
+    /// Deletes `refname` on the host.
+    pub fn delete_ref(&self, refname: &str) {
+        git(&self.bare, &["update-ref", "-d", refname]);
+    }
+
+    /// The commit of `rev` on the host.
+    pub fn commit(&self, rev: &str) -> String {
+        git(&self.bare, &["rev-parse", rev])
     }
 }

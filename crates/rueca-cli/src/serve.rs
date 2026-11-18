@@ -1,5 +1,6 @@
-//! `rueca serve` (RFC 0008 phase 1): the service mode's query role, from
-//! the `rueca-serve` crate (feature `service`, on by default).
+//! `rueca serve` (RFC 0008): the service mode's query role (phase 1) and
+//! indexer role (phase 2; `--role indexer`, or `all` for both), from the
+//! `rueca-serve` crate (feature `service`, on by default).
 //!
 //! ```text
 //! rueca serve [--config FILE] [--role query|indexer|all] [--check-config]

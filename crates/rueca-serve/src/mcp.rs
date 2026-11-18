@@ -144,6 +144,10 @@ async fn call_tool(
         return ("error", rpc_error(StatusCode::OK, Some(id), err));
     };
     let visibility = st.visibility.resolve(&principal.repos, current.generation.generation, &current.repos);
+    if call.args.get("ref").is_some() {
+        let (st, args) = (st.clone(), call.args.clone());
+        tokio::task::spawn_blocking(move || st.note_read(&args));
+    }
     let deadline = st.config.http.query_deadline.0;
     let started = Instant::now();
     let opts = RespondOptions { deadline: Some(started + deadline), visibility: Some(visibility) };

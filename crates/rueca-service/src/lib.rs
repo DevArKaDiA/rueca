@@ -1,6 +1,10 @@
-//! Rueca service mode, phase 0 (RFC 0008 §5, §7.9, §10): a **service
-//! store** in object storage that indexers publish to and replicas pull
-//! from, behind the [`rueca_storage::Storage`] seam.
+//! Rueca service mode (RFC 0008 §5, §7, §10): a **service store** in
+//! object storage that indexers publish to and replicas pull from, behind
+//! the [`rueca_storage::Storage`] seam (phase 0), and the indexing pipeline
+//! that keeps it current (phase 2): [`jobs`] and their leases, the
+//! [`reconcile`]r with adaptive polling over [`remote`] code hosts, the
+//! [`indexer`] job runner and the [`updater`] leader loop with idle expiry
+//! from [`reads`].
 //!
 //! # The mirror model
 //!
@@ -67,6 +71,9 @@
 //! orgs/<name>/profiles/<segment>.json          RepoProfile                      Create
 //! orgs/<name>/links/<segment>-<hash>.bin       link set                         Create
 //! gc/candidates.json                           deletion candidates (two rounds) CAS
+//! jobs/<repo-dir>.json                         Job (desired state, lease)       CAS
+//! leases/org-updater.json                      UpdaterLease                     CAS
+//! reads/<yyyy-mm-dd>/<hh>-<replica>.json       ReadsObject                      Create
 //! ```
 //!
 //! `<repo-dir>` is [`repo_dir`]: the slug-and-hash directory name of
@@ -74,7 +81,7 @@
 //! service keys repositories by id (no path prefix: there are no roots).
 //! A pack holds the blobs of every snapshot its local store wrote while it
 //! was open; it is uploaded under every repository whose snapshot lists it.
-//! Facts, vectors, jobs, leases and reads (§5.1) come in phases 2–3.
+//! Facts and vectors in the bucket (§5.1) come in phase 3.
 //!
 //! # Sequences
 //!
@@ -156,27 +163,60 @@
 //! refuses one whose segments are not in the store, so the updater builds
 //! only from pulled (published) snapshots.
 //!
+//! # The indexing pipeline (phase 2)
+//!
+//! Level-triggered (§7.2): the desired state of a repository lives in its
+//! job object and everything converges on it.
+//!
+//! - [`jobs`]: `jobs/<repo-dir>.json` — desired refs, state, priority,
+//!   lease (15 min, renewed every 5 min, stolen 30 s after it ends, epoch
+//!   incremented), attempts and back-off (`min(10 min × attempts, 120
+//!   min)`), the polling schedule. [`jobs::lease_job`],
+//!   [`jobs::LeasedJob::renew`] / `finish` / `fail`,
+//!   [`jobs::desired_update`] (polling, webhooks and admin requests merge
+//!   desired commits by CAS).
+//! - [`remote`]: the `[indexing].hosts` allowlist, `git` with credentials
+//!   in the child's environment (`GIT_CONFIG_COUNT`, never the command
+//!   line), `git ls-remote --symref`.
+//! - [`reconcile`]: inventory (`[[repo]]` → catalog and job), adaptive
+//!   polling (half the quiet time, 45 s – 8 h, 8 per host, a `429` pauses
+//!   the host), desired refs from the default branch, branch and tag globs
+//!   and pull request heads, branch removal and pull request closing,
+//!   priorities.
+//! - [`indexer`]: [`indexer::run_job`] runs a leased job's refs (default
+//!   first) through a [`indexer::RefRunner`] into the indexer's staging
+//!   store, then [`publish_snapshot`]; [`indexer::InProcessRunner`] is a
+//!   stub until the child-process runner of phase 2 Part B.
+//! - [`updater`]: the leader of `leases/org-updater.json` reconciles, runs
+//!   idle expiry ([`reads`]: pull requests and on-demand refs unread for
+//!   [`Retention::pr_idle`]) and [`collect_garbage`] hourly, pulls changed
+//!   repositories and publishes generations.
+//!
 //! # Phases
 //!
 //! - Phase 1 (`rueca serve`): replicas poll [`pull_generation`] with the
 //!   last [`PullGenerationReport::version`] (one conditional request per
-//!   tick) and serve MCP over HTTP from the mirror; a disk cache bound and
-//!   pruning of a mirror's superseded generations.
-//! - Phase 2 (indexer role): jobs and leases (`jobs/`, `leases/`), the
-//!   updater lease around [`publish_generation`] and [`collect_garbage`],
-//!   refs lifecycle from webhooks and polling (setting
-//!   [`RefEntry::closed_at`]), **idle expiry** of pull requests and
-//!   on-demand refs from `reads/` evidence ([`Retention::pr_idle`] is
-//!   carried but not applied yet), facts in the bucket.
-//! - Phase 3: `vectors` ([`SnapshotEntry::vectors`]) and their objects.
+//!   tick) and serve MCP over HTTP from the mirror.
+//! - Phase 2 Parts B and C: bare git mirrors, filtered fetches and the
+//!   `rueca index-worker` child process behind [`indexer::RefRunner`];
+//!   webhooks into [`jobs::desired_update`] (setting
+//!   [`RefEntry::closed_at`] on close events).
+//! - Phase 3: `vectors` ([`SnapshotEntry::vectors`]) and their objects,
+//!   `embed` jobs ([`jobs::JobKind::Embed`]), facts in the bucket.
 
 mod candidates;
 mod catalog;
 mod gc;
 mod generation;
+pub mod indexer;
+pub mod jobs;
 mod publish;
 mod pull;
+pub mod reads;
+pub mod reconcile;
+pub mod remote;
 mod status;
+pub mod updater;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -197,7 +237,7 @@ pub use gc::{GcReport, collect_garbage};
 pub use generation::{Conflict, GenerationReport, PullGenerationReport, publish_generation, pull_generation};
 pub use publish::{PublishReport, publish_snapshot};
 pub use pull::{PullReport, PullWhich, PulledRef, pull_repo};
-pub use status::{ClassUsage, RefStatus, RepoStatus, ServiceStatus, status};
+pub use status::{ClassUsage, RefStatus, RepoStatus, ServiceStatus, object_class, status};
 
 /// Version of `store.json`.
 pub const STORE_FORMAT: u32 = 1;
@@ -254,6 +294,18 @@ impl ServiceStore {
             bail!("`{url}` is not a Rueca service store (no {STORE_FILE}); create it by publishing with --org <name>");
         };
         Self::with_storage(storage, local_dir, &info.org)
+    }
+
+    /// [`ServiceStore::open`] over an already opened backend: creates
+    /// `store.json` for `org` when absent; an existing store must be
+    /// `org`'s.
+    pub fn open_with_storage(storage: Arc<dyn Storage>, local_dir: &Path, org: &str) -> anyhow::Result<ServiceStore> {
+        rueca_segment::org::validate_name(org)?;
+        let info = ensure_store_info(storage.as_ref(), org)?;
+        if info.org != org {
+            bail!("the store serves organization `{}`, not `{org}`", info.org);
+        }
+        Self::with_storage(storage, local_dir, org)
     }
 
     /// A service store over an already opened backend (tests wrap one).

@@ -5,7 +5,10 @@
 //! `Host` / `Origin` and query-string token checks (403 / 400) → body limit
 //! (413) → IP limiter (429) → `authenticate` (401 / 403) → principal
 //! limiter (429) → `[http].request_timeout` (503) → the handler.
-//! `/admin/*` and `/webhooks/*` are the indexer role's (phase 2): 404 here.
+//! By role (RFC 0008 §4.2): `/mcp` and the PRM are the query role's (and
+//! `all`'s); `/admin/*` ([`crate::admin`]) the indexer role's (and
+//! `all`'s); elsewhere they answer 404. `/webhooks/*` come in phase 2 Part
+//! C.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -16,22 +19,30 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use serde_json::{Value, json};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 
 use crate::auth::{Challenge, Principal, is_admin};
-use crate::config::{SCOPE_ADMIN, SCOPE_READ};
+use crate::config::{Role, SCOPE_ADMIN, SCOPE_READ};
 use crate::mcp::{self, json_response};
 use crate::state::AppState;
 
 /// The main listener's router.
 pub fn main_router(st: Arc<AppState>) -> Router {
     let max_body = usize::try_from(st.config.http.max_body_bytes.0).unwrap_or(usize::MAX);
-    let protected = Router::new()
-        .route("/mcp", post(mcp::handle))
-        .route("/status", get(status))
+    let mut protected = Router::new().route("/status", get(status));
+    if st.role != Role::Indexer {
+        protected = protected.route("/mcp", post(mcp::handle));
+    }
+    if st.indexer.is_some() {
+        protected = protected
+            .route("/admin/index", post(crate::admin::index))
+            .route("/admin/refs", delete(crate::admin::remove_ref))
+            .route("/admin/jobs", get(crate::admin::jobs));
+    }
+    let protected = protected
         .route_layer(TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, st.config.http.request_timeout.0))
         .route_layer(middleware::from_fn_with_state(st.clone(), authenticate));
     Router::new()
@@ -183,11 +194,25 @@ async fn prm(State(st): State<Arc<AppState>>) -> Response {
 }
 
 /// `GET /status`: generation, the repositories visible to the caller with
-/// their refs and commits, lag; admins also see the cache.
+/// their refs and commits, lag; admins also see the cache; the indexer
+/// role adds its jobs by state and the queue (depth by priority, oldest
+/// pending age).
 async fn status(State(st): State<Arc<AppState>>, axum::Extension(p): axum::Extension<Principal>) -> Response {
+    let mut body = generation_status(&st, &p);
+    if let Some(idx) = &st.indexer {
+        let s = idx.summary();
+        let states: serde_json::Map<String, Value> =
+            s.by_state.iter().map(|((kind, state), n)| (format!("{kind}.{state}"), json!(n))).collect();
+        body["jobs"] = Value::Object(states);
+        body["queue"] = json!({"depth": s.depth, "oldest_pending_seconds": s.oldest_pending_s});
+        body["role"] = json!(st.role.as_str());
+    }
+    json_response(StatusCode::OK, body.to_string())
+}
+
+fn generation_status(st: &AppState, p: &Principal) -> Value {
     let Some(current) = st.current() else {
-        let body = json!({"ready": false, "generation": null, "error": st.last_error().is_some()});
-        return json_response(StatusCode::OK, body.to_string());
+        return json!({"ready": false, "generation": null, "error": st.last_error().is_some()});
     };
     let g = &current.generation;
     let visibility = st.visibility.resolve(&p.repos, g.generation, &current.repos);
@@ -214,21 +239,35 @@ async fn status(State(st): State<Arc<AppState>>, axum::Extension(p): axum::Exten
         "repositories": repos,
         "role": st.role.as_str(),
     });
-    if is_admin(&p, &st.config.auth.admins)
+    if is_admin(p, &st.config.auth.admins)
         && let Some(serving) = st.serving()
     {
         let usage = st.cache_usage(&serving);
         body["cache"] = json!({"bytes": usage, "budget": st.config.store.cache_bytes.0, "warm": format!("{}/{}", current.warm.0, current.warm.1)});
         body["repositories_total"] = json!(g.repos.len());
     }
-    json_response(StatusCode::OK, body.to_string())
+    body
 }
 
 async fn healthz() -> Response {
     json_response(StatusCode::OK, json!({"ok": true}).to_string())
 }
 
+/// Query and all roles: the generation is served; indexer role: the store
+/// is readable and `git` is recent enough (RFC 0008 §6.7).
 async fn readyz(State(st): State<Arc<AppState>>) -> Response {
+    if let (Role::Indexer, Some(idx)) = (st.role, st.indexer.clone()) {
+        return match tokio::task::spawn_blocking(move || idx.ready()).await {
+            Ok(Ok(body)) => json_response(StatusCode::OK, body.to_string()),
+            Ok(Err(reason)) => {
+                json_response(StatusCode::SERVICE_UNAVAILABLE, json!({"ready": false, "reason": reason}).to_string())
+            }
+            Err(e) => json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"ready": false, "reason": e.to_string()}).to_string(),
+            ),
+        };
+    }
     match st.current() {
         Some(c) => {
             let body = json!({"generation": c.generation.generation, "warm": format!("{}/{}", c.warm.0, c.warm.1)});

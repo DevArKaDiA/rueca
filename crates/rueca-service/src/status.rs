@@ -61,7 +61,7 @@ pub fn status(svc: &ServiceStore) -> anyhow::Result<ServiceStatus> {
     let storage = svc.storage.as_ref();
     let mut st = ServiceStatus { store: read_store_info(storage)?, org: svc.org.clone(), ..ServiceStatus::default() };
     for o in storage.list("")? {
-        let class = classify(&o.path);
+        let class = object_class(&o.path);
         let c = st.classes.entry(class.to_string()).or_default();
         c.objects += 1;
         c.bytes += o.size;
@@ -79,7 +79,9 @@ pub fn status(svc: &ServiceStore) -> anyhow::Result<ServiceStatus> {
     Ok(st)
 }
 
-fn classify(path: &str) -> &'static str {
+/// The class of an object path (`/status`, `rueca status`, garbage
+/// collection metrics).
+pub fn object_class(path: &str) -> &'static str {
     match path.split('/').collect::<Vec<_>>().as_slice() {
         ["repos", _, "catalog.json"] => "catalogs",
         ["repos", _, "segments", _] => "segments",
@@ -89,6 +91,9 @@ fn classify(path: &str) -> &'static str {
         ["orgs", _, "index", _] => "org_index",
         ["orgs", _, "profiles", _] => "profiles",
         ["orgs", _, "links", _] => "links",
+        ["jobs", _] => "jobs",
+        ["leases", _] => "leases",
+        ["reads", ..] => "reads",
         _ => "other",
     }
 }

@@ -2,11 +2,13 @@
 //! `deny_unknown_fields`, `env:` secret references and string durations
 //! and sizes.
 //!
-//! Phase 1 honours `[store]`, `[org].name`, `[http]`, `[auth]` and
-//! `[telemetry]`; `[org].inventory`, `[[repo]]`, `[indexing]`,
-//! `[retention]` and `[retrieval]` are parsed and type-checked (their
-//! secrets resolved) but only the indexer role of phase 2 and the
-//! embeddings of phase 3 use them ([`ServiceConfig::unused_sections`]).
+//! Every role honours `[store]`, `[org].name`, `[http]`, `[auth]` and
+//! `[telemetry]`; the indexer role (`indexer`, `all`, phase 2) also
+//! `[[repo]]`, `[indexing]` and `[retention]`. `[org].inventory`,
+//! `[indexing].webhooks` and `[retrieval]` are parsed and type-checked (their
+//! secrets resolved) but drive nothing yet
+//! ([`ServiceConfig::unused_sections`]). Repository URLs are checked
+//! against the `[indexing].hosts` allowlist (RFC 0008 §9.2) by every role.
 //!
 //! **Precedence** (RFC 0007 §8.3): argument, environment, file, built-in
 //! default. Environment: `RUECA_CONFIG` (the file, when `--config` is not
@@ -190,7 +192,7 @@ pub struct InventoryConfig {
     pub archived: bool,
 }
 
-/// `[[repo]]` (phase 2: parsed only).
+/// `[[repo]]`: a repository the indexer role keeps indexed (RFC 0008 §7.1).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepoConfig {
@@ -338,10 +340,19 @@ pub struct VisibilityRule {
     pub repos: Vec<String>,
 }
 
-/// `[indexing]` (phase 2: parsed only).
+/// `[indexing]`: the indexer role (RFC 0008 §7).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IndexingConfig {
+    /// `git ls-remote` runs at once per host (default 8; added in phase 2).
+    pub ls_remote_concurrency: Option<u32>,
+    /// Job discovery and lease period of each indexer (default 5 s; added
+    /// in phase 2).
+    pub discover: Option<Dur>,
+    /// Accept `file://` repository URLs (a local bare repository as the
+    /// code host). **Tests only**: honoured by debug builds; a release
+    /// build refuses a configuration that sets it.
+    pub allow_file_urls: Option<bool>,
     pub jobs: Option<u32>,
     pub threads: Option<u32>,
     pub gpu: Option<bool>,
@@ -387,7 +398,7 @@ pub struct PollConfig {
     pub pr_heads: Option<bool>,
 }
 
-/// `[retention]` (phase 2: parsed only).
+/// `[retention]` (RFC 0008 §5.8): snapshots kept, expiry, the GC grace.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetentionConfig {
@@ -561,6 +572,7 @@ impl ServiceConfig {
         }
         self.validate_http(&mut p);
         self.validate_auth(&mut p);
+        crate::indexer::validate(self, &mut p);
         p
     }
 
@@ -651,27 +663,27 @@ impl ServiceConfig {
         }
     }
 
-    /// The sections this phase parses but does not act on, for a start-up
+    /// The sections `role` parses but does not act on, for a start-up
     /// note.
-    pub fn unused_sections(&self) -> Vec<&'static str> {
+    pub fn unused_sections(&self, role: Role) -> Vec<&'static str> {
         let mut out = Vec::new();
         if self.org.inventory.is_some() {
             out.push("[org].inventory (phase 3)");
         }
-        if !self.repo.is_empty() {
-            out.push("[[repo]] (phase 2, indexer role)");
+        if !self.indexing.webhooks.is_empty() {
+            out.push("[indexing].webhooks (phase 2, webhooks)");
         }
-        let i = &self.indexing;
-        if i.jobs.is_some()
-            || i.budget.is_some()
-            || i.mirror_dir.is_some()
-            || !i.credentials.is_empty()
-            || !i.hosts.is_empty()
-        {
-            out.push("[indexing] (phase 2, indexer role)");
-        }
-        if self.retention.grace.is_some() || self.retention.default_snapshots.is_some() {
-            out.push("[retention] (phase 2, garbage collection)");
+        if role == Role::Query {
+            let i = &self.indexing;
+            if !self.repo.is_empty() {
+                out.push("[[repo]] (indexer role)");
+            }
+            if i.jobs.is_some() || i.budget.is_some() || i.mirror_dir.is_some() || !i.credentials.is_empty() {
+                out.push("[indexing] (indexer role)");
+            }
+            if self.retention.grace.is_some() || self.retention.default_snapshots.is_some() {
+                out.push("[retention] (indexer role, garbage collection)");
+            }
         }
         if self.retrieval.preset.is_some() {
             out.push("[retrieval] (phase 3, embeddings)");
@@ -836,7 +848,8 @@ prometheus = true
         assert_eq!(c.org.inventory.as_ref().unwrap().token.value(), Some("ghp_x"));
         assert!(!format!("{c:?}").contains("ghp_x"), "secrets never print");
         assert_eq!(c.validate(), Vec::<String>::new());
-        assert_eq!(c.unused_sections().len(), 5);
+        assert_eq!(c.unused_sections(Role::Query).len(), 6);
+        assert_eq!(c.unused_sections(Role::All).len(), 3);
     }
 
     #[test]

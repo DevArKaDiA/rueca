@@ -42,6 +42,8 @@ pub struct GcReport {
     /// Deleted objects, by path.
     pub deleted: Vec<String>,
     pub deleted_bytes: u64,
+    /// Deleted bytes by object class ([`crate::object_class`]).
+    pub deleted_by_class: BTreeMap<String, u64>,
     /// Repository directories and organizations not swept because their
     /// catalog or pointer changed during the collection (next run).
     pub skipped: Vec<String>,
@@ -319,6 +321,7 @@ fn sweep(
             storage.delete(&o.path)?;
             report.deleted.push(o.path.clone());
             report.deleted_bytes += o.size;
+            *report.deleted_by_class.entry(crate::object_class(&o.path).to_string()).or_default() += o.size;
         }
     }
     report.skipped = changed.into_iter().collect();
@@ -352,6 +355,10 @@ fn sweep_rounds(
     let sizes: HashMap<&str, u64> = objects.iter().map(|o| (o.path.as_str(), o.size)).collect();
     report.candidates = unreferenced.len().saturating_sub(deleted.len());
     report.deleted_bytes = deleted.iter().filter_map(|p| sizes.get(p.as_str())).sum();
+    for p in &deleted {
+        *report.deleted_by_class.entry(crate::object_class(p).to_string()).or_default() +=
+            sizes.get(p.as_str()).copied().unwrap_or(0);
+    }
     report.deleted = deleted;
     Ok(())
 }

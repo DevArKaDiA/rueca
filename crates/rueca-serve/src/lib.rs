@@ -1,4 +1,5 @@
-//! Rueca service mode, the **query role** (RFC 0008 phase 1): `rueca serve`.
+//! Rueca service mode: `rueca serve`, the **query role** (RFC 0008 phase 1)
+//! and the **indexer role** (phase 2, [`indexer`]); `--role all` runs both.
 //!
 //! A query replica serves MCP over stateless Streamable HTTP from a local
 //! mirror of the service store (`rueca-service`), the organization's current
@@ -20,15 +21,24 @@
 //! - [`state`]: the generation watcher, readiness, the disk cache (§5.6,
 //!   §6.7).
 //! - [`metrics`], [`logging`]: §6.6.
+//! - [`indexer`], [`admin`]: the indexer role (§7): job discovery and
+//!   leasing every `[indexing].discover`, the job runner, the updater loop
+//!   every `[indexing].updater_tick` when `[indexing].org_updater` (default
+//!   true), `/admin/*`, its readiness (store readable, `git` ≥ 2.45).
+//! - Read evidence (§5.8): the query role records the refs tool calls name
+//!   and writes one `reads/<yyyy-mm-dd>/<hh>-<replica>.json` per hour
+//!   (`[retention].pr_idle = "0"` disables it).
 //!
 //! The protocol core stays synchronous and free of tokio
 //! (`docs/mcp-protocol.md` §8): tokio enters only in this crate.
 //! Configuration keys this phase parses but does not act on are listed by
 //! [`config::ServiceConfig::unused_sections`] and logged at start-up.
 
+pub mod admin;
 pub mod auth;
 pub mod config;
 pub mod http;
+pub mod indexer;
 pub mod limits;
 pub mod logging;
 pub mod mcp;
@@ -65,9 +75,12 @@ pub struct Running {
 
 impl Running {
     /// Stops accepting, lets in-flight requests finish for up to `drain`,
-    /// stops the watcher.
+    /// stops the watcher and the indexer loops (a running job is left to
+    /// its lease), writes the current hour's read evidence.
     pub async fn shutdown(self, drain: Duration) {
         let _ = self.stop.send(true);
+        let st = self.state.clone();
+        let _ = tokio::task::spawn_blocking(move || st.flush_reads(true)).await;
         let all = futures_util::future::join_all(self.tasks);
         if tokio::time::timeout(drain, all).await.is_err() {
             tracing::warn!(drain_s = drain.as_secs(), "in-flight requests did not finish within the drain; exiting");
@@ -75,15 +88,12 @@ impl Running {
     }
 }
 
-/// Binds both listeners and starts the HTTP servers and the generation
-/// watcher on the current tokio runtime.
+/// Binds both listeners and starts the HTTP servers and, by role, the
+/// generation watcher and the indexer loops on the current tokio runtime.
 pub async fn start(loaded: Loaded) -> anyhow::Result<Running> {
     let Loaded { config, role, .. } = loaded;
-    if role != Role::Query {
-        tracing::info!(role = role.as_str(), "indexer role: phase 2; only the query loops run");
-    }
-    for section in config.unused_sections() {
-        tracing::info!(section, "configuration parsed, not used in this phase");
+    for section in config.unused_sections(role) {
+        tracing::info!(section, "configuration parsed, not used by this role or phase");
     }
     let state = Arc::new(AppState::new(config, role)?);
     let http = &state.config.http;
@@ -93,12 +103,21 @@ pub async fn start(loaded: Loaded) -> anyhow::Result<Running> {
     let (stop, stopped) = watch::channel(false);
     let main_app = http::main_router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
     let ops_app = http::ops_router(state.clone());
-    let tasks = vec![
+    let mut tasks = vec![
         tokio::spawn(serve_until(listener, main_app, stopped.clone(), "main")),
         tokio::spawn(serve_ops(ops, ops_app, stopped.clone())),
-        tokio::spawn(watch_generations(state.clone(), stopped)),
     ];
-    tracing::info!(%addr, %ops_addr, store = %state.config.store.url, "rueca serve listening");
+    if role != Role::Indexer {
+        tasks.push(tokio::spawn(watch_generations(state.clone(), stopped.clone())));
+    }
+    if let Some(idx) = state.indexer.clone() {
+        tracing::info!(owner = %idx.owner, jobs = idx.jobs, updater = idx.has_updater(), "indexer role started");
+        if idx.has_updater() {
+            tasks.push(tokio::spawn(run_updater(idx.clone(), stopped.clone())));
+        }
+        tasks.push(tokio::spawn(discover_jobs(idx, stopped)));
+    }
+    tracing::info!(%addr, %ops_addr, role = role.as_str(), store = %state.config.store.url, "rueca serve listening");
     Ok(Running { addr, ops_addr, state, stop, tasks })
 }
 
@@ -143,6 +162,47 @@ async fn watch_generations(state: Arc<AppState>, mut stopped: watch::Receiver<bo
         }
         tokio::select! {
             _ = tokio::time::sleep(poll) => {}
+            _ = stopped.wait_for(|s| *s) => return,
+        }
+    }
+}
+
+/// Job discovery: every `[indexing].discover`, lease jobs while fewer than
+/// `[indexing].jobs` run, each on a blocking thread.
+async fn discover_jobs(idx: Arc<indexer::Indexer>, mut stopped: watch::Receiver<bool>) {
+    let permits = Arc::new(tokio::sync::Semaphore::new(idx.jobs.max(1)));
+    loop {
+        lease_while_free(&idx, &permits).await;
+        tokio::select! {
+            _ = tokio::time::sleep(idx.discover) => {}
+            _ = stopped.wait_for(|s| *s) => return,
+        }
+    }
+}
+
+async fn lease_while_free(idx: &Arc<indexer::Indexer>, permits: &Arc<tokio::sync::Semaphore>) {
+    while let Ok(permit) = permits.clone().try_acquire_owned() {
+        let i = idx.clone();
+        let Ok(Some(job)) = tokio::task::spawn_blocking(move || i.lease_next(state::unix_now())).await else {
+            return;
+        };
+        let i = idx.clone();
+        tokio::task::spawn_blocking(move || {
+            i.run(job);
+            drop(permit);
+        });
+    }
+}
+
+/// The updater loop: one blocking tick every `[indexing].updater_tick`.
+async fn run_updater(idx: Arc<indexer::Indexer>, mut stopped: watch::Receiver<bool>) {
+    loop {
+        let i = idx.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || i.tick_updater(state::unix_now())).await {
+            tracing::error!(error = %e, "updater tick panicked");
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(idx.updater_tick) => {}
             _ = stopped.wait_for(|s| *s) => return,
         }
     }
@@ -213,8 +273,8 @@ pub fn check(sources: &Sources, env: &dyn Fn(&str) -> Option<String>) -> CheckRe
         },
         Err(e) => report.errors.push(format!("store.url: {e:#}")),
     }
-    for section in loaded.config.unused_sections() {
-        report.warnings.push(format!("{section}: parsed, not used by this phase"));
+    for section in loaded.config.unused_sections(loaded.role) {
+        report.warnings.push(format!("{section}: parsed, not used by this role or phase"));
     }
     report
 }
