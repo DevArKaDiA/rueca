@@ -69,6 +69,17 @@ pub enum Error {
     /// An argument is out of range or inconsistent.
     #[error("invalid argument: {0}")]
     Invalid(String),
+    /// A remote provider failed or answered something unusable.
+    #[error("remote provider `{provider}`: {message}")]
+    Remote {
+        /// The provider (`voyage`, `openai`, `gemini`, `cohere`).
+        provider: String,
+        /// What happened.
+        message: String,
+    },
+    /// The crate was built without the `remote` feature.
+    #[error("this build has no remote providers (feature `remote` is off); rebuild with default features")]
+    NoRemote,
     /// The crate was built without the `embeddings` feature.
     #[error(
         "this build has no embedding runtime (feature `embeddings` is off); \

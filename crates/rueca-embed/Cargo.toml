@@ -10,10 +10,14 @@ rust-version.workspace = true
 
 [features]
 default = ["embeddings"]
+# Remote providers (RFC 0007 §3.5): HTTPS clients for Voyage, OpenAI,
+# Gemini and Cohere through `ureq`. Part of `embeddings`; on its own it
+# gives a lexical build that can still embed through an API.
+remote = ["dep:ureq", "dep:rustls"]
 # The llama.cpp backend (vendored C++, needs CMake and a C/C++ compiler) and
 # the weights download. Metal is enabled by `llama-cpp-2` itself on Apple
 # silicon. Without it the crate keeps presets, keys and the cache listing.
-embeddings = ["dep:llama-cpp-2", "dep:ureq", "dep:rustls", "dep:num_cpus", "dep:libc"]
+embeddings = ["remote", "dep:llama-cpp-2", "dep:num_cpus", "dep:libc"]
 # CUDA build of llama.cpp (service builds, RFC 0007 §4.3).
 cuda = ["embeddings", "llama-cpp-2/cuda"]
 

@@ -92,9 +92,8 @@ pub struct PresetRerankerLoader {
 
 impl RerankerLoader for PresetRerankerLoader {
     fn load(&self, preset: &str) -> anyhow::Result<Arc<dyn Reranker>> {
-        let p = rueca_embed::preset(preset)?;
         let cache = rueca_embed::ModelCache::for_store(&self.store);
-        Ok(Arc::from(rueca_embed::backend::load_reranker(&cache, p, &RerankOptions::default())?))
+        Ok(Arc::from(rueca_embed::backend::load_reranker_preset(&cache, preset, &RerankOptions::default())?))
     }
 }
 

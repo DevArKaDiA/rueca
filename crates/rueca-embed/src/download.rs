@@ -3,11 +3,8 @@
 use std::fs::{self, File};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
 
 use sha2::{Digest as _, Sha256};
-use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
 use crate::cache::{ModelCache, Progress, hex, write_sidecar};
 use crate::error::{Error, Result};
@@ -41,17 +38,7 @@ impl ModelCache {
 }
 
 fn fetch(w: &WeightsFile, part: &Path, progress: Progress<'_>) -> Result<()> {
-    let tls = TlsConfig::builder()
-        .provider(TlsProvider::Rustls)
-        .root_certs(RootCerts::PlatformVerifier)
-        .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .build();
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .tls_config(tls)
-        .timeout_connect(Some(Duration::from_secs(30)))
-        .timeout_recv_body(None)
-        .build()
-        .into();
+    let agent = crate::http::agent(None, true);
     let net = |e: ureq::Error| Error::Download { url: w.url.to_string(), message: e.to_string() };
     let response = agent.get(w.url).call().map_err(net)?;
     let mut reader = response.into_body().into_with_config().limit(w.bytes).reader();

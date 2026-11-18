@@ -79,10 +79,11 @@ impl Default for EmbedConfig {
 
 impl EmbedConfig {
     /// The embedder options: full width (the cache's), the canonical text
-    /// version.
+    /// version. A remote preset's full width is the one asked of the
+    /// provider (`dims`), which is also what its vectors are keyed by.
     pub fn options(&self) -> EmbedOptions {
         EmbedOptions {
-            dims: None,
+            dims: if rueca_embed::is_remote_preset(&self.preset) { self.dims } else { None },
             max_tokens: self.max_tokens,
             batch_tokens: self.batch_tokens,
             threads: self.threads,
@@ -124,19 +125,16 @@ pub struct PresetLoader {
 
 impl EmbedderLoader for PresetLoader {
     fn describe(&self, cfg: &EmbedConfig) -> anyhow::Result<ModelMeta> {
-        Ok(rueca_embed::backend::describe(rueca_embed::preset(&cfg.preset)?, &cfg.options())?)
+        Ok(rueca_embed::backend::describe_preset(&cfg.preset, &cfg.options())?)
     }
 
     fn check(&self, cfg: &EmbedConfig) -> anyhow::Result<()> {
-        let preset = rueca_embed::preset(&cfg.preset)?;
-        rueca_embed::ModelCache::for_store(&self.store).resolve(preset)?;
-        Ok(())
+        Ok(rueca_embed::backend::check_preset(&rueca_embed::ModelCache::for_store(&self.store), &cfg.preset)?)
     }
 
     fn load(&self, cfg: &EmbedConfig) -> anyhow::Result<Box<dyn Embedder>> {
-        let preset = rueca_embed::preset(&cfg.preset)?;
         let cache = rueca_embed::ModelCache::for_store(&self.store);
-        Ok(rueca_embed::backend::load(&cache, preset, &cfg.options())?)
+        Ok(rueca_embed::backend::load_preset(&cache, &cfg.preset, &cfg.options())?)
     }
 }
 

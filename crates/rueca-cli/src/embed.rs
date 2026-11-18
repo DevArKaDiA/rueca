@@ -96,7 +96,7 @@ struct Record {
 
 /// Runs `rueca embed`.
 pub fn run(store: &Path, args: &EmbedArgs, pretty: bool) -> anyhow::Result<()> {
-    let preset = rueca_embed::preset(&args.preset)?;
+    let preset = args.preset.as_str();
     let opts = EmbedOptions {
         dims: args.dims,
         max_tokens: args.max_tokens,
@@ -108,14 +108,14 @@ pub fn run(store: &Path, args: &EmbedArgs, pretty: bool) -> anyhow::Result<()> {
     };
     if args.info {
         // The record without loading the model (the bench asks per instance).
-        let mut v = serde_json::to_value(rueca_embed::backend::describe(preset, &opts)?)?;
+        let mut v = serde_json::to_value(rueca_embed::backend::describe_preset(preset, &opts)?)?;
         v["load_ms"] = Value::Null;
         println!("{}", crate::render(&v, pretty));
         return Ok(());
     }
     let cache = ModelCache::for_store(store);
     let started = Instant::now();
-    let embedder = rueca_embed::backend::load(&cache, preset, &opts)?;
+    let embedder = rueca_embed::backend::load_preset(&cache, preset, &opts)?;
     let load_ms = started.elapsed().as_secs_f64() * 1e3;
     if let Some(text) = &args.text {
         let kind = if args.query { InputKind::Query } else { InputKind::Document };

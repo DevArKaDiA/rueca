@@ -60,7 +60,6 @@ struct Record {
 /// Runs `rueca rerank`.
 pub fn run(store: &Path, args: &RerankArgs) -> anyhow::Result<()> {
     let records = read(&args.input)?;
-    let preset = rueca_embed::preset(&args.preset)?;
     let opts = RerankOptions {
         max_doc_tokens: args.max_tokens,
         batch_tokens: args.batch,
@@ -69,7 +68,7 @@ pub fn run(store: &Path, args: &RerankArgs) -> anyhow::Result<()> {
         instruction: args.instruction.clone(),
     };
     let started = Instant::now();
-    let reranker = rueca_embed::backend::load_reranker(&ModelCache::for_store(store), preset, &opts)?;
+    let reranker = rueca_embed::backend::load_reranker_preset(&ModelCache::for_store(store), &args.preset, &opts)?;
     let load_ms = started.elapsed().as_secs_f64() * 1e3;
     let docs: Vec<&str> = records.iter().map(|r| r.text.as_str()).collect();
     let started = Instant::now();

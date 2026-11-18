@@ -40,9 +40,11 @@ pub enum PresetStatus {
     Unavailable,
     /// Listed for the phase 0 model sweep; no GGUF file pinned yet.
     Planned,
-    /// A remote API preset (RFC 0007 §3.5), implemented in phase 3.
-    #[serde(rename = "phase 3")]
-    Phase3,
+    /// A remote API preset (RFC 0007 §3.5): no weights, the provider's
+    /// API key in the environment, opt-in.
+    Remote,
+    /// Listed, not implemented yet (Bedrock).
+    Later,
 }
 
 impl PresetStatus {
@@ -53,7 +55,8 @@ impl PresetStatus {
             Self::Available => "available",
             Self::Unavailable => "unavailable",
             Self::Planned => "planned",
-            Self::Phase3 => "phase 3",
+            Self::Remote => "remote",
+            Self::Later => "later",
         }
     }
 }
@@ -68,6 +71,8 @@ pub enum Pooling {
     Cls,
     /// The mean over tokens.
     Mean,
+    /// Whatever a remote provider does (not known, not keyed).
+    Provider,
 }
 
 impl Pooling {
@@ -78,6 +83,7 @@ impl Pooling {
             Self::Last => "last",
             Self::Cls => "cls",
             Self::Mean => "mean",
+            Self::Provider => "provider",
         }
     }
 }
@@ -312,13 +318,20 @@ const fn planned(
     }
 }
 
-/// A `remote:` preset (RFC 0007 §3.5), listed for phase 3.
-const fn remote(name: &'static str, dims: usize) -> Preset {
-    remote_as(name, dims, Role::Embedder)
+/// A `remote:` embedder preset (RFC 0007 §3.5): widths `min_dims..=dims`
+/// (the provider's default when none is asked, `crate::remote`).
+const fn remote(name: &'static str, (min_dims, dims): (usize, usize), note: &'static str) -> Preset {
+    remote_as(name, (min_dims, dims), Role::Embedder, PresetStatus::Remote, note)
 }
 
-/// A `remote:` preset with a role.
-const fn remote_as(name: &'static str, dims: usize, role: Role) -> Preset {
+/// A `remote:` preset with a role and status.
+const fn remote_as(
+    name: &'static str,
+    (min_dims, dims): (usize, usize),
+    role: Role,
+    status: PresetStatus,
+    note: &'static str,
+) -> Preset {
     Preset {
         name,
         model: name,
@@ -326,18 +339,24 @@ const fn remote_as(name: &'static str, dims: usize, role: Role) -> Preset {
         license: "provider terms",
         kind: PresetKind::Remote,
         role,
-        status: PresetStatus::Phase3,
+        status,
         quantization: "",
         dims,
-        min_dims: dims,
+        min_dims,
         context: 0,
-        pooling: Pooling::Last,
+        pooling: Pooling::Provider,
         query: QWEN_INSTRUCT,
         document_prefix: "",
         weights: None,
-        note: "remote API preset, opt-in, implemented in phase 3 (RFC 0007 §3.5)",
+        note,
     }
 }
+
+/// The note of an implemented remote preset.
+const REMOTE_NOTE: &str = "remote API, opt-in (an organization needs `[retrieval] allow_remote = true`); \
+     any model of the provider works as `remote:<provider>/<model>` (RFC 0007 §3.5)";
+/// The note of the Bedrock presets.
+const BEDROCK_NOTE: &str = "later: needs AWS SigV4 signing and credential resolution (RFC 0007 §3.5)";
 
 /// The instruction of the reranker prompt for code (Qwen3-Reranker's
 /// `<Instruct>:` line), the embedder's code-retrieval instruction.
@@ -538,14 +557,14 @@ pub static PRESETS: &[Preset] = &[
         weights: None,
         note: "Qwen2-based reranker with its own prompt; llama.cpp runtime path unverified (RFC 0007 §7.5)",
     },
-    remote_as("remote:voyage/rerank-3", 0, Role::Reranker),
-    remote_as("remote:cohere/rerank-3.5", 0, Role::Reranker),
-    remote("remote:voyage/voyage-code-4", 2048),
-    remote("remote:voyage/voyage-code-3", 2048),
-    remote("remote:openai/text-embedding-3-large", 3072),
-    remote("remote:gemini/gemini-embedding-001", 3072),
-    remote("remote:bedrock/titan-embed-text-v2", 1024),
-    remote("remote:bedrock/cohere-embed-v4", 1536),
+    remote_as("remote:voyage/rerank-2.5", (0, 0), Role::Reranker, PresetStatus::Remote, REMOTE_NOTE),
+    remote_as("remote:cohere/rerank-v3.5", (0, 0), Role::Reranker, PresetStatus::Remote, REMOTE_NOTE),
+    remote("remote:voyage/voyage-code-4", (256, 2048), REMOTE_NOTE),
+    remote("remote:voyage/voyage-code-3", (256, 2048), REMOTE_NOTE),
+    remote("remote:openai/text-embedding-3-large", (1, 3072), REMOTE_NOTE),
+    remote("remote:gemini/gemini-embedding-001", (128, 3072), REMOTE_NOTE),
+    remote_as("remote:bedrock/titan-embed-text-v2", (256, 1024), Role::Embedder, PresetStatus::Later, BEDROCK_NOTE),
+    remote_as("remote:bedrock/cohere-embed-v4", (256, 1536), Role::Embedder, PresetStatus::Later, BEDROCK_NOTE),
 ];
 
 /// sha256 of the phase 0 local conversion (`llama-quantize` of the official
@@ -560,6 +579,12 @@ const Q4_BYTES: u64 = 396_474_560;
 const RERANK_06_SHA256: &str = "def2f55d8729597c9456a441f9cc7781bbbbc1ac5ce8592a404a7575e30dd81e";
 /// Size of that conversion.
 const RERANK_06_BYTES: u64 = 639_153_376;
+
+/// Whether `name` is a `remote:` preset (RFC 0007 §3.5), listed or not.
+#[must_use]
+pub fn is_remote_preset(name: &str) -> bool {
+    name.starts_with("remote:")
+}
 
 /// Finds a preset by name.
 ///

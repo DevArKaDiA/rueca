@@ -112,6 +112,30 @@ impl EmbedKey {
         )
     }
 
+    /// Hashes the stable inputs of a remote preset (RFC 0007 §3.5):
+    /// provider, model, API version and output width replace the file hash
+    /// (a provider's output depends on the width it is asked for).
+    #[must_use]
+    pub fn remote(
+        provider: &str,
+        model: &str,
+        version: &str,
+        dims: usize,
+        text_builder_version: u32,
+        token_budget: usize,
+    ) -> Self {
+        Self(
+            KeyHasher::new("rueca-embed/embed-key/remote/v1")
+                .field(1, provider.as_bytes())
+                .field(2, model.as_bytes())
+                .field(3, version.as_bytes())
+                .field(4, &(dims as u64).to_le_bytes())
+                .field(5, &text_builder_version.to_le_bytes())
+                .field(6, &(token_budget as u64).to_le_bytes())
+                .finish(),
+        )
+    }
+
     /// The digest.
     #[must_use]
     pub fn digest(&self) -> &Digest {
@@ -223,6 +247,8 @@ pub enum Backend {
     Cpu,
     /// NVIDIA GPU through CUDA.
     Cuda,
+    /// A provider's API (`remote:` presets).
+    Remote,
 }
 
 /// The CPU feature level of this machine: `x86-64-v4`, `x86-64-v3`,

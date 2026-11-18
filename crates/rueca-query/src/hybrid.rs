@@ -114,14 +114,17 @@ pub struct PresetQueryLoader {
 
 impl QueryEmbedderLoader for PresetQueryLoader {
     fn load(&self, meta: &VectorsMeta) -> anyhow::Result<Arc<dyn Embedder>> {
-        let preset = rueca_embed::preset(&meta.preset)?;
+        // A remote preset's vectors are keyed by the width asked of the
+        // provider (the segment's full width).
+        let remote = rueca_embed::is_remote_preset(&meta.preset);
         let opts = EmbedOptions {
+            dims: remote.then_some(meta.max_dims),
             max_tokens: meta.token_budget,
             text_builder_version: meta.text_builder_version,
             ..EmbedOptions::default()
         };
         let cache = rueca_embed::ModelCache::for_store(&self.store);
-        let e: Arc<dyn Embedder> = Arc::from(rueca_embed::backend::load(&cache, preset, &opts)?);
+        let e: Arc<dyn Embedder> = Arc::from(rueca_embed::backend::load_preset(&cache, &meta.preset, &opts)?);
         anyhow::ensure!(
             e.meta().embed_key.to_string() == meta.embed_key,
             "the local `{}` model differs from the one that embedded the snapshot (embed key {}); \

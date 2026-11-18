@@ -33,6 +33,13 @@
 //! level are not keyed but recorded in [`ModelMeta`] for audit; the query
 //! instruction is not keyed either, since documents carry none.
 //!
+//! # Remote presets
+//!
+//! `remote:<provider>/<model>` names an embedder or reranker behind a
+//! provider's API (`remote`, feature `remote`, part of `embeddings`):
+//! Voyage, OpenAI and Gemini embeddings, Voyage and Cohere rerank. The
+//! `backend::*_preset` functions resolve any preset name, local or remote.
+//!
 //! # Rerankers
 //!
 //! [`Reranker`] scores documents against a query (RFC 0007 §7.5);
@@ -51,15 +58,21 @@ pub mod config;
 mod download;
 mod error;
 pub mod hashing;
+#[cfg(feature = "remote")]
+mod http;
 pub mod key;
 pub mod presets;
+#[cfg(feature = "remote")]
+pub mod remote;
 pub mod vector;
 
 pub use cache::{CacheState, MODEL_DIR_ENV, ModelCache};
 pub use config::RetrievalConfig;
 pub use error::{Error, Result};
 pub use key::{Backend, EmbedKey, ModelKey, ModelMeta, TEXT_BUILDER_VERSION, VectorEncoding, VectorKey};
-pub use presets::{DEFAULT_PRESET, DEFAULT_RERANK_PRESET, PRESETS, Preset, PresetStatus, Role, preset};
+pub use presets::{
+    DEFAULT_PRESET, DEFAULT_RERANK_PRESET, PRESETS, Preset, PresetStatus, Role, is_remote_preset, preset,
+};
 
 use presets::QueryStyle;
 
