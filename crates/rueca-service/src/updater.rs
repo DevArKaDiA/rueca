@@ -24,9 +24,18 @@
 //!    `update_org_with` and the package linker, and [`publish_generation`]
 //!    when it changed. A [`Conflict`] (another updater published first)
 //!    forgets the adopted version, so the next tick pulls the winner's
-//!    generation and rebuilds on it. At most one generation per tick.
+//!    generation and rebuilds on it. At most one generation per tick: every
+//!    job finished since the last one is in it.
+//!
+//! The package linker reads file facts from the mirror's own facts cache,
+//! then from [`UpdaterOptions::facts_from`] (the indexer's staging store,
+//! which holds the facts of every snapshot this indexer indexed); a file in
+//! neither is parsed from the content packs once and its facts cached in the
+//! mirror, so re-linking the reverse dependencies of a pushed repository
+//! never parses a file twice.
 
 use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rueca_index::link::PackageLinker;
@@ -92,6 +101,9 @@ pub struct UpdaterOptions {
     pub retention: Retention,
     /// Idle expiry and garbage collection period (1 h).
     pub housekeeping_every: Duration,
+    /// Local stores whose facts caches the package linker also reads (the
+    /// indexer's staging store), after the mirror's own (module docs).
+    pub facts_from: Vec<PathBuf>,
 }
 
 /// What one tick did.
@@ -110,6 +122,13 @@ pub struct TickReport {
     pub generation: Option<GenerationReport>,
     /// Time to build and publish the generation.
     pub generation_seconds: f64,
+    /// Of which: profiles, link sets (`update_org_with`) and the upload
+    /// ([`publish_generation`]), in milliseconds.
+    pub profile_ms: u64,
+    pub link_ms: u64,
+    pub publish_ms: u64,
+    /// Entries whose link set was recomputed.
+    pub relinked: Vec<String>,
     /// Another updater published first (rebuilt next tick).
     pub conflict: bool,
 }
@@ -253,8 +272,12 @@ impl Updater {
         if members.is_empty() {
             return Ok(());
         }
-        let linker = PackageLinker::new(&self.svc.local.dir);
+        let linker =
+            self.options.facts_from.iter().fold(PackageLinker::new(&self.svc.local.dir), |l, d| l.with_fallback(d));
         let update = update_org_with(&self.svc.local, &self.svc.org, &members, &linker)?;
+        report.profile_ms = update.profile_ms;
+        report.link_ms = update.link_ms;
+        report.relinked = update.linked.into_iter().map(|(entry, _)| entry).collect();
         if !update.published && self.pointer.is_some() {
             return Ok(());
         }
@@ -262,8 +285,10 @@ impl Updater {
     }
 
     fn publish(&mut self, report: &mut TickReport, started: Instant) -> anyhow::Result<()> {
+        let t = Instant::now();
         match publish_generation(&self.svc) {
             Ok(g) => {
+                report.publish_ms = t.elapsed().as_millis() as u64;
                 report.generation_seconds = started.elapsed().as_secs_f64();
                 report.generation = Some(g);
                 Ok(())

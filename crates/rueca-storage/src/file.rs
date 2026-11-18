@@ -267,7 +267,9 @@ impl Storage for FileStorage {
     }
 
     fn put_new_file(&self, path: &str, src: &Path) -> Result<ObjectVersion, PutError> {
-        self.object(path)?;
+        // Not worth copying a file that is already there (checked again
+        // under the lock).
+        check_precondition(&self.object(path)?, None)?;
         let staged = self.stage_file(src)?;
         self.commit(path, staged, None)
     }

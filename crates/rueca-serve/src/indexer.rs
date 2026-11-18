@@ -267,8 +267,12 @@ impl Indexer {
             let svc = ServiceStore::with_storage(storage, &mirrors.join("store"), org)?;
             let lister: Arc<dyn RemoteLister> = git.clone();
             let reconciler = Reconciler::new(specs.clone(), poll_policy(c), lister);
-            let options =
-                UpdaterOptions { owner: owner.clone(), retention: retention(c), housekeeping_every: HOUSEKEEPING };
+            let options = UpdaterOptions {
+                owner: owner.clone(),
+                retention: retention(c),
+                housekeeping_every: HOUSEKEEPING,
+                facts_from: vec![staging.local.dir.clone()],
+            };
             Some(Mutex::new(Updater::new(svc, reconciler, options)))
         } else {
             None
@@ -420,7 +424,17 @@ impl Indexer {
         if let Some(g) = &r.generation {
             self.metrics.gauge("rueca_generation", &[]).set(g.generation as f64);
             self.metrics.histogram("rueca_publish_seconds", &[("stage", "generation")]).record(r.generation_seconds);
-            tracing::info!(generation = g.generation, published = g.published, pulled = ?r.pulled, "updater published");
+            tracing::info!(
+                generation = g.generation,
+                published = g.published,
+                pulled = ?r.pulled,
+                seconds = r.generation_seconds,
+                profile_ms = r.profile_ms,
+                link_ms = r.link_ms,
+                publish_ms = r.publish_ms,
+                relinked = ?r.relinked,
+                "updater published"
+            );
         }
         if r.conflict {
             self.metrics.counter("rueca_cas_conflicts_total", &[("object", "pointer")]).increment(1);

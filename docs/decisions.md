@@ -164,6 +164,26 @@ Still open for the resolver: a module and a function with one name
 (`mod spawn; pub use spawn::spawn;`) bind the module, so `tokio::spawn(…)`
 calls stay unresolved.
 
+## 2026-11-18 — Indexer role: leased job objects, child processes per ref, webhooks as hints
+
+RFC 0008 phase 2. Indexing is level-triggered: a reconciler holds the
+desired commit of every configured ref from webhooks, adaptive
+`ls-remote` polling and admin requests, and writes one job object per
+repository in the bucket; indexers lease jobs by compare-and-swap (15 min
+leases with epochs, stealable when expired), fetch exact commits into a
+bare mirror with `--depth=1 --filter=blob:limit`, export from the mirror
+and index each ref in a `rueca index-worker` child under `RLIMIT_AS`,
+`RLIMIT_CPU` and a wall-clock kill, so a parser that loops or explodes
+fails only its ref; the job fails as a whole only when no ref reached its
+desired commit. Webhooks (GitHub, GitLab incl. Standard Webhooks,
+Bitbucket) are verified, deduplicated by delivery id and confirmed with
+`ls-remote` before they move the desired state; polling keeps
+correctness. One updater, elected by a lease object, publishes
+generations, collects garbage and expires pull requests by close and by
+idle reads that replicas record hourly. Credentials reach `git` only
+through `GIT_CONFIG_*` environment variables. `file://` and `git://`
+hosts are accepted by debug builds only, for tests.
+
 ## 2026-11-17 — Service query role: Rueca's own HTTP transport and auth layer, governor over tower_governor
 
 RFC 0008 phase 1. `rueca serve` answers MCP over a stateless `POST /mcp`

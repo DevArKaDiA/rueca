@@ -84,7 +84,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import CACHE, RESULTS_DIR, log, run, safe_name, write_json
-from .corpus import add_worktree, remove_worktree
+from .corpus import NO_LFS, add_worktree, remove_worktree
 from .org import _filtered, org_members
 from .service import (
     McpClient,
@@ -121,25 +121,54 @@ def git(args: list[str], cwd: Path | None = None) -> str:
 
 
 def org_sources(work: Path, split: str, only: list[str] | None) -> tuple[list[Path], list[str]]:
-    """The split's members cut at their pins into one-commit repositories."""
+    """The split's members cut at their pins into one-commit repositories.
+    A member that cannot be prepared (pin missing from its clone, a failing
+    checkout) is skipped with its reason logged, and its queries with it."""
     repos = set(only) if only else None
     members = _filtered(org_members(split), repos)
     if not members:
         raise SystemExit(f"rueca-bench service-index: no {split} member matches --only {only}")
-    roots = []
+    roots, skipped = [], []
     for m in members:
-        wt = add_worktree(m["repo"], m["commit"], f"service-index-{m['repo']}")
         try:
-            dest = work / "repos" / safe_name(m["repo"])
-            dest.mkdir(parents=True)
-            arch = subprocess.run(["git", "-C", str(wt), "archive", "HEAD"], capture_output=True, check=True)
-            subprocess.run(["tar", "-x", "-C", str(dest)], input=arch.stdout, check=True)
-            for cmd in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "snapshot"]):
-                git(cmd, cwd=dest)
-            roots.append(dest)
-        finally:
-            remove_worktree(m["repo"], wt)
+            roots.append(cut_member(work, m["repo"], m["commit"]))
+        except (RuntimeError, OSError, subprocess.CalledProcessError) as e:
+            log(f"service-index: skipping {m['repo']}@{m['commit'][:10]}: {failure_reason(e)}")
+            skipped.append(m["repo"])
+    if not roots:
+        raise SystemExit(f"rueca-bench service-index: no {split} member could be prepared")
+    if skipped:
+        repos = {m["repo"] for m in members} - set(skipped)
     return roots, org_queries(split, repos)
+
+
+def cut_member(work: Path, repo: str, commit: str) -> Path:
+    """`repo` at `commit` as a one-commit repository under `work/repos/`
+    (Git LFS filters off, as for the worktree: the pointers are indexed)."""
+    dest = work / "repos" / safe_name(repo)
+    wt = add_worktree(repo, commit, f"service-index-{repo}")
+    try:
+        shutil.rmtree(dest, ignore_errors=True)
+        dest.mkdir(parents=True)
+        arch = subprocess.run(["git", *NO_LFS, "-C", str(wt), "archive", "HEAD"], capture_output=True, check=True)
+        subprocess.run(["tar", "-x", "-C", str(dest)], input=arch.stdout, capture_output=True, check=True)
+        for cmd in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "snapshot"]):
+            git([*NO_LFS, *cmd], cwd=dest)
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    finally:
+        remove_worktree(repo, wt)
+    return dest
+
+
+def failure_reason(e: BaseException) -> str:
+    """The last line of a failed command's error output, else the error."""
+    err = getattr(e, "stderr", None)
+    if isinstance(err, bytes):
+        err = err.decode(errors="replace")
+    lines = [ln for ln in (err or str(e)).splitlines() if ln.strip()]
+    return lines[-1].strip() if lines else type(e).__name__
 
 
 def local_baseline(bin_: Path, roots: list[Path], work: Path) -> dict:

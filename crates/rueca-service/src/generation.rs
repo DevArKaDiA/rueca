@@ -133,7 +133,7 @@ fn named_objects(svc: &ServiceStore, g: &OrgGeneration, local: &Path) -> anyhow:
     for r in &g.repos {
         let rd = repo_dir(&r.repo, None);
         for e in r.entries() {
-            let packs = svc.local.open_segment(&e.segment_id)?.meta().packs.clone();
+            let packs = svc.segment_packs(&e.segment_id)?;
             out.extend(packs.iter().map(|p| ServiceStore::repo_path(&rd, &format!("packs/{p}.rcpack"))));
             out.push(ServiceStore::repo_path(&rd, &format!("segments/{}.rcseg", e.segment_id)));
         }

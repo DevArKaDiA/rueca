@@ -139,6 +139,7 @@ fn register(svc: &ServiceStore, root: &Path, segment: &str, ref_name: Option<&st
         return Ok(false);
     }
     let meta = svc.local.open_segment(segment)?.meta().clone();
+    svc.remember_packs(segment, &meta.packs);
     match ref_name {
         None => svc.local.register(&root_s, &meta)?,
         Some(r) => svc.local.register_ref(&root_s, &meta, r)?,
@@ -183,6 +184,7 @@ impl<'a> Fetcher<'a> {
             self.pack(pack)?;
         }
         tmp.persist(&dest)?;
+        self.svc.remember_packs(id, &packs);
         self.segments += 1;
         Ok(())
     }

@@ -225,11 +225,11 @@ pub mod updater;
 pub mod webhooks;
 pub mod worker;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
@@ -271,6 +271,9 @@ pub struct ServiceStore {
     pub local: Store,
     /// The organization of the store (`store.json`).
     pub org: String,
+    /// Packs of the mirror's segments seen so far, by segment id (segments
+    /// are immutable, so opening one once is enough).
+    packs: Mutex<HashMap<String, Vec<String>>>,
 }
 
 impl ServiceStore {
@@ -322,7 +325,23 @@ impl ServiceStore {
         fs::create_dir_all(local_dir).with_context(|| format!("creating {}", local_dir.display()))?;
         let dir = fs::canonicalize(local_dir).with_context(|| format!("opening {}", local_dir.display()))?;
         let local = Store::open(&dir)?;
-        Ok(ServiceStore { storage, local, org: org.to_string() })
+        Ok(ServiceStore { storage, local, org: org.to_string(), packs: Mutex::default() })
+    }
+
+    /// The packs mirror segment `id` lists: remembered from a pull or an
+    /// earlier call, else read by opening the segment (full validation).
+    pub(crate) fn segment_packs(&self, id: &str) -> anyhow::Result<Vec<String>> {
+        if let Some(p) = self.packs.lock().unwrap_or_else(|p| p.into_inner()).get(id) {
+            return Ok(p.clone());
+        }
+        let packs = self.local.open_segment(id)?.meta().packs.clone();
+        self.remember_packs(id, &packs);
+        Ok(packs)
+    }
+
+    /// Records the packs of mirror segment `id` (just opened elsewhere).
+    pub(crate) fn remember_packs(&self, id: &str, packs: &[String]) {
+        self.packs.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string(), packs.to_vec());
     }
 
     /// The synthetic root under which the mirror registers ref `ref_name`

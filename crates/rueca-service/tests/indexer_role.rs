@@ -41,6 +41,7 @@ fn updater(url: &str, dir: &std::path::Path, owner: &str, specs: Vec<RepoSpec>) 
         owner: owner.to_string(),
         retention: Retention::default(),
         housekeeping_every: Duration::from_secs(3600),
+        facts_from: Vec::new(),
     };
     Updater::new(open(url, dir), reconciler, options)
 }
