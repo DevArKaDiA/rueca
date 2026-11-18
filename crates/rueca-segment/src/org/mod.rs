@@ -117,7 +117,7 @@ pub use link::{
     ContractKey, LinkDir, LinkEdge, LinkInput, LinkRef, LinkTable, NoLinker, OrgDep, OrgLinker, OrgLinks, Package,
     RepoDeps,
 };
-pub use route::{PROFILE_FORMAT, RepoProfile, RepoRoute, RouteMode, RouteParams};
+pub use route::{Centroid, PROFILE_FORMAT, RepoProfile, RepoRoute, RouteMode, RouteParams, RouteQuery};
 pub use select::{OrgRefInfo, OrgSelection, OrgSlot, ref_names_match, snapshot_ref_name};
 
 /// Version of the generation file format.
@@ -223,6 +223,40 @@ pub struct OrgGeneration {
     /// none).
     #[serde(default)]
     pub linker: u32,
+    /// The organization's embedding model (RFC 0007 §10): the one model
+    /// key whose vectors its hybrid search fuses; members with other
+    /// vectors or none rank lexically. `None`: not recorded (the members'
+    /// most common model is used).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<OrgModel>,
+    /// Whether a `remote:` preset may embed or rerank the organization's
+    /// code (`[retrieval] allow_remote` of its file, RFC 0007 §3.5).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_remote: bool,
+}
+
+/// The embedding model of an organization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrgModel {
+    /// The preset that embeds its members.
+    pub preset: String,
+    /// What the vectors' texts were embedded with.
+    pub embed_key: String,
+    /// What a member's vectors must have to be fused (embed key, width,
+    /// `i8`).
+    pub model_key: String,
+    /// The width stored in segments.
+    pub dims: usize,
+}
+
+/// What an organization's file says about retrieval, recorded in the
+/// generation by [`update_org_with_policy`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OrgPolicy {
+    /// The organization's model, `None` when it does not embed.
+    pub model: Option<OrgModel>,
+    /// `allow_remote`.
+    pub allow_remote: bool,
 }
 
 impl OrgGeneration {
@@ -456,7 +490,27 @@ pub fn update_org(store: &Store, name: &str, members: &[OrgMember]) -> Result<Or
 /// copy, profile, link set); an unregistered one is dropped. A ref entry's
 /// link set is computed against its dependencies' default entries, from
 /// its own imports; refs never trigger a reverse-dependency recompute.
+///
+/// The organization's model and `allow_remote` stay those of the current
+/// generation ([`update_org_with_policy`] sets them).
 pub fn update_org_with(store: &Store, name: &str, members: &[OrgMember], linker: &dyn OrgLinker) -> Result<OrgUpdate> {
+    validate_name(name)?;
+    let policy = current_generation(&store.dir, name)?
+        .map(|g| OrgPolicy { model: g.model, allow_remote: g.allow_remote })
+        .unwrap_or_default();
+    update_org_with_policy(store, name, members, linker, &policy)
+}
+
+/// [`update_org_with`] recording `policy` (the organization file's model
+/// and `allow_remote`) in the generation; a changed policy publishes a new
+/// generation.
+pub fn update_org_with_policy(
+    store: &Store,
+    name: &str,
+    members: &[OrgMember],
+    linker: &dyn OrgLinker,
+    policy: &OrgPolicy,
+) -> Result<OrgUpdate> {
     validate_name(name)?;
     let started = Instant::now();
     ensure_dirs(&store.dir)?;
@@ -507,7 +561,7 @@ pub fn update_org_with(store: &Store, name: &str, members: &[OrgMember], linker:
     let t = Instant::now();
     b.link_all(&mut repos, &profiles)?;
     b.update.link_ms = t.elapsed().as_millis() as u64;
-    b.publish(name, repos, started)
+    b.publish(name, repos, policy, started)
 }
 
 /// `<store>/refs`: where ref snapshots are exported.
@@ -841,15 +895,18 @@ impl OrgBuild<'_> {
     }
 
     /// Publishes generation `next` when anything changed.
-    fn publish(self, name: &str, repos: Vec<OrgRepo>, started: Instant) -> Result<OrgUpdate> {
+    fn publish(self, name: &str, repos: Vec<OrgRepo>, policy: &OrgPolicy, started: Instant) -> Result<OrgUpdate> {
         let OrgBuild { store, dir, tmp, prev, template, version, next, mut update, costs, .. } = self;
         update.repos = repos.len();
         update.refs = repos.iter().map(|r| r.refs.len()).sum();
         update.costs = costs.into_values().collect();
-        let changed = match &prev {
-            None => true,
-            Some(g) => g.repos != repos || g.tantivy != template || g.linker != version,
-        };
+        let changed = prev.as_ref().is_none_or(|g| {
+            g.repos != repos
+                || g.tantivy != template
+                || g.linker != version
+                || g.model != policy.model
+                || g.allow_remote != policy.allow_remote
+        });
         if !changed {
             update.generation = prev.map_or(0, |g| g.generation);
             update.duration_ms = started.elapsed().as_millis() as u64;
@@ -863,6 +920,8 @@ impl OrgBuild<'_> {
             repos,
             tantivy: template,
             linker: version,
+            model: policy.model.clone(),
+            allow_remote: policy.allow_remote,
         };
         let bytes = serde_json::to_vec_pretty(&generation).map_err(|e| SegmentError::Other(e.to_string()))?;
         atomic_write(&generation_path(&dir, next), &tmp, &bytes)?;
@@ -1414,25 +1473,48 @@ impl OrgIndex {
         view: &OrgSelection,
         params: &RouteParams,
     ) -> Result<Vec<RepoRoute>> {
+        self.route_view_with(text, visible, view, params, None)
+    }
+
+    /// [`OrgIndex::route_view`] with the query's vector: the embedding
+    /// centroid joins as a third signal ([`route`], RFC 0007 §10).
+    pub fn route_view_with(
+        &self,
+        text: &str,
+        visible: &[usize],
+        view: &OrgSelection,
+        params: &RouteParams,
+        query: Option<RouteQuery<'_>>,
+    ) -> Result<Vec<RepoRoute>> {
         let mut vis: Vec<usize> = visible.iter().copied().filter(|&i| i < self.generation.repos.len()).collect();
         vis.sort_unstable();
         vis.dedup();
         let terms = route::query_terms(text);
-        if vis.len() < 2 || terms.is_empty() {
-            return Ok(vis.into_iter().map(|repo| RepoRoute { repo, score: 1.0, terms: 1.0, doc: 1.0 }).collect());
+        let query = query.filter(|_| params.centroid > 0.0);
+        if vis.len() < 2 || (terms.is_empty() && query.is_none()) {
+            let one = |repo| RepoRoute { repo, score: 1.0, terms: 1.0, doc: 1.0, centroid: None };
+            return Ok(vis.into_iter().map(one).collect());
         }
         let at: Vec<usize> = vis.iter().map(|&r| self.position_of(view.primary(r))).collect::<Result<_>>()?;
         let (df, cw) = self.term_distribution(&terms, &at)?;
         let by_terms = route::normalize(&route::cori(&df, &cw, params.cori_k, params.cori_c));
         let by_doc = route::normalize(&self.docs.scores(&terms, &at, &params.fields));
+        let by_centroid = match &query {
+            Some(q) => {
+                let profiles: Vec<Option<&RepoProfile>> = at.iter().map(|&p| self.profiles[p].as_ref()).collect();
+                route::centroid_signal(&profiles, q)
+            }
+            None => vec![None; at.len()],
+        };
         let mut out: Vec<RepoRoute> = vis
             .iter()
             .enumerate()
             .map(|(j, &repo)| RepoRoute {
                 repo,
-                score: (1.0 - params.mu) * by_terms[j] + params.mu * by_doc[j],
+                score: params.mix(by_terms[j], by_doc[j], by_centroid[j]),
                 terms: by_terms[j],
                 doc: by_doc[j],
+                centroid: by_centroid[j],
             })
             .collect();
         let best = out.iter().map(|r| r.score).fold(0f32, f32::max);

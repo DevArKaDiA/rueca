@@ -16,8 +16,17 @@
 //!   most referenced symbols, the path vocabulary, scored with BM25 per
 //!   field (weights in [`RouteParams`]).
 //!
+//! - **Embedding centroid** (RFC 0007 §10), when the query has a vector:
+//!   the cosine between it and the repository's [`Centroid`] (the mean of
+//!   its symbol vectors, re-normalized, in its profile), for repositories
+//!   whose vectors share the query's embed key.
+//!
 //! Each signal is min-max normalized over the visible repositories and
-//! mixed (`mu` = weight of the document); the result `r ∈ [0, 1]` is the
+//! mixed (`mu` = weight of the document); with a centroid signal (at least
+//! two visible repositories have one), a repository that has a centroid
+//! mixes the three as `(2(1 − mu)·terms + 2mu·doc + w·centroid) / (2 + w)`,
+//! `w` = [`RouteParams::centroid`] (1: equal weights at `mu` = 0.5), one
+//! without keeps the two-signal mix. The result `r ∈ [0, 1]` is the
 //! repository's relevance. [`RouteParams::mode`] decides how it is used:
 //! `prior` multiplies every symbol score by `((eps + r) / (eps + 1))^alpha`
 //! (the default), `top` searches only the repositories whose `r` is within
@@ -33,8 +42,9 @@ use crate::Segment;
 use crate::priors::{is_test_path, is_vendored_path};
 use crate::tokenizer::tokens;
 
-/// Version of [`RepoProfile`]; a new version recomputes every profile.
-pub const PROFILE_FORMAT: u32 = 1;
+/// Version of [`RepoProfile`]; a new version recomputes every profile
+/// (2: the embedding centroid).
+pub const PROFILE_FORMAT: u32 = 2;
 
 /// Bytes of the README kept in a profile.
 const README_BYTES: usize = 4096;
@@ -65,6 +75,55 @@ pub struct RepoProfile {
     /// Packages published, imports not resolved inside, packages required.
     #[serde(default)]
     pub deps: RepoDeps,
+    /// The mean of the snapshot's symbol vectors, when it has vectors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centroid: Option<Centroid>,
+}
+
+/// The embedding centroid of a repository snapshot (RFC 0007 §10): the
+/// mean of its (dequantized) symbol vectors, re-normalized.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Centroid {
+    /// The embed key of the vectors (a query vector must share it).
+    pub embed_key: String,
+    /// Their model key (embed key, width, encoding).
+    pub model_key: String,
+    /// The width: the segment's.
+    pub dims: usize,
+    /// The unit mean vector.
+    pub vector: Vec<f32>,
+}
+
+impl Centroid {
+    /// The centroid of `seg`'s vectors; `None` without vectors (or when
+    /// they cannot be read).
+    pub fn of(seg: &Segment) -> Option<Centroid> {
+        let v = seg.vectors().ok()??;
+        if v.is_empty() {
+            return None;
+        }
+        let mut sum = vec![0f64; v.dims()];
+        for row in 0..v.len() {
+            for (s, x) in sum.iter_mut().zip(v.row(row)) {
+                *s += f64::from(x);
+            }
+        }
+        let mean: Vec<f32> = sum.iter().map(|&s| (s / v.len() as f64) as f32).collect();
+        let meta = v.meta();
+        Some(Centroid {
+            embed_key: meta.embed_key.clone(),
+            model_key: meta.model_key.clone(),
+            dims: v.dims(),
+            vector: crate::vectors::truncate_normalize(&mean, v.dims()),
+        })
+    }
+
+    /// Cosine with a unit query vector of the same embed key (truncated to
+    /// the centroid's width and re-normalized).
+    pub fn cosine(&self, query: &[f32]) -> f32 {
+        let q = crate::vectors::truncate_normalize(query, self.dims);
+        q.iter().zip(&self.vector).map(|(a, b)| a * b).sum()
+    }
 }
 
 fn readme_rank(path: &str) -> Option<(usize, usize, String)> {
@@ -169,6 +228,7 @@ impl RepoProfile {
             paths: paths.join(" "),
             languages: languages.into_iter().collect(),
             deps,
+            centroid: Centroid::of(seg),
         }
     }
 }
@@ -283,6 +343,9 @@ pub struct RouteParams {
     /// Score each repository with its own BM25 statistics (its ranking is
     /// then the one it has alone) instead of organization-wide ones.
     pub local_stats: bool,
+    /// Weight of the embedding-centroid signal (0: off; 1: equal to the
+    /// two others at `mu` = 0.5).
+    pub centroid: f32,
 }
 
 impl Default for RouteParams {
@@ -298,6 +361,7 @@ impl Default for RouteParams {
             cori_k: 50.0,
             cori_c: 150.0,
             local_stats: false,
+            centroid: 1.0,
         }
     }
 }
@@ -331,6 +395,7 @@ impl RouteParams {
                 "paths" => p.fields[3] = f()?,
                 "cori_k" => p.cori_k = f()?,
                 "cori_c" => p.cori_c = f()?,
+                "centroid" => p.centroid = f()?,
                 "stats" => {
                     p.local_stats = match v.trim() {
                         "local" => true,
@@ -344,9 +409,32 @@ impl RouteParams {
         Ok(p)
     }
 
-    /// The defaults, or `RUECA_ORG_ROUTE` when set and valid.
+    /// The defaults, or `RUECA_ORG_ROUTE` when set and valid; the centroid
+    /// weight from `RUECA_ORG_ROUTE_CENTROID` when set.
     pub fn from_env() -> RouteParams {
-        std::env::var("RUECA_ORG_ROUTE").ok().and_then(|s| RouteParams::parse(&s).ok()).unwrap_or_default()
+        RouteParams::resolve(None)
+    }
+
+    /// [`RouteParams::from_env`] with the centroid weight of the
+    /// configuration (`[retrieval] route_centroid`) under the environment.
+    pub fn resolve(config_centroid: Option<f32>) -> RouteParams {
+        let mut p: RouteParams =
+            std::env::var("RUECA_ORG_ROUTE").ok().and_then(|s| RouteParams::parse(&s).ok()).unwrap_or_default();
+        let env = std::env::var("RUECA_ORG_ROUTE_CENTROID").ok().and_then(|v| v.trim().parse::<f32>().ok());
+        if let Some(w) = env.or(config_centroid).filter(|w| w.is_finite() && *w >= 0.0) {
+            p.centroid = w;
+        }
+        p
+    }
+
+    /// The relevance of a repository from its normalized signals (see the
+    /// module docs).
+    pub fn mix(&self, terms: f32, doc: f32, centroid: Option<f32>) -> f32 {
+        let two = (1.0 - self.mu) * terms + self.mu * doc;
+        match centroid {
+            Some(c) if self.centroid > 0.0 => (2.0 * two + self.centroid * c) / (2.0 + self.centroid),
+            _ => two,
+        }
     }
 
     /// The prior of a repository with relevance `r`.
@@ -498,9 +586,36 @@ pub struct RepoRoute {
     pub repo: usize,
     /// Relevance in [0, 1] (1: the best visible repository).
     pub score: f32,
-    /// The two signals, normalized: term distribution and document.
+    /// The signals, normalized: term distribution, document and (with a
+    /// query vector and a centroid) embedding centroid.
     pub terms: f32,
     pub doc: f32,
+    pub centroid: Option<f32>,
+}
+
+/// A query's vector, for the centroid signal.
+#[derive(Debug, Clone, Copy)]
+pub struct RouteQuery<'a> {
+    /// The embed key it was embedded with.
+    pub embed_key: &'a str,
+    /// The unit vector (full width; truncated per centroid).
+    pub vector: &'a [f32],
+}
+
+/// The normalized centroid signal of each repository (`None`: no centroid
+/// for the query's model); all `None` unless at least two have one.
+pub(crate) fn centroid_signal(profiles: &[Option<&RepoProfile>], q: &RouteQuery<'_>) -> Vec<Option<f32>> {
+    let raw: Vec<Option<f32>> = profiles
+        .iter()
+        .map(|p| p.and_then(|p| p.centroid.as_ref()).filter(|c| c.embed_key == q.embed_key).map(|c| c.cosine(q.vector)))
+        .collect();
+    let present: Vec<f32> = raw.iter().flatten().copied().collect();
+    if present.len() < 2 {
+        return vec![None; raw.len()];
+    }
+    let norm = normalize(&present);
+    let mut it = norm.into_iter();
+    raw.iter().map(|x| x.and_then(|_| it.next())).collect()
 }
 
 #[cfg(test)]
@@ -518,6 +633,25 @@ mod tests {
         assert_eq!(p.prior(1.0), 1.0);
         assert_eq!(p.prior(0.5), 0.25);
         assert_eq!(RouteParams { alpha: 0.0, ..p }.prior(0.0), 1.0);
+        assert_eq!(RouteParams::parse("prior,centroid=0.5").unwrap().centroid, 0.5);
+    }
+
+    #[test]
+    fn mixing_with_and_without_a_centroid() {
+        let p = RouteParams::default();
+        assert_eq!(p.mix(1.0, 0.0, None), 0.5);
+        // Equal weights: (1 + 0 + 1) / 3.
+        assert!((p.mix(1.0, 0.0, Some(1.0)) - 2.0 / 3.0).abs() < 1e-6);
+        let off = RouteParams { centroid: 0.0, ..p };
+        assert_eq!(off.mix(1.0, 0.0, Some(1.0)), 0.5);
+        let c = |key: &str, v: Vec<f32>| RepoProfile {
+            centroid: Some(Centroid { embed_key: key.into(), model_key: String::new(), dims: v.len(), vector: v }),
+            ..RepoProfile::default()
+        };
+        let (a, b, x) = (c("k", vec![1.0, 0.0]), c("k", vec![0.0, 1.0]), c("other", vec![1.0, 0.0]));
+        let q = RouteQuery { embed_key: "k", vector: &[1.0, 0.0] };
+        assert_eq!(centroid_signal(&[Some(&a), Some(&b), Some(&x), None], &q), [Some(1.0), Some(0.0), None, None]);
+        assert_eq!(centroid_signal(&[Some(&a), Some(&x)], &q), [None, None], "one centroid is no signal");
     }
 
     #[test]
