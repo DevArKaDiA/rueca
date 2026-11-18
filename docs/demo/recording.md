@@ -26,8 +26,8 @@ answers quoted below are the captured outputs of
    ```
 
 3. Ask the three questions once, off camera, in a scratch session. This
-   warms the file cache (the first call can take 370 ms instead of 60) and
-   shows you what the agent will say.
+   warms the file cache, so no take waits on a cold disk, and shows you
+   what the agent will say.
 4. Terminal: a monospace font at 16 to 18 pt, a dark or light theme with
    good contrast, about 120 columns. Clear the scrollback. Set the prompt
    to something short, such as `$ `.
@@ -48,7 +48,7 @@ RUECA_HOME=$RUECA_DEMO_CACHE/store rueca status
 Say: "These are eight Rust repositories from three GitHub organizations,
 tokio, hyper, tower and the rest, indexed as one organization. tokio has
 two refs: the current release and 1.53.3." Point at the line
-`ref tokio-1.53.3 @a85c3f5baa29` and at `8 repositories + 1 refs, 73037
+`ref tokio-1.53.3 @a85c3f5baa29` and at `8 repositories + 1 refs, 75583
 symbol documents`.
 
 ### 8 to 22 s: question 1
@@ -91,6 +91,28 @@ Expect `search_symbols` for "graceful shutdown", then `trace` on
 Point at `[1]` (axum) and `[0]` (tonic) in one answer. Say: "One trace
 from tokio's primitive finds the serve loops of both frameworks."
 
+Alternative question 2, same slot:
+
+> Who spawns tokio tasks across these repositories? Trace the callers of
+> tokio's spawn.
+
+Expect `search_symbols` or `get_symbol` for `spawn`, then `trace` on
+`tokio::task::spawn::spawn`, callers. If the agent tries
+`tokio::spawn` first, it gets "no symbol found" and searches; cut that
+part. The key lines:
+
+```
+1 [2] in d1 Method WebSocketUpgrade.on_upgrade  axum/src/extract/ws.rs L347-411  →0 CALLS 0.9 import_resolved @359
+2 [2] in d1 Method WithGracefulShutdown.run  axum/src/serve/mod.rs L267-304  →0 CALLS 0.9 import_resolved @276
+6 [1] in d1 Function main  grpc-benchmark/src/bin/bench.rs L135-336  →0 CALLS 0.9 import_resolved @176
+8 [0] in d1 Function fetch_url  examples/client.rs L42-81  →0 CALLS 0.9 import_resolved @50
+(422 tests excluded; `include_tests: true` lists them)
+```
+
+Point at the three snapshot markers (axum `[2]`, tonic `[1]`, hyper
+`[0]`). Say: "`spawn` sits inside a feature macro in tokio; Rueca opens
+the macro body, so its 92 callers across the organization show up."
+
 ### 36 to 50 s: question 3
 
 > What changed between tokio 1.53.3 and the current release around
@@ -116,29 +138,31 @@ today. `[0,1]` means the code did not move."
 Say: "Rueca is a code graph for agents: symbols, calls and contracts
 across repositories and refs, served over MCP. It is lexical today;
 semantic search is next. On this organization it still misses
-attribute macros like `#[tokio::main]` and items inside tokio's `cfg_*!`
-macros. The numbers and the failures are in the demo page."
+re-export paths such as `tokio::spawn` as names, and methods of
+extension traits such as tower's `oneshot`. The numbers and the failures
+are in the demo page."
 
 ## Avoid on camera
 
-- `tokio::spawn`: not in the index; it sits inside a `cfg_rt!` body.
-- `TcpListener`, `UdpSocket`, `AsyncReadExt`: inside `cfg_*!` bodies,
-  missing; `TcpListener.accept` has 0 callers.
-- `time::sleep`, `time::timeout`, `time::interval`: re-exported from a
-  module of the same name, 0 callers.
-- `#[tokio::main]` and `#[tokio::test]`: no link edges.
+- Re-export paths as names: `tokio::spawn`, `tokio::net::TcpListener`
+  and `tokio::time::sleep` answer "no symbol found"; only the module
+  paths work (`tokio::task::spawn::spawn`,
+  `tokio::net::tcp::listener::TcpListener.accept`,
+  `tokio::time::sleep::sleep`).
+- tower's `ServiceExt.oneshot` and other methods of extension traits
+  implemented for every `Service`: 0 callers.
 - "How does hyper read the request body": the lexical ranking returns FFI
   types and roadmap sections.
 - Dangling contracts: all 19 are false positives (`.unwrap()` read as an
   RPC).
-- Callers of hyper's `Connection.graceful_shutdown`: 0, probably because
-  of the `Pin` receiver.
+- Callers of hyper's `Connection.graceful_shutdown`: 1 for HTTP/1, 0 for
+  HTTP/2; the `Pin::new(&mut conn)` call sites are not linked.
 
 ## Re-recording
 
 The outputs are deterministic given the pins and the binary. Before a new
 take, re-run `scripts/demo-tokio-rs.sh` (it re-checks every pin) and
-compare the key lines above with `out/08-*.txt`, `out/10-*.txt` and
-`out/13-*.txt`. If the binary changed, update this page from those files
-first. Record each question as its own take and cut the agent's thinking
-time; do not speed up the answers.
+compare the key lines above with `out/08-*.txt`, `out/10-*.txt`,
+`out/13-*.txt` and `out/15-*.txt`. If the binary changed, update this
+page from those files first. Record each question as its own take and
+cut the agent's thinking time; do not speed up the answers.

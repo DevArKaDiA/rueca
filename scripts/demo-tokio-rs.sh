@@ -136,9 +136,13 @@ cmd_index() {
   "$RUECA" links --org "$ORG" --json >"$OUT/links.json"
   {
     echo "# edges: $(jq '.edges | length' "$OUT/links.json")"
+    # The provider is the edge's other repository: a DECORATES edge runs
+    # from the provider's macro to the consumer's item, and an `impl
+    # LocalTrait for ForeignType` edge from the provider's type.
     echo "# per consumer -> provider"
-    jq -r '.edges | group_by([.consumer, .dst_repo])
-      | map([length, .[0].consumer, .[0].dst_repo]) | sort_by(-.[0]) | .[]
+    jq -r '.edges | map(. + {provider: (if .dst_repo == .consumer then .src_repo else .dst_repo end)})
+      | group_by([.consumer, .provider])
+      | map([length, .[0].consumer, .[0].provider]) | sort_by(-.[0]) | .[]
       | "\(.[0])\t\(.[1]) -> \(.[2])"' "$OUT/links.json"
     echo "# per kind"
     jq -r '.edges | group_by(.kind) | map([length, .[0].kind]) | sort_by(-.[0]) | .[]
@@ -222,38 +226,44 @@ cmd_queries() {
   step 12 trace-servicebuilder-layer-repo trace \
     '{"qualified_name":"ServiceBuilder.layer","repo":"github.com/tower-rs/tower","direction":"callers","min_confidence":0.85,"limit":10}'
 
+  # Items that sit inside tokio's cfg_*! macro bodies, and attribute macros.
+  step 13 trace-tokio-spawn-callers trace \
+    '{"qualified_name":"tokio::task::spawn::spawn","direction":"callers","limit":15}'
+  step 14 trace-tokio-main-decorates trace \
+    '{"qualified_name":"tokio_macros::main","direction":"callees","edge_types":["DECORATES"],"limit":10}'
+
   # Two refs of tokio.
-  step 13 refs-compare-blocking search_symbols \
+  step 15 refs-compare-blocking search_symbols \
     "{\"query\":\"blocking acquire lock\",\"repo\":\"$TOKIO\",\"ref\":[\"HEAD\",\"$prev\"],\"limit\":8}"
-  step 14 refs-previous-release search_symbols \
+  step 16 refs-previous-release search_symbols \
     "{\"query\":\"blocking acquire lock\",\"repo\":\"$TOKIO\",\"ref\":\"$prev\",\"limit\":5}"
 
   # Contracts.
-  step 15 contracts-greeter list_contracts '{"kind":"rpc","query":"Greeter/SayHello","limit":12}'
-  step 16 contracts-dangling list_contracts '{"side":"dangling","limit":6}'
+  step 17 contracts-greeter list_contracts '{"kind":"rpc","query":"Greeter/SayHello","limit":12}'
+  step 18 contracts-dangling list_contracts '{"side":"dangling","limit":6}'
 
   # Symbol and file views.
-  step 17 get-symbol-steal-work get_symbol \
+  step 19 get-symbol-steal-work get_symbol \
     '{"qualified_name":"tokio::runtime::scheduler::multi_thread::worker::Core.steal_work"}'
-  step 18 outline-io-driver get_file_outline \
+  step 20 outline-io-driver get_file_outline \
     "{\"path\":\"tokio/src/runtime/io/driver.rs\",\"repo\":\"$TOKIO\"}"
 
   # Natural-language questions (lexical ranking).
-  step 19 nl-axum-handler-service search_symbols \
+  step 21 nl-axum-handler-service search_symbols \
     '{"query":"where does axum turn a handler into a service","limit":6}'
-  step 20 nl-tokio-steal-work search_symbols \
+  step 22 nl-tokio-steal-work search_symbols \
     '{"query":"how does tokio steal work from other workers","limit":6}'
-  step 21 nl-tonic-prost-encode search_symbols \
+  step 23 nl-tonic-prost-encode search_symbols \
     '{"query":"how does tonic encode a message with prost","limit":6}'
-  step 22 nl-tokio-worker-thread search_symbols \
+  step 24 nl-tokio-worker-thread search_symbols \
     '{"query":"how does tokio decide which worker thread runs a task","limit":6}'
-  step 23 nl-hyper-request-body search_symbols \
+  step 25 nl-hyper-request-body search_symbols \
     '{"query":"how does hyper read the request body","limit":6}'
 
   # Text search and budgets.
-  step 24 search-code-cfg-net search_code \
+  step 26 search-code-cfg-net search_code \
     '{"pattern":"cfg_net!\\s*\\{","regex":true,"language":"rust","limit":8}'
-  step 25 trace-oneshot-budget trace \
+  step 27 trace-oneshot-budget trace \
     '{"qualified_name":"tokio::sync::oneshot::channel","direction":"callers","budget_tokens":400}'
 }
 
@@ -261,9 +271,15 @@ cmd_queries() {
 
 q_text() { "$RUECA" query "$1" "$2" --org "$ORG" --text 2>&1 || true; }
 
-callers_count() { # qualified name -> number of callers (tests excluded)
-  "$RUECA" query trace "{\"qualified_name\":\"$1\",\"direction\":\"callers\",\"limit\":2000}" \
-    --org "$ORG" 2>/dev/null | jq '.results.nodes | length - 1' 2>/dev/null || echo error
+# callers_count qualified_name include_tests: the number of callers, then
+# per repository. A large budget_tokens, so the default budget does not cut
+# the answer.
+callers_count() {
+  "$RUECA" query trace "{\"qualified_name\":\"$1\",\"direction\":\"callers\",\"limit\":2000,\"budget_tokens\":1000000,\"include_tests\":$2}" \
+    --org "$ORG" 2>/dev/null | jq -r '(.snapshots | map({key: (.s | tostring), value: (.repo | split("/")[2])}) | from_entries) as $repo
+      | if .truncated then "truncated" else
+        "\(.results.nodes | length - 1) (\([.results.nodes[1:][] | $repo[(.s // 0) | tostring]]
+          | group_by(.) | map("\(.[0]) \(length)") | join(", ")))" end' 2>/dev/null || echo error
 }
 
 cfg_estimate() {
@@ -314,16 +330,25 @@ cmd_checks() {
   need "$RUECA" "set RUECA to the binary"
   need jq
   [[ -f $OUT/links.json ]] || die "not indexed; run: $0 index"
-  local f=$OUT/checks.txt r m t name path where spec
+  local f=$OUT/checks.txt r m mc t tc name path where spec qn
+  local consumers=("$REPOS_DIR/axum" "$REPOS_DIR/hyper" "$REPOS_DIR/tonic" "$REPOS_DIR/tower" "$REPOS_DIR/tracing")
   log "checks (out/checks.txt)"
   {
-    echo "## 1. Attribute macros: #[tokio::main] / #[tokio::test] vs link edges into tokio-macros"
+    echo "## 1. Attribute macros: #[tokio::main] / #[tokio::test] vs DECORATES link edges from tokio-macros"
+    echo "grep: every line (doc comments included), and in parentheses the lines that start with the attribute"
     for r in axum hyper tonic tower tracing; do
       m=$(grep -rE --include='*.rs' '#\[tokio::main' "$REPOS_DIR/$r" | wc -l | tr -d ' ')
+      mc=$(grep -rE --include='*.rs' '^[[:space:]]*#\[tokio::main' "$REPOS_DIR/$r" | wc -l | tr -d ' ')
       t=$(grep -rE --include='*.rs' '#\[tokio::test' "$REPOS_DIR/$r" | wc -l | tr -d ' ')
-      echo "$r: #[tokio::main] $m, #[tokio::test] $t"
+      tc=$(grep -rE --include='*.rs' '^[[:space:]]*#\[tokio::test' "$REPOS_DIR/$r" | wc -l | tr -d ' ')
+      echo "$r: #[tokio::main] $m ($mc), #[tokio::test] $t ($tc)"
     done
-    echo "link edges into tokio-macros: $(jq '[.edges[] | select(.dst_path | startswith("tokio-macros/"))] | length' "$OUT/links.json")"
+    echo "DECORATES link edges from tokio-macros (macro -> decorated item), per consumer and macro:"
+    jq -r '[.edges[] | select(.kind == "DECORATES" and (.src_path | startswith("tokio-macros/")))]
+      | group_by([.consumer, .src]) | .[] | "  \(.[0].consumer) \(.[0].src): \(length)"' "$OUT/links.json"
+    echo "DECORATES link edges from tokio-macros: $(jq '[.edges[] | select(.kind == "DECORATES" and (.src_path | startswith("tokio-macros/")))] | length' "$OUT/links.json")"
+    echo "DECORATES link edges, any macro: $(jq '[.edges[] | select(.kind == "DECORATES")] | length' "$OUT/links.json")"
+    echo "link edges of any kind whose source is under tokio-macros/: $(jq '[.edges[] | select(.src_repo == "github.com/tokio-rs/tokio" and (.src_path | startswith("tokio-macros/")))] | length' "$OUT/links.json")"
     echo
     echo "## 2. Items inside cfg_*! { ... } bodies (tokio/src)"
     echo "cfg_*! { occurrences (grep): $(grep -rhoE 'cfg_[a-z0-9_]+! *\{' "$REPOS_DIR/tokio/tokio/src" | wc -l | tr -d ' ')"
@@ -335,30 +360,42 @@ cmd_checks() {
       'spawn|tokio/src/task/spawn.rs|inside cfg_rt!' \
       'AsyncReadExt|tokio/src/io/util/async_read_ext.rs|inside cfg_io_util!' \
       'AsyncReadExt.read|tokio/src/io/util/async_read_ext.rs|inside cfg_io_util!' \
+      'read|tokio/src/io/util/async_read_ext.rs|inside cfg_io_util!' \
       'File|tokio/src/fs/file.rs|outside' \
       'channel|tokio/src/sync/mpsc/bounded.rs|outside'; do
       IFS='|' read -r name path where <<<"$spec"
       echo "  $name ($where): $(q_text get_symbol "{\"name\":\"$name\",\"path\":\"$path\",\"repo\":\"$TOKIO\"}" | grep -v '^github.com/' | head -1 | cut -c1-100)"
     done
+    echo "trace by re-export path (first line of the answer):"
+    for qn in tokio::spawn tokio::net::TcpListener.accept tokio::time::sleep; do
+      echo "  $qn: $(q_text trace "{\"qualified_name\":\"$qn\",\"direction\":\"callers\",\"limit\":1}" | head -1 | cut -c1-100)"
+    done
     echo
     echo "## 3. tokio -> mio edges (same-named types: TcpStream, UdpSocket, UnixStream, ...)"
     jq -r '[.edges[] | select(.consumer == "github.com/tokio-rs/tokio" and .dst_repo == "github.com/tokio-rs/mio")]
       | "edges: \(length)", (group_by([.kind, .strategy]) | .[] | "  \(.[0].kind) \(.[0].strategy): \(length)")' "$OUT/links.json"
-    echo "Edges whose source lies in a dependency of the consumer (right for impl LocalTrait for ForeignType,"
-    echo "wrong where a local type was resolved to a same-named type of another crate):"
-    jq -r '.edges[] | select(.src_repo != .consumer)
+    echo "Edges whose source lies in a dependency of the consumer, DECORATES left out (right for"
+    echo "impl LocalTrait for ForeignType, wrong where a local type was resolved to a same-named type of another crate):"
+    jq -r '.edges[] | select(.src_repo != .consumer and .kind != "DECORATES")
       | "  \(.src) -> \(.dst) \(.kind) @\(.path):\(.line)"' "$OUT/links.json"
     echo "  hyper::ext::h1_reason_phrase::Bytes.from as a call target (impl From<ReasonPhrase> for Bytes): $(jq '[.edges[] | select(.dst == "hyper::ext::h1_reason_phrase::Bytes.from" and .kind == "CALLS")] | length' "$OUT/links.json") edges"
+    echo "  bytes::bytes::Bytes.from as a call target: $(jq '[.edges[] | select(.dst == "bytes::bytes::Bytes.from" and .kind == "CALLS")] | length' "$OUT/links.json") edges"
     echo
-    echo "## 4. Functions re-exported from a same-named module (mod sleep; pub use sleep::sleep)"
-    for name in tokio::time::sleep::sleep tokio::time::timeout::timeout tokio::time::interval::interval \
-      tokio::time::instant::Instant.now tokio::sync::watch::channel; do
-      echo "  callers of $name: $(callers_count "$name")"
+    echo "## 4. Callers of tokio functions in the organization: tests excluded / included (per repository)"
+    for name in tokio::task::spawn::spawn tokio::net::tcp::listener::TcpListener.accept \
+      tokio::time::sleep::sleep tokio::time::timeout::timeout tokio::time::interval::interval \
+      tokio::time::instant::Instant.now tokio::sync::watch::channel \
+      hyper::server::conn::http1::Connection.graceful_shutdown \
+      hyper::server::conn::http2::Connection.graceful_shutdown; do
+      echo "  $name: $(callers_count "$name" false) / $(callers_count "$name" true)"
     done
+    echo "  tokio::spawn( / task::spawn( call sites in axum/hyper/tonic/tower/tracing (grep, tests included): $(grep -rE --include='*.rs' 'tokio::spawn\(|task::spawn\(' \
+      "${consumers[@]}" | wc -l | tr -d ' ')"
     for name in sleep timeout interval; do
-      echo "  time::$name( call sites in axum/hyper/tonic/tower/tracing: $(grep -rE --include='*.rs' "(tokio::)?time::$name\(" \
-        "$REPOS_DIR/axum" "$REPOS_DIR/hyper" "$REPOS_DIR/tonic" "$REPOS_DIR/tower" "$REPOS_DIR/tracing" | wc -l | tr -d ' ')"
+      echo "  time::$name( call sites in axum/hyper/tonic/tower/tracing (grep, tests included): $(grep -rE --include='*.rs' "time::$name\(" \
+        "${consumers[@]}" | wc -l | tr -d ' ')"
     done
+    echo "  .accept() call sites in axum/hyper/tonic/tower/tracing (grep, any type, tests included): $(grep -rE --include='*.rs' '\.accept\(\)' "${consumers[@]}" | wc -l | tr -d ' ')"
     echo
     echo "## 5. Errors reported by the index"
     jq -r '"link_errors: \(.update.link_errors | length), ref_errors: \(.ref_errors | length)",
@@ -367,6 +404,10 @@ cmd_checks() {
     echo
     echo "## 6. The default ref of a detached checkout is named HEAD, not by its tag"
     q_text search_symbols "{\"query\":\"spawn\",\"repo\":\"$TOKIO\",\"ref\":\"tokio-1.54.1\",\"limit\":1}"
+    echo
+    echo "## 7. Methods of an extension trait implemented for every Service (impl<T: Service> ServiceExt for T)"
+    echo "  callers of tower::util::ServiceExt.oneshot: $(callers_count tower::util::ServiceExt.oneshot false) / $(callers_count tower::util::ServiceExt.oneshot true)"
+    echo "  .oneshot( call sites in axum/hyper/tonic/tower/tracing (grep, tests included): $(grep -rE --include='*.rs' '\.oneshot\(' "${consumers[@]}" | wc -l | tr -d ' ')"
   } >"$f"
 }
 

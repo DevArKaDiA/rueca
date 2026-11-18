@@ -5,8 +5,8 @@ repositories: tokio and the crates around it, eight repositories from
 three GitHub organizations, with a second ref of tokio indexed next to the
 current release. Everything below is the output of
 [`scripts/demo-tokio-rs.sh`](../../scripts/demo-tokio-rs.sh), run on
-2026-11-17 on a MacBook Pro M1 Pro with 32 GB of memory, with
-`rueca 0.1.0-alpha.2` built from commit `d569441` of `main`. The query
+2026-11-18 on a MacBook Pro M1 Pro with 32 GB of memory, with
+`rueca 0.1.0-alpha.2` built from commit `4905a37` of `main`. The query
 outputs are byte-identical across runs; only the timings vary. An agent
 reads the same answers over MCP with `rueca mcp --org <file>`.
 
@@ -36,10 +36,10 @@ moved.
 | `github.com/hyperium/hyper` | `v1.12.0` | `7f67699ce32d717081deb7018b4da7d679277ac0` |
 | `github.com/tower-rs/tower` | `tower-0.5.3` | `4b0a6b0e688bd177eb2c9c97f5268dd9703c66fc` |
 | `github.com/tokio-rs/axum` | `axum-v0.8.9` | `c59208c86fded335cd85e388030ad59347b0e5ae` |
-| `github.com/hyperium/tonic` | `tonic-v0.14.9` | `4c0f455c264f2ec9f9ab5d0cc7fd2824d5daf70` |
+| `github.com/hyperium/tonic` | `tonic-v0.14.9` | `4c0f455c264fe2ec9f9ab5d0cc7fd2824d5daf70` |
 
-The clones take 269 MB (tonic 178 MB, tokio 28 MB, hyper 25 MB, tracing
-14 MB, axum 11 MB, tower 5.2 MB, mio 5.1 MB, bytes 3.8 MB). They are full
+The clones take 256 MB (tonic 166 MB, tokio 28 MB, hyper 24 MB, tracing
+14 MB, axum 10 MB, tower 5.2 MB, mio 5.1 MB, bytes 3.8 MB). They are full
 clones, so indexing the second tokio ref needs no network.
 
 The script writes this organization file, with absolute paths where this
@@ -89,12 +89,15 @@ indexed.
 
 ## Install and index
 
-The demo needs the Rust language pack, refs over an organization and
-contracts. All three landed on `main` after the `0.1.0-alpha.2` release,
-so for now build from source; the binary still reports `0.1.0-alpha.2`:
+The demo needs the Rust language pack, refs over an organization,
+contracts, and the Rust fixes of
+[PR #68](https://github.com/DevArKaDiA/rueca/pull/68) (items inside macro
+bodies, attribute macros, value and type namespaces, crate-scoped types).
+All of them landed on `main` after the `0.1.0-alpha.2` release, so for now
+build from source; the binary still reports `0.1.0-alpha.2`:
 
 ```sh
-cargo install --git https://github.com/DevArKaDiA/rueca --rev d569441 --locked rueca
+cargo install --git https://github.com/DevArKaDiA/rueca --rev 4905a37 --locked rueca
 ```
 
 Once a later release is out, the usual install lines from the
@@ -132,76 +135,79 @@ The first index of a fresh store, from `out/index.json`:
 
 | Repository | Files | Nodes | Edges | Index ms |
 |---|---:|---:|---:|---:|
-| tokio | 886 | 15,475 | 44,723 | 945 |
-| mio | 89 | 2,042 | 6,979 | 218 |
-| bytes | 47 | 1,270 | 3,734 | 160 |
-| tracing | 345 | 6,905 | 22,039 | 389 |
-| hyper | 139 | 4,097 | 10,621 | 289 |
-| tower | 162 | 1,907 | 5,027 | 231 |
-| axum | 488 | 6,296 | 16,659 | 341 |
-| tonic | 815 | 20,341 | 53,127 | 1,066 |
-| **8 repositories** | **2,971** | **58,333** | **162,909** | |
-| tokio at `tokio-1.53.3` | 866 | 14,704 | 42,072 | 1,371 |
+| tokio | 886 | 16,443 | 56,615 | 993 |
+| mio | 89 | 2,167 | 7,589 | 214 |
+| bytes | 47 | 1,270 | 3,726 | 161 |
+| tracing | 345 | 6,966 | 24,007 | 441 |
+| hyper | 139 | 4,241 | 11,226 | 289 |
+| tower | 162 | 2,035 | 5,477 | 186 |
+| axum | 488 | 6,441 | 17,387 | 349 |
+| tonic | 815 | 20,355 | 52,822 | 972 |
+| **8 repositories** | **2,971** | **59,918** | **178,849** | |
+| tokio at `tokio-1.53.3` | 866 | 15,665 | 53,210 | 979 |
 
 Nodes are every node of the graph, files included; `list_repositories`
 reports a smaller count of symbols. The `tokio-1.53.3` ref exported 867
 files from the git object database and indexed 866 of them; 504 came from
 the facts cache, because their blobs are the same in both releases. Its
-1,371 ms include the 423 ms export.
+979 ms include the 248 ms export.
 
-Rueca reports 7,422 ms for the whole run: 3,647 ms for the eight
-repositories, 1,374 ms for the ref and 2,401 ms for the organization layer
-(312 ms profiles, 1,522 ms links). Wall time was 7,438 ms. Across my runs
-on a fresh store, wall time was 7 to 15 s; 14.6 s the first time, with a
-cold file cache. `link_errors` and `ref_errors` were empty.
+Rueca reports 7,145 ms for the whole run: 3,613 ms for the eight
+repositories, 982 ms for the ref and 2,549 ms for the organization layer
+(332 ms profiles, 1,696 ms links). Wall time was 7,162 ms. Across my runs
+on a fresh store, wall time was 7.2 to 8.0 s; 29.8 s the first time, with
+a cold file cache right after cloning. `link_errors` and `ref_errors` were
+empty.
 
-Running `rueca index --org` again with nothing changed took 5,476 ms
-(4.9 to 5.5 s across runs). It is not a no-op: every repository is
+Running `rueca index --org` again with nothing changed took 5,060 ms
+(5.1 to 5.4 s across runs). It is not a no-op: every repository is
 replaced and the generation goes up; only the ref is skipped
 (`out/index-again.txt`, first lines):
 
 ```
-indexed /private/tmp/rueca-demo-cache/repos/tokio (github.com/tokio-rs/tokio @ b53b2001ed2c): 886 files, 15475 nodes, 44723 edges in 558 ms
+indexed /private/tmp/rueca-demo-cache/repos/tokio (github.com/tokio-rs/tokio @ b53b2001ed2c): 886 files, 16443 nodes, 56615 edges in 581 ms
 […]
 indexed ref tokio-1.53.3 of github.com/tokio-rs/tokio (tag @ a85c3f5baa29): unchanged in 11 ms
-organization tokio-rs: generation 2, 8 repositories (0 added, 8 replaced, 0 removed, 0 unchanged) in 2524 ms
+organization tokio-rs: generation 2, 8 repositories (0 added, 8 replaced, 0 removed, 0 unchanged) in 2385 ms
   refs:       1 (0 added, 0 replaced, 0 removed, 1 unchanged)
 ```
 
-The store was 134 MB after the first index and 189 MB after the second;
-it stays there on later runs. The organization symbol index holds 73,037
-documents in 14.7 MB (`rueca status`).
+The store was 138 MB after the first index and 194 MB after the second;
+it stays there on later runs. The organization symbol index holds 75,583
+documents in 15.1 MB (`rueca status`).
 
 ### Links
 
-The organization update reports 7,462 link edges: 6,199 between the
-default refs and 1,263 for the `tokio-1.53.3` entry. All of them are
+The organization update reports 10,837 link edges: 9,550 between the
+default refs and 1,287 for the `tokio-1.53.3` entry. All of them are
 package edges (`via package`); there are no cross-repository contract
 edges here, because every contract's providers and consumers sit in the
 same repository (tonic). The largest consumer → provider pairs:
 
 | Consumer → provider | Edges |
 |---|---:|
-| tonic → tower | 1,094 |
-| tonic → tokio | 740 |
-| tonic → bytes | 649 |
-| tokio → bytes | 639 |
-| hyper → bytes | 489 |
-| tokio → tracing | 463 |
-| axum → tower | 432 |
-| hyper → tokio | 375 |
-| tower → tokio | 300 |
-| tokio → mio | 200 |
-| tonic → hyper | 186 |
-| axum → bytes | 158 |
-| axum → tracing | 154 |
+| tonic → tokio | 2,687 |
+| tonic → tower | 1,151 |
+| hyper → tokio | 898 |
+| tonic → bytes | 702 |
+| tokio → bytes | 684 |
+| axum → tokio | 516 |
+| hyper → bytes | 490 |
+| tokio → tracing | 487 |
+| axum → tower | 467 |
+| tower → tokio | 440 |
+| axum → tracing | 263 |
+| axum → bytes | 167 |
+| tokio → mio | 158 |
+| tonic → hyper | 149 |
 
-The full list is in `out/links-summary.txt`. By kind: CALLS 1,986,
-REFERENCES 1,838, TESTS 1,002, IMPORTS 880, OVERRIDES 308, IMPLEMENTS 170,
-INHERITS 15. By resolution strategy: `import_resolved` 3,810,
-`type_resolved` 2,380, `same_module` 9. Keep the `type_resolved` share in
-mind when reading the tokio → mio section of
-[What does not work yet](#what-does-not-work-yet-on-this-organization).
+The full list is in `out/links-summary.txt`. The provider is the edge's
+other repository: a `DECORATES` edge runs from tokio-macros to the
+consumer's function, so the 509 `#[tokio::main]` and `#[tokio::test]`
+edges of tonic count under tonic → tokio. By kind: CALLS 3,254,
+REFERENCES 2,020, TESTS 1,824, IMPORTS 1,104, DECORATES 847, OVERRIDES
+317, IMPLEMENTS 168, INHERITS 16. By resolution strategy:
+`import_resolved` 6,677, `type_resolved` 2,865, `same_module` 8.
 
 ### Contracts
 
@@ -227,8 +233,8 @@ positives (see [below](#what-does-not-work-yet-on-this-organization)).
 
 Every query below runs against the organization with `--text`, which
 prints what an agent reads over MCP. The latency is the median of three
-runs, CLI process start included; every query took 24 to 77 ms warm. The
-first call after indexing took 57 to 370 ms in my runs.
+runs, CLI process start included; every query took 23 to 57 ms warm. The
+first call right after an index took 59 and 65 ms in two tries.
 
 How to read the output, once:
 
@@ -262,17 +268,17 @@ I cut the long `packages` lists (the ones that end in `(+N)`) to
 [5] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 [6] github.com/tokio-rs/tracing@2d55f6faf9be (HEAD)
 [7] github.com/tower-rs/tower@4b0a6b0e688b (HEAD)
-[2] github.com/tokio-rs/axum  refs HEAD@c59208c86fde  488 files, 5531 symbols, 16659 edges  rust 296, toml 63, markdown 40, javascript 5, yaml 3, json 1  packages […]  depends on github.com/hyperium/hyper, github.com/tokio-rs/bytes, github.com/tokio-rs/tokio, github.com/tokio-rs/tracing, github.com/tower-rs/tower  (1.0)
-[0] github.com/hyperium/hyper  refs HEAD@7f67699ce32d  139 files, 3898 symbols, 10621 edges  rust 99, markdown 23, yaml 5, c 3, toml 3  packages , hyper  depends on github.com/tokio-rs/bytes, github.com/tokio-rs/tokio, github.com/tokio-rs/tracing  (0.368)
-[1] github.com/hyperium/tonic  refs HEAD@4c0f455c264f  815 files, 18799 symbols, 53127 edges  rust 467, proto 203, toml 38, markdown 37, yaml 4, cpp 3, hcl 2, json 2, python 1  packages […]  depends on github.com/hyperium/hyper, github.com/tokio-rs/axum, github.com/tokio-rs/bytes, github.com/tokio-rs/tokio, github.com/tokio-rs/tracing, github.com/tower-rs/tower  (0.311)
-[7] github.com/tower-rs/tower  refs HEAD@4b0a6b0e688b  162 files, 1679 symbols, 5027 edges  rust 133, markdown 11, toml 9, yaml 3  packages examples, tower, tower-layer, tower-service, tower-test  depends on github.com/tokio-rs/tokio, github.com/tokio-rs/tracing  (0.0487)
-[6] github.com/tokio-rs/tracing  refs HEAD@2d55f6faf9be  345 files, 6412 symbols, 22039 edges  rust 260, markdown 31, toml 23, yaml 4  packages […]  depends on github.com/hyperium/hyper, github.com/tokio-rs/bytes, github.com/tokio-rs/mio, github.com/tokio-rs/tokio, github.com/tower-rs/tower  (0.0116)
-[5] github.com/tokio-rs/tokio  refs HEAD@b53b2001ed2c, tokio-1.53.3@a85c3f5baa29  886 files, 14282 symbols, 44723 edges  rust 811, markdown 29, toml 18, yaml 11, json 1  packages […]  depends on github.com/tokio-rs/bytes, github.com/tokio-rs/mio, github.com/tokio-rs/tracing  (0.00304)
-[3] github.com/tokio-rs/bytes  refs HEAD@67edc2b999d6  47 files, 1192 symbols, 3734 edges  rust 35, markdown 3, toml 2, yaml 1  packages bytes  (0.00136)
-[4] github.com/tokio-rs/mio  refs HEAD@101e5b7c92b1  89 files, 1914 symbols, 6979 edges  rust 82, markdown 2, toml 1, yaml 1  packages mio  (0.0)
+[2] github.com/tokio-rs/axum  refs HEAD@c59208c86fde  488 files, 5676 symbols, 17387 edges  rust 296, toml 63, markdown 40, javascript 5, yaml 3, json 1  packages […]  depends on github.com/hyperium/hyper, github.com/tokio-rs/bytes, github.com/tokio-rs/tokio, github.com/tokio-rs/tracing, github.com/tower-rs/tower  (1.0)
+[0] github.com/hyperium/hyper  refs HEAD@7f67699ce32d  139 files, 4042 symbols, 11226 edges  rust 99, markdown 23, yaml 5, c 3, toml 3  packages , hyper  depends on github.com/tokio-rs/bytes, github.com/tokio-rs/tokio, github.com/tokio-rs/tracing  (0.402)
+[1] github.com/hyperium/tonic  refs HEAD@4c0f455c264f  815 files, 18813 symbols, 52822 edges  rust 467, proto 203, toml 38, markdown 37, yaml 4, cpp 3, hcl 2, json 2, python 1  packages […]  depends on github.com/hyperium/hyper, github.com/tokio-rs/axum, github.com/tokio-rs/bytes, github.com/tokio-rs/tokio, github.com/tokio-rs/tracing, github.com/tower-rs/tower  (0.314)
+[7] github.com/tower-rs/tower  refs HEAD@4b0a6b0e688b  162 files, 1807 symbols, 5477 edges  rust 133, markdown 11, toml 9, yaml 3  packages examples, tower, tower-layer, tower-service, tower-test  depends on github.com/tokio-rs/tokio, github.com/tokio-rs/tracing  (0.0479)
+[6] github.com/tokio-rs/tracing  refs HEAD@2d55f6faf9be  345 files, 6473 symbols, 24007 edges  rust 260, markdown 31, toml 23, yaml 4  packages […]  depends on github.com/hyperium/hyper, github.com/tokio-rs/bytes, github.com/tokio-rs/mio, github.com/tokio-rs/tokio, github.com/tower-rs/tower  (0.0118)
+[5] github.com/tokio-rs/tokio  refs HEAD@b53b2001ed2c, tokio-1.53.3@a85c3f5baa29  886 files, 15243 symbols, 56615 edges  rust 811, markdown 29, toml 18, yaml 11, json 1  packages […]  depends on github.com/tokio-rs/bytes, github.com/tokio-rs/mio, github.com/tokio-rs/tracing  (0.00295)
+[3] github.com/tokio-rs/bytes  refs HEAD@67edc2b999d6  47 files, 1192 symbols, 3726 edges  rust 35, markdown 3, toml 2, yaml 1  packages bytes  (0.00137)
+[4] github.com/tokio-rs/mio  refs HEAD@101e5b7c92b1  89 files, 2038 symbols, 7589 edges  rust 82, markdown 2, toml 1, yaml 1  packages mio  (0.0)
 ```
 
-Median 57 ms. Why it matters for an agent: one call names the repository
+Median 52 ms. Why it matters for an agent: one call names the repository
 to read first (axum), its refs, and what it depends on, before any symbol
 search.
 
@@ -301,7 +307,7 @@ rueca query search_symbols '{"query":"graceful shutdown","limit":8}' --org tokio
 (truncated; continue with "cursor": "8")
 ```
 
-Median 55 ms. Why it matters for an agent: scores are comparable across
+Median 53 ms. Why it matters for an agent: scores are comparable across
 repositories, so axum's serve API and hyper's HTTP/2 connection code come
 back in one list instead of one list per repository.
 
@@ -373,7 +379,7 @@ tonic-prost/src/codec.rs
 (truncated; continue with "cursor": "8")
 ```
 
-Medians 63, 39 and 74 ms. Why it matters for an agent: the same words
+Medians 53, 24 and 38 ms. Why it matters for an agent: the same words
 mean different code in each repository, and `repo` (one id or a list)
 picks which part of the one ranking to read. With the list, all eight
 hits come from tonic; tokio's codec methods rank lower in that ranking.
@@ -398,7 +404,7 @@ rueca query trace '{"qualified_name":"mio::poll::Poll.poll","direction":"callers
 (9 tests excluded; `include_tests: true` lists them)
 ```
 
-Median 77 ms. The walk crosses from mio (`[0]`) into tokio (`[1]`) at
+Median 54 ms. The walk crosses from mio (`[0]`) into tokio (`[1]`) at
 depth 1 and then climbs the stack of drivers: the I/O driver's `turn`,
 its `park` and `park_timeout`, the signal driver that wraps it, and the
 process driver that wraps that. Every edge says how it was resolved and
@@ -438,7 +444,7 @@ rueca query trace '{"qualified_name":"bytes::bytes::Bytes.copy_from_slice","dire
 (truncated; continue with "cursor": "15")
 ```
 
-Median 57 ms. A `File` caller (node 11) is module-level code. Why it
+Median 54 ms. A `File` caller (node 11) is module-level code. Why it
 matters for an agent: before changing a function in a shared crate, this
 is the list of call sites in the four repositories that use it, tests
 counted separately.
@@ -466,11 +472,11 @@ rueca query trace '{"qualified_name":"tokio::sync::watch::channel","direction":"
 10 [0] in d1 Method HealthReporter.new  tonic-health/src/server.rs L65-72  →0 CALLS 0.9 import_resolved @67
 11 [0] in d1 Method HealthReporter.set_service_status  tonic-health/src/server.rs L98-116  →0 CALLS 0.9 import_resolved @113
 12 [0] in d1 Method OutlierStatsRegistry.new  tonic-xds/src/client/loadbalance/outlier_detection.rs L105-118  →0 CALLS 0.9 import_resolved @108
-(41 tests excluded; `include_tests: true` lists them)
+(42 tests excluded; `include_tests: true` lists them)
 (truncated; continue with "cursor": "12")
 ```
 
-Median 70 ms. Both servers create tokio watch channels in their serve
+Median 54 ms. Both servers create tokio watch channels in their serve
 loops: axum in `Serve.run` and `WithGracefulShutdown.run`, tonic in
 `Server.serve_internal`; tonic's `grpc` crate does it in
 `GracefulCoordinator.new`. Why it matters for an agent: "how does X work
@@ -494,10 +500,9 @@ rueca query trace '{"qualified_name":"tokio::runtime::io::driver::Driver.turn","
 5 [1] out d1 Function dispatch_event  tokio/src/runtime/io/driver.rs L353-361  ←0 CALLS 0.9 same_module @226
 6 [1] out d1 Method Handle.get_uring  tokio/src/runtime/io/driver/uring.rs L200-202  ←0 CALLS 0.85 type_resolved @240
 7 [1] out d1 Method RegistrationSet.is_shutdown  tokio/src/runtime/io/registration_set.rs L47-49  ←0 CALLS 0.85 type_resolved @186
-8 [1] out d1 Method IoDriverMetrics.incr_ready_count_by  tokio/src/runtime/metrics/io.rs L22-24  ←0 CALLS 0.85 type_resolved @257
 ```
 
-Median 56 ms. The same edge as in query 4, seen from the other end
+Median 55 ms. The same edge as in query 4, seen from the other end
 (`←0 … @199`). Why it matters for an agent: the callees of one function,
 each with its call-site line, outline what it does before reading its 74
 lines.
@@ -527,14 +532,94 @@ rueca query trace '{"qualified_name":"ServiceBuilder.layer","repo":"github.com/t
 (truncated; continue with "cursor": "10")
 ```
 
-Median 41 ms. A short name can match symbols in several repositories;
+Median 38 ms. A short name can match symbols in several repositories;
 `repo` says which one is meant, and the walk still
 follows link edges into axum and tonic. `min_confidence` drops
 low-confidence edges. Why it matters for an agent: a short name plus a
 repository is enough to start a cross-repository trace, without knowing
 the full module path.
 
-### 9. Two releases of tokio side by side
+### 9. Who spawns tokio tasks
+
+```sh
+rueca query trace '{"qualified_name":"tokio::task::spawn::spawn","direction":"callers","limit":15}' --org tokio-rs --text
+```
+
+```
+[0] github.com/hyperium/hyper@7f67699ce32d (HEAD)
+[1] github.com/hyperium/tonic@4c0f455c264f (HEAD)
+[2] github.com/tokio-rs/axum@c59208c86fde (HEAD)
+[3] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
+[4] github.com/tokio-rs/tracing@2d55f6faf9be (HEAD)
+0 [3] Function spawn  tokio/src/task/spawn.rs L174-185
+1 [2] in d1 Method WebSocketUpgrade.on_upgrade  axum/src/extract/ws.rs L347-411  →0 CALLS 0.9 import_resolved @359
+2 [2] in d1 Method WithGracefulShutdown.run  axum/src/serve/mod.rs L267-304  →0 CALLS 0.9 import_resolved @276
+3 [2] in d1 Function handle_connection  axum/src/serve/mod.rs L353-416  →0 CALLS 0.9 import_resolved @389
+4 [2] in d1 Function spawn_service  axum/src/test_helpers/test_client.rs L11-30  →0 CALLS 0.9 import_resolved @23
+5 [1] in d1 Function main  xds-client/examples/basic.rs L160-244  →0 CALLS 0.9 import_resolved @197
+6 [1] in d1 Function main  grpc-benchmark/src/bin/bench.rs L135-336  →0 CALLS 0.9 import_resolved @176
+7 [1] in d1 Function with_cancellation_handler  examples/src/cancellation/server.rs L73-94  →0 CALLS 0.9 import_resolved @84
+8 [0] in d1 Function fetch_url  examples/client.rs L42-81  →0 CALLS 0.9 import_resolved @50
+9 [0] in d1 Function fetch_json  examples/client_json.rs L30-62  →0 CALLS 0.9 import_resolved @39
+10 [1] in d1 Function main  examples/src/dynamic_load_balance/client.rs L40-104  →0 CALLS 0.9 import_resolved @49
+11 [1] in d1 Function main  examples/src/dynamic_load_balance/server.rs L52-78  →0 CALLS 0.9 import_resolved @66
+12 [0] in d1 Function main  examples/echo.rs L92-110  →0 CALLS 0.9 import_resolved @101
+13 [4] in d1 Function main  examples/examples/echo.rs L37-122  →0 CALLS 0.9 import_resolved @73
+14 [2] in d1 Function websocket  examples/chat/src/main.rs L72-146  →0 CALLS 0.9 import_resolved @111
+15 [2] in d1 Function main  examples/websockets/src/client.rs L29-46  →0 CALLS 0.9 import_resolved @33
+(422 tests excluded; `include_tests: true` lists them)
+(truncated; continue with "cursor": "15")
+```
+
+Median 54 ms. tokio declares `spawn` inside a `cfg_rt! { … }` body;
+before `4905a37` it was not in the index at all. Now it has 92 callers
+outside tests (514 with them) in six repositories: axum 19, hyper 19,
+tokio 15, tonic 31, tower 2 and tracing 6 (`out/checks.txt`). The first
+fifteen are axum's serve loop, WebSocket upgrade and examples, hyper's
+examples, tonic's examples and benchmark, and a tracing example. The name
+to ask for is the file's module path, `tokio::task::spawn::spawn`; the
+re-export path `tokio::spawn` is not a name yet (see below). Why it
+matters for an agent: "who starts background tasks, and where" is one call
+across the organization.
+
+### 10. Every function `#[tokio::main]` decorates
+
+```sh
+rueca query trace '{"qualified_name":"tokio_macros::main","direction":"callees","edge_types":["DECORATES"],"limit":10}' --org tokio-rs --text
+```
+
+```
+[0] github.com/hyperium/tonic@4c0f455c264f (HEAD)
+[1] github.com/tokio-rs/axum@c59208c86fde (HEAD)
+[2] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
+[3] github.com/tokio-rs/tracing@2d55f6faf9be (HEAD)
+0 [2] Function main  tokio-macros/src/lib.rs L314-316
+1 [3] out d1 Function main  examples/examples/async-fn.rs L42-57  ←0 DECORATES 0.9 import_resolved @41 examples/examples/async-fn.rs
+2 [0] out d1 Function main  examples/src/authentication/client.rs L33-52  ←0 DECORATES 0.9 import_resolved @32 examples/src/authentication/client.rs
+3 [0] out d1 Function main  examples/src/authentication/server.rs L46-55  ←0 DECORATES 0.9 import_resolved @45 examples/src/authentication/server.rs
+4 [1] out d1 Function main  examples/auto-reload/src/main.rs L12-30  ←0 DECORATES 0.9 import_resolved @11 examples/auto-reload/src/main.rs
+5 [0] out d1 Function main  examples/src/autoreload/server.rs L53-76  ←0 DECORATES 0.9 import_resolved @52 examples/src/autoreload/server.rs
+6 [0] out d1 Function main  xds-client/examples/basic.rs L160-244  ←0 DECORATES 0.9 import_resolved @159 xds-client/examples/basic.rs
+7 [0] out d1 Function main  grpc-benchmark/src/bin/bench.rs L135-336  ←0 DECORATES 0.9 import_resolved @134 grpc-benchmark/src/bin/bench.rs
+8 [0] out d1 Function main  examples/src/cancellation/client.rs L35-54  ←0 DECORATES 0.9 import_resolved @34 examples/src/cancellation/client.rs
+9 [0] out d1 Function main  examples/src/cancellation/server.rs L97-109  ←0 DECORATES 0.9 import_resolved @96 examples/src/cancellation/server.rs
+10 [0] out d1 Function main  tonic-xds/examples/channel.rs L63-93  ←0 DECORATES 0.9 import_resolved @62 tonic-xds/examples/channel.rs
+(37 tests excluded; `include_tests: true` lists them)
+(truncated; continue with "cursor": "10")
+```
+
+Median 55 ms. An attribute macro is a decorator: a `DECORATES` edge
+runs from the `#[proc_macro_attribute] pub fn main` in tokio-macros to
+each function it decorates, so the walk goes out from the macro
+(`callees`). On these link edges the file after the line (`@41
+examples/examples/async-fn.rs`) is where the attribute is written, in the
+consumer, not in tokio-macros. Across the five consumers there are 146
+such edges for `#[tokio::main]` and 699 for `#[tokio::test]` (from
+`tokio_macros::test`). Functions in test code are left out, as the last
+line says. Why it matters for an agent: "which programs start a tokio
+runtime, and which tests run on one" is one call per macro.
+
+### 11. Two releases of tokio side by side
 
 ```sh
 rueca query search_symbols '{"query":"blocking acquire lock","repo":"github.com/tokio-rs/tokio","ref":["HEAD","tokio-1.53.3"],"limit":8}' --org tokio-rs --text
@@ -573,7 +658,7 @@ tokio/src/sync/rwlock.rs
 (truncated; continue with "cursor": "5")
 ```
 
-Medians 36 and 24 ms. With a `ref` list, a symbol that is identical in
+Medians 34 and 23 ms. With a `ref` list, a symbol that is identical in
 both releases comes back once, marked ` [0,1]` (the `Mutex` methods); a
 symbol whose version differs is marked ` changed`. The comparison is per
 file blob, not per symbol: `semaphore.rs` changed between the releases
@@ -585,7 +670,7 @@ reads the older release alone, with no `changed` marks. Why it matters
 for an agent: "what is different in this release around X" is one call,
 and ` [0,1]` rules out the code that did not move.
 
-### 10. gRPC contracts
+### 12. gRPC contracts
 
 ```sh
 rueca query list_contracts '{"kind":"rpc","query":"Greeter/SayHello","limit":12}' --org tokio-rs --text
@@ -623,7 +708,7 @@ Test/Unwrap  consumes  tonic  github.com/hyperium/tonic:tests/integration_tests/
 (truncated; continue with "cursor": "6")
 ```
 
-Medians 56 and 55 ms. Each row is a key, a side, the framework that
+Medians 52 and 53 ms. Each row is a key, a side, the framework that
 declared it, the handler or call site, and in parentheses its number of
 counterparts: every `MyGreeter.say_hello` serves the 24 client calls, and
 every client call reaches 26 providers (23 tonic servers and 3 `.proto`
@@ -634,15 +719,15 @@ agent: "who serves this RPC, who calls it" across code and `.proto`
 files is one call; the dangling list is where a broken contract would
 appear, once the false positives are gone.
 
-### 11. A file outline
+### 13. A file outline
 
 ```sh
 rueca query get_file_outline '{"path":"tokio/src/runtime/io/driver.rs","repo":"github.com/tokio-rs/tokio"}' --org tokio-rs --text
 ```
 
-The first 16 lines; the remaining 27 (the other structs, enums,
-constants and the methods of `Driver` and `Handle`) are in
-`out/18-outline-io-driver.txt`.
+The first 16 lines; the remaining 28 (the other structs, enums,
+constants, the methods of `Driver` and `Handle`, and one test) are in
+`out/20-outline-io-driver.txt`.
 
 ```
 github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
@@ -664,11 +749,11 @@ tokio/src/runtime/io/driver.rs (rust, 407 lines)
 […]
 ```
 
-Median 32 ms. Why it matters for an agent: the shape of a 407-line file
+Median 23 ms. Why it matters for an agent: the shape of a 407-line file
 (and which fields hold mio types) costs a few hundred tokens instead of
 the file.
 
-### 12. Text search across repositories
+### 14. Text search across repositories
 
 ```sh
 rueca query search_code '{"pattern":"cfg_net!\\s*\\{","regex":true,"language":"rust","limit":8}' --org tokio-rs --text
@@ -695,12 +780,13 @@ rueca query search_code '{"pattern":"cfg_net!\\s*\\{","regex":true,"language":"r
 (truncated; continue with "cursor": "8")
 ```
 
-Median 61 ms. `search_code` is a regex over file contents, in repository
-order. Why it matters for an agent: literals and macro invocations that
-the symbol graph does not model are still reachable, and here they point
-at the biggest gap of this demo (failure 2 below).
+Median 55 ms. `search_code` is a regex over file contents, in repository
+order. Why it matters for an agent: literals and macro invocations, which
+the symbol graph does not hold as symbols, are still reachable. These
+`cfg_net!` bodies are where `TcpListener` and `UdpSocket` are declared;
+the graph now holds the items inside them (query 9).
 
-### 13. A token budget
+### 15. A token budget
 
 ```sh
 rueca query trace '{"qualified_name":"tokio::sync::oneshot::channel","direction":"callers","budget_tokens":400}' --org tokio-rs --text
@@ -722,7 +808,7 @@ rueca query trace '{"qualified_name":"tokio::sync::oneshot::channel","direction"
 8 [1] in d1 Method InMemoryTransport.connect  grpc/src/inmemory/mod.rs L434-471  →0 CALLS 0.9 import_resolved @455
 9 [0] in d1 Method Sender.send  src/client/dispatch.rs L119-128  →0 CALLS 0.9 import_resolved @123
 10 [0] in d1 Method Sender.try_send  src/client/dispatch.rs L107-116  →0 CALLS 0.9 import_resolved @111
-(176 tests excluded; `include_tests: true` lists them)
+(201 tests excluded; `include_tests: true` lists them)
 (truncated; continue with "cursor": "10")
 ```
 
@@ -778,8 +864,8 @@ tokio/src/runtime/scheduler/multi_thread/worker/taskdump.rs
   Method Shared.steal_all L59-75  pub(super) fn steal_all(&self) -> super::queue::Local<Arc<Handle>>
 tokio/src/runtime/metrics/runtime.rs
   Method RuntimeMetrics.num_workers L48-50  pub fn num_workers(&self) -> usize
-tokio/src/runtime/scheduler/multi_thread/stats.rs
-  Method Stats.incr_steal_operations L142-144  pub(crate) fn incr_steal_operations(&mut self)
+tokio/src/runtime/scheduler/mod.rs
+  Method Handle.num_workers L214-220  pub(crate) fn num_workers(&self) -> usize
 (truncated; continue with "cursor": "6")
 ```
 
@@ -819,6 +905,8 @@ rueca query search_symbols '{"query":"how does tokio decide which worker thread 
 
 ```
 github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
+tokio/src/runtime/metrics/runtime.rs
+  Method RuntimeMetrics.worker_thread_id L349-354  pub fn worker_thread_id(&self, worker: usize) -> Option<ThreadId>
 tokio/src/runtime/scheduler/multi_thread/worker.rs
   Struct Worker L102-111  pub(super) struct Worker
   Method Context.run_task L648-797  fn run_task(&self, task: Notified, mut core: Box<Core>) -> ControlFlow<(), Box<Core>>
@@ -827,13 +915,12 @@ tokio/src/runtime/blocking/sharded.rs
 tokio/src/runtime/blocking/pool.rs
   Method Spawner.spawn_task L462-506  fn spawn_task(&self, task: Task, rt: &Handle) -> Result<(), SpawnError>
   Method ThreadManagementState.worker_timed_out L172-178  pub(super) fn worker_timed_out( &mut self, worker_thread_id: usize, ) -> Option<thread::JoinHandle<()>>
-tokio-util/src/task/spawn_pinned.rs
-  Method LocalWorkerHandle.new_worker L379-398  fn new_worker() -> LocalWorkerHandle
 (truncated; continue with "cursor": "6")
 ```
 
-Mixed. `Worker` and `Context.run_task` are relevant; the blocking pool
-hits are noise. The decision itself lives in `Handle.schedule_task` and
+Mixed. `Worker` and `Context.run_task` are relevant; a metrics getter
+(`RuntimeMetrics.worker_thread_id`, first) and the blocking pool hits are
+noise. The decision itself lives in `Handle.schedule_task` and
 `Core.next_task`, which share no word with the question.
 
 ### "how does hyper read the request body"
@@ -845,20 +932,19 @@ rueca query search_symbols '{"query":"how does hyper read the request body","lim
 ```
 github.com/hyperium/hyper@7f67699ce32d (HEAD)
 src/ffi/http_types.rs
+  Function hyper_request_set_body L248-253  fn hyper_request_set_body(req: *mut hyper_request, body: *mut hyper_body) -> hyper_code
   Struct hyper_request L31  pub struct hyper_request(pub(super) Request<IncomingBody>)
 src/ffi/body.rs
+  Function hyper_body_free L78-80  fn hyper_body_free(body: *mut hyper_body)
   Struct hyper_body L33  pub struct hyper_body(pub(super) IncomingBody)
+  Function hyper_body_set_data_func L195-198  fn hyper_body_set_data_func(body: *mut hyper_body, func: hyper_body_data_callback)
 docs/ROADMAP-1.0.md
   Section hyper 1.0 Roadmap > Known Issues > You call hyper, or hyper calls you? L117-140  ### You call hyper, or hyper calls you?
-  Section Appendix > Unresolved Questions > How could the Body trait prepare for unknown frames? L341-359  ### How could the `Body` trait prepare for unknown frames?
-  Section hyper 1.0 Roadmap > hyper-util > body L293-296  ### body
-capi/include/hyper.h
-  TypeAlias hyper_body_data_callback L197  typedef int (*hyper_body_data_callback)(void*, struct hyper_context*, struct hyper_buf**)
 (truncated; continue with "cursor": "6")
 ```
 
-Bad. The FFI types and roadmap sections match "hyper", "request" and
-"body" literally. The answer lives in `Incoming.poll_frame`,
+Bad. The FFI functions and types and a roadmap section match "hyper",
+"request" and "body" literally. The answer lives in `Incoming.poll_frame`,
 `Conn.poll_read_body` and `Decoder.decode`, named with other words.
 
 ## Natural-language questions with semantic search
@@ -878,89 +964,123 @@ pins, and add the outputs here next to the lexical ones:
 ## What does not work yet on this organization
 
 The numbers come from `scripts/demo-tokio-rs.sh checks`
-(`out/checks.txt`) unless a line says it was checked by hand. Items 1 to
-3 are the open findings of
+(`out/checks.txt`) unless a line says it was checked by hand.
+
+### Fixed in `4905a37`
+
+The first version of this page, built from `d569441`, listed four
+failures. Three were the open findings of
 [RFC 0006 §9.2](../rfcs/0006-org-graph.md#92-phase-2--implemented) (open
-question 10 in §12), measured again on these pins; item 4 is new.
+question 10 in §12); [PR #68](https://github.com/DevArKaDiA/rueca/pull/68)
+fixed them and the fourth, with one part left open:
 
-1. **Attribute macros produce no edge.** axum, hyper, tonic, tower and
-   tracing contain 163 `#[tokio::main]` and 704 `#[tokio::test]`; there
-   are 0 link edges into tokio-macros.
+| Failure on `d569441` | Now | Before → after |
+|---|---|---|
+| Attribute macros produce no edge | fixed | 0 → 845 `DECORATES` link edges from tokio-macros |
+| Items inside `cfg_*! { … }` bodies are not extracted | fixed, except re-export paths | 0 → 5 of 5 sampled items found; callers of `tokio::spawn` 0 → 92, of `TcpListener.accept` 0 → 34 |
+| Method calls resolve to a same-named type of another crate | fixed | tokio → mio 200 → 158 edges, `type_resolved` CALLS 70 → 24; `Bytes::from` → hyper 29 → 0 |
+| A function re-exported from a module of the same name has no callers | fixed | callers of `time::sleep`, `timeout`, `interval` 0, 0, 0 → 32, 12, 4 |
 
-   | Repository | `#[tokio::main]` | `#[tokio::test]` |
-   |---|---:|---:|
-   | axum | 64 | 87 |
-   | hyper | 15 | 106 |
-   | tonic | 66 | 447 |
-   | tower | 7 | 63 |
-   | tracing | 11 | 1 |
+The details, measured again:
 
-2. **Items inside `cfg_*! { … }` bodies are not extracted.** tokio gates
-   most of its API behind feature macros. In `tokio/src` there are 340
-   `cfg_*! {` occurrences, 287 outermost bodies in 112 files. 522 of 3,317
-   `pub` item lines (15.7%) sit inside them, including 155 of 297
-   `pub use` (52%), 52 of 145 `pub mod`, 37 of 432 structs, 256 of 2,319
-   functions and 4 of 37 traits. All five items I sampled are missing:
-   `TcpListener`, `UdpSocket`, `spawn`, `AsyncReadExt` and
-   `AsyncReadExt.read`. Consequences: `tokio::spawn` is not in the index;
-   `TcpListener.accept` has 0 callers; and re-export paths such as
-   `tokio::net::TcpListener` never resolve, so you must use the file's
-   module path, `tokio::net::tcp::listener::TcpListener.accept`.
+- **Attribute macros.** axum, hyper, tonic, tower and tracing contain 146
+  lines that start with `#[tokio::main]` and 701 that start with
+  `#[tokio::test]` (163 and 704 with doc comments). There are 146 and 699
+  `DECORATES` link edges from tokio-macros (845; 847 with tracing's
+  `#[instrument]`). Checked by hand: the 2 `#[tokio::test]` lines without
+  an edge sit inside `macro_rules!` bodies (axum-extra's `cookie_test!`,
+  tonic's `parametrized_tests!`), so they are templates, not items.
 
-3. **Method calls can resolve to a same-named type of another crate.**
-   tokio has its own `TcpStream`, `UdpSocket`, `UnixStream`; so does mio.
-   The 200 tokio → mio edges are 97 CALLS (27 `import_resolved`, 70
-   `type_resolved`), 68 REFERENCES, 13 IMPORTS, 10 TESTS, 9 OVERRIDES and
-   3 IMPLEMENTS. Checked by hand against the source: 46 of the 97 CALLS
-   are wrong (47%), all of them `type_resolved` (46 of 70, 66%; all 27
-   `import_resolved` calls are right); 9 of 10 TESTS are wrong; 55 of 200
-   edges overall (27.5%). The same mechanism gives 13 wrong edges that
-   point from a dependency into its consumer, such as `mio`'s `TcpStream`
-   implementing tokio's `AsyncRead` (`checks.txt` lists 19 such edges; the
-   other 6 are a consumer implementing its own trait for a dependency's
-   type, which is right). And 29 `Bytes::from(…)` calls in axum and tonic
-   link to hyper's `impl From<ReasonPhrase> for Bytes`; 8 of 8 I checked
-   are wrong. The control pairs tokio → bytes, tokio → tracing and
-   tonic → tower were right in 24 of 24 edges I checked.
+  | Repository | `#[tokio::main]` lines | edges | `#[tokio::test]` lines | edges |
+  |---|---:|---:|---:|---:|
+  | axum | 56 | 56 | 85 | 84 |
+  | hyper | 15 | 15 | 106 | 106 |
+  | tonic | 64 | 64 | 446 | 445 |
+  | tower | 1 | 1 | 63 | 63 |
+  | tracing | 10 | 10 | 1 | 1 |
 
-4. **New: a function re-exported from a module of the same name has no
-   callers.** tokio writes `mod sleep; pub use sleep::sleep;`.
-   `tokio::time::sleep::sleep`, `tokio::time::timeout::timeout` and
-   `tokio::time::interval::interval` have 0 callers in the whole
-   organization, while axum, hyper, tonic, tower and tracing contain 86
-   `time::sleep(`, 77 `time::timeout(` and 4 `time::interval(` call
-   sites. Controls that are not re-exported this way do resolve:
-   `Instant.now` has 36 callers and `watch::channel` 18.
+- **Items inside `cfg_*!` bodies.** In `tokio/src` there are 340
+  `cfg_*! {` occurrences, 287 outermost bodies, holding 522 of 3,317 `pub`
+  item lines (15.7%). `get_symbol` with a name and a path now finds all
+  five items I sampled: `TcpListener`, `UdpSocket`, `spawn`,
+  `AsyncReadExt` and `AsyncReadExt.read` (the last one as `name: "read"`).
+  Callers outside tests: `tokio::spawn` 92 (514 with tests),
+  `TcpListener.accept` 34 (77 with tests), in axum, hyper, tokio, tonic
+  and tracing. The part still open is the first item of the next list.
+- **Same-named types of another crate.** The tokio → mio edges went from
+  200 to 158: CALLS 52 (28 `import_resolved`, 24 `type_resolved`; was 97
+  with 46 wrong), REFERENCES 77, IMPORTS 16, OVERRIDES 9, IMPLEMENTS 3,
+  TESTS 1 (was 10, 9 of them wrong). Checked by hand against the source:
+  15 of the 52 CALLS (7 `import_resolved`, 8 `type_resolved`), 15 right.
+  Edges whose source lies in a dependency of the consumer went from 19 (13
+  wrong) to 13; checked by hand, all 13 are `impl LocalTrait for
+  ForeignType`, which is right (`impl IntoResponse for Bytes` in axum,
+  `impl Connected for TcpStream` in tonic). `Bytes::from(…)` calls no
+  longer link to hyper's `impl From<ReasonPhrase> for Bytes` (29 → 0); 73
+  link edges now target bytes' own `Bytes.from`.
+- **Re-exports from a module of the same name.**
+  `tokio::time::sleep::sleep`, `timeout::timeout` and
+  `interval::interval` have 32, 12 and 4 callers outside tests (206, 91
+  and 16 with them). For scale, the five consumers contain 86
+  `time::sleep(`, 77 `time::timeout(` and 4 `time::interval(` call
+  sites, tests included. The controls moved by one: `Instant.now` 36 → 35
+  and `watch::channel` 18 → 17; PR #68 says callers in modules declared
+  by `#[cfg(test)] mod x;` are now test code.
+
+### Still failing
+
+1. **A re-export path is not a name.** `trace` with `qualified_name`
+   `tokio::spawn`, `tokio::net::TcpListener.accept` or
+   `tokio::time::sleep` answers "no symbol found"; the file's module path
+   works (`tokio::task::spawn::spawn`,
+   `tokio::net::tcp::listener::TcpListener.accept`,
+   `tokio::time::sleep::sleep`). An agent that starts from the documented
+   path has to search first. `get_symbol` with `name:
+   "AsyncReadExt.read"` fails the same way, while `name: "read"` plus the
+   path works.
+
+2. **Methods of an extension trait implemented for every `Service` bind
+   to nothing.** tower writes `impl<T: Service> ServiceExt for T`.
+   `ServiceExt.oneshot` has 0 callers outside tests and 1 with them (a
+   tower test), while axum, hyper, tonic, tower and tracing contain 73
+   `.oneshot(` call sites, tests included; axum's
+   `Route` calls it on lines 51 and 57 of `axum/src/routing/route.rs`
+   (checked by hand).
+
+3. **Re-indexing with nothing changed is not a no-op.** It takes 5.1 to
+   5.4 s; every repository is replaced and the generation goes up. Only
+   the ref is skipped.
 
 Smaller things seen while writing this page:
 
-- Re-indexing with nothing changed is not a no-op: 4.9 to 5.5 s, every
-  repository replaced, a new generation. Only the ref is skipped.
-- Ref comparison is per file blob, not per symbol (query 9): a symbol is
+- Ref comparison is per file blob, not per symbol (query 11): a symbol is
   ` changed` whenever its file changed.
 - On `trace`, `repo` only selects the root. A `repo` list still returns
   callers from other repositories, and `repo: hyper` with a bytes symbol
   as the root answers "no symbol found".
 - `get_symbol` with `name: "TcpListener.accept"` fails, while
-  `qualified_name` plus `repo` works.
+  `qualified_name` plus `repo`, or `name: "accept"` plus the path, works.
 - hyper shows an empty package name in `list_repositories`
   (`packages , hyper`).
 - Routing ranks hyper above bytes for "byte buffer".
 - With `budget_tokens`, the header can list a repository none of whose
-  nodes is printed (tower in query 13).
+  nodes is printed (tower in query 15).
 - Skipped and partially parsed files are counted but not named: tracing
   2 skipped, axum 1, tonic 8 skipped and 2 partial.
 - A search scoped to `repo: [tonic, axum]` for "graceful shutdown" shows
   only axum in the top 8.
-- hyper's `Connection.graceful_shutdown` has 0 callers. The likely cause
-  is the `Pin` receiver (`conn.as_mut().graceful_shutdown()`); I have not
-  verified it.
+- hyper's HTTP/1 `Connection.graceful_shutdown` has 1 caller (an
+  example) and 1 test; checked by hand, the `Pin::new(&mut conn)
+  .graceful_shutdown()` call sites in hyper's tests and in `http1.rs` are
+  not among them. The HTTP/2 one has 0 callers.
 - The 19 dangling contracts are all false positives: 18 are an
   `.unwrap()` after `XClient::connect(…).await`, read as an RPC `X/Unwrap`;
   1 is a hand-written wrapper named `BlockingClient`, read as a stub.
-- `out/links-summary.txt` has 19 edges whose consumer and provider are the
-  same repository (tokio → tokio 12, axum → axum 5, hyper and tonic 1
-  each). I have not looked into them.
+
+The 19 edges whose consumer and provider looked like the same repository
+in the first version of this page were edges written in the consumer
+with their source in a dependency; `out/links-summary.txt` now counts
+them under that dependency.
 
 ## Reproduce it
 
@@ -968,7 +1088,7 @@ Smaller things seen while writing this page:
 scripts/demo-tokio-rs.sh            # all: clone, index, queries, checks, summary
 scripts/demo-tokio-rs.sh clone      # clone the 8 repositories and check out the pins (the only network use)
 scripts/demo-tokio-rs.sh index      # write rueca-org.toml, index, record status, links, contracts
-scripts/demo-tokio-rs.sh queries    # the 25 queries: out/NN-<slug>.txt and out/timings.tsv
+scripts/demo-tokio-rs.sh queries    # the 27 queries: out/NN-<slug>.txt and out/timings.tsv
 scripts/demo-tokio-rs.sh checks     # measure the weak spots: out/checks.txt
 scripts/demo-tokio-rs.sh clean      # remove the store and out/; `clean --all` removes the clones too
 ```
@@ -982,7 +1102,7 @@ Environment:
   never touches your own store.
 
 Requirements: git, jq, perl (for millisecond timings) and python3 (one
-estimate in `checks`). Disk: 269 MB of clones and about 190 MB of store.
+estimate in `checks`). Disk: 256 MB of clones and about 195 MB of store.
 
 Outputs in `$RUECA_DEMO_CACHE/out/`: `NN-<slug>.txt` for each query (the
 first line is the exact command, the rest its exact output, errors
