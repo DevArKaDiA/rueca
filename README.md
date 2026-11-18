@@ -197,6 +197,18 @@ edges into a ref follow the symbols it still has
 ([RFC 0006](docs/rfcs/0006-org-graph.md),
 [how it works](docs/how-it-works.md#46-the-organization-layer-rueca-segment-org)).
 
+### Demo: the tokio-rs organization
+
+[docs/demo/tokio-rs.md](docs/demo/tokio-rs.md) runs this on a public family
+of repositories: tokio, mio, bytes, tracing, hyper, tower, axum and tonic,
+with two refs of tokio, Cargo package edges between them and gRPC contracts
+in tonic. Every output, timing and known failure on that page comes from one
+script:
+
+```sh
+RUECA=$(command -v rueca) scripts/demo-tokio-rs.sh
+```
+
 ## Use it from an agent
 
 `rueca mcp --root <repo>` speaks MCP over stdio and indexes the root on first
