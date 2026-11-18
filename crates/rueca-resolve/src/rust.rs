@@ -541,7 +541,15 @@ impl Resolver<'_> {
                 }
             }
         }
-        for imp in imports.iter().filter(|i| i.names.iter().any(|n| n.name == "*")) {
+        self.rust_env_globs(fid, ns, &mut env);
+        env
+    }
+
+    /// Adds to `env` the names the glob imports of `fid` bind (namespace
+    /// `ns` first) that neither an explicit import nor an item of the file
+    /// binds.
+    fn rust_env_globs(&self, fid: FileId, ns: Ns, env: &mut Env) {
+        for imp in self.imports(fid).iter().filter(|i| i.names.iter().any(|n| n.name == "*")) {
             for name in self.rust_glob_names(fid, imp) {
                 if env.contains_key(&name) || self.module_def(fid, &name).is_some() {
                     continue;
@@ -552,7 +560,6 @@ impl Resolver<'_> {
                 }
             }
         }
-        env
     }
 
     /// What the explicit imports of `fid` bind to `name`, namespace `ns`
