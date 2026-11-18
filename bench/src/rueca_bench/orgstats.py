@@ -62,6 +62,9 @@ COMPARISONS = [
     (("grep", "native"), ("grep", "per_repo")),
 ]
 ISSUE_METRICS = ("file_acc@5", "func_acc@10")
+# what a Rueca setting with vectors or a second stage (`rueca-hybrid:<tag>`,
+# RFC 0007) is paired against: BM25 (the §11.2 rows) and lexical Rueca
+SETTING_BASES = (("grep", "native"), ("rueca", "native"))
 IMPACT_METRICS = ("consumer_hit@10", "file_acc@5")
 # RFC 0006 §8
 RATIO_FLOOR, RATIO_TARGET = 0.85, 0.95
@@ -69,6 +72,18 @@ TOKENS_TARGET = 1.2
 UPDATE_FLOOR, UPDATE_TARGET = 2.0, 1.0
 EDGES_FLOOR = {"precision": 0.90, "recall": 0.75}
 EDGES_TARGET = {"precision": 0.97, "recall": 0.90}
+
+
+def arm_order(arms: dict | None) -> list[str]:
+    """The original arms, then every Rueca setting present (sorted)."""
+    return [*ARMS, *sorted(k for k in (arms or {}) if k not in ARMS)]
+
+
+def comparisons(arms: dict | None) -> list[tuple[tuple[str, str], tuple[str, str]]]:
+    """`COMPARISONS` plus, for every Rueca setting present, its organization
+    answer against BM25's and lexical Rueca's."""
+    extra = [((k, "native"), base) for k in arm_order(arms) if k not in ARMS for base in SETTING_BASES]
+    return [*COMPARISONS, *extra]
 
 
 def _settings() -> tuple[int, int]:
@@ -230,7 +245,7 @@ def org_stats(split_score: dict, split: str, resamples: int | None = None, seed:
         "paired": [],
     }
     arms = split_score.get("arms") or {}
-    for arm in ARMS:
+    for arm in arm_order(arms):
         a = arms.get(arm)
         if not a or a.get("status") != "ok":
             out["arms"][arm] = {"status": (a or {}).get("status") or "pending", "reason": (a or {}).get("error")}
@@ -239,7 +254,7 @@ def org_stats(split_score: dict, split: str, resamples: int | None = None, seed:
         if a.get("impact"):
             out["impact"][arm] = {mode: impact_mode_stats(m) for mode, m in a["impact"].items()}
     for kind, metrics in (("issue", ISSUE_METRICS), ("impact", IMPACT_METRICS)):
-        for (aa, ma), (ab, mb) in COMPARISONS:
+        for (aa, ma), (ab, mb) in comparisons(arms):
             ra, rb = _rows(split_score, aa, ma, kind), _rows(split_score, ab, mb, kind)
             for key in metrics:
                 entry = {"kind": kind, "metric": key, "a": f"{aa} {ma}", "b": f"{ab} {mb}"}

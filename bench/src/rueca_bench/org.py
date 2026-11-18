@@ -41,7 +41,14 @@ removed after indexing):
   gated members, the member with the most symbol documents is re-indexed
   (RFC 0006 §8 incremental update). The calibration organization is a copy
   of the gated store (`copy_store`) with the calibration members added by
-  `index --org`.
+  `index --org`. A Rueca setting with vectors or a second stage (RFC 0007:
+  `rueca-hybrid`, `rueca-semantic`, `rueca-lexical`) runs the same way with
+  `index --org ... --embed=<preset>` (the shared `RUECA_VECTOR_DIR`), its
+  `mode`, reranker arguments and knobs on every request, into
+  `multirepo-<split>-<arm>--<tag>.json` (`org_label`); with `rueca query
+  --batch` the JSON requests of a question are answered by two processes
+  (`prefetch_answers`). `run_impact_sweep` asks the impact questions under
+  many settings over one index (phase 2 sweeps).
 - **grep** (BM25, `arms/grep.py` per member): **native** = one BM25 ranking
   over the union of the members (file documents for files, function-body
   documents for functions; document count, lengths and frequencies of the
@@ -155,7 +162,8 @@ from .queries import tokenize
 from .s1 import EFF_LIMIT, queries_for, s1_gold
 from .s1 import instances as s1_instances
 from .spanning import spanning_pairs
-from .stats import wilson
+from .orgstats import paired_comparison
+from .stats import seeded, wilson
 from .treesitter import extract_functions, grammar_for
 
 RRF_K = 60
@@ -164,6 +172,9 @@ KEEP = 50  # items kept per answer (a merged top 50 needs at most each list's to
 MULTIREF_SAMPLE = 20
 SPLITS = ("gated", "calibration")
 ORG_ARMS = ("rueca", "grep", "cbm")
+# Rueca settings with vectors or a second stage (RFC 0007): their own outputs,
+# `multirepo-<split>-<arm>--<tag>.json` (`org_label`).
+RUECA_SETTING_ARMS = ("rueca-hybrid", "rueca-semantic", "rueca-lexical")
 SELECT_WORKERS = 4
 
 
@@ -449,9 +460,12 @@ def copy_store(src: Path, dst: Path) -> float:
 
 
 def _org_index(arm, org_file: Path, root: Path, store: Path) -> dict:
-    """`rueca index --org <file> <root>`: one repository indexed, then the
-    organization layer updated. Repository id, both times, documents."""
-    res = run([arm.bin, "index", "--org", str(org_file), str(root), "--store", str(store), "--json"], timeout=arm.index_timeout)
+    """`rueca index --org <file> <root> [--embed=<preset>]`: one repository
+    indexed (with vectors for a hybrid / semantic setting, through the
+    shared `RUECA_VECTOR_DIR`), then the organization layer updated.
+    Repository id, both times, documents, the vectors report."""
+    cmd = [arm.bin, "index", "--org", str(org_file), str(root), "--store", str(store), "--json", *arm.index_args()]
+    res = run(cmd, timeout=arm.index_timeout, env=arm.config.env() or None)
     out: dict = {"ok": res.rc == 0, "seconds": res.seconds, "repo_id": None, "error": None if res.rc == 0 else res.stderr[-300:]}
     if res.rc != 0:
         return out
@@ -459,6 +473,8 @@ def _org_index(arm, org_file: Path, root: Path, store: Path) -> dict:
         rep = json.loads(res.stdout)
         seg = rep["indexed"][0]["segment"]
         up = rep["update"]
+        if rep["indexed"][0].get("vectors") is not None:
+            out["vectors"] = rep["indexed"][0]["vectors"]
         out.update(
             repo_id=seg["snapshot"]["repo"],
             docs=seg["node_count"],
@@ -517,37 +533,74 @@ def _norm_cbm_score(hits: list[dict]) -> list[dict]:
     return [dict(h, score=-(h.get("rank") or 0.0)) for h in hits]
 
 
-def rueca_answer(arm, q: str, own: str, store: Path, org_file: Path, members: list[dict], index: dict) -> dict:
-    a: dict = {}
-    data, secs, err, _ = arm.call("search_symbols", {"query": q, "limit": ORG_LIMIT}, None, store, org=org_file)
+def _member_ids(members: list[dict], index: dict) -> list[tuple[str, str]]:
+    """(repository, Rueca id) of every indexed member."""
+    return [(m["repo"], index[m["repo"]]["repo_id"]) for m in members if index.get(m["repo"], {}).get("repo_id")]
+
+
+def prefetch_answers(arm, q: str, store: Path, org_file: Path, ids: list[tuple[str, str]], eff: bool = True) -> None:
+    """Every JSON request of `rueca_answer` for one question in two `rueca
+    query --batch` processes (organization, then per repository), when the
+    binary has `--batch`; the per-call path then reads them from the memo."""
+    org_reqs = [("search_symbols", arm.search_args(q, ORG_LIMIT), "scoring")]
+    per_reqs = [("search_symbols", {**arm.search_args(q, ORG_LIMIT), "repo": rid}, "scoring") for _, rid in ids]
+    if eff:
+        org_reqs.append(("search_symbols", arm.eff_args(q, EFF_LIMIT), "agent"))
+        per_reqs += [("search_symbols", arm.eff_args(q, EFF_LIMIT, rid), "agent") for _, rid in ids]
+    arm.prefetch(org_reqs, None, store, org=org_file)
+    arm.prefetch(per_reqs, None, store)
+
+
+def _native_answer(arm, q: str, store: Path, org_file: Path, eff: bool) -> dict:
+    data, secs, err, _ = arm.call("search_symbols", arm.search_args(q, ORG_LIMIT), None, store, org=org_file)
     if err:
-        a["native"] = {"ok": False, "error": err}
-    else:
-        eff = arm.search_eff(None, q, EFF_LIMIT, root=None, store=store, org=org_file)
-        a["native"] = {"ok": True, "seconds": secs, "items": _items(flat_results(data))[:KEEP], "eff": _eff(eff)}
+        return {"ok": False, "error": err}
+    out = {"ok": True, "seconds": secs, "items": _items(flat_results(data))[:KEEP]}
+    if eff:
+        out["eff"] = _eff(arm.search_eff(None, q, EFF_LIMIT, root=None, store=store, org=org_file))
+    return out
+
+
+def _member_answer(arm, q: str, store: Path, repo: str, rid: str, eff: bool) -> tuple[list[dict] | None, dict | None, str | None]:
+    """One member's `repo:`-scoped answer: (hits, its efficiency answer or
+    None, error)."""
+    data, _, err, _ = arm.call("search_symbols", {**arm.search_args(q, ORG_LIMIT), "repo": rid}, None, store)
+    if err:
+        return None, None, err
+    hits = [dict(h, repo=repo) for h in flat_results(data)]
+    return hits, arm.search_eff(None, q, EFF_LIMIT, root=None, store=store, repo=rid) if eff else None, None
+
+
+def _per_repo_answers(arm, q: str, own: str, store: Path, ids: list[tuple[str, str]], eff: bool) -> tuple[dict, dict]:
+    """The per-repository answers merged by RRF, and the own repository's."""
     per: list[list[dict]] = []
     tokens = 0
     errors: list[str] = []
     single: dict = {"ok": False, "error": "own repository not indexed"}
-    for m in members:
-        rid = index.get(m["repo"], {}).get("repo_id")
-        if not rid:
+    for repo, rid in ids:
+        hits, ef, err = _member_answer(arm, q, store, repo, rid, eff)
+        if hits is None:
+            errors.append(err or "")
+            single = {"ok": False, "error": err} if repo == own else single
             continue
-        d2, _, e2, _ = arm.call("search_symbols", {"query": q, "limit": ORG_LIMIT, "repo": rid}, None, store)
-        if e2:
-            errors.append(e2)
-            if m["repo"] == own:
-                single = {"ok": False, "error": e2}
-            continue
-        hits = [dict(h, repo=m["repo"]) for h in flat_results(d2)]
         per.append(hits)
-        ef = arm.search_eff(None, q, EFF_LIMIT, root=None, store=store, repo=rid)
-        if ef.ok:
-            tokens += ef.extra.get("tokens") or 0
-        if m["repo"] == own:
-            single = {"ok": True, "items": _items(hits)[:KEEP], "eff": _eff(ef, own)}
-    a["per_repo"] = {"ok": not errors or bool(per), "errors": errors[:3], "items": _items(rrf_merge(per))[:KEEP], "tokens": tokens, "calls": len(per)}
-    a["single"] = single
+        tokens += (ef.extra.get("tokens") or 0) if ef is not None and ef.ok else 0
+        if repo == own:
+            single = {"ok": True, "items": _items(hits)[:KEEP], "eff": _eff(ef, own) if ef is not None else None}
+    merged = {"ok": not errors or bool(per), "errors": errors[:3], "items": _items(rrf_merge(per))[:KEEP], "tokens": tokens if eff else None, "calls": len(per)}
+    return merged, single
+
+
+def rueca_answer(arm, q: str, own: str, store: Path, org_file: Path, members: list[dict], index: dict, eff: bool = True, per_repo: bool = True) -> dict:
+    """One question: the organization answer, the per-repository answers
+    merged by RRF and the own repository's (`per_repo=False`: the
+    organization answer alone, a sweep). Requests carry the arm's `mode` and
+    reranker arguments; `eff=False` skips the efficiency searches."""
+    ids = _member_ids(members, index) if per_repo else []
+    prefetch_answers(arm, q, store, org_file, ids, eff)
+    a: dict = {"native": _native_answer(arm, q, store, org_file, eff)}
+    if per_repo:
+        a["per_repo"], a["single"] = _per_repo_answers(arm, q, own, store, ids, eff)
     return a
 
 
@@ -652,6 +705,26 @@ def _member_record(m: dict) -> dict:
     return {k: m.get(k) for k in ("repo", "language", "commit", "split")}
 
 
+def org_label(arm) -> str:
+    """File label of an arm's organization output: the arm name, or for a
+    Rueca setting with vectors or a second stage `<arm>--<tag>`."""
+    cfg = getattr(arm, "config", None)
+    if cfg is None or cfg.plain:
+        return arm.name
+    return f"{cfg.arm_name}--{cfg.tag()}"
+
+
+def column_label(label: str) -> str:
+    """`rueca-hybrid--<tag>` -> `rueca-hybrid:<tag>` (the `compare` spelling)."""
+    return label.replace("--", ":", 1)
+
+
+def org_arm_names(arm_names: list[str]) -> list[str]:
+    """The arms of `arm_names` the multi-repository scenario runs: the
+    original ones and Rueca's vector / second-stage settings."""
+    return [a for a in arm_names if a in ORG_ARMS or a in RUECA_SETTING_ARMS]
+
+
 def _done(split: str, arm: str, repos: set[str] | None) -> bool:
     p = run_path(f"multirepo-{split}", arm)
     if not p.exists():
@@ -667,13 +740,11 @@ def run_multirepo(arm_names: list[str], force: bool = False, only: list[str] | N
     the calibration organization and answers those."""
     splits, repos = parse_only(only)
     arms = []
-    for name in ORG_ARMS:
-        if name not in arm_names:
-            continue
+    for name in org_arm_names(arm_names):
         arm = make_arm(name)
         if not arm.available()[0]:
             continue
-        pending = [s for s in splits if force or not _done(s, name, repos)]
+        pending = [s for s in splits if force or not _done(s, org_label(arm), repos)]
         if pending:
             arms.append((arm, pending))
     if not arms:
@@ -694,15 +765,17 @@ def run_multirepo(arm_names: list[str], force: bool = False, only: list[str] | N
         version = arm.version()
         for s, rec in recs.items():
             rec.update(split=s, arm=arm.name, arm_version=version, filter=sorted(repos) if repos else None)
+            if hasattr(arm, "config") and not arm.config.plain:
+                rec["setting"] = arm.config.as_dict()
             rec.setdefault("max_rss_mb", _max_rss_mb())
-            write_json(run_path(f"multirepo-{s}", arm.name), rec)
+            write_json(run_path(f"multirepo-{s}", org_label(arm)), rec)
         log(f"org multirepo {arm.name}: done in {time.perf_counter() - t0:.0f} s, peak RSS {_max_rss_mb()}")
 
 
 def _multirepo_arm(arm, pending: list[str], insts: dict[str, list[dict]], repos: set[str] | None) -> dict[str, dict]:
     gated = _filtered(org_members("gated"), repos)
     extra = _filtered(org_repos("calibration"), repos) if "calibration" in pending else []
-    if arm.name == "rueca":
+    if arm.name == "rueca" or arm.name in RUECA_SETTING_ARMS:
         return _multirepo_rueca(arm, pending, insts, gated, extra)
     if arm.name == "grep":
         return _multirepo_grep(arm, pending, insts, gated, extra)
@@ -723,7 +796,7 @@ def _record(members: list[dict], insts: list[dict], index: dict, answers: dict, 
 
 
 def _multirepo_rueca(arm, pending: list[str], insts: dict[str, list[dict]], gated: list[dict], extra: list[dict]) -> dict[str, dict]:
-    base = CACHE / "org"
+    base = CACHE / "org" / safe_name(org_label(arm)) if not arm.config.plain else CACHE / "org"
     store, org_file = base / "rueca-store", base / "rueca-org.toml"
     cstore, corg = base / "rueca-calib-store", base / "rueca-calib-org.toml"
     shutil.rmtree(store, ignore_errors=True)
@@ -836,6 +909,102 @@ def _multirepo_cbm(arm, pending: list[str], insts: dict[str, list[dict]], gated:
     finally:
         for h in handles.values():
             arm.cleanup(h)
+    return out
+
+
+# --- second-stage sweep on the impact kind (RFC 0007 §7.3, phase 2) ----------------------
+
+
+def sweep_path(split: str, cfg) -> Path:
+    """Raw output of one setting of the impact sweep."""
+    return run_path(f"sweep/impact-{split}", f"{cfg.arm_name}--{cfg.tag()}")
+
+
+def _sweep_done(split: str, cfg) -> bool:
+    p = sweep_path(split, cfg)
+    return p.exists() and read_json(p).get("status") == "ok"
+
+
+def impact_questions(split: str, repos: set[str] | None = None) -> list[dict]:
+    """The impact instances of a split, each with its keyword query."""
+    insts = [i for i in org_questions(split, repos) if "impact" in instance_kinds(i)]
+    for inst in insts:
+        inst["query"] = queries_for(inst)["kw"]
+    return insts
+
+
+def _sweep_answers(arm, configs: list, insts: list[dict], store: Path, org_file: Path, members: list[dict], index: dict) -> dict[str, dict]:
+    """{setting label: {instance id: answer}}: the organization answer of
+    every impact question under every setting, one batch per environment."""
+    out: dict[str, dict] = {}
+    for group in arm.env_groups(configs):
+        lead = arm.with_config(group[0])
+        lead.prefetch([("search_symbols", arm.with_config(c).search_args(i["query"], ORG_LIMIT), "scoring") for c in group for i in insts], None, store, org=org_file)
+        for cfg in group:
+            one = arm.with_config(cfg)
+            out[cfg.label()] = {i["id"]: {"native": _native_answer(one, i["query"], store, org_file, eff=False)} for i in insts}
+    return out
+
+
+def run_impact_sweep(arm, configs: list, split: str = "gated", force: bool = False, repos: set[str] | None = None) -> list:
+    """Index the organization of `split` once (with the first setting's
+    vectors), then ask every impact question under each pending setting:
+    the organization answer only (no per-repository merge, no efficiency
+    search), written to `sweep/impact-<split>-<arm>--<tag>.json`. The
+    settings must share the preset (one index serves them all)."""
+    pending = [c for c in configs if force or not _sweep_done(split, c)]
+    insts = impact_questions(split, repos) if pending else []
+    if not insts:
+        log(f"org impact sweep {split}: nothing to run ({len(pending)} pending settings, no impact instance)" if pending else f"org impact sweep {split}: every setting cached")
+        return pending
+    members = _filtered(org_members(split), repos)
+    base = CACHE / "org" / "sweep"
+    store, org_file = base / "store", base / "org.toml"
+    shutil.rmtree(store, ignore_errors=True)
+    store.mkdir(parents=True, exist_ok=True)
+    try:
+        index: dict[str, dict] = {}
+        t0 = time.perf_counter()
+        add_org_members(arm.with_config(pending[0]), members, store, org_file, [], index, prefix="org")
+        index_s = time.perf_counter() - t0
+        t1 = time.perf_counter()
+        answers = _sweep_answers(arm, pending, insts, store, org_file, members, index)
+        query_s = time.perf_counter() - t1
+        for cfg in pending:
+            one = arm.with_config(cfg)
+            rec = _record(members, insts, index, answers[cfg.label()], index_s, query_s, incremental=None, store=None, setting=cfg.as_dict())
+            rec.update(split=split, arm=one.name, arm_version=one.version(), kind="impact")
+            write_json(sweep_path(split, cfg), rec)
+    finally:
+        shutil.rmtree(store, ignore_errors=True)
+        org_file.unlink(missing_ok=True)
+    return pending
+
+
+def _impact_rows(rec: dict | None) -> list[dict] | None:
+    if not rec or rec.get("status") != "ok":
+        return None
+    m = score_arm(rec, "impact").get("native") or {}
+    return m.get("rows") if m.get("status") == "ok" else None
+
+
+def score_impact_sweep(split: str, configs: list, resamples: int, seed: int) -> dict:
+    """Per setting: consumer hit@10 and own File Acc@5 of the organization
+    answer, paired against BM25's organization answer of the same
+    instances (`multirepo-<split>-grep.json`)."""
+    gp = run_path(f"multirepo-{split}", "grep")
+    base = _impact_rows(read_json(gp)) if gp.exists() else None
+    out: dict = {"split": split, "base": "grep native" if base else None, "settings": []}
+    for cfg in configs:
+        p = sweep_path(split, cfg)
+        rows = _impact_rows(read_json(p)) if p.exists() else None
+        row: dict = {"setting": cfg.label(), "config": cfg.as_dict(), "n": len(rows or [])}
+        if rows:
+            row["consumer_hit@10"] = sum(r["consumer_hit@10"] for r in rows) / len(rows)
+            row["file_acc@5"] = sum(r["file_acc@5"] for r in rows) / len(rows)
+            if base:
+                row["paired"] = paired_comparison(rows, base, "consumer_hit@10", resamples, seeded(seed, "org-sweep", split, cfg.label()))
+        out["settings"].append(row)
     return out
 
 
@@ -1115,10 +1284,24 @@ def population(rec: dict) -> str:
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
 
 
+def output_labels(split: str) -> list[str]:
+    """Arms with an organization output on `split`: the original ones, then
+    every Rueca setting (`org_label`) found in the cache."""
+    found = sorted(p.name.removeprefix(f"multirepo-{split}-").removesuffix(".json") for p in run_path(f"multirepo-{split}", "x").parent.glob(f"multirepo-{split}-rueca-*--*.json"))
+    return [*ORG_ARMS, *found]
+
+
+def arm_keys(arms: dict | None) -> list[str]:
+    """Scored arms in report order: the original ones, then Rueca settings."""
+    extra = sorted(k for k in (arms or {}) if k not in ORG_ARMS)
+    return [*ORG_ARMS, *extra]
+
+
 def score_split(split: str) -> dict:
     out: dict = {"split": split, "instances": 0, "repos": [], "instance_repos": [], "arms": {}}
-    for arm in ORG_ARMS:
-        p = run_path(f"multirepo-{split}", arm)
+    for label in output_labels(split):
+        p = run_path(f"multirepo-{split}", label)
+        arm = column_label(label)
         if not p.exists():
             continue
         rec = read_json(p)

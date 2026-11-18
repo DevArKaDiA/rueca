@@ -26,7 +26,7 @@ both have, so a sweep still running yields honest, smaller n.
 from __future__ import annotations
 
 import itertools
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .common import families, lang_group, load_manifest, read_json, safe_name, scorecard_spec, split_of
@@ -262,6 +262,7 @@ class Comparison:
     split: str
     base: str
     arms: list[str]
+    rows: dict = field(default_factory=dict, init=False, repr=False)
 
     def run(self) -> dict:
         runs = self.cache / "runs" / "s1"
@@ -273,6 +274,7 @@ class Comparison:
         base = columns_for(runs, self.base)[0]
         cols = _unique([c for spec in self.arms for c in columns_for(runs, spec) if c.label != base.label])
         rows = {c.label: load_column(c, insts, golds) for c in [base, *cols]}
+        self.rows = rows  # {column label: {instance id: {variant: row}}}, for paired checks between columns
         out: dict = {
             "suite": "s1",
             "split": self.split,

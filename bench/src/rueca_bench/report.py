@@ -31,7 +31,7 @@ from . import contracts as contracts_mod
 from . import lite as lite_mod
 from . import org as org_mod
 from . import orgstats as orgstats_mod
-from . import semgates
+from . import rfc0007, semgates
 from .arms import ARM_NAMES, LOCALIZATION_ONLY, S1_ARM_NAMES, make_arm, run_label
 from .arms.base import is_callable_label, same_def
 from .match import CallableIndex, class_map, class_members
@@ -1465,6 +1465,8 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict,
     L.append("")
     render_scorecard(L, card, s3, meta, s1)
     semgates.render(L, card.get("semantic_gates") or {})
+    if card.get("rfc0007"):
+        rfc0007.render(L, card["rfc0007"])
 
     L.append("## Run metadata")
     L.append("")
@@ -1749,7 +1751,14 @@ RUST_GAPS = (
 def _org_mode_label(arm: str, mode: str) -> str:
     if mode == "per_repo":
         return "per repository + RRF"
-    return {"rueca": "organization `--org`", "grep": "one BM25 over the union"}.get(arm, mode)
+    if arm.startswith("rueca"):
+        return "organization `--org`"
+    return {"grep": "one BM25 over the union"}.get(arm, mode)
+
+
+def _org_arm_label(arm: str) -> str:
+    """`Rueca`, `BM25 (grep)`, `cbm`, or a Rueca setting `arm:tag` as code."""
+    return ORG_ARM_LABEL.get(arm) or f"Rueca `{arm}`"
 
 
 def _org_rate(r: dict | None, with_n: bool = False) -> str:
@@ -1828,21 +1837,21 @@ def _org_results_table(L: list[str], st: dict) -> None:
         "| Other-repository share of top 10 | Tokens (median) | Tokens per correct |"
     )
     L.append("|---|---|---:|---|---|---|---|---|---:|---:|---:|")
-    for arm in org_mod.ORG_ARMS:
+    for arm in org_mod.arm_keys(st.get("arms")):
         a = (st.get("arms") or {}).get(arm) or {}
         if "status" in a and a.get("status") != "ok":
             reason = f": {str(a.get('reason'))[:120]}" if a.get("reason") and a.get("status") != "pending" else ""
-            L.append(f"| {ORG_ARM_LABEL[arm]} | — | — | {a.get('status')}{reason} | | | | | | | |")
+            L.append(f"| {_org_arm_label(arm)} | — | — | {a.get('status')}{reason} | | | | | | | |")
             continue
         for mode in ("native", "per_repo"):
             m = a.get(mode)
             if m is None:
                 continue
             if m.get("status") != "ok":
-                L.append(f"| {ORG_ARM_LABEL[arm]} | {_org_mode_label(arm, mode)} | — | pending: {str(m.get('reason') or '')[:160]} | | | | | | | |")
+                L.append(f"| {_org_arm_label(arm)} | {_org_mode_label(arm, mode)} | — | pending: {str(m.get('reason') or '')[:160]} | | | | | | | |")
                 continue
             L.append(
-                f"| {ORG_ARM_LABEL[arm]} | {_org_mode_label(arm, mode)} | {m['n']} | {_org_rate(m['file_acc@5'])} | {_org_rate(m['single_file_acc@5'])} | "
+                f"| {_org_arm_label(arm)} | {_org_mode_label(arm, mode)} | {m['n']} | {_org_rate(m['file_acc@5'])} | {_org_rate(m['single_file_acc@5'])} | "
                 f"{_org_ratio(m['file_acc@5_ratio'])} | {_org_rate(m['func_acc@10'], with_n=True)} | {_org_rate(m['single_func_acc@10'])} | "
                 f"{_f(m.get('other_repo_top10'))} | {_tok(m.get('tokens_median'))} | {_tok(m.get('tokens_per_correct'))} |"
             )
@@ -1891,20 +1900,20 @@ def _org_impact(L: list[str], st: dict) -> None:
         return
     L.append("| Arm | Mode | n | Own File Acc@5 (95% CI) | Own Function Acc@10 (95% CI) | Consumer hit@10 (95% CI) | Consumer hit@20 (95% CI) | Consumer recall@20 | Other-repository share of top 10 | Consumer files (median) |")
     L.append("|---|---|---:|---|---|---|---|---:|---:|---:|")
-    for arm in org_mod.ORG_ARMS:
+    for arm in org_mod.arm_keys(st.get("impact")):
         a = (st.get("impact") or {}).get(arm)
         if not a:
-            L.append(f"| {ORG_ARM_LABEL[arm]} | — | — | pending | | | | | | |")
+            L.append(f"| {_org_arm_label(arm)} | — | — | pending | | | | | | |")
             continue
         for mode in ("native", "per_repo"):
             m = a.get(mode)
             if m is None:
                 continue
             if m.get("status") != "ok":
-                L.append(f"| {ORG_ARM_LABEL[arm]} | {_org_mode_label(arm, mode)} | — | pending | | | | | | |")
+                L.append(f"| {_org_arm_label(arm)} | {_org_mode_label(arm, mode)} | — | pending | | | | | | |")
                 continue
             L.append(
-                f"| {ORG_ARM_LABEL[arm]} | {_org_mode_label(arm, mode)} | {m['n']} | {_org_rate(m['file_acc@5'])} | {_org_rate(m['func_acc@10'], with_n=True)} | "
+                f"| {_org_arm_label(arm)} | {_org_mode_label(arm, mode)} | {m['n']} | {_org_rate(m['file_acc@5'])} | {_org_rate(m['func_acc@10'], with_n=True)} | "
                 f"{_org_rate(m['consumer_hit@10'])} | {_org_rate(m['consumer_hit@20'])} | {_f(m.get('consumer_recall@20'))} | {_f(m.get('other_repo_top10'))} | "
                 f"{_tok(m.get('consumer_files_median'))} |"
             )
@@ -2278,6 +2287,7 @@ def report() -> None:
     sem = semgates.all_gates(s1)
     if sem:
         card["semantic_gates"] = sem  # RFC 0007 §11.2 localization rows
+    card["rfc0007"] = rfc0007.table(s1, orgs, [x for g in language_groups() for x in _latencies(s1, s3, "rueca", g)])  # the whole §11.2 table
     s2 = contracts_mod.score()
     card["contracts"] = contracts_mod.scorecard_block(s2, _judge)  # gated family "Cross-service edges" (S2)
     carried_pairs = {tuple(k.split(":", 1)) for k in s1.get("carried", {})}

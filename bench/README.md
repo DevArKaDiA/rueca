@@ -54,10 +54,12 @@ uv run --project bench rueca-bench check                 # regression check vs t
   to language families (manifest `[languages]` keys: `python`, `ecma`,
   `php`, `go`, `java`, `c`, `cpp`, `rust`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
-- `run --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all|a,b} --suite {s1,s3,data,health,org,lite,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--limit N] [--workers N] [--force] [--prune]`.
+- `run --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,rueca-lexical,all|a,b} --suite {s1,s3,data,health,org,lite,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--limit N] [--workers N] [--force] [--prune] [--rerank-sample N]`.
   `--split` restricts S1 to one split; `lite` (the SWE-bench Lite
-  diagnostic, `--limit N` for a subset) and the `vector`, `rueca-hybrid`
-  and `rueca-semantic` arms are never included by `all`.
+  diagnostic, `--limit N` for a subset) and the `vector`, `rueca-hybrid`,
+  `rueca-semantic` and `rueca-lexical` arms are never included by `all`
+  (the last three run S1, Lite and the multi-repository organization
+  scenario; `rueca-hybrid` also the RFC 0007 latency rows of `health`).
   Outputs are cached per (arm, instance) in `.cache/runs/`; re-running only
   computes what is missing (`--force` recomputes). Arm failures are recorded
   (and scored as misses), never dropped. `--workers` runs S1 repositories
@@ -83,14 +85,20 @@ uv run --project bench rueca-bench check                 # regression check vs t
   and position.
 - `clean --work` removes worktrees; `clean --runs rueca` drops cached Rueca outputs.
 - `compare` (decision tables over cached outputs) and `sweep` (the RFC 0007
-  §7.6 fusion sweep): below, after the vector arm.
+  §7.6 fusion sweep and the phase 2 sweeps): below, after the vector arm.
 - `uv run --project bench pytest bench/tests` — unit tests of the harness
   pieces (efficiency counting, contract normalizers, health rules, rank
   fusion, the organization file and RFC 0006 metrics, the multi-ref scorer,
   S3 gold derivation and scoring, the vector arm, the `rueca embed`
   protocol against a fake binary, all-gold metrics, the CoIR dry run,
   `compare`, the Rueca hybrid arm and the sweep against the fake binary,
-  the plateau choice, the RFC 0007 §11.2 gate rows); CI
+  the plateau choice, the RFC 0007 §11.2 gate rows; phases 2–3: the
+  second-stage knobs, `rueca query --batch` through the fake binary (which
+  also honours `index --org ... --embed`), the organization scenario in
+  hybrid mode on a two-repository fixture organization (impact hit@10 with
+  and without expansion), the phase 2 sweeps and their choice, the reranker
+  gate, the latency rows, the vector arm's CPU knob, the §11.2 table and
+  its `check` rows); CI
   runs them in the `bench harness` job (the CoIR dry run is skipped without
   the `coir` group).
 - Per-call timeouts: 120 s per query, 1800 s per index (`arms/__init__.py`;
@@ -198,6 +206,7 @@ hash>-f<file text>-x<text version>/` (so two settings never share outputs;
 | `RUECA_BENCH_VECTOR_INSTRUCTION` | the preset's | `--instruction` for queries; a binary without the flag stops the run before any instance |
 | `RUECA_BENCH_VECTOR_FILE_TEXT` | `0` | file texts (above) |
 | `RUECA_BENCH_VECTOR_DIR` | `bench/.cache/vectors` | the vector cache (share it across checkouts) |
+| `RUECA_BENCH_VECTOR_CPU` | `0` | `1`: `rueca embed --cpu`, tag suffix `-cpu`, its own cache namespace `<model key>-cpu/` (vectors embedded on the CPU, never mixed with the default backend's): the backend overlap row (below) |
 
 **Vector cache** (`embed.py`). Rows are stored at the model's full width as
 float16, append-only, per namespace:
@@ -317,6 +326,226 @@ Cost: one `rueca query` process per call loads the model (about 0.2 s), so
 22 settings × 2 variants × 118 instances are about 5,200 calls; indexing
 pays the lexical index once per instance, embeddings only on the first
 commit of each repository (the shared cache).
+
+### Second stage: expansion, centrality prior, reranker (RFC 0007 phase 2)
+
+Knobs, read from the environment by every Rueca setting (the binary's own
+names; `arms/rueca.py: RuecaConfig`):
+
+| Variable | Default | Meaning | Tag |
+|---|---|---|---|
+| `RUECA_EXPAND` | `off` | graph expansion edges: `off`, `calls`, `calls+contains`, `calls+contains+imports` | `-x<edges>-d<decay>` |
+| `RUECA_EXPAND_DECAY` | 0.5 | a neighbour inherits its seed's score times this (only with expansion on) | (above) |
+| `RUECA_CENTRALITY_BETA` | 0 | centrality prior exponent | `-b<β>` |
+| `RUECA_RERANK` | `0` | `1`: the tool arguments `rerank: true`, `rerank_k` | `-r<K>` |
+| `RUECA_RERANK_K` | 50 | candidates the reranker scores (1–200) | (above) |
+| `RUECA_RERANK_PRESET` | `qwen3-reranker-0.6b-q8` | reranker preset (its weights must be on disk: checked before any instance) | `-r<K>-<preset>` when not the default |
+
+- They apply in **every mode**: Rueca's second stage runs over the
+  lexical, hybrid and semantic first stages alike (`docs/decisions.md`,
+  2026-11-17). A lexical setting with a stage on is its own arm,
+  `rueca-lexical` (`runs/<suite>/rueca-lexical/lexical<stage tag>/`);
+  today's `rueca` arm (every knob off) keeps `runs/<suite>/rueca/` and, if
+  the caller's environment sets one of these variables, turns it off
+  explicitly on every call so it never expands by accident.
+- A value at its default adds nothing to the tag, so the phase 1
+  directories (`rueca-hybrid/<preset>-a<α>-n<N>-<norm>/`) are unchanged.
+- Expansion and β reach the binary as environment variables (explicit on
+  every call of a non-plain setting); the reranker is a tool argument, so
+  settings that differ only in the reranker share one batch process.
+- A reranked call may take seconds: its timeout is 600 s.
+
+### `rueca query --batch` (RFC 0007 phase 3)
+
+The contract the bench codes against (`arms/batch.py`; the fake binary in
+`tests/fake_rueca.py` implements it):
+
+- `rueca query --batch <file> [--root PATH | --org FILE] --store DIR`;
+  `<file>` is JSON Lines, one request per line: `{"tool": "search_symbols",
+  "args": {...}}` (the arguments exactly as a single `rueca query <tool>
+  '<args>'` takes them); never with `--text`;
+- stdout: one line per request, in input order, each the JSON a single call
+  prints (its envelope, or `{"error": "..."}` for that request alone),
+  flushed as it is written; exit status 0 when every line was answered.
+
+Support is detected from `rueca query --help` naming `--batch`; without it
+every caller falls back to one process per call. Where it is used:
+
+- `sweep` (S1): per instance, every query of every setting that shares one
+  process environment (settings differing only in the reranker) in one
+  batch, so the model and the reranker load once per instance and
+  environment;
+- the organization scenario: per question, the organization requests
+  (`--org`) and the per-repository requests (`repo` narrowing, no `--org`)
+  in two batches, the scoring and the efficiency JSON alike (the `--text`
+  renderings stay one process per call); the impact sweep: every question
+  of every setting of one environment in one batch;
+- the latency rows (below): the warm measurement *is* a batch.
+
+The arm keeps batch answers in a memo keyed by tool, arguments, root,
+store, organization file and the setting's environment; `call` pops the
+matching answer (a batch line that errored is not kept: that call runs on
+its own and reports its own error).
+
+### Phase 2 sweeps (RFC 0007 §7.3–§7.6)
+
+```sh
+export UV_NO_EDITABLE=1 RUECA_BIN=$PWD/target/release/rueca
+rueca models pull qwen3-0.6b-q8; rueca models pull qwen3-reranker-0.6b-q8     # or `rueca models import`
+# S1, calibration split (the base: `run --arm grep --suite s1 --split calibration` first)
+uv run --project bench rueca-bench sweep --mode hybrid --alpha 0.5 --norm minmax \
+    --expand off,calls,calls+contains,calls+contains+imports --decay 0.5,0.25 --prune --json /tmp/expand.json
+uv run --project bench rueca-bench sweep --mode hybrid --alpha 0.5 --norm minmax --beta 0,0.5,1 --prune
+uv run --project bench rueca-bench sweep --mode hybrid --alpha 0.5 --norm minmax --rerank on,off --rerank-k 20,50 --prune
+# the organization's impact kind (the base: `run --arm grep --suite org` first)
+uv run --project bench rueca-bench sweep --suite org --mode hybrid --alpha 0.5 --norm minmax \
+    --expand off,calls,calls+contains,calls+contains+imports --decay 0.5,0.25
+uv run --project bench rueca-bench sweep ... --report-only      # tables and choice from the cached outputs
+```
+
+`--expand`, `--decay`, `--beta`, `--rerank` (`on`/`off`), `--rerank-k` are
+comma lists crossed with the fusion grid (`--alpha`, `--norm`, `--n`); a
+decay only with expansion on and a K only with the reranker on, duplicates
+dropped. `--mode lexical` sweeps the second stage over BM25 (no fusion
+grid; its all-off setting is today's `rueca` arm, run with its efficiency
+search so its outputs are that arm's). Every setting has its own run
+directory (tag above). When the settings differ in the second stage, the
+report prints, after the `compare` tables:
+
+- **the choice** (`phase2.py`, §7.6's plateau rule extended): the
+  objective (macro over languages of ½ (File Acc@5 + Function Acc@10),
+  `--variant`) of every setting; among those within one instance (1 / n
+  pooled) of the best, the **cheapest**: the reranker off (then the smaller
+  K), edges `off` < `calls` < `calls+contains` <
+  `calls+contains+imports`, β 0 (then the smaller β); ties by the higher
+  objective; then the same choice without each language;
+- **the reranker gate** (§7.5), for every reranked setting whose twin
+  without the reranker was swept, over the instances both answered:
+  Δ pooled Function Acc@10 ≥ +3 points **and** pooled File Acc@5 down by at
+  most one instance (1 / n), per variant with paired bootstrap intervals,
+  and the verdict (`✅ holds` / `❌ fails`) on `--variant` (`both`: the mean
+  of the `kw` and `raw` differences).
+
+A fusion-only sweep (no second-stage knob varies) prints the α plateau as
+before.
+
+`--suite org` (`org.run_impact_sweep`) indexes the organization once (with
+the first setting's vectors) and asks every **impact** question under each
+setting — the organization answer only, no per-repository merge, no
+efficiency search — into `runs/org/sweep/impact-<split>-<arm>--<tag>.json`;
+the report pairs each setting's consumer hit@10 against BM25's organization
+answer (`multirepo-<split>-grep.json`), with the §11.2 floor (interval not
+below 0) and target (Δ ≥ +10, interval above 0), and the cheapest setting
+within one instance of the best hit@10. The calibration organization has no
+impact instance (no library member among its calibration repositories), so
+`--suite org` reads the **gated** split by default: a diagnostic of the
+gated population, printed as such — the S1 sweeps on the calibration split
+choose; the impact sweep shows what the choice does to the impact row.
+
+Cost: the reranker is 2.6 s (K 20) to 6 s (K 50) per query on an M-series
+GPU, 4.5–16 s on its CPU (`docs/decisions.md`): `--rerank on,off
+--rerank-k 20,50` is three settings (off, K 20, K 50), and its reranked
+calls over 118 calibration instances × 2 variants are about 35 min on
+Metal *(estimate: 236 × (2.6 + 6) s)*, the reranker loaded once per
+instance by the batch.
+
+### Organization scenario in hybrid mode (RFC 0007 phase 3)
+
+```sh
+RUECA_BENCH_RUECA_MODE=hybrid RUECA_EXPAND=calls uv run --project bench rueca-bench run --arm rueca --suite org --only gated
+RUECA_BENCH_RUECA_MODE=hybrid RUECA_EXPAND=calls uv run --project bench rueca-bench report
+```
+
+With a vector or second-stage setting the Rueca arm (`rueca-hybrid`,
+`rueca-semantic`, `rueca-lexical`) also runs the multi-repository
+scenario (issue and impact kinds; multi-ref, cross-repository and S2 stay
+lexical: they do not rank by `search_symbols` similarity):
+
+- every member is indexed with `rueca index --org <file> <root> --json
+  --embed=<preset>` (phase 3), with `RUECA_VECTOR_DIR` the same shared
+  store vector cache as S1's, so a member already embedded at that commit
+  by S1 (or by a previous organization run) embeds nothing; each step's
+  `vectors` report is kept in `index`;
+- every request carries the setting: `mode`, the reranker's arguments, and
+  the fusion and second-stage environment, on the organization answer, the
+  per-repository answers and the efficiency searches alike;
+- outputs: `runs/org/multirepo-<split>-<arm>--<tag>.json` (stores under
+  `.cache/org/<arm>--<tag>/`, deleted after), never colliding with the
+  lexical `multirepo-<split>-rueca.json` nor with another setting; the
+  report scores every setting found (key `<arm>:<tag>`, the `compare`
+  spelling) next to `rueca`, `grep` and `cbm`, and pairs each setting's
+  organization answer against BM25's and lexical Rueca's (issue: File
+  Acc@5, Function Acc@10; impact: consumer hit@10, own File Acc@5).
+
+Rows read by the §11.2 table (below) for the setting the environment names:
+organization File Acc@5 over the same setting's single-repository answer
+(floor ≥ 0.85×, target ≥ 0.95×), with lexical Rueca's ratio and the hybrid
+organization answer over the lexical single answer next to it; hybrid −
+BM25 on File Acc@5 (reported); **impact hit@10** hybrid (+ expansion) −
+BM25, paired (floor: interval not below 0; target: Δ ≥ +10 with the
+interval above 0); tokens per correct answer, hybrid over lexical.
+
+### Latency rows (RFC 0007 §11.2, `latency.py`)
+
+```sh
+RUECA_BENCH_RUECA_MODE=hybrid uv run --project bench rueca-bench run --arm rueca --suite health --rerank-sample 3
+```
+
+`--arm rueca-hybrid --suite health` measures, over the health suite's
+gated corpus repositories (every S1 repository at its first instance's base
+commit, every S3 repository at its tag), each indexed once with `--embed`
+(the shared vector cache), the reranker forced off for the first rows:
+
+| Row | How |
+|---|---|
+| hybrid p95, **warm**, keyword-length | one `rueca query --batch` per repository over every gated S1 `kw` query of that repository and every S3 lookup name (its gold's lookup sample), `mode: hybrid`, at the scoring limits; per request the time between answer lines; the first answer (process start, model load) is reported apart and left out |
+| hybrid p95, **cold process** | one `rueca query` process per keyword query (at most 20 per repository): what a shell call costs |
+| raw-query hybrid p95, warm | the S1 `raw` queries, same batch |
+| reranker p95, K 20 and K 50 | the first `--rerank-sample` keyword queries per repository, `rerank: true`, one batch per backend after a discarded warm-up; seconds per request and the envelope's `retrieval.reranker.ms` |
+
+Backends: the default (Metal on a Mac) and the CPU when `rueca query`
+exposes a switch: a `--cpu` flag in `rueca query --help`, else a
+`RUECA_EMBED_CPU` variable the help names; the binary of this branch has
+neither (`--cpu` exists on `rueca embed` and `rueca rerank` only), so the
+CPU reranker row is reported as unavailable, naming why. Without
+`--batch` only the cold rows are measured. Raw outputs:
+`.cache/runs/health/rueca-hybrid/<tag>/<name>.json`; p95 with the
+binomial order-statistic interval, pooled over repositories.
+
+### Backend overlap (RFC 0007 §9, §11.2)
+
+```sh
+uv run --project bench rueca-bench run --arm vector --suite s1 --split calibration
+RUECA_BENCH_VECTOR_CPU=1 uv run --project bench rueca-bench run --arm vector --suite s1 --split calibration
+uv run --project bench rueca-bench compare --arms vector:<tag> vector:<tag>-cpu      # the overlap table
+```
+
+The vector arm on the CPU (`RUECA_BENCH_VECTOR_CPU=1`: `rueca embed
+--cpu`, tag `…-cpu`, cache namespace `<model key>-cpu/`, so no vector is
+shared between backends) against the same setting on the default backend:
+the §11.2 row is the mean top-10 Jaccard of files and of functions over the
+common calibration instances, per variant, the lowest of the four against
+the floor 0.9.
+
+### RFC 0007 §11.2 table in `report`
+
+`report` adds an *RFC 0007 §11.2 acceptance table* (`rfc0007.py`;
+`scorecard.json` `rfc0007`): every row of the RFC's table — Metric, Today,
+Floor, Target, Status (✅ met with the interval on the right side, ⚠ met
+but the interval crosses the floor, ❌ not met, `reported`, `pending`) —
+from the cached runs: the S1 rows of the *Semantic search gates*, the
+organization rows (the setting the environment names), the CoIR cheap
+profile (`bench/results/coir/<preset>-native-512.json`), the hybrid and
+lexical latency rows, the reported row (reranker p95 per backend, raw-query
+p95, symbols/s and the cold embed time from the hybrid S1 index reports),
+the re-index row (a Rust test, not a bench row), tokens per correct answer
+(S1 efficiency searches of the hybrid arm over lexical Rueca's on the same
+gated queries, and the organization's), and the backend overlap. Run
+`report` with the environment of the runs it should read
+(`RUECA_BENCH_RUECA_MODE`, fusion and second-stage knobs). `check` compares
+the rows with a floor (latency rows excepted, as RFC 0004's) and treats a
+row the current run did not measure as a note, not a regression (the CI
+regression job computes no embeddings).
 
 ### CoIR runner (RFC 0007 §11.1)
 
@@ -664,7 +893,10 @@ from the committed `bench/results/*.json`. `check` fails when any gated floor
 metric of any language (or of the configuration card) moved the wrong way by
 more than the half-width of its committed 95% interval, or disappeared.
 Query latency is not compared (CI runners are not the machine that produced
-the published numbers) and neither are tokens (no floor). The regenerated
+the published numbers) and neither are tokens (no floor). The RFC 0007
+§11.2 rows with a floor (`scorecard.json` `rfc0007`) are compared when the
+current run measured them; a missing one is a note (the job computes no
+embeddings). The regenerated
 results are uploaded as an artifact. Runtime on `ubuntu-latest`: about
 60–90 min with a cold cache (datasets, every gold set, the SCIP indexers),
 about 40–60 min warm (estimates from local timings; the first scheduled run
@@ -1332,7 +1564,12 @@ single answer, and `tokens` = the sum over per-member top-10 answers
 (`null` when the arm has no rendered answer, as BM25). Scoring, statistics
 and the report pick the arm up from its raw output
 (`.cache/runs/org/multirepo-<split>-<arm>.json`); add it to
-`orgstats.ARMS` and to `orgstats.COMPARISONS` for its paired rows.
+`orgstats.ARMS` and to `orgstats.COMPARISONS` for its paired rows. Rueca's
+own vector and second-stage settings need none of this: they reuse
+`_multirepo_rueca` (`org.RUECA_SETTING_ARMS`), write
+`multirepo-<split>-<arm>--<tag>.json` and are paired against BM25 and
+lexical Rueca automatically (`orgstats.comparisons`; *Organization scenario
+in hybrid mode* above).
 
 **Routing calibration** (RFC 0004 §7.7; `uv run --project bench python -m
 rueca_bench.org calibrate [ROUTE ...] [--force]`, not part of `run`).
@@ -1826,6 +2063,15 @@ carried forward).
   question, callable universe filter, confidence ≥ 0.6 row.
 
 ## Deviations from the RFCs
+
+- RFC 0007 §7.6 tunes on the calibration split only; the organization's
+  impact kind exists only on the gated split (the calibration organization
+  has no library member), so `sweep --suite org` reads the gated split and
+  says so. It shows what the S1-chosen second stage does to the impact row;
+  it is not where the choice is made.
+- RFC 0007 §11.1 measures hybrid latency "on a warm `rueca mcp`"; the bench
+  uses one `rueca query --batch` process instead (the same warm engine,
+  without the MCP framing), the cold-process p95 next to it.
 
 - RFC 0001 §15 lists NDCG; the alpha report gives Acc@k, Recall@k and MRR
   (LocBench's reported metrics). NDCG can be computed from

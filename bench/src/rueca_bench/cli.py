@@ -1,10 +1,11 @@
 """rueca-bench command line.
 
   rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
-  rueca-bench run    --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all} --suite {s1,s3,data,health,org,s2,lite,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force] [--split gated|calibration] [--limit N]
+  rueca-bench run    --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,rueca-lexical,all} --suite {s1,s3,data,health,org,s2,lite,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force] [--split gated|calibration] [--limit N]
   rueca-bench coir   [--profile cheap|full] [--preset P] [--dims N] [--max-tokens N] [--instruction task|preset|TEXT] [--tasks A,B] [--limit-corpus N]
   rueca-bench compare --arms ARM[:TAG] ... [--base grep] [--split calibration|gated|all] [--variant kw|raw|both] [--cache DIR] [--json OUT]
-  rueca-bench sweep  --arm rueca --mode hybrid|semantic [--alpha A,B,...] [--norm minmax,theoretical] [--n N,...] [--split calibration] [--lang FAMILY ...]
+  rueca-bench sweep  --arm rueca --mode lexical|hybrid|semantic [--suite s1|org] [--alpha A,B,...] [--norm minmax,theoretical] [--n N,...]
+                     [--expand off,calls,...] [--decay 0.5,0.25] [--beta 0,0.5,1] [--rerank on,off] [--rerank-k 20,50] [--split calibration|gated] [--lang FAMILY ...]
   rueca-bench report [--s2-only]
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
@@ -13,9 +14,12 @@ Language families are the manifest `[languages]` keys (python, ecma, php, ...);
 `data` selects the data-format suite (manifest `[[data.repos]]`). `vector`
 (dense retrieval through `rueca embed`) and `rueca-hybrid` / `rueca-semantic`
 (Rueca indexed with `--embed`; also `--arm rueca` with
-RUECA_BENCH_RUECA_MODE=hybrid|semantic) run the localization suites only (s1,
-lite) and are never part of `--arm all`; `lite` (the SWE-bench Lite
-diagnostic) is never part of `--suite all`.
+RUECA_BENCH_RUECA_MODE=hybrid|semantic) and `rueca-lexical` (a second stage
+on: RUECA_EXPAND, RUECA_CENTRALITY_BETA, RUECA_RERANK) run the localization
+suites (s1, lite) and the multi-repository organization scenario (org), and
+`rueca-hybrid` the RFC 0007 latency rows (health); they are never part of
+`--arm all`; `lite` (the SWE-bench Lite diagnostic) is never part of
+`--suite all`.
 """
 
 from __future__ import annotations
@@ -31,12 +35,13 @@ from . import compare as compare_mod
 from . import contracts as contracts_mod
 from . import data as data_mod
 from . import health as health_mod
+from . import latency as latency_mod
 from . import lite as lite_mod
 from . import org as org_mod
 from . import report as report_mod
 from . import s1, s3
 from . import sweep as sweep_mod
-from .arms import ARM_NAMES, S1_ARM_NAMES, canonical_arm, make_arm
+from .arms import ARM_NAMES, RUECA_MODE_ARMS, S1_ARM_NAMES, canonical_arm, make_arm
 from .arms.rueca import rueca_binary
 from .common import CACHE, RUNS_DIR, WORK_DIR, families, log, write_json
 from .embed import DEFAULT_MAX_TOKENS, DEFAULT_PRESET
@@ -121,15 +126,30 @@ def _compare(a: argparse.Namespace) -> None:
     print(compare_mod.render(res, a.variant), end="")
 
 
+def _sweep_split(a: argparse.Namespace) -> str:
+    """Tuning reads the calibration split; the impact kind exists on the
+    gated organization only (README, *Phase 2 sweeps*)."""
+    split = a.split or ("gated" if a.suite == "org" else "calibration")
+    if a.suite == "s1" and split != "calibration":
+        raise SystemExit("rueca-bench sweep: S1 sweeps tune on the calibration split only (RFC 0004 §7.7)")
+    return split
+
+
 def _sweep(a: argparse.Namespace, langs: set[str] | None) -> None:
     try:
         sw = sweep_mod.Sweep(
             mode=a.mode,
             preset=a.preset,
             alphas=sweep_mod.parse_alphas(a.alpha),
-            norms=[x.strip() for x in a.norm.split(",") if x.strip()],
-            ns=[int(x) for x in a.n.split(",") if x.strip()],
-            split=a.split,
+            norms=sweep_mod.parse_list(a.norm),
+            ns=sweep_mod.parse_list(a.n, int),
+            split=_sweep_split(a),
+            expands=sweep_mod.parse_list(a.expand),
+            decays=sweep_mod.parse_list(a.decay, float),
+            betas=sweep_mod.parse_list(a.beta, float),
+            reranks=sweep_mod.parse_list(a.rerank, bool),
+            rerank_ks=sweep_mod.parse_list(a.rerank_k, int),
+            suite=a.suite,
         )
         sw.configs()
     except ValueError as exc:
@@ -140,6 +160,15 @@ def _sweep(a: argparse.Namespace, langs: set[str] | None) -> None:
     if a.json:
         write_json(Path(a.json), res)
     print(text, end="")
+
+
+def _health(a: argparse.Namespace, arms: list[str], langs: set[str] | None) -> None:
+    """Health (S5) for the lexical arm; the RFC 0007 §11.2 latency rows
+    (warm batch, cold process, reranker) for `rueca-hybrid`."""
+    if "rueca" in arms:
+        health_mod.run(languages=langs, force=a.force, only=a.only, prune=a.prune)
+    if "rueca-hybrid" in arms:
+        latency_mod.run(languages=langs, force=a.force, only=a.only, prune=a.prune, rerank_sample=a.rerank_sample)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -163,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--prune", action="store_true", help="delete each repository clone once its runs are done (bounded disk, e.g. CI)")
     rp.add_argument("--limit", type=int, default=None, help="lite: the first N instances (sha256 order)")
     rp.add_argument("--split", choices=["gated", "calibration"], default=None, help="s1: only the instances of one split")
+    rp.add_argument("--rerank-sample", type=int, default=latency_mod.RERANK_SAMPLE, help="health with rueca-hybrid: keyword queries per repository timed with the reranker (K 20 and 50)")
 
     op = sub.add_parser("coir", help="CoIR nDCG@10 of a `rueca embed` preset (needs `--group coir`)")
     op.add_argument("--profile", choices=sorted(coir_mod.PROFILES), default="cheap")
@@ -185,11 +215,16 @@ def main(argv: list[str] | None = None) -> int:
     mp.add_argument("--cache", default=None, help="bench cache to read (default: this checkout's .cache); never written")
     mp.add_argument("--json", default=None, help="also write the result as JSON to this file")
 
-    wp = sub.add_parser("sweep", help="RFC 0007 §7.6 fusion sweep of the Rueca arm on the calibration split, then compare tables and the plateau choice")
-    wp.add_argument("--suite", choices=["s1"], default="s1")
-    wp.add_argument("--split", choices=["calibration"], default="calibration", help="tuning happens on the calibration split only (RFC 0004 §7.7)")
+    wp = sub.add_parser("sweep", help="RFC 0007 §7.6 fusion and phase 2 (expansion, centrality, reranker) sweeps of the Rueca arm, then compare tables and the choice")
+    wp.add_argument("--suite", choices=["s1", "org"], default="s1", help="s1 (calibration split) or org (the organization's impact kind)")
+    wp.add_argument("--split", choices=["calibration", "gated"], default=None, help="s1: calibration only (RFC 0004 §7.7); org: gated by default (the calibration organization has no impact instance)")
     wp.add_argument("--arm", choices=["rueca"], default="rueca")
-    wp.add_argument("--mode", choices=["hybrid", "semantic"], default="hybrid")
+    wp.add_argument("--mode", choices=["lexical", "hybrid", "semantic"], default="hybrid")
+    wp.add_argument("--expand", default="off", help="comma list of off, calls, calls+contains, calls+contains+imports (RUECA_EXPAND)")
+    wp.add_argument("--decay", default="0.5", help="comma list of expansion decays (RUECA_EXPAND_DECAY; only with expansion on)")
+    wp.add_argument("--beta", default="0", help="comma list of centrality prior exponents (RUECA_CENTRALITY_BETA)")
+    wp.add_argument("--rerank", default="off", help="comma list of on, off (tool argument `rerank`)")
+    wp.add_argument("--rerank-k", default="50", help="comma list of reranker candidates (tool argument `rerank_k`; only with the reranker on)")
     wp.add_argument("--alpha", default="0,0.1,...,1", help="comma list, or first,second,...,last (semantic mode: ignored)")
     wp.add_argument("--norm", default="minmax,theoretical", help="comma list of minmax, theoretical")
     wp.add_argument("--n", default="100", help="comma list of candidates per list (RUECA_FUSION_N)")
@@ -232,8 +267,8 @@ def main(argv: list[str] | None = None) -> int:
         wanted = _suites(a.suite)
         loc_arms = arms
         arms = [x for x in arms if x in ARM_NAMES]
-        if "health" in wanted and run_code and "rueca" in arms:
-            health_mod.run(languages=code_langs, force=a.force, only=a.only, prune=a.prune)
+        if "health" in wanted and run_code:
+            _health(a, loc_arms, code_langs)
         if "s1" in wanted and run_code:
             s1.run(loc_arms, workers=a.workers, only=a.only, force=a.force, languages=code_langs, prune=a.prune, split=a.split)
         if "lite" in wanted:
@@ -243,8 +278,9 @@ def main(argv: list[str] | None = None) -> int:
         if "data" in wanted and (not langs or "data" in langs):
             data_mod.run(arms, only=a.only, force=a.force)
         if "org" in wanted and not langs:
-            # self-contained: the single-repository answers come from the same org run
-            org_mod.run_all(arms, force=a.force, only=a.only)
+            # self-contained: the single-repository answers come from the same org run;
+            # Rueca's vector / second-stage settings run the multi-repository scenario
+            org_mod.run_all(arms + [x for x in loc_arms if x in RUECA_MODE_ARMS], force=a.force, only=a.only)
         if "s2" in wanted and not langs:
             contracts_mod.run(arms, force=a.force)  # cross-service edges (S2): one organization per group
     elif a.cmd == "coir":

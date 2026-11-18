@@ -1,5 +1,8 @@
 """`rueca-bench sweep`: the fusion sweep of RFC 0007 §7.6 on the calibration
-split, through the Rueca arm in `hybrid` (or `semantic`) mode.
+split, through the Rueca arm in `hybrid` (or `semantic`) mode, and the
+phase 2 sweeps of the second stage (`--expand`, `--decay`, `--beta`,
+`--rerank`, `--rerank-k`; any mode, `lexical` included) on S1 and on the
+organization's impact kind (`--suite org`).
 
 Every setting is a `RuecaConfig` (α × normalization × N, one preset) with
 its own run directory, `runs/s1/rueca-<mode>/<preset>-a<α>-n<N>-<norm>/`,
@@ -11,7 +14,28 @@ are re-run for each pending setting: the fusion knobs reach the binary as
 `RUECA_FUSION_ALPHA` / `_N` / `_NORM`. The efficiency search is skipped
 (tuning reads localization only).
 
-Then the `compare` tables (base `grep` by default) and the plateau choice:
+Batching: when `rueca query --help` names `--batch`, the queries of an
+instance under every setting that shares one process environment (settings
+that differ only in the reranker, a tool argument) are answered by one
+`rueca query --batch` process (`arms/batch.py`), so the model and the
+reranker load once per instance; otherwise one process per call.
+
+**Second stage** (`phase2.py`): when the settings differ in the second
+stage, the choice is the cheapest setting within one instance of the best
+(edges off < calls < …, β 0, reranker off preferred), the leave-one-out
+check redoes it without each language, and every reranked setting whose
+twin without the reranker was swept gets the §7.5 gate (Δ Function Acc@10
+pooled ≥ +3 and File Acc@5 down by at most one instance). `--suite org`
+asks the organization's impact questions under every setting
+(`org.run_impact_sweep`: one organization index, the organization answer
+only) and reads consumer hit@10 against BM25's organization answer
+(`run --arm grep --suite org` first); the calibration organization has no
+impact instance (no library member), so this sweep reads the gated split
+(`--split gated`, the default for `--suite org`) — a diagnostic on the
+gated population, stated as such in its output.
+
+Then, for a fusion sweep, the `compare` tables (base `grep` by default) and
+the plateau choice:
 
 - objective: macro over languages of ½ (File Acc@5 + Function Acc@10),
   `both` = the mean of `kw` and `raw` (the default), or one variant;
@@ -35,14 +59,23 @@ import itertools
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import s1
-from .arms.rueca import RuecaArm, RuecaConfig
-from .common import CACHE, RUNS_DIR, load_manifest, log, read_json, safe_name, write_json
+from . import org as org_mod
+from . import phase2, s1
+from .arms.rueca import DEFAULT_ALPHA, DEFAULT_DECAY, DEFAULT_FUSION_N, DEFAULT_NORM, DEFAULT_RERANK_K, RuecaArm, RuecaConfig
+from .common import CACHE, RUNS_DIR, load_manifest, log, read_json, safe_name, scorecard_spec, write_json
 from .compare import POOLED, Comparison, macro_objective, render
 from .corpus import worktree
 from .metrics import mean
 
 EPS = 1e-9
+
+
+def parse_list(text: str, kind: type = str) -> list:
+    """A comma list (`0.5,0.25`, `on,off`, `20,50`)."""
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if kind is bool:
+        return [p.lower() in ("on", "1", "true", "yes") for p in parts]
+    return [kind(p) for p in parts]
 
 
 def parse_alphas(text: str) -> list[float]:
@@ -77,16 +110,38 @@ class Sweep:
     norms: list[str] = field(default_factory=lambda: ["minmax", "theoretical"])
     ns: list[int] = field(default_factory=lambda: [100])
     split: str = "calibration"
+    expands: list[str] = field(default_factory=lambda: ["off"])
+    decays: list[float] = field(default_factory=lambda: [DEFAULT_DECAY])
+    betas: list[float] = field(default_factory=lambda: [0.0])
+    reranks: list[bool] = field(default_factory=lambda: [False])
+    rerank_ks: list[int] = field(default_factory=lambda: [DEFAULT_RERANK_K])
+    suite: str = "s1"
+
+    def _first_stages(self) -> list[tuple[float, int, str]]:
+        """(α, N, normalization): lexical mode has no fusion; semantic
+        ignores α (α = 0)."""
+        if self.mode == "lexical":
+            return [(DEFAULT_ALPHA, DEFAULT_FUSION_N, DEFAULT_NORM)]
+        alphas = [0.0] if self.mode == "semantic" else self.alphas
+        return [(a, n, norm) for norm, n, a in itertools.product(self.norms, self.ns, alphas)]
+
+    def _second_stages(self) -> list[dict]:
+        """Decay only with expansion on, K only with the reranker on."""
+        grid = itertools.product(self.expands, self.decays, self.betas, self.reranks, self.rerank_ks)
+        return [{"expand": e, "decay": d if e != "off" else DEFAULT_DECAY, "beta": b, "rerank": r, "rerank_k": k if r else DEFAULT_RERANK_K} for e, d, b, r, k in grid]
 
     def configs(self) -> list[RuecaConfig]:
-        """Every setting (α = 0 only in `semantic` mode, which ignores α)."""
+        """Every setting, without duplicates, in grid order."""
         base = RuecaConfig.from_env(mode=self.mode)
         preset = self.preset or base.preset
-        alphas = [0.0] if self.mode == "semantic" else self.alphas
-        return [RuecaConfig(self.mode, preset, a, n, norm) for norm, n, a in itertools.product(self.norms, self.ns, alphas)]
+        out: dict[str, RuecaConfig] = {}
+        for (a, n, norm), st in itertools.product(self._first_stages(), self._second_stages()):
+            c = RuecaConfig(self.mode, preset, a, n, norm, rerank_preset=base.rerank_preset, **st)
+            out.setdefault(c.label(), c)
+        return list(out.values())
 
     def columns(self) -> list[str]:
-        return [f"{c.arm_name}:{c.tag()}" for c in self.configs()]
+        return [c.label() for c in self.configs()]
 
     # -- running ----------------------------------------------------------------------
 
@@ -96,19 +151,34 @@ class Sweep:
         if not arm.available()[0]:
             raise SystemExit(f"rueca-bench sweep: {arm.available()[1]}")
         try:
-            arm.preflight()
+            for cfg in configs if any(c.rerank for c in configs) else configs[:1]:
+                arm.with_config(cfg).preflight()
         except RuntimeError as exc:
             raise SystemExit(f"rueca-bench sweep: {exc}") from exc
         arm.version()  # once: shared by every setting's records
+        log(f"sweep: {len(configs)} settings ({configs[0].arm_name}), {'one `rueca query --batch` per instance and environment' if arm.supports_batch else 'one process per call'}")
+        if self.suite == "org":
+            org_mod.run_impact_sweep(arm, configs, self.split, force, set(only) if only else None)
+            return
         insts = s1.select_instances(only, languages, self.split)
         limit = load_manifest()["s1"].get("result_limit", 100)
-        log(f"sweep: {len(insts)} instances x {len(configs)} settings ({configs[0].arm_name})")
+        log(f"sweep: {len(insts)} instances")
         s1.by_repo(insts, lambda inst: sweep_instance(arm, inst, configs, limit, force), "sweep", workers, prune)
 
     # -- reading ----------------------------------------------------------------------
 
+    def comparison(self, base: str = "grep", cache: Path | None = None) -> Comparison:
+        return Comparison(cache or CACHE, self.split, base, self.columns())
+
     def compare(self, base: str = "grep", cache: Path | None = None) -> dict:
-        return Comparison(cache or CACHE, self.split, base, self.columns()).run()
+        return self.comparison(base, cache).run()
+
+
+def _prefetch(arm: RuecaArm, h, configs: list[RuecaConfig], qs: dict[str, str], limit: int) -> None:
+    """Every scoring query of every setting, one batch per environment."""
+    for group in arm.env_groups(configs):
+        reqs = [("search_symbols", arm.with_config(c).search_args(q, limit), "scoring") for c in group for q in qs.values()]
+        arm.with_config(group[0]).prefetch(reqs, h.root, h.state["store"])
 
 
 def sweep_instance(arm: RuecaArm, inst: dict, configs: list[RuecaConfig], limit: int, force: bool) -> None:
@@ -124,11 +194,14 @@ def sweep_instance(arm: RuecaArm, inst: dict, configs: list[RuecaConfig], limit:
         log(f"sweep index {inst['id']} ({len(pending)} settings)")
         rec0, h = s1.index_record(first, inst, root)
         try:
+            if h.ok:
+                _prefetch(arm, h, pending, qs, limit)
             for cfg in pending:
                 one = arm.with_config(cfg)
                 rec = {**rec0, "arm": one.name, "setting": cfg.as_dict()}
                 if h.ok:
-                    s1.query_record(one, h, rec, qs, limit, eff=False)
+                    # today's lexical arm keeps its efficiency search: its outputs are the `rueca` arm's
+                    s1.query_record(one, h, rec, qs, limit, eff=cfg.plain)
                 rec["arm_version"] = one.version()
                 write_json(output_path(cfg, inst["id"]), rec)
         finally:
@@ -295,8 +368,69 @@ def render_plateau(p: dict) -> str:
     return "\n".join(L) + "\n"
 
 
+def stage2_choice(res: dict, configs: list[RuecaConfig], variant: str) -> tuple[dict | None, list[dict]]:
+    """The cheapest setting within one instance of the best, and the same
+    choice without each language (`phase2`)."""
+    labels = [c.label() for c in configs]
+    n = _pooled_n(res, labels)
+    choice = phase2.cheapest_within({k: objective(res, k, variant) for k in labels}, configs, n)
+    if choice is None:
+        return None, []
+    groups = [(g, n_g) for g in res["groups"] if (n_g := _group_n(res, labels, g))]
+    lolo = phase2.leave_one_out(lambda g: {k: objective(res, k, variant, g) for k in labels}, groups, configs, n)
+    return choice, lolo
+
+
+def _s1_report(sweep: Sweep, base: str, variant: str, cache: Path | None) -> tuple[str, dict]:
+    cmp = sweep.comparison(base, cache)
+    res = cmp.run()
+    configs = sweep.configs()
+    text = render(res, variant) + "\n"
+    if not phase2.varies_stage2(configs):
+        p = plateau(res, configs, variant)
+        return text + render_plateau(p), {"compare": res, "plateau": p}
+    choice, lolo = stage2_choice(res, configs, variant)
+    gates = phase2.rerank_gates(cmp.rows, configs, variant)
+    text += phase2.render_choice(choice, lolo) + "\n" + phase2.render_gates(gates, variant)
+    return text, {"compare": res, "choice": choice, "leave_one_out": lolo, "rerank_gates": gates}
+
+
+def _org_row(r: dict) -> str:
+    p = r.get("paired") or {}
+    ci = p.get("ci")
+    floor, target = phase2.impact_status(p.get("diff"), ci)
+    delta = "—" if p.get("diff") is None else f"{100 * p['diff']:+.1f}" + (f" ({100 * ci[0]:+.1f} … {100 * ci[1]:+.1f})" if ci else "")
+    hit = r.get("consumer_hit@10")
+    own = r.get("file_acc@5")
+    return f"| `{r['setting']}` | {r['n']} | {'—' if hit is None else f'{100 * hit:.1f}'} | {delta} | {floor} | {'met' if target else 'not met'} | {'—' if own is None else f'{100 * own:.1f}'} |"
+
+
+def _org_report(sweep: Sweep) -> tuple[str, dict]:
+    sc = scorecard_spec()
+    configs = sweep.configs()
+    res = org_mod.score_impact_sweep(sweep.split, configs, int(sc.get("bootstrap_resamples", 10000)), int(sc.get("bootstrap_seed", 20261025)))
+    n = max((r["n"] for r in res["settings"]), default=0)
+    choice = phase2.cheapest_within({r["setting"]: r.get("consumer_hit@10") for r in res["settings"]}, configs, n)
+    L = [
+        f"# Organization impact sweep — split `{sweep.split}` (RFC 0007 §7.3, §11.2)",
+        "",
+        "Consumer hit@10 of the organization answer per setting, paired against BM25's organization answer over the instances both have "
+        f"({'base: ' + res['base'] if res['base'] else 'BM25 pending: run `rueca-bench run --arm grep --suite org`'}). Floor: interval not below 0; "
+        "target: Δ ≥ +10 with the interval above 0."
+        + (" The calibration organization has no impact instance: this reads the gated split, a diagnostic on the gated population." if sweep.split == "gated" else ""),
+        "",
+        "| Setting | n | Consumer hit@10 | Δ vs BM25 (95% CI) | Floor | Target | Own File Acc@5 |",
+        "|---|---:|---:|---:|---|---|---:|",
+        *[_org_row(r) for r in res["settings"]],
+        "",
+    ]
+    return "\n".join(L) + "\n" + phase2.render_choice(choice, metric="consumer hit@10"), {"impact": res, "choice": choice}
+
+
 def report(sweep: Sweep, base: str = "grep", variant: str = "both", cache: Path | None = None) -> tuple[str, dict]:
-    """Markdown (compare tables, then the plateau) and the JSON result."""
-    res = sweep.compare(base, cache)
-    p = plateau(res, sweep.configs(), variant)
-    return render(res, variant) + "\n" + render_plateau(p), {"compare": res, "plateau": p}
+    """Markdown and the JSON result: compare tables, then the plateau (a
+    fusion sweep) or the second-stage choice and the reranker gate; the
+    impact table and choice for `--suite org`."""
+    if sweep.suite == "org":
+        return _org_report(sweep)
+    return _s1_report(sweep, base, variant, cache)

@@ -45,11 +45,15 @@ the query flag, so the binary adds the preset's instruction (or
 rows), ties broken by unit order. Sweep knobs (environment, every one part
 of the run directory `runs/s1/vector/<tag>/`): `RUECA_BENCH_VECTOR_PRESET`,
 `_DIMS`, `_MAX_TOKENS`, `_INSTRUCTION`, `_FILE_TEXT` (`1` / `0`), and
-`RUECA_BENCH_VECTOR_DIR` (the vector cache, `embed.vector_dir`).
+`RUECA_BENCH_VECTOR_DIR` (the vector cache, `embed.vector_dir`), and
+`RUECA_BENCH_VECTOR_CPU=1` (`rueca embed --cpu`, its own cache namespace
+`<model key>-cpu` and tag suffix `-cpu`: the backend overlap row of RFC
+0007 §9 / §11.2 compares the two).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import textwrap
@@ -211,6 +215,7 @@ class VectorConfig:
     max_tokens: int = DEFAULT_MAX_TOKENS
     instruction: str | None = None
     file_text: bool = False
+    cpu: bool = False
 
     @classmethod
     def from_env(cls) -> "VectorConfig":
@@ -221,17 +226,23 @@ class VectorConfig:
             max_tokens=_env_int("RUECA_BENCH_VECTOR_MAX_TOKENS") or DEFAULT_MAX_TOKENS,
             instruction=instr if instr else None,
             file_text=os.environ.get("RUECA_BENCH_VECTOR_FILE_TEXT", "0").strip().lower() in ("1", "true", "on", "yes"),
+            cpu=os.environ.get("RUECA_BENCH_VECTOR_CPU", "0").strip().lower() in ("1", "true", "on", "yes"),
         )
 
     def tag(self) -> str:
         """Every knob (and the text builder version): two sweep settings never
         share a run directory."""
         instr = short_hash(self.instruction) if self.instruction else "default"
-        return f"{self.preset}-d{self.dims or 'full'}-t{self.max_tokens}-i{instr}-f{int(self.file_text)}-x{TEXT_VERSION}"
+        return f"{self.preset}-d{self.dims or 'full'}-t{self.max_tokens}-i{instr}-f{int(self.file_text)}-x{TEXT_VERSION}" + ("-cpu" if self.cpu else "")
 
     def describe(self) -> str:
         instr = f"instruction {self.instruction!r}" if self.instruction else "preset instruction"
-        return f"{self.preset}, dims {self.dims or 'full'}, {self.max_tokens} tokens, {instr}, file text {'on' if self.file_text else 'off'}, text v{TEXT_VERSION}"
+        backend = ", CPU (`--cpu`)" if self.cpu else ""
+        return f"{self.preset}, dims {self.dims or 'full'}, {self.max_tokens} tokens, {instr}, file text {'on' if self.file_text else 'off'}, text v{TEXT_VERSION}{backend}"
+
+    def backend_twin(self) -> "VectorConfig":
+        """The same setting on the other backend (default ↔ `--cpu`)."""
+        return dataclasses.replace(self, cpu=not self.cpu)
 
 
 # --- the arm --------------------------------------------------------------------------------
@@ -253,7 +264,7 @@ class VectorArm(Arm):
         self.config = config or VectorConfig.from_env()
         self.bin = rueca_binary()
         if embedder is None and self.bin:
-            embedder = RuecaEmbedder(self.bin, self.config.preset, self.config.max_tokens, self.config.instruction)
+            embedder = RuecaEmbedder(self.bin, self.config.preset, self.config.max_tokens, self.config.instruction, cpu=self.config.cpu, separate_backend=True)
         self.embedder = embedder
         self.cache = CachedEmbedder(embedder, vector_root) if embedder is not None else None
 

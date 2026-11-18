@@ -140,6 +140,9 @@ class RuecaEmbedder:
     cpu: bool = False
     threads: int | None = None
     timeout: float = EMBED_TIMEOUT
+    # cache CPU vectors apart (`<model key>-cpu`): the backend overlap row
+    # (RFC 0007 §9) compares rankings from vectors embedded on each backend
+    separate_backend: bool = False
     _info: dict | None = field(default=None, init=False, repr=False)
 
     def _common_args(self) -> list[str]:
@@ -180,7 +183,8 @@ class RuecaEmbedder:
 
     def namespace(self, query: bool) -> str:
         side = f"query-{self.instruction_tag()}" if query else "doc"
-        return f"{safe_name(self.model_key())}/t{self.max_tokens}/{side}"
+        backend = "-cpu" if self.cpu and self.separate_backend else ""
+        return f"{safe_name(self.model_key())}{backend}/t{self.max_tokens}/{side}"
 
     def command(self, src: Path, out: Path) -> list[str]:
         args = [*self._common_args(), "--max-tokens", str(self.max_tokens)]
