@@ -405,13 +405,17 @@ fn attribute_macros_decorate() {
 
 /// Rust's two namespaces: `mod sleep; pub use sleep::sleep;` binds the
 /// module for paths and types, the function for calls (also through a
-/// `use` of the leaf, a module path and a call result); a `mod x;` next to
-/// a `fn x` in one module splits the same way.
+/// `use` of the leaf, a module path and a call result), whichever of the
+/// two comes first (hyper's `pub use self::to_bytes::to_bytes; mod
+/// to_bytes;`); a `mod x;` next to a `fn x` in one module splits the same
+/// way.
 #[test]
 fn values_and_types_have_their_own_namespaces() {
     let out = build(crate_files(&[
         ("Cargo.toml", "[package]\nname = \"mini\"\n"),
-        ("src/lib.rs", "pub mod time;\nmod app;\nmod same;\n"),
+        ("src/lib.rs", "pub mod time;\npub mod body;\nmod app;\nmod same;\n"),
+        ("src/body/mod.rs", "pub use self::to_bytes::to_bytes;\nmod to_bytes;\n"),
+        ("src/body/to_bytes.rs", "pub fn to_bytes() {}\n"),
         ("src/time/mod.rs", "mod sleep;\npub use sleep::{sleep, Sleep};\n"),
         (
             "src/time/sleep.rs",
@@ -419,7 +423,7 @@ fn values_and_types_have_their_own_namespaces() {
         ),
         (
             "src/app.rs",
-            "use crate::time::sleep;\nuse crate::time;\nfn a() { sleep(1); }\nfn b() { crate::time::sleep(1); }\nfn c() { time::sleep(1); }\nfn d(s: time::sleep::Sleep) { s.reset(); }\nfn e() { time::sleep(1).reset(); }\n",
+            "use crate::time::sleep;\nuse crate::time;\nfn a() { sleep(1); }\nfn b() { crate::time::sleep(1); }\nfn c() { time::sleep(1); }\nfn d(s: time::sleep::Sleep) { s.reset(); }\nfn e() { time::sleep(1).reset(); }\nfn h() { crate::body::to_bytes(); }\n",
         ),
         ("src/same.rs", "mod x;\npub fn x() {}\nfn f() { x(); }\nfn g(y: x::Y) {}\n"),
         ("src/same/x.rs", "pub struct Y;\n"),
@@ -436,6 +440,7 @@ fn values_and_types_have_their_own_namespaces() {
     g.has("mini::app::d", "mini::time::sleep::Sleep.reset", Calls, TypeResolved, 0.85);
     g.has("mini::app::e", "mini::time::sleep::Sleep.reset", Calls, TypeResolved, 0.85);
     g.imports("src/app.rs", "src/time/sleep.rs");
+    g.has("mini::app::h", "mini::body::to_bytes::to_bytes", Calls, ImportResolved, 0.9);
     g.has("mini::same::f", "mini::same::x", Calls, SameModule, 0.9);
     g.has("mini::same::g", "mini::same::x::Y", References, ImportResolved, 0.9);
 }

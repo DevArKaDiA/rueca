@@ -341,7 +341,11 @@ impl Resolver<'_> {
 
     /// The explicit imports of `f` binding `name` (`mod`, `extern crate`,
     /// `use` leaves, anchors), in order, offered to `pick`: `Break` with the
-    /// binding, or with `None` when the first binding's target is not found.
+    /// binding, or with `None` when the name is bound but no binding's
+    /// target is found. A binding whose target is not found does not hide a
+    /// later one: `pub use self::to_bytes::to_bytes;` before `mod
+    /// to_bytes;` (the leaf's path needs the module, which the `use` cannot
+    /// be).
     fn rust_import_pick(
         &self,
         f: FileId,
@@ -349,6 +353,7 @@ impl Resolver<'_> {
         visited: &mut Visited,
         pick: &mut Pick,
     ) -> ControlFlow<Option<Target>> {
+        let mut unresolved = false;
         for (k, imp) in self.imports(f).iter().enumerate() {
             match self.rust_import_binding(f, k, imp, name, pick.ns, visited) {
                 Some(Some(t)) => {
@@ -356,9 +361,12 @@ impl Resolver<'_> {
                         return ControlFlow::Break(Some(t));
                     }
                 }
-                Some(None) if pick.is_empty() => return ControlFlow::Break(None),
-                Some(None) | None => {}
+                Some(None) => unresolved = true,
+                None => {}
             }
+        }
+        if unresolved && pick.is_empty() {
+            return ControlFlow::Break(None);
         }
         ControlFlow::Continue(())
     }
