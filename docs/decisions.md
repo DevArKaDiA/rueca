@@ -1,5 +1,54 @@
 # Decisions log
 
+## 2026-11-17 — Rust: items inside macro invocation bodies; attribute macros are decorators
+
+A demo over the tokio-rs repositories showed `tokio::spawn`,
+`TcpListener`, `UdpSocket` and `AsyncReadExt` missing: tokio declares
+them inside pass-through macros (`cfg_net! { pub mod tcp; pub use
+tcp::listener::TcpListener; }`, `cfg_rt! { … }`, `cfg_if! { if #[cfg(…)]
+{ … } else { … } }`), which tree-sitter keeps as opaque token trees.
+
+- **Opened in place, same length.** An invocation in item or statement
+  position whose body parses on its own as items (a `cfg_if!`-shaped body:
+  every branch) has its delimiters blanked and keeps an empty body
+  (`cfg_net!{}`), before the file is walked; newlines stay, so offsets,
+  lines and texts are the file's, as in the C/C++ pack's same-length
+  preprocessor. Its definitions, `use` / `pub use` and `mod` declarations
+  are then those of the enclosing file, inline module or function, with
+  every existing rule (prepass, local scopes, receiver typing) unchanged,
+  and the invocation is still a call of the macro. Rounds repeat for nested
+  macros (≤ 4); a round that adds parse errors is dropped. Rejected: a
+  separate parse of each body mapped back by an offset, like macro
+  arguments: every item rule, the prepass and type inference would have had
+  to read a second tree. `#[cfg]` stays ignored, so `cfg_if!` branches may
+  define one name twice, as `#[cfg]` items already did.
+- **`mod x;` inside inline modules** (`mod net { mod tcp; }`) is the file
+  below their directories (`net/tcp.rs`), with or without a file for them.
+- **Attribute macros are decorators.** An attribute that is not built in
+  (`#[tokio::main]`, `#[tracing::instrument]`, `#[rstest]`) is a
+  `Decorator` reference of the item (path qualifier normalized like code
+  paths) and its text a `decorators` entry; the resolver's `DECORATES`
+  goes from the `#[proc_macro_attribute] pub fn` to the item, through the
+  crate's re-exports. Built-in and tool attributes and derive helpers
+  (`#[serde(…)]` next to a `#[derive]`) are not references. The micro
+  answer keys are `CALLS`-only, so no micro snippet.
+- Extractor version 3: cached Rust facts are extracted again.
+
+Measured on tokio 1.54.1 (`tokio/src`, 380 files): definitions 6,245 →
+7,002, exported 3,921 → 4,459, imports 3,657 → 4,267; `pub` item lines
+with no definition or import at their line 622 → 52 of 3,349 (the rest are
+`macro_rules!` bodies, comments and bodies in a macro's own syntax);
+parse errors 0 → 0. Whole repository: 15,475 → 16,443 nodes, 44,723 →
+54,835 edges, references resolved 39.3 % → 48.3 % (26,290 / 66,823 →
+32,764 / 67,775). `get_symbol` finds `TcpListener`, `UdpSocket`, `spawn`,
+`AsyncReadExt` and `AsyncReadExt.read`, and `TcpListener.accept` gets its
+callers through `use tokio::net::TcpListener` (`type_resolved`). In the
+tokio-rs organization, 847 link edges are `DECORATES` from
+`tokio_macros::main` / `test` into hyper, tonic, axum, tower and tracing.
+Still open for the resolver: a module and a function with one name
+(`mod spawn; pub use spawn::spawn;`) bind the module, so `tokio::spawn(…)`
+calls stay unresolved.
+
 ## 2026-11-17 — Own MCP layer instead of rmcp
 
 The required `cargo deny` check failed on main with RUSTSEC-2026-0543:
