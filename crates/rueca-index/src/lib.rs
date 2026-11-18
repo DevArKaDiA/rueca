@@ -300,39 +300,8 @@ pub fn index_worktree_with(opts: &IndexOptions, loader: &dyn EmbedderLoader) -> 
         cpp_headers: has_cpp(&paths),
     };
     let loaded: Vec<anyhow::Result<Loaded>> = pool.install(|| paths.par_iter().map(|p| ctx.load(p)).collect());
-    let mut files = Vec::with_capacity(loaded.len());
-    let mut contents: HashMap<String, Vec<u8>> = HashMap::new();
-    let mut configs = std::collections::BTreeMap::new();
-    let (mut extracted, mut skipped, mut partial, mut unsupported, mut hits) = (0u64, 0u64, 0u64, 0u64, 0u64);
-    for l in loaded {
-        let l = match l {
-            Ok(l) => l,
-            Err(e) => {
-                // Vanished or unreadable since the walk: leave it out.
-                warn!("skipping unreadable file: {e:#}");
-                continue;
-            }
-        };
-        if l.cache_hit {
-            hits += 1;
-        }
-        match l.input.status.as_str() {
-            "ok" => extracted += 1,
-            "partial" => {
-                extracted += 1;
-                partial += 1;
-            }
-            "skipped:unsupported" => unsupported += 1,
-            _ => skipped += 1,
-        }
-        if let Some(text) = l.config {
-            configs.insert(l.input.path.clone(), text);
-        }
-        if let Some(bytes) = l.bytes {
-            contents.insert(l.input.path.clone(), bytes);
-        }
-        files.push(l.input);
-    }
+    let Collected { files, contents, configs, tally } = Collected::from_loaded(loaded);
+    let ExtractTally { extracted, skipped, partial, unsupported, hits } = tally;
     // Only files that were read are part of the project (vanished ones are out).
     let project = ProjectFiles { paths: files.iter().map(|f| f.path.clone()).collect(), configs };
     timings.extract_ms = t.elapsed().as_millis() as u64;
@@ -591,6 +560,72 @@ struct ExtractCtx<'a> {
 /// Whether any path is a C++ source or header (decides `.h`).
 fn has_cpp(paths: &[String]) -> bool {
     paths.iter().any(|p| Language::from_path(p) == Some(Language::Cpp))
+}
+
+/// Per-status file counts of the extract phase.
+#[derive(Default)]
+struct ExtractTally {
+    extracted: u64,
+    skipped: u64,
+    partial: u64,
+    unsupported: u64,
+    hits: u64,
+}
+
+impl ExtractTally {
+    fn count(&mut self, l: &Loaded) {
+        if l.cache_hit {
+            self.hits += 1;
+        }
+        match l.input.status.as_str() {
+            "ok" => self.extracted += 1,
+            "partial" => {
+                self.extracted += 1;
+                self.partial += 1;
+            }
+            "skipped:unsupported" => self.unsupported += 1,
+            _ => self.skipped += 1,
+        }
+    }
+}
+
+/// The loaded files split into the resolver's inputs, the writer's kept
+/// contents and the module-resolution configs.
+struct Collected {
+    files: Vec<FileInput>,
+    contents: HashMap<String, Vec<u8>>,
+    configs: std::collections::BTreeMap<String, String>,
+    tally: ExtractTally,
+}
+
+impl Collected {
+    fn from_loaded(loaded: Vec<anyhow::Result<Loaded>>) -> Self {
+        let mut out = Collected {
+            files: Vec::with_capacity(loaded.len()),
+            contents: HashMap::new(),
+            configs: std::collections::BTreeMap::new(),
+            tally: ExtractTally::default(),
+        };
+        for l in loaded {
+            match l {
+                Ok(l) => out.push(l),
+                // Vanished or unreadable since the walk: leave it out.
+                Err(e) => warn!("skipping unreadable file: {e:#}"),
+            }
+        }
+        out
+    }
+
+    fn push(&mut self, l: Loaded) {
+        self.tally.count(&l);
+        if let Some(text) = l.config {
+            self.configs.insert(l.input.path.clone(), text);
+        }
+        if let Some(bytes) = l.bytes {
+            self.contents.insert(l.input.path.clone(), bytes);
+        }
+        self.files.push(l.input);
+    }
 }
 
 struct Loaded {
