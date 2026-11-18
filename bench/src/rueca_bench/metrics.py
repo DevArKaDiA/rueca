@@ -9,6 +9,16 @@ from .arms.base import same_def
 
 FILE_KS = (1, 3, 5, 10)
 FUNC_KS = (5, 10)
+# all-gold hits (LocAgent / SweRank convention, RFC 0007 §11.1): 1 only when
+# every gold file / function is in the top k. Diagnostic next to the any-gold
+# Acc@k S1 gates on.
+FILE_ALL_KS = (5,)
+FUNC_ALL_KS = (10,)
+
+
+def all_gold_hit(ranks_per_gold: list[int | None], k: int) -> float:
+    """1.0 when every gold item has a rank <= k (0.0 with no gold)."""
+    return float(bool(ranks_per_gold) and all(r is not None and r <= k for r in ranks_per_gold))
 
 
 def score_files(ranked: list[str], gold: list[str]) -> dict:
@@ -18,6 +28,8 @@ def score_files(ranked: list[str], gold: list[str]) -> dict:
     out.update({f"recall@{k}": (sum(1 for r in ranks if r <= k) / len(gold_set)) if gold_set else 0.0 for k in FILE_KS})
     out["mrr"] = 1.0 / ranks[0] if ranks else 0.0
     out["first_rank"] = ranks[0] if ranks else None
+    first = {p: i + 1 for i, p in reversed(list(enumerate(ranked)))}
+    out.update({f"all_acc@{k}": all_gold_hit([first.get(g) for g in gold_set], k) for k in FILE_ALL_KS})
     return out
 
 
@@ -41,6 +53,7 @@ def score_functions(ranked: list[dict], gold: list[dict]) -> dict:
     out.update({f"recall@{k}": (sum(1 for r in ranks if r <= k) / n) if n else 0.0 for k in FUNC_KS})
     out["mrr"] = 1.0 / ranks[0] if ranks else 0.0
     out["first_rank"] = ranks[0] if ranks else None
+    out.update({f"all_acc@{k}": all_gold_hit([first_rank_per_gold.get(gi) for gi in range(n)], k) for k in FUNC_ALL_KS})
     return out
 
 

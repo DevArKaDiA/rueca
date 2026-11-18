@@ -4,8 +4,10 @@
 A floor metric regresses when its value moves the wrong way by more than
 the half-width of its committed 95% interval. Checked: every gated metric
 with a floor, for Rueca, per language (localization, structure, micro,
-parse-error rate), the configuration metrics and the cross-service
-edges (S2, per contract kind). Not checked: query
+parse-error rate), the configuration metrics, the cross-service
+edges (S2, per contract kind) and the rows of RFC 0007 §11.2 with a floor
+(`rfc0007`; a row not measured in the current run is a note, since the
+regression job computes no embeddings). Not checked: query
 latency (machine-dependent: CI runners are not the machine that produced
 the published numbers) and tokens (no floor). A metric present in the
 baseline and missing now is a failure; a new metric is reported, not
@@ -20,7 +22,11 @@ from pathlib import Path
 
 from .common import REPO_ROOT, RESULTS_DIR
 
-SKIP = {"latency_p95_ms", "tokens_per_answer", "search_tokens_to_first_hit", "search_tokens_per_hit", "trace_tokens_per_true_edge"}
+SKIP = {"latency_p95_ms", "tokens_per_answer", "search_tokens_to_first_hit", "search_tokens_per_hit", "trace_tokens_per_true_edge", "hybrid_latency_p95_ms", "lexical_latency_p95_ms"}
+# families whose rows exist only when their (optional) runs were made: a
+# missing row is "not measured here", not a regression (RFC 0007 §11.2 needs
+# embeddings, which the CI regression job does not compute)
+OPTIONAL = {"rfc0007"}
 SCORECARD = "scorecard.json"
 
 
@@ -44,6 +50,8 @@ def _rows(card: dict):
         yield "config", key, m
     for key, m in ((card.get("contracts") or {}).get("metrics") or {}).items():
         yield "contracts", key, m  # S2 cross-service edges
+    for key, m in ((card.get("rfc0007") or {}).get("metrics") or {}).items():
+        yield "rfc0007", key, m  # RFC 0007 §11.2 rows with a floor
 
 
 def compare(baseline: dict, current: dict) -> tuple[list[str], list[str]]:
@@ -59,7 +67,7 @@ def compare(baseline: dict, current: dict) -> tuple[list[str], list[str]]:
             continue
         c = cur.get((lang, key))
         if c is None or c.get("value") is None:
-            failures.append(f"{lang} {key}: missing (baseline {bv:.4f})")
+            (notes if lang in OPTIONAL else failures).append(f"{lang} {key}: missing (baseline {bv:.4f})")
             continue
         ci = b.get("ci") or [bv, bv]
         half = (ci[1] - ci[0]) / 2 if ci and None not in ci else 0.0

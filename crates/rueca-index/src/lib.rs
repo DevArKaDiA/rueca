@@ -42,6 +42,11 @@
 //!    from disk and verified against the blob SHA when more than 512 MiB of
 //!    content was read), and **register** it in the store catalog under the
 //!    canonical root.
+//! 6. **Vectors** ([`IndexOptions::embed`], RFC 0007 §5.6, [`vectors`]):
+//!    canonical texts and vector keys, a store vector cache lookup, then one
+//!    publication with the `vectors.*` components when everything is cached,
+//!    else the lexical segment first and, once the misses are embedded, a
+//!    copy with vectors under a new id that replaces it in the catalog.
 //!
 //! Logging: one `info` summary per run and `debug` timings per phase
 //! (`tracing`). [`IndexReport`] carries the same numbers.
@@ -77,6 +82,9 @@ mod golden;
 pub mod link;
 pub mod org;
 pub mod refs;
+pub mod vectors;
+
+pub use vectors::{EmbedConfig, EmbedRequest, EmbedderLoader, PresetLoader, VectorsReport, resolve_embed};
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct IndexOptions {
@@ -102,6 +110,22 @@ pub struct IndexOptions {
     /// Full commit of the exported ref (see [`IndexOptions::ref_name`]).
     #[serde(default)]
     pub commit: Option<String>,
+    /// Embed the snapshot's symbols (RFC 0007 §5.6, [`vectors`]); `None`
+    /// embeds with the configured preset ([`EmbedRequest::Configured`]:
+    /// `RUECA_EMBED_PRESET`, `[retrieval] preset`), if any, unless
+    /// [`IndexOptions::no_embed`].
+    #[serde(default)]
+    pub embed: Option<EmbedConfig>,
+    /// With `embed` = `None`: index lexically, whatever is configured
+    /// (`--no-embed`, or a caller that resolved the embedding itself).
+    #[serde(default)]
+    pub no_embed: bool,
+    /// The organization this run indexes for (set by [`org::index_org`],
+    /// which checked its own `allow_remote`); every other organization
+    /// holding the root still forbids a `remote:` preset unless it allows
+    /// them.
+    #[serde(default)]
+    pub org: Option<String>,
 }
 
 impl IndexOptions {
@@ -143,6 +167,9 @@ pub struct IndexReport {
     pub references_external: u64,
     /// Wall-clock time per phase, in milliseconds.
     pub timings: PhaseTimings,
+    /// The vectors pass, when the run embedded ([`IndexOptions::embed`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vectors: Option<VectorsReport>,
 }
 
 /// Wall-clock milliseconds per indexing phase.
@@ -152,6 +179,8 @@ pub struct PhaseTimings {
     pub extract_ms: u64,
     pub resolve_ms: u64,
     pub write_ms: u64,
+    /// The vectors pass: texts, cache lookup, embedding, second publication.
+    pub embed_ms: u64,
 }
 
 /// Language packs shipped with this build (Python, TypeScript/TSX/JavaScript,
@@ -240,7 +269,14 @@ const CONTENT_MEMORY_CAP: u64 = 512 * 1024 * 1024;
 
 /// Indexes the working tree at `opts.root` (including uncommitted changes and
 /// untracked, non-ignored files) and registers the new segment in the store.
+/// With [`IndexOptions::embed`], embeds with the presets of `rueca-embed`.
 pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
+    index_worktree_with(opts, &PresetLoader { store: opts.store.clone() })
+}
+
+/// [`index_worktree`] with the embedder of the vectors pass supplied by
+/// `loader`.
+pub fn index_worktree_with(opts: &IndexOptions, loader: &dyn EmbedderLoader) -> anyhow::Result<IndexReport> {
     let started = Instant::now();
     let pinned = opts.pinned()?;
     let root = fs::canonicalize(&opts.root).with_context(|| format!("cannot access {}", opts.root.display()))?;
@@ -276,39 +312,8 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
         cpp_headers: has_cpp(&paths),
     };
     let loaded: Vec<anyhow::Result<Loaded>> = pool.install(|| paths.par_iter().map(|p| ctx.load(p)).collect());
-    let mut files = Vec::with_capacity(loaded.len());
-    let mut contents: HashMap<String, Vec<u8>> = HashMap::new();
-    let mut configs = std::collections::BTreeMap::new();
-    let (mut extracted, mut skipped, mut partial, mut unsupported, mut hits) = (0u64, 0u64, 0u64, 0u64, 0u64);
-    for l in loaded {
-        let l = match l {
-            Ok(l) => l,
-            Err(e) => {
-                // Vanished or unreadable since the walk: leave it out.
-                warn!("skipping unreadable file: {e:#}");
-                continue;
-            }
-        };
-        if l.cache_hit {
-            hits += 1;
-        }
-        match l.input.status.as_str() {
-            "ok" => extracted += 1,
-            "partial" => {
-                extracted += 1;
-                partial += 1;
-            }
-            "skipped:unsupported" => unsupported += 1,
-            _ => skipped += 1,
-        }
-        if let Some(text) = l.config {
-            configs.insert(l.input.path.clone(), text);
-        }
-        if let Some(bytes) = l.bytes {
-            contents.insert(l.input.path.clone(), bytes);
-        }
-        files.push(l.input);
-    }
+    let Collected { files, contents, configs, tally } = Collected::from_loaded(loaded);
+    let ExtractTally { extracted, skipped, partial, unsupported, hits } = tally;
     // Only files that were read are part of the project (vanished ones are out).
     let project = ProjectFiles { paths: files.iter().map(|f| f.path.clone()).collect(), configs };
     timings.extract_ms = t.elapsed().as_millis() as u64;
@@ -329,17 +334,27 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
     timings.resolve_ms = t.elapsed().as_millis() as u64;
     debug!(nodes = out.graph.nodes.len(), edges = out.graph.edges.len(), ms = timings.resolve_ms, "resolve");
 
-    // 5. Write and register.
+    // 5. Write and register; with vectors, lexical first unless every
+    // vector is cached (RFC 0007 §5.6).
     let t = Instant::now();
+    let pass = match run_embedding(opts, &root)? {
+        Some(cfg) => prepare_vectors(&out.graph, &root, &contents, &cfg, loader, &opts.store)?,
+        None => None,
+    };
+    let embed_prepare_ms = t.elapsed().as_millis() as u64;
     let source = WorktreeContent { root: &root, contents: std::sync::Mutex::new(contents) };
-    let meta = rueca_segment::write_segment(&out.graph, &source, &opts.store).context("writing segment")?;
-    match pinned {
-        Some((ref_name, _)) => store.register_ref(&root_str, &meta, ref_name),
-        None => store.register(&root_str, &meta),
-    }
-    .context("registering segment")?;
-    timings.write_ms = t.elapsed().as_millis() as u64;
-    debug!(segment = %meta.id, bytes = meta.bytes, ms = timings.write_ms, "write");
+    let register = |meta: &SegmentMeta| -> anyhow::Result<()> {
+        match pinned {
+            Some((ref_name, _)) => store.register_ref(&root_str, meta, ref_name),
+            None => store.register(&root_str, meta),
+        }
+        .context("registering segment")
+    };
+    let published = publish(&out.graph, &source, &store, pass, loader, &register)?;
+    let (meta, vectors) = (published.meta, published.vectors);
+    timings.write_ms = published.write_ms;
+    timings.embed_ms = embed_prepare_ms + published.embed_ms;
+    debug!(segment = %meta.id, bytes = meta.bytes, ms = timings.write_ms, embed_ms = timings.embed_ms, "write");
 
     let stats = out.stats;
     let report = IndexReport {
@@ -358,6 +373,7 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
         references_builtin: stats.references_builtin,
         references_external: stats.references_external,
         timings,
+        vectors,
     };
     info!(
         root = %report.root,
@@ -374,6 +390,120 @@ pub fn index_worktree(opts: &IndexOptions) -> anyhow::Result<IndexReport> {
         "indexed"
     );
     Ok(report)
+}
+
+/// The embedding of a run: `opts.embed`, else the configured one unless
+/// `opts.no_embed`; a `remote:` preset is refused when an organization
+/// holding `root` (other than `opts.org`) does not allow remote presets.
+fn run_embedding(opts: &IndexOptions, root: &Path) -> anyhow::Result<Option<EmbedConfig>> {
+    let cfg = match (&opts.embed, opts.no_embed) {
+        (Some(c), _) => Some(c.clone()),
+        (None, true) => None,
+        (None, false) => resolve_embed(&opts.store, &EmbedRequest::Configured, None)?,
+    };
+    if let Some(c) = cfg.as_ref().filter(|c| rueca_embed::is_remote_preset(&c.preset))
+        && let Some(name) = org::forbidding_remote(&opts.store, root, opts.org.as_deref())?
+    {
+        anyhow::bail!(
+            "`{}` is a member of organization `{name}`, which does not allow remote presets: `{}` would send its \
+             code to the provider (set `[retrieval] allow_remote = true` in its rueca-org.toml to opt in)",
+            root.display(),
+            c.preset
+        );
+    }
+    Ok(cfg)
+}
+
+/// The vectors pass up to the cache lookup, or `None` when the run stays
+/// lexical: a configured (not required) embedding whose preset, weights or
+/// cache are unusable warns instead of failing. Required (`--embed`)
+/// failures are errors before anything is published.
+fn prepare_vectors(
+    graph: &rueca_model::ResolvedGraph,
+    root: &Path,
+    contents: &HashMap<String, Vec<u8>>,
+    cfg: &EmbedConfig,
+    loader: &dyn EmbedderLoader,
+    store: &Path,
+) -> anyhow::Result<Option<vectors::Pass>> {
+    let read = |f: &FileEntry| -> anyhow::Result<Vec<u8>> {
+        if let Some(b) = contents.get(&f.path) {
+            return Ok(b.clone());
+        }
+        let bytes = fs::read(root.join(&f.path))?;
+        anyhow::ensure!(git_blob_sha(&bytes) == f.blob_sha, "{} changed while indexing", f.path);
+        Ok(bytes)
+    };
+    let pass = vectors::Pass::prepare(graph, &read, cfg, loader, store).and_then(|p| {
+        if !p.all_cached() {
+            loader.check(cfg)?;
+        }
+        Ok(p)
+    });
+    match pass {
+        Ok(p) => Ok(Some(p)),
+        Err(e) if cfg.required => Err(e.context(format!("vectors (`--embed={}`)", cfg.preset))),
+        Err(e) => {
+            warn!("indexing lexically, vectors unavailable: {e:#}");
+            Ok(None)
+        }
+    }
+}
+
+/// What [`publish`] published.
+struct Published {
+    meta: SegmentMeta,
+    vectors: Option<VectorsReport>,
+    write_ms: u64,
+    embed_ms: u64,
+}
+
+/// Writes and registers the segment: once with its vectors when the pass
+/// found every vector cached; else lexical first, then (after embedding the
+/// misses) a copy with vectors that replaces it.
+fn publish(
+    graph: &rueca_model::ResolvedGraph,
+    source: &dyn ContentSource,
+    store: &Store,
+    pass: Option<vectors::Pass>,
+    loader: &dyn EmbedderLoader,
+    register: &dyn Fn(&SegmentMeta) -> anyhow::Result<()>,
+) -> anyhow::Result<Published> {
+    let t = Instant::now();
+    if let Some(p) = pass.as_ref().filter(|p| p.all_cached()) {
+        let vw = p.build()?;
+        let meta =
+            rueca_segment::write_segment_with(graph, source, &store.dir, Some(&vw)).context("writing segment")?;
+        register(&meta)?;
+        let write_ms = t.elapsed().as_millis() as u64;
+        let report = pass.map(|p| p.finish(1));
+        return Ok(Published { meta, vectors: report, write_ms, embed_ms: 0 });
+    }
+    let lexical = rueca_segment::write_segment(graph, source, &store.dir).context("writing segment")?;
+    register(&lexical)?;
+    let write_ms = t.elapsed().as_millis() as u64;
+    let Some(mut p) = pass else {
+        return Ok(Published { meta: lexical, vectors: None, write_ms, embed_ms: 0 });
+    };
+    let t = Instant::now();
+    let required = p.required();
+    let republished = p.embed_misses(loader).and_then(|()| {
+        let vw = p.build()?;
+        let seg = store.open_segment(&lexical.id)?;
+        Ok(store.republish_with_vectors(&seg, &vw)?)
+    });
+    match republished {
+        Ok(meta) => {
+            register(&meta)?;
+            let embed_ms = t.elapsed().as_millis() as u64;
+            Ok(Published { meta, vectors: Some(p.finish(2)), write_ms, embed_ms })
+        }
+        Err(e) if required => Err(e.context("embedding (the lexical segment is published)")),
+        Err(e) => {
+            warn!("vectors not published, the snapshot stays lexical: {e:#}");
+            Ok(Published { meta: lexical, vectors: None, write_ms, embed_ms: t.elapsed().as_millis() as u64 })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -464,6 +594,72 @@ struct ExtractCtx<'a> {
 /// Whether any path is a C++ source or header (decides `.h`).
 fn has_cpp(paths: &[String]) -> bool {
     paths.iter().any(|p| Language::from_path(p) == Some(Language::Cpp))
+}
+
+/// Per-status file counts of the extract phase.
+#[derive(Default)]
+struct ExtractTally {
+    extracted: u64,
+    skipped: u64,
+    partial: u64,
+    unsupported: u64,
+    hits: u64,
+}
+
+impl ExtractTally {
+    fn count(&mut self, l: &Loaded) {
+        if l.cache_hit {
+            self.hits += 1;
+        }
+        match l.input.status.as_str() {
+            "ok" => self.extracted += 1,
+            "partial" => {
+                self.extracted += 1;
+                self.partial += 1;
+            }
+            "skipped:unsupported" => self.unsupported += 1,
+            _ => self.skipped += 1,
+        }
+    }
+}
+
+/// The loaded files split into the resolver's inputs, the writer's kept
+/// contents and the module-resolution configs.
+struct Collected {
+    files: Vec<FileInput>,
+    contents: HashMap<String, Vec<u8>>,
+    configs: std::collections::BTreeMap<String, String>,
+    tally: ExtractTally,
+}
+
+impl Collected {
+    fn from_loaded(loaded: Vec<anyhow::Result<Loaded>>) -> Self {
+        let mut out = Collected {
+            files: Vec::with_capacity(loaded.len()),
+            contents: HashMap::new(),
+            configs: std::collections::BTreeMap::new(),
+            tally: ExtractTally::default(),
+        };
+        for l in loaded {
+            match l {
+                Ok(l) => out.push(l),
+                // Vanished or unreadable since the walk: leave it out.
+                Err(e) => warn!("skipping unreadable file: {e:#}"),
+            }
+        }
+        out
+    }
+
+    fn push(&mut self, l: Loaded) {
+        self.tally.count(&l);
+        if let Some(text) = l.config {
+            self.configs.insert(l.input.path.clone(), text);
+        }
+        if let Some(bytes) = l.bytes {
+            self.contents.insert(l.input.path.clone(), bytes);
+        }
+        self.files.push(l.input);
+    }
 }
 
 struct Loaded {

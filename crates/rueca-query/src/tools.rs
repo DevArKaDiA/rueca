@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use rueca_model::{EdgeKind, FileId, Label, NodeId, SymbolIdParts};
-use rueca_segment::org::{LinkDir, OrgScope, OrgSlot, RouteMode};
+use rueca_segment::org::{LinkDir, OrgScope, OrgSlot, RouteMode, RouteQuery};
 use rueca_segment::{CatalogEntry, ContentMatch, ContentQuery, EdgeRef, Segment, SymbolQuery};
 
 use crate::args::{
@@ -231,6 +231,15 @@ fn symbol_result(view: &View, n: NodeId, candidates: Vec<NodeId>, extra: Vec<Bri
     }
 }
 
+/// A BM25 ranking with the routing it applied: `boost[view]` multiplied
+/// the view's scores (1 without routing); `routed[view]` is false for a
+/// view that `top` routing left out.
+pub(crate) struct Ranked {
+    pub hits: Vec<(usize, NodeId, f64)>,
+    pub boost: Vec<f32>,
+    pub routed: Vec<bool>,
+}
+
 fn verbose<T: serde::Serialize>(value: &T) -> anyhow::Result<Response> {
     Ok(Response::verbose(serde_json::to_value(value)?))
 }
@@ -256,7 +265,8 @@ impl Engine {
             limit: if collapse { offset.saturating_add(limit + 1).saturating_mul(per_repo) } else { limit + 1 },
             offset: if collapse { 0 } else { offset },
         };
-        let ranked = self.rank_symbols(&sel, &base)?;
+        let rerank = self.rerank_request(a.rerank, a.rerank_k);
+        let (ranked, retrieval) = self.rank_with_mode(&sel, &base, a.mode, rerank)?;
         let mut ranked: Vec<(Key, f64, Option<RefMark>)> = if collapse {
             refset::collapse_hits(views, ranked).into_iter().skip(offset).collect()
         } else {
@@ -279,25 +289,40 @@ impl Engine {
             });
         }
         let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
-        Ok(compact::search_symbols(&snaps, &hits, offset, more, a.scores.unwrap_or(false), budget(&a.common)))
+        let scores = a.scores.unwrap_or(false);
+        Ok(compact::search_symbols(&snaps, &hits, offset, more, scores, budget(&a.common), retrieval.to_json()))
     }
 
     /// `(view, node, score)`: one ranking over every selected snapshot (RFC
     /// 0006 §6) — the organization index, or the snapshots' indexes scored
-    /// with summed statistics.
-    fn rank_symbols(&self, sel: &Selection, base: &SymbolQuery) -> anyhow::Result<Vec<(usize, NodeId, f64)>> {
+    /// with summed statistics — with the routing it applied per view.
+    pub(crate) fn rank_symbols_routed(&self, sel: &Selection, base: &SymbolQuery) -> anyhow::Result<Ranked> {
+        self.rank_symbols_routed_with(sel, base, None)
+    }
+
+    /// [`Engine::rank_symbols_routed`] with the query's vector for the
+    /// routing's centroid signal (RFC 0007 §10).
+    pub(crate) fn rank_symbols_routed_with(
+        &self,
+        sel: &Selection,
+        base: &SymbolQuery,
+        qvec: Option<RouteQuery<'_>>,
+    ) -> anyhow::Result<Ranked> {
         let views = &sel.views;
+        let unrouted = |hits| Ranked { hits, boost: vec![1.0; views.len()], routed: vec![true; views.len()] };
         Ok(match &sel.org {
-            Some(org) => self.org_ranked(org, views, base)?,
-            None if views.len() == 1 => {
-                views[0].seg.search_symbols(base)?.into_iter().map(|h| (0, h.node, f32_to_f64(h.score))).collect()
-            }
+            Some(org) => self.org_ranked(org, views, base, qvec)?,
+            None if views.len() == 1 => unrouted(
+                views[0].seg.search_symbols(base)?.into_iter().map(|h| (0, h.node, f32_to_f64(h.score))).collect(),
+            ),
             None => {
                 let segs: Vec<&Segment> = views.iter().map(|v| v.seg.as_ref()).collect();
-                rueca_segment::search_symbols_merged(&segs, base)?
-                    .into_iter()
-                    .map(|(vi, h)| (vi, h.node, f32_to_f64(h.score)))
-                    .collect()
+                unrouted(
+                    rueca_segment::search_symbols_merged(&segs, base)?
+                        .into_iter()
+                        .map(|(vi, h)| (vi, h.node, f32_to_f64(h.score)))
+                        .collect(),
+                )
             }
         })
     }
@@ -309,20 +334,27 @@ impl Engine {
         org: &OrgCtx,
         views: &[View],
         base: &SymbolQuery,
-    ) -> anyhow::Result<Vec<(usize, NodeId, f64)>> {
+        qvec: Option<RouteQuery<'_>>,
+    ) -> anyhow::Result<Ranked> {
         let mut selected: Vec<(usize, &Segment)> =
             views.iter().filter_map(|v| v.org_repo().map(|i| (i, v.seg.as_ref()))).collect();
         let view_of: HashMap<OrgSlot, usize> =
             views.iter().enumerate().filter_map(|(vi, v)| v.org_slot.map(|s| (s, vi))).collect();
-        let boost = self.route_boost(org, &base.text, &mut selected)?;
+        let boost = self.route_boost(org, &base.text, &mut selected, qvec)?;
         let scope = OrgScope { visible: &org.visible, selected: &selected, view: Some(&org.view) };
         let local_stats = self.route.local_stats && self.route.mode != RouteMode::Off;
-        Ok(org
+        let hits = org
             .index
             .search_with(base, &scope, &boost, local_stats)?
             .into_iter()
             .filter_map(|h| view_of.get(&h.slot).map(|&vi| (vi, h.node, f32_to_f64(h.score))))
-            .collect())
+            .collect();
+        let kept: HashSet<usize> = selected.iter().map(|(i, _)| *i).collect();
+        Ok(Ranked {
+            hits,
+            boost: views.iter().map(|v| v.org_repo().and_then(|r| boost.get(&r).copied()).unwrap_or(1.0)).collect(),
+            routed: views.iter().map(|v| v.org_repo().is_some_and(|r| kept.contains(&r))).collect(),
+        })
     }
 
     /// Repository routing (RFC 0006 phase 2) when several repositories are
@@ -334,12 +366,13 @@ impl Engine {
         org: &OrgCtx,
         text: &str,
         selected: &mut Vec<(usize, &Segment)>,
+        qvec: Option<RouteQuery<'_>>,
     ) -> anyhow::Result<HashMap<usize, f32>> {
         let repos: BTreeSet<usize> = selected.iter().map(|(i, _)| *i).collect();
         if repos.len() < 2 || self.route.mode == RouteMode::Off {
             return Ok(HashMap::new());
         }
-        let routes = org.index.route_view(text, &org.visible, &org.view, &self.route)?;
+        let routes = org.index.route_view_with(text, &org.visible, &org.view, &self.route, qvec)?;
         if self.route.mode == RouteMode::Top {
             let keep: HashSet<usize> = routes
                 .iter()

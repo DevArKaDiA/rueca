@@ -3,8 +3,13 @@
 Per instance: one detached worktree at the base commit; every pending arm
 indexes it and answers two queries derived from the issue text (`kw`:
 deterministic keyword list, `raw`: the issue text itself). Raw arm outputs
-are cached per (arm, instance) in .cache/runs/s1/<arm>/<id>.json, so runs are
-resumable; scoring happens in `report`.
+are cached per (arm, instance) in .cache/runs/s1/<arm>/<id>.json (the vector
+arm: runs/s1/vector/<sweep tag>/<id>.json), so runs are resumable; scoring
+happens in `report`. Arms that return raw candidate scores (`grep`: BM25,
+`vector`: cosine) have them persisted per query (`scores`: top 200 files and
+functions, post-filtered like the rankings) for offline fusion sweeps (RFC
+0007 §7.6). The SWE-bench Lite diagnostic (`lite.py`) reuses this runner
+with its own instances under runs/lite/.
 """
 
 from __future__ import annotations
@@ -12,9 +17,9 @@ from __future__ import annotations
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .arms import make_arm
+from .arms import make_arm, run_label
 from .arms.base import Arm
-from .common import GOLD_DIR, RUNS_DIR, candidate_path, lang_family, load_manifest, log, read_json, safe_name, write_json
+from .common import GOLD_DIR, RUNS_DIR, candidate_path, lang_family, load_manifest, log, read_json, safe_name, split_of, write_json
 from .corpus import ensure_commit, prune_clone, worktree
 from .datasets import instance_row, rows_by_id
 from .gold import assembled_functions, compute_s1_gold, context_files, parse_list
@@ -110,12 +115,12 @@ def queries_for(inst: dict) -> dict[str, str]:
     return {"kw": " ".join(kws), "raw": raw_query(text)}
 
 
-def run_path(arm: str, iid: str):
-    return RUNS_DIR / "s1" / arm / f"{safe_name(iid)}.json"
+def run_path(arm: str, iid: str, suite: str = "s1"):
+    return RUNS_DIR / suite / run_label(arm) / f"{safe_name(iid)}.json"
 
 
-def _done(arm: str, iid: str) -> bool:
-    p = run_path(arm, iid)
+def _done(arm: str, iid: str, suite: str = "s1") -> bool:
+    p = run_path(arm, iid, suite)
     if not p.exists():
         return False
     rec = read_json(p)
@@ -140,39 +145,63 @@ def _filtered_funcs(funcs: list[dict], language: str) -> list[dict]:
     return out
 
 
-def _run_arm(arm: Arm, inst: dict, root, qs: dict[str, str], limit: int) -> dict:
-    lang = inst["language"]
-    rec: dict = {"arm": arm.name, "id": inst["id"], "repo": inst["repo"], "language": lang}
-    h = arm.index(root, f"s1-{inst['id']}", lang)
+def _filtered_scores(scores: dict, language: str) -> dict:
+    """Raw candidate scores, post-filtered like the rankings."""
+    return {
+        "files": [x for x in scores.get("files", []) if candidate_path(x[0], language)],
+        "functions": [x for x in scores.get("functions", []) if candidate_path(x[0], language)],
+    }
+
+
+def index_record(arm: Arm, inst: dict, root) -> tuple[dict, object]:
+    """Index one instance: the run record so far and the arm's handle
+    (`status` = `index_failed` when indexing failed)."""
+    rec: dict = {"arm": arm.name, "id": inst["id"], "repo": inst["repo"], "language": inst["language"]}
+    h = arm.index(root, f"s1-{inst['id']}", inst["language"])
     rec["index_seconds"] = h.index_seconds
     rec["index_info"] = h.info
     if not h.ok:
         rec["status"] = "index_failed"
         rec["error"] = h.error
-        arm.cleanup(h)
-        return rec
-    rec["queries"] = {}
-    try:
-        for variant, q in qs.items():
-            res = arm.localize(h, q, limit)
-            entry: dict = {"ok": res.ok, "seconds": res.seconds, "error": res.error, "tokens": res.extra.get("tokens"), "tokens_json": res.extra.get("tokens_json")}
-            if res.ok:
-                entry["files"] = _filtered_files(res.extra.get("files", []), lang)
-                entry["functions"] = _filtered_funcs(res.extra.get("functions", []), lang)
-                if "functions_name" in res.extra:
-                    entry["functions_name"] = _filtered_funcs(res.extra["functions_name"], lang)
-            rec["queries"][variant] = entry
-        eff_q = qs.get(EFF_VARIANT)
-        if eff_q is not None and hasattr(arm, "search_eff"):
-            rec["eff"] = eff_record(arm.search_eff(h, eff_q, EFF_LIMIT))
-    finally:
-        arm.cleanup(h)
+    return rec, h
+
+
+def _query_entry(arm: Arm, h, q: str, limit: int, lang: str) -> dict:
+    res = arm.localize(h, q, limit)
+    entry: dict = {"ok": res.ok, "seconds": res.seconds, "error": res.error, "tokens": res.extra.get("tokens"), "tokens_json": res.extra.get("tokens_json")}
+    if res.ok:
+        entry["files"] = _filtered_files(res.extra.get("files", []), lang)
+        entry["functions"] = _filtered_funcs(res.extra.get("functions", []), lang)
+        if "functions_name" in res.extra:
+            entry["functions_name"] = _filtered_funcs(res.extra["functions_name"], lang)
+        if "scores" in res.extra:
+            entry["scores"] = _filtered_scores(res.extra["scores"], lang)
+    return entry
+
+
+def query_record(arm: Arm, h, rec: dict, qs: dict[str, str], limit: int, eff: bool = True) -> dict:
+    """Answer every query variant on an indexed instance (and, with `eff`,
+    the efficiency search): `rec` completed with status `ok`."""
+    rec["queries"] = {variant: _query_entry(arm, h, q, limit, rec["language"]) for variant, q in qs.items()}
+    eff_q = qs.get(EFF_VARIANT)
+    if eff and eff_q is not None and hasattr(arm, "search_eff"):
+        rec["eff"] = eff_record(arm.search_eff(h, eff_q, EFF_LIMIT))
     rec["status"] = "ok"
     return rec
 
 
-def run_instance(inst: dict, arm_names: list[str], limit: int, force: bool) -> None:
-    pending = [a for a in arm_names if force or not _done(a, inst["id"])]
+def _run_arm(arm: Arm, inst: dict, root, qs: dict[str, str], limit: int) -> dict:
+    rec, h = index_record(arm, inst, root)
+    try:
+        if h.ok:
+            query_record(arm, h, rec, qs, limit)
+    finally:
+        arm.cleanup(h)
+    return rec
+
+
+def run_instance(inst: dict, arm_names: list[str], limit: int, force: bool, suite: str = "s1") -> None:
+    pending = [a for a in arm_names if force or not _done(a, inst["id"], suite)]
     if not pending:
         return
     s1_gold(inst)
@@ -183,36 +212,56 @@ def run_instance(inst: dict, arm_names: list[str], limit: int, force: bool) -> N
             t_ok, why = arm.available()
             if not t_ok:
                 continue
-            log(f"s1 {name:5s} {inst['id']}")
+            log(f"{suite} {name:5s} {inst['id']}")
             try:
                 rec = _run_arm(arm, inst, root, qs, limit)
             except Exception as exc:  # recorded, never silently dropped
                 rec = {"arm": name, "id": inst["id"], "status": "error", "error": f"{exc}\n{traceback.format_exc()[-1500:]}"}
             rec["arm_version"] = arm.version()
-            write_json(run_path(name, inst["id"]), rec)
+            write_json(run_path(name, inst["id"], suite), rec)
 
 
-def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, force: bool = False, languages: set[str] | None = None, prune: bool = False) -> None:
-    limit = load_manifest()["s1"].get("result_limit", 100)
+def select_instances(only: list[str] | None = None, languages: set[str] | None = None, split: str | None = None) -> list[dict]:
+    """S1 instances by id / repository, language family and split."""
     insts = [i for i in instances() if not only or i["id"] in only or i["repo"] in only]
     if languages:
         insts = [i for i in insts if lang_family(i["language"]) in languages]
-    log(f"s1: {len(insts)} instances x {arm_names}")
-    # instances of one repo run sequentially (shared clone, git lock); repos in parallel
-    by_repo: dict[str, list[dict]] = {}
+    if split:
+        splits = {r["repo"]: split_of(r) for r in load_manifest()["s1"]["repos"]}
+        insts = [i for i in insts if splits.get(i["repo"], "gated") == split]
+    return insts
+
+
+def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, force: bool = False, languages: set[str] | None = None, prune: bool = False, split: str | None = None) -> None:
+    run_instances(select_instances(only, languages, split), arm_names, "s1", workers=workers, force=force, prune=prune)
+
+
+def run_instances(insts: list[dict], arm_names: list[str], suite: str, workers: int = 2, force: bool = False, prune: bool = False) -> None:
+    """Run arms on instances, repositories in parallel (S1 and the Lite
+    diagnostic)."""
+    limit = load_manifest()["s1"].get("result_limit", 100)
+    log(f"{suite}: {len(insts)} instances x {arm_names}")
+    by_repo(insts, lambda inst: run_instance(inst, arm_names, limit, force, suite), suite, workers, prune)
+
+
+def by_repo(insts: list[dict], job, label: str, workers: int, prune: bool) -> None:
+    """`job(inst)` for every instance: the instances of one repository
+    sequentially (shared clone, git lock), repositories in parallel; a
+    failure is logged and the next instance runs."""
+    groups: dict[str, list[dict]] = {}
     for i in insts:
-        by_repo.setdefault(i["repo"], []).append(i)
+        groups.setdefault(i["repo"], []).append(i)
 
     def _repo_job(items: list[dict]) -> None:
         for inst in items:
             try:
-                run_instance(inst, arm_names, limit, force)
+                job(inst)
             except Exception as exc:
-                log(f"s1 FAILED {inst['id']}: {exc}")
+                log(f"{label} FAILED {inst['id']}: {exc}")
         if prune:
             prune_clone(items[0]["repo"])
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-        futs = [ex.submit(_repo_job, items) for items in by_repo.values()]
+        futs = [ex.submit(_repo_job, items) for items in groups.values()]
         for f in as_completed(futs):
             f.result()

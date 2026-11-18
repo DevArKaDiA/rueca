@@ -91,7 +91,8 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/DevArKaDiA/rueca/releases/download/v0.1.0-alpha.2/rueca-installer.sh | sh
 ```
 
-With Cargo (Rust 1.90+):
+With Cargo (Rust 1.90+; the default `embeddings` feature builds llama.cpp and
+needs CMake and a C/C++ compiler, `--no-default-features` skips it):
 
 ```sh
 cargo install rueca@0.1.0-alpha.2 --locked
@@ -140,6 +141,23 @@ and every tool takes `repo` (a list, or `"*"` for every indexed repository),
 Indexes live in `$RUECA_HOME` (default `~/.cache/rueca`). Re-run
 `rueca index` after changes; only changed files are re-extracted.
 
+Semantic search is opt-in: `rueca models pull` downloads the default
+embedding model (Qwen3-Embedding-0.6B, 639 MB) and `rueca index
+path/to/repo --embed` adds a vector per function, class and doc section
+(cached in the store, so a re-index embeds only new text). `search_symbols`
+then fuses BM25 with embedding similarity by default (`mode`: `hybrid`,
+`semantic` or `lexical`), so a question such as `where is the configuration
+file parsed` finds code that does not use those words. `rerank: true`
+reorders the top results with a cross-encoder (Qwen3-Reranker-0.6B, a local
+conversion registered with `rueca models import` until its release is
+published), and graph expansion and a centrality prior can be turned on per
+store; all three are off by default. Remote presets embed or rerank through
+a provider instead (`--embed=remote:voyage/voyage-code-3`, also
+`remote:openai/…`, `remote:gemini/…`, `remote:voyage/rerank-2.5`,
+`remote:cohere/rerank-v3.5`; the key in `VOYAGE_API_KEY`,
+`OPENAI_API_KEY`, `GEMINI_API_KEY` or `COHERE_API_KEY`): naming one is
+how a repository opts in to sending its code out.
+
 Other refs are snapshots of their own, next to the working tree: `rueca
 index . --ref pr/123` (also a branch, a tag or a commit; `--remove` drops
 it) exports that commit's tree under the store and indexes it, reusing the
@@ -163,10 +181,15 @@ refs = ["release/2.x", "pr/123"]             # other refs to index next to the d
 
 [[repo]]
 url = "https://github.com/acme/shared-lib"   # cloned under the store with git
+
+[retrieval]                                  # optional: the organization's embedding model
+preset = "qwen3-0.6b-q8"
+allow_remote = false                         # a `remote:` preset needs `true` here
 ```
 
 ```sh
 rueca index --org rueca-org.toml                  # every repository, then the organization layer
+rueca index --org rueca-org.toml --embed          # with vectors: every member and ref, one model
 rueca query search_symbols '{"query":"refund invoice"}' --org acme --text   # one ranking over all of them
 rueca query list_repositories '{"query":"refund invoice"}' --org acme --text   # which repositories it is about
 rueca query trace '{"qualified_name":"payments.charge","direction":"callers"}' --org acme --text   # callers in every repository
@@ -193,9 +216,33 @@ provides. A ref of one repository (`repo: A, ref:
 "pr/7"`) is the organization with A replaced by A at that ref; `ref`
 alone reads every repository that has it (a release branch across
 repositories) and the others at their default, and the cross-repository
-edges into a ref follow the symbols it still has
+edges into a ref follow the symbols it still has. With vectors the
+organization has one model: members embedded with it are fused, the
+others rank lexically and the answer says why, and the query's vector
+also routes (each repository's embedding centroid); `rueca status` and
+`rueca links` show which members are covered. Code leaves the machine
+for a `remote:` preset only when the file sets `allow_remote = true`
 ([RFC 0006](docs/rfcs/0006-org-graph.md),
 [how it works](docs/how-it-works.md#46-the-organization-layer-rueca-segment-org)).
+
+### Embeddings (preview)
+
+Semantic search ([RFC 0007](docs/rfcs/0007-semantic-search.md)) also has
+batch commands, used by the bench:
+
+```sh
+rueca models list                                  # presets (embedders, rerankers) and the cache
+rueca models pull                                  # the default preset, sha256-verified, into $RUECA_HOME/models
+rueca embed --input in.jsonl --output out.jsonl    # {"id","text","query"} lines → {"id","vector"} lines
+rueca rerank --query "…" --input docs.jsonl        # {"id","text"} lines → {"id","score"} lines
+rueca query --batch requests.jsonl                 # {"tool","args"} lines → one answer per line, one process
+```
+
+`RUECA_PROFILE=service` selects the service defaults (RFC 0008): the
+`qwen3-4b-q4` embedder on a GPU build, lexical on a CPU-only one, the
+reranker still off until its gate holds.
+
+See [how it works, §10](docs/how-it-works.md#10-embeddings-rfc-0007).
 
 ## Use it from an agent
 
@@ -370,6 +417,7 @@ More languages (Kotlin, Swift, Ruby, C#, …) follow the same gate.
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
 | [`rueca-query`](crates/rueca-query) | the tools, organization scope |
 | [`rueca-mcp`](crates/rueca-mcp) | MCP server: its own protocol layer ([reference](docs/mcp-protocol.md)), stdio |
+| [`rueca-embed`](crates/rueca-embed) | embedding presets, weights cache, llama.cpp runtime |
 
 ## Contributing
 

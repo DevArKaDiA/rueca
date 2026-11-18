@@ -23,6 +23,7 @@ Contents:
 7. [Confidence: how to read an edge](#7-confidence-how-to-read-an-edge)
 8. [Determinism, incrementality, limits](#8-determinism-incrementality-limits)
 9. [Where the code lives](#9-where-the-code-lives)
+10. [Embeddings (RFC 0007)](#10-embeddings-rfc-0007)
 
 ---
 
@@ -879,9 +880,26 @@ component exists because a tool needs it:
 | bodiless set | C/C++ functions and methods whose source has no body (prototypes, in-class declarations), for the declaration prior | `search_symbols` |
 | trigram index | which files contain each 3-byte sequence | `search_code` |
 | content packs | zstd-compressed file contents by blob SHA | `search_code`, `get_snippet` |
+| symbol vectors | with `rueca index --embed`: one int8 vector per callable, type and Markdown section, its node, its vector key and a per-row scale, plus the model record (optional components `vectors.meta`, `vectors.nodes`, `vectors.keys`, `vectors.scale`, `vectors.data`; §10) | `search_symbols` in `hybrid` / `semantic` mode |
 
 The segment is written to a temp file and atomically renamed; the catalog
 then points the indexed root at it. Query time never reads the working tree.
+
+Every component is BLAKE3-checksummed when a segment opens, except the
+vector bulk (`vectors.keys`, `vectors.scale`, `vectors.data`): their bounds
+and lengths are checked at open and their checksums on the first dense use
+in a process, so lexical queries never pay for them. On this repository
+(9,868 vectors of 1,024 dimensions, 19.0 MB segment, 29.5 MB with vectors)
+opening takes the same time with or without vectors, about 21 ms, and the
+first dense use adds about 7 ms of checksum (debug build with BLAKE3 and
+`rueca-segment` optimized). Readers ignore components they do not know, so
+a segment with vectors opens in an older build of format 2.
+
+Besides `segments/`, `packs/` and `facts/`, the store holds a **vector
+cache** (`<store>/vectors/<embed key>/`, or `$RUECA_VECTOR_DIR`): the f16
+vector of every text ever embedded under one embed key, at the model's full
+width, keyed by its vector key (BLAKE3 of the embed key and the text), so
+worktrees, branches and repositories of one store embed a text once (§10).
 
 **Ref snapshots** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--implemented)).
 `rueca index [PATH] --ref <name>` indexes a branch, pull request (`pr/<n>`),
@@ -1038,6 +1056,48 @@ index**, so a question asked of the whole organization gets one ranking.
   picks the entries a call reads — `repo: A, ref: pr/7` is the organization
   with A at `pr/7` and every other repository at its default — and search
   statistics, routing and `trace`'s link edges are computed over that view.
+- **Vectors in the organization** (RFC 0007 §10, phase 3). Vectors travel
+  with each repository segment; nothing is copied into the organization
+  layer. `rueca index --org <file> --embed[=PRESET]` (or a configured
+  preset: `RUECA_EMBED_PRESET`, the file's `[retrieval] preset`, the
+  store's) embeds every member and ref with one preset through the store
+  vector cache, so a member embedded before embeds nothing again and a ref
+  embeds only the text it changed. The generation records the
+  organization's **model** (preset, embed key, model key, width) and its
+  `allow_remote`. At query time the members whose vectors carry that model
+  key are fused; the others rank lexically and are listed in
+  `retrieval.lexical` with their reason in `retrieval.lexical_reasons` (no
+  vectors, or vectors of another model). A generation without a recorded
+  model (built lexically, or before phase 3) falls back to the embed key
+  most selected snapshots share. `rueca index --org`, `rueca status` and
+  `rueca links --org` print each entry's coverage (`fused`, `other model`,
+  `no vectors`).
+- **Centroid routing.** A routing profile (format 2) also holds the entry's
+  **embedding centroid**: the mean of its dequantized symbol vectors,
+  re-normalized, at the segment's width. When a hybrid query has a vector,
+  the cosine between it and each centroid of the same embed key is a third
+  routing signal, min-max normalized over the visible repositories; a
+  repository with a centroid mixes the three signals as `(2(1 − mu)·terms
+  + 2mu·doc + w·centroid) / (2 + w)` (`w` = `RUECA_ORG_ROUTE_CENTROID`, or
+  `[retrieval] route_centroid`, or `centroid=` in `RUECA_ORG_ROUTE`;
+  default 1, equal weights at `mu` = 0.5), one without keeps the
+  two-signal mix, and the prior's shape is unchanged. Fewer than two
+  centroids give no signal. The weight is the bench's to sweep.
+- **Remote presets are opt-in per organization.** A `remote:` preset
+  (§10, *Remote presets*) embeds or reranks an organization's code only
+  when its file sets `[retrieval] allow_remote = true` (default `false`):
+  `rueca index --org` refuses it otherwise, a plain `rueca index` of a
+  member root with a remote preset is refused while an organization that
+  does not allow them holds that root, and the query engine never sends a
+  query or reranker candidates of such an organization to a provider (it
+  ranks lexically with a warning, or errors when the call asked for the
+  mode). A repository outside any organization opts in by naming the
+  preset.
+- **Dense scan at organization scale.** The exhaustive int8 scan stays:
+  over 21 segments × 50,000 vectors × 1,024 dimensions (1.05M vectors) it
+  takes 74 ms on one thread (70 ns per row) and 8.3 ms with the views of
+  a call scanned in parallel, which `search_symbols` now does (at most one
+  thread per core); no ANN index is built (`docs/decisions.md`, phase 3).
 - **Across repositories at query time.** `trace` follows link edges in
   both directions: callers of a library function include its callers in
   other repositories, each node carrying its snapshot (`s`). A link edge is
@@ -1185,6 +1245,16 @@ document sections are found alongside code (`install linux` →
 `Document` nodes unless `language` is a data language, because a repository
 has far more config keys than functions. Ties break by node id so pages are
 stable.
+
+**Hybrid and semantic modes** (RFC 0007, §10). When the repository was
+indexed with `rueca index --embed`, the default `mode` is `hybrid`: the
+BM25 top 100 above and the 100 symbols whose vectors are closest to the
+query's (an exact scan under the same filters) are fused by a convex
+combination of their normalized scores, times the same priors and routing
+boost. A question in plain words (`where is the configuration file
+parsed`) then finds `load_settings` though it shares none of them.
+`semantic` ranks by the embedding alone, `lexical` is the ranking above,
+unchanged.
 
 ### `search_code` — "where does this text appear?"
 
@@ -1411,7 +1481,9 @@ gaps show up on real repositories.
   instead of failing the index.
 - **Immutable**: a segment is never modified after it is written; re-indexing
   writes a new one and swaps the catalog entry atomically, so queries running
-  during a re-index keep working. An organization does the same with
+  during a re-index keep working. Adding vectors (§10) is the same move: a
+  copy of the lexical segment plus the `vectors.*` components, under a new
+  id, swapped in. An organization does the same with
   generations: one repository's part is replaced and a pointer swapped.
 
 ## 9. Where the code lives
@@ -1437,3 +1509,523 @@ gaps show up on real repositories.
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |
 | Tools | `rueca-query` | `src/tools.rs` |
 | MCP protocol layer, stdio / CLI | `rueca-mcp`, `rueca` | [`docs/mcp-protocol.md`](mcp-protocol.md), `RuecaServer::handle` (`src/protocol.rs`), `serve_stdio`, `src/main.rs` |
+| Embedding presets, weights cache, llama.cpp runtime | `rueca-embed` | crate docs, `src/presets.rs`, `src/backend/llama.rs` |
+
+## 10. Embeddings (RFC 0007)
+
+Semantic search ([RFC 0007](rfcs/0007-semantic-search.md)) is being built
+in phases. Phase 0 added the runtime and a batch command; phase 1 adds
+symbol vectors to the index (`rueca index --embed`) and the `hybrid` and
+`semantic` modes of `search_symbols` (*Indexing with vectors* and *Hybrid
+search* below). Phase 2 adds graph expansion, a centrality prior and a
+cross-encoder reranker after that first stage, all off by default until
+the bench's sweep decides (*Graph signals* and *Reranker* below). Phase 3
+adds the organization scope (one model per organization, centroid
+routing: §4.6), remote presets, the service profile and `rueca query
+--batch` (*Remote presets*, *Configuration* and *Commands* below).
+
+**Crate.** `rueca-embed` owns presets, weights and runtimes behind two
+traits: `Embedder` (`embed` of a batch of documents and queries into
+L2-normalized vectors, `model_key`, `dims`, `meta`) and `Reranker`
+(`rerank(query, docs)`: `NoReranker`, and the llama.cpp Qwen3-Reranker of
+*Reranker* below). The runtime is llama.cpp through
+`llama-cpp-2` (pinned exactly), behind the `embeddings` feature, on by
+default in `rueca-embed` and `rueca`: it needs CMake and a C/C++ compiler,
+uses Metal on Apple silicon, and `--no-default-features` builds a
+lexical-only binary. `cuda` is an opt-in feature for service builds.
+
+**Presets.** A manifest compiled into the binary (`rueca models list`):
+
+| Preset | File | Status |
+|---|---|---|
+| `qwen3-0.6b-q8` | Qwen3-Embedding-0.6B, official `Q8_0` GGUF | default (provisional) |
+| `qwen3-0.6b-f16` | same, official `f16` | reference for rank overlap |
+| `qwen3-0.6b-q4` | `Q4_K_M` converted by Rueca from the official `f16` | unavailable until published; a local file with the pinned sha256 loads |
+| `qwen3-4b-q4`, `qwen3-4b-q8`, `qwen3-8b-q4`, `qwen3-8b-q8` | official `Q4_K_M` / `Q8_0` | available (GPU) |
+| `coderank-137m`, `coderank-137m-q8` | CodeRankEmbed (NomicBERT encoder, CLS pooling, query prefix), `f16` / `Q8_0` converted by Rueca | unavailable until published; `rueca models import` registers a local conversion (*Encoder presets* below) |
+| `gte-modernbert-149m` | gte-modernbert-base (ModernBERT encoder, CLS pooling, no prefix), `f16` converted by Rueca | same |
+| `remote:voyage/…`, `remote:openai/…`, `remote:gemini/…` | provider APIs (*Remote presets* below) | remote, opt-in |
+| `remote:voyage/rerank-2.5`, `remote:cohere/rerank-v3.5` (rerankers) | provider APIs | remote, opt-in |
+| `remote:bedrock/…` | Amazon Bedrock | later (SigV4) |
+| `qwen3-reranker-0.6b-q8` (reranker) | Qwen3-Reranker-0.6B, `Q8_0` converted by Rueca with its classifier head | unavailable until published; `rueca models import` registers a local conversion (*Reranker* below) |
+| `qwen3-reranker-4b-q4`, `mxbai-rerank-large-v2` (rerankers) | to convert | planned |
+
+Each local preset pins the file's URL at an upstream revision, its sha256
+and size, the quantization, the width (with its Matryoshka range), the
+context, the pooling (last token for Qwen3, the first token `[CLS]` for
+the BERT-family encoders, mean available) and the query format. Qwen3
+queries are `Instruct: {instruction}\nQuery:{query}` with a code-search
+instruction by default (`--instruction` overrides it for the phase 0
+sweep); encoder queries get a fixed prefix (CodeRankEmbed: `Represent
+this query for searching relevant code: `; gte-modernbert: none), which
+`--instruction` replaces verbatim; documents get no prefix.
+
+The `qwen3-0.6b-q4` file is made with llama.cpp's own tool at the commit
+`llama-cpp-2` vendors, and is byte-for-byte reproducible:
+
+```sh
+llama-quantize Qwen3-Embedding-0.6B-f16.gguf Qwen3-Embedding-0.6B-Q4_K_M.gguf Q4_K_M
+# llama.cpp d81235049384 → sha256 44f67b5875def0e90ae67247b141a5a861538efb8d8b0f783eef3d94211d9dcd
+```
+
+**Encoder presets.** CodeRankEmbed (`coderank-137m`, MIT; NomicBERT,
+the Arctic-embed-m-long encoder: 12 layers, rotary positions, 768 dims,
+8,192 tokens) and gte-modernbert-base (`gte-modernbert-149m`,
+Apache-2.0; ModernBERT: 22 layers, alternating local and global
+attention, 768 dims, 8,192 tokens) run through the same llama.cpp
+backend. Both read the `[CLS]` state (llama.cpp `CLS` pooling, set from
+the preset, and also the pooling the converter records in the GGUF), have
+no Matryoshka range (768 only), wrap every input in the tokenizer's
+`[CLS]` … `[SEP]` (WordPiece, lower-cased, for CodeRankEmbed; BPE for
+ModernBERT; both embedded in the GGUF by the converter) and cut the body
+so the budget holds both. Attention is bidirectional, so llama.cpp runs
+them without a KV cache, every sequence of a batch in one micro-batch, as
+for Qwen3. The converter records a 2,048-token training context for
+NomicBERT (its rule for nomic-embed v1 / v1.5, whose config has the same
+`n_positions` 8192 / `max_trained_positions` 2048); CodeRankEmbed's card
+and `sentence-transformers` use 8,192 and llama.cpp runs a longer context
+with a warning: a 5,481-token input matched the reference at cosine
+0.999999.
+
+The files are Rueca conversions, `unavailable` until their release
+assets are published; convert them locally and register them (the same
+converter checkout as the reranker's, *Reranker* below):
+
+```sh
+# nomic-ai/CodeRankEmbed at revision 3c4b60807d71f79b43f3c4363786d9493691f8b1
+mkdir -p CodeRankEmbed/1_Pooling && cd CodeRankEmbed
+for f in README.md config.json config_sentence_transformers.json modules.json sentence_bert_config.json \
+    special_tokens_map.json tokenizer.json tokenizer_config.json vocab.txt 1_Pooling/config.json model.safetensors; do
+  curl -sSfL -o $f https://huggingface.co/nomic-ai/CodeRankEmbed/resolve/3c4b60807d71f79b43f3c4363786d9493691f8b1/$f
+done
+cd ..
+uv run --no-project --with torch --with transformers --with numpy --with sentencepiece --with safetensors \
+  python llama.cpp/convert_hf_to_gguf.py CodeRankEmbed --outtype f16 --outfile CodeRankEmbed-F16.gguf
+# 274,181,632 bytes, sha256 8017b5bca09c111b5264cd686274b361aa54213a10cdf307eced3a3a0940444c
+# --outtype q8_0 --outfile CodeRankEmbed-Q8_0.gguf:
+# 146,033,152 bytes, sha256 829cc983d0c54aec5705ee6a3cdf12f6f87db145300d88ec2145bc235d94be9a
+rueca models import coderank-137m CodeRankEmbed-F16.gguf
+rueca models import coderank-137m-q8 CodeRankEmbed-Q8_0.gguf
+
+# Alibaba-NLP/gte-modernbert-base at revision e7f32e3c00f91d699e8c43b53106206bcc72bb22
+# (README.md config.json config_sentence_transformers.json modules.json special_tokens_map.json
+#  tokenizer.json tokenizer_config.json 1_Pooling/config.json model.safetensors), then
+uv run --no-project --with torch --with transformers --with numpy --with sentencepiece --with safetensors \
+  python llama.cpp/convert_hf_to_gguf.py gte-modernbert-base --outtype f16 --outfile gte-modernbert-base-F16.gguf
+# 299,877,088 bytes, sha256 a17fb60a5a2d8b6f171f846c834876fdaac3626e78a0b199c3e335adfff9eafe
+rueca models import gte-modernbert-149m gte-modernbert-base-F16.gguf
+```
+
+Every conversion is reproducible (two runs, same file). The upstream
+gte-modernbert weights are `float16`, so its `f16` file loses nothing.
+Validated against `sentence-transformers` on 2 queries and 3 code
+documents (CodeRankEmbed: float32, `trust_remote_code`, transformers
+4.45.1 as its config records, the model card's `query` prompt;
+gte-modernbert: its `float16` weights): cosine to the reference
+
+| Preset | Metal | `--cpu` | ranking of the 3 documents per query |
+|---|---|---|---|
+| `coderank-137m` (`f16`) | ≥ 0.99999 | ≥ 0.99999 | equal |
+| `coderank-137m-q8` | ≥ 0.9984 | ≥ 0.9976 | equal |
+| `gte-modernbert-149m` (`f16`) | ≥ 0.99999 | ≥ 0.99999 | equal |
+
+Throughput (`rueca embed --preset P --bench --runs 3`, 2,000 inputs of
+about 210 tokens, batch 512, median of 3; M-series GPU and 10 performance
+cores, both shared with a running benchmark, so read them as lower
+bounds): `coderank-137m` 7,011 tokens/s on Metal (runs 72.0, 49.9,
+59.9 s), 4,562 on `--cpu` (runs 80.8, 92.0, 102.5 s); `gte-modernbert-149m`
+(22 layers) 4,223 on Metal and 4,160 on `--cpu`.
+
+**Weights cache.** Never in the binary:
+
+```text
+<models>/<preset>/<file>          the GGUF file
+<models>/<preset>/<file>.sha256   its verified sha256
+```
+
+`<models>` is `$RUECA_MODEL_DIR` when set, else `<store>/models`
+(`~/.cache/rueca/models` by default). `rueca models pull [PRESET]`
+downloads to a temporary file, checks size and sha256, renames it into
+place and writes the sidecar; a hand-placed file is hashed once on first
+use. A missing file is an error naming the preset, the URL,
+`rueca models pull` and `RUECA_MODEL_DIR`.
+
+**Embedding.** Inputs are tokenized with the tokenizer inside the GGUF
+file, cut to the token budget (512 by default, special tokens included;
+Qwen3 ends every input with `<|endoftext|>`, which last-token pooling
+reads; encoders begin with `[CLS]`, which CLS pooling reads, and end with
+`[SEP]`), packed into batches of 512 tokens by default (`--batch`; every
+input fits one micro-batch: 512 tokens keep the default model near 1.0 GB
+of memory where 2,048 took 2.2 GB, for about 4% less throughput, measured
+in phase 0), pooled, L2-normalized and, with `--dims`, truncated and
+re-normalized. The batch order is fixed by content: inputs are sorted by
+token length, then BLAKE3 of the text, and results are returned in input
+order. Threads default to the performance cores (on Apple silicon the
+efficiency cores slow a CPU run down by half).
+
+**Identity and audit** (RFC 0007 §5.4, §9). The *embed key* is BLAKE3 of
+the model file's sha256, the pooling, the document prefix, the text
+builder version and the token budget; the *model key* adds the output
+width and the vector encoding. The query instruction is in neither key
+(documents carry none), nor are the runtime, its version, the backend or
+the CPU level: those go to the audit record that `rueca embed --info`
+prints (`model_sha256`, `quantization`, `dims`, `pooling`, `runtime`,
+`runtime_version`, `backend` = `metal` | `cpu` | `cuda` | `remote`, `cpu_level` =
+`neon` or the x86-64 psABI level, batch and micro-batch sizes, threads).
+
+**Commands.**
+
+```sh
+rueca index . --embed                 # index with symbol vectors (default preset)
+rueca index . --embed=remote:voyage/voyage-code-3   # through a provider (VOYAGE_API_KEY)
+rueca index --org rueca-org.toml --embed            # every member and ref with the organization's model
+rueca index . --ref feature/x --embed               # a ref: only the text it changed is embedded
+rueca query --batch requests.jsonl    # {"tool","args"} per line → one answer per line, one process
+rueca models list                     # presets, status, what the cache holds
+rueca models pull qwen3-0.6b-q8       # download and verify
+rueca models path qwen3-0.6b-q8       # where the file lives
+rueca models rm qwen3-0.6b-f16
+rueca models import qwen3-reranker-0.6b-q8 Qwen3-Reranker-0.6B-Q8_0.gguf   # register a local conversion (size and sha256 checked)
+rueca rerank --query "where is login handled?" --input docs.jsonl         # {"id","text"} → {"id","score"}, input order
+rueca embed --info                    # the audit record of the default preset (no model load; load_ms: null)
+rueca embed --text "where is login handled?" --query
+rueca embed --input in.jsonl --output out.jsonl          # {"id","text","query"} → {"id","vector"}
+rueca embed --input in.jsonl --output out.f32 --format f32le --dims 256   # raw rows + out.f32.ids
+rueca embed --bench --n 2000 --tokens 200 --runs 3 [--cpu]               # tokens/s and texts/s as JSON
+```
+
+`--preset` (or `RUECA_EMBED_PRESET`), `--max-tokens`, `--batch`,
+`--threads` and `--cpu` apply to every form. Output keeps input order.
+Errors print `rueca: …` on stderr and exit with status 1.
+
+**Indexing with vectors.** `rueca index --embed[=PRESET]` (or a configured
+preset, below) runs a vectors pass after resolution:
+
+1. **Units.** Every `Function`, `Method`, `Test`, `Class`, `Struct`,
+   `Interface`, `Trait`, `Enum` and Markdown `Section` with a file gets one
+   vector; fields, variables, constants, type aliases, configuration keys,
+   contracts and containers do not (RFC 0007 §5.1).
+2. **Canonical text** (text builder version 1, the bench vector arm's
+   format):
+
+   ```text
+   <language> <label> <qualified name>
+   path: <repository-relative path>
+   <signature>
+   <doc comment>
+   <body head>
+   ```
+
+   The signature is the declaration header scanned from the source (to the
+   `:` closing a Python header, else to the first `{` outside brackets,
+   lines joined by one space); the doc is the extracted docstring, else the
+   comment lines right above the definition; the body is the rest of the
+   span, dedented, without blank lines or the closing `}`. Types list their
+   members' signatures instead of their body, so a method edit does not
+   re-embed its class; sections are their text. Empty parts are left out
+   and the text is cut to `max_tokens × 4` characters (512 tokens → 2,048
+   characters; the model then cuts at 512 real tokens — a tokenizer-based
+   cut in the builder is a follow-up).
+3. **Cache lookup.** Each text's *vector key* is BLAKE3(embed key ‖ text);
+   the store vector cache answers which are already embedded.
+4. **Publication.** If every key hits (a re-index after a small change, a
+   second worktree, another repository with the same files), the segment is
+   written once with its vectors and the model is never loaded. Otherwise
+   the lexical segment is published and registered first (queries are
+   lexical meanwhile), the misses are embedded in batches of 256 texts in
+   key order — each batch appended to the cache as it finishes, so an
+   interrupted run resumes — and the snapshot is published again: the
+   bundle's components copied byte for byte, `meta` with a new segment id,
+   plus the `vectors.*` components; the catalog entry is swapped to it and
+   the lexical file deleted. Copying beats appending to the file: a
+   published segment is never modified (readers map it), and the copy of a
+   20 MB bundle costs tens of milliseconds next to minutes of embedding.
+
+`IndexReport.vectors` (and the `vectors:` line of `rueca index`) gives the
+units, how many were cached and embedded, tokens, time and the number of
+publications; progress (`embedded n of m`, tokens/s) is logged at `info`.
+`--embed` is an explicit request: missing weights are an error naming
+`rueca models pull`, raised before anything is published. A preset that
+comes from configuration only warns and indexes lexically.
+
+**Segment vectors.** `vectors.meta` (JSON: the audit record above plus
+`dims`, `rows`, `encoding: "i8"`, the segment's model key and the embedded
+labels), `vectors.nodes` (`[u32]`, ascending), `vectors.keys` (`[[u8; 32]]`),
+`vectors.scale` (`[f32]`) and `vectors.data` (`[i8; rows × dims]`). The
+cache keeps the model's full width; the segment stores `dims` components
+(`[retrieval] dims`, default the full width): truncated, re-normalized
+(Matryoshka) and quantized with one scale per row (`max |x| / 127`), so a
+new width re-quantizes from the cache without embedding anything.
+
+**Store vector cache.** `<store>/vectors/<embed key>/` (or
+`$RUECA_VECTOR_DIR`, shared across stores): `meta.json` (width, `f16`) and
+256 shards by the first byte of the key, each a pair of append-only files,
+`<xx>.keys` (32-byte keys) and `<xx>.f16` (rows). Writers lock the shard's
+`.keys` file (`flock`), skip keys already present, append and fsync the
+rows, then the keys; readers take no lock and count the complete entries
+(`min(keys, rows)`), so indexers of several repositories can share one
+store. A shard whose lengths disagree (a crash between the two appends) is
+truncated to its complete entries by the next writer. Entries are never
+removed yet (like content packs).
+
+**Hybrid search.** `search_symbols` gains `mode`:
+
+| Snapshot has vectors | Model loads | `mode` | Ranking |
+|---|---|---|---|
+| yes | yes | absent or `hybrid` | hybrid (`retrieval.mode: "hybrid"`) |
+| yes | yes | `semantic` | dense only |
+| yes | no (weights missing, model differs) | absent | lexical, with `retrieval.warnings` |
+| yes | no | `hybrid` / `semantic` | error naming `rueca models pull` |
+| no | — | absent | lexical |
+| no | — | `hybrid` / `semantic` | error naming `rueca index --embed` |
+| any | — | `lexical` | lexical, unchanged |
+
+The query model is the one recorded in the segment's `vectors.meta`
+(preset, token budget, text builder version; its embed key is checked), not
+the configured preset; it is loaded once per process (about 0.2 s and
+1.0 GB resident for the default model: a `rueca query` process pays it on
+every call, the MCP server once). The query is embedded with the preset's
+instruction, truncated to each segment's width. Candidates are the BM25 top
+N (today's ranking; its raw score is recovered by dividing out the prior and
+routing boost) and the dense top N of an exhaustive int8 scan of each
+selected snapshot under the same label, language, `path_glob` and scope
+filters (N = 100, at least the requested page; about 1.4 ms for this
+repository's 9,868 vectors). Every candidate with a vector gets its cosine,
+rescored from the cache's f16 rows when the cache is there. Then
+
+```text
+s = (α · b̂ + (1 − α) · d̂) · prior · route
+```
+
+with `b̂`, `d̂` min-max normalized over each list's top N (a list of equal
+scores normalizes to 1; BM25 is 0 outside its top N, a cosine below the
+dense list's range 0) and α = 0.5 until the phase 1 tuning. A snapshot
+without vectors for the model (an organization member indexed without
+`--embed`) is scored `b̂ · prior · route` and listed in `retrieval.lexical`;
+`semantic` leaves it out with a warning. Ties break by (snapshot, node),
+so pages are exact. Knobs: `RUECA_FUSION_ALPHA`, `RUECA_FUSION_N`,
+`RUECA_FUSION_NORM` (`minmax`, or `theoretical`: RFC 0007 §7.2's division
+by the theoretical minimum), over `[retrieval]` in the store's
+`rueca.toml`.
+
+**Graph signals** (RFC 0007 §7.3, §7.4). When either is on,
+`search_symbols` takes a pool of at least N first-stage candidates
+(lexical or fused, priors and routing applied) and, in this order:
+
+- **Centrality prior.** Each score is multiplied by `((0.25 + p) /
+  1.25)^β`, `p` the candidate's centrality percentile: the share of its
+  snapshot's symbols with a smaller distinct in-degree over `CALLS` and
+  `IMPORTS` (files, folders, modules and the repository get 1, so the prior
+  never moves them). β = 0 (off) by default. A multiplication commutes with
+  fusion, so in hybrid mode this is exactly the prior of §7.4; in lexical
+  mode it re-scores the BM25 top N (the other priors are applied inside the
+  index, before top-k). The percentiles come from the incoming CSR the
+  first time a query asks for them and stay with the opened segment: 7.9 ms
+  for 100k nodes and 400k edges with the crate optimized (32 ms
+  unoptimized; `cargo test -p rueca-segment --test scale centrality --
+  --ignored`), so they are not computed at open (cost 0 while β = 0) and
+  not written at index time.
+- **Graph expansion.** The 1-hop neighbours of the top 10 candidates (the
+  seeds) join the pool. A neighbour's score is its seed's score with the
+  seed's prior, routing boost and centrality taken out, times the decay
+  (0.5), times the neighbour's own multipliers; a candidate already in the
+  pool keeps the higher of its score and the inherited one. Edge sets:
+  `calls` (callers and callees), `calls+contains` (also the RFC's
+  containment, which is Rueca's `DEFINES`: a type's members and a member's
+  container; `CONTAINS` links folders and files, which search does not
+  return), `calls+contains+imports` (also `IMPORTS` both ways; they link
+  files, so with the default labels they add nothing). In organization mode
+  `CALLS` and `IMPORTS` also follow the link layer into other repositories
+  (the edges `trace` follows, through the call's view and visibility) when
+  the other repository is selected: a search that finds a library symbol
+  brings its consumers (the impact question). Neighbours pass the call's
+  `labels`, `language` and `path_glob`; at most 20 are added per seed and
+  100 per query, seeds in rank order, then callers, callees, members,
+  container, importers, imported. One hop only. On this repository (34,757
+  nodes) a `rueca query` process takes 0.30 s with and without expansion.
+
+`retrieval` gains `expansion` (`{"edges": "calls", "added": 3}`) and
+`centrality` (β) when they are on.
+
+**Reranker** (RFC 0007 §7.5). `search_symbols` with `rerank: true` (or
+`[retrieval] rerank = true`; off by default) scores the top `rerank_k`
+(default 50) of the pool above with a cross-encoder and returns the
+reranker's order for them, the first-stage order below. A candidate's text
+is its canonical text (the text its vector embeds, header, path,
+signature, doc, body head or member signatures) cut to 256 tokens (1,024
+characters), rebuilt from the content packs at query time, so a snapshot
+without vectors reranks too. Scores stay monotone with the order: a
+reranked result's `score` is the reranker's relevance in `[0, 1]`, a result
+below K keeps its first-stage score scaled under half the lowest reranked
+one. `retrieval.reranker` is `{"preset", "model_key", "k", "ms"}`. An
+explicit `rerank: true` whose weights are missing is an error naming
+`rueca models import` / `rueca models pull`; a reranker turned on by
+configuration that cannot load leaves the first-stage order and a warning.
+The model loads once per process.
+
+The runtime is llama.cpp. Qwen3-Reranker is a causal LM asked whether a
+document meets a query; its score is `softmax(logit(yes), logit(no))[yes]`
+after the model card's chat prompt:
+
+```text
+<|im_start|>system
+Judge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>
+<|im_start|>user
+<Instruct>: {instruction}
+<Query>: {query}
+<Document>: {document}<|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>
+
+```
+
+llama.cpp's `convert_hf_to_gguf.py` recognises the reranker (class
+`Qwen3Model`, `conversion/qwen.py`: a README titled `# Qwen3-Reranker` or
+the name) and writes the `yes` and `no` rows of the LM head as a two-way
+classifier (`cls.output.weight`, labels `["yes", "no"]`) with rank pooling;
+llama.cpp then reads the last token of each sequence through it and
+applies the softmax in the graph (`build_pooling`, rank pooling with
+`LLM_ARCH_QWEN3`), so a pooled read is `[p(yes), p(no)]`. Rueca refuses a
+file without that head. Per call, the shared prefix (system turn,
+instruction, query, `<Document>:`) is decoded once as sequence 0 and copied
+into each chunk's sequences in the unified KV cache; documents (`
+{document}` cut to 256 tokens, then the assistant suffix) are decoded in
+chunks of about 2,048 tokens, in input order. The instruction is the code
+retrieval one of the embedder; documents and query are tokenized as plain
+text (a special-token string in code stays text).
+
+The preset `qwen3-reranker-0.6b-q8` is a Rueca conversion (Qwen publishes
+no reranker GGUF; most community files score near 4.5e-23, llama.cpp issue
+#16407, because they were converted without the head). It is
+`unavailable` until its release asset is published; meanwhile convert it
+locally and register it:
+
+```sh
+# llama.cpp at the commit llama-cpp-2 0.1.161 vendors (converter only)
+git init llama.cpp && cd llama.cpp
+git remote add origin https://github.com/ggml-org/llama.cpp.git
+git sparse-checkout set --no-cone /convert_hf_to_gguf.py /conversion/ /gguf-py/
+git fetch --depth 1 --filter=blob:none origin d81235049384534c167caea52b85a694f6103d14 && git checkout FETCH_HEAD
+cd ..
+# Qwen/Qwen3-Reranker-0.6B at revision e61197ed45024b0ed8a2d74b80b4d909f1255473 (README.md included)
+mkdir Qwen3-Reranker-0.6B && cd Qwen3-Reranker-0.6B
+for f in README.md config.json generation_config.json merges.txt tokenizer.json tokenizer_config.json vocab.json model.safetensors; do
+  curl -sSfLO https://huggingface.co/Qwen/Qwen3-Reranker-0.6B/resolve/e61197ed45024b0ed8a2d74b80b4d909f1255473/$f
+done
+cd ..
+uv run --no-project --with torch --with transformers --with numpy --with sentencepiece --with safetensors \
+  python llama.cpp/convert_hf_to_gguf.py Qwen3-Reranker-0.6B --outtype q8_0 --outfile Qwen3-Reranker-0.6B-Q8_0.gguf
+# 639,153,376 bytes, sha256 def2f55d8729597c9456a441f9cc7781bbbbc1ac5ce8592a404a7575e30dd81e (two runs, same file)
+rueca models import qwen3-reranker-0.6b-q8 Qwen3-Reranker-0.6B-Q8_0.gguf
+```
+
+Validated against `transformers` (float32, the model card's recipe) on 6
+queries × 5 code documents (`cargo test -p rueca-embed --test rerank`,
+`RUECA_EMBED_TESTS=1`): every query's ranking is equal, Pearson r 0.9999
+on log-odds and 0.9997 on probabilities, largest probability difference
+0.046 (`Q8_0`). Latency, documents of about 256 tokens, M-series GPU
+(Metal) while another process embedded on the same GPU: K = 20 2.6 s,
+K = 50 6.0 s; `--cpu` 4.5 s and 15.6 s (`cargo test -p rueca-embed --test
+rerank latency -- --ignored`); 512 tokens per decode call is 1.6× slower,
+4,096 and 8,192 no faster than 2,048. Loading takes about 0.2 s when the
+Metal kernels are cached (`rueca rerank --timing`); a load that compiles
+them took 9.4 s here.
+Other presets: `qwen3-reranker-4b-q4` (a Rueca conversion to come, split
+under the 2 GiB release-asset limit) and `mxbai-rerank-large-v2` are
+planned; the remote rerankers are below.
+
+**Remote presets** (RFC 0007 §3.5; `rueca-embed` `remote`, feature
+`remote`, part of `embeddings`). `remote:<provider>/<model>` names an
+embedder or a reranker (a model starting with `rerank`) behind an API; any
+model of the provider works, the manifest lists the compared ones.
+
+| Provider | Embeddings | Rerank | Key | Batch per request |
+|---|---|---|---|---|
+| `voyage` | `POST /v1/embeddings`, `input_type` `query` / `document`, `output_dimension` | `POST /v1/rerank` | `VOYAGE_API_KEY` | 256 texts, ~100K tokens |
+| `openai` | `POST /v1/embeddings`, `dimensions` | — | `OPENAI_API_KEY` | 512 texts, ~250K tokens |
+| `gemini` | `POST /v1beta/models/<model>:batchEmbedContents`, `taskType` `CODE_RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT`, `outputDimensionality` | — | `GEMINI_API_KEY` (`x-goog-api-key`) | 100 texts |
+| `cohere` | — | `POST /v2/rerank` | `COHERE_API_KEY` | — |
+| `bedrock` | later: AWS SigV4 signing and credential resolution need the AWS SDK or a hand-written signer | — | — | — |
+
+Tokens are estimated at 4 characters each (no tokenizer); the width is
+`dims` (`--dims`, `[retrieval] dims`), else the model's default (Voyage
+1,024, OpenAI `text-embedding-3-large` 3,072, Gemini
+`gemini-embedding-001` 3,072), sent only when it differs; every vector is
+L2-normalized on arrival. A 429, a 5xx or a transport error is retried
+up to 5 times with exponential backoff from 0.5 s (capped at 30 s), or
+after the answer's `Retry-After` seconds; other errors fail at once with
+the provider's message. `RUECA_VOYAGE_BASE_URL`, `RUECA_OPENAI_BASE_URL`,
+`RUECA_GEMINI_BASE_URL` and `RUECA_COHERE_BASE_URL` point a provider at a
+proxy or a compatible server. The *embed key* of a remote preset hashes
+provider, model, API version, width, text builder version and token
+budget; providers publish no weights version, so a model changed behind
+its name is not detected. The vectors pass, the store vector cache and
+hybrid search treat remote vectors like local ones (`backend: remote` in
+the audit record). Privacy: an organization's code goes to a provider
+only when its `rueca-org.toml` sets `[retrieval] allow_remote = true`
+(§4.6); a repository outside any organization opts in by naming the
+preset. The tests run against a local mock server; no real API is
+called.
+
+**Configuration.** `<store>/rueca.toml`:
+
+```toml
+[retrieval]
+preset = "qwen3-0.6b-q8"   # rueca index embeds with it ("off": never)
+dims = 1024                # width stored in segments
+alpha = 0.5                # BM25 weight of the hybrid fusion
+fusion_n = 100             # candidates per list
+normalization = "minmax"   # or "theoretical"
+expand = "off"             # calls | calls+contains | calls+contains+imports
+expand_decay = 0.5         # expand_seeds = 10, expand_per_seed = 20, expand_total = 100
+centrality_beta = 0.0      # centrality prior exponent (0: off)
+rerank = false             # rerank when a call does not say
+rerank_k = 50
+rerank_preset = "qwen3-reranker-0.6b-q8"
+route_centroid = 1.0       # weight of the centroid routing signal (§4.6)
+```
+
+The same `[retrieval]` table in `rueca-org.toml` configures an
+organization (its `preset` and `dims` are the organization's model) and,
+only there, `allow_remote = true` lets a `remote:` preset see its code
+(default `false`; the store file rejects the key).
+
+**Profiles.** Unset keys take the defaults of the profile in effect,
+`RUECA_PROFILE`: `local` (the default) keeps the built-in defaults below;
+`service` (RFC 0008 service mode, RFC 0007 §8.3) embeds with
+`qwen3-4b-q4` when the build runs models on a GPU (`cuda`, or Metal on
+Apple silicon) and stays lexical on a CPU-only build, with `rerank =
+false` and `rerank_k = 50`:
+
+```toml
+# what RUECA_PROFILE=service means on a GPU build
+[retrieval]
+preset = "qwen3-4b-q4"
+rerank = false   # turned on only once the reranker's gate (RFC 0007 §7.5, §11.2) holds on the bench
+rerank_k = 50
+```
+
+Precedence: the argument (`--embed=PRESET`, `--no-embed`; `rerank`,
+`rerank_k`), the environment (`RUECA_EMBED_PRESET`, `RUECA_FUSION_*`,
+`RUECA_EXPAND`, `RUECA_EXPAND_DECAY`, `RUECA_EXPAND_SEEDS`,
+`RUECA_EXPAND_PER_SEED`, `RUECA_EXPAND_TOTAL`, `RUECA_CENTRALITY_BETA`,
+`RUECA_RERANK` (`1` / `0`), `RUECA_RERANK_K`, `RUECA_RERANK_PRESET`,
+`RUECA_ORG_ROUTE_CENTROID`), the organization file (indexing), the store
+file, the profile's defaults, the built-in default (no embedding; α 0.5,
+N 100, min-max; no expansion, β 0, no reranking; centroid weight 1).
+Without `--embed`, `rueca index` (and the MCP server's first-start index)
+embeds only when a preset is configured: embedding stays opt-in. `rueca status` shows the preset that embedded each
+snapshot (`VECTORS`, `-` for a lexical one).
+
+**Fallback runtime.** RFC 0007 §4.2 names `fastembed` (candle) as the
+fallback should the llama.cpp build break cargo-dist or the size budget.
+Phase 0 measured `fastembed` 7.7.1 with only `qwen3-text` on the same
+`Q8_0` file: it builds in pure Rust (plus Oniguruma for the tokenizer) and
+its vectors match the reference (cosine ≥ 0.999), but it needs the
+model's `tokenizer.json` beside the GGUF file, runs on the CPU at about
+0.7× llama.cpp's speed with about twice the memory, and its Metal path
+fails on Qwen3 (`no metal implementation for qk-norm-rope`). It is not in
+the tree; llama.cpp builds, links statically and adds about 11 MB to the
+release binary.

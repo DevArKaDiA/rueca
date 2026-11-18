@@ -205,6 +205,7 @@ pub(crate) fn search_symbols(
     more: bool,
     scores: bool,
     budget: usize,
+    retrieval: Value,
 ) -> Response {
     let n = hits.len();
     fit(n.min(1), n, budget, |k| {
@@ -219,7 +220,8 @@ pub(crate) fn search_symbols(
             (remap[s], h.brief.path.clone(), Value::Object(m))
         });
         let (truncated, cursor) = next(offset, k, n, more);
-        with_text("search_symbols", envelope(&listed, group(items, "symbols"), truncated, cursor, vec![]))
+        let extra = vec![("retrieval", retrieval.clone())];
+        with_text("search_symbols", envelope(&listed, group(items, "symbols"), truncated, cursor, extra))
     })
 }
 

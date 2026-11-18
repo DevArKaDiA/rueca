@@ -289,7 +289,9 @@ is recomputed (remapping is by node, not by key).
 
 BM25 search over symbol names, qualified names, signatures, docstrings,
 paths and each symbol's source code, with camelCase / snake_case / path
-splitting. A one-word query is a name lookup (exact names first); dotted
+splitting; when the repository was indexed with `rueca index --embed`,
+fused with embedding similarity (`mode`, below), so questions and issue
+text in plain words are welcome. A one-word query is a name lookup (exact names first); dotted
 parts (`Session.request`, `util:formatAmount`) and adjacent word pairs
 (`session request`) match qualified-name suffixes; multi-word queries also
 match the code itself. Fields, variables, constants and tests rank below
@@ -305,6 +307,69 @@ other definitions with the same text score. Ranking details:
 | `limit` | int, 1–200 | 10 |
 | `offset` | int (`cursor` takes precedence) | 0 |
 | `scores` | bool: include each result's score (3 significant digits) | false |
+| `mode` | `"lexical"` (BM25), `"hybrid"` (BM25 fused with embedding similarity), `"semantic"` (embeddings only) | `hybrid` when a selected snapshot has vectors and its model loads, else `lexical` |
+| `rerank` | bool: rerank the top `rerank_k` results with a cross-encoder (seconds per call) | the store's `[retrieval] rerank`, off |
+| `rerank_k` | int, 1–200: candidates the reranker scores | 50 (`[retrieval] rerank_k`, `RUECA_RERANK_K`) |
+
+`mode` ([RFC 0007](rfcs/0007-semantic-search.md) §8,
+[how-it-works §10](how-it-works.md#10-embeddings-rfc-0007)): an explicit
+`hybrid` or `semantic` on snapshots without vectors is an error naming
+`rueca index --embed`, and one whose model is not available locally an
+error naming `rueca models pull`; without `mode` both cases rank lexically
+(the second with a warning). In `hybrid` the score is
+`(α·b̂ + (1 − α)·d̂) × prior × routing`, BM25 and cosine each min-max
+normalized over its own top 100, α = 0.5; a snapshot without vectors for
+the call's model (an organization member indexed without `--embed`, or
+embedded with another model than the organization's) is ranked by BM25
+alone and named in `retrieval.lexical`, with its reason in
+`retrieval.lexical_reasons`. In an organization the call's model is the
+one its generation records (`rueca index --org --embed`); in a call over
+several snapshots their vectors are scanned in parallel, and the query
+vector also weighs the repository routing (its cosine with each
+repository's embedding centroid). An organization whose file does not set
+`[retrieval] allow_remote = true` never sends a query or reranker
+candidates to a `remote:` preset: the call ranks lexically with a warning,
+or fails when it asked for `hybrid`, `semantic` or `rerank: true`. `semantic` ranks by the cosine alone and
+leaves such snapshots out. Older binaries reject `mode` (arguments are
+validated strictly).
+
+`rerank` ([RFC 0007](rfcs/0007-semantic-search.md) §7.5,
+[how-it-works §10](how-it-works.md#10-embeddings-rfc-0007)): the top
+`rerank_k` of the first stage (any `mode`) are scored by a cross-encoder
+(`qwen3-reranker-0.6b-q8` by default) on their canonical text, cut to 256
+tokens; they come back in the reranker's order, the rest in first-stage
+order. With `scores`, a reranked result's score is the reranker's
+relevance (0–1) and a result below them its first-stage score scaled under
+the lowest reranked one, so scores always follow the order. An explicit
+`rerank: true` whose weights are missing is an error naming `rueca models
+import` / `rueca models pull`; a reranker turned on in the configuration
+that cannot load leaves the order and a warning. Graph expansion and a
+centrality prior (off by default) are configured per store, not per call
+(`[retrieval] expand`, `centrality_beta`, `RUECA_EXPAND`,
+`RUECA_CENTRALITY_BETA`).
+
+The envelope gains `retrieval` (between `next_cursor` and `budget`):
+
+```json
+"retrieval": {"mode": "hybrid", "model": "qwen3-0.6b-q8:3f9a1c2b", "alpha": 0.5,
+              "lexical": ["github.com/acme/legacy"],
+              "lexical_reasons": {"github.com/acme/legacy": "no vectors"},
+              "expansion": {"edges": "calls", "added": 4}, "centrality": 0.5,
+              "reranker": {"preset": "qwen3-reranker-0.6b-q8", "model_key": "2689173a", "k": 50, "ms": 6042.1}}
+```
+
+`mode` is the ranking the call got (`lexical`, `hybrid`, `semantic`);
+`model` the preset and a prefix of the vectors' model key; `alpha` the BM25
+weight (hybrid only); `lexical` the repositories ranked without vectors;
+`lexical_reasons` why, per repository (`no vectors`, or `vectors of
+another model (<preset>:<model key prefix>)`);
+`expansion` the graph expansion's edge set and how many neighbours it
+added, `centrality` the centrality prior's exponent (both only when
+configured on); `reranker` the reranker that ran (preset, a prefix of its
+model key, candidates scored, milliseconds); `warnings` why a call fell
+back (a model that did not load, unreadable vectors, a configured reranker
+that did not load). Empty fields are omitted: a lexical call has
+`{"mode": "lexical"}`. The text rendering does not change.
 
 Results, grouped by snapshot and file in rank order (a group sits where its
 best result ranks):
@@ -641,6 +706,19 @@ rueca index [PATH] --ref NAME [--remove] [--store DIR] [--repo ID] [--json]
     commit does nothing; --remove drops the snapshot and its export.
     Organizations holding the repository list (or drop) the ref.
 
+rueca index [PATH] [--embed[=PRESET] | --no-embed] …
+    With vectors for hybrid search (RFC 0007; `--embed` without a preset:
+    the configured one, else the default; `remote:<provider>/<model>`
+    presets call a provider's API). Without either flag a configured
+    preset (`RUECA_EMBED_PRESET`, `[retrieval] preset`) embeds. The flags
+    apply to `--ref` and `--org` too: a ref embeds only the text it
+    changed, and an organization embeds every member and ref with its
+    model (JSON adds "model" and "vectors", the coverage of each entry:
+    {"repo", "ref", "preset", "model_key", "rows", "status": "fused" |
+    "other model" | "no vectors"}). A `remote:` preset needs
+    `allow_remote = true` in the organization file of every organization
+    holding the root.
+
 rueca index --org FILE [PATH] [--store DIR] [--json]
     Index every repository of the organization file (or only the one
     containing PATH), then build or update the organization layer: the
@@ -662,6 +740,13 @@ rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [
     Run one tool and print its JSON result (with --text, the compact text
     rendering MCP clients get as text content). Same semantics as MCP.
 
+rueca query --batch FILE|- [--root PATH | --org FILE|NAME] [--store DIR]
+    Answer many calls in one process (models, rerankers and segments load
+    once): JSON lines {"tool": NAME, "args": {...}} in; one line out per
+    request, in order, each the JSON `rueca query` prints for it (an
+    `{"error": ...}` answers that request alone), flushed as written.
+    Exits 0 once every line is answered.
+
 rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
     MCP server on stdio. Indexes --root first if it has no segment; with
     --org FILE, builds the organization first if the store has none.
@@ -670,12 +755,15 @@ rueca status [--store DIR] [--json]
     List indexed roots with repo, commit, node/edge/file counts, age, the
     ref snapshots under each repository (`ref 8.5.1 @cf19179e8e2f …
     (export)`), and the organizations (generation, repositories and refs:
-    `main@08b803cf32ce + 8.5.1@cf19179e8e2f`).
+    `main@08b803cf32ce + 8.5.1@cf19179e8e2f`; with vectors, the
+    organization's model and each entry not fused: JSON "model",
+    "allow_remote", "vectors").
 
 rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
     List the organization's cross-repository edges (RFC 0006 link layer):
-    one line per edge (contract edges end with `[contract <key>]`), or JSON
-    {"org", "generation", "edges": [{"consumer", "src_repo", "src",
+    one line per edge (contract edges end with `[contract <key>]`) and the
+    vector coverage, or JSON {"org", "generation", "model", "vectors",
+    "edges": [{"consumer", "src_repo", "src",
     "src_label", "src_path", "dst_repo", "dst", "dst_name", "dst_label",
     "dst_path", "kind", "strategy", "confidence", "path", "line", "via",
     "key" (contract edges)}]} (`consumer`: the repository the edge was
@@ -707,6 +795,12 @@ path = "~/src/billing"             # `~` and paths relative to this file
 url = "https://github.com/acme/payments"   # cloned under <store>/orgs/acme/clones/ with `git`
 id = "github.com/acme/payments"            # optional repository id (like `index --repo`)
 refs = ["release/2.x", "pr/123"]           # optional: other refs indexed next to the default
+
+[retrieval]                        # optional (RFC 0007 §10)
+preset = "qwen3-0.6b-q8"           # the organization's model: `rueca index --org` embeds every member with it
+dims = 1024
+allow_remote = false               # `true` lets a `remote:` preset see the organization's code
+route_centroid = 1.0               # weight of the embedding-centroid routing signal
 ```
 
 The default ref of a member is its root (a `path` member's working tree; a

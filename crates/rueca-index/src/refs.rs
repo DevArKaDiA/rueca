@@ -63,7 +63,7 @@ use rueca_segment::{CatalogEntry, Store};
 use serde::Serialize;
 use tracing::{info, warn};
 
-use crate::{IndexOptions, IndexReport, PhaseTimings, git, index_worktree};
+use crate::{EmbedderLoader, IndexOptions, IndexReport, PhaseTimings, PresetLoader, git, index_worktree_with};
 
 /// Hex digits of a commit recorded as its ref name.
 const SHORT_COMMIT: usize = 12;
@@ -543,6 +543,13 @@ pub struct RefIndexOptions {
     pub budget: Budget,
     /// Worker threads; `None` = available parallelism.
     pub threads: Option<usize>,
+    /// As [`IndexOptions::embed`]: the export's symbols are embedded through
+    /// the store vector cache, so only text the ref changed is embedded.
+    pub embed: Option<crate::EmbedConfig>,
+    /// As [`IndexOptions::no_embed`].
+    pub no_embed: bool,
+    /// As [`IndexOptions::org`].
+    pub org: Option<String>,
 }
 
 /// What [`index_ref`] did.
@@ -577,6 +584,12 @@ pub struct RefIndexReport {
 /// Resolves, exports and indexes a ref of `opts.root`'s repository (see the
 /// module docs); a no-op when the snapshot is already at that commit.
 pub fn index_ref(opts: &RefIndexOptions) -> anyhow::Result<RefIndexReport> {
+    index_ref_with(opts, &PresetLoader { store: opts.store.clone() })
+}
+
+/// [`index_ref`] with the embedder of the vectors pass supplied by
+/// `loader`.
+pub fn index_ref_with(opts: &RefIndexOptions, loader: &dyn EmbedderLoader) -> anyhow::Result<RefIndexReport> {
     let started = Instant::now();
     let root = fs::canonicalize(&opts.root).with_context(|| format!("cannot access {}", opts.root.display()))?;
     let t = Instant::now();
@@ -594,7 +607,7 @@ pub fn index_ref(opts: &RefIndexOptions) -> anyhow::Result<RefIndexReport> {
             info!(repo = %base.repo, r#ref = %base.resolved.name, commit = %base.resolved.commit, "ref snapshot unchanged");
             Ok(base.finish(index, ExportReport::default(), 0, true))
         }
-        None => reindex(opts, &root, &owner, base),
+        None => reindex(opts, &root, &owner, base, loader),
     }
 }
 
@@ -654,13 +667,19 @@ impl ReportBase {
 }
 
 /// Exports the ref, records its owner and indexes it.
-fn reindex(opts: &RefIndexOptions, root: &Path, owner: &RefOwner, base: ReportBase) -> anyhow::Result<RefIndexReport> {
+fn reindex(
+    opts: &RefIndexOptions,
+    root: &Path,
+    owner: &RefOwner,
+    base: ReportBase,
+    loader: &dyn EmbedderLoader,
+) -> anyhow::Result<RefIndexReport> {
     let t = Instant::now();
     let export = export(root, &base.resolved.commit, &base.dest)
         .map_err(|e| anyhow::anyhow!("ref `{}`: {e:#}", base.resolved.name))?;
     owner.write(&base.dest)?;
     let export_ms = t.elapsed().as_millis() as u64;
-    let index = index_worktree(&IndexOptions {
+    let opts_index = IndexOptions {
         root: base.dest.clone(),
         store: opts.store.clone(),
         repo: Some(base.repo.clone()),
@@ -668,8 +687,12 @@ fn reindex(opts: &RefIndexOptions, root: &Path, owner: &RefOwner, base: ReportBa
         threads: opts.threads,
         ref_name: Some(base.resolved.name.clone()),
         commit: Some(base.resolved.commit.clone()),
-    })
-    .with_context(|| format!("indexing ref `{}` exported at {}", base.resolved.name, base.dest.display()))?;
+        embed: opts.embed.clone(),
+        no_embed: opts.no_embed,
+        org: opts.org.clone(),
+    };
+    let index = index_worktree_with(&opts_index, loader)
+        .with_context(|| format!("indexing ref `{}` exported at {}", base.resolved.name, base.dest.display()))?;
     info!(
         repo = %base.repo,
         r#ref = %base.resolved.name,
@@ -715,6 +738,7 @@ fn current_report(store: &Store, e: &CatalogEntry, resolved: &ResolvedRef, dest:
         references_builtin: 0,
         references_external: 0,
         timings: PhaseTimings::default(),
+        vectors: None,
     })
 }
 

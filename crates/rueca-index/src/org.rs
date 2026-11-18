@@ -15,7 +15,20 @@
 //! url = "https://github.com/acme/payments"   # cloned under <store>/orgs/acme/clones/
 //! id = "github.com/acme/payments"            # optional repository id override
 //! refs = ["release/2.x", "pr/123"]           # optional: other refs indexed too
+//!
+//! [retrieval]                     # optional (RFC 0007 §10, `rueca_embed::RetrievalConfig`)
+//! preset = "qwen3-0.6b-q8"        # the organization's model: every member is embedded with it
+//! allow_remote = false            # a `remote:` preset needs `true` (RFC 0007 §3.5)
 //! ```
+//!
+//! **Vectors** (RFC 0007 §10): with an embedding (`rueca index --org FILE
+//! --embed[=PRESET]`, or a configured preset: `RUECA_EMBED_PRESET`, the
+//! file's `[retrieval] preset`, the store's), every member and ref is
+//! embedded through the store vector cache, so a member indexed with
+//! vectors before embeds nothing again. The generation records the
+//! organization's model ([`OrgModel`]) and `allow_remote`; a member whose
+//! vectors have another model key, or none, ranks lexically
+//! ([`vector_coverage`]).
 //!
 //! **Refs** (RFC 0006 §9.3): besides its default ref (the member root), a
 //! member's `refs` are indexed as ref snapshots ([`crate::refs::index_ref`],
@@ -42,15 +55,19 @@ use std::process::Command;
 use std::time::Instant;
 
 use anyhow::Context;
+use rueca_embed::{ModelKey, RetrievalConfig, VectorEncoding};
 use rueca_extract::Budget;
 use rueca_segment::Store;
-use rueca_segment::org::{self, OrgMember, OrgUpdate};
+use rueca_segment::org::{self, OrgMember, OrgModel, OrgPolicy, OrgUpdate};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::link::PackageLinker;
 use crate::refs::{self, RefIndexOptions, RefIndexReport, RefRemoval};
-use crate::{IndexOptions, IndexReport, index_worktree, normalize_remote};
+use crate::{
+    EmbedConfig, EmbedRequest, EmbedderLoader, IndexOptions, IndexReport, PresetLoader, index_worktree_with,
+    normalize_remote, resolve_embed,
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -58,6 +75,8 @@ struct OrgFile {
     name: String,
     #[serde(default, rename = "repo")]
     repos: Vec<RepoFile>,
+    #[serde(default)]
+    retrieval: RetrievalConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,10 +110,15 @@ pub struct OrgRepoConfig {
 }
 
 /// A parsed `rueca-org.toml`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OrgConfig {
     pub name: String,
     pub repos: Vec<OrgRepoConfig>,
+    /// `[retrieval]` of the file (its model and `allow_remote`).
+    pub retrieval: RetrievalConfig,
+    /// What this run asks of the vectors pass (the command line's
+    /// `--embed` / `--no-embed`; [`EmbedRequest::Configured`] from a file).
+    pub embed: EmbedRequest,
 }
 
 fn expand(path: &str, base: &Path) -> PathBuf {
@@ -137,7 +161,13 @@ impl OrgConfig {
             }
             repos.push(OrgRepoConfig { source, id: r.id, refs: ref_names });
         }
-        Ok(OrgConfig { name: f.name, repos })
+        Ok(OrgConfig { name: f.name, repos, retrieval: f.retrieval, embed: EmbedRequest::Configured })
+    }
+
+    /// The embedding of this organization's run ([`resolve_embed`] with its
+    /// file's `[retrieval]` and the `allow_remote` gate).
+    pub fn embedding(&self, store: &Path) -> anyhow::Result<Option<EmbedConfig>> {
+        resolve_embed(store, &self.embed, Some((&self.name, &self.retrieval)))
     }
 
     /// The working tree of a member: its path, or its clone under `store`.
@@ -226,6 +256,12 @@ pub struct OrgIndexOptions {
 #[derive(Debug, Clone, Serialize)]
 pub struct OrgIndexReport {
     pub org: String,
+    /// The organization's model (absent when it does not embed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<OrgModel>,
+    /// Vector coverage of the published generation's entries.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vectors: Vec<MemberVectors>,
     /// One report per repository indexed by this run.
     pub indexed: Vec<IndexReport>,
     /// One report per ref snapshot synced by this run (indexed, or found
@@ -272,41 +308,93 @@ fn member_named(r: &OrgRepoConfig, name: &str) -> bool {
     r.id.as_deref() == Some(name) || matches!(&r.source, RepoSource::Url(u) if u == name)
 }
 
+/// The embedding of an organization run and where its model comes from.
+struct OrgRun<'a> {
+    embed: Option<EmbedConfig>,
+    loader: &'a dyn EmbedderLoader,
+    policy: OrgPolicy,
+}
+
+impl<'a> OrgRun<'a> {
+    /// Resolves the run's embedding (gate included) and the organization's
+    /// model, without loading it.
+    fn new(opts: &OrgIndexOptions, loader: &'a dyn EmbedderLoader) -> anyhow::Result<OrgRun<'a>> {
+        let embed = opts.config.embedding(&opts.store)?;
+        let model = match &embed {
+            Some(cfg) => Some(org_model(cfg, loader)?),
+            None => None,
+        };
+        let policy = OrgPolicy { model, allow_remote: opts.config.retrieval.remote_allowed() };
+        Ok(OrgRun { embed, loader, policy })
+    }
+
+    /// The index options of a member root: this run's embedding, resolved
+    /// already (`no_embed` keeps the store's configuration out).
+    fn index_options(&self, opts: &OrgIndexOptions, root: &Path, repo: Option<String>) -> IndexOptions {
+        IndexOptions {
+            root: root.to_path_buf(),
+            store: opts.store.clone(),
+            repo,
+            budget: opts.budget.clone(),
+            threads: opts.threads,
+            embed: self.embed.clone(),
+            no_embed: true,
+            org: Some(opts.config.name.clone()),
+            ..IndexOptions::default()
+        }
+    }
+}
+
+/// The model record of an embedding: its preset, embed key and the model
+/// key of segments it writes (width `dims`, `i8`).
+fn org_model(cfg: &EmbedConfig, loader: &dyn EmbedderLoader) -> anyhow::Result<OrgModel> {
+    let meta = loader.describe(cfg)?;
+    let dims = cfg.dims.unwrap_or(meta.max_dims);
+    Ok(OrgModel {
+        preset: meta.preset.clone(),
+        embed_key: meta.embed_key.to_string(),
+        model_key: ModelKey::new(&meta.embed_key, dims, VectorEncoding::I8).to_string(),
+        dims,
+    })
+}
+
 /// Indexes the members of an organization (all, or [`OrgIndexOptions::only`]),
 /// syncs their refs and updates the organization layer.
 pub fn index_org(opts: &OrgIndexOptions) -> anyhow::Result<OrgIndexReport> {
+    index_org_with(opts, &PresetLoader { store: opts.store.clone() })
+}
+
+/// [`index_org`] with the embedder of the vectors pass supplied by
+/// `loader`.
+pub fn index_org_with(opts: &OrgIndexOptions, loader: &dyn EmbedderLoader) -> anyhow::Result<OrgIndexReport> {
     let started = Instant::now();
     let cfg = &opts.config;
+    let run = OrgRun::new(opts, loader)?;
     let targets = targets(cfg, &opts.store, opts.only.as_deref())?;
     let mut indexed = Vec::new();
     for (r, root) in &targets {
         if let RepoSource::Url(u) = &r.source {
             sync_clone(u, root).with_context(|| format!("cloning {u}"))?;
         }
-        let report = index_worktree(&IndexOptions {
-            root: root.clone(),
-            store: opts.store.clone(),
-            repo: r.id.clone(),
-            budget: opts.budget.clone(),
-            threads: opts.threads,
-            ..IndexOptions::default()
-        })
-        .with_context(|| format!("indexing {}", root.display()))?;
+        let report = index_worktree_with(&run.index_options(opts, root, r.id.clone()), loader)
+            .with_context(|| format!("indexing {}", root.display()))?;
         indexed.push(report);
     }
     let repos_ms = started.elapsed().as_millis() as u64;
     let t = Instant::now();
     let mut sync = RefSync::default();
     for ((r, root), report) in targets.iter().zip(&indexed) {
-        sync.member(opts, r, root, &report.segment.snapshot.repo)?;
+        sync.member(opts, &run, r, root, &report.segment.snapshot.repo)?;
     }
     let refs_ms = t.elapsed().as_millis() as u64;
     let t = Instant::now();
-    let mut update = update_org(opts)?;
+    let mut update = update_org(opts, &run.policy)?;
     report_unowned(opts, &sync.reports, &mut update)?;
     let org_ms = t.elapsed().as_millis() as u64;
     Ok(OrgIndexReport {
         org: cfg.name.clone(),
+        model: run.policy.model.clone(),
+        vectors: current_coverage(&opts.store, &cfg.name)?,
         indexed,
         refs: sync.reports,
         ref_errors: sync.errors,
@@ -320,11 +408,11 @@ pub fn index_org(opts: &OrgIndexOptions) -> anyhow::Result<OrgIndexReport> {
 
 /// Builds or updates the organization layer of `opts.config` with the
 /// package linker, logging what it left out.
-fn update_org(opts: &OrgIndexOptions) -> anyhow::Result<OrgUpdate> {
+fn update_org(opts: &OrgIndexOptions, policy: &OrgPolicy) -> anyhow::Result<OrgUpdate> {
     let cfg = &opts.config;
     let store = Store::open(&opts.store)?;
     let linker = PackageLinker::new(&opts.store);
-    let update = org::update_org_with(&store, &cfg.name, &cfg.members(&opts.store), &linker)?;
+    let update = org::update_org_with_policy(&store, &cfg.name, &cfg.members(&opts.store), &linker, policy)?;
     for e in &update.link_errors {
         warn!(org = %cfg.name, "linking: {e}");
     }
@@ -352,7 +440,14 @@ struct RefSync {
 impl RefSync {
     /// Syncs the refs of member `r` (repository `repo`, root `root`): the
     /// configured ones, then the ones indexed earlier.
-    fn member(&mut self, opts: &OrgIndexOptions, r: &OrgRepoConfig, root: &Path, repo: &str) -> anyhow::Result<()> {
+    fn member(
+        &mut self,
+        opts: &OrgIndexOptions,
+        run: &OrgRun<'_>,
+        r: &OrgRepoConfig,
+        root: &Path,
+        repo: &str,
+    ) -> anyhow::Result<()> {
         let store = Store::open(&opts.store)?;
         let mut names = r.refs.clone();
         // This root's exports only: another root of the repository (a
@@ -369,7 +464,7 @@ impl RefSync {
             }
         }
         for name in names {
-            match index_member_ref(opts, r, root, repo, &name) {
+            match index_member_ref(opts, run, (r, root), repo, &name) {
                 Ok(report) => self.reports.push(report),
                 Err(e) => {
                     warn!(%repo, r#ref = %name, "cannot index ref: {e:#}");
@@ -387,8 +482,8 @@ impl RefSync {
 /// validated before anything runs `git` with it.
 fn index_member_ref(
     opts: &OrgIndexOptions,
-    r: &OrgRepoConfig,
-    root: &Path,
+    run: &OrgRun<'_>,
+    (r, root): (&OrgRepoConfig, &Path),
     repo: &str,
     name: &str,
 ) -> anyhow::Result<RefIndexReport> {
@@ -396,14 +491,19 @@ fn index_member_ref(
     if matches!(r.source, RepoSource::Url(_)) {
         refresh_remote_branch(root, name);
     }
-    refs::index_ref(&RefIndexOptions {
-        root: root.to_path_buf(),
+    let o = run.index_options(opts, root, Some(repo.to_string()));
+    let ref_opts = RefIndexOptions {
+        root: o.root,
         name: name.to_string(),
-        store: opts.store.clone(),
-        repo: Some(repo.to_string()),
-        budget: opts.budget.clone(),
-        threads: opts.threads,
-    })
+        store: o.store,
+        repo: o.repo,
+        budget: o.budget,
+        threads: o.threads,
+        embed: o.embed,
+        no_embed: o.no_embed,
+        org: o.org,
+    };
+    refs::index_ref_with(&ref_opts, run.loader)
 }
 
 /// In a `url` member's clone, updates the remote-tracking ref of branch
@@ -443,8 +543,20 @@ pub struct OrgRefReport {
 /// that ref's entry changes. The member's default must have been indexed
 /// for the ref to be listed.
 pub fn index_org_ref(opts: &OrgIndexOptions, name: &str, remove: bool) -> anyhow::Result<OrgRefReport> {
+    index_org_ref_with(opts, name, remove, &PresetLoader { store: opts.store.clone() })
+}
+
+/// [`index_org_ref`] with the embedder of the vectors pass supplied by
+/// `loader`.
+pub fn index_org_ref_with(
+    opts: &OrgIndexOptions,
+    name: &str,
+    remove: bool,
+    loader: &dyn EmbedderLoader,
+) -> anyhow::Result<OrgRefReport> {
     let started = Instant::now();
     let cfg = &opts.config;
+    let run = OrgRun::new(opts, loader)?;
     let only = opts.only.as_deref().context("`--ref` with `--org` needs the member (its path, id or url)")?;
     let found = targets(cfg, &opts.store, Some(only))?;
     let [(r, root)] = found.as_slice() else {
@@ -468,11 +580,11 @@ pub fn index_org_ref(opts: &OrgIndexOptions, name: &str, remove: bool) -> anyhow
     let (indexed, removed) = if remove {
         (None, Some(refs::remove_ref(&opts.store, &repo, &refs::root_prefix(root), name)?))
     } else {
-        (Some(index_member_ref(opts, r, root, &repo, name)?), None)
+        (Some(index_member_ref(opts, &run, (r, root), &repo, name)?), None)
     };
     let ref_ms = started.elapsed().as_millis() as u64;
     let t = Instant::now();
-    let mut update = update_org(opts)?;
+    let mut update = update_org(opts, &run.policy)?;
     report_unowned(opts, indexed.iter(), &mut update)?;
     Ok(OrgRefReport {
         org: cfg.name.clone(),
@@ -539,9 +651,90 @@ fn update_orgs_where(store_dir: &Path, holds: impl Fn(&org::OrgGeneration) -> bo
     Ok(out)
 }
 
+/// The name of an organization of the store (other than `except`) whose
+/// current generation holds `root` (a member's default or ref root) and
+/// does not allow remote presets.
+pub fn forbidding_remote(store_dir: &Path, root: &Path, except: Option<&str>) -> anyhow::Result<Option<String>> {
+    let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canon = canon.to_string_lossy();
+    if !store_dir.join("orgs").is_dir() {
+        return Ok(None);
+    }
+    let orgs = org::list_orgs(store_dir)?;
+    let holds = |g: &org::OrgGeneration| g.repos.iter().flat_map(|r| r.entries()).any(|e| e.root == canon);
+    Ok(orgs.into_iter().find(|g| !g.allow_remote && Some(g.name.as_str()) != except && holds(g)).map(|g| g.name))
+}
+
+/// How one entry of a generation stands against the organization's model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MemberVectors {
+    pub repo: String,
+    /// The ref of a ref entry (absent for the default).
+    #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub ref_name: Option<String>,
+    /// The preset of the entry's vectors (absent without vectors).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    /// Their model key (absent without vectors).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_key: Option<String>,
+    pub rows: usize,
+    /// `fused` (the organization's model key), `other model` or `no
+    /// vectors`: the last two rank lexically.
+    pub status: &'static str,
+}
+
+/// The vector coverage of every entry of generation `g` (each segment's
+/// `vectors.meta` read).
+pub fn vector_coverage(store_dir: &Path, g: &org::OrgGeneration) -> anyhow::Result<Vec<MemberVectors>> {
+    let store = Store::open(store_dir)?;
+    let mut out = Vec::new();
+    for r in &g.repos {
+        for (k, e) in r.slots() {
+            let ref_name = k.map(|k| r.refs[k].ref_name.clone());
+            let seg = store.open_segment(&e.segment_id)?;
+            let v = seg.vectors_meta().filter(|v| v.rows > 0);
+            let status = match (v, &g.model) {
+                (None, _) => "no vectors",
+                (Some(v), Some(m)) if v.model_key != m.model_key => "other model",
+                (Some(_), _) => "fused",
+            };
+            out.push(MemberVectors {
+                repo: r.repo.clone(),
+                ref_name,
+                preset: v.map(|v| v.preset.clone()),
+                model_key: v.map(|v| v.model_key.clone()),
+                rows: v.map_or(0, |v| v.rows),
+                status,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// [`vector_coverage`] of the current generation of organization `name`
+/// (empty when it has none or nothing has vectors).
+fn current_coverage(store_dir: &Path, name: &str) -> anyhow::Result<Vec<MemberVectors>> {
+    let Some(g) = org::current_generation(store_dir, name)? else { return Ok(Vec::new()) };
+    let all = vector_coverage(store_dir, &g)?;
+    Ok(if g.model.is_none() && all.iter().all(|m| m.rows == 0) { Vec::new() } else { all })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_retrieval() {
+        let cfg = OrgConfig::parse(
+            "name = \"a\"\n[retrieval]\npreset = \"remote:voyage/voyage-code-3\"\nallow_remote = true\n",
+            Path::new("/"),
+        )
+        .unwrap();
+        assert_eq!(cfg.retrieval.preset.as_deref(), Some("remote:voyage/voyage-code-3"));
+        assert!(cfg.retrieval.remote_allowed());
+        assert!(OrgConfig::parse("name = \"a\"\n[retrieval]\nbogus = 1\n", Path::new("/")).is_err());
+    }
 
     #[test]
     fn parses_paths_urls_and_ids() {

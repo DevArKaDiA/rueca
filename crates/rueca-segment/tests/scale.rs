@@ -252,3 +252,30 @@ fn scale_50k_nodes_200k_edges_2k_files() {
     }
     println!("adjacency: {} edge reads over {} nodes in {:?}", n, seg.nodes().len() / 7, t.elapsed());
 }
+
+/// The centrality percentiles of a 100k-node segment (RFC 0007 §7.4): the
+/// cost of the first query with β ≠ 0 (they are computed on first use).
+/// `cargo test -p rueca-segment --test scale centrality -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn centrality_cost_100k_nodes() {
+    let (graph, mem) = synth(4_000, 24, 400_000);
+    let dir = tempfile::tempdir().unwrap();
+    let meta = write_segment(&graph, &mem, dir.path()).unwrap();
+    let path = dir.path().join(format!("segments/{}.rcseg", meta.id));
+    let mut times = Vec::new();
+    for _ in 0..5 {
+        let seg = Segment::open(&path, dir.path()).unwrap();
+        let t = Instant::now();
+        let p = seg.centrality();
+        times.push(t.elapsed());
+        assert_eq!(p.len(), seg.nodes().len());
+        assert!(p.iter().all(|x| (0.0..=1.0).contains(x)));
+    }
+    println!(
+        "centrality of {} nodes, {} edges: p50 {:?} (debug builds are several times slower)",
+        graph.nodes.len(),
+        graph.edges.len(),
+        p50(times)
+    );
+}

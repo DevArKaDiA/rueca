@@ -80,6 +80,18 @@ pub enum DirectionArg {
     Both,
 }
 
+/// Ranking of `search_symbols` (RFC 0007 §8.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchModeArg {
+    /// BM25 over names, signatures, docs, paths and bodies only.
+    Lexical,
+    /// BM25 and embedding similarity fused.
+    Hybrid,
+    /// Embedding similarity only.
+    Semantic,
+}
+
 /// `repo`: one repository, several, or every indexed one.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(untagged)]
@@ -187,6 +199,17 @@ pub struct SearchSymbolsArgs {
     pub offset: Option<i64>,
     /// Include each result's rank score (3 significant digits). Default false.
     pub scores: Option<bool>,
+    /// `lexical` (BM25), `hybrid` (BM25 fused with embedding similarity) or `semantic`
+    /// (embeddings only). Default: `hybrid` when the snapshots were indexed with `rueca index
+    /// --embed` and the model loads, else `lexical`. An explicit `hybrid` or `semantic` that
+    /// cannot be served is an error.
+    pub mode: Option<SearchModeArg>,
+    /// Rerank the top `rerank_k` results with a cross-encoder (slower: seconds). Default: the
+    /// store's `[retrieval] rerank` (off). An explicit `true` without the reranker's weights is
+    /// an error.
+    pub rerank: Option<bool>,
+    /// Candidates the reranker scores, 1–200 (default 50).
+    pub rerank_k: Option<i64>,
     #[serde(flatten)]
     pub common: CommonArgs,
 }
