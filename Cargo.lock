@@ -3302,7 +3302,7 @@ dependencies = [
 
 [[package]]
 name = "rueca"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3323,7 +3323,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-extract"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "rueca-model",
  "serde",
@@ -3333,7 +3333,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-index"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "gix",
@@ -3364,7 +3364,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-cpp"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "rueca-extract",
  "rueca-model",
@@ -3377,7 +3377,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-data"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "hcl-edit",
  "jsonc-parser",
@@ -3393,7 +3393,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-go"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "rueca-extract",
  "rueca-model",
@@ -3403,7 +3403,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-java"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "rueca-extract",
  "rueca-model",
@@ -3414,7 +3414,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-markdown"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "percent-encoding",
  "pulldown-cmark",
@@ -3424,7 +3424,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-php"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "rueca-extract",
  "rueca-model",
@@ -3435,7 +3435,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-proto"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "prost-types",
  "protox-parse",
@@ -3445,7 +3445,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-python"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "rueca-extract",
  "rueca-model",
@@ -3455,7 +3455,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-rust"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "rueca-extract",
  "rueca-model",
@@ -3466,7 +3466,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-lang-typescript"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "oxc_resolver",
  "rueca-extract",
@@ -3479,7 +3479,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-mcp"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "rueca-extract",
@@ -3494,7 +3494,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-model"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "postcard",
  "serde",
@@ -3503,7 +3503,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-query"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "rueca-model",
@@ -3517,7 +3517,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-resolve"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "rueca-extract",
  "rueca-lang-go",
@@ -3532,7 +3532,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-segment"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "blake3",
  "bytemuck",
@@ -3555,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-serve"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3603,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-service"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3627,7 +3627,7 @@ dependencies = [
 
 [[package]]
 name = "rueca-storage"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "blake3",
