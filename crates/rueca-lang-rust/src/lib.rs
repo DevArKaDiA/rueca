@@ -16,9 +16,10 @@
 //!   semantics in `locals.rs`). They decide which identifiers are locals.
 //! - **Cargo manifests** are read with `toml_edit` (MIT OR Apache-2.0; the
 //!   data pack's TOML parser).
-//! - Definitions, qualified names, imports, receivers, macro arguments and
-//!   the module model are Rueca code (`extract.rs`, `refs.rs`,
-//!   `receivers.rs`, `macros.rs`, `uses.rs`, `modules.rs`). Upstream
+//! - Definitions, qualified names, imports, receivers, macro bodies and
+//!   arguments, attribute macros and the module model are Rueca code
+//!   (`extract.rs`, `refs.rs`, `receivers.rs`, `expand.rs`, `macros.rs`,
+//!   `decorators.rs`, `uses.rs`, `modules.rs`). Upstream
 //!   `tags.scm` (MIT) is not vendored: it has no containment, receivers or
 //!   qualified names.
 //!
@@ -65,10 +66,19 @@
 //! - Items inside function bodies (functions, types, `impl` blocks) are
 //!   children of the function (`outer.inner`, `outer.Local.m`). Closures
 //!   are not definitions: their code belongs to the enclosing function.
+//! - **Items inside macro invocations** are items where the invocation
+//!   stands, when the macro's body parses as items (`cfg_net! { pub mod
+//!   tcp; pub fn f() {} }` at file level → `f`; inside `mod m { … }` →
+//!   `m.f`; inside `fn outer` → `outer.f`), and so are their `use` and
+//!   `mod` declarations; every branch of a `cfg_if!`-shaped body `if
+//!   #[cfg(…)] { … } else { … }` counts (two branches may define the same
+//!   name). The invocation stays a call of the macro (see `expand.rs`).
 //! - `span` is the item without its attributes and doc comment; `name_span`
 //!   the identifier; `signature` the item up to its body on one line
 //!   (≤ 200 chars); `doc` the `///` / `/** */` comments above it (≤ 1000
 //!   chars, attributes between them skipped).
+//! - `decorators`: the item's attribute macros as written inside `#[…]`
+//!   (`tokio::main(flavor = "current_thread")`), see *References*.
 //! - `exported`: the item has a `pub` visibility (any form); trait members
 //!   and variants follow their trait or enum; items of trait impls are
 //!   exported.
@@ -76,6 +86,11 @@
 //!   `#[tokio::test]` and any `…::test`, `#[bench]`, `#[rstest]`,
 //!   `#[test_case(…)]`), everything inside a `#[cfg(test)]` module, and
 //!   every definition of a file under a `tests/` or `benches/` directory.
+//!   A module file declared by `#[cfg(test)] mod x;` (or `all(test, …)`,
+//!   not `any(test, …)`: such a module is also built without tests) is
+//!   test code too, which the file alone does not show: the declaring
+//!   file's `$test` marker import (*Imports*) lets the resolver mark its
+//!   definitions.
 //!   Because this depends on the path, [`LanguagePack::facts_depend_on_path`]
 //!   is true.
 //!
@@ -103,13 +118,22 @@
 //!   references, except in field types (where the resolver reads the first
 //!   one as the field's type; smart pointers are skipped there).
 //! - `Write`: assignments to non-local names and to `self.field`.
+//! - `Decorator`: an attribute macro of an item (`#[tokio::main]` → `main`
+//!   with receiver `tokio`, `#[rstest]` → `rstest`), enclosed by the item;
+//!   the resolver adds `DECORATES` from the macro's function (a
+//!   `#[proc_macro_attribute] pub fn`) to the item. Built-in attributes
+//!   (`#[derive]`, `#[cfg]`, `#[test]`, `#[inline]`, `#[doc]`, …), tool
+//!   attributes (`#[rustfmt::skip]`) and, on an item with a `#[derive]`,
+//!   single-segment helper attributes (`#[serde(…)]`) are not references
+//!   (`decorators.rs`).
 //! - `EnvVar`: `std::env::var("X")`, `env::var("X")` / `var("X")` with
 //!   `std::env` / `std::env::var` imported (also `var_os`), `env!("X")`,
 //!   `option_env!("X")` — literal names only (RFC 0003 §7.2).
 //! - **Inside macro arguments** (`println!("{}", f())`, `assert_eq!(a.len(),
 //!   3)`, `vec![make()]`, `write!(f, …)`, any macro of any crate): the
 //!   argument list is parsed again as code and visited like the file's own,
-//!   at the original positions (see `macros.rs`).
+//!   at the original positions (see `macros.rs`). A body that is items is
+//!   not re-parsed as an expression: its items are visited as items.
 //! - `Read` / `Write` / `Type` are deduplicated per `(enclosing, receiver,
 //!   name)`; at most 20,000 references per file.
 //!
@@ -149,7 +173,9 @@
 //! | `pub use …` | as above | | | `reexport: true` |
 //! | `use …` inside `mod m { … }` | as above | | | `$in:m` (the module, for lookups of `m::name`) |
 //! | `mod x;` (inside `mod m { … }`: `m::x`) | `x` | 1 | | `x` |
+//! | `use` / `mod` inside a macro body that is items (`cfg_net! { pub mod tcp; pub use tcp::X; }`) | as above, at their place | | | |
 //! | `#[path = "p.rs"] mod x;` | `"p.rs"` | 1 | | `x` |
+//! | `#[cfg(test)] mod x;` (or `all(test, …)`; also inside such a module) | the `mod x;` import, then a marker: as above | 1 | | `$test`, `type_only: true` |
 //! | `extern crate foo as bar;` | `::foo` | 0 | | `bar` |
 //! | a path anchor used in code (`crate`, `super`, `serde_json`) | `crate` / *(empty)* / `serde_json` | 0 / 2 / 0 | | the anchor (`super$1` for `super`), `type_only: true` |
 //!
@@ -163,18 +189,25 @@
 //! same workspace first) continues from there, and each further segment is
 //! `<dir>/<s>.rs` or `<dir>/<s>/mod.rs`; the walk stops at the first
 //! segment that is not a file (an inline module, a type) and returns the
-//! deepest module file. `std`, `core`, `alloc` and third-party crates
-//! resolve to nothing (external).
+//! deepest module file. A `mod x;` inside inline modules (`mod net { mod
+//! tcp; }`) is the file below their directories (`<dir>/net/tcp.rs`),
+//! whether or not a file holds the inline modules. `std`, `core`, `alloc`
+//! and third-party crates resolve to nothing (external).
 //!
 //! # Limitations
 //!
 //! - Types are file-local: return types of functions of other files and
 //!   field types of structs declared elsewhere are not followed in the pack
 //!   (the resolver follows `$member:` chains through declared field types).
-//! - Macros are not expanded: items a macro generates or wraps (`cfg_if!`,
-//!   tokio's `cfg_*!` blocks, `bitflags!`, derives) are not definitions
-//!   (their arguments are still visited for references), and what a
-//!   `macro_rules!` body calls is not a call of the macro's callers.
+//! - Macros are not expanded. Items a macro **passes through** are items
+//!   (a body that parses as items, or `cfg_if!`'s branches); items a macro
+//!   **generates** (`bitflags!`, derives, a `macro_rules!` that builds an
+//!   `impl` from its arguments, bodies in a macro's own syntax such as
+//!   `stable: { … }`) are not definitions (their arguments are still
+//!   visited for references), and what a `macro_rules!` body calls is not
+//!   a call of the macro's callers. A pass-through invocation written with
+//!   no whitespace around its opening delimiter (`m!{fn f() {}}`) is not
+//!   opened (`expand.rs`).
 //! - A method called on a return-position `impl Trait` binds the trait's
 //!   method, not the concrete type's.
 //! - `#[cfg]` is ignored: every item is indexed; `#[path]` is honoured on
@@ -184,6 +217,8 @@
 
 mod builtins;
 mod contracts;
+mod decorators;
+mod expand;
 mod extract;
 mod locals;
 mod macros;
@@ -219,7 +254,8 @@ impl LanguagePack for RustPack {
     }
     fn extractor_version(&self) -> u32 {
         // 2: contract hints (HTTP routes and calls, tonic; RFC 0006 phase 4).
-        2
+        // 3: items inside macro bodies, attribute macros as decorators.
+        3
     }
     fn extract(
         &self,

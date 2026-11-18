@@ -1675,10 +1675,11 @@ def _x(r: float | None) -> str:
 ORG_ARM_LABEL = {"rueca": "Rueca", "grep": "BM25 (grep)", "cbm": "cbm"}
 ORG_KIND_LABEL = {"issue": "issue", "impact": "impact"}
 RUST_GAPS = (
-    "Rust gaps (findings about Rueca, not labeler noise): attribute macros (`#[tokio::main]`, `#[tokio::test]`) are uses the link layer "
-    "does not record — a large share of the axum → tokio uses it misses; bodies of macro invocations are not extracted, so uses inside them are "
-    "invisible; and cross-repository method resolution by type name can pick a same-named type of another crate (the wrong tokio → mio "
-    "edges)."
+    "Rust gaps (findings about Rueca, not labeler noise): methods of an extension trait implemented for every type that has another "
+    "trait (`impl<T: Service> ServiceExt for T`: `.oneshot()`, `StreamExt`, `AsyncBufReadExt`) bind to nothing — most of the axum → tower "
+    "misses; macros defined inside another macro's body (`tokio::join!`) and items behind `#[cfg]`-selected glob re-exports (mio's "
+    "`unix::pipe`) are not found; Cargo dependencies are matched by package name, not version. Most edges counted wrong are methods of "
+    "values a library call returned (`Server::bind(..).serve(..)`, `tokio::spawn(..).abort()`), which the labeler cannot see."
 )
 
 

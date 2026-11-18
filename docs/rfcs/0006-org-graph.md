@@ -206,7 +206,7 @@ The benchmark's multi-repository scenario becomes the organization suite:
 | Metric | Today (gated split, n = 120; `docs/bench/alpha-results.md`) | Floor | Target |
 |---|---|---|---|
 | File Acc@5, organization scope vs the right repository alone | 56.7% vs 66.7% (0.85×, 95% CI 0.74–0.96 ⚠; rank fusion: 24.2%) | ≥ 0.85 × single-repository | ≥ 0.95 × |
-| Cross-repository edges (packages) precision / recall on labelled pairs | 12 pairs: 98.3 / 74.9 (recall ❌); without Rust (8 pairs) 99.8 / 96.2; Rust alone (4 pairs) 94.5 / 53.2 | ≥ 90 / 75 | ≥ 97 / 90 |
+| Cross-repository edges (packages) precision / recall on labelled pairs | 12 pairs: 99.4 / 94.7; without Rust (8 pairs) 100.0 / 96.2; Rust alone (4 pairs) 98.3 / 93.1 | ≥ 90 / 75 | ≥ 97 / 90 |
 | Incremental update: re-index one repository of 42 | micropython/micropython: organization layer 504 ms vs 2,681 ms (0.19×) | org layer ≤ 2× the repository's own index time | ≤ 1× |
 | Tokens per correct answer, organization scope | 701 vs 542 single-repo (1.29×, 95% CI 1.13–1.50; top 10) | reported | ≤ 1.2 × single-repo |
 
@@ -435,9 +435,9 @@ comparable and no longer carried (§10).
 | Tokens per correct answer, organization scope (top 10), gated | 701 vs 542 (1.29×, 1.13–1.50) | reported | ≤ 1.2× |
 | Impact (16 gated): consumer hit@10, Rueca vs BM25 over the union | 12.5% vs 37.5% (−25.0, −50.0…−6.2 ❌) | — | — |
 | Impact: own File Acc@5, Rueca vs BM25 over the union | 81.2% vs 62.5% | — | — |
-| Cross-repository edges (packages), precision / recall, 12 labelled pairs pooled | 98.3 (97.8–98.7) / 74.9 (72.2–77.4) ❌ | ≥ 90 / 75 | ≥ 97 / 90 |
-| — without Rust (8 pairs: Python, PHP, Java) | 99.8 / 96.2 | ≥ 90 / 75 | ≥ 97 / 90 |
-| — Rust alone (4 pairs) | 94.5 / 53.2 ❌ | ≥ 90 / 75 | ≥ 97 / 90 |
+| Cross-repository edges (packages), precision / recall, 12 labelled pairs pooled | 99.4 (99.1–99.6) / 94.7 (93.2–95.9) ✅ (2026-11-18; 98.3 / 74.9 ❌ before the Rust fixes) | ≥ 90 / 75 | ≥ 97 / 90 |
+| — without Rust (8 pairs: Python, PHP, Java) | 100.0 / 96.2 (99.8 / 96.2 before) | ≥ 90 / 75 | ≥ 97 / 90 |
+| — Rust alone (4 pairs) | 98.3 (97.4–98.9) / 93.1 (90.6–95.0) ✅ (94.5 / 53.2 ❌ before) | ≥ 90 / 75 | ≥ 97 / 90 |
 | Incremental update: re-index micropython (95,342 symbols) of 42 (profiles, routing, links included) | 504 ms vs 2,681 ms (0.19×) | ≤ 2× | ≤ 1× |
 | Organization layer per added repository (42 steps) | median 273 ms, max 1,598 ms (0.30× / 3.62× ❌) | ≤ 2× (max) | ≤ 1× |
 
@@ -469,18 +469,37 @@ score transplant: the organization score distribution, the repository's
 own order) and, for impact, signals from the link layer.
 
 Open findings from the Rust pairs (about Rueca, not the labeler; §12,
-question 5):
+question 10):
 
-- **Attribute macros** (`#[tokio::main]`, `#[tokio::test]`) produce no
-  link edge: 70 of the 176 labelled axum → tokio uses.
-- **Items inside macro invocation bodies** — `mod`, `use` and items in
+- ~~**Attribute macros** (`#[tokio::main]`, `#[tokio::test]`) produce no
+  link edge: 70 of the 176 labelled axum → tokio uses.~~ Fixed 2026-11-17
+  (PR fix/rust-tokio-gaps): an attribute macro is a `Decorator` reference,
+  `DECORATES` from the `#[proc_macro_attribute] pub fn` to the item.
+- ~~**Items inside macro invocation bodies** — `mod`, `use` and items in
   `cfg_net! { … }` and similar — are not extracted, so re-exports such as
-  `tokio::net::TcpListener` and `tokio::spawn` are invisible to consumers.
-- **Cross-repository method resolution by type name** can pick a
+  `tokio::net::TcpListener` and `tokio::spawn` are invisible to
+  consumers.~~ Fixed 2026-11-17 (PR fix/rust-tokio-gaps): a body that
+  parses as items (and every `cfg_if!` branch) is opened in place; Rust
+  lookups also keep the value and type namespaces apart (`mod sleep; pub
+  use sleep::sleep;`).
+- ~~**Cross-repository method resolution by type name** can pick a
   same-named type of another crate (`TcpStream.peek` → mio): most of the
-  38 wrong tokio → mio edges.
+  38 wrong tokio → mio edges.~~ Fixed 2026-11-17 (PR fix/rust-tokio-gaps):
+  a type binds in the file's scope, another crate's same-named type only
+  as a guess (`heuristic`, dropped by the link layer); tokio → mio 200 →
+  166 edges, 165 counted correct (the one left is `Registry.register` on
+  a `mio::Registry` field, right but invisible to the labeler).
 - The linker matches Cargo dependencies by package name only, never by
   version.
+- Methods of an extension trait implemented for every type with another
+  trait (`impl<T: Service> ServiceExt for T`: `.oneshot()`, `StreamExt`)
+  bind to nothing: 20 of the 36 Rust uses still missed (axum → tower).
+
+After the fixes (2026-11-18): axum → tokio 98.0 / 95.6 (was 92.9 / 14.1),
+axum → hyper 90.4 / 94.7 (100 / 54.4), axum → tower 100 / 89.8 (100 /
+82.7), tokio → mio 99.4 / 93.8 (81.0 / 87.5). The edges counted wrong are
+methods of values a library call returned (`Server::bind(..).serve(..)`,
+`tokio::spawn(..).abort()`), right but unseen by the labeler.
 
 ### 9.3 Phase 3 — implemented
 
@@ -957,6 +976,12 @@ gated; RFC 0004 §5):
   labelled pairs (Rust included) and are reported over all pairs, without
   Rust and Rust alone. The earlier 21-instance numbers are another
   population and are no longer carried.
+- **2026-11-18 — Rust pairs after the Rust fixes** (§8, §9.2, §12 q.10).
+  Items inside macro bodies, attribute macros as decorators, value and
+  type namespaces and crate-scoped types (PR fix/rust-tokio-gaps) lift the
+  cross-repository edges to 99.4 / 94.7 over the 12 pairs (Rust alone 98.3
+  / 93.1), over the floor and at the recall target; three of the four
+  Rust findings of §9.2 are closed.
 
 ## 11. Alternatives considered
 
@@ -1006,13 +1031,15 @@ gated; RFC 0004 §5):
    writer wins and a collection can race a registration. Local mode runs
    one indexer at a time; service mode needs the lock (or a transactional
    catalog).
-10. Rust in the link layer (§9.2, open findings): attribute macros
+10. Rust in the link layer (§9.2, open findings): ~~attribute macros
    (`#[tokio::main]`, `#[tokio::test]`) as uses, items and `mod` / `use`
    inside macro invocation bodies (`cfg_net! { … }`), method resolution
    across repositories that does not pick a same-named type of another
-   crate, and Cargo dependencies matched by version as well as name. Rust
-   pairs pool at 94.5 / 53.2; the all-pairs recall (74.9) misses the
-   floor because of them.
+   crate~~ (fixed 2026-11-17, PR fix/rust-tokio-gaps: Rust pairs 94.5 /
+   53.2 → 98.3 / 93.1, all pairs 98.3 / 74.9 → 99.4 / 94.7), and Cargo
+   dependencies matched by version as well as name; methods of blanket
+   extension traits (`ServiceExt::oneshot`) are the largest share of the
+   Rust misses left.
 11. Impact: the consumers of a changed library symbol are not surfaced by
    the organization ranking (consumer hit@10 12.5% vs 37.5% for BM25 over
    the union, 16 gated impact instances). Which signals answer "who uses

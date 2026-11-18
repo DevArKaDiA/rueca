@@ -11,7 +11,7 @@ use rueca_extract::span_of;
 use rueca_extract::tree_sitter::Node;
 use rueca_model::{Import, ImportedName};
 
-use crate::extract::{Extractor, mod_path_attr, named_children};
+use crate::extract::{Extractor, mod_is_cfg_test, mod_path_attr, named_children};
 use crate::locals::text;
 
 /// One leaf of a `use` tree.
@@ -65,6 +65,10 @@ pub(crate) fn normalize(segs: &[String], mods: &[String]) -> Option<ModulePath> 
 fn tail(rest: &[String]) -> String {
     if rest.is_empty() { String::new() } else { format!("::{}", rest.join("::")) }
 }
+
+/// `module_alias` of the marker import that follows a `#[cfg(test)] mod x;`
+/// (crate docs, *Imports*).
+const TEST_MARKER: &str = "$test";
 
 /// The marker of a `use` declared inside inline modules `mods` (`$in:a.b`),
 /// kept in the import's `module_alias` (unused by `use` imports otherwise).
@@ -248,6 +252,14 @@ impl Extractor<'_> {
             }
         };
         let path = ModulePath { level: 1, module };
+        if mod_is_cfg_test(node, self.src) {
+            // The resolver marks the module file as test code.
+            let mut marker = import(path.clone(), Vec::new(), Some(TEST_MARKER.to_string()), false, node);
+            marker.type_only = true;
+            self.imports.push(import(path, Vec::new(), Some(name), false, node));
+            self.imports.push(marker);
+            return;
+        }
         self.imports.push(import(path, Vec::new(), Some(name), false, node));
     }
 }

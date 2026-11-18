@@ -301,7 +301,7 @@ scorecard (`stable` = every floor met; full tables in
 - **Java** `stable`
 - **C** `stable` (1.1% of files with parse errors, vendored code excluded)
 - **C++** `stable` (callees precision 92.5 with SCIP-ambiguous definitions scored as one class; 0.5% of files with parse errors, vendored code excluded)
-- **Rust** `stable` (localization meets the floor but trails BM25 on the point estimate: File Acc@5 62.8 vs 67.4, Function Acc@10 39.0 vs 46.3 over 43 issues, paired intervals cross zero; callers / callees precision 98.5 / 98.0, recall 87.8 / 87.1 against rust-analyzer on serde_json and ripgrep; 0.1% of files with parse errors)
+- **Rust** `stable` (localization meets the floor but trails BM25 on the point estimate: File Acc@5 62.8 vs 67.4, Function Acc@10 39.0 vs 46.3 over 43 issues, paired intervals cross zero; callers / callees precision 98.5 / 98.0, recall 86.8 / 87.1 against rust-analyzer on serde_json and ripgrep; 0.1% of files with parse errors)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 **Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),
@@ -317,8 +317,8 @@ asking that repository alone (0.85×, at the floor with its interval
 crossing it; per-repository rank fusion gives 24.2%; BM25 over the union
 of the repositories 52.5%); it does not yet surface the consumers of a
 changed library symbol (12.5% vs 37.5% for BM25). Cross-repository edges
-on 12 labelled consumer–library pairs have 98.3% precision and 74.9%
-recall (99.8 / 96.2 without the Rust pairs, 94.5 / 53.2 Rust alone);
+on 12 labelled consumer–library pairs have 99.4% precision and 94.7%
+recall (100.0 / 96.2 without the Rust pairs, 98.3 / 93.1 Rust alone);
 re-indexing one repository of 42 updates the organization layer in 0.5 s,
 0.19× the repository's own index time
 ([RFC 0006 §8, §9.2](docs/rfcs/0006-org-graph.md)).

@@ -246,7 +246,23 @@ What packs deliberately do and don't do:
   local scopes for closures inside the arguments. Standard macros are not
   references; `stringify!`, `concat!`, `include*!` and `quote!`-style token
   builders are not re-parsed, and `macro_rules!` bodies are token patterns,
-  not code (rust-analyzer records no references in them either).
+  not code (rust-analyzer records no references in them either). **Macro
+  bodies that are items are items**: crates gate groups of items behind
+  pass-through macros (tokio's `cfg_net! { pub mod tcp; pub use
+  tcp::listener::TcpListener; }`, `cfg_if! { if #[cfg(unix)] { … } else {
+  … } }`), so an invocation in item or statement position whose body
+  parses on its own as items (every branch of a `cfg_if!`-shaped body) is
+  opened in place before the walk: a same-length rewrite blanks its
+  delimiters and leaves `name!{}`, so its definitions, `use` and `mod`
+  declarations are those of the enclosing file, inline module or function
+  at their real positions, and the invocation is still a call of the
+  macro. Rounds repeat for nested macros; a round that adds parse errors is
+  dropped. **Attribute macros are decorators**: an attribute that is not
+  built in (`#[tokio::main]`, `#[tracing::instrument]`, `#[rstest]`; not
+  `#[derive]`, `#[cfg]`, `#[test]`, tool attributes or derive helpers such
+  as `#[serde(…)]`) is a `Decorator` reference of the item, which the
+  resolver turns into `DECORATES` from the `#[proc_macro_attribute]`
+  function to the item, also across repositories.
 - **Receiver types from declarations and assignments** (TS/JS, Python;
   "strategy 5"). A per-file pre-pass records what every binding of a name
   says about its type, per function (and for module-level names and class
@@ -762,7 +778,16 @@ items, else what its `mod`, `use` (leaves, re-exports, globs) and
 anchor (`crate`, `self` / `super`, a name in scope, a crate) through module
 files, inline modules, types and re-export chains. Path qualifiers used in
 code (`crate::a::f()`, `super::g()`, `serde_json::to_string(…)`) are bound
-by synthetic imports the pack adds for them.
+by synthetic imports the pack adds for them. Names have Rust's two
+namespaces: a call or a read looks for a function, constant or constructor,
+a type reference and a path segment for a module or type, so `mod sleep;
+pub use sleep::sleep;` binds the module for `time::sleep::Sleep` and the
+function for `time::sleep(d)` or `sleep(d)` after `use tokio::time::sleep`.
+Types bind in scope — declared, imported or named by path; by name alone
+only in the file's own crate — so a same-named type of another crate (mio's
+`TcpStream` for tokio's) is never a guess, and test code (`#[cfg(test)]`
+modules, also module files declared by `#[cfg(test)] mod mocks;`) never
+binds for other code.
 
 | Rust reference | Rule (edge `strategy`) | Confidence |
 |---|---|---|
@@ -775,7 +800,9 @@ by synthetic imports the pack adds for them.
 | `x.m()` on a generic `T: Tr`, `impl Tr` or `dyn Tr` | the trait's method (`type_resolved`) | 0.85 |
 | `x.m()` where `x` holds the result of a call the file cannot type (`let s = Store::open(p)?;`, `make().build()`): the callee's declared return type, `Self` and `Result<Self>` / `Option<Self>` through `?` / `unwrap()` included (`$ret:`) | typed receiver (`type_resolved`) | 0.85 |
 | `x.m()` with an unknown receiver: one trait method (its implementations count as it), or one method, of that name | `heuristic` | 0.50; several candidates: no edge |
+| `T` named by nothing in scope: the only type of that name in the file's own crate (never another crate's) | `unique_name` | 0.60 |
 | `my_macro!()` with no import (`#[macro_use]`): the only `macro_rules!` of that name | `unique_name` | 0.60 |
+| `#[tokio::main]`, `#[instrument]` (a `Decorator`): the attribute's path like a call path, through re-exports to the `#[proc_macro_attribute] pub fn` | imported module / binding (`import_resolved`) | 0.90 / 0.95 |
 
 Items of an `impl` block are attached to the type their self type names
 (resolved in the item's scope, wherever the type is declared); `impl Tr for
@@ -985,7 +1012,8 @@ index**, so a question asked of the whole organization gets one ranking.
   strategy, confidence and evidence they would have inside one. Kept are
   edges between a consumer node and a dependency node, never through the
   name-matching rungs (`unique_name`, `heuristic`), never into a
-  dependency's tests or into a name the consumer defines itself.
+  dependency's tests or into a name the consumer defines itself, and never
+  written in a dependency's file (a dependency cannot name its consumer).
 - **The link layer: contracts** (RFC 0006 phase 4). The analysis also
   records the distinct keys of each repository's **contract table** (the
   routes, OpenAPI operations and `.proto` RPC methods it provides, the HTTP

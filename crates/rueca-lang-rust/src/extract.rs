@@ -166,6 +166,22 @@ impl Attrs {
         })
     }
 
+    /// `#[cfg(test)]` or `#[cfg(all(test, …))]`: compiled for tests only
+    /// (not `any(test, feature = "…")`).
+    fn is_cfg_test_only(&self) -> bool {
+        self.0.iter().any(|a| {
+            let Some(rest) = a.strip_prefix("cfg").map(str::trim_start) else { return false };
+            let Some(pred) = rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')).map(str::trim) else {
+                return false;
+            };
+            pred == "test"
+                || (pred.starts_with("all(")
+                    && !pred.contains("any(")
+                    && !pred.contains("not(")
+                    && pred.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == "test"))
+        })
+    }
+
     /// `#[path = "…"]`.
     fn path(&self) -> Option<String> {
         self.0.iter().find_map(|a| {
@@ -256,6 +272,10 @@ pub(crate) struct Extractor<'s> {
 pub(crate) fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<FileFacts, ExtractError> {
     let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
     let tree = rueca_extract::parse(&language, source, budget)?;
+    // Item-shaped macro bodies opened in place (same length, see `expand.rs`).
+    let expanded = crate::expand::expand(source, tree, budget);
+    let source: &[u8] = expanded.text.as_deref().unwrap_or(source);
+    let tree = expanded.tree;
     let root = tree.root_node();
     let locals = locals::build(&tree, source, budget.max_parse_time)?;
     let mut ex = Extractor {
@@ -275,7 +295,7 @@ pub(crate) fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<File
         container: Container::default(),
         std_types: false,
         macro_depth: 0,
-        macro_bytes: 0,
+        macro_bytes: expanded.bytes,
         snippet_locals: Vec::new(),
         trait_impls: Vec::new(),
     };
@@ -447,6 +467,7 @@ impl<'s> Extractor<'s> {
         d.doc = doc;
         let test = d.is_test;
         let id = self.push_def(d);
+        self.decorate(node, id, c);
         self.callable_parts(node, id, c.child(&qn, id, test));
     }
 
@@ -482,6 +503,7 @@ impl<'s> Extractor<'s> {
         d.doc = doc;
         let exported = d.exported;
         let id = self.push_def(d);
+        self.decorate(node, id, c);
         let cx = Cx::main(self.src);
         self.within(Some(id), c.child(&qn, id, false), |ex| {
             ex.generics(cx, node);
@@ -539,6 +561,7 @@ impl<'s> Extractor<'s> {
         d.doc = doc;
         let exported = d.exported;
         let id = self.push_def(d);
+        self.decorate(node, id, c);
         let cx = Cx::main(self.src);
         self.within(Some(id), c.child(&qn, id, false), |ex| {
             ex.generics(cx, node);
@@ -596,6 +619,7 @@ impl<'s> Extractor<'s> {
         }
         let exported = d.exported;
         let id = self.push_def(d);
+        self.decorate(node, id, c);
         let inner = c.child(&qn, id, false);
         self.within(Some(id), inner.clone(), |ex| {
             ex.generics(cx, node);
@@ -630,6 +654,7 @@ impl<'s> Extractor<'s> {
         d.doc = doc;
         let test = d.is_test;
         let id = self.push_def(d);
+        self.decorate(node, id, c);
         self.member_parts(node, id, c.child(&qn, id, test));
     }
 
@@ -737,6 +762,7 @@ impl<'s> Extractor<'s> {
         d.implements = imp.trait_path.iter().cloned().collect();
         let test = d.is_test;
         let id = self.push_def(d);
+        self.decorate(node, id, c);
         self.member_parts(node, id, c.child(&qn, id, test));
     }
 
@@ -756,6 +782,7 @@ impl<'s> Extractor<'s> {
             d.bases.push(base);
         }
         let id = self.push_def(d);
+        self.decorate(node, id, c);
         self.within(Some(id), c.child(&qn, id, false), |ex| {
             ex.generics(cx, node);
             if let Some(t) = target {
@@ -780,6 +807,7 @@ impl<'s> Extractor<'s> {
         d.signature = Some(self.signature_until(node, node.child_by_field_name("value")));
         d.doc = doc;
         let id = self.push_def(d);
+        self.decorate(node, id, c);
         self.member_parts(node, id, c.child(&qn, id, false));
     }
 
@@ -811,6 +839,7 @@ impl<'s> Extractor<'s> {
         d.doc = doc;
         d.is_test = test;
         let id = self.push_def(d);
+        self.decorate(node, id, c);
         let mut inner = c.child(&qn, id, test);
         inner.mods.push(name.to_string());
         let cx = Cx::main(self.src);
@@ -832,4 +861,17 @@ fn generic_params(node: Node<'_>, src: &[u8]) -> Vec<String> {
 /// `#[path = "…"]` of a `mod` item (`uses.rs`).
 pub(crate) fn mod_path_attr(node: Node<'_>, src: &[u8]) -> Option<String> {
     attrs_and_doc(node, src).0.path()
+}
+
+/// Whether a `mod` item is compiled for tests only: `#[cfg(test)]` (or
+/// `all(test, …)`) on it or on an inline module around it (`uses.rs`).
+pub(crate) fn mod_is_cfg_test(node: Node<'_>, src: &[u8]) -> bool {
+    let mut cur = Some(node);
+    while let Some(n) = cur {
+        if n.kind() == "mod_item" && attrs_and_doc(n, src).0.is_cfg_test_only() {
+            return true;
+        }
+        cur = n.parent();
+    }
+    false
 }

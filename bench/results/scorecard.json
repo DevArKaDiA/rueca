@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-17 15:26 UTC",
+ "generated": "2026-11-18 05:53 UTC",
  "languages": {
   "python": {
    "label": "python",
@@ -3106,10 +3106,10 @@
      "min_n": 30
     },
     "callers_precision": {
-     "value": 0.9852927215015905,
+     "value": 0.9851882499100469,
      "ci": [
-      0.9800352565119375,
-      0.9899845129765357
+      0.9800020687896537,
+      0.9899958157822889
      ],
      "n": 1417,
      "cbm": 0.8190313416322317,
@@ -3126,8 +3126,8 @@
     "callees_precision": {
      "value": 0.9795239453066655,
      "ci": [
-      0.9724764077287602,
-      0.9859744626393473
+      0.972598323760642,
+      0.9858652083587925
      ],
      "n": 1296,
      "cbm": 0.7063136885341301,
@@ -3142,10 +3142,10 @@
      "min_n": 300
     },
     "callers_recall": {
-     "value": 0.8780340846325321,
+     "value": 0.8680723168725991,
      "ci": [
-      0.8619371492421952,
-      0.8935674640579369
+      0.8514283639398318,
+      0.8845044440386713
      ],
      "n": 1417,
      "cbm": 0.44096132781812875,
@@ -3160,10 +3160,10 @@
      "min_n": 300
     },
     "callees_recall": {
-     "value": 0.8708097544541187,
+     "value": 0.870558064271873,
      "ci": [
-      0.8534892573221481,
-      0.8875231805922226
+      0.8533010974695603,
+      0.8874556417563464
      ],
      "n": 1296,
      "cbm": 0.4228117109363339,
@@ -3178,10 +3178,10 @@
      "min_n": 300
     },
     "callers_precision@conf": {
-     "value": 0.9873415243971387,
+     "value": 0.9872483712651471,
      "ci": [
-      0.9823009980754558,
-      0.9918806464684378
+      0.9822036433340171,
+      0.9917436478552856
      ],
      "n": 1417,
      "cbm": 0.8190313416322317,
@@ -3198,8 +3198,8 @@
     "callees_precision@conf": {
      "value": 0.9816069167953481,
      "ci": [
-      0.9745746212595467,
-      0.9878567429016596
+      0.9746119736238054,
+      0.9879283001544175
      ],
      "n": 1296,
      "cbm": 0.7063136885341301,
@@ -3214,10 +3214,10 @@
      "min_n": 300
     },
     "callers_recall@conf": {
-     "value": 0.8385862236250381,
+     "value": 0.8286244558651051,
      "ci": [
-      0.8198322358070064,
-      0.8569447445638342
+      0.8094765544121577,
+      0.8469729290874316
      ],
      "n": 1417,
      "cbm": 0.44096132781812875,
@@ -3232,10 +3232,10 @@
      "min_n": 300
     },
     "callees_recall@conf": {
-     "value": 0.8323398256774768,
+     "value": 0.8320881354952312,
      "ci": [
-      0.8133065756030171,
-      0.8504084495964123
+      0.813022122466034,
+      0.8502750045927904
      ],
      "n": 1296,
      "cbm": 0.4228117109363339,
@@ -3250,10 +3250,10 @@
      "min_n": 300
     },
     "callers_precision@strict": {
-     "value": 0.9856056049141289,
+     "value": 0.9855027878063726,
      "ci": [
-      0.9803443492976197,
-      0.9903374026129087
+      0.9802354633225195,
+      0.9902422289331142
      ],
      "n": 1417,
      "cbm": 0.8179892567324406,
@@ -3268,10 +3268,10 @@
      "min_n": 300
     },
     "callers_recall@strict": {
-     "value": 0.8734469286692292,
+     "value": 0.8634851609092963,
      "ci": [
-      0.8567134770663353,
-      0.8898236276191462
+      0.8465944908420207,
+      0.8803591535101768
      ],
      "n": 1417,
      "cbm": 0.4347863101752212,
@@ -3288,8 +3288,8 @@
     "callees_precision@strict": {
      "value": 0.9783904979157331,
      "ci": [
-      0.9713864108517658,
-      0.9849430390918842
+      0.9713097529430934,
+      0.9849749820087716
      ],
      "n": 1296,
      "cbm": 0.6962154339485159,
@@ -3304,10 +3304,10 @@
      "min_n": 300
     },
     "callees_recall@strict": {
-     "value": 0.8698121987690629,
+     "value": 0.8695605085868171,
      "ci": [
-      0.8525839111164178,
-      0.886322012803951
+      0.8524502385029461,
+      0.8861256735674089
      ],
      "n": 1296,
      "cbm": 0.41565682878145177,
@@ -3402,10 +3402,10 @@
      "min_n": null
     },
     "latency_p95_ms": {
-     "value": 11.9,
+     "value": 11.1,
      "ci": [
-      11.5,
-      12.8
+      11.0,
+      11.299999999999999
      ],
      "n": 4100,
      "cbm": 447.79999999999995,
@@ -3420,10 +3420,10 @@
      "min_n": null
     },
     "search_tokens_to_first_hit": {
-     "value": 391.64,
+     "value": 381.88461538461536,
      "ci": [
-      268.09268817204304,
-      603.5614035087718
+      266.27257575757574,
+      572.6368421052631
      ],
      "n": 43,
      "cbm": 606.4545454545455,
@@ -3440,10 +3440,10 @@
      "min_n": null
     },
     "search_tokens_per_hit": {
-     "value": 232.265625,
+     "value": 224.1969696969697,
      "ci": [
-      164.95499999999998,
-      358.15931818181804
+      159.30340579710145,
+      343.5951839826839
      ],
      "n": 43,
      "cbm": 319.4179104477612,
@@ -3460,10 +3460,10 @@
      "min_n": null
     },
     "trace_tokens_per_true_edge": {
-     "value": 50.63842417701025,
+     "value": 50.71937760086846,
      "ci": [
-      49.70371413115264,
-      51.62838428026731
+      49.76968087900432,
+      51.72068286748736
      ],
      "n": 1858,
      "cbm": 106.12344620660095,
@@ -3624,6 +3624,182 @@
   "min_s1": 30,
   "variant": "kw"
  },
+ "contracts": {
+  "label": "Cross-service edges",
+  "status": "stable",
+  "failing": [],
+  "metrics": {
+   "http-code_precision": {
+    "label": "http-code precision",
+    "value": 0.9830508474576272,
+    "ci": [
+     0.9607843137254902,
+     1.0
+    ],
+    "n": 118,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "http-code_recall": {
+    "label": "http-code recall",
+    "value": 0.9797979797979798,
+    "ci": [
+     0.957983193277311,
+     1.0
+    ],
+    "n": 99,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "http-spec_precision": {
+    "label": "http-spec precision",
+    "value": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "n": 131,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "http-spec_recall": {
+    "label": "http-spec recall",
+    "value": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "n": 110,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "rpc-spec-client_precision": {
+    "label": "rpc-spec-client precision",
+    "value": 0.9605263157894737,
+    "ci": [
+     0.8911891448212178,
+     0.9956521739130435
+    ],
+    "n": 228,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u26a0"
+   },
+   "rpc-spec-client_recall": {
+    "label": "rpc-spec-client recall",
+    "value": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "n": 212,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "rpc-spec-server_precision": {
+    "label": "rpc-spec-server precision",
+    "value": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "n": 18,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "rpc-spec-server_recall": {
+    "label": "rpc-spec-server recall",
+    "value": 0.9,
+    "ci": [
+     0.8181818181818182,
+     1.0
+    ],
+    "n": 20,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "rpc-code_precision": {
+    "label": "rpc-code precision",
+    "value": 0.9551724137931035,
+    "ci": [
+     0.8481626751096647,
+     1.0
+    ],
+    "n": 290,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": true,
+    "status": "\u26a0"
+   },
+   "rpc-code_recall": {
+    "label": "rpc-code recall",
+    "value": 0.9540636042402827,
+    "ci": [
+     0.8895326925324296,
+     0.9897959183673469
+    ],
+    "n": 283,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": true,
+    "status": "\u2705"
+   },
+   "all_precision": {
+    "label": "all precision",
+    "value": 0.9694267515923567,
+    "ci": [
+     0.9375,
+     0.9916555830374886
+    ],
+    "n": 785,
+    "floor": 0.9,
+    "target": 0.97,
+    "better": "higher",
+    "gated": false,
+    "status": "\u2705"
+   },
+   "all_recall": {
+    "label": "all recall",
+    "value": 0.9765193370165746,
+    "ci": [
+     0.9559316938962671,
+     0.9920887639465652
+    ],
+    "n": 724,
+    "floor": 0.75,
+    "target": 0.9,
+    "better": "higher",
+    "gated": false,
+    "status": "\u2705"
+   }
+  }
+ },
+ "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830); rueca 0.1.0-alpha.2 (binary sha256 e1918daa111e, rfc0005 contract, fix/rust-tokio-gaps@ebc4224)",
  "org": {
   "status": "ok",
   "split": "gated",
@@ -4624,49 +4800,49 @@
    "all": {
     "pairs": 12,
     "counts": {
-     "predicted": 2796,
-     "correct": 2749,
+     "predicted": 3147,
+     "correct": 3128,
      "gold": 1055,
-     "found": 790
+     "found": 999
     },
     "precision": {
-     "value": 0.9831902718168812,
+     "value": 0.9939625039720369,
      "ci": [
-      0.9777194926801203,
-      0.9873351504988883
+      0.9905891593144605,
+      0.9961313852233931
      ],
-     "n": 2796,
+     "n": 3147,
      "floor": 0.9,
      "target": 0.97,
      "status": "\u2705"
     },
     "recall": {
-     "value": 0.7488151658767772,
+     "value": 0.9469194312796209,
      "ci": [
-      0.7217742617404215,
-      0.7740506756253
+      0.9316971924180738,
+      0.9588988379359747
      ],
      "n": 1055,
      "floor": 0.75,
      "target": 0.9,
-     "status": "\u274c"
+     "status": "\u2705"
     }
    },
    "without_rust": {
     "pairs": 8,
     "counts": {
-     "predicted": 2031,
+     "predicted": 2026,
      "correct": 2026,
      "gold": 532,
      "found": 512
     },
     "precision": {
-     "value": 0.9975381585425899,
+     "value": 1.0,
      "ci": [
-      0.9942497661850114,
-      0.9989480042060459
+      0.9981075079514211,
+      1.0
      ],
-     "n": 2031,
+     "n": 2026,
      "floor": 0.9,
      "target": 0.97,
      "status": "\u2705"
@@ -4686,32 +4862,32 @@
    "rust": {
     "pairs": 4,
     "counts": {
-     "predicted": 765,
-     "correct": 723,
+     "predicted": 1121,
+     "correct": 1102,
      "gold": 523,
-     "found": 278
+     "found": 487
     },
     "precision": {
-     "value": 0.9450980392156862,
+     "value": 0.9830508474576272,
      "ci": [
-      0.9266199433288944,
-      0.9591283370052177
+      0.9736795437116174,
+      0.9891228063506204
      ],
-     "n": 765,
+     "n": 1121,
      "floor": 0.9,
      "target": 0.97,
      "status": "\u2705"
     },
     "recall": {
-     "value": 0.5315487571701721,
+     "value": 0.9311663479923518,
      "ci": [
-      0.4887080658110198,
-      0.5739293736833374
+      0.9061767715090026,
+      0.9498682349138763
      ],
      "n": 523,
      "floor": 0.75,
      "target": 0.9,
-     "status": "\u274c"
+     "status": "\u2705"
     }
    }
   },
@@ -4726,181 +4902,5 @@
    "mde": "(1.96 + 0.84) * sqrt(d / n): paired binary outcome, 80% power, two-sided alpha 0.05, d = discordance rate",
    "mde_old_n": 21
   }
- },
- "contracts": {
-  "label": "Cross-service edges",
-  "status": "stable",
-  "failing": [],
-  "metrics": {
-   "http-code_precision": {
-    "label": "http-code precision",
-    "value": 0.9830508474576272,
-    "ci": [
-     0.9607843137254902,
-     1.0
-    ],
-    "n": 118,
-    "floor": 0.9,
-    "target": 0.97,
-    "better": "higher",
-    "gated": true,
-    "status": "\u2705"
-   },
-   "http-code_recall": {
-    "label": "http-code recall",
-    "value": 0.9797979797979798,
-    "ci": [
-     0.957983193277311,
-     1.0
-    ],
-    "n": 99,
-    "floor": 0.75,
-    "target": 0.9,
-    "better": "higher",
-    "gated": true,
-    "status": "\u2705"
-   },
-   "http-spec_precision": {
-    "label": "http-spec precision",
-    "value": 1.0,
-    "ci": [
-     1.0,
-     1.0
-    ],
-    "n": 131,
-    "floor": 0.9,
-    "target": 0.97,
-    "better": "higher",
-    "gated": true,
-    "status": "\u2705"
-   },
-   "http-spec_recall": {
-    "label": "http-spec recall",
-    "value": 1.0,
-    "ci": [
-     1.0,
-     1.0
-    ],
-    "n": 110,
-    "floor": 0.75,
-    "target": 0.9,
-    "better": "higher",
-    "gated": true,
-    "status": "\u2705"
-   },
-   "rpc-spec-client_precision": {
-    "label": "rpc-spec-client precision",
-    "value": 0.9605263157894737,
-    "ci": [
-     0.8911891448212178,
-     0.9956521739130435
-    ],
-    "n": 228,
-    "floor": 0.9,
-    "target": 0.97,
-    "better": "higher",
-    "gated": true,
-    "status": "\u26a0"
-   },
-   "rpc-spec-client_recall": {
-    "label": "rpc-spec-client recall",
-    "value": 1.0,
-    "ci": [
-     1.0,
-     1.0
-    ],
-    "n": 212,
-    "floor": 0.75,
-    "target": 0.9,
-    "better": "higher",
-    "gated": true,
-    "status": "\u2705"
-   },
-   "rpc-spec-server_precision": {
-    "label": "rpc-spec-server precision",
-    "value": 1.0,
-    "ci": [
-     1.0,
-     1.0
-    ],
-    "n": 18,
-    "floor": 0.9,
-    "target": 0.97,
-    "better": "higher",
-    "gated": true,
-    "status": "\u2705"
-   },
-   "rpc-spec-server_recall": {
-    "label": "rpc-spec-server recall",
-    "value": 0.9,
-    "ci": [
-     0.8181818181818182,
-     1.0
-    ],
-    "n": 20,
-    "floor": 0.75,
-    "target": 0.9,
-    "better": "higher",
-    "gated": true,
-    "status": "\u2705"
-   },
-   "rpc-code_precision": {
-    "label": "rpc-code precision",
-    "value": 0.9551724137931035,
-    "ci": [
-     0.8481626751096647,
-     1.0
-    ],
-    "n": 290,
-    "floor": 0.9,
-    "target": 0.97,
-    "better": "higher",
-    "gated": true,
-    "status": "\u26a0"
-   },
-   "rpc-code_recall": {
-    "label": "rpc-code recall",
-    "value": 0.9540636042402827,
-    "ci": [
-     0.8895326925324296,
-     0.9897959183673469
-    ],
-    "n": 283,
-    "floor": 0.75,
-    "target": 0.9,
-    "better": "higher",
-    "gated": true,
-    "status": "\u2705"
-   },
-   "all_precision": {
-    "label": "all precision",
-    "value": 0.9694267515923567,
-    "ci": [
-     0.9375,
-     0.9916555830374886
-    ],
-    "n": 785,
-    "floor": 0.9,
-    "target": 0.97,
-    "better": "higher",
-    "gated": false,
-    "status": "\u2705"
-   },
-   "all_recall": {
-    "label": "all recall",
-    "value": 0.9765193370165746,
-    "ci": [
-     0.9559316938962671,
-     0.9920887639465652
-    ],
-    "n": 724,
-    "floor": 0.75,
-    "target": 0.9,
-    "better": "higher",
-    "gated": false,
-    "status": "\u2705"
-   }
-  }
- },
- "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830)"
+ }
 }
