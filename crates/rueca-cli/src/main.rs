@@ -7,6 +7,7 @@
 //! rueca index --org FILE [PATH] [--store DIR] [--json]
 //! rueca index --org FILE PATH --ref NAME [--remove] [--store DIR] [--json]
 //! rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
+//! rueca query --batch FILE|- [--root PATH | --org FILE|NAME] [--store DIR]
 //! rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
 //! rueca status [--store DIR] [--json]
 //! rueca links --org FILE|NAME [--repo ID [--ref NAME]] [--store DIR] [--json]
@@ -47,7 +48,7 @@
 //! nothing is indexed automatically, so launching the server from an
 //! arbitrary directory (e.g. `$HOME`) never starts a huge index.
 
-use std::io::{IsTerminal, Read};
+use std::io::{BufRead, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -137,16 +138,24 @@ enum Command {
     #[command(
         after_help = "Tools: search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline, list_repositories, \
 list_contracts\n\
-Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\"}'"
+Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\"}'\n\
+Batch: rueca query --batch requests.jsonl (one {\"tool\", \"args\"} per line; one answer per line, in order)"
     )]
     Query {
         /// Tool name.
-        tool: String,
+        #[arg(required_unless_present = "batch")]
+        tool: Option<String>,
         /// Tool arguments as a JSON object (`-` reads stdin). Default `{}`.
         args: Option<String>,
         /// Print the compact text rendering (the MCP text content) instead of JSON.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "batch")]
         text: bool,
+        /// Answer many calls in one process (models load once): JSON lines
+        /// `{"tool": NAME, "args": {...}}` from FILE (`-`: stdin); each
+        /// answer is the JSON `rueca query` prints for that call, one line
+        /// per request in input order, flushed as written.
+        #[arg(long, value_name = "FILE", conflicts_with_all = ["tool", "args"])]
+        batch: Option<String>,
     },
     /// Serve MCP on stdio. Indexes --root first if it has no segment.
     Mcp {
@@ -229,8 +238,12 @@ fn main() -> ExitCode {
                     .and_then(|embed| cmd_index(&store, IndexCmd { path, repo, threads, embed }, out)),
             }
         }
-        Command::Query { tool, args, text } => {
-            return cmd_query(&store, cli.root, cli.org.as_deref(), &tool, args, cli.pretty, text);
+        Command::Query { tool, args, text, batch } => {
+            return match (batch, tool) {
+                (Some(input), _) => cmd_query_batch(&store, cli.root, cli.org.as_deref(), &input),
+                (None, Some(tool)) => cmd_query(&store, cli.root, cli.org.as_deref(), &tool, args, cli.pretty, text),
+                (None, None) => ExitCode::from(2),
+            };
         }
         Command::Mcp { no_auto_index } => cmd_mcp(&store, cli.root, cli.org.as_deref(), !no_auto_index),
         Command::Status => cmd_status(&store, cli.json, cli.pretty),
@@ -707,6 +720,57 @@ fn cmd_query(
             ExitCode::from(2)
         }
     }
+}
+
+/// `rueca query --batch FILE`: one engine (models and rerankers loaded
+/// once, segments opened once) answers every JSON line of `input`; each
+/// answer is what `rueca query` prints for that call (compact JSON, or
+/// `{"error": ...}` for that request alone). Exits 0 when every line was
+/// answered, 1 when the input cannot be read.
+fn cmd_query_batch(store: &Path, root: Option<PathBuf>, org: Option<&str>, input: &str) -> ExitCode {
+    let reader: Box<dyn std::io::BufRead> = match input {
+        "-" => Box::new(std::io::stdin().lock()),
+        path => match std::fs::File::open(path) {
+            Ok(f) => Box::new(std::io::BufReader::new(f)),
+            Err(e) => {
+                eprintln!("rueca: cannot open `{path}`: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+    let engine = query_engine(store, root, org).map_err(|e| format!("{e:#}"));
+    let mut out = std::io::stdout().lock();
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("rueca: reading `{input}`: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let answer = match &engine {
+            Ok(e) => batch_answer(e, &line).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
+            Err(msg) => json!({ "error": msg }),
+        };
+        if writeln!(out, "{}", render(&answer, false)).and_then(|()| out.flush()).is_err() {
+            return ExitCode::FAILURE;
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// The JSON answer of one batch line `{"tool": NAME, "args": {...}}`.
+fn batch_answer(engine: &rueca_query::Engine, line: &str) -> anyhow::Result<Value> {
+    let req: Value = serde_json::from_str(line).map_err(|e| anyhow::anyhow!("request is not valid JSON: {e}"))?;
+    let tool = req.get("tool").and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("request has no `tool`"))?;
+    if !rueca_query::TOOL_NAMES.contains(&tool) {
+        anyhow::bail!("unknown tool `{tool}` (available: {})", rueca_query::TOOL_NAMES.join(", "));
+    }
+    let args = req.get("args").cloned().unwrap_or_else(|| json!({}));
+    Ok(engine.respond(tool, args)?.json)
 }
 
 fn run_query(

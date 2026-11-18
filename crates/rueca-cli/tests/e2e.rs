@@ -307,3 +307,45 @@ fn php_index_then_every_tool() {
     let r = query(&p, "get_snippet", json!({"id": save_id}));
     assert!(r["text"].as_str().unwrap().trim_start().starts_with("public function save(): bool"), "{r}");
 }
+
+/// `rueca query --batch`: one answer per request, in order, each what a
+/// single `rueca query` prints; a bad request answers an error alone.
+#[test]
+fn query_batch_answers_each_line_like_a_single_call() {
+    let p = python_project();
+    index(&p);
+    let requests = [
+        json!({"tool": "search_symbols", "args": {"query": "invoice issue"}}),
+        json!({"tool": "nope", "args": {}}),
+        json!({"tool": "get_symbol", "args": {"qualified_name": "InvoiceService.issue"}}),
+    ];
+    let mut input: String = requests.iter().map(|r| format!("{r}\n")).collect();
+    input.push_str("not json\n\n");
+    let file = p.store.parent().unwrap().join("requests.jsonl");
+    std::fs::write(&file, &input).unwrap();
+    let out = rueca(&p.store).arg("--root").arg(&p.root).args(["query", "--batch"]).arg(&file).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let lines: Vec<Value> =
+        String::from_utf8(out.stdout).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    for (i, r) in [0, 2].into_iter().map(|i| (i, &requests[i])) {
+        let single = rueca(&p.store)
+            .arg("--root")
+            .arg(&p.root)
+            .args(["query", r["tool"].as_str().unwrap(), &r["args"].to_string()])
+            .output()
+            .unwrap();
+        assert_eq!(lines[i], stdout_json(&single), "request {i}");
+    }
+    assert!(lines[1]["error"].as_str().unwrap().contains("unknown tool `nope`"));
+    assert!(lines[3]["error"].as_str().unwrap().contains("not valid JSON"));
+    // stdin works too.
+    let out = rueca(&p.store)
+        .arg("--root")
+        .arg(&p.root)
+        .args(["query", "--batch", "-"])
+        .write_stdin(requests[0].to_string())
+        .output()
+        .unwrap();
+    assert_eq!(stdout_json(&out), lines[0]);
+}
