@@ -136,7 +136,12 @@ pub fn add_php(p: &Project) {
 
 pub fn rueca(store: &Path) -> Command {
     let mut c = Command::cargo_bin("rueca").unwrap();
-    c.arg("--store").arg(store).env_remove("RUECA_LOG").env_remove("RUECA_HOME");
+    c.arg("--store")
+        .arg(store)
+        .env_remove("RUECA_LOG")
+        .env_remove("RUECA_HOME")
+        .env_remove("RUECA_EMBED")
+        .env_remove("RUECA_EMBED_PRESET");
     c
 }
 

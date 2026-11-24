@@ -754,7 +754,7 @@ fn reindex(
         embed: opts.embed.clone(),
     };
     let index = crate::index_worktree_with_embedder(&options, &[], loader)
-    .with_context(|| format!("indexing ref `{}` exported at {}", base.resolved.name, base.dest.display()))?;
+        .with_context(|| format!("indexing ref `{}` exported at {}", base.resolved.name, base.dest.display()))?;
     info!(
         repo = %base.repo,
         r#ref = %base.resolved.name,

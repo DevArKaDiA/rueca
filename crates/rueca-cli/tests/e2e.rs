@@ -142,6 +142,8 @@ fn reindex_and_status() {
     let out = rueca(&p.store).arg("status").output().unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.starts_with("ROOT") && text.contains("local/proj"), "{text}");
+    assert!(text.lines().next().is_some_and(|h| h.contains("VECTORS")), "{text}");
+    assert!(roots[0].get("vectors").is_none(), "{s}");
 
     // The current directory selects its indexed root when --root is absent.
     let out = rueca(&p.store)
