@@ -8,6 +8,7 @@
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
   rueca-bench service [--small] [--split gated|calibration] [--only REPO ...] [--limit N] [--sample N] [--repeat N] [--keep] [--out FILE] [--bin PATH]
+  rueca-bench multistep run|report|tasks|probe|describe-api|gold ...   (RFC 0009 phase 2; `rueca-bench multistep -h`)
   rueca-bench service-index [--small] [--split gated|calibration] [--only REPO ...] [--indexers N ...] [--pushes N] [--no-faults] [--keep] [--out FILE] [--bin PATH]
 
 Language families are the manifest `[languages]` keys (python, ecma, php, ...);
@@ -39,6 +40,7 @@ from . import sweep as sweep_mod
 from .arms import ARM_NAMES, S1_ARM_NAMES, canonical_arm, make_arm
 from .arms.rueca import rueca_binary
 from .common import CACHE, RUNS_DIR, WORK_DIR, families, log, write_json
+from .multistep import cli as multistep_cli
 from .prepare import setup
 
 # `service` runs only when named (never part of `all`).
@@ -202,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
     xp.add_argument("--out", default=None, help="report path (default bench/results/service-index-<UTC timestamp>.json)")
     xp.add_argument("--bin", default=None, help="rueca binary, a debug build (default $RUECA_BIN)")
 
+    multistep_cli.add_parser(sub)
+
     cp = sub.add_parser("clean", help="remove work trees and/or cached arm outputs")
     cp.add_argument("--work", action="store_true")
     cp.add_argument("--runs", nargs="*", help="arm names whose cached outputs to delete")
@@ -253,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "service-index":
         out = Path(a.out) if a.out else None
         service_index_mod.run_service_index(small=a.small, split=a.split, only=a.only, indexers=a.indexers, pushes=a.pushes, faults=not a.no_faults, keep=a.keep, out=out, bin_arg=a.bin)
+    elif a.cmd == "multistep":
+        return multistep_cli.dispatch(a)
     elif a.cmd == "check":
         return check_mod.main(a.baseline, a.current)
     elif a.cmd == "clean":

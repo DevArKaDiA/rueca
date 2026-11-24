@@ -25,6 +25,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Org scenarios** | "Does it still find the code in a store of many repositories, and of one repository at two commits?" (RFC 0005 §5–§6) | reported; paired vs BM25 with MDE (not a language gate) |
 | **Configuration** (RFC 0003 §3.3) | "Which keys exist, who reads this env var, who sets it?" | key recall, span accuracy, bridge precision / recall |
 | **Service** (RFC 0008 §8.2–§8.3) | "Does `rueca serve` answer the organization suite over HTTP exactly as `rueca query` does, and how fast?" | reported (differential n/n, time to ready, p50 / p95) |
+| **Multi-step** (RFC 0009 §8, experimental code mode) | "How many tokens does a multi-step question cost as tool calls, as one code-mode script, and with cbm?" | reported; RFC 0009's per-language graduation gate |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
 the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust}/` and the
@@ -1108,11 +1109,10 @@ of the language's gated S1 instances and S3 repository sets (`search_symbols`,
 included, so this overstates an MCP session). **Index throughput**: files
 per second of the health index, reported.
 
-### Code mode (RFC 0009, experimental; the multi-step suite is phase 2)
+### Code mode (RFC 0009, experimental) and the multi-step suite (`multistep/`)
 
-Not a suite yet: what the phase 2 suite drives. Code mode is off unless
-asked for, so the arms above are unaffected. `execute` runs through the
-same interface as the other tools:
+Code mode is off unless asked for, so the arms above are unaffected.
+`execute` runs through the same interface as the other tools:
 
 ```sh
 RUECA_EXPERIMENTAL_CODE_MODE=1 $RUECA_BIN query execute '{"code": "<script>"}' --root <root> --store <dir> [--text]
@@ -1120,15 +1120,100 @@ RUECA_EXPERIMENTAL_CODE_MODE=1 $RUECA_BIN query execute '{"language": "starlark"
 ```
 
 (`--code-file FILE|-` reads `code` from a file or stdin; `--text` prints
-what a model reads.) Starlark needs a binary built with `cargo build
---release -p rueca --features code-mode-starlark`; the default build
-answers `language: "starlark"` with an error. With
-`RUECA_CODE_MODE_TIMING=1` the JSON result gains `timing: {"total_us",
-"engine_us"}` (the whole `execute` and the sum of its engine calls, both
-measured inside the process), for §8's gate: median `total_us -
-engine_us` under 20 ms. Without the variable the answer is deterministic.
-`docs/tools.md` ("Experimental: code mode") has the response and the
-limits.
+what a model reads.) Starlark needs a binary built with `--features
+code-mode-starlark`; the default build answers `language: "starlark"`
+with an error. With `RUECA_CODE_MODE_TIMING=1` the JSON result gains
+`timing: {"total_us", "engine_us"}` (the whole `execute` and the sum of its
+engine calls, both measured inside the process). Without the variable the
+answer is deterministic. `docs/tools.md` ("Experimental: code mode") has
+the response and the limits.
+
+**Multi-step efficiency** (RFC 0009 §8, `rueca_bench/multistep/`). 25
+multi-step questions over pinned inputs the bench already has, each
+answered four ways: its reference **tool-call plan** (`plans.py`: the
+calls a competent agent makes, later calls built from what the earlier
+compact text answers said, with sensible `limit`s, `labels` and one depth-2
+`trace` where that answers the question), its reference **JavaScript** and
+**Starlark** scripts run once through `execute` (`multistep/scripts/<id>.js`,
+`.star`), and a reference **cbm** plan (`cbm_plans.py`: one `query_graph`
+Cypher query when cbm's subset can express the join) where cbm can express
+the task at all.
+
+- **Corpora** (`corpora.py`): the S3 repositories `flask`, `requests` and
+  `hono` at their `[[s3.repos]]` commits; the Flask cross-repository group
+  of `crossrepo.GROUPS` (Flask with Click, Jinja and Werkzeug) as one
+  organization; the S2 group `ollama` of `contracts.GROUPS` (the Go server
+  and its Python and JavaScript clients) as one organization; the
+  multi-ref scenario (`[multiref] instance`: base commit plus the fix
+  commit as a ref). Checkouts go to `.cache/work/ms-*`, stores to
+  `.cache/multistep/<corpus>/store` (re-indexed only when the members or
+  the binary change).
+- **Gold** is derived mechanically (`derive.py`) from existing gold, copied
+  into `multistep/inputs.json` by `rueca-bench multistep gold --extract`:
+  the S3 call graphs, the cross-repository labeler's *uses*
+  (`crossrepo.label_python`), the S2 gold pairs and the multi-ref
+  `collapse_gold` classes. `multistep/gold.json` holds every answer;
+  `tests/test_multistep.py` re-derives it from `inputs.json` (no corpora
+  needed) and, when the bench cache holds the S3 gold, re-extracts the S3
+  inputs and compares.
+- **Tasks** (`tasks.py`): 2-hop callers and an exactly-2-hop count,
+  callers ∩ callers and callees ∩ callees, file outline → per-symbol caller
+  counts (all methods of a class, the three most called functions of a
+  file, the uncalled ones), callees that call nothing, search → filter by
+  name → caller counts, the callee with the most callers, callers in a
+  directory, callers of a library function / class from another
+  repository, routes called by both clients, by one and not the other, the
+  OpenAPI operations a client calls, the functions that differ between two
+  refs; and five where code mode is not expected to win (one call answers
+  them: direct callers, callers outside a file, a depth-2 trace, the
+  organization's dependencies, a route's handlers). Each has an
+  agent-facing statement (repository ids, files, refs, the exact answer
+  shape, no solution steps) that the fluency probe reuses. Answers are
+  compared exactly (sets, ordered lists, integers, objects).
+- **Measured per arm**: tokens **read** (cl100k_base) — plans and cbm: every
+  tool answer's text as the agent receives it; code mode: the script source
+  plus `execute`'s text result (or its error line) — with `describe_api`'s
+  text (read once per session) reported apart and amortised over the suite;
+  tokens **written** (tool-call arguments as JSON; `execute`'s arguments with
+  the script); round trips (code mode: one `execute`; its engine calls
+  apart); correctness; wall time (each `rueca query` process opens the
+  store, so a plan pays that per call: the wall column favours code mode);
+  `execute` overhead (`total_us − engine_us`, median and p95); limits hit
+  (truncated, partial, timeouts, errors). Headline: **tokens read per
+  correct answer**, per arm, by expectation, by task kind and per task, plus
+  the tasks every arm answered correctly (paired).
+- **Gate** (RFC 0009 §8, per language): at least 40% fewer tokens read per
+  correct answer than the tool-call plans, no task correct under the plans
+  incorrect in that language, median `execute` overhead under 20 ms (also
+  shown with `describe_api` amortised).
+
+```sh
+cargo build --release -p rueca --no-default-features --features code-mode-starlark   # lexical only (no llama.cpp); enough for this suite
+export RUECA_BIN=$CARGO_TARGET_DIR/release/rueca           # or target/release/rueca
+uv run --project bench rueca-bench multistep run [--arm plan,js,starlark,cbm] [--only ms01 ...]
+uv run --project bench rueca-bench multistep report         # docs/bench/multistep-results.md from bench/results/multistep.json
+uv run --project bench rueca-bench multistep gold [--extract]   # print (and with --extract re-derive) the gold answers
+```
+
+`run` needs the S3 gold of `flask`, `requests` and `hono` (`rueca-bench
+setup`) only for `gold --extract`; the run itself reads the committed
+`inputs.json`. It clones the ollama group on first use (network, three
+small shallow clones). Results: `bench/results/multistep.json` (one record
+per task and arm) and `docs/bench/multistep-results.md`.
+
+**Probe runner** (for RFC 0009 phase 3's fluency probe):
+
+```sh
+uv run --project bench rueca-bench multistep tasks                       # JSON: id, kind, corpus, expect, answer shape, statement
+uv run --project bench rueca-bench multistep describe-api --language js --out api-js.txt
+uv run --project bench rueca-bench multistep probe --task ms17 --language starlark --script attempt.star
+```
+
+`probe` runs the script unchanged (`execute` with its defaults; `language`
+only for Starlark) against the task's corpus and prints one JSON line:
+`{task, language, correct, error (the execute error line, else null),
+result_preview, script_tokens, result_tokens, calls (engine calls),
+truncated}`.
 
 ### Efficiency — tokens per correct answer (RFC 0005 §8)
 
