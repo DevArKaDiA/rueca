@@ -1,0 +1,27 @@
+[package]
+name = "rueca-codemode"
+description = "Code mode for Rueca (RFC 0009, experimental): sandboxed script engines behind one trait"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+default = ["js", "starlark"]
+js = ["dep:rquickjs"]
+starlark = ["dep:starlark", "dep:allocative"]
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+rquickjs = { version = "0.14.0", optional = true }
+starlark = { version = "0.14.3", optional = true }
+# The derive `starlark` values need (`Allocative`); the version `starlark` uses.
+allocative = { version = "0.3.7", optional = true }
+
+[target.'cfg(unix)'.dev-dependencies]
+# `getrusage` for the peak memory of the phase 0 limit probes.
+libc = "0.2.177"
