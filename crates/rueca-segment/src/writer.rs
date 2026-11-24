@@ -11,6 +11,7 @@ use rueca_model::{ResolvedGraph, SnapshotInfo, git_blob_sha};
 
 use crate::bundle::BundleWriter;
 use crate::packs::{BlobIndex, NewPack, PackReader, PackWriter, Sha, compress, parse_sha};
+use crate::vectors::VectorsWrite;
 use crate::{
     ContentSource, FORMAT_VERSION, Result, SegmentError, SegmentMeta, contracts, graph, ngram, priors, store, symbols,
 };
@@ -68,8 +69,12 @@ pub(crate) fn write_segment(
     graph: &ResolvedGraph,
     contents: &dyn ContentSource,
     store_dir: &Path,
+    vectors: Option<&VectorsWrite>,
 ) -> Result<SegmentMeta> {
     graph.validate().map_err(|e| SegmentError::Other(format!("invalid graph: {e}")))?;
+    if let Some(v) = vectors {
+        v.check_nodes(graph.nodes.len())?;
+    }
     store::ensure_dirs(store_dir)?;
     let tmp_dir = store_dir.join("tmp");
     store::clean_stale_tmp(&tmp_dir);
@@ -128,19 +133,64 @@ pub(crate) fn write_segment(
         packs,
     };
     let tmp_path = tmp_dir.join(format!("{id}.rcseg.tmp"));
-    match write_bundle(&tmp_path, &tmp_dir, &meta, graph, merged) {
+    match write_bundle(&tmp_path, &tmp_dir, &meta, graph, merged, vectors) {
         Ok(bytes) => meta.bytes = bytes,
         Err(e) => {
             let _ = std::fs::remove_file(&tmp_path);
             return Err(e);
         }
     }
+    publish(store_dir, &tmp_path, &id)?;
+    Ok(meta)
+}
+
+/// Renames a finished bundle into `segments/`.
+fn publish(store_dir: &Path, tmp_path: &Path, id: &str) -> Result<()> {
     let segments_dir = store_dir.join("segments");
-    if let Err(e) = std::fs::rename(&tmp_path, segments_dir.join(format!("{id}.rcseg"))) {
-        let _ = std::fs::remove_file(&tmp_path);
+    if let Err(e) = std::fs::rename(tmp_path, segments_dir.join(format!("{id}.rcseg"))) {
+        let _ = std::fs::remove_file(tmp_path);
         return Err(e.into());
     }
     store::sync_dir(&segments_dir);
+    Ok(())
+}
+
+/// A copy of `segment` under a new id with `vectors` as its `vectors.*`
+/// components (replacing any it had): every other component byte for byte
+/// except `meta`, which gets the new id. The source segment is untouched.
+pub(crate) fn republish_with_vectors(
+    store_dir: &Path,
+    segment: &crate::Segment,
+    vectors: &VectorsWrite,
+) -> Result<SegmentMeta> {
+    vectors.check_nodes(segment.nodes().len())?;
+    store::ensure_dirs(store_dir)?;
+    let tmp_dir = store_dir.join("tmp");
+    let mut meta = segment.meta().clone();
+    meta.id = segment_id(&meta.snapshot);
+    meta.bytes = 0;
+    let tmp_path = tmp_dir.join(format!("{}.rcseg.tmp", meta.id));
+    let written = (|| {
+        let bundle = segment.inner.bundle();
+        let mut w = BundleWriter::create(&tmp_path, FORMAT_VERSION)?;
+        for (name, range) in bundle.in_file_order() {
+            if name == "meta" {
+                w.add("meta", &serde_json::to_vec(&meta).map_err(|e| SegmentError::Other(e.to_string()))?)?;
+            } else if !crate::vectors::is_vectors(name) {
+                w.add(name, &bundle.map[range])?;
+            }
+        }
+        vectors.write(&mut w)?;
+        w.finish()
+    })();
+    match written {
+        Ok(bytes) => meta.bytes = bytes,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(e);
+        }
+    }
+    publish(store_dir, &tmp_path, &meta.id)?;
     Ok(meta)
 }
 
@@ -342,6 +392,7 @@ fn write_bundle(
     meta: &SegmentMeta,
     graph: &ResolvedGraph,
     merged: Merged,
+    vectors: Option<&VectorsWrite>,
 ) -> Result<u64> {
     let mut w = BundleWriter::create(tmp_path, FORMAT_VERSION)?;
     w.add("meta", &serde_json::to_vec(meta).map_err(|e| SegmentError::Other(e.to_string()))?)?;
@@ -360,5 +411,80 @@ fn write_bundle(
     let mut tf = Vec::new();
     merged.text_files.serialize_into(&mut tf)?;
     w.add("ngrams.text_files", &tf)?;
+    if let Some(v) = vectors {
+        v.write(&mut w)?;
+    }
     w.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use rueca_model::{FileEntry, Label, Language, Node, ResolvedGraph, SnapshotInfo, git_blob_sha};
+
+    use super::*;
+
+    struct One(Vec<u8>);
+
+    impl ContentSource for One {
+        fn content(&self, _: &FileEntry) -> std::io::Result<Vec<u8>> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// Format 2 readers ignore components they do not know: a segment with
+    /// an extra component (as a newer writer adds `vectors.*`) opens.
+    #[test]
+    fn unknown_components_are_ignored() {
+        let src = b"def f():\n    pass\n".to_vec();
+        let graph = ResolvedGraph {
+            snapshot: SnapshotInfo {
+                repo: "local/x".into(),
+                commit: "worktree".into(),
+                dirty: false,
+                branch: None,
+                root: None,
+                indexed_at: 0,
+                rueca_version: "test".into(),
+            },
+            nodes: vec![Node {
+                label: Label::File,
+                name: "a.py".into(),
+                qualified_name: "a.py".into(),
+                file: Some(0),
+                span: None,
+                language: Some(Language::Python),
+                signature: None,
+                doc: None,
+                exported: true,
+                is_test: false,
+            }],
+            edges: vec![],
+            files: vec![FileEntry {
+                path: "a.py".into(),
+                blob_sha: git_blob_sha(&src),
+                language: Some(Language::Python),
+                size: src.len() as u64,
+                line_count: 2,
+                node: 0,
+                status: "ok".into(),
+            }],
+            modules: vec![],
+            contracts: vec![],
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let meta = write_segment(&graph, &One(src), dir.path(), None).unwrap();
+        let store = crate::Store::open(dir.path()).unwrap();
+        let seg = store.open_segment(&meta.id).unwrap();
+        let path = dir.path().join("tmp").join("future.rcseg");
+        let mut w = BundleWriter::create(&path, FORMAT_VERSION).unwrap();
+        for (name, range) in seg.inner.bundle().in_file_order() {
+            w.add(name, &seg.inner.bundle().map[range]).unwrap();
+        }
+        w.add("zzz.future", b"anything").unwrap();
+        w.add("vectors.unknown", &[1, 2, 3]).unwrap();
+        w.finish().unwrap();
+        let future = crate::Segment::open(&path, dir.path()).unwrap();
+        assert_eq!(future.nodes().len(), 1);
+        assert!(future.vectors().unwrap().is_none());
+    }
 }

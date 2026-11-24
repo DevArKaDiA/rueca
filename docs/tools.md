@@ -289,7 +289,10 @@ is recomputed (remapping is by node, not by key).
 
 BM25 search over symbol names, qualified names, signatures, docstrings,
 paths and each symbol's source code, with camelCase / snake_case / path
-splitting. A one-word query is a name lookup (exact names first); dotted
+splitting; when the repository was indexed with vectors (opt-in: `rueca
+index --embed` or `RUECA_EMBED=1 rueca index`), fused with embedding
+similarity (`mode`, below), so questions and issue text in plain words are
+welcome. A one-word query is a name lookup (exact names first); dotted
 parts (`Session.request`, `util:formatAmount`) and adjacent word pairs
 (`session request`) match qualified-name suffixes; multi-word queries also
 match the code itself. Fields, variables, constants and tests rank below
@@ -305,6 +308,35 @@ other definitions with the same text score. Ranking details:
 | `limit` | int, 1–200 | 10 |
 | `offset` | int (`cursor` takes precedence) | 0 |
 | `scores` | bool: include each result's score (3 significant digits) | false |
+| `mode` | `"lexical"` (BM25), `"hybrid"` (BM25 fused with embedding similarity), `"semantic"` (embeddings only) | `hybrid` when a selected snapshot has vectors and its model loads, else `lexical` |
+
+`mode` ([RFC 0007](rfcs/0007-semantic-search.md) §8,
+[how-it-works §10](how-it-works.md#10-embeddings-rfc-0007)): an explicit
+`hybrid` or `semantic` on snapshots without vectors is an error naming
+`rueca index --embed`, and one whose model is not available locally an
+error naming `rueca models pull`; without `mode` both cases rank lexically
+(the second with a warning). In `hybrid` the score is
+`(α·b̂ + (1 − α)·d̂) × prior × routing`, BM25 and cosine each min-max
+normalized over its own top 100, α = 0.5 (the defaults; `[retrieval]` in
+`<store>/rueca.toml` tunes them); a snapshot without vectors (an
+organization member indexed without `--embed`) is ranked by BM25 alone and
+named in `retrieval.lexical`. `semantic` ranks by the cosine alone and
+leaves such snapshots out. Older binaries reject `mode` (arguments are
+validated strictly).
+
+The envelope gains `retrieval` (between `next_cursor` and `budget`):
+
+```json
+"retrieval": {"mode": "hybrid", "model": "qwen3-0.6b-q8:3f9a1c2b", "alpha": 0.5,
+              "lexical": ["github.com/acme/legacy"]}
+```
+
+`mode` is the ranking the call got (`lexical`, `hybrid`, `semantic`);
+`model` the preset and a prefix of the vectors' model key; `alpha` the BM25
+weight (hybrid only); `lexical` the repositories ranked without vectors;
+`warnings` why a call fell back to lexical (a model that did not load,
+unreadable vectors). Empty fields are omitted: a lexical call has
+`{"mode": "lexical"}`. The text rendering does not change.
 
 Results, grouped by snapshot and file in rank order (a group sits where its
 best result ranks):

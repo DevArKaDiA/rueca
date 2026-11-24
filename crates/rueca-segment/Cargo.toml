@@ -13,6 +13,7 @@ rueca-model.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 tantivy = { version = "0.27.0", default-features = false, features = ["mmap"] }
 stable_deref_trait = "1.2.1"
 memmap2 = "0.9.12"

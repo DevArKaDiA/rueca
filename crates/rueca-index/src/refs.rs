@@ -66,7 +66,7 @@ use rueca_segment::{CatalogEntry, Store};
 use serde::Serialize;
 use tracing::{info, warn};
 
-use crate::{AbsentFile, IndexOptions, IndexReport, PhaseTimings, git, index_worktree};
+use crate::{AbsentFile, IndexOptions, IndexReport, PhaseTimings, git};
 
 /// Hex digits of a commit recorded as its ref name.
 const SHORT_COMMIT: usize = 12;
@@ -602,6 +602,9 @@ pub struct RefIndexOptions {
     pub budget: Budget,
     /// Worker threads; `None` = available parallelism.
     pub threads: Option<usize>,
+    /// Embed the snapshot's symbols ([`IndexOptions::embed`]). A snapshot
+    /// already at the ref's commit is indexed again when it lacks vectors.
+    pub embed: Option<crate::EmbedConfig>,
 }
 
 /// What [`index_ref`] did.
@@ -636,6 +639,15 @@ pub struct RefIndexReport {
 /// Resolves, exports and indexes a ref of `opts.root`'s repository (see the
 /// module docs); a no-op when the snapshot is already at that commit.
 pub fn index_ref(opts: &RefIndexOptions) -> anyhow::Result<RefIndexReport> {
+    index_ref_with_embedder(opts, &crate::PresetLoader { store: opts.store.clone() })
+}
+
+/// [`index_ref`] with the embedder of the vectors pass supplied by `loader`
+/// (see [`crate::index_worktree_with_embedder`]).
+pub fn index_ref_with_embedder(
+    opts: &RefIndexOptions,
+    loader: &dyn crate::EmbedderLoader,
+) -> anyhow::Result<RefIndexReport> {
     let started = Instant::now();
     let root = fs::canonicalize(&opts.root).with_context(|| format!("cannot access {}", opts.root.display()))?;
     let t = Instant::now();
@@ -648,12 +660,13 @@ pub fn index_ref(opts: &RefIndexOptions) -> anyhow::Result<RefIndexReport> {
     let existing = entry_at(&store, &dest)?;
     check_owner(existing.as_ref(), &owner, &dest)?;
     let base = ReportBase { resolved, repo: owner.repo.clone(), dest, resolve_ms, started };
-    match existing.as_ref().and_then(|e| current_report(&store, e, &base.resolved, &base.dest)) {
+    let current = existing.as_ref().and_then(|e| current_report(&store, e, &base.resolved, &base.dest));
+    match current.filter(|_| opts.embed.is_none() || existing.as_ref().is_some_and(|e| has_vectors(&store, e))) {
         Some(index) => {
             info!(repo = %base.repo, r#ref = %base.resolved.name, commit = %base.resolved.commit, "ref snapshot unchanged");
             Ok(base.finish(index, ExportReport::default(), 0, true))
         }
-        None => reindex(opts, &root, &owner, base),
+        None => reindex(opts, &root, &owner, base, loader),
     }
 }
 
@@ -712,14 +725,25 @@ impl ReportBase {
     }
 }
 
+/// Whether the snapshot of `e` carries vectors (no checksum work).
+fn has_vectors(store: &Store, e: &CatalogEntry) -> bool {
+    store.open_segment(&e.segment_id).is_ok_and(|s| s.vectors_meta().is_some())
+}
+
 /// Exports the ref, records its owner and indexes it.
-fn reindex(opts: &RefIndexOptions, root: &Path, owner: &RefOwner, base: ReportBase) -> anyhow::Result<RefIndexReport> {
+fn reindex(
+    opts: &RefIndexOptions,
+    root: &Path,
+    owner: &RefOwner,
+    base: ReportBase,
+    loader: &dyn crate::EmbedderLoader,
+) -> anyhow::Result<RefIndexReport> {
     let t = Instant::now();
     let export = export(root, &base.resolved.commit, &base.dest)
         .map_err(|e| anyhow::anyhow!("ref `{}`: {e:#}", base.resolved.name))?;
     owner.write(&base.dest)?;
     let export_ms = t.elapsed().as_millis() as u64;
-    let index = index_worktree(&IndexOptions {
+    let options = IndexOptions {
         root: base.dest.clone(),
         store: opts.store.clone(),
         repo: Some(base.repo.clone()),
@@ -727,8 +751,10 @@ fn reindex(opts: &RefIndexOptions, root: &Path, owner: &RefOwner, base: ReportBa
         threads: opts.threads,
         ref_name: Some(base.resolved.name.clone()),
         commit: Some(base.resolved.commit.clone()),
-    })
-    .with_context(|| format!("indexing ref `{}` exported at {}", base.resolved.name, base.dest.display()))?;
+        embed: opts.embed.clone(),
+    };
+    let index = crate::index_worktree_with_embedder(&options, &[], loader)
+        .with_context(|| format!("indexing ref `{}` exported at {}", base.resolved.name, base.dest.display()))?;
     info!(
         repo = %base.repo,
         r#ref = %base.resolved.name,
@@ -774,6 +800,7 @@ fn current_report(store: &Store, e: &CatalogEntry, resolved: &ResolvedRef, dest:
         references_builtin: 0,
         references_external: 0,
         timings: PhaseTimings::default(),
+        vectors: None,
     })
 }
 

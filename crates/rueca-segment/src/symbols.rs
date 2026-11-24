@@ -725,6 +725,19 @@ pub(crate) fn build_query(f: &Fields, q: &SymbolQuery) -> Box<dyn Query> {
     Box::new(BooleanQuery::new(clauses))
 }
 
+/// The label part of [`build_query`] as a predicate.
+pub(crate) fn label_filter(q: &SymbolQuery) -> impl Fn(Label) -> bool + use<> {
+    let labels = q.labels.clone();
+    let data = q.language.is_some_and(|l| l.family() == LanguageFamily::Data);
+    move |l: Label| {
+        if labels.is_empty() {
+            !DEFAULT_EXCLUDED.contains(&l) && (data || !DATA_DETAIL.contains(&l))
+        } else {
+            labels.contains(&l)
+        }
+    }
+}
+
 /// The scoring part of [`build_query`]: every document when the text has
 /// no token.
 fn scoring_query(f: &Fields, q: &SymbolQuery) -> Box<dyn Query> {

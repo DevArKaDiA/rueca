@@ -30,7 +30,8 @@ from . import crossrepo as crossrepo_mod
 from . import contracts as contracts_mod
 from . import org as org_mod
 from . import orgstats as orgstats_mod
-from .arms import ARM_NAMES, S1_ARM_NAMES, make_arm, run_label
+from . import semgates
+from .arms import ARM_NAMES, LOCALIZATION_ONLY, S1_ARM_NAMES, make_arm, run_label
 from .arms.base import is_callable_label, same_def
 from .match import CallableIndex, class_map, class_members
 from .efficiency import search_aggregate, search_row, trace_aggregate
@@ -307,9 +308,11 @@ def score_s1(published: dict | None = None) -> dict:
     splits = s1_splits()
     published = published or {}
     vector_tag = run_label("vector")
-    # vector rows are carried only from a publication of the same sweep setting
-    same_vector = published.get("vector_config") == vector_tag
-    pub_rows = {(r["arm"], r["variant"], r["id"]): r for r in published.get("per_instance", []) if r["arm"] != "vector" or same_vector}
+    labels = {a: run_label(a) for a in LOCALIZATION_ONLY}
+    # rows of an arm with sweep settings are carried only from a publication
+    # of the same setting (publications before `run_labels` named the vector one)
+    pub_labels = published.get("run_labels") or {"vector": published.get("vector_config")}
+    pub_rows = {(r["arm"], r["variant"], r["id"]): r for r in published.get("per_instance", []) if r["arm"] not in labels or pub_labels.get(r["arm"]) == labels[r["arm"]]}
     pub_gold = published.get("gold_per_instance", {})
     per: list[dict] = []
     summaries: dict[str, dict] = {}
@@ -422,6 +425,7 @@ def score_s1(published: dict | None = None) -> dict:
         "failures": failures,
         "overall_groups": overall_groups,
         "vector_config": vector_tag,
+        "run_labels": labels,
     }
 
 
@@ -926,6 +930,10 @@ def _judge(spec: dict, value, ci, n, min_n: int | None, paired: dict | None = No
     return "✅"
 
 
+# localization-only arms shown next to BM25 and cbm in the scorecard (RFC 0007 §11.2): (arm, column)
+SCORECARD_EXTRA = (("vector", "vector"), ("rueca-hybrid", "hybrid"))
+
+
 def _metric_values(key: str, fam_label: str, s1: dict, s3: dict, health: dict, eff: dict | None = None) -> dict:
     """value, ci, n, bm25, cbm (and paired difference) of one scorecard metric."""
     sc = _sc()
@@ -936,8 +944,9 @@ def _metric_values(key: str, fam_label: str, s1: dict, s3: dict, health: dict, e
     if key in ("file_acc@5", "func_acc@10"):
         r = t("rueca")
         out = {"value": r.get(key), "ci": (r.get("ci") or {}).get(key), "n": r.get("n") if key.startswith("file") else r.get("n_func"), "bm25": t("grep").get(key), "cbm": t("cbm").get(key)}
-        if t("vector").get(key) is not None:
-            out["vector"] = t("vector")[key]
+        for arm, col in SCORECARD_EXTRA:
+            if t(arm).get(key) is not None:
+                out[col] = t(arm)[key]
         a, b = _paired_rows(s1, "rueca", "grep", fam_label, v, "file" if key.startswith("file") else "func")
         out["paired"] = paired_bootstrap(a, b, sc["resamples"], seeded(sc["seed"], "paired", fam_label, key)) if a else None
         if out["paired"] and out["paired"].get("ci"):
@@ -1236,16 +1245,19 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
     if card.get("contracts"):
         L.append(contracts_mod.scorecard_row(card["contracts"]))
     L.append("")
-    # RFC 0007 §11.2: the localization rows gain a vector column once the arm has results
-    vec = any(m.get("vector") is not None for c in card["languages"].values() for m in c["metrics"].values())
-    if vec:
+    # RFC 0007 §11.2: the localization rows gain vector / hybrid columns once those arms have results
+    extra = [col for _, col in SCORECARD_EXTRA if any(m.get(col) is not None for c in card["languages"].values() for m in c["metrics"].values())]
+    if "vector" in extra:
         L.append(f"**vector** = the dense-retrieval arm (`rueca embed`, {_vector_setting(s1)}), localization rows only.")
+        L.append("")
+    if "hybrid" in extra:
+        L.append(f"**hybrid** = Rueca's `search_symbols` with `mode: hybrid` (setting `{_setting(s1, 'rueca-hybrid')}`), localization rows only; its gates: *Semantic search gates* below.")
         L.append("")
     for key, c in card["languages"].items():
         L.append(f"### {c['label']} — `{c['status']}`")
         L.append("")
-        L.append("| Metric | Rueca (95% CI) | Floor | Target | Status | BM25 | cbm |" + (" vector |" if vec else ""))
-        L.append("|---|---|---|---|---|---|---|" + ("---|" if vec else ""))
+        L.append("| Metric | Rueca (95% CI) | Floor | Target | Status | BM25 | cbm |" + "".join(f" {col} |" for col in extra))
+        L.append("|---|---|---|---|---|---|---|" + "---|" * len(extra))
         for mk, m in c["metrics"].items():
             m = dict(m, key=mk)
             unit = next((s.get("unit") for s in sc["metrics"] if s["key"] == mk), None)
@@ -1255,7 +1267,7 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
             if m.get("paired") and m["paired"].get("ci"):
                 p = m["paired"]
                 bm += f" (Δ {100 * p['diff']:+.1f}, {100 * p['ci'][0]:+.1f}–{100 * p['ci'][1]:+.1f})"
-            vcell = (f" {_num(m['vector'], unit) if m.get('vector') is not None else '—'} |") if vec else ""
+            vcell = "".join(f" {_num(m[col], unit) if m.get(col) is not None else '—'} |" for col in extra)
             L.append(f"| {label} | {_value_txt(m)} | {_floor_txt(m)} | {_target_txt(m)} | {_status_txt(m)} | {bm} | {_num(m.get('cbm'), unit)} |{vcell}")
         L.append("")
         if c["failing"]:
@@ -1293,6 +1305,12 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
         n = f", n = {m['n']:,}" if m.get("n") is not None else ""
         L.append(f"| {m['label']} | {_ci(m['value'], m['ci'])}{n} | {_floor_txt(m)} | {_target_txt(m)} | {m['status']} | {_f(m.get('grep'))} | {_f(m.get('cbm'))} |")
     L.append("")
+
+
+def _setting(s1: dict | None, arm: str) -> str:
+    """The sweep setting (run directory tag) behind an arm's numbers."""
+    label = ((s1 or {}).get("run_labels") or {}).get(arm) or run_label(arm)
+    return label.split("/", 1)[-1]
 
 
 def _vector_setting(s1: dict | None) -> str:
@@ -1445,6 +1463,7 @@ def render(meta: dict, s1: dict, s3: dict, data: dict, health: dict, card: dict,
     L.append(f"Generated by `rueca-bench report` on {meta['date']}. Do not edit by hand; methodology, gold sources and known biases: `bench/README.md`; quality bar: RFC 0004.")
     L.append("")
     render_scorecard(L, card, s3, meta, s1)
+    semgates.render(L, card.get("semantic_gates") or {})
 
     L.append("## Run metadata")
     L.append("")
@@ -2252,6 +2271,9 @@ def report() -> None:
     orgs = score_orgs(published.get("org") or {})
     log("report: scorecard")
     card = build_scorecard(s1, s3, health, data, eff)
+    sem = semgates.all_gates(s1)
+    if sem:
+        card["semantic_gates"] = sem  # RFC 0007 §11.2 localization rows
     s2 = contracts_mod.score()
     card["contracts"] = contracts_mod.scorecard_block(s2, _judge)  # gated family "Cross-service edges" (S2)
     carried_pairs = {tuple(k.split(":", 1)) for k in s1.get("carried", {})}
