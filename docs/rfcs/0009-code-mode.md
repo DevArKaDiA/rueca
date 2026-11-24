@@ -1,14 +1,16 @@
 # RFC 0009 — Code mode (experimental)
 
-- Status: Draft — phases 0–1 implemented, experimental (behind
+- Status: Draft — phases 0–2 implemented, experimental (behind
   `--experimental-code-mode`; Starlark behind the `code-mode-starlark`
-  cargo feature, §13)
+  cargo feature, §13; phase 2 suite and results in §8, §13.1)
 - Created: 2026-11-24
 - Amended: 2026-11-24 — both languages ship behind one `Sandbox` trait
   during the experiment so they can be compared; the language is an output
   of the experiment, not an up-front pick (§1, §4, §6, §8, §10, §12–§14)
 - Amended: 2026-11-24 — phase 1: the details §4–§5 left open are settled
   (§4.4), and Starlark is a non-default cargo feature (§13)
+- Amended: 2026-11-24 — phase 2: the multi-step suite as built (§8) and
+  its results (§13.1); no helper earned a place (§4.3)
 - Depends on: RFC 0001 (§11 tools, §13 security), RFC 0004 (efficiency
   metrics), RFC 0005 (envelope, pinned ids, `repo` / `ref`, tokens per
   correct answer), RFC 0006 (organization, contracts), RFC 0008 (service
@@ -320,6 +322,28 @@ incorrect, and median `execute` overhead under 20 ms above the sum of the
 engine calls *(defaults)*. Single-step questions are not expected to
 improve and must not regress, since the tools are unchanged.
 
+**As built (phase 2).** `bench/` command `rueca-bench multistep`
+(`bench/README.md`, *Code mode … and the multi-step suite*): **25 tasks**
+over three S3 repositories (Flask, Requests, Hono; 16 tasks), the Flask
+cross-repository group (Flask with Click, Jinja, Werkzeug; 4), the S2
+`ollama` group (server and two clients; 4) and the multi-ref scenario (1).
+Kinds: 2-hop callers, exactly-2-hop count, callers ∩ callers, callees ∩
+callees, outline → per-member caller counts, top-N by fan-in in a file,
+uncalled functions of a file, callees that call nothing, search → filter →
+details, the callee with most callers, callers in a directory, callers of a
+library function / classes from another repository, routes called by both
+clients / by one only, OpenAPI operations a client calls, a route's
+handlers, the organization's dependencies, functions that differ between
+two refs; 5 of the 25 are expected not to favour code mode (one call
+answers them). Gold is derived in code from the existing gold (S3 call
+graphs, the cross-repository labeler's uses, S2 pairs, `collapse_gold`),
+committed with its inputs and re-derived by a test. Arms: the reference
+tool-call plan, the reference JavaScript and Starlark scripts, and cbm
+0.12.0 (one `query_graph` where its Cypher subset can express the task:
+16 of 25; the cross-repository, contract and multi-ref tasks it cannot).
+Each task's statement is written for the phase 3 probe (`rueca-bench
+multistep tasks`, `probe`, `describe-api`). Results: §13.1.
+
 What this does not measure: whether models write good scripts. That needs
 agentic runs, which RFC 0004 defers; the reference scripts stand in for a
 competent agent. Phase 3 adds only a small, bounded fluency probe (§10),
@@ -387,7 +411,7 @@ not an agentic evaluation.
 3. Should enabling code mode hide the eight tools (Cloudflare's
    single-tool shape) or keep them alongside? This RFC keeps them.
 4. Default `budget_tokens` and `timeout_ms`.
-5. Which helpers (§4.3) earn a place, if any.
+5. Which helpers (§4.3) earn a place, if any. Phase 2: none (§13.1).
 
 ## 13. Phase 0 results
 
@@ -476,6 +500,91 @@ What the rows mean for the experiment:
   option (enabled), undefined names are compile-time errors. Unlike the
   Starlark specification, `starlark-rust` allows recursion (bounded here
   by 200 nested calls). These feed phase 3's fluency probe.
+
+### 13.1 Phase 2 results
+
+`rueca-bench multistep run`, 2026-11-24, Apple M1 Pro; `rueca` release
+build `--no-default-features --features code-mode-starlark` (lexical only,
+no embedding runtime: nothing in the suite embeds), cbm 0.12.0 (the bench's
+pinned binary). Tokens: cl100k_base. All 25 tasks and all four arms ran;
+full tables in `docs/bench/multistep-results.md`, records in
+`bench/results/multistep.json`.
+
+| Arm | Correct | Read / correct | … `describe_api` amortised | Written / correct | Round trips | `execute` overhead median / p95 |
+|---|---|---|---|---|---|---|
+| Tool-call plans | 18/25 | 3,639 | — | 257 | 145 | — |
+| JavaScript | 18/25 | 444 | 671 | 367 | 25 | 0.56 / 1.13 ms |
+| Starlark | 18/25 | 448 | 680 | 402 | 25 | 0.32 / 0.58 ms |
+| cbm | 4/16 | 2,171 | — | 344 | 18 | — |
+
+- **Gate: both languages pass.** Tokens read per correct answer −87.8%
+  (JavaScript) and −87.7% (Starlark) against the plans; −81.6% / −81.3%
+  with `describe_api` (4,086 / 4,166 tokens) read once and amortised over
+  the 25 tasks; no task the plans answer correctly is wrong in either
+  language; median overhead under 1 ms (gate 20 ms).
+- **Where it comes from.** The pooled ratio is dominated by the plans that
+  must read whole listings: callers of a library function across the
+  organization (7,826 tokens for one `trace`), the three contract tasks
+  (6,533–7,780), the ref diff (11,625: the file at both refs). Without
+  those five tasks the reduction is 76%; the median per-task ratio of
+  code mode to plan is 0.36 (0.26 over the 20 tasks expected to win).
+- **Where code mode does not help.** A one-call question with a short
+  answer: direct callers (ms04: 71 tokens as a call, 229 as a script) and
+  callers outside a file (ms10: 296 vs 334) — the script source costs more
+  than the answer. The other three single-step tasks still read less
+  (a depth-2 trace, `list_repositories`, a route's handlers), and on the
+  four tasks every arm answers correctly cbm's one Cypher query reads the
+  least (446 tokens in total vs 1,307 plans, 1,132 JavaScript, 1,185
+  Starlark): code mode's cost there is the script itself.
+- **Correctness is the engine's, not the arm's.** The seven tasks no
+  Rueca arm gets right (ms05, ms06, ms08, ms11, ms12, ms13, ms16) differ
+  from the SCIP gold by one element each (a caller Rueca resolves that SCIP
+  does not, a nested-function name); plans and both languages give the same
+  answer on every task. cbm's 12 misses are its own call graph (no
+  constructor calls, class-less names for TypeScript object-literal
+  methods, a missing `api.py` hop) — and its `[:CALLS*1..2]` / `[:CALLS*2]`
+  return the direct callers only, so its plans spell the second hop out.
+- **Limits hit**: none in any arm (plans ask for whole answers with
+  `budget_tokens`; the tools' default budget would cut five of them).
+- **Helpers (§4.3): none added.** Considered: depth-1 neighbours of a
+  root in one direction as `path#Qualname` (the same five-line filter in 16
+  of 25 scripts per language — but it saves no round trip: one `trace` with
+  `labels` already does the work, and a local-name field in the shapes
+  would remove the boilerplate for every tool); `callersAcrossRepos` (the
+  three cross-repository tasks are one `trace` each plus an id-prefix
+  filter); a ref-diff helper (one task; the honest version needs a
+  per-symbol comparison in the engine, below).
+
+Friction from writing the 50 reference scripts:
+
+- Both languages: the result shapes' `qn` is the **global** qualified name
+  (`flask.ctx.RequestContext`, `github.com/ollama/ollama/server.Server.ListHandler`)
+  while the text renderings, and every statement, use the file-local one;
+  the local name is only in the `id` (slice after `:` for `path#Qualname`).
+  Three scripts were wrong on the first run because of it (ms05, ms24,
+  ms25). The repository of a cross-repository `trace` node is likewise
+  only in its id: `s` indexes `execute`'s `snapshots`, which the script
+  never sees.
+- Both: `changed` on multi-ref answers compares **file blobs**, so every
+  symbol of a changed file is `changed` (`Session.get`, identical in both
+  refs, is flagged), while the API says "not identical in every requested
+  ref"; the ref-diff task has to fetch the file at both refs and compare
+  line ranges. Reported, not fixed (per-symbol comparison is an engine
+  change).
+- Both: a `trace` with `include_tests: false` still returns functions
+  nested in a `describe` block of `src/jsx/components.test.tsx`; scripts
+  filter test paths themselves. Reported.
+- Both: a tool argument error listed `format` among the valid arguments
+  although code mode refuses it — **fixed** (`codemode/execute.rs`,
+  `script_error`, with a test).
+- JavaScript: nothing blocked; the root node has no `dir`, `[...new
+  Set(…)]` for dedup, `await` in loops runs the calls one after another.
+- Starlark: no regular expressions (test-path filter by substrings); the
+  root node has no `dir`, so `n["dir"]` is a runtime error and every
+  script uses `n.get("dir")`; flattening outline children needs recursion,
+  which `starlark-rust` allows and the Starlark specification does not;
+  `**root` with other keyword arguments, `sorted(key = lambda …)`, `set()`
+  and comprehensions covered the rest.
 
 ## 14. Decision
 
