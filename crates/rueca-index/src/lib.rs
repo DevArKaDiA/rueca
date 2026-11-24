@@ -393,10 +393,7 @@ pub fn index_worktree_with_embedder(
     // 5. Write and register; with vectors, lexical first unless every
     // vector is cached (RFC 0007 §5.6).
     let t = Instant::now();
-    let pass = match &opts.embed {
-        Some(cfg) => prepare_vectors(&out.graph, &root, &contents, cfg, loader, &opts.store)?,
-        None => None,
-    };
+    let pass = prepare_vectors(&out.graph, &root, &contents, opts.embed.as_ref(), loader, &opts.store)?;
     let embed_prepare_ms = t.elapsed().as_millis() as u64;
     let source = WorktreeContent { root: &root, contents: std::sync::Mutex::new(contents), absent: absent_paths };
     let register = |meta: &SegmentMeta| -> anyhow::Result<()> {
@@ -467,7 +464,7 @@ fn absent_inputs(absent: &[AbsentFile], walked: &[String], registry: &Registry) 
 }
 
 /// The vectors pass up to the cache lookup, or `None` when the run stays
-/// lexical: an embedding that is not [`EmbedConfig::required`] and whose
+/// lexical (no [`IndexOptions::embed`], or): an embedding that is not [`EmbedConfig::required`] and whose
 /// preset, weights or cache are unusable warns instead of failing. Required
 /// failures (every `rueca index --embed` / `RUECA_EMBED`) are errors before
 /// anything is published.
@@ -475,10 +472,11 @@ fn prepare_vectors(
     graph: &rueca_model::ResolvedGraph,
     root: &Path,
     contents: &HashMap<String, Vec<u8>>,
-    cfg: &EmbedConfig,
+    cfg: Option<&EmbedConfig>,
     loader: &dyn EmbedderLoader,
     store: &Path,
 ) -> anyhow::Result<Option<vectors::Pass>> {
+    let Some(cfg) = cfg else { return Ok(None) };
     let read = |f: &FileEntry| -> anyhow::Result<Vec<u8>> {
         if let Some(b) = contents.get(&f.path) {
             return Ok(b.clone());
