@@ -270,10 +270,17 @@ impl Host for EngineHost<'_> {
             Ok(response) => Ok(self.absorb(tool, response.json)),
             Err(err) => {
                 self.deadline_hit |= err.downcast_ref::<DeadlineExceeded>().is_some();
-                Err(format!("{name}: {err:#}"))
+                Err(format!("{name}: {}", script_error(&format!("{err:#}"))))
             }
         }
     }
+}
+
+/// A tool's error as a script reads it: `format` is not part of the script
+/// API (it is refused), so it is dropped from the "valid arguments" list the
+/// tools' argument errors print.
+fn script_error(msg: &str) -> String {
+    msg.replace("(valid arguments: format, ", "(valid arguments: ").replace(", format,", ",").replace(", format)", ")")
 }
 
 /// Runs `args.code` in `sandbox` against `engine` and builds the response.
@@ -445,6 +452,19 @@ mod tests {
         assert_eq!(got, json!({"repo": "*", "budget_tokens": 300}));
         assert!(scope_args_for_call(json!({"format": "verbose"}), None, None).is_err());
         assert!(scope_args_for_call(json!({"format": "compact"}), None, None).is_ok());
+    }
+
+    #[test]
+    fn argument_errors_do_not_offer_format() {
+        let msg =
+            "unknown argument `nme` for `trace` (valid arguments: id, name, repo, ref, format, budget_tokens, cursor)";
+        assert_eq!(
+            script_error(msg),
+            "unknown argument `nme` for `trace` (valid arguments: id, name, repo, ref, budget_tokens, cursor)"
+        );
+        assert_eq!(script_error("(valid arguments: format, cursor)"), "(valid arguments: cursor)");
+        assert_eq!(script_error("(valid arguments: cursor, format)"), "(valid arguments: cursor)");
+        assert_eq!(script_error("no symbol found for name `format`"), "no symbol found for name `format`");
     }
 
     #[test]
