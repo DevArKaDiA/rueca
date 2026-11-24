@@ -52,6 +52,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
 
+  # Starlark code mode is opt-in (RFC 0009 §13: `starlark`'s dependencies
+  # fail the deny job's advisories), so the jobs above build without it.
+  # This keeps it compiling, lint-clean and tested; it is not in the deny job.
+  code-mode-starlark:
+    name: code mode (Starlark feature)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p rueca-codemode -p rueca-mcp -p rueca --all-targets --locked --features rueca-codemode/starlark,rueca-mcp/code-mode-starlark,rueca/code-mode-starlark -- -D warnings
+      - run: cargo test -p rueca-codemode -p rueca-mcp --locked --features rueca-codemode/starlark,rueca-mcp/code-mode-starlark
+
   msrv:
     name: MSRV (1.90)
     runs-on: ubuntu-latest

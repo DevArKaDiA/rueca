@@ -263,7 +263,11 @@ impl AppState {
         };
         let svc = ServiceStore::with_storage(self.storage.clone(), &self.config.store.cache_dir, &org)?;
         let engine = Engine::for_org(svc.local.dir.clone(), &org)?;
-        let serving = Arc::new(Serving { svc, server: RuecaServer::new(engine.clone()), engine, org });
+        // Code mode (RFC 0009 §7.3) stays off in service mode whatever the
+        // environment says: scripts would run in this process, without the
+        // child-process isolation a shared server needs.
+        let server = RuecaServer::new(engine.clone()).with_code_mode(false);
+        let serving = Arc::new(Serving { svc, server, engine, org });
         *self.serving.write().unwrap_or_else(|p| p.into_inner()) = Some(serving.clone());
         Ok(serving)
     }

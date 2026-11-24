@@ -141,7 +141,9 @@ pub fn rueca(store: &Path) -> Command {
         .env_remove("RUECA_LOG")
         .env_remove("RUECA_HOME")
         .env_remove("RUECA_EMBED")
-        .env_remove("RUECA_EMBED_PRESET");
+        .env_remove("RUECA_EMBED_PRESET")
+        .env_remove("RUECA_EXPERIMENTAL_CODE_MODE")
+        .env_remove("RUECA_CODE_MODE_TIMING");
     c
 }
 

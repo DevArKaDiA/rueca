@@ -48,9 +48,17 @@
 //! answered immediately (clients time out slow start-ups); tool calls wait
 //! for the index for up to [`INDEX_WAIT`] and then report "still indexing".
 //!
+//! Code mode (RFC 0009, experimental; [`codemode`]): with
+//! [`ServerOptions::code_mode`] (`rueca mcp --experimental-code-mode`) the
+//! server also lists and answers `execute` and `describe_api`, after the
+//! eight tools. Off (the default, and always in service mode, whose
+//! [`RuecaServer::new`] never enables it) the tool list, the schemas and
+//! every answer are what they were without it.
+//!
 //! Nothing is written to stdout except protocol messages; logs go through
 //! `tracing` and the binary installs a stderr subscriber.
 
+pub mod codemode;
 mod jsonrpc;
 mod protocol;
 mod stdio;
@@ -81,6 +89,9 @@ pub struct ServerOptions {
     /// The organization's file, used to build it when the store has no
     /// generation yet (with `auto_index`).
     pub org_config: Option<rueca_index::org::OrgConfig>,
+    /// Lists and answers the experimental code-mode tools (`execute`,
+    /// `describe_api`; RFC 0009). Off by default.
+    pub code_mode: bool,
 }
 
 /// Instructions sent to clients in `initialize` / `server/discover`.
@@ -111,17 +122,44 @@ pub struct RuecaServer {
     engine: Arc<Engine>,
     tools: Arc<Vec<Tool>>,
     gate: Option<Arc<IndexGate>>,
+    /// Code mode, when enabled ([`RuecaServer::with_code_mode`]).
+    code_mode: Option<Arc<codemode::CodeMode>>,
 }
 
 impl RuecaServer {
+    /// A server for `engine`, code mode off (service mode builds its
+    /// servers with this and never enables it).
     pub fn new(engine: Engine) -> RuecaServer {
         RuecaServer::with_index_gate(engine, None)
     }
 
     /// A server whose tool calls first wait for a background index
-    /// (see [`spawn_auto_index`]).
+    /// (see [`spawn_auto_index`]). Code mode off.
     pub fn with_index_gate(engine: Engine, gate: Option<Arc<IndexGate>>) -> RuecaServer {
-        RuecaServer { engine: Arc::new(engine), tools: Arc::new(tools()), gate }
+        RuecaServer { engine: Arc::new(engine), tools: Arc::new(tools()), gate, code_mode: None }
+    }
+
+    /// The same server with the experimental code-mode tools listed and
+    /// answered (`enabled`), or not: the eight tools, then `execute` and
+    /// `describe_api` ([`codemode`]).
+    pub fn with_code_mode(mut self, enabled: bool) -> RuecaServer {
+        let mut list = tools();
+        self.code_mode = enabled.then(|| {
+            list.extend(codemode::tools());
+            Arc::new(codemode::CodeMode::new())
+        });
+        self.tools = Arc::new(list);
+        self
+    }
+
+    /// Whether the code-mode tools are listed and answered.
+    pub fn code_mode(&self) -> bool {
+        self.code_mode.is_some()
+    }
+
+    /// The tools `tools/list` advertises, in order.
+    pub fn tool_list(&self) -> &[Tool] {
+        &self.tools
     }
 
     /// The same server for a caller who may read only `visibility` (RFC
@@ -129,7 +167,12 @@ impl RuecaServer {
     /// segments and the organization index), the tool list is shared.
     pub fn with_visibility(&self, visibility: rueca_query::Visibility) -> RuecaServer {
         let engine = self.engine.as_ref().clone().with_visibility(visibility);
-        RuecaServer { engine: Arc::new(engine), tools: self.tools.clone(), gate: self.gate.clone() }
+        RuecaServer {
+            engine: Arc::new(engine),
+            tools: self.tools.clone(),
+            gate: self.gate.clone(),
+            code_mode: self.code_mode.clone(),
+        }
     }
 
     /// The server [`serve_stdio`] runs: the engine for `opts.org` or
@@ -140,7 +183,7 @@ impl RuecaServer {
             Some(name) => (Engine::for_org(opts.store_dir.clone(), name)?, spawn_org_index(opts)),
             None => (Engine::new(opts.store_dir.clone(), opts.root.clone())?, spawn_auto_index(opts)),
         };
-        Ok(RuecaServer::with_index_gate(engine, gate))
+        Ok(RuecaServer::with_index_gate(engine, gate).with_code_mode(opts.code_mode))
     }
 
     /// Runs one tool call (blocking): waits for a pending auto-index, then
@@ -155,7 +198,11 @@ impl RuecaServer {
             Some(gate) => gate.wait(INDEX_WAIT).map_err(anyhow::Error::msg)?,
             None => None,
         };
-        self.engine.respond_with(tool, args, opts).map_err(|err| match index_failure {
+        let answer = match &self.code_mode {
+            Some(cm) if codemode::handles(tool) => cm.respond(&self.engine, tool, args, &opts),
+            _ => self.engine.respond_with(tool, args, opts),
+        };
+        answer.map_err(|err| match index_failure {
             Some(reason) => err.context(format!("automatic indexing failed: {reason}")),
             None => err,
         })
