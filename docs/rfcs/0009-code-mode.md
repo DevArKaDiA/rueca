@@ -2,6 +2,9 @@
 
 - Status: Draft
 - Created: 2026-11-24
+- Amended: 2026-11-24 — both languages ship behind one `Sandbox` trait
+  during the experiment so they can be compared; the language is an output
+  of the experiment, not an up-front pick (§1, §4, §6, §8, §10, §12–§14)
 - Depends on: RFC 0001 (§11 tools, §13 security), RFC 0004 (efficiency
   metrics), RFC 0005 (envelope, pinned ids, `repo` / `ref`, tokens per
   correct answer), RFC 0006 (organization, contracts), RFC 0008 (service
@@ -27,11 +30,15 @@ one script that does the chain, filters, and hands back the final rows.
   tools cannot drift.
 - Scripts run in a sandbox with no network, no filesystem, no clock and no
   randomness, under limits on time, memory, engine calls and output size.
-- The language is chosen in phase 0 by measurement between **JavaScript
-  (QuickJS via `rquickjs`)** and **Starlark (`starlark`)**; this RFC
-  recommends JavaScript (§6).
-- It graduates from experimental only if the efficiency bench shows a
-  clear gain on multi-step questions (§8); otherwise it is removed.
+- Two languages ship behind one `Sandbox` trait for the whole experiment,
+  **JavaScript (QuickJS via `rquickjs`)** and **Starlark (`starlark`)**,
+  each behind its own cargo feature; `execute` takes a `language`. Which
+  to keep is an **output** of the experiment, not a choice made up front:
+  §6 states the hypothesis (JavaScript) that phases 0–3 test.
+- Phase 3 writes a per-language verdict from the efficiency bench (§8) and
+  a fluency probe (§10), and recommends keeping both, keeping one, or
+  removing code mode (§14). Graduating to on-by-default is the owner's
+  decision, not this work's.
 
 ## 2. Motivation
 
@@ -89,17 +96,19 @@ Non-goals:
 
 | Tool | Purpose |
 |---|---|
-| `execute` | Run a script; return its value |
-| `describe_api` | Return the API reference (TypeScript declarations or Starlark docstrings), so the agent loads it only when it decides to use code mode |
+| `execute` | Run a script in `language`; return its value |
+| `describe_api` | Return the API reference for `language` (`"js"`: TypeScript declarations; `"starlark"`: a docstring reference), so the agent loads it only when it decides to use code mode |
 
 `describe_api` exists so the declarations do not inflate every session's
-tool list; the `execute` description stays short and points to it.
+tool list; the `execute` description stays short and points to it. It
+takes `language` (`"js"` | `"starlark"`, default `"js"`) like `execute`.
 
 ### 4.2 `execute`
 
 | Arg | Type | Default |
 |---|---|---|
 | `code` | string, the script | — |
+| `language` | `"js"` \| `"starlark"` | `"js"` while experimental |
 | `repo`, `ref` | as RFC 0005: default scope for every API call in the script | the server's default |
 | `budget_tokens` | int: cap on the rendered result | 2000 *(default)* |
 | `timeout_ms` | int, ≤ the server maximum | 2000 *(default)*, max 10000 |
@@ -140,6 +149,15 @@ declare const rueca: {
 };
 ```
 
+Starlark shape: the same functions under their snake_case names, keyword
+arguments only (a dict spreads with `**args`), returning the tool's JSON
+as dicts and lists, synchronously:
+
+```python
+hits = rueca.search_symbols(query = "parse", limit = 5)
+result = [h["name"] for h in hits]
+```
+
 Phase 2 may add a few helpers that save round trips without new engine
 features (e.g. `rueca.callersAcrossRepos(id)`), each justified by a bench
 task. Helpers are thin compositions of the eight tools.
@@ -168,19 +186,25 @@ agent can fix the script in one more turn.
 | MSRV | 1.87 (fits 1.90) | not declared | 1.66 |
 | Engine | C (QuickJS) via `cc`; Rueca already builds C/C++ for llama.cpp | pure Rust (Meta, used by Buck2) | pure Rust |
 | Model fluency | Highest: the language code-mode reports use | High: a Python dialect, but no `while`, recursion, classes, exceptions or imports — models will reach for them | Low: little training data |
-| Termination | Needs an interrupt handler (QuickJS supports one) | Guaranteed by the language: no unbounded loops or recursion | `max_operations` built in |
-| Memory limit | QuickJS memory limit | to verify in phase 0 *(unverified)* | built-in size limits |
+| Termination | Needs an interrupt handler (QuickJS supports one) | No `while`, but bounded loops can still run for hours (`range(2147483647)`): needs the evaluator's cancellation hook (§13) | `max_operations` built in |
+| Memory limit | QuickJS memory limit | Best-effort heap check, not on allocation (§13) | built-in size limits |
 | Determinism | Remove `Date`, `Math.random` and timers | Deterministic by design | Deterministic |
 | Rejected | — | — | Model fluency |
 
-**Recommendation: JavaScript.** Code mode's value depends on the model
+**Both ship during the experiment.** JavaScript and Starlark run behind
+the same `Sandbox` trait (crate `rueca-codemode`, features `js` and
+`starlark`, both on while the experiment runs), so every measurement in
+§8 and §10 is taken for both and dropping one later is removing a
+feature.
+
+**Hypothesis to test: JavaScript.** Code mode's value depends on the model
 writing a correct script on the first try, and both published reports use
 JavaScript/TypeScript. QuickJS gives the two controls that matter (memory
 limit and an interrupt handler) and has no I/O unless its `std`/`os`
-modules are added, which Rueca does not do. Starlark is the fallback if
-phase 0 shows QuickJS's start-up, binary size or sandbox controls are a
-problem; its hermeticity is attractive but its missing constructs will
-cause failed scripts.
+modules are added, which Rueca does not do. Starlark's hermeticity is
+attractive, but its missing constructs (`while`, exceptions, classes,
+`**`, imports) may cause failed scripts. Phase 0 (§13) measures the
+engines; phase 3's fluency probe and the suite decide (§14).
 
 ## 7. Sandbox and limits
 
@@ -200,6 +224,9 @@ loading.
 | Engine calls | 200 per script | counter in the binding |
 | Result size | `budget_tokens` | truncation at serialization |
 | Script size | 16 KB | checked before parsing |
+
+Each engine's enforcement of these limits, and the cases it cannot
+enforce in-process, are recorded in §13.
 
 Engine calls inherit the tools' own limits (`limit`, `depth`, token
 budgets), so one call cannot do more than the tool could.
@@ -225,15 +252,17 @@ A new deterministic **multi-step efficiency suite** in the bench:
   route is consumed by another service; functions reachable from a handler
   that changed between two refs.
 - For each task, a reference **tool-call plan** (the sequence an agent
-  would make) and a reference **script**, both written once and committed.
-- Measured: tokens the agent reads (sum of tool answers vs. script source
-  plus `execute` result), number of calls, correctness of the final answer
-  against gold, latency. Tokens counted with the bench's tokenizer (RFC
+  would make) and a reference **script per language** (JavaScript and
+  Starlark), written once and committed.
+- Measured, **per language**: tokens the agent reads (sum of tool answers
+  vs. script source plus `execute` result), number of calls, correctness
+  of the final answer against gold, latency. Tokens counted with the bench's tokenizer (RFC
   0005 §8).
 - Compared against the same tasks answered with cbm's tools where cbm can
   express them (including `query_graph`).
 
-**Graduation gate:** on the suite, code mode reads at least 40% fewer
+**Per-language gate** (each language is judged on its own): on the suite,
+code mode reads at least 40% fewer
 tokens per correct answer than the tool-call plans, with no task becoming
 incorrect, and median `execute` overhead under 20 ms above the sum of the
 engine calls *(defaults)*. Single-step questions are not expected to
@@ -241,7 +270,8 @@ improve and must not regress, since the tools are unchanged.
 
 What this does not measure: whether models write good scripts. That needs
 agentic runs, which RFC 0004 defers; the reference scripts stand in for a
-competent agent.
+competent agent. Phase 3 adds only a small, bounded fluency probe (§10),
+not an agentic evaluation.
 
 ## 9. Alternatives considered
 
@@ -254,7 +284,7 @@ competent agent.
    arguments reference earlier results (`"$1.results[0].id"`). Much
    simpler and sandbox-free, and it removes round trips; it cannot filter
    or join, so intermediate answers still return. Kept as the fallback if
-   phase 0 rejects both languages.
+   the experiment rejects both languages.
 3. **Making the tools more compact.** Necessary anyway (the `trace` gap is
    formatting) and independent of this RFC.
 4. **WebAssembly sandbox (wasmtime) running agent-provided modules.**
@@ -264,16 +294,24 @@ competent agent.
 ## 10. Phases
 
 - **Phase 0 — spike (no PR to main).** Embed QuickJS and Starlark behind
-  the same `Sandbox` trait; bind two API functions; measure start-up time,
-  per-call overhead, binary size, memory-limit and interrupt behaviour,
-  and cargo-deny. Pick the language by §6's criteria; record it.
-- **Phase 1 — `execute` and `describe_api` behind the flag.** Generated
-  API from `tool_definitions()`, limits of §7, result envelope of §4.2,
-  tests (limits, determinism, errors, golden transcripts unchanged when
-  disabled).
-- **Phase 2 — multi-step suite (§8) and helpers** justified by tasks.
-- **Phase 3 — decide.** Graduate (document in tools.md as a normal tool,
-  still opt-in or on by default) or remove.
+  the same `Sandbox` trait (kept, and extended in phase 1); bind two API
+  functions; measure start-up time, per-call overhead, binary size,
+  memory-limit and interrupt behaviour, dependencies and cargo-deny, for
+  each engine. Record the results in §13; no language is picked.
+- **Phase 1 — `execute` and `describe_api` behind the flag, both
+  languages.** Generated API from `tool_definitions()` (TypeScript
+  declarations and the Starlark reference), limits of §7, result envelope
+  of §4.2, tests (limits, determinism, errors, golden transcripts
+  unchanged when disabled).
+- **Phase 2 — multi-step suite (§8), per language, and helpers**
+  justified by tasks.
+- **Phase 3 — verdict.** A fluency probe: 10 tasks × 2 languages, a fresh
+  model given only `describe_api`'s output for that language and the task
+  statement, scored on first-try success and success after one repair
+  turn (the error message of §5 as the only feedback). With the suite's
+  numbers it writes a per-language verdict and a recommendation in §14:
+  keep both, keep one, or remove code mode. Graduation (tools.md as a
+  normal tool, on by default) is the owner's decision, not this work's.
 
 ## 11. References
 
@@ -290,10 +328,19 @@ competent agent.
 
 ## 12. Open questions
 
-1. JavaScript or Starlark — decided in phase 0 (§6 recommends JavaScript).
+1. Which language(s) to keep — an output of phase 3 (§14); §6's
+   hypothesis is JavaScript. If both stay, which is the default.
 2. Should `describe_api` return TypeScript declarations for every tool, or
    a shorter hand-written reference?
 3. Should enabling code mode hide the eight tools (Cloudflare's
    single-tool shape) or keep them alongside? This RFC keeps them.
 4. Default `budget_tokens` and `timeout_ms`.
 5. Which helpers (§4.3) earn a place, if any.
+
+## 13. Phase 0 results
+
+*To be filled in by the phase 0 spike.*
+
+## 14. Decision
+
+*To be written in phase 3 (§10).*
