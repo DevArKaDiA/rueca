@@ -299,6 +299,8 @@ claude mcp add --transport http rueca https://rueca.acme.internal/mcp --header "
   "headers": { "Authorization": "Bearer ${input:rueca-token}" } } } }
 ```
 
+**Code mode (experimental)**: `rueca mcp --experimental-code-mode` (or `RUECA_EXPERIMENTAL_CODE_MODE=1`) adds `execute` and `describe_api`, which run a short JavaScript script (Starlark with a build `--features code-mode-starlark`) against the tools and return only its answer ([details](docs/tools.md#experimental-code-mode)).
+
 (VS Code, `.vscode/mcp.json`; Cursor: `{"mcpServers": {"rueca": {"url":
 "https://rueca.acme.internal/mcp", "headers": {"Authorization": "Bearer
 …"}}}}`.)

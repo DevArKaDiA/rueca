@@ -657,6 +657,128 @@ snapshots):
 [1] POST /nowhere  consumes  requests  local/client:app/users.py#missing L9  (0)
 ```
 
+## Experimental: code mode
+
+[RFC 0009](rfcs/0009-code-mode.md), phases 0–1. Off by default; nothing
+above changes when it is off (same tool list, schemas and answers).
+
+**Enabling.** `rueca mcp --experimental-code-mode`, or the environment
+variable `RUECA_EXPERIMENTAL_CODE_MODE=1` (or `true`), adds two tools after
+the eight: `execute` and `describe_api`. `rueca query execute` /
+`rueca query describe_api` take the same flag or variable (`--code-file
+FILE|-` reads `execute`'s `code` from a file or stdin). Service mode
+(`rueca serve`) never enables it, whatever its environment: scripts run in
+the server process (RFC 0009 §7.3).
+
+**Languages.** JavaScript (`js`, QuickJS through `rquickjs`) is always
+built. Starlark (`starlark`) needs the cargo feature `code-mode-starlark`
+(`cargo build --release -p rueca --features code-mode-starlark`, or
+`cargo install rueca --features code-mode-starlark`): `starlark` 0.14.3
+depends on crates with "unmaintained" RUSTSEC advisories that the
+repository's `cargo deny` policy rejects, so it is not in the default
+build. Without it, `language: "starlark"` is an error that says how to
+rebuild.
+
+**`describe_api`** (`language`, default `js`) returns the script API,
+generated from the tool definitions (one function per tool, the tools'
+argument names, types, descriptions and defaults, and their result shapes),
+with the script contract, the limits and two examples: TypeScript
+declarations for `js` (about 3,900 tokens), a docstring reference for
+`starlark` (about 3,800 tokens). Read it once per session. JavaScript:
+`await rueca.searchSymbols({query: "parse", limit: 5})`; Starlark:
+`rueca.search_symbols(query = "parse", limit = 5)` (keyword arguments
+only). Arguments keep the tools' snake_case names in both.
+
+**`execute`**:
+
+| Arg | Type | Default |
+|---|---|---|
+| `code` | string: the script, at most 16 KB. `js`: the body of an async function, `return` the answer; `starlark`: assign the answer to `result` | — |
+| `language` | `js` or `starlark` | `js` |
+| `repo`, `ref` | as the tools': the default of every call in the script that names neither the argument nor an `id` (an id pins its repository and commit) | — |
+| `budget_tokens` | int, 100–1,000,000: cap on the returned `result` | 2000 |
+| `timeout_ms` | int, 1–10,000 (larger values are clamped, like the tools' ranges) | 2000 |
+
+```json
+{"result": ["billing.invoices.InvoiceService.issue"], "logs": ["root billing.invoices.total_due"],
+ "calls": 2, "snapshots": [{"s": 0, "repo": "local/golden-repo", "ref": "worktree", "commit": "worktree", "overlay": false}],
+ "truncated": false}
+```
+
+- Each `rueca.*` call resolves to its envelope's **`results`** (the shapes
+  of each tool above). `snapshots` lists every snapshot the calls read,
+  once each, numbered in the order they were first read; every `s` and
+  `in` inside a call's results is renumbered to that list before the
+  script sees it. Ids are the pinned ids of the tools, so an id in `result`
+  works in any tool afterwards. The envelope's other fields (`budget`,
+  `retrieval`, `files_scanned`, `org`, `omitted`) are not passed to
+  scripts.
+- A call whose own answer was cut (its `limit` or `max_lines` reached) is
+  listed in **`partial`**: `[{"call": 3, "tool": "search_symbols",
+  "next_cursor": "10"}]` (the script can raise `limit`, or pass the cursor
+  as `cursor`). `partial` is present only when not empty.
+- Inside scripts a call's `budget_tokens` defaults to 1,000,000 (the tools'
+  maximum): its answer reaches the script, not the agent, so only the
+  tool's `limit` bounds it. `format` other than `compact` is refused.
+- **`budget_tokens`** cuts `result`, as compact JSON counted with the tools'
+  estimator (`ceil(bytes / 4)`): the largest array keeps its longest prefix
+  that fits (then the next largest, …), then the longest string is cut
+  (ending in `…`), and a result that still does not fit becomes `null`;
+  `truncated` is then `true`.
+- `logs`: `console.log` / `print` lines, 4 KB in total; `logs_truncated:
+  true` (present only then) when output was dropped.
+- With `RUECA_CODE_MODE_TIMING=1` (for the benchmark's overhead gate, RFC
+  0009 §8) the result also has `timing: {"total_us", "engine_us"}`: the
+  whole `execute` and the sum of its engine calls. Without it the answer is
+  deterministic: the same script on the same index gives the same bytes.
+- **Text content** (what a model reads): the snapshot header lines of the
+  tools (`repo@commit12[+] (ref)`, `[s] ` first when there are several),
+  `result` as compact JSON on one line, a `log: …` line per log line, then
+  `(truncated: the result was cut to budget_tokens N)`, `(partial: call 3
+  search_symbols was cut, next cursor "10")` and `(logs truncated)` when
+  they apply. `structuredContent` carries the JSON above.
+
+**Errors** are tool results with `isError: true` and one line naming the
+language, the kind, the script line when known and the interpreter's
+message, so a script can be fixed in one more turn:
+
+```
+js runtime error at line 2: Error: rueca.getSymbol: no symbol found for name `nope`; try `search_symbols` to find the right name (describe_api lists the API)
+```
+
+Kinds: `syntax` (also an undefined name in Starlark), `runtime` (a thrown
+error, an unknown function, a failed call not caught), `timeout`,
+`memory`, `call_limit`, `script_too_large`, `result` (the answer is not
+JSON), `internal`. A failed `rueca.*` call is an error the script can catch
+in JavaScript (`try`/`catch`, message `rueca.<name>: <the tool's error>`);
+Starlark has no exceptions, so it stops the script at the call's line
+with the same message. Engine argument errors are the tools' own (unknown
+argument, missing required argument, wrong type).
+
+**Limits** (RFC 0009 §7.2): wall time `timeout_ms` (2 s, at most 10 s; the
+engine calls get the script's remaining time as their deadline), 64 MB of
+interpreter memory, 200 `rueca.*` calls, 16 KB of script (refused before
+parsing), 4 KB of logs, 512 KB of JavaScript stack, 200 nested Starlark
+calls. Scripts have no network, files, environment, clock, randomness,
+timers or module loading (JavaScript: no `Date`, `Math.random`,
+`setTimeout`, `import` / `require`, `fetch`, `eval`, `Function`; Starlark:
+no `load`).
+
+**Sandbox caveats.** Scripts run inside the `rueca mcp` process; the
+limits protect a session from runaway scripts, not the machine from a
+hostile user (RFC 0009 §7.3). JavaScript's memory limit is enforced on
+every allocation and its deadline is polled by the interpreter (generic
+`Array.prototype` methods refuse array-likes longer than 2^22 elements,
+the one non-polling case found). **Starlark's memory limit is best-effort
+in-process**: the heap is checked every 1,000 steps, not on allocation, so
+one large operation can use far more than 64 MB before it is stopped
+(`"x" * (1 << 30)` peaked at 3 GiB), memory a value keeps outside the
+Starlark heap (dictionary tables) is not counted, and an impossible
+allocation (`("x" * 131072) * 2147483647`) aborts the process. A single
+long Starlark operation also runs past the deadline (3.1 s for a 2 s
+limit). Containing these needs a child process with OS limits (RFC 0009
+§7.3, §13).
+
 ## Over HTTP
 
 `rueca serve` ([RFC 0008](rfcs/0008-service-mode.md) §6) serves the same
@@ -780,9 +902,16 @@ rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [
     Run one tool and print its JSON result (with --text, the compact text
     rendering MCP clients get as text content). Same semantics as MCP.
 
-rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
+rueca query execute|describe_api '<JSON ARGS>' --experimental-code-mode [--code-file FILE|-] [...]
+    The experimental code-mode tools (also with RUECA_EXPERIMENTAL_CODE_MODE=1;
+    see "Experimental: code mode"). --code-file reads execute's `code` from
+    a file (`-`: stdin).
+
+rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index] [--experimental-code-mode]
     MCP server on stdio. Indexes --root first if it has no segment; with
     --org FILE, builds the organization first if the store has none.
+    --experimental-code-mode (or RUECA_EXPERIMENTAL_CODE_MODE=1) also serves
+    `execute` and `describe_api`.
 
 rueca status [--store DIR] [--json]
     List indexed roots with repo, commit, node/edge/file counts, age, the

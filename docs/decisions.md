@@ -1,5 +1,35 @@
 # Decisions log
 
+## 2026-11-24 — Code mode phase 1: `execute` and `describe_api` behind a flag; Starlark opt-in (RFC 0009)
+
+`rueca mcp --experimental-code-mode` (or `RUECA_EXPERIMENTAL_CODE_MODE=1`)
+lists and answers `execute` and `describe_api` after the eight tools; off,
+the tool list, schemas and answers are byte-identical to before (tested
+against the golden transcripts). Service mode never enables it.
+
+- **Starlark is a non-default cargo feature** (`code-mode-starlark` on the
+  `rueca` binary and `rueca-mcp`, `starlark` on `rueca-codemode`, whose
+  default is `["js"]`). The owner rejected ignoring the three
+  "unmaintained" advisories of `starlark` 0.14.3's dependencies and
+  loosening `deny.toml`; with the feature off, `cargo deny check` passes
+  as CI runs it. A CI job keeps the feature building and tested; a build
+  without it answers `language: "starlark"` with an error saying how to
+  rebuild. This supersedes "both default-on" in the entry below.
+- **The API is generated, results included.** `rueca_query::ToolDef` gains
+  `output_shape` (a JSON Schema of each tool's `results`, never sent to MCP
+  clients); `describe_api` builds the TypeScript declarations and the
+  Starlark reference from the input schemas and these shapes, and a test
+  checks real answers against the shapes both ways.
+- **Scripts read `results`, renumbered.** A call resolves to its
+  envelope's `results`; the snapshots of every call are merged into
+  `execute`'s `snapshots` and each `s` / `in` is renumbered to them; a call
+  the tool cut is reported in `partial`. Inside scripts a call's
+  `budget_tokens` defaults to the maximum (its answer reaches the script,
+  not the agent); `execute`'s `budget_tokens` cuts `result` (largest array
+  first, then strings, then `null`); `timeout_ms` is clamped to 10 s.
+- **`rueca-codemode` is published** with the other crates: `rueca-mcp`
+  depends on it.
+
 ## 2026-11-24 — Code mode: both languages ship behind one `Sandbox` for the experiment (RFC 0009)
 
 RFC 0009's experimental `execute` tool runs scripts in **both** JavaScript

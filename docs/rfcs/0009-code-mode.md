@@ -1,10 +1,14 @@
 # RFC 0009 — Code mode (experimental)
 
-- Status: Draft
+- Status: Draft — phases 0–1 implemented, experimental (behind
+  `--experimental-code-mode`; Starlark behind the `code-mode-starlark`
+  cargo feature, §13)
 - Created: 2026-11-24
 - Amended: 2026-11-24 — both languages ship behind one `Sandbox` trait
   during the experiment so they can be compared; the language is an output
   of the experiment, not an up-front pick (§1, §4, §6, §8, §10, §12–§14)
+- Amended: 2026-11-24 — phase 1: the details §4–§5 left open are settled
+  (§4.4), and Starlark is a non-default cargo feature (§13)
 - Depends on: RFC 0001 (§11 tools, §13 security), RFC 0004 (efficiency
   metrics), RFC 0005 (envelope, pinned ids, `repo` / `ref`, tokens per
   correct answer), RFC 0006 (organization, contracts), RFC 0008 (service
@@ -130,6 +134,9 @@ Results:
 Every id inside `result` is a pinned RFC 0005 id (repo + 12-hex commit), so
 an agent can follow up with the normal tools.
 
+`partial` (the calls whose own answer was cut), `logs_truncated` and, with
+`RUECA_CODE_MODE_TIMING=1`, `timing` follow when they apply (§4.4).
+
 ### 4.3 The API
 
 Generated from `tool_definitions()`: one function per tool, same argument
@@ -162,6 +169,49 @@ Phase 2 may add a few helpers that save round trips without new engine
 features (e.g. `rueca.callersAcrossRepos(id)`), each justified by a bench
 task. Helpers are thin compositions of the eight tools.
 
+### 4.4 Settled in phase 1
+
+- **Result types.** `tool_definitions()` carries each tool's
+  `output_shape` (a JSON Schema of the envelope's `results`, not sent to
+  MCP clients); `describe_api` generates the TypeScript result types and
+  the Starlark shapes from it, and a test checks real answers against it
+  both ways (`rueca-query/tests/shapes.rs`). Arguments every tool takes
+  with the same schema are written once (`CommonArgs`); `format` is left
+  out of the API and refused (scripts always read the compact shape).
+  `describe_api` is about 3,900 tokens for `js` and 3,800 for `starlark`.
+- **Call shapes.** JavaScript: `rueca.<camelCase>(args)`, one object with
+  the tools' snake_case argument names, a `Promise` of `results`; a failed
+  call rejects with an `Error` whose message is `rueca.<name>: <the tool's
+  error>`, catchable. Starlark: `rueca.<snake_case>(**kwargs)`, keyword
+  arguments only, synchronous; a failed call stops the script with the
+  same message and the line (Starlark has no exceptions).
+- **Snapshots and `s`.** The calls' snapshot entries are merged (same
+  entry once) and numbered in first-read order; every `s` and `in` in a
+  call's `results` is renumbered to that list before the script sees it.
+  Envelope fields other than `results` are not passed to scripts; a call
+  the tool cut (`truncated`) is reported in `partial` with its
+  `next_cursor`.
+- **Scope.** `execute`'s `repo` / `ref` are added to a call that names
+  neither the argument nor an `id` (an id pins its repository and commit).
+- **Per-call budget.** A call's `budget_tokens` defaults to 1,000,000 (the
+  tools' maximum) inside scripts: the call's answer reaches the script,
+  not the agent, so only the tool's `limit` bounds it; `execute`'s own
+  `budget_tokens` caps what the agent reads.
+- **Truncation.** `result` is counted as compact JSON with the tools'
+  estimator (`ceil(bytes / 4)`); the largest array keeps its longest
+  fitting prefix (then the next largest), then the longest string is cut
+  (ending in `…`), and a result that still does not fit becomes `null`.
+- **`timeout_ms`** is clamped to 1–10,000 ms, like the tools' ranges
+  (not an error); the engine calls get the script's remaining wall time as
+  their cooperative deadline.
+- **Text content.** The tools' snapshot header lines, `result` as compact
+  JSON on one line, `log:` lines, then `(truncated …)`, `(partial …)` and
+  `(logs truncated)` notes. Errors: one line, `<language> <kind> error at
+  line N: <message>`.
+- **Where it runs.** The server side lives in `rueca-mcp` (`codemode`
+  module: the engine-backed `Host`, the generated API); `rueca query
+  execute` uses the same code. Service mode keeps it off explicitly.
+
 ## 5. Execution
 
 1. Parse the script; reject it before running if it exceeds 16 KB
@@ -193,9 +243,11 @@ agent can fix the script in one more turn.
 
 **Both ship during the experiment.** JavaScript and Starlark run behind
 the same `Sandbox` trait (crate `rueca-codemode`, features `js` and
-`starlark`, both on while the experiment runs), so every measurement in
-§8 and §10 is taken for both and dropping one later is removing a
-feature.
+`starlark`), so every measurement in §8 and §10 is taken for both and
+dropping one later is removing a feature. JavaScript is in the default
+build; Starlark is the opt-in feature `code-mode-starlark` of the `rueca`
+binary, because its dependencies fail the repository's `cargo deny`
+policy (§13).
 
 **Hypothesis to test: JavaScript.** Code mode's value depends on the model
 writing a correct script on the first try, and both published reports use
@@ -339,7 +391,8 @@ not an agentic evaluation.
 
 ## 13. Phase 0 results
 
-Crate `rueca-codemode` (features `js`, `starlark`, both default-on):
+Crate `rueca-codemode` (features `js`, `starlark`; both default-on in
+phase 0, Starlark opt-in since phase 1):
 `Sandbox::run(script, &mut dyn Host, &Limits) -> Result<Outcome,
 ScriptError>`, two tools bound through an in-memory host. Measured
 2026-11-24 on an Apple M1 Pro (10 cores, 32 GB), macOS, Rust stable
@@ -402,10 +455,27 @@ What the rows mean for the experiment:
   for upstream: `starlark-rust`'s main branch has already dropped `paste`
   and `fxhash` but still uses `derivative`; (d) drop Starlark. No
   advisory is ignored and no licence was added to the allow-list.
+- **Outcome (phase 1): option (b).** The owner rejected advisory
+  ignores and policy changes, so Starlark is a **non-default cargo
+  feature**: `rueca-codemode` has `default = ["js"]`, and the feature is
+  forwarded as `code-mode-starlark` by `rueca-mcp` and the `rueca` binary.
+  `cargo deny check` (CI's invocation: default features, `deny.toml`
+  unchanged) passes; the default binary has no Starlark, and
+  `language: "starlark"` there is an error that says to rebuild with
+  `--features code-mode-starlark`. A CI job runs clippy and the tests of
+  the code-mode crates with the feature on, so Starlark keeps building and
+  passing; it is not in the deny job. For phase 3 this is evidence against
+  keeping Starlark as is: it cannot be in the default build until upstream
+  drops `derivative`, `paste` and `fxhash` (or the policy changes), and
+  its memory limit stays best-effort in-process (`docs/tools.md`,
+  "Sandbox caveats"; no cheap in-process mitigation was sound: the
+  repetition operators of built-in strings and lists cannot be
+  intercepted without patching the crate).
 - **Starlark ergonomics** found while writing the tests: no `**` operator,
   `range` takes 32-bit integers, top-level `for`/`if` needed a dialect
-  option (enabled), undefined names are compile-time errors. These feed
-  phase 3's fluency probe.
+  option (enabled), undefined names are compile-time errors. Unlike the
+  Starlark specification, `starlark-rust` allows recursion (bounded here
+  by 200 nested calls). These feed phase 3's fluency probe.
 
 ## 14. Decision
 

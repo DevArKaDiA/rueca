@@ -1108,6 +1108,28 @@ of the language's gated S1 instances and S3 repository sets (`search_symbols`,
 included, so this overstates an MCP session). **Index throughput**: files
 per second of the health index, reported.
 
+### Code mode (RFC 0009, experimental; the multi-step suite is phase 2)
+
+Not a suite yet: what the phase 2 suite drives. Code mode is off unless
+asked for, so the arms above are unaffected. `execute` runs through the
+same interface as the other tools:
+
+```sh
+RUECA_EXPERIMENTAL_CODE_MODE=1 $RUECA_BIN query execute '{"code": "<script>"}' --root <root> --store <dir> [--text]
+RUECA_EXPERIMENTAL_CODE_MODE=1 $RUECA_BIN query execute '{"language": "starlark"}' --code-file task.star --root <root> --store <dir>
+```
+
+(`--code-file FILE|-` reads `code` from a file or stdin; `--text` prints
+what a model reads.) Starlark needs a binary built with `cargo build
+--release -p rueca --features code-mode-starlark`; the default build
+answers `language: "starlark"` with an error. With
+`RUECA_CODE_MODE_TIMING=1` the JSON result gains `timing: {"total_us",
+"engine_us"}` (the whole `execute` and the sum of its engine calls, both
+measured inside the process), for §8's gate: median `total_us -
+engine_us` under 20 ms. Without the variable the answer is deterministic.
+`docs/tools.md` ("Experimental: code mode") has the response and the
+limits.
+
 ### Efficiency — tokens per correct answer (RFC 0005 §8)
 
 Measured with tiktoken `cl100k_base` on **what an agent reads**: Rueca's
