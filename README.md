@@ -91,7 +91,9 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/DevArKaDiA/rueca/releases/download/v0.1.0-alpha.2/rueca-installer.sh | sh
 ```
 
-With Cargo (Rust 1.90+):
+With Cargo (Rust 1.90+; the default `embeddings` feature builds llama.cpp
+from source and needs CMake, a C/C++ compiler and libclang —
+`--no-default-features --features service` builds without it, lexical only):
 
 ```sh
 cargo install rueca@0.1.0-alpha.2 --locked
@@ -208,6 +210,21 @@ script:
 ```sh
 RUECA=$(command -v rueca) scripts/demo-tokio-rs.sh
 ```
+
+### Embedding models (preview)
+
+Semantic search ([RFC 0007](docs/rfcs/0007-semantic-search.md)) is being
+built in phases; this release ships its runtime, not yet used by
+`search_symbols`. It is opt-in: nothing is downloaded or embedded unless you
+run one of these commands.
+
+```sh
+rueca models list                                  # presets (Qwen3-Embedding GGUF files, sha256-pinned) and the cache
+rueca models pull                                  # the default, qwen3-0.6b-q8 (639 MB), verified, into <store>/models
+rueca embed --input in.jsonl --output out.jsonl    # {"id","text","query"} lines → {"id","vector"} lines
+```
+
+See [how it works, §10](docs/how-it-works.md#10-embeddings-rfc-0007).
 
 ## Use it from an agent
 
@@ -410,7 +427,7 @@ absolute floors and aspirational targets).
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
-| **Retrieval** | Semantic search inside `search_symbols` ([RFC 0007](docs/rfcs/0007-semantic-search.md)): embedding presets (Qwen3-Embedding 0.6B / 4B / 8B in several quantizations, CodeRankEmbed, remote APIs opt-in; default preset `qwen3-0.6b-q8`, which phase 0 may change by a stated rule), weights downloaded on first use; vectors keyed by content hash, cached in the store and reused across branches, worktrees and repositories; two stages — BM25 + vectors + graph neighbours fused by a convex combination, then an optional reranker, off by default locally and on in service mode only if it passes its gate — measured on CoIR, the S1 localization suite (`raw` and `kw`) and the organization suite (localization and impact) | 🗺️ next (design) |
+| **Retrieval** | Semantic search inside `search_symbols` ([RFC 0007](docs/rfcs/0007-semantic-search.md)): embedding presets (Qwen3-Embedding 0.6B / 4B / 8B in several quantizations, CodeRankEmbed, remote APIs opt-in; default preset `qwen3-0.6b-q8`, decided), weights downloaded only on request; vectors keyed by content hash, cached in the store and reused across branches, worktrees and repositories; two stages — BM25 + vectors + graph neighbours fused by a convex combination, then an optional reranker, off by default locally and on in service mode only if it passes its gate — measured on CoIR, the S1 localization suite (`raw` and `kw`) and the organization suite (localization and impact) | 🚧 phase 0 landed (`rueca-embed`: Qwen3-Embedding presets, weights cache, llama.cpp runtime; `rueca models`, `rueca embed`; the bench's vector arm); next: phase 1, hybrid search |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
 | **Service mode** | One container, segments in object storage, MCP over HTTP, organization-wide indexing with GPU for embeddings ([RFC 0008](docs/rfcs/0008-service-mode.md)): one image with `query` / `indexer` roles, per-repository catalogs and packs written by compare-and-swap (no lock, no database), stateless Streamable HTTP with OIDC or static tokens and deny-by-default visibility, webhooks as hints over adaptive polling, child-process isolation per ref, retention for branches and PRs | 🚧 phases 0–2 landed (`rueca-storage`: memory / file / S3-compatible stores with compare-and-swap; `rueca-service`: publish, pull, generations, garbage collection, jobs and leases, reconciler, updater; `rueca serve`: the query role — stateless MCP over HTTP, static tokens and OIDC, visibility rules, deadlines, rate limits, health and metrics — and the indexer role — git mirrors with filtered fetches, `index-worker` child processes, webhooks for GitHub / GitLab / Bitbucket, adaptive polling, pull-request lifecycle; the container image); next: phase 3 — `embed` jobs on GPU indexers and inventory discovery, after RFC 0007 lands |
 | **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | ✅ phases 1–4 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges, Cargo included; refs / branches / PRs over the organization with `--ref` and `refs = [...]`, collapse across refs; contracts: HTTP / OpenAPI / protobuf-gRPC edges across repositories, `list_contracts`) |
@@ -441,6 +458,7 @@ More languages (Kotlin, Swift, Ruby, C#, …) follow the same gate.
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
 | [`rueca-query`](crates/rueca-query) | the tools, organization scope |
 | [`rueca-mcp`](crates/rueca-mcp) | MCP server: its own protocol layer ([reference](docs/mcp-protocol.md)), stdio |
+| [`rueca-embed`](crates/rueca-embed) | embedding presets, weights cache, llama.cpp runtime |
 | [`rueca-storage`](crates/rueca-storage) | object storage behind a `Storage` trait: `memory://`, `file://`, `s3://`, `gs://`, conditional writes |
 | [`rueca-service`](crates/rueca-service) | service store: publish, pull, organization generations, garbage collection |
 | [`rueca-serve`](crates/rueca-serve) | `rueca serve`: MCP over HTTP, authentication, visibility, rate limits, health and metrics |

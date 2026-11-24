@@ -23,6 +23,7 @@ Contents:
 7. [Confidence: how to read an edge](#7-confidence-how-to-read-an-edge)
 8. [Determinism, incrementality, limits](#8-determinism-incrementality-limits)
 9. [Where the code lives](#9-where-the-code-lives)
+10. [Embeddings (RFC 0007)](#10-embeddings-rfc-0007)
 
 ---
 
@@ -1663,3 +1664,115 @@ gaps show up on real repositories.
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |
 | Tools | `rueca-query` | `src/tools.rs` |
 | MCP protocol layer, stdio / CLI | `rueca-mcp`, `rueca` | [`docs/mcp-protocol.md`](mcp-protocol.md), `RuecaServer::handle` (`src/protocol.rs`), `serve_stdio`, `src/main.rs` |
+| Embedding presets, weights cache, llama.cpp runtime; `rueca models`, `rueca embed` | `rueca-embed`, `rueca` | crate docs, `src/presets.rs`, `src/backend/llama.rs`; `src/models.rs`, `src/embed.rs` |
+
+## 10. Embeddings (RFC 0007)
+
+Semantic search ([RFC 0007](rfcs/0007-semantic-search.md)) is being built
+in phases. Phase 0 adds the runtime and a batch command; nothing in
+`search_symbols` uses vectors yet. It is opt-in: no command downloads
+weights or embeds anything except `rueca models pull` and `rueca embed`.
+
+**Crate.** `rueca-embed` owns presets, weights and the runtime behind one
+trait, `Embedder` (`embed` of a batch of documents and queries into
+L2-normalized vectors, `model_key`, `dims`, `meta`, `token_count`).
+`hashing::HashingEmbedder` is a deterministic bag-of-words embedder for
+tests (no weights, keys from a fake model hash, optional query synonyms).
+The runtime is llama.cpp through `llama-cpp-2` (pinned exactly), behind the
+`embeddings` feature, on by default in `rueca-embed` and `rueca`: it
+builds llama.cpp from source (CMake, a C/C++ compiler, libclang for the
+bindings), uses Metal on Apple silicon, and `--no-default-features` builds
+a lexical-only binary. `cuda` is an opt-in feature for service builds.
+
+**Presets.** A manifest compiled into the binary (`rueca models list`), the
+Qwen3-Embedding family (Apache-2.0, official GGUF files):
+
+| Preset | File | Width (Matryoshka) | Size |
+|---|---|---|---|
+| `qwen3-0.6b-q8` | Qwen3-Embedding-0.6B, official `Q8_0` | 1024 (32–1024) | 639 MB — **default** ([decisions](decisions.md)) |
+| `qwen3-0.6b-f16` | same, official `f16` | 1024 (32–1024) | 1,198 MB — reference for rank overlap |
+| `qwen3-4b-q4`, `qwen3-4b-q8` | Qwen3-Embedding-4B, official `Q4_K_M` / `Q8_0` | 2560 | 2,497 / 4,280 MB — GPU |
+| `qwen3-8b-q4`, `qwen3-8b-q8` | Qwen3-Embedding-8B, official `Q4_K_M` / `Q8_0` | 4096 | 4,677 / 8,047 MB — GPU, service mode |
+
+Each preset pins the file's URL at an upstream revision, its sha256 and
+size, the quantization, the width with its Matryoshka range, the context
+(32,768 tokens), the pooling (last token) and the query format. Queries
+are `Instruct: {instruction}\nQuery:{query}` with the issue-shaped
+instruction ("Given a GitHub issue, retrieve the source code functions that
+must change to fix it", chosen by the phase 0 sweep; `--instruction`
+overrides it); documents get no prefix. Another model is one more entry in
+`src/presets.rs`.
+
+**Weights cache.** Never in the binary:
+
+```text
+<models>/<preset>/<file>          the GGUF file
+<models>/<preset>/<file>.sha256   its verified sha256
+```
+
+`<models>` is `$RUECA_MODEL_DIR` when set, else `<store>/models`
+(`~/.cache/rueca/models` by default). `rueca models pull [PRESET]`
+downloads to a temporary file, checks size and sha256, renames it into
+place and writes the sidecar; a hand-placed file is hashed once on first
+use. A missing file is an error naming the preset, the URL,
+`rueca models pull` and `RUECA_MODEL_DIR`.
+
+**Embedding.** Inputs are tokenized with the tokenizer inside the GGUF
+file and cut to their budget, special tokens included: documents at the
+token budget (`--max-tokens`, 512 by default, RFC 0007 §5.2), queries at
+their own budget, 512 capped by the preset's context, whatever the
+documents' budget. Qwen3 ends every input with `<|endoftext|>`, which
+last-token pooling reads. Inputs are packed into batches of 512 tokens by
+default (`--batch`; every input fits one micro-batch: 512 tokens keep the
+default model near 1.0 GB of memory where 2,048 took 2.2 GB, for about 4%
+less throughput, measured in phase 0), pooled, L2-normalized and, with
+`--dims`, truncated and re-normalized. The batch order is fixed by
+content: inputs are sorted by token length, then BLAKE3 of the text, and
+results are returned in input order. Threads default to the performance
+cores (on Apple silicon the efficiency cores slow a CPU run down by half).
+
+**Identity and audit** (RFC 0007 §5.4, §9). The *embed key* is BLAKE3 of
+the model file's sha256, the pooling, the document prefix, the text
+builder version and the token budget; the *vector key* adds the text; the
+*model key* adds the output width and the vector encoding to the embed
+key. The query instruction and the query budget are in no key (no query
+vector is stored), nor are the runtime, its version, the backend or the
+CPU level: those go to the audit record that `rueca embed --info` prints
+without loading the model (`model_sha256`, `quantization`, `dims`,
+`pooling`, `token_budget`, `query_token_budget`, `runtime`,
+`runtime_version`, `backend` = `metal` | `cpu` | `cuda`, `cpu_level` =
+`neon` or the x86-64 psABI level, batch and micro-batch sizes, threads).
+
+**Configuration.** `[retrieval] preset` in `<store>/rueca.toml` names the
+preset `rueca embed` and `rueca models pull` use when none is given
+(precedence: `--preset`, `RUECA_EMBED_PRESET`, the file, `qwen3-0.6b-q8`).
+
+**Commands.**
+
+```sh
+rueca models list                     # presets, status, what the cache holds
+rueca models pull qwen3-0.6b-q8       # download and verify
+rueca models path qwen3-0.6b-q8       # where the file lives
+rueca models rm qwen3-0.6b-f16
+rueca embed --info                    # the audit record of the default preset (no model load; load_ms: null)
+rueca embed --text "where is login handled?" --query
+rueca embed --input in.jsonl --output out.jsonl          # {"id","text","query"} → {"id","vector"}
+rueca embed --input in.jsonl --output out.f32 --format f32le --dims 256   # raw rows + out.f32.ids
+rueca embed --bench --n 2000 --tokens 200 --runs 3 [--cpu]               # tokens/s and texts/s as JSON
+```
+
+`--preset` (or `RUECA_EMBED_PRESET`), `--max-tokens`, `--batch`,
+`--threads` and `--cpu` apply to every form. Output keeps input order.
+Errors print `rueca: …` on stderr and exit with status 1. The bench's
+`vector` arm calls `rueca embed` (`bench/README.md`, *Vector arm*).
+
+**Fallback runtime.** RFC 0007 §4.2 names `fastembed` (candle) as the
+fallback should the llama.cpp build break cargo-dist or the size budget.
+Phase 0 measured `fastembed` 7.7.1 with only `qwen3-text` on the same
+`Q8_0` file: it builds in pure Rust (plus Oniguruma for the tokenizer) and
+its vectors match the reference (cosine ≥ 0.999), but it needs the
+model's `tokenizer.json` beside the GGUF file, runs on the CPU at about
+0.7× llama.cpp's speed with about twice the memory, and its Metal path
+fails on Qwen3 (`no metal implementation for qk-norm-rope`). It is not in
+the tree; llama.cpp builds, links statically and adds about 11 MB to the
+release binary.

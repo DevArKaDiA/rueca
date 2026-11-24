@@ -1,5 +1,52 @@
 # Decisions log
 
+## 2026-11-24 — Embedding runtime: default model, canonical text, token budget, llama.cpp (RFC 0007 phase 0)
+
+The owner decided the embedding defaults of RFC 0007 on the phase 0
+evidence; `rueca-embed`, `rueca models` / `rueca embed` and the bench's
+`vector` arm land with them. Semantic search stays opt-in: nothing
+downloads or embeds unless the user runs `rueca models pull` or `rueca
+embed`.
+
+- **Default model: Qwen3-Embedding-0.6B `Q8_0`**, preset `qwen3-0.6b-q8`:
+  the official GGUF file pinned by revision and sha256
+  (`06507c7b…e439`, 639,150,592 bytes), 1,024 dimensions. The preset table
+  holds the Qwen3-Embedding family only (`qwen3-0.6b-q8`, `qwen3-0.6b-f16`,
+  `qwen3-4b-q4` / `-q8`, `qwen3-8b-q4` / `-q8`); another model is one more
+  entry.
+- **Canonical text: `full`** (RFC 0007 §5.2: language, label and
+  qualified name; path; signature; doc comment; body head).
+- **Token budget: 512** per document. Queries keep their own budget, 512
+  capped by the preset's context, whatever the documents' budget (not
+  keyed: no query vector is stored).
+- **Runtime: llama.cpp through `llama-cpp-2`** (pinned `=0.1.161`, RFC
+  0007 §4.2), behind the `embeddings` feature, on by default in `rueca`, so
+  release binaries carry it; it runs only when one of the commands above is
+  used. It builds llama.cpp from source (CMake, C/C++, libclang), which CI
+  does; `--no-default-features` gives a lexical-only binary.
+- **Default query instruction**: the issue-shaped one ("Given a GitHub
+  issue, retrieve the source code functions that must change to fix it"),
+  chosen by the phase 0 instruction sweep on the calibration split.
+  Documents carry no instruction, so it is in no key.
+- **Rejected by the owner:** Model2Vec / static embeddings; int4 as the
+  default; tiny encoders as the default (none passed the bar).
+
+**Evidence** (S1 calibration split, 118 instances, File Acc@5 / Function
+Acc@10, issue text `raw`): the BM25 arm scores 78.8 / 57.9; the vector and
+hybrid rows are recorded with hybrid search (RFC 0007 phase 1). **Cost**
+with the default: indexing Rueca itself (9,319 symbols) took 400 s on an M1
+Pro (Metal), about 23 symbols/s; a CLI query took about 0.25 s including
+the model load.
+
+**Not in this landing** (kept on the branches `feat/semantic-search-next`
+and `feat/semantic-static`): the CoIR runner, the SWE-bench Lite
+diagnostic, encoder and small-encoder presets, the reranker, remote
+presets, text profiles.
+
+Also: `deny.toml` lists the four shipped targets under `[graph]` (the
+platform verifier of the weights download bundles root certificates only
+on wasm32), and `url` moves to 2.5.9 for RUSTSEC-2026-0592.
+
 ## 2026-11-18 — Rust: a `use` leaf before its module; the bench after the Rust fixes
 
 hyper 0.14 writes `pub use self::to_bytes::to_bytes;` before `mod

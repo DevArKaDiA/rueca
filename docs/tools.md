@@ -789,6 +789,26 @@ rueca contracts [--org FILE|NAME | --root PATH] [--repo ID [--ref NAME]]
     page of it: the pages are merged into one envelope (snapshots listed
     once) up to --limit entries (default: all). Text by default (one line
     per entry), the envelope with --json.
+
+rueca models list | pull [PRESET] | rm PRESET | path PRESET [--store DIR] [--json]
+    Embedding weights (RFC 0007 §4.4): `list` prints the presets (status,
+    cache state, quantization, width, size); `pull` downloads a preset's
+    GGUF file (default: `[retrieval] preset` of <store>/rueca.toml, else
+    qwen3-0.6b-q8) and checks its size and sha256 — the only command that
+    downloads weights; `rm` deletes it; `path` prints where it lives. The
+    cache is $RUECA_MODEL_DIR, else <store>/models.
+
+rueca embed [--preset P] [--dims N] [--max-tokens N] [--batch N] [--cpu] [--threads N]
+            [--instruction TEXT] [--input FILE|-] [--output FILE|-] [--format jsonl|f32le]
+            [--info | --bench | --text TEXT [--query]]
+    Embed JSON lines {"id", "text", "query"} into {"id", "vector"} lines
+    (or, with --format f32le, raw little-endian f32 rows plus FILE.ids), in
+    input order, with weights already pulled (a missing file is an error
+    naming `rueca models pull`). Documents are cut at --max-tokens (512),
+    queries at 512 capped by the preset's context. --info prints the model
+    record (keys, sha256, dims, budgets, runtime, backend) without loading
+    the model; --bench prints throughput. Needs the `embeddings` feature
+    (on by default).
 ```
 
 **Organization file** (`rueca-org.toml`, RFC 0006 §7):

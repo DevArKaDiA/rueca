@@ -1,6 +1,9 @@
 # RFC 0007 — Semantic search
 
-- Status: Draft
+- Status: Draft; phase 0's runtime landed (`rueca-embed`, `rueca models`,
+  `rueca embed`, the bench's vector arm) with the owner's defaults:
+  `qwen3-0.6b-q8`, canonical text `full`, token budget 512, llama.cpp
+  (`docs/decisions.md`, 2026-11-24)
 - Created: 2026-11-16
 - Depends on: RFC 0001 (§8 storage, §11 query engine), RFC 0004 (metrics,
   calibration split), RFC 0005 (envelope), RFC 0006 (org index, routing)
@@ -400,7 +403,8 @@ coding, retrieval code or passage that can solve user's question",
 [task prompts](https://media.githubusercontent.com/media/QwenLM/Qwen3-Embedding/main/evaluation/task_prompts.json))
 and an issue instruction ("Given a GitHub issue or a question about a code
 base, retrieve the functions, classes or sections that answer it or must
-change"). The dense arm cuts the query to the token budget; BM25 keeps it
+change"). The dense arm cuts the query to its own token budget (512 capped by
+the model's context, whatever the documents' budget); BM25 keeps it
 whole.
 
 ### 5.4 Identity: content hash
