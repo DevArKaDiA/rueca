@@ -211,20 +211,46 @@ script:
 RUECA=$(command -v rueca) scripts/demo-tokio-rs.sh
 ```
 
-### Embedding models (preview)
+### Semantic search (opt-in)
 
-Semantic search ([RFC 0007](docs/rfcs/0007-semantic-search.md)) is being
-built in phases; this release ships its runtime, not yet used by
-`search_symbols`. It is opt-in: nothing is downloaded or embedded unless you
-run one of these commands.
+`search_symbols` can fuse BM25 with embedding similarity
+([RFC 0007](docs/rfcs/0007-semantic-search.md)), so a question in plain
+words — `where is the configuration file parsed` — finds code that does not
+use those words. It is **off unless you turn it on**; without it nothing is
+downloaded or embedded and every answer is lexical, as before. One line
+enables it:
 
 ```sh
-rueca models list                                  # presets (Qwen3-Embedding GGUF files, sha256-pinned) and the cache
-rueca models pull                                  # the default, qwen3-0.6b-q8 (639 MB), verified, into <store>/models
-rueca embed --input in.jsonl --output out.jsonl    # {"id","text","query"} lines → {"id","vector"} lines
+rueca models pull                 # once: the default model, Qwen3-Embedding-0.6B Q8_0 (639 MB), sha256-verified
+rueca index --embed               # or: RUECA_EMBED=1 rueca index
 ```
 
-See [how it works, §10](docs/how-it-works.md#10-embeddings-rfc-0007).
+Precedence is argument > environment > `[retrieval]` in
+`<store>/rueca.toml`: `--no-embed` overrides `RUECA_EMBED=1`; `RUECA_EMBED`
+= `0`, empty, `false` or `off` leaves it off; `RUECA_EMBED=<preset>` or
+`--embed=<preset>` picks another preset; the file chooses the preset and
+fusion parameters but never turns embedding on by itself. Missing weights
+are an error naming `rueca models pull` (indexing never downloads).
+Queries need nothing: a snapshot indexed with vectors is searched in
+`hybrid` mode automatically, falls back to lexical (and says so in the
+answer's `retrieval`) when its model cannot load, and `mode` (`lexical`,
+`hybrid`, `semantic`) picks one explicitly. Vectors are cached in the store
+by content, so a re-index, another branch or another repository embeds only
+new text.
+
+**What it costs.** Indexing Rueca itself (9,319 symbols) took 400 s on an M1
+Pro with Metal, about 23 symbols/s, once; a CLI query takes about 0.25 s
+including the model load (the MCP server loads it once).
+
+**When it helps.** On the S1 calibration split (118 instances, File Acc@5 /
+Function Acc@10), natural-language questions (the issue text) gain: hybrid
+83.1 / 70.1 against BM25 78.8 / 57.9 (Function +12.1, 95% interval +2.8 …
++21.5). Keyword queries do not: hybrid 73.7 / 56.1 against BM25 72.9 / 57.9.
+Details in [how it works, §10](docs/how-it-works.md#10-embeddings-rfc-0007)
+and [the decisions log](docs/decisions.md).
+
+`rueca models list | pull | path | rm` manage the weights, and `rueca embed`
+embeds JSON lines in batch (the bench's vector arm).
 
 ## Use it from an agent
 
@@ -427,7 +453,7 @@ absolute floors and aspirational targets).
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
-| **Retrieval** | Semantic search inside `search_symbols` ([RFC 0007](docs/rfcs/0007-semantic-search.md)): embedding presets (Qwen3-Embedding 0.6B / 4B / 8B in several quantizations, CodeRankEmbed, remote APIs opt-in; default preset `qwen3-0.6b-q8`, decided), weights downloaded only on request; vectors keyed by content hash, cached in the store and reused across branches, worktrees and repositories; two stages — BM25 + vectors + graph neighbours fused by a convex combination, then an optional reranker, off by default locally and on in service mode only if it passes its gate — measured on CoIR, the S1 localization suite (`raw` and `kw`) and the organization suite (localization and impact) | 🚧 phase 0 landed (`rueca-embed`: Qwen3-Embedding presets, weights cache, llama.cpp runtime; `rueca models`, `rueca embed`; the bench's vector arm); next: phase 1, hybrid search |
+| **Retrieval** | Semantic search inside `search_symbols` ([RFC 0007](docs/rfcs/0007-semantic-search.md)): Qwen3-Embedding presets (default `qwen3-0.6b-q8`), weights downloaded only on request; vectors keyed by content hash, cached in the store and reused across branches, refs, worktrees and repositories; BM25 and an exhaustive int8 vector scan fused by a convex combination (min-max, α 0.5, N 100); opt-in locally | 🚧 phases 0–1 landed (`rueca-embed`, `rueca models`, `rueca embed`, `rueca index --embed` / `RUECA_EMBED`, `search_symbols` `mode` and `retrieval`, the bench's vector and hybrid arms); next: graph expansion, centrality prior and reranker (phase 2), organization scope and service mode (phase 3) |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
 | **Service mode** | One container, segments in object storage, MCP over HTTP, organization-wide indexing with GPU for embeddings ([RFC 0008](docs/rfcs/0008-service-mode.md)): one image with `query` / `indexer` roles, per-repository catalogs and packs written by compare-and-swap (no lock, no database), stateless Streamable HTTP with OIDC or static tokens and deny-by-default visibility, webhooks as hints over adaptive polling, child-process isolation per ref, retention for branches and PRs | 🚧 phases 0–2 landed (`rueca-storage`: memory / file / S3-compatible stores with compare-and-swap; `rueca-service`: publish, pull, generations, garbage collection, jobs and leases, reconciler, updater; `rueca serve`: the query role — stateless MCP over HTTP, static tokens and OIDC, visibility rules, deadlines, rate limits, health and metrics — and the indexer role — git mirrors with filtered fetches, `index-worker` child processes, webhooks for GitHub / GitLab / Bitbucket, adaptive polling, pull-request lifecycle; the container image); next: phase 3 — `embed` jobs on GPU indexers and inventory discovery, after RFC 0007 lands |
 | **Organization graph** | Per-repository graphs stay the unit; one organization graph on top with a single symbol index, cross-repository edges (packages, then contracts) and scoped queries; local `--org` first ([RFC 0006](docs/rfcs/0006-org-graph.md)) | ✅ phases 1–4 landed (organization symbol index, scoped queries, local `--org`, repository routing, cross-repository package edges, Cargo included; refs / branches / PRs over the organization with `--ref` and `refs = [...]`, collapse across refs; contracts: HTTP / OpenAPI / protobuf-gRPC edges across repositories, `list_contracts`) |

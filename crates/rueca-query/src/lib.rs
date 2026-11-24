@@ -65,6 +65,11 @@
 //! repository has is an error; a `pr/<n>` must then name one repository:
 //! pull request numbers are per repository).
 //!
+//! `search_symbols` takes `mode` (RFC 0007): over snapshots indexed with
+//! vectors it fuses BM25 with embedding similarity by default (`hybrid`),
+//! or ranks by the embedding alone (`semantic`); the envelope's `retrieval`
+//! says which ranking a call got ([`FusionParams`], `hybrid.rs`).
+//!
 //! With several snapshots, `search_symbols` returns **one ranking** (RFC 0006
 //! §6, no rank fusion): every snapshot's symbol index is scored with BM25
 //! statistics summed over all selected snapshots

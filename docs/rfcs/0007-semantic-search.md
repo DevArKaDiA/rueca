@@ -1,9 +1,11 @@
 # RFC 0007 — Semantic search
 
-- Status: Draft; phase 0's runtime landed (`rueca-embed`, `rueca models`,
-  `rueca embed`, the bench's vector arm) with the owner's defaults:
-  `qwen3-0.6b-q8`, canonical text `full`, token budget 512, llama.cpp
-  (`docs/decisions.md`, 2026-11-24)
+- Status: **phases 0–1 implemented**, opt-in. Phase 0: the runtime
+  (`rueca-embed`, `rueca models`, `rueca embed`, the bench's vector arm).
+  Phase 1: hybrid search (`rueca index --embed` / `RUECA_EMBED`, the store
+  vector cache, `vectors.*` components, `search_symbols` `mode` and
+  `retrieval`, the bench's hybrid arm). The owner's decisions of
+  2026-11-24 (§0) set the defaults; phases 2–3 are follow-ups (§12)
 - Created: 2026-11-16
 - Depends on: RFC 0001 (§8 storage, §11 query engine), RFC 0004 (metrics,
   calibration split), RFC 0005 (envelope), RFC 0006 (org index, routing)
@@ -16,6 +18,42 @@
   versions and prices were checked that day (§17). *(estimate)* marks
   arithmetic on published figures, with its inputs; *(unverified)* marks a
   claim no primary source confirmed.
+
+## 0. The owner's decisions (2026-11-24)
+
+Recorded in `docs/decisions.md` (2026-11-24); they override what the
+sections below proposed where they differ.
+
+- **Model** `qwen3-0.6b-q8` (Qwen3-Embedding-0.6B `Q8_0`), canonical text
+  `full`, token budget 512.
+- **Fusion**: convex combination, **min-max** normalization over each
+  list's top N, **α = 0.5**, **N = 100** (§7.2). These are the code's
+  defaults.
+- **Search**: the exhaustive int8 scan; HNSW deferred (§6.4).
+- **Opt-in locally**: semantic search is off unless enabled by argument
+  (`rueca index --embed[=PRESET]`) or environment (`RUECA_EMBED=1` /
+  `RUECA_EMBED=<preset>`; `0`, empty, `false`, `off` disable).
+  Precedence: argument > environment > configuration; `[retrieval]` alone
+  never enables embedding (§8.3). An enabled run without weights is an
+  error naming `rueca models pull`; indexing and queries never download.
+- **Queries**: hybrid automatically when the snapshot has vectors and the
+  model loads, else lexical, saying so in the envelope; `mode` picks
+  `lexical`, `hybrid` or `semantic`; the envelope names the mode used and
+  the model key; `rueca status` names the preset (§7.7, §8).
+- **Release binaries** include the runtime; it activates only when enabled.
+  Service mode turns it on later (phase 3).
+- **Rejected**: Model2Vec / static embeddings, int4 as the default, tiny
+  encoders as the default (none passed the bar).
+
+**Evidence** (S1 calibration split, 118 instances, File Acc@5 / Function
+Acc@10, paired against BM25). Issue text (`raw`): BM25 78.8 / 57.9, Rueca
+lexical 73.7 / 61.7, hybrid with `qwen3-0.6b-q8` at α 0.5 **83.1 / 70.1**
+(Function +12.1, 95% interval +2.8 … +21.5; File +4.2, −2.5 … +11.0),
+hybrid with granite-47m 83.1 / 64.5. Keywords (`kw`): BM25 72.9 / 57.9,
+lexical 75.4 / 53.3, hybrid 73.7 / 56.1. Semantic search helps
+natural-language questions, not keyword ones. Cost: indexing Rueca itself
+(9,319 symbols) took 400 s on an M1 Pro (Metal), about 23 symbols/s; a CLI
+query about 0.25 s including the model load.
 
 ## 1. Summary
 
@@ -318,10 +356,12 @@ breaks cargo-dist or the size budget.
   reference ([dotLLM #1398](https://github.com/jamesburton/dotLLM/issues/1398)).
   Rueca's conversions must keep these keys.
 - **Commands:** `rueca models pull [PRESET] | list | rm PRESET`.
-  **Offline:** an explicit request (`--embed`, `mode: "semantic"`) whose
-  weights are absent and unreachable is an error naming the preset, the
-  URL, `rueca models pull` and `RUECA_MODEL_DIR`; an implicit default falls
-  back to lexical search with a notice in `rueca index` and `rueca status`.
+  **Offline:** an explicit request (`--embed`, `RUECA_EMBED`, `mode:
+  "semantic"`) whose weights are absent is an error naming the preset, the
+  URL, `rueca models pull` and `RUECA_MODEL_DIR`; a query without `mode`
+  falls back to lexical search with a warning in its envelope. **As
+  implemented** (§0): only `rueca models pull` downloads; `rueca index` and
+  queries never do.
 - **Rueca-hosted conversions.** Qwen ships no 0.6B int4 file and no
   Qwen3-Reranker GGUF, and most community reranker files return scores
   near 4.5e-23 (llama.cpp issue #16407,
@@ -524,19 +564,29 @@ default `d` is the smallest of 1024 / 512 / 256 within 1.0 point of 1024
 on the CoIR cheap-profile mean and within one calibration instance on S1.
 Changing `d` re-quantizes from the cache; nothing is re-embedded.
 
-### 6.4 Search: exhaustive scan; ANN at organization scale
+### 6.4 Search: exhaustive scan; HNSW deferred (decided 2026-11-24)
 
-Default: an exhaustive SIMD int8 scan of every selected segment, parallel
-across segments: about 1–3 ms per core per 100k vectors of 1024
-dimensions, 10–30 ms per core per 1M *(estimate: 32–64 int8
-multiply-adds per cycle with AVX2 / NEON dot products)*. Per-segment top-N
-lists merge by (score, segment, node), a total order, so paging stays
-exact as in `top_hits`. ANN ([`usearch`](https://crates.io/crates/usearch)
-2.26.6, Apache-2.0, mmap view) is an optional per-segment `vectors.hnsw`,
-built for large segments and used only when the query scope exceeds
-**2M vectors** (proposed; about 2 GB of int8 per query at 1024
-dimensions), its results rescored exactly; the threshold is measured in
-phase 3.
+**Owner's decision:** an exhaustive int8 scan of every selected segment
+(an f32 query against int8 rows with a per-row scale), parallel across
+segments; per-segment top-N lists merge by (score, segment, node), a total
+order, so paging stays exact as in `top_hits`. No ANN index in phases 1–2.
+
+**Evidence** (a benchmark outside the repository: synthetic 1,024-dimension
+clustered vectors, 200 queries, top 10, M1 Pro, recall against exact f32):
+
+| Vectors | int8 scan | `usearch` 2.26 HNSW, f16 | `hnsw_rs` 0.3 |
+|---|---|---|---|
+| 10k | 0.26 ms, recall 0.99 | 0.15 ms | — |
+| 100k | 1.3 ms, recall 0.99 | 0.36 ms | built in 137 s |
+| 1M | 8.3 ms, recall 0.99 | 0.6–0.8 ms, recall 0.61–0.81, built in 16 min | — |
+
+The scan is exact, has no build step and suits immutable segments, and
+embedding the query (about 40 ms) dominates the latency anyway. HNSW
+(`usearch` f16 with exact rescoring, an optional per-segment
+`vectors.hnsw`) is reserved for organizations of several million vectors
+in service mode (phase 3); `usearch` i8 loses too much recall and
+`hnsw_rs` builds too slowly. The data are synthetic with tight clusters, a
+hard case for HNSW; real embeddings may recall better at 1M.
 
 ### 6.5 Open cost
 
@@ -582,7 +632,12 @@ s(c) = (α·b̂(c) + (1 − α)·d̂(c)) · prior(c) · route(repo(c))
   reference row in the bench.
 - **Normalization** by the theoretical minimum (BM25 0, cosine −1), the
   most stable variant in the same paper, which suggests α of 0.6–0.8 with
-  it; per-query min-max is a sweep variant.
+  it; per-query min-max is a sweep variant. **Decided (2026-11-24, §0):
+  min-max** over each list's top N, **α = 0.5**, **N = 100**: cosines of
+  unrelated code sit far above −1, so the theoretical form squeezes the
+  dense signal into a narrow band near 1; it stays a variant
+  (`normalization = "theoretical"`). With min-max, `b̂` and `d̂` are
+  `(x − min) / (max − min)` over each list's top N (0 outside it).
 - Every candidate's cosine is exact (all vectors are at hand); BM25 is 0
   outside its top N. Priors and the routing prior multiply as today; ties
   break by (view, node). `semantic` mode is α = 0; `lexical` mode is
@@ -737,6 +792,12 @@ binaries reject `mode`; the bench drops it for them.
 snapshots (`s`) served without vectors. Agents learn what ranking they
 got; the bench labels its runs with it.
 
+**As implemented (phase 1):** `retrieval` is `{"mode", "model", "alpha",
+"lexical", "warnings"}`, empty fields omitted: `lexical` lists repository
+ids (not snapshot indexes), `warnings` why a call fell back to lexical,
+`rerank` waits for phase 2. A lexical answer carries `{"mode":
+"lexical"}` and is otherwise unchanged.
+
 ### 8.3 Commands and configuration
 
 - `rueca index [--embed[=PRESET] | --no-embed]`; `rueca index --org`
@@ -752,9 +813,18 @@ got; the bench labels its runs with it.
   knobs (α, N, K, expansion, β) as `RUECA_ORG_ROUTE` is for routing.
   Precedence: argument, environment, organization file, store file,
   built-in default.
-- **Embedding by default** once phase 1's acceptance holds (opt-in
-  before): `rueca index` downloads the weights on first use with a notice;
-  `--no-embed` or `preset = "off"` opts out.
+- ~~**Embedding by default** once phase 1's acceptance holds~~ —
+  **superseded by the owner's decision (2026-11-24, §0): opt-in locally.**
+  `rueca index` embeds only with `--embed[=PRESET]` or `RUECA_EMBED=1` /
+  `RUECA_EMBED=<preset>` (`0`, empty, `false`, `off`, `no`: disabled);
+  `--no-embed` overrides the environment. Precedence: argument >
+  environment > configuration; `[retrieval]` chooses `preset`, `dims`,
+  `alpha`, `fusion_n` and `normalization` but never enables embedding by
+  itself. Missing weights are an error naming `rueca models pull`; nothing
+  downloads on first use. `RUECA_FUSION_ALPHA` / `_N` / `_NORM` are the
+  experiment knobs (instead of one `RUECA_SEARCH` string). As implemented,
+  `rueca index --ref` embeds too; `rueca index --org` and the MCP server's
+  auto-index stay lexical until phase 3.
 - **Service mode** embeds on a GPU through the CUDA build or an external
   TEI / llama-server (`remote:openai-compatible`). **Recorded
   (provisional, 2026-11-17):** its GPU defaults are the `qwen3-4b-q4`
@@ -929,12 +999,12 @@ below the better of BM25 and the vector arm.
 
 ## 12. Phasing
 
-| Phase | Delivers | Acceptance |
-|---|---|---|
-| 0. Measurement | Calibration split grown (§7.6); runtime bake-off (§4.2); minimal `rueca-embed` and `rueca embed`; `vector` arm; CoIR cheap runner; sweeps of model (§3.4), quantization (§3.3), dimensions (§6.3), token budget (§5.2) and instruction (§5.3) | Each choice made by its rule and recorded in `docs/decisions.md` with the sweep; vector-arm rows on S1 (`kw`, `raw`) and the Lite diagnostic; CoIR sanity row met; binary size within budget |
-| 1. Hybrid search | `rueca-embed`, weights and `rueca models`; store vector cache; `vectors.*` components; lexical-first publication; exhaustive scan, f16 rescoring; convex fusion in `search_symbols` tuned on calibration; `mode`, envelope, configuration | §11.2 File Acc@5 rows (`raw` gate, `kw` and per-language floors); latency rows; re-index test; backend overlap row; Function Acc@10 reported |
-| 2. Graph and reranker | Expansion and centrality prior, each kept only if the sweep keeps it; reranker stage and presets, default per §7.5; `raw` results published | §11.2 Function Acc@10 gate; reranker gate; organization impact hit@10 floor; reranker latency reported |
-| 3. Organization and service | One model key per organization; centroid routing; ANN threshold measured at organization scale; remote presets; service-mode GPU defaults | Organization File Acc@5 ≥ 0.85× (gated); organization impact hit@10 target; incremental-update floor unchanged; ANN recall against the exact scan reported |
+| Phase | Delivers | Acceptance | Status (2026-11-24) |
+|---|---|---|---|
+| 0. Measurement | Calibration split grown (§7.6); runtime bake-off (§4.2); minimal `rueca-embed` and `rueca embed`; `vector` arm; CoIR cheap runner; sweeps of model (§3.4), quantization (§3.3), dimensions (§6.3), token budget (§5.2) and instruction (§5.3) | Each choice made by its rule and recorded in `docs/decisions.md` with the sweep; vector-arm rows on S1 (`kw`, `raw`) and the Lite diagnostic; CoIR sanity row met; binary size within budget | **Implemented**: runtime, `rueca models`, `rueca embed`, vector arm, split of 118, `compare`; defaults decided by the owner (§0). The CoIR runner and the Lite diagnostic stay on `feat/semantic-search-next` |
+| 1. Hybrid search | `rueca-embed`, weights and `rueca models`; store vector cache; `vectors.*` components; lexical-first publication; exhaustive scan, f16 rescoring; convex fusion in `search_symbols` tuned on calibration; `mode`, envelope, configuration | §11.2 File Acc@5 rows (`raw` gate, `kw` and per-language floors); latency rows; re-index test; backend overlap row; Function Acc@10 reported | **Implemented**, opt-in (§0, §8.3); the bench's `rueca-hybrid` arm, fusion sweep and §11.2 rows; calibration evidence in §0 |
+| 2. Graph and reranker | Expansion and centrality prior, each kept only if the sweep keeps it; reranker stage and presets, default per §7.5; `raw` results published | §11.2 Function Acc@10 gate; reranker gate; organization impact hit@10 floor; reranker latency reported | Follow-up: graph expansion, centrality prior and reranker on `feat/semantic-search-next` |
+| 3. Organization and service | One model key per organization; centroid routing; ANN threshold measured at organization scale; remote presets; service-mode GPU defaults | Organization File Acc@5 ≥ 0.85× (gated); organization impact hit@10 target; incremental-update floor unchanged; ANN recall against the exact scan reported | Follow-up: organization scope, centroid routing, remote presets and `rueca query --batch` on `feat/semantic-search-next`; small-encoder presets, text profiles and the units filter on `feat/semantic-static`; service mode turns embedding on (RFC 0008 phase 3); HNSW only past several million vectors (§6.4) |
 
 Follow-ups, not phases:
 
@@ -1026,6 +1096,9 @@ Follow-ups, not phases:
   answer next to localization.
 
 ## 15. Open questions — all resolved provisionally on 2026-11-17
+
+The phase 1 decisions of 2026-11-24 (fusion defaults, exhaustive scan,
+opt-in and its precedence) are the owner's, in §0.
 
 1. ~~**Default quantization:** int4, as the owner chose, or Q8, as the
    owner's rule yields on Metal and x86?~~ Decided (§3.3):

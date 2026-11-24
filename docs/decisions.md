@@ -1,5 +1,118 @@
 # Decisions log
 
+## 2026-11-24 — Hybrid search, opt-in: the owner's defaults (RFC 0007 phase 1)
+
+`rueca index --embed` (or `RUECA_EMBED=1`) embeds every callable, type and
+Markdown section into a store vector cache and the segment;
+`search_symbols` gains `mode` (`lexical` | `hybrid` | `semantic`) and the
+envelope `retrieval`. The owner decided the defaults on the phase 0 / 1
+evidence below; they are the code's defaults.
+
+**The owner's decisions:**
+
+- **Model and text**: Qwen3-Embedding-0.6B `Q8_0` (`qwen3-0.6b-q8`),
+  canonical text `full`, token budget 512 (as in the phase 0 entry below).
+- **Fusion**: a convex combination of the two scores, **min-max**
+  normalized over each list's top N, **α = 0.5** (BM25's weight), **N =
+  100** candidates per list: `s = (α·b̂ + (1 − α)·d̂) · prior · route`.
+  RFC 0007 §7.2's division by the theoretical minimum stays a sweep variant
+  (`normalization = "theoretical"`): cosines of unrelated code sit far above
+  −1, so it squeezes the dense signal into a narrow band near 1.
+- **Search: exhaustive int8 scan; HNSW deferred.** Evidence from a
+  benchmark outside the repository (synthetic 1,024-dimension clustered
+  vectors, 200 queries, top 10, M1 Pro, recall against exact f32):
+
+  | Vectors | int8 scan (Rueca) | `usearch` HNSW, f16 | `hnsw_rs` |
+  |---|---|---|---|
+  | 10k | 0.26 ms, recall 0.99 | 0.15 ms | — |
+  | 100k | 1.3 ms, recall 0.99 | 0.36 ms | build 137 s |
+  | 1M | 8.3 ms, recall 0.99 | 0.6–0.8 ms, recall 0.61–0.81, build 16 min | — |
+
+  The scan is exact, needs no build and fits immutable segments; embedding
+  the query (about 40 ms) dominates the latency anyway. HNSW waits for
+  organizations of several million vectors in service mode.
+- **Opt-in locally.** Semantic search is off unless an argument or the
+  environment enables it: `rueca index --embed[=PRESET]`, or `RUECA_EMBED=1`
+  (`true`, `on`, `yes`) / `RUECA_EMBED=<preset>`; `RUECA_EMBED` unset,
+  empty, `0`, `false`, `off` or `no` leaves it off. **Precedence: argument >
+  environment > configuration**: `--no-embed` beats `RUECA_EMBED=1`,
+  `--embed` beats `RUECA_EMBED=0`, and `[retrieval]` in `<store>/rueca.toml`
+  only chooses the preset and parameters — it never enables embedding by
+  itself (the owner's wording: "off unless enabled by argument or
+  environment variable"). The preset, once enabled: `--embed=PRESET`, then
+  `RUECA_EMBED=<preset>`, then `RUECA_EMBED_PRESET`, then `[retrieval]
+  preset`, then `qwen3-0.6b-q8`. Without enablement nothing is downloaded
+  or embedded and every answer is today's lexical one (plus `retrieval:
+  {"mode": "lexical"}` in the envelope).
+- **Missing weights**: an enabled `rueca index` without the weights is an
+  error naming `rueca models pull`, raised before anything is published;
+  indexing never downloads (only `rueca models pull` does), so enabling it
+  cannot start a 639 MB download by surprise.
+- **Queries**: hybrid automatically when a selected snapshot has vectors and
+  its model loads, else lexical, with the reason in `retrieval.warnings`;
+  an explicit `hybrid` / `semantic` that cannot be served is an error
+  naming `rueca index --embed` or `rueca models pull`. Query time never
+  downloads weights. `retrieval` names the mode used and the model (preset
+  and model-key prefix); `rueca status` names the preset that embedded each
+  snapshot (`VECTORS`).
+- **Release binaries** carry the runtime (feature `embeddings`); it runs
+  only when enabled. Service mode turns it on later: `rueca serve`'s
+  indexers, `rueca index --org` and the MCP server's auto-index stay
+  lexical for now.
+- **Rejected**: Model2Vec / static embeddings, int4 as the default, tiny
+  encoders as the default (none passed the bar).
+
+**Evidence** (S1 calibration split, 118 instances, File Acc@5 / Function
+Acc@10, paired against BM25):
+
+| Query | BM25 | Rueca lexical | Hybrid, Qwen3-0.6B, α 0.5 | Hybrid, granite-47m |
+|---|---|---|---|---|
+| Issue text (`raw`) | 78.8 / 57.9 | 73.7 / 61.7 | **83.1 / 70.1** | 83.1 / 64.5 |
+| Keywords (`kw`) | 72.9 / 57.9 | 75.4 / 53.3 | 73.7 / 56.1 | — |
+
+Hybrid − BM25 on `raw`: Function Acc@10 +12.1 (95% interval +2.8 … +21.5),
+File Acc@5 +4.2 (−2.5 … +11.0). Semantic search helps natural-language
+questions, not keyword ones. **Cost**: indexing Rueca itself (9,319
+symbols) took 400 s on an M1 Pro (Metal), about 23 symbols/s; a CLI query
+about 0.25 s including the model load.
+
+**How it is built** (choices and deviations from the RFC):
+
+- **Publication**: lexical first, then a copy of the bundle under a new id
+  with the `vectors.*` components, swapped in the catalog (RFC §5.6); one
+  publication when every vector is cached. Appending to the published file
+  was rejected: segments are immutable and mapped by readers.
+- **Cache layout**: `<store>/vectors/<embed key>/` (the embed key, not the
+  model key: entries are full-width f16, shared by every width and
+  encoding), 256 shards of append-only `.keys` / `.f16` pairs with a
+  per-shard `flock`, rows written before keys, lock-free readers, repair by
+  truncation — instead of RFC §5.5's pack files plus an index with one
+  writer per store, so concurrent indexers of one store (RFC 0008) share
+  it. Reused across branches, refs, worktrees and repositories; no
+  collection of unreferenced entries yet.
+- **Lazy checksums**: `vectors.meta` and `vectors.nodes` at open, `keys`,
+  `scale`, `data` on the first dense use in a process (RFC §6.5).
+- **Snapshots without vectors** in a hybrid answer are scored `b̂ · prior ·
+  route` (RFC §10) and named in `retrieval.lexical` by repository id;
+  `semantic` leaves them out with a warning. A failed model load is
+  remembered for the process (the MCP server needs a restart after
+  `rueca models pull`).
+- **Text builder**: version 1, the qualified name is Rueca's global one,
+  the doc the extracted docstring when there is one, the cut `max_tokens ×
+  4` characters before the model's token cut.
+- **Tests** inject the weight-free `HashingEmbedder` through
+  `index_worktree_with_embedder` / `index_ref_with_embedder` and
+  `Engine::with_query_embedder`; nothing in the binary selects a test
+  embedder. The real-weights test runs only with `RUECA_EMBED_TESTS=1`.
+- **`rueca query --batch`** is not in this landing: the bench's hybrid arm
+  runs one `rueca query` per call (the model load is part of the 0.25 s).
+
+**Not in phase 1** (follow-ups, on branches): graph expansion, the
+centrality prior and the reranker (phase 2), organization scope, centroid
+routing, remote presets and `rueca query --batch` (phase 3) —
+`feat/semantic-search-next`; small-encoder presets, text profiles and the
+units filter — `feat/semantic-static`.
+
 ## 2026-11-24 — Embedding runtime: default model, canonical text, token budget, llama.cpp (RFC 0007 phase 0)
 
 The owner decided the embedding defaults of RFC 0007 on the phase 0

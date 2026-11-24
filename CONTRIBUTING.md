@@ -39,10 +39,13 @@ cargo deny check            # optional locally; runs in CI (cargo install cargo-
 
 Some tests are `#[ignore]` because they clone real repositories; each
 crate's docs explain the environment variable that enables them. No test
-downloads model weights: the embedding tests use the hashing test embedder
-or no model at all, and the ones against real weights
-(`crates/rueca-embed/tests/llama.rs`) run only with `RUECA_EMBED_TESTS=1`
-after `rueca models pull qwen3-0.6b-q8`.
+downloads model weights: the embedding tests use the deterministic hashing
+test embedder (`rueca_embed::hashing::HashingEmbedder`, injected through
+`rueca_index::index_worktree_with_embedder` and
+`rueca_query::Engine::with_query_embedder`) or no model at all, and the
+ones against real weights (`crates/rueca-embed/tests/llama.rs`, and hybrid
+search end to end in `crates/rueca-cli/tests/hybrid.rs`) run only with
+`RUECA_EMBED_TESTS=1` after `rueca models pull qwen3-0.6b-q8`.
 
 Try a change end to end:
 

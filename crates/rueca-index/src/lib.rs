@@ -42,6 +42,11 @@
 //!    from disk and verified against the blob SHA when more than 512 MiB of
 //!    content was read), and **register** it in the store catalog under the
 //!    canonical root.
+//! 6. **Vectors** ([`IndexOptions::embed`], RFC 0007 §5.6, [`vectors`]):
+//!    canonical texts and vector keys, a store vector cache lookup, then one
+//!    publication with the `vectors.*` components when everything is cached,
+//!    else the lexical segment first and, once the misses are embedded, a
+//!    copy with vectors under a new id that replaces it in the catalog.
 //!
 //! Logging: one `info` summary per run and `debug` timings per phase
 //! (`tracing`). [`IndexReport`] carries the same numbers.
