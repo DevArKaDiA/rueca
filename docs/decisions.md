@@ -1,5 +1,26 @@
 # Decisions log
 
+## 2026-11-24 — Code mode: both languages ship behind one `Sandbox` for the experiment (RFC 0009)
+
+RFC 0009's experimental `execute` tool runs scripts in **both** JavaScript
+(QuickJS via `rquickjs`) and Starlark (`starlark`) during the whole
+experiment, behind one `Sandbox` trait in the new crate `rueca-codemode`
+(cargo features `js` and `starlark`, both default-on while it runs).
+`execute` and `describe_api` take `language` (`"js"` by default). The
+language is not picked up front: phase 3 writes a per-language verdict
+from the multi-step suite and a fluency probe, and recommends keeping
+both, one, or neither (RFC 0009 §14); making code mode on-by-default is
+the owner's decision.
+
+Phase 0 (RFC 0009 §13): both engines start and call the host well within
+the overhead budget (JS ~0.1 ms start, 2.5 µs per call; Starlark ~1.5 µs
+start, 0.4 µs per call); JavaScript's time and memory limits are
+enforceable in-process; Starlark's memory limit is not (a one-line
+script can abort the process), and `starlark` 0.14.3 fails `cargo deny`
+on three "unmaintained" advisories (`derivative`, `paste`, `fxhash`).
+Both must be resolved before Starlark can reach `main`; the options are
+listed in RFC 0009 §13.
+
 ## 2026-11-24 — Hybrid search, opt-in: the owner's defaults (RFC 0007 phase 1)
 
 `rueca index --embed` (or `RUECA_EMBED=1`) embeds every callable, type and

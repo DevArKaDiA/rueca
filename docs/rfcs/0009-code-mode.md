@@ -339,7 +339,73 @@ not an agentic evaluation.
 
 ## 13. Phase 0 results
 
-*To be filled in by the phase 0 spike.*
+Crate `rueca-codemode` (features `js`, `starlark`, both default-on):
+`Sandbox::run(script, &mut dyn Host, &Limits) -> Result<Outcome,
+ScriptError>`, two tools bound through an in-memory host. Measured
+2026-11-24 on an Apple M1 Pro (10 cores, 32 GB), macOS, Rust stable
+1.99, release profile of the workspace (`lto = "thin"`,
+`codegen-units = 4`, `strip`). Versions: `rquickjs` 0.14.0 (QuickJS-ng,
+built from C by `rquickjs-sys` 0.14.0), `starlark` 0.14.3. Timings come
+from `cargo run --release -p rueca-codemode --example phase0`; each limit
+probe runs in its own child process (peak RSS from `getrusage`), under
+the default limits (2 s, 64 MiB).
+
+| Row | JavaScript (QuickJS) | Starlark | Method |
+|---|---|---|---|
+| Cold start (fresh interpreter + `return 1` / `result = 1`) | p50 77–114 µs, p95 87–133 µs | p50 1.5 µs, p95 1.6–1.8 µs | 500 runs, three sessions; the sandbox (prelude / globals) is built once per server: 0.5–1.2 µs (JS), 3.7 µs (Starlark) |
+| Per host call | 2.4–2.5 µs | 0.43–0.45 µs | script making 1,000 calls to a no-op host returning a 4-field object, minus the same loop without calls; median of 30 |
+| Endless loop (`while (true) {}` / `for x in range(2147483647)`) | Timeout after 2000.1 ms | Timeout after 2001.5 ms | deadline 2 s; JS polls every ~10k operations, Starlark every 1,000 ticks |
+| Long single built-in | Regex backtracking `/(a+)+b/` stops at 2000.1 ms (libregexp polls). `copyWithin` on a 2^40-length array-like **does not poll**: ran > 10 min, killed. Fixed by a prelude guard on every `Array.prototype` method (length ≤ 2^22); the worst case under the guard, `copyWithin` on a sparse 2^22 array, takes 127 ms | `"x" * (1 << 30)`: 3076 ms against the 2 s deadline (no check inside the operation) | probes `js-regex-backtracking`, `js-native-*`, `star-one-op-1gib` |
+| Memory, gradual growth | `out of memory` (`ErrorKind::Memory`) after 140 ms, peak RSS 72 MiB | `Heap memory limit … exceeded` after 46 ms, peak RSS 65 MiB | push 10 KB strings into a list until stopped, 64 MiB limit |
+| Memory, one large allocation | 512 MiB `repeat`: refused on allocation, `Memory` after 0.3 ms, RSS 3 MiB | 1 GiB repeat: allocated in full, **peak RSS 3 GiB**, then stopped (by the deadline here; `Memory` when it finishes first) | probes `js-one-op-512mib`, `star-one-op-1gib` |
+| Memory, impossible allocation | refused (QuickJS checks the limit before `malloc`) | `("x" * 131072) * 2147483647` asks for 256 TiB: **the process aborts (SIGABRT)** | probe `star-one-op-256tib` |
+| Memory outside the counted heap | — (every QuickJS allocation is counted) | a dict grew to **1.2–1.5 GiB RSS** in 2 s under 64 MiB; stopped only by the deadline | probe `star-dict` |
+| Script catching the limit error | catching `out of memory` in a loop: stopped by the deadline at 2001 ms | (no exceptions in Starlark) | probe `js-catch-oom` |
+| Binary size (stripped, release) | +1.03 MB (1,053,728 B) | +5.72 MB (5,717,136 B); both: +6.72 MB | minimal binary linking the crate and running one script, against the same binary without engines (390,240 B); the `rueca` CLI was not rebuilt (its full release build with llama.cpp is too heavy for the disk budget) |
+| Dependencies | +10 crates (3 new to the workspace: `rquickjs`, `-core`, `-sys`) | +145 crates (80 new `Cargo.lock` entries, e.g. `rustyline`, `nix`, `lsp-types`, `logos`, `derive_more`) | `cargo tree -e normal,build` unique crates vs. no engine; new = added to `Cargo.lock` |
+| Clean release build | 12 s (vs. 4 s without engines) | 33 s; both: 33 s (parallel) | `nice cargo build --release` of the minimal binary, empty target dir |
+| C toolchain | yes: `cc` builds QuickJS-ng; bindings are pre-generated for the release targets (no `bindgen`/libclang) | no (pure Rust) | `rquickjs-sys` build script |
+| `cargo deny check` (repository `deny.toml`) | passes (licences MIT; no advisories) | **fails, advisories**: RUSTSEC-2024-0388 `derivative` 2.2.0 (via `starlark`, `starlark_syntax`), RUSTSEC-2024-0436 `paste` 1.0.15 (via `starlark`), RUSTSEC-2025-0057 `fxhash` 0.2.1 (via `starlark_map`), all "unmaintained"; licences, bans and sources pass | `cargo deny check` (cargo-deny 0.21.0) |
+| MSRV 1.90 | passes | passes | `cargo +1.90 check -p rueca-codemode --all-targets --locked` |
+| Determinism, no ambient capabilities | same outcome twice; no `Date`, `performance`, timers, `require`, `process`, `fetch`, `eval`, `WeakRef`; `Math.random` and the `Function` constructors throw | same outcome twice; `load` rejected at parse time; no clock or randomness in the language | `crates/rueca-codemode/tests/sandbox.rs` |
+
+What the rows mean for the experiment:
+
+- **Start-up and call overhead are not a constraint for either engine**:
+  both are far below §8's 20 ms overhead budget. Starlark is ~60× faster
+  to start (no interpreter to build; JavaScript compiles its prelude on
+  every run, which phase 1 can cache as bytecode) and ~5× cheaper per
+  call (JavaScript crosses as JSON text and through a promise).
+- **JavaScript's limits are enforceable in-process**: memory is checked
+  on every allocation and the deadline is polled in the interpreter and
+  the regex engine; the one non-polling built-in found
+  (`Array.prototype.copyWithin` and friends on huge array-likes) is closed
+  by the length guard. Residual: a built-in not probed here that loops
+  without polling or allocating, bounded by the length guard or the
+  memory limit.
+- **Starlark's memory limit cannot be enforced in-process.** A one-line
+  script can abort the `rueca mcp` process (impossible allocation), use
+  gigabytes before the first check (one large operation), or grow memory
+  the heap limit does not count (dictionaries) until the deadline. Running
+  Starlark scripts in a child process with OS limits (the RFC 0008 §7.8
+  isolation, §7.3) would contain all three, at the cost of a process per
+  script or a worker pool. Its deadline is enforceable except inside one
+  long operation (3.1 s observed for a 2 s limit).
+- **cargo-deny**: Starlark cannot be merged to `main` as is. Options:
+  (a) set `[advisories] unmaintained = "workspace"` in `deny.toml`, which
+  reports unmaintained crates only when they are direct dependencies of a
+  workspace crate (verified: all checks then pass; it is a policy change,
+  not an ignore, and applies to every future transitive crate); (b) make
+  the `starlark` feature non-default (verified: `cargo deny check` passes
+  with `default = ["js"]`, since the check uses default features), which
+  also takes Starlark out of CI's tests unless a job enables it; (c) wait
+  for upstream: `starlark-rust`'s main branch has already dropped `paste`
+  and `fxhash` but still uses `derivative`; (d) drop Starlark. No
+  advisory is ignored and no licence was added to the allow-list.
+- **Starlark ergonomics** found while writing the tests: no `**` operator,
+  `range` takes 32-bit integers, top-level `for`/`if` needed a dialect
+  option (enabled), undefined names are compile-time errors. These feed
+  phase 3's fluency probe.
 
 ## 14. Decision
 
