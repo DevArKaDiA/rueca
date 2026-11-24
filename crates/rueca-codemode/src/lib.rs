@@ -10,9 +10,11 @@
 //!   code mode's server side implements it over `rueca_query::Engine`.
 //! - Two engines ship behind cargo features so the experiment can compare
 //!   them (RFC 0009 §6): [`js::JsSandbox`] (feature `js`, QuickJS through
-//!   `rquickjs`) and [`starlark::StarlarkSandbox`] (feature `starlark`,
-//!   `starlark-rust`). Both are default-on; dropping one is removing its
-//!   feature.
+//!   `rquickjs`) and `starlark::StarlarkSandbox` (feature `starlark`,
+//!   `starlark-rust`). `js` is on by default; `starlark` is opt-in, because
+//!   `starlark` 0.14.3 depends on crates with "unmaintained" RUSTSEC
+//!   advisories that the repository's `cargo deny` policy rejects (RFC 0009
+//!   §13). Dropping a language is removing its feature.
 //! - A sandbox is built once from the API's tool names (snake_case, as in
 //!   `rueca_query::TOOL_NAMES`) and runs any number of scripts, each in a
 //!   fresh interpreter: no state survives between runs.
@@ -74,7 +76,7 @@ pub struct Limits {
     /// the Starlark heap, checked periodically; see each module).
     pub memory_bytes: usize,
     /// Native stack the JavaScript interpreter may use (Starlark bounds
-    /// recursion by frames instead, [`starlark::MAX_CALL_DEPTH`] when built
+    /// recursion by frames instead, `starlark::MAX_CALL_DEPTH` when built
     /// with the `starlark` feature).
     pub stack_bytes: usize,
     /// Host calls per script; the call over the limit fails the run.

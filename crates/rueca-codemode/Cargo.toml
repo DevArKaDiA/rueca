@@ -7,12 +7,20 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-publish = false
 
 [features]
-default = ["js", "starlark"]
+default = ["js"]
+# JavaScript through QuickJS (`rquickjs`).
 js = ["dep:rquickjs"]
+# Starlark (`starlark-rust`). Off by default: `starlark` 0.14.3 depends on
+# crates with "unmaintained" RUSTSEC advisories (`derivative`, `paste`,
+# `fxhash`) that `cargo deny` rejects, and no advisory is ignored (RFC 0009
+# §13).
 starlark = ["dep:starlark", "dep:allocative"]
+
+[[example]]
+name = "phase0"
+required-features = ["js", "starlark"]
 
 [dependencies]
 serde_json.workspace = true

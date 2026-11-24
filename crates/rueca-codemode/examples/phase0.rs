@@ -2,7 +2,7 @@
 //! behaviour of every engine this build has. Run it in release:
 //!
 //! ```sh
-//! cargo run --release -p rueca-codemode --example phase0
+//! cargo run --release -p rueca-codemode --features starlark --example phase0
 //! ```
 //!
 //! Limit probes run in a child process each (`phase0 probe <name>`), so a
