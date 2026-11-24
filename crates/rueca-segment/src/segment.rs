@@ -219,6 +219,11 @@ impl Inner {
         }
     }
 
+    /// The vectors' meta, without verifying the bulk components.
+    pub fn vectors_meta(&self) -> Option<&vectors::VectorsMeta> {
+        self.vectors.as_ref().map(Vectors::meta)
+    }
+
     /// The bundle (for re-publication with vectors).
     pub(crate) fn bundle(&self) -> &Bundle {
         &self.bundle

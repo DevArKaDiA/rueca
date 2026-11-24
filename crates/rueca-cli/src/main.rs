@@ -147,6 +147,19 @@ enum Command {
         /// With --ref: remove that ref snapshot and its export.
         #[arg(long, requires = "ref_name")]
         remove: bool,
+        /// Embed the symbols for hybrid search (RFC 0007; opt-in): with a
+        /// preset, or the configured one (`RUECA_EMBED=<preset>`,
+        /// `RUECA_EMBED_PRESET`, `[retrieval] preset` in
+        /// `<store>/rueca.toml`), else `qwen3-0.6b-q8`. `RUECA_EMBED=1`
+        /// enables it too; `[retrieval]` alone never does. The lexical
+        /// segment is published first; vectors are cached in the store, so a
+        /// re-index embeds only new text. Missing weights are an error
+        /// (`rueca models pull`): nothing is downloaded.
+        #[arg(long, value_name = "PRESET", num_args = 0..=1, require_equals = true, default_missing_value = "", conflicts_with = "no_embed")]
+        embed: Option<String>,
+        /// Do not embed, even with `RUECA_EMBED` set.
+        #[arg(long)]
+        no_embed: bool,
     },
     /// Run one tool and print its JSON result. Same semantics as MCP.
     #[command(
@@ -286,18 +299,24 @@ fn main() -> ExitCode {
     init_logging(cli.verbose, matches!(cli.command, Command::Mcp { .. }));
     let store = cli.store.clone().unwrap_or_else(Store::default_dir);
     let result = match cli.command {
-        Command::Index { path, repo, threads, ref_name, remove } => match (cli.org, ref_name) {
-            (Some(org), Some(name)) => {
-                let out = Output { json: cli.json, pretty: cli.pretty };
-                cmd_index_org_ref(&store, &org, RefCmd { path, repo, name, remove, threads }, out)
+        Command::Index { path, repo, threads, ref_name, remove, embed, no_embed } => {
+            let out = Output { json: cli.json, pretty: cli.pretty };
+            let arg = embed_arg(embed.as_deref(), no_embed);
+            match (cli.org, ref_name) {
+                (Some(_), _) if matches!(arg, rueca_embed::EmbedArg::On(_)) => {
+                    Err(anyhow::anyhow!("--embed is not supported with --org yet (RFC 0007 phase 3)"))
+                }
+                (Some(org), Some(name)) => {
+                    cmd_index_org_ref(&store, &org, RefCmd { path, repo, name, remove, threads, embed: None }, out)
+                }
+                (Some(org), None) => cmd_index_org(&store, &org, path, repo, cli.json, cli.pretty, threads),
+                (None, Some(name)) => embed_config(&store, arg).and_then(|embed| {
+                    cmd_index_ref(&store, RefCmd { path, repo, name, remove, threads, embed }, out)
+                }),
+                (None, None) => embed_config(&store, arg)
+                    .and_then(|embed| cmd_index(&store, IndexCmd { path, repo, threads, embed }, out)),
             }
-            (Some(org), None) => cmd_index_org(&store, &org, path, repo, cli.json, cli.pretty, threads),
-            (None, Some(name)) => {
-                let out = Output { json: cli.json, pretty: cli.pretty };
-                cmd_index_ref(&store, RefCmd { path, repo, name, remove, threads }, out)
-            }
-            (None, None) => cmd_index(&store, path, repo, cli.json, cli.pretty, threads),
-        },
+        }
         Command::Query { tool, args, text } => {
             return cmd_query(&store, cli.root, cli.org.as_deref(), &tool, args, cli.pretty, text);
         }
@@ -347,7 +366,8 @@ fn init_logging(verbose: u8, serving: bool) {
     let default = match verbose {
         0 if serving => "info",
         // llama.cpp reports model-file quirks as warnings on every load.
-        0 => "warn,llama-cpp-2=error",
+        // The vectors pass reports its progress (cache hits, tokens/s).
+        0 => "warn,rueca_index::vectors=info,llama-cpp-2=error",
         1 => "debug",
         _ => "trace",
     };
@@ -360,14 +380,42 @@ fn init_logging(verbose: u8, serving: bool) {
         .try_init();
 }
 
-fn cmd_index(
-    store: &Path,
+/// `rueca index [PATH]` of a working tree.
+struct IndexCmd {
     path: Option<PathBuf>,
     repo: Option<String>,
-    json: bool,
-    pretty: bool,
     threads: Option<usize>,
-) -> anyhow::Result<()> {
+    embed: Option<rueca_index::EmbedConfig>,
+}
+
+/// The `--embed` / `--no-embed` flags of `rueca index`.
+fn embed_arg(flag: Option<&str>, no_embed: bool) -> rueca_embed::EmbedArg<'_> {
+    match (flag, no_embed) {
+        (_, true) => rueca_embed::EmbedArg::Off,
+        (Some(p), false) => rueca_embed::EmbedArg::On(Some(p).filter(|p| !p.is_empty())),
+        (None, false) => rueca_embed::EmbedArg::Unset,
+    }
+}
+
+/// How `rueca index` embeds (RFC 0007 §8.3, opt-in): enabled by the
+/// argument, else by `RUECA_EMBED`; `[retrieval]` of `<store>/rueca.toml`
+/// only chooses the preset and width
+/// ([`rueca_embed::RetrievalConfig::index_preset`]). An enabled run is
+/// explicit: missing weights are an error, never a download.
+fn embed_config(store: &Path, arg: rueca_embed::EmbedArg<'_>) -> anyhow::Result<Option<rueca_index::EmbedConfig>> {
+    let file = rueca_embed::RetrievalConfig::load(store)?;
+    let env = |k: &str| std::env::var(k).ok();
+    let preset = file.index_preset(
+        arg,
+        env(rueca_embed::config::EMBED_ENV).as_deref(),
+        env(rueca_embed::config::EMBED_PRESET_ENV).as_deref(),
+    );
+    Ok(preset.map(|preset| rueca_index::EmbedConfig { preset, dims: file.dims, ..rueca_index::EmbedConfig::default() }))
+}
+
+fn cmd_index(store: &Path, cmd: IndexCmd, out: Output) -> anyhow::Result<()> {
+    let IndexCmd { path, repo, threads, embed } = cmd;
+    let (json, pretty) = (out.json, out.pretty);
     let path = path.unwrap_or_else(|| PathBuf::from("."));
     let root = std::fs::canonicalize(&path).map_err(|e| anyhow::anyhow!("cannot open `{}`: {e}", path.display()))?;
     if !root.is_dir() {
@@ -379,6 +427,7 @@ fn cmd_index(
         repo,
         budget: rueca_extract::Budget::default(),
         threads,
+        embed,
         ..rueca_index::IndexOptions::default()
     };
     let report = rueca_index::index_worktree(&opts)?;
@@ -422,6 +471,19 @@ fn print_index_details(report: &rueca_index::IndexReport) {
     println!("  graph:      {} nodes, {} edges", s.node_count, s.edge_count);
     println!("  references: {}/{} resolved ({pct:.1}%)", report.references_resolved, report.references_total);
     println!("  segment:    {} ({}) in {} ms", s.id, human_bytes(s.bytes), report.duration_ms);
+    if let Some(v) = &report.vectors {
+        println!(
+            "  vectors:    {} symbols ({}, {} dims): {} cached, {} embedded in {} ms, {} publication{}",
+            v.units,
+            v.preset,
+            v.dims,
+            v.cached,
+            v.embedded,
+            v.embed_ms,
+            v.publications,
+            if v.publications == 1 { "" } else { "s" }
+        );
+    }
 }
 
 /// JSON / pretty flags of a command's output.
@@ -438,6 +500,7 @@ struct RefCmd {
     name: String,
     remove: bool,
     threads: Option<usize>,
+    embed: Option<rueca_index::EmbedConfig>,
 }
 
 /// Indexes (or removes) a ref snapshot of PATH's repository (RFC 0006 §9.3).
@@ -469,6 +532,7 @@ fn cmd_index_ref(store: &Path, cmd: RefCmd, out: Output) -> anyhow::Result<()> {
         repo: cmd.repo,
         budget: rueca_extract::Budget::default(),
         threads: cmd.threads,
+        embed: cmd.embed,
     })?;
     // Organizations holding the repository list the ref (RFC 0006 §9.3):
     // only its entry changes.

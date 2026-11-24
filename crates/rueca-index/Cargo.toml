@@ -13,6 +13,7 @@ rueca-extract.workspace = true
 rueca-model.workspace = true
 rueca-resolve.workspace = true
 rueca-segment.workspace = true
+rueca-embed.workspace = true
 rueca-lang-python.workspace = true
 rueca-lang-typescript.workspace = true
 rueca-lang-markdown.workspace = true

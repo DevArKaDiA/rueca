@@ -317,6 +317,7 @@ impl rueca_service::indexer::RefRunner for InProcessRunner {
             threads: self.threads,
             ref_name: Some(task.ref_name.to_string()),
             commit: Some(task.commit.to_string()),
+            embed: None,
         };
         let report = rueca_index::index_worktree(&opts).map_err(|e| RefError::new("index", &e))?;
         stages.push(("index", t.elapsed()));

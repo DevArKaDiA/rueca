@@ -393,6 +393,8 @@ impl RefRunner for ChildRunner {
             threads: self.threads,
             ref_name: Some(task.ref_name.to_string()),
             commit: Some(task.commit.to_string()),
+            // Service mode embeds in a later phase (RFC 0007 §8.3).
+            embed: None,
         };
         let result = worker::run_ref(&self.worker, &WorkerRequest::new(options, export.absent));
         if let Err(e) = std::fs::remove_dir_all(&dest) {

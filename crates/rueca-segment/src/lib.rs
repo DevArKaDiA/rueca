@@ -753,6 +753,12 @@ impl Segment {
     pub fn vectors(&self) -> Result<Option<&Vectors>> {
         self.inner.vectors()
     }
+    /// The metadata of the segment's vectors (preset, keys, width, rows),
+    /// `None` for a lexical-only segment. Unlike [`Segment::vectors`] it
+    /// verifies nothing (`rueca status`).
+    pub fn vectors_meta(&self) -> Option<&VectorsMeta> {
+        self.inner.vectors_meta()
+    }
     /// The filter `search_symbols` applies for `query` without its text:
     /// labels (the default exclusions when `labels` is empty), language and
     /// `path_glob`. Dense retrieval applies it to its candidates.

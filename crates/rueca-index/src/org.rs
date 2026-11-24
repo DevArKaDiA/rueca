@@ -415,6 +415,8 @@ fn index_member_ref(
         repo: Some(repo.to_string()),
         budget: opts.budget.clone(),
         threads: opts.threads,
+        // Organizations embed in a later phase (RFC 0007 §10).
+        embed: None,
     })
 }
 

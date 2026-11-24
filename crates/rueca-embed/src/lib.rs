@@ -52,7 +52,7 @@ pub mod presets;
 pub mod vector;
 
 pub use cache::{CacheState, MODEL_DIR_ENV, ModelCache};
-pub use config::RetrievalConfig;
+pub use config::{EmbedArg, EmbedEnv, RetrievalConfig};
 pub use error::{Error, Result};
 pub use key::{Backend, EmbedKey, ModelKey, ModelMeta, TEXT_BUILDER_VERSION, VectorEncoding, VectorKey};
 pub use presets::{DEFAULT_PRESET, PRESETS, Preset, PresetStatus, preset};

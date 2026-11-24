@@ -3575,6 +3575,7 @@ dependencies = [
  "ignore",
  "postcard",
  "rayon",
+ "rueca-embed",
  "rueca-extract",
  "rueca-lang-cpp",
  "rueca-lang-data",

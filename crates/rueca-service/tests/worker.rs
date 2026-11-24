@@ -106,6 +106,7 @@ fn a_normal_ref_round_trips_its_report() {
         commit: Some(commit.clone()),
         threads: Some(1),
         budget: Budget { max_bytes: MAX_BYTES, ..Budget::default() },
+        embed: None,
     };
     let cmd = WorkerCommand::current_exe(WorkerLimits::default()).unwrap();
     let report = rueca_service::worker::run_ref(&cmd, &WorkerRequest::new(options, exported.absent)).unwrap();
