@@ -11,6 +11,7 @@ the gate. It compares, on the same inputs and with the same scoring:
 | `grep` | No graph. BM25 (k1=1.2, b=0.75) over file contents, function bodies and function names (tree-sitter); textual `name(` heuristic for callers/callees | in-process |
 | `cbm` | codebase-memory-mcp **v0.12.0**, official release binary pinned by sha256 in `manifest.toml` (never a binary on `PATH`) | `codebase-memory-mcp cli --quiet <tool> '<json>'`, with `CBM_CACHE_DIR` / `CBM_RUNTIME_DIR` inside `bench/.cache`; one warm `daemon start` per bench process (as in an MCP session; stopped at exit), UI disabled |
 | `rueca` | Rueca at HEAD | `$RUECA_BIN index <root> --store <dir> --json`, `$RUECA_BIN query <tool> '<json>' --root <root> --store <dir> [--text]` (`docs/tools.md`; both the alpha contract and the RFC 0005 contract are understood, see *Rueca arm*) |
+| `vector` | No graph, no BM25: the `grep` arm's units (same files, same tree-sitter functions) embedded as a canonical text and ranked by exact cosine (RFC 0007 §11.1); files by their best function. Localization only (S1); never part of `--arm all` | `$RUECA_BIN embed --preset <p> ... --format f32le` through temporary files, vectors cached by content hash (see *Vector arm*) |
 
 Suites, by name (the S-numbers stay as short identifiers):
 
@@ -54,7 +55,9 @@ uv run --project bench rueca-bench check                 # regression check vs t
   to language families (manifest `[languages]` keys: `python`, `ecma`,
   `php`, `go`, `java`, `c`, `cpp`, `rust`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
-- `run --arm {grep,cbm,rueca,all|a,b} --suite {s1,s3,data,health,org,all|a,b} [--only ID|REPO|SET ...] [--workers N] [--force] [--prune]`.
+- `run --arm {grep,cbm,rueca,vector,all|a,b} --suite {s1,s3,data,health,org,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--workers N] [--force] [--prune]`.
+  `--split` restricts S1 to one split; the `vector` arm is never included
+  by `all`.
   Outputs are cached per (arm, instance) in `.cache/runs/`; re-running only
   computes what is missing (`--force` recomputes). Arm failures are recorded
   (and scored as misses), never dropped. `--workers` runs S1 repositories
@@ -82,7 +85,9 @@ uv run --project bench rueca-bench check                 # regression check vs t
 - `uv run --project bench pytest bench/tests` — unit tests of the harness
   pieces (efficiency counting, contract normalizers, health rules, rank
   fusion, the organization file and RFC 0006 metrics, the multi-ref scorer,
-  S3 gold derivation and scoring); CI runs them in the `bench harness` job.
+  S3 gold derivation and scoring, the vector arm, the `rueca embed`
+  protocol against a fake binary, all-gold metrics, `compare`); CI runs
+  them in the `bench harness` job.
 - Per-call timeouts: 120 s per query, 1800 s per index (`arms/__init__.py`).
 - S1 runs repositories in parallel (`--workers`, default 2), instances of one
   repository sequentially (one partial clone per repository, one detached
@@ -149,6 +154,143 @@ RUECA_BIN=$PWD/target/debug/rueca uv run --project bench rueca-bench service-ind
 PATH]` writes `bench/results/service-index-<UTC timestamp>.json`; the
 method is under *Suites → Service indexing*.
 
+### Vector arm (RFC 0007 phase 0)
+
+```sh
+cargo build --release -p rueca                # a binary with `rueca embed`
+export UV_NO_EDITABLE=1 RUECA_BIN=$PWD/target/release/rueca
+$RUECA_BIN models pull qwen3-0.6b-q8          # the weights, once (639 MB, sha256-verified); nothing downloads them implicitly
+export RUECA_BENCH_SHARED_CACHE=/path/to/other/bench/.cache   # optional: pinned datasets already downloaded
+uv run --project bench rueca-bench run --arm grep,vector --suite s1 --split calibration --workers 4 --prune
+RUECA_BENCH_VECTOR_DIMS=256 uv run --project bench rueca-bench run --arm vector --suite s1 --split calibration   # one sweep setting
+uv run --project bench rueca-bench report
+```
+
+`arms/vector.py` uses exactly the `grep` arm's units (`arms/grep.py:
+code_files` and the tree-sitter functions), so `grep` and `vector` differ
+only in the scorer. Each function is embedded once, as a **canonical text**
+(RFC 0007 §5.2; text builder version 1, the `x1` in the run tag):
+
+```text
+<language> <label> <qualified name>
+path: <repository-relative path>
+<signature>
+<doc comment>
+<body head>
+```
+
+- `language` is the instance language (`python`, `typescript`, `cpp`, …),
+  `label` the labeler's `Function` / `Method`, `qualified name` its local
+  qualified name (`Class.method`, `outer.inner`, `ns::f`).
+- `signature`: from the declaration's first line (after decorators) to the
+  end of its header, lines stripped and joined with one space — up to and
+  including the `:` ending a Python header, up to (not including) the first
+  `{` outside parentheses and brackets elsewhere; at most 12 lines, else the
+  first line only.
+- `doc comment`: Python's docstring (the body's first statement when it is
+  a string literal); otherwise the comment lines directly above the
+  declaration and its decorators, no blank line between (Rust attributes
+  skipped), stripped, comment markers kept (`#` counts in Python only).
+- `body head`: the rest of the body (after the docstring), without the
+  closing `}`, dedented, trailing spaces removed, blank lines dropped.
+- Empty parts are left out; parts are joined with `\n`; the whole text is
+  cut to `max_tokens` × 4 characters (512 tokens → 2,048 characters), then
+  right-stripped; `rueca embed --max-tokens` cuts again at real tokens.
+- `RUECA_BENCH_VECTOR_FILE_TEXT=1` (sweep variant, off by default) also
+  embeds one text per file, `<language> File <path>\npath: <path>\n<file
+  head>`, and a file scores the best of its functions and its own text;
+  off, a file scores its best function (RFC 0007 §5.1) and files without
+  functions are not ranked.
+
+Queries are the same `kw` / `raw` strings every arm gets, embedded with the
+query flag (the binary adds the preset's instruction, or
+`RUECA_BENCH_VECTOR_INSTRUCTION`) in calls of their own whose
+`--max-tokens` is the query budget — `query_token_budget` of `rueca embed
+--info`, 512 capped by the preset's context (512 for a binary that does not
+report it) — whatever the document budget; scores are exact cosines over
+L2-normalized rows, ties broken by unit order. Sweep knobs, all part of the
+run directory `runs/s1/vector/<preset>-d<dims>-t<tokens>-i<instruction
+hash>-f<file text>-x<text version>/` (so two settings never share outputs;
+`report` reads the setting the environment names, default
+`qwen3-0.6b-q8-dfull-t512-idefault-f0-x1`, and labels the column with it):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RUECA_BENCH_VECTOR_PRESET` | `qwen3-0.6b-q8` | `rueca embed --preset` |
+| `RUECA_BENCH_VECTOR_DIMS` | the model's | Matryoshka dimensions: the first N components, re-normalized (in the bench) |
+| `RUECA_BENCH_VECTOR_MAX_TOKENS` | 512 | document budget (× 4 characters) and the documents' `--max-tokens`; queries keep their own budget (below) |
+| `RUECA_BENCH_VECTOR_INSTRUCTION` | the preset's | `--instruction` for queries; a binary without the flag stops the run before any instance |
+| `RUECA_BENCH_VECTOR_FILE_TEXT` | `0` | file texts (above) |
+| `RUECA_BENCH_VECTOR_DIR` | `bench/.cache/vectors` | the vector cache (share it across checkouts) |
+
+**Vector cache** (`embed.py`). Rows are stored at the model's full width as
+float16, append-only, per namespace:
+`vectors/<model key>/t<max tokens>/doc/` and
+`vectors/<model key>/t<max tokens>/query-<instruction hash | default>[-q<query budget>]/`
+(the `-q` suffix only when the query budget differs from the document
+budget, so `t512` caches keep their names),
+each holding `keys.txt` (sha256 of the text, line i = row i), `rows.f16`
+and `meta.json` (width); writers take an exclusive `flock`, rows are written
+before their keys. Dimensions are applied after the cache, so a sweep over
+dimensions, or over query instructions, embeds no document again, and the
+instances of one repository share almost every vector. The model key comes
+from `rueca embed --info`. Size: 2 bytes × width per distinct text (1024
+dimensions: 2 KB per function).
+
+**Raw scores** (RFC 0007 §7.6). The `grep` arm (BM25) and the `vector` arm
+(cosine) store, per query, their top 200 files and functions with the raw
+score, post-filtered like the rankings, in the run record
+(`queries.<variant>.scores = {"files": [[path, score]], "functions":
+[[path, name, start line, score]]}`), so fusion sweeps re-score offline;
+`grep` outputs cached before this change have none (`run --arm grep
+--force`).
+
+**Report.** The S1 tables and the per-repository / calibration / cost
+tables gain a `vector` column once the arm has results (its `overall`
+column only when it covers every pooled language); the scorecard's
+localization rows gain a `vector` column (RFC 0007 §11.2). Every arm's S1
+table also shows the **all-gold** diagnostic: File Acc@5 counting an
+instance only when every gold file is in the top 5, Function Acc@10 only
+when every gold function is in the top 10 (the LocAgent / SweRank
+convention; S1's gated Acc@k counts any gold item).
+
+### Compare: decision tables over cached runs (RFC 0007)
+
+```sh
+uv run --project bench rueca-bench compare --split calibration --base grep --arms vector --variant both
+uv run --project bench rueca-bench compare --arms vector:qwen3-0.6b-q8-dfull-t512-idefault-f0-x1 vector:qwen3-0.6b-q8-d256-t512-idefault-f0-x1 \
+    --cache /path/to/other/bench/.cache --json /tmp/compare.json
+```
+
+`rueca-bench compare --arms ARM[:TAG] ... [--base grep] [--split
+calibration|gated|all] [--variant kw|raw|both] [--cache DIR] [--json OUT]`
+(`compare.py`) turns the cached S1 outputs of one split into the tables the
+RFC 0007 rules read, without running anything and without writing to the
+cache (`--cache` may be another checkout's, even while a run is filling
+it). A column is an arm (`grep`, `rueca`) or an arm and one sweep setting:
+`vector` expands to every tag under `runs/s1/vector/`, `vector:<tag>`
+selects one. Scoring is the report's (`metrics.py`; a failed query is a
+miss), on the instances of the split with gold. Markdown goes to stdout,
+the whole result (both variants) to `--json`:
+
+- **Pooled** and **per language**, per variant: n, any-gold and all-gold
+  File Acc@5 and Function Acc@10, file and function MRR.
+- **Paired bootstrap** of column − base per instance (`stats.py`, the
+  manifest's `bootstrap_resamples` = 10,000 and `bootstrap_seed`, 95%),
+  pooled and per language, for the four Acc@k metrics; a column is paired
+  only on the instances both have, so a sweep that is still running shows
+  a smaller n instead of a biased number.
+- **Objective** (RFC 0007 §7.6, also §3.4's model rule): the macro over
+  languages of ½ (File Acc@5 + Function Acc@10), per variant and averaged
+  over `kw` and `raw`, with its difference to the base; the number of
+  languages it covers is shown (compare only columns with the same
+  coverage). One pooled instance is worth 100 / n points (the rules'
+  "within one calibration instance").
+- **Top-10 overlap** for every pair of non-base columns: the mean over
+  common instances of the Jaccard index of the two top-10 file lists and of
+  the two top-10 function lists (both empty: 1). RFC 0007 §3.3 (int4 vs
+  F16, floor 0.9) and §6.3 (dimensions) read it.
+
 ### Sharing a cache between checkouts
 
 `RUECA_BENCH_CACHE` moves the whole cache. `RUECA_BENCH_SHARED_CACHE` points at
@@ -201,11 +343,16 @@ repository filter), PHPStan PHAR 31 MB, plus the `php:8.3-cli` image
 ≈ 1.3 GB: shallow per-commit clones of 26 repositories ≈ 0.8 GB (hugo,
 terraform, prometheus, redis are the large ones; `[corpus] shallow` keeps one
 tree per pinned commit instead of whole histories), Multi-SWE-bench JSONL
-7 MB, scip-go 13 MB, scip-clang 71 MB, scip-java 90 MB, Go module downloads
-for scip-go ≈ 0.5 GB (deletable after `setup`), plus the
+7 MB (+ 36 MB for the calibration files, ponyc's 26 MB), scip-go 13 MB,
+scip-clang 71 MB, scip-java 90 MB, Go module downloads for scip-go ≈ 0.5 GB (deletable after `setup`), plus the
 `eclipse-temurin:21-jdk` image (≈ 500 MB, in Docker's storage). The RFC 0004
 gold repositories (jinja, click, zod, goawk, javapoet, yaml-cpp, Lua) and
-the calibration repositories add ≈ 0.3 GB of clones. Rust adds ≈ 0.4 GB:
+the first calibration repositories add ≈ 0.3 GB of clones; the 16
+repositories added when the split grew (RFC 0007 §7.6) add an estimated
+≈ 0.5 GB more (uncompressed trees at the pinned commits, from the GitHub
+API: zeek ≈ 0.1 GB per commit, mostly test baselines and traces, and
+jackson-core's oldest pinned commit 0.16 GB of javadoc; the other 14 are
+under 10 MB each). Rust adds ≈ 0.4 GB:
 shallow per-commit clones of the 8 S1 repositories ≈ 165 MB (nushell,
 coreutils and ruff are the large ones) and the 3 S3 repositories ≈ 10 MB,
 rust-analyzer 37 MB (+ 14 MB archive), and what rust-analyzer's cargo runs
@@ -213,7 +360,10 @@ leave in the cache: the crates.io registry (`.cache/registry`, ≈ 70 MB) and
 build-script / proc-macro outputs (`.cache/cargo-target`, ≈ 120 MB), both
 deletable after `setup`. With `--prune` a full
 run peaks at about 2 GB of cache (clones are deleted as soon as their runs
-are done; gold, datasets and tools stay).
+are done; gold, datasets and tools stay). The vector arm adds its cache
+(`.cache/vectors`, 2 KB per distinct function text at 1024 dimensions, per
+model and token budget) and the model weights `rueca models pull`
+downloads (`RUECA_MODEL_DIR`).
 
 ## Adding a language
 
@@ -333,18 +483,34 @@ of evaluation order (`stats.py`).
 
 Ranking weights and heuristics are tuned only on a calibration split whose
 instances and repositories are disjoint from the gated ones; the gated set
-is only evaluated. In the manifest, `split = "calibration"`:
+is only evaluated. In the manifest, `split = "calibration"`. The S1 split
+started at 5 instances per language and was grown to 15 per language (13
+for C++) on three repositories each before any RFC 0007 fusion or reranker
+gate is read (RFC 0007 §7.6): 118 instances on 24 repositories. Sources:
+SWE-rebench V2 (rows its own LLM screen rated `A`, a column of the pinned
+parquet, so the screen is reproduced without an LLM), Multi-SWE-bench
+(human-validated) and a spare SWE-PolyBench repository. Every calibration
+repository is disjoint from every gated S1, S3 and data-format repository
+(GitHub renames checked), and the Python ones also from SWE-bench Lite's
+repositories, so an external SWE-bench Lite diagnostic (RFC 0007 §11.1)
+stays untuned:
 
-| Language | S1 (SWE-rebench V2, LLM screen A, unless noted) | S3 |
+| Language | S1 (instances; dataset) | S3 |
 |---|---|---|
-| python | pallets/click (5) | pallets/click 8.1.8 (scip-python) |
-| ts/js | yargs/yargs (5) | — |
-| php | JsonMapper/JsonMapper (5) | — |
-| go | benhoyt/goawk (5) | benhoyt/goawk v1.29.1 (scip-go) |
-| java | decorators-squad/eo-yaml (5) | — |
-| c | nanomsg/nng (5) | — |
-| cpp | randombit/botan (5) | — |
-| rust | tokio-rs/bytes (5, Multi-SWE-bench) | tokio-rs/bytes v1.12.1 (rust-analyzer) |
+| python (15) | pallets/click (5), Python-Markdown/markdown (5); SWE-rebench V2 · yt-dlp/yt-dlp (5; SWE-PolyBench) | pallets/click 8.1.8 (scip-python) |
+| ts/js (15) | yargs/yargs (5, JS), sindresorhus/got (5, TS); SWE-rebench V2 · iamkun/dayjs (5, JS; Multi-SWE-bench) | — |
+| php (15) | JsonMapper/JsonMapper (5), CuyZ/Valinor (5), phpactor/phpactor (5); SWE-rebench V2 | — |
+| go (15) | benhoyt/goawk (5; SWE-rebench V2) · grpc/grpc-go (5), zeromicro/go-zero (5; Multi-SWE-bench) | benhoyt/goawk v1.29.1 (scip-go) |
+| java (15) | decorators-squad/eo-yaml (5; SWE-rebench V2) · fasterxml/jackson-core (5), mockito/mockito (5; Multi-SWE-bench) | — |
+| c (15) | nanomsg/nng (5; SWE-rebench V2) · facebook/zstd (5), ponylang/ponyc (5; Multi-SWE-bench) | — |
+| cpp (13) | randombit/botan (5), zeek/zeek (5), ccache/ccache (3); SWE-rebench V2 | — |
+| rust (15) | tokio-rs/bytes (5), tokio-rs/tracing (5), sharkdp/fd (5); Multi-SWE-bench | tokio-rs/bytes v1.12.1 (rust-analyzer) |
+
+C++ stops at 13: outside the gated repositories, Multi-SWE-bench has only
+cpp-httplib (one eligible instance) and SWE-rebench V2 only zeek (70
+eligible), ccache (3) and repositories with one or two. PHP has no
+Multi-SWE-bench, SWE-PolyBench or SWE-bench Lite source, so its split is
+SWE-rebench V2 only.
 
 Every arm runs on the split and the report prints it in its own section;
 it never enters the scorecard. A change tuned on it says so in its PR (and
@@ -385,7 +551,9 @@ and query latency. Gated (RFC 0004 §5): **File Acc@5** — 1 if a gold file is
 in the top 5 ranked files, averaged over the language's instances;
 **Function Acc@10** — the same over the top 10 functions, over instances
 whose patch changes a function. Diagnostic: File Acc@1/3, Recall@k, MRR, the
-`raw` variant, ContextBench context-file recall.
+`raw` variant, ContextBench context-file recall, and the all-gold File
+Acc@5 / Function Acc@10 (every gold file / function in the top k; RFC 0007
+§11.1).
 
 **Instances.** Defined in `manifest.toml` (`[[s1.repos]]` quotas,
 `[[s1.instances]]` generated list). Python: SWE-bench Verified ∪ Lite on
@@ -421,15 +589,18 @@ issue (as SWE-bench does) and `fix_patch` as the gold patch. Function gold
 for these languages comes from the tree-sitter labeler, except SWE-PolyBench
 Java (`modified_nodes`; its `ReturnType_name` node names are mapped back to
 the method name). ContextBench gold context exists for 32 of the new
-instances (mostly C++ and Java). The calibration split adds 5 SWE-rebench V2
-instances per language on seven more repositories (above); they are run
-by every arm and reported apart.
+instances (mostly C++ and Java). The calibration split adds 15 instances
+per language (13 for C++) on 24 repositories of its own (above; 45 of the
+78 added when it grew carry assembled gold: SWE-PolyBench
+`modified_nodes` or ContextBench context); they are run by every arm and
+reported apart.
 
 Rust (43): every SWE-bench Multilingual Rust instance (tokio 9, bat 8,
 axum 7, ruff 7, coreutils 5, nushell 5, ripgrep 2; every patch touches a
-non-test `.rs` file). Its calibration split is the five Multi-SWE-bench
-instances of tokio-rs/bytes (SWE-rebench V2 is not needed: Multi-SWE-bench
-is already pinned for C++, at the same revision). Function gold comes from
+non-test `.rs` file). Its calibration split is Multi-SWE-bench's
+tokio-rs/bytes (all five instances), tokio-rs/tracing and sharkdp/fd (five
+each; SWE-rebench V2 is not needed: Multi-SWE-bench is already pinned for
+C++, at the same revision). Function gold comes from
 the tree-sitter labeler (ContextBench has context gold for one nushell and
 three bytes instances). Two gated instances have empty function gold
 (axum-1730: additions outside existing functions; tokio-4384: code added
@@ -886,7 +1057,8 @@ gated S1 repository at the base commit of its first gated
 commit of its first calibration entry; `org.derive_pins`, checked by a unit
 test). The **gated organization** is the `split = "gated"` members (42); the
 **calibration organization** is the gated one plus the `split =
-"calibration"` members (8), the gated ones acting as distractors. A member
+"calibration"` members (24 since the calibration split grew from 8; RFC 0007
+phase 0), the gated ones acting as distractors. A member
 without S1 instances (a sibling library) is indexed like the others.
 Instances, per member of a split, in manifest order: the S1 instances whose
 gold is present at the pin — every gold file exists there and, when the
@@ -1383,12 +1555,12 @@ and the summary printed at the end.
 |---|---|---|---|
 | SWE-bench Verified (`princeton-nlp/SWE-bench_Verified`) | HF revision + sha256 | none stated on the card (SWE-bench code: MIT) | S1 issues, patches |
 | SWE-bench Lite (`SWE-bench/SWE-bench_Lite`) | HF revision + sha256 | none stated on the card | S1 issues, patches |
-| SWE-PolyBench (`AmazonScience/SWE-PolyBench`) | HF revision + sha256 | MIT | S1 TS issues, patches, `modified_nodes` gold |
+| SWE-PolyBench (`AmazonScience/SWE-PolyBench`) | HF revision + sha256 | MIT | S1 TS and Java issues, patches, `modified_nodes` gold; the Python calibration repository yt-dlp |
 | SWE-bench Multilingual (`SWE-bench/SWE-bench_Multilingual`) | HF revision + sha256 | MIT | S1 TS/JS issues, patches |
 | LocAgent / Loc-Bench labels (`czlll/SWE-bench_Lite`) | HF revision + sha256 | none stated on the card (LocAgent code: Apache-2.0) | S1 function gold |
 | ContextBench (`Contextbench/ContextBench`) | HF revision + sha256 | none stated on the card (ContextBench code: Apache-2.0) | S1 context-file gold |
-| SWE-rebench V2 (`nebius/SWE-rebench-V2`) | HF revision + sha256 | CC-BY-4.0 (attribution: Nebius, SWE-rebench V2) | S1 PHP issues, patches (Twig, monolog, commonmark); the calibration split of every language |
-| Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`), four C++ JSONL files and one Rust JSONL file | HF revision + per-file sha256 | CC0 (dataset README; upstream repository licences apply) | S1 C++ issues, patches (fmt, nlohmann/json, Catch2, simdjson); the Rust calibration split (tokio-rs/bytes) |
+| SWE-rebench V2 (`nebius/SWE-rebench-V2`) | HF revision + sha256 | CC-BY-4.0 (attribution: Nebius, SWE-rebench V2) | S1 PHP issues, patches (Twig, monolog, commonmark); calibration repositories of every language but Rust |
+| Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`), four C++, three Rust, two C, two Go, two Java and one JS JSONL file | HF revision + per-file sha256 | CC0 (dataset README; upstream repository licences apply) | S1 C++ issues, patches (fmt, nlohmann/json, Catch2, simdjson); calibration repositories: Rust (bytes, tracing, fd), C (zstd, ponyc), Go (grpc-go, go-zero), Java (jackson-core, mockito), JS (dayjs) |
 | PyCG micro-benchmark (`vitsalis/PyCG`) | commit | Apache-2.0 | S3 Python call-graph gold (diagnostic) |
 | PHP micro-benchmark (`bench/micro/php`) | in repository | Apache-2.0 (Rueca's own labels) | S3 PHP call-graph gold |
 | Python / TS/JS / Go / Java / C / C++ / Rust micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
@@ -1464,9 +1636,11 @@ file paths and function names of the public corpus repositories.
   report counts the dropped predictions per arm and set.
 - **PyCG** contains mostly module-level calls; restricted to function →
   function edges it is small (see the gold table in the report); diagnostic.
-- **Calibration split.** Five SWE-rebench V2 instances per language (LLM
-  screened, train split) on one repository each: wide intervals, meant for
-  tuning, not for claims.
+- **Calibration split.** 15 instances per language (13 for C++) on three
+  repositories each, from SWE-rebench V2 (LLM screened, train split),
+  Multi-SWE-bench and SWE-PolyBench: 118 pooled, still wide intervals per
+  language, meant for tuning, not for claims. PHP and C++ draw on
+  SWE-rebench V2 only.
 - **Label agreement.** Assembled labels and the tree-sitter labeler disagree
   on some instances (mostly multi-function patches and code outside
   functions); the report shows the mean Jaccard.

@@ -1,7 +1,8 @@
 """rueca-bench command line.
 
   rueca-bench setup  [--select] [--skip-s3] [--lang FAMILY ...]
-  rueca-bench run    --arm {grep,cbm,rueca,all} --suite {s1,s3,data,health,org,s2,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force]
+  rueca-bench run    --arm {grep,cbm,rueca,vector,all} --suite {s1,s3,data,health,org,s2,all} [--lang FAMILY ...] [--only ID ...] [--workers N] [--force] [--split gated|calibration]
+  rueca-bench compare --arms ARM[:TAG] ... [--base grep] [--split calibration|gated|all] [--variant kw|raw|both] [--cache DIR] [--json OUT]
   rueca-bench report [--s2-only]
   rueca-bench check  [--baseline bench/results/scorecard.json] [--current FILE]
   rueca-bench clean  [--work] [--runs ARM]
@@ -9,7 +10,9 @@
   rueca-bench service-index [--small] [--split gated|calibration] [--only REPO ...] [--indexers N ...] [--pushes N] [--no-faults] [--keep] [--out FILE] [--bin PATH]
 
 Language families are the manifest `[languages]` keys (python, ecma, php, ...);
-`data` selects the data-format suite (manifest `[[data.repos]]`).
+`data` selects the data-format suite (manifest `[[data.repos]]`). `vector`
+(dense retrieval through `rueca embed`) runs the localization suite (s1) only
+and is never part of `--arm all`.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import sys
 from pathlib import Path
 
 from . import check as check_mod
+from . import compare as compare_mod
 from . import contracts as contracts_mod
 from . import data as data_mod
 from . import health as health_mod
@@ -28,24 +32,52 @@ from . import report as report_mod
 from . import s1, s3
 from . import service as service_mod
 from . import service_index as service_index_mod
-from .arms import ARM_NAMES, make_arm
-from .common import RUNS_DIR, WORK_DIR, families, log
+from .arms import ARM_NAMES, S1_ARM_NAMES, make_arm
+from .common import CACHE, RUNS_DIR, WORK_DIR, families, log, write_json
 from .prepare import setup
+
+# `service` runs only when named (never part of `all`).
+SUITES = {"s1", "s3", "data", "health", "org", "s2", "service"}
+ALL_SUITES = {"s1", "s3", "data", "health", "org", "s2"}
 
 
 def _arms(arg: str) -> list[str]:
     names = list(ARM_NAMES) if arg == "all" else [a.strip() for a in arg.split(",") if a.strip()]
     for n in names:
-        if n not in ARM_NAMES:
-            raise SystemExit(f"unknown arm {n!r}; choose from {ARM_NAMES} or all")
+        if n not in S1_ARM_NAMES:
+            raise SystemExit(f"unknown arm {n!r}; choose from {S1_ARM_NAMES} or all")
     out = []
     for n in names:
-        ok, why = make_arm(n).available()
-        if ok:
-            out.append(n)
-        else:
+        arm = make_arm(n)
+        ok, why = arm.available()
+        if not ok:
             log(f"arm {n} unavailable: {why} (reported as pending)")
+            continue
+        if hasattr(arm, "preflight"):
+            try:
+                arm.preflight()
+            except RuntimeError as exc:
+                raise SystemExit(f"arm {n}: {exc}") from exc
+        out.append(n)
     return out
+
+
+def _suites(arg: str) -> set[str]:
+    wanted = {x.strip() for x in arg.split(",") if x.strip()}
+    if "all" in wanted:
+        wanted = (wanted - {"all"}) | ALL_SUITES
+    unknown = wanted - SUITES
+    if unknown:
+        raise SystemExit(f"unknown suite(s) {sorted(unknown)}")
+    return wanted
+
+
+def _compare(a: argparse.Namespace) -> None:
+    cache = Path(a.cache).resolve() if a.cache else CACHE
+    res = compare_mod.Comparison(cache, a.split, a.base, a.arms).run()
+    if a.json:
+        write_json(Path(a.json), res)
+    print(compare_mod.render(res, a.variant), end="")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,6 +99,16 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--force", action="store_true", help="ignore cached arm outputs")
     rp.add_argument("--lang", nargs="*", help="language families to run (default: all)")
     rp.add_argument("--prune", action="store_true", help="delete each repository clone once its runs are done (bounded disk, e.g. CI)")
+    rp.add_argument("--split", choices=["gated", "calibration"], default=None, help="s1: only the instances of one split")
+
+    mp = sub.add_parser("compare", help="decision tables over cached S1 outputs: metrics per arm / tag, paired bootstrap against a base, RFC 0007 §7.6 objective, top-10 overlap")
+    mp.add_argument("--suite", choices=["s1"], default="s1")
+    mp.add_argument("--split", choices=["calibration", "gated", "all"], default="calibration")
+    mp.add_argument("--base", default="grep", help="the arm (or arm:tag) every column is paired against")
+    mp.add_argument("--arms", nargs="+", required=True, help="arm (every tag it has, e.g. vector) or arm:tag (one sweep setting)")
+    mp.add_argument("--variant", choices=["kw", "raw", "both"], default="both", help="query variants shown (the JSON always holds both)")
+    mp.add_argument("--cache", default=None, help="bench cache to read (default: this checkout's .cache); never written")
+    mp.add_argument("--json", default=None, help="also write the result as JSON to this file")
 
     pr = sub.add_parser("report", help="score cached outputs; write bench/results/*.json and docs/bench/alpha-results.md")
     pr.add_argument("--s2-only", action="store_true", help="publish S2 alone: s2.json, the contracts family of scorecard.json, the S2 rows of alpha-results.md")
@@ -115,16 +157,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         code_langs = {x for x in langs if x != "data"} if langs else None
         run_code = not langs or bool(code_langs)
-        wanted = {x.strip() for x in a.suite.split(",") if x.strip()}
-        if "all" in wanted:
-            wanted = {"s1", "s3", "data", "health", "org", "s2"}
-        unknown = wanted - {"s1", "s3", "data", "health", "org", "s2", "service"}
-        if unknown:
-            raise SystemExit(f"unknown suite(s) {sorted(unknown)}")
+        wanted = _suites(a.suite)
+        loc_arms = arms
+        arms = [x for x in arms if x in ARM_NAMES]
         if "health" in wanted and run_code and "rueca" in arms:
             health_mod.run(languages=code_langs, force=a.force, only=a.only, prune=a.prune)
         if "s1" in wanted and run_code:
-            s1.run(arms, workers=a.workers, only=a.only, force=a.force, languages=code_langs, prune=a.prune)
+            s1.run(loc_arms, workers=a.workers, only=a.only, force=a.force, languages=code_langs, prune=a.prune, split=a.split)
         if "s3" in wanted and run_code:
             s3.run(arms, only=a.only, force=a.force, languages=code_langs, workers=a.workers, prune=a.prune)
         if "data" in wanted and (not langs or "data" in langs):
@@ -136,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
             service_mod.run_service(only=[r for r in a.only or [] if "/" in r] or None)
         if "s2" in wanted and not langs:
             contracts_mod.run(arms, force=a.force)  # cross-service edges (S2): one organization per group
+    elif a.cmd == "compare":
+        _compare(a)
     elif a.cmd == "report":
         if a.s2_only:
             report_mod.publish_s2()

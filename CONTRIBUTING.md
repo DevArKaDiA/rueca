@@ -21,7 +21,12 @@ assembling a maintained, permissively licensed component over writing one.
 
 ## Development setup
 
-Requirements: Rust 1.90+ (`rustup` recommended), git. The benchmark also needs
+Requirements: Rust 1.90+ (`rustup` recommended), git, and for the default
+`embeddings` feature (llama.cpp, built from source by `rueca-embed`) CMake, a
+C/C++ compiler and libclang (Debian / Ubuntu: `apt install cmake clang
+libclang-dev`; macOS: Xcode command-line tools and `brew install cmake`).
+`cargo build -p rueca --no-default-features --features service` builds a
+lexical-only binary without them. The benchmark also needs
 Python 3.12+, [uv](https://docs.astral.sh/uv/) and Node.js (for SCIP indexers).
 
 ```sh
@@ -33,7 +38,11 @@ cargo deny check            # optional locally; runs in CI (cargo install cargo-
 ```
 
 Some tests are `#[ignore]` because they clone real repositories; each
-crate's docs explain the environment variable that enables them.
+crate's docs explain the environment variable that enables them. No test
+downloads model weights: the embedding tests use the hashing test embedder
+or no model at all, and the ones against real weights
+(`crates/rueca-embed/tests/llama.rs`) run only with `RUECA_EMBED_TESTS=1`
+after `rueca models pull qwen3-0.6b-q8`.
 
 Try a change end to end:
 

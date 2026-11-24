@@ -3,6 +3,15 @@
 
 [graph]
 all-features = false
+# The targets Rueca ships (dist-workspace.toml): dependencies of other
+# targets (wasm32's bundled root certificates under rustls-platform-verifier,
+# pulled by rueca-embed's weights download) are never linked.
+targets = [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+]
 
 [advisories]
 version = 2

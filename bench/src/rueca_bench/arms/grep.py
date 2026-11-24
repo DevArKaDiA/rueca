@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
+from typing import Iterator
 
 from ..bm25 import BM25
 from ..common import is_code_file
@@ -15,6 +16,47 @@ from ..treesitter import extract_functions
 from .base import Arm, CallResult, Handle
 
 MAX_FILE_BYTES = 1_000_000
+# Raw candidate scores kept per query (RFC 0007 §7.6: fusion sweeps re-score
+# offline from them).
+SCORES_KEEP = 200
+
+
+def code_files(root: Path, language: str) -> Iterator[tuple[str, bytes]]:
+    """(path, bytes) of every indexed source file of the instance language,
+    in `git ls-files` order: the units of the `grep` and `vector` arms."""
+    for rel in list_files(root):
+        if not is_code_file(rel, language):
+            continue
+        p = root / rel
+        try:
+            if p.is_symlink() or not p.is_file() or p.stat().st_size > MAX_FILE_BYTES:
+                continue
+            data = p.read_bytes()
+        except OSError:
+            continue
+        yield rel, data
+
+
+def func_record(rel: str, f) -> dict:
+    """A tree-sitter function as an arm hit."""
+    return {
+        "path": rel,
+        "name": f.name,
+        "qualname": f.qualname,
+        "label": f.label,
+        "start_line": f.start,
+        "end_line": f.end,
+        "def_line": f.def_line,
+    }
+
+
+def scored(files: list[tuple[str, float]], funcs: list[tuple[dict, float]]) -> dict:
+    """The `scores` record of a localization answer: ranked files and
+    functions with the arm's raw score."""
+    return {
+        "files": [[p, round(float(s), 6)] for p, s in files],
+        "functions": [[f["path"], f["name"], f["start_line"], round(float(s), 6)] for f, s in funcs],
+    }
 
 
 class GrepArm(Arm):
@@ -31,30 +73,13 @@ class GrepArm(Arm):
         body_docs = []
         funcs: dict[str, dict] = {}
         bodies: dict[str, str] = {}
-        for rel in list_files(root):
-            if not is_code_file(rel, language):
-                continue
-            p = root / rel
-            try:
-                if p.is_symlink() or not p.is_file() or p.stat().st_size > MAX_FILE_BYTES:
-                    continue
-                data = p.read_bytes()
-            except OSError:
-                continue
+        for rel, data in code_files(root, language):
             text = data.decode("utf-8", errors="replace")
             file_docs.append((rel, tokenize(text) + tokenize(rel)))
             lines = text.splitlines()
             for f in extract_functions(rel, data, language):
                 fid = f"{rel}#{f.qualname}@{f.start}"
-                funcs[fid] = {
-                    "path": rel,
-                    "name": f.name,
-                    "qualname": f.qualname,
-                    "label": f.label,
-                    "start_line": f.start,
-                    "end_line": f.end,
-                    "def_line": f.def_line,
-                }
+                funcs[fid] = func_record(rel, f)
                 body = "\n".join(lines[f.start - 1 : f.end])
                 bodies[fid] = body
                 name_docs.append((fid, tokenize(f.qualname)))
@@ -74,16 +99,22 @@ class GrepArm(Arm):
         t0 = time.perf_counter()
         q = tokenize(query)
         st = h.state
-        files = [k for k, _ in st["files"].search(q, limit)]
+        keep = max(limit, SCORES_KEEP)
+        files = st["files"].search(q, keep)
         fn_names = [dict(st["funcs"][k]) for k, _ in st["names"].search(q, limit)]
-        fn_bodies = [dict(st["funcs"][k]) for k, _ in st["bodies"].search(q, limit)]
+        bodies = [(st["funcs"][k], s) for k, s in st["bodies"].search(q, keep)]
         return CallResult(
             True,
             time.perf_counter() - t0,
             hits=[],
             # primary function ranking = BM25 over function bodies (signature
             # included); name-only BM25 is kept as a secondary ranking.
-            extra={"files": files, "functions": fn_bodies, "functions_name": fn_names},
+            extra={
+                "files": [k for k, _ in files[:limit]],
+                "functions": [dict(f) for f, _ in bodies[:limit]],
+                "functions_name": fn_names,
+                "scores": scored(files, bodies),
+            },
         )
 
     def resolve(self, h: Handle, func: dict) -> CallResult:

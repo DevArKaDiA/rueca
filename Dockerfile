@@ -21,6 +21,11 @@
 # --- build: the release binary ---------------------------------------------------------
 FROM rust:1.90-trixie@sha256:e227f20ec42af3ea9a3c9c1dd1b2012aa15f12279b5e9d5fb890ca1c2bb5726c AS build
 WORKDIR /src
+# The default `embeddings` feature builds llama.cpp (CMake, C/C++) and its
+# bindings (bindgen: libclang); the runtime only runs when asked.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends cmake clang libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN cargo build --release -p rueca --locked \
     && install -D -m 0755 target/release/rueca /out/usr/local/bin/rueca
