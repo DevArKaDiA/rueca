@@ -3,8 +3,12 @@
 Per instance: one detached worktree at the base commit; every pending arm
 indexes it and answers two queries derived from the issue text (`kw`:
 deterministic keyword list, `raw`: the issue text itself). Raw arm outputs
-are cached per (arm, instance) in .cache/runs/s1/<arm>/<id>.json, so runs are
-resumable; scoring happens in `report`.
+are cached per (arm, instance) in .cache/runs/s1/<arm>/<id>.json (the vector
+arm: runs/s1/vector/<sweep tag>/<id>.json), so runs are resumable; scoring
+happens in `report`. Arms that return raw candidate scores (`grep`: BM25,
+`vector`: cosine) have them persisted per query (`scores`: top 200 files and
+functions, post-filtered like the rankings) for offline fusion sweeps (RFC
+0007 §7.6).
 """
 
 from __future__ import annotations
@@ -12,9 +16,9 @@ from __future__ import annotations
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .arms import make_arm
+from .arms import make_arm, run_label
 from .arms.base import Arm
-from .common import GOLD_DIR, RUNS_DIR, candidate_path, lang_family, load_manifest, log, read_json, safe_name, write_json
+from .common import GOLD_DIR, RUNS_DIR, candidate_path, lang_family, load_manifest, log, read_json, safe_name, split_of, write_json
 from .corpus import ensure_commit, prune_clone, worktree
 from .datasets import instance_row, rows_by_id
 from .gold import assembled_functions, compute_s1_gold, context_files, parse_list
@@ -110,12 +114,12 @@ def queries_for(inst: dict) -> dict[str, str]:
     return {"kw": " ".join(kws), "raw": raw_query(text)}
 
 
-def run_path(arm: str, iid: str):
-    return RUNS_DIR / "s1" / arm / f"{safe_name(iid)}.json"
+def run_path(arm: str, iid: str, suite: str = "s1"):
+    return RUNS_DIR / suite / run_label(arm) / f"{safe_name(iid)}.json"
 
 
-def _done(arm: str, iid: str) -> bool:
-    p = run_path(arm, iid)
+def _done(arm: str, iid: str, suite: str = "s1") -> bool:
+    p = run_path(arm, iid, suite)
     if not p.exists():
         return False
     rec = read_json(p)
@@ -140,6 +144,14 @@ def _filtered_funcs(funcs: list[dict], language: str) -> list[dict]:
     return out
 
 
+def _filtered_scores(scores: dict, language: str) -> dict:
+    """Raw candidate scores, post-filtered like the rankings."""
+    return {
+        "files": [x for x in scores.get("files", []) if candidate_path(x[0], language)],
+        "functions": [x for x in scores.get("functions", []) if candidate_path(x[0], language)],
+    }
+
+
 def _run_arm(arm: Arm, inst: dict, root, qs: dict[str, str], limit: int) -> dict:
     lang = inst["language"]
     rec: dict = {"arm": arm.name, "id": inst["id"], "repo": inst["repo"], "language": lang}
@@ -161,6 +173,8 @@ def _run_arm(arm: Arm, inst: dict, root, qs: dict[str, str], limit: int) -> dict
                 entry["functions"] = _filtered_funcs(res.extra.get("functions", []), lang)
                 if "functions_name" in res.extra:
                     entry["functions_name"] = _filtered_funcs(res.extra["functions_name"], lang)
+                if "scores" in res.extra:
+                    entry["scores"] = _filtered_scores(res.extra["scores"], lang)
             rec["queries"][variant] = entry
         eff_q = qs.get(EFF_VARIANT)
         if eff_q is not None and hasattr(arm, "search_eff"):
@@ -171,8 +185,8 @@ def _run_arm(arm: Arm, inst: dict, root, qs: dict[str, str], limit: int) -> dict
     return rec
 
 
-def run_instance(inst: dict, arm_names: list[str], limit: int, force: bool) -> None:
-    pending = [a for a in arm_names if force or not _done(a, inst["id"])]
+def run_instance(inst: dict, arm_names: list[str], limit: int, force: bool, suite: str = "s1") -> None:
+    pending = [a for a in arm_names if force or not _done(a, inst["id"], suite)]
     if not pending:
         return
     s1_gold(inst)
@@ -183,21 +197,29 @@ def run_instance(inst: dict, arm_names: list[str], limit: int, force: bool) -> N
             t_ok, why = arm.available()
             if not t_ok:
                 continue
-            log(f"s1 {name:5s} {inst['id']}")
+            log(f"{suite} {name:5s} {inst['id']}")
             try:
                 rec = _run_arm(arm, inst, root, qs, limit)
             except Exception as exc:  # recorded, never silently dropped
                 rec = {"arm": name, "id": inst["id"], "status": "error", "error": f"{exc}\n{traceback.format_exc()[-1500:]}"}
             rec["arm_version"] = arm.version()
-            write_json(run_path(name, inst["id"]), rec)
+            write_json(run_path(name, inst["id"], suite), rec)
 
 
-def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, force: bool = False, languages: set[str] | None = None, prune: bool = False) -> None:
-    limit = load_manifest()["s1"].get("result_limit", 100)
+def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, force: bool = False, languages: set[str] | None = None, prune: bool = False, split: str | None = None) -> None:
     insts = [i for i in instances() if not only or i["id"] in only or i["repo"] in only]
     if languages:
         insts = [i for i in insts if lang_family(i["language"]) in languages]
-    log(f"s1: {len(insts)} instances x {arm_names}")
+    if split:
+        splits = {r["repo"]: split_of(r) for r in load_manifest()["s1"]["repos"]}
+        insts = [i for i in insts if splits.get(i["repo"], "gated") == split]
+    run_instances(insts, arm_names, "s1", workers=workers, force=force, prune=prune)
+
+
+def run_instances(insts: list[dict], arm_names: list[str], suite: str, workers: int = 2, force: bool = False, prune: bool = False) -> None:
+    """Run arms on instances, repositories in parallel."""
+    limit = load_manifest()["s1"].get("result_limit", 100)
+    log(f"{suite}: {len(insts)} instances x {arm_names}")
     # instances of one repo run sequentially (shared clone, git lock); repos in parallel
     by_repo: dict[str, list[dict]] = {}
     for i in insts:
@@ -206,9 +228,9 @@ def run(arm_names: list[str], workers: int = 2, only: list[str] | None = None, f
     def _repo_job(items: list[dict]) -> None:
         for inst in items:
             try:
-                run_instance(inst, arm_names, limit, force)
+                run_instance(inst, arm_names, limit, force, suite)
             except Exception as exc:
-                log(f"s1 FAILED {inst['id']}: {exc}")
+                log(f"{suite} FAILED {inst['id']}: {exc}")
         if prune:
             prune_clone(items[0]["repo"])
 
