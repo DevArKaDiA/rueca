@@ -89,8 +89,6 @@ _PART = r"(?:[\w$]+|\"[^\"]+\"|`[^`]+`|\[[^\]]+\])"
 _REL = re.compile(r"\b(FROM|JOIN|INTO|UPDATE|REFERENCES|ON|EXEC|EXECUTE|CALL|PERFORM|TABLE)\s+(" + _PART + r"(?:\s*\.\s*" + _PART + r")*)", re.IGNORECASE)
 _CALL = re.compile(r"(?<![\w.$])(" + _PART + r"(?:\.\w+)*)\s*\(")
 _DOLLAR = re.compile(r"\$(\w*)\$(.*?)\$\1\$", re.DOTALL)
-_GO = re.compile(r"^\s*GO\s*(\d+)?\s*$", re.IGNORECASE)
-_DELIMITER = re.compile(r"^\s*DELIMITER\s+(\S+)\s*$", re.IGNORECASE)
 _JINJA = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
 _MACRO = re.compile(r"\{%-?\s*(macro|test|materialization)\s+(\w+)")
 _ENDMACRO = re.compile(r"\{%-?\s*end(?:macro|test|materialization)\s*-?%\}")
@@ -125,10 +123,41 @@ def norm_name(parts: list[tuple[str, bool]], dialect: str) -> str:
     return ".".join(segs)
 
 
+_CLOSE = {'"': '"', "`": "`", "[": "]"}
+
+
+def _split_dotted(text: str) -> list[str]:
+    """The parts of a dotted name, dots inside quotes kept."""
+    parts, cur, close = [], [], None
+    for ch in text:
+        if close is None and ch == ".":
+            parts.append("".join(cur).strip())
+            cur = []
+            continue
+        if close is None and ch in _CLOSE:
+            close = _CLOSE[ch]
+        elif ch == close:
+            close = None
+        cur.append(ch)
+    parts.append("".join(cur).strip())
+    return parts
+
+
 def written_name(text: str, dialect: str) -> str:
     """Normalized name of a dotted name as written (`[dbo].[T]`, `a.b`)."""
-    parts = [_unquote(p) for p in re.split(r"\s*\.\s*(?=(?:[^\"`\]]*[\"`\]][^\"`\]]*[\"`\]])*[^\"`\]]*$)", text)]
-    return norm_name(parts, dialect)
+    return norm_name([_unquote(p) for p in _split_dotted(text)], dialect)
+
+
+def _is_go(line: str) -> bool:
+    """A T-SQL batch separator: `GO` alone on its line (optionally a count)."""
+    words = line.split()
+    return bool(words) and words[0].upper() == "GO" and (len(words) == 1 or (len(words) == 2 and words[1].isdigit()))
+
+
+def _delimiter(line: str) -> str | None:
+    """The new delimiter of a MySQL `DELIMITER x` line."""
+    words = line.split()
+    return words[1] if len(words) == 2 and words[0].upper() == "DELIMITER" else None
 
 
 def table_name(t: exp.Table, dialect: str) -> str:
@@ -150,12 +179,12 @@ def _batches(source: str) -> list[tuple[int, int, bool]]:
     out: list[tuple[int, int, bool]] = []
     pos, start, delim = 0, 0, None
     for line in source.splitlines(keepends=True):
-        m = _DELIMITER.match(line)
-        if m or _GO.match(line):
+        new = _delimiter(line)
+        if new or _is_go(line):
             out.append((start, pos, delim is None))
             start = pos + len(line)
-            if m:
-                delim = None if m.group(1) == ";" else m.group(1)
+            if new:
+                delim = None if new == ";" else new
         elif delim:
             for d in [i for i in range(len(line)) if line.startswith(delim, i)]:
                 out.append((start, pos + d, False))
