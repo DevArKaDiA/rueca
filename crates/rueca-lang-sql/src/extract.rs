@@ -31,6 +31,9 @@ pub struct Stats {
     /// errors of the strict count, which is what `Facts::parse_errors` and
     /// the health metric use.
     pub head_only: u32,
+    /// Statements read in full by the pack's productions (a subset of
+    /// `own`): parsed, by the pack's grammar rather than sqlparser's.
+    pub productions: u32,
     /// Statements with at least one parse error or head-only statement.
     pub unparsed_strict: u32,
 }
@@ -90,6 +93,7 @@ fn run(path: &str, source: &[u8], failures: bool) -> (Stats, Vec<(String, String
         errors: r.errors,
         own: r.own,
         head_only: r.head_only,
+        productions: r.productions,
         unparsed_strict,
     };
     (stats, r.failures.take().unwrap_or_default())

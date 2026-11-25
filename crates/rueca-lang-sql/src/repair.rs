@@ -9,10 +9,13 @@
 //! | Dialect | Construct | Repair |
 //! |---|---|---|
 //! | any (Jinja) | a placeholder right after an expression (`a, b {{ extra }} order by`), a macro that expands to a clause | blanked |
+//! | any (Jinja) | a placeholder between a query and `select` (a macro that expands to a set operator) | `union` |
+//! | any (Jinja) | a placeholder between `with` and `select` (a macro that expands to the CTE list) | `_ as (select 1)` |
 //! | any (Jinja) | a placeholder before `over (` (a macro that expands to a window function) | written as a call |
 //! | PostgreSQL | named arguments `f(a := 1)` | `f(a => 1)` |
 //! | PostgreSQL | `LIKE t INCLUDING ALL` / `EXCLUDING …` options | blanked |
-//! | PostgreSQL | `TABLESPACE name`, `CREATE OR REPLACE PROCEDURE`'s `OR REPLACE` | blanked |
+//! | PostgreSQL | `TABLESPACE name`, `CREATE OR REPLACE PROCEDURE`'s `OR REPLACE`, YugabyteDB `CREATE INDEX NONCONCURRENTLY` | blanked |
+//! | MySQL, Oracle | the partitioning clause of `CREATE TABLE` (`PARTITION BY … (PARTITION p …)`) | blanked |
 //! | PostgreSQL | arguments of `EXECUTE PROCEDURE f('a', 'b')` in `CREATE TRIGGER` | blanked |
 //! | T-SQL | `CLUSTERED` / `NONCLUSTERED`, index and table options `WITH (PAD_INDEX = …)`, filegroups `ON [PRIMARY]` / `TEXTIMAGE_ON […]` | blanked |
 //! | T-SQL | compound assignment `+=`, `-=`, `*=`, `/=` | `=` |
@@ -166,6 +169,34 @@ impl Repair<'_> {
             if !is_placeholder(t.word()) || t.word().len() < 2 {
                 continue;
             }
+            let (ps, pe) = t.range;
+            let before_query =
+                self.is(i + 1, "SELECT") || (self.tok(i + 1) == Some(&Token::LParen) && self.is(i + 2, "SELECT"));
+            if i > 0 && self.is(i - 1, "WITH") && before_query && pe - ps >= 15 {
+                // `with {{ ctes() }} select …`: a macro that expands to the
+                // CTE list
+                self.out[ps..ps + 15].copy_from_slice(b"_ as (select 1)");
+                for b in &mut self.out[ps + 15..pe] {
+                    *b = b' ';
+                }
+                self.changed = true;
+                continue;
+            }
+            let after_query = i.checked_sub(1).is_some_and(|p| match &self.toks[p].token {
+                Token::Word(w) => w.quote_style.is_some() || !is_clause_word(&w.value),
+                Token::RParen | Token::Number(..) | Token::SingleQuotedString(_) => true,
+                _ => false,
+            });
+            if after_query && self.is(i + 1, "SELECT") && pe - ps >= 5 {
+                // `select … {{ union() }} select …`: a macro that expands
+                // to a set operator
+                self.out[ps..ps + 5].copy_from_slice(b"union");
+                for b in &mut self.out[ps + 5..pe] {
+                    *b = b' ';
+                }
+                self.changed = true;
+                continue;
+            }
             if self.is(i + 1, "OVER") && t.word().len() >= 3 {
                 let (_, e) = t.range;
                 self.out[e - 2] = b'(';
@@ -207,6 +238,9 @@ impl Repair<'_> {
                 || (create && i == 1 && self.is(i, "OR") && self.is(i + 1, "REPLACE") && self.is(i + 2, "PROCEDURE"))
             {
                 self.blank(i, i + 2);
+            } else if create && self.is(i, "NONCONCURRENTLY") && self.is(i - 1, "INDEX") {
+                // YugabyteDB `CREATE INDEX NONCONCURRENTLY`
+                self.blank(i, i + 1);
             } else if create
                 && self.is(i, "EXECUTE")
                 && self.any(i + 1, &["PROCEDURE", "FUNCTION"])
@@ -395,10 +429,13 @@ impl Repair<'_> {
     }
 
     fn oracle(&mut self) {
+        self.partitioning();
         let ddl = self.any(0, &["CREATE", "ALTER"]);
         let mut i = 0;
         while i < self.toks.len() {
-            if ddl && self.any(i, ORACLE_VALUED) && matches!(self.tok(i + 1), Some(Token::Number(..) | Token::Word(_)))
+            if ddl
+                && ((self.any(i, ORACLE_VALUED) && matches!(self.tok(i + 1), Some(Token::Number(..) | Token::Word(_))))
+                    || (self.is(i, "PARALLEL") && matches!(self.tok(i + 1), Some(Token::Number(..)))))
             {
                 self.blank(i, i + 2);
                 i += 2;
@@ -562,7 +599,35 @@ impl Repair<'_> {
         }
     }
 
+    /// `CREATE TABLE t (…) … PARTITION BY RANGE (c) (PARTITION p VALUES …)`
+    /// (MySQL, Oracle): the partitioning clause, to the end.
+    fn partitioning(&mut self) {
+        if !(self.is(0, "CREATE") && (1..self.toks.len().min(5)).any(|k| self.is(k, "TABLE"))) {
+            return;
+        }
+        let mut depth = 0i32;
+        for i in 0..self.toks.len() {
+            match self.toks[i].token {
+                Token::LParen => depth += 1,
+                Token::RParen => depth -= 1,
+                _ => {}
+            }
+            if depth == 0
+                && self.is(i, "PARTITION")
+                && self.is(i + 1, "BY")
+                && i > 0
+                && self.tok(i - 1) == Some(&Token::RParen)
+            {
+                let end =
+                    (i..self.toks.len()).find(|&k| self.tok(k) == Some(&Token::SemiColon)).unwrap_or(self.toks.len());
+                self.blank(i, end);
+                return;
+            }
+        }
+    }
+
     fn mysql(&mut self) {
+        self.partitioning();
         // `VARCHAR(40) BINARY`: the collation shorthand of a column
         for i in 1..self.toks.len() {
             if self.is(i, "BINARY")

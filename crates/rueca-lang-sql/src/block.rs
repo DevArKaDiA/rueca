@@ -719,7 +719,11 @@ impl Block<'_, '_, '_, '_> {
                 return;
             }
             "CALL" => return self.r.leaf(range, self.enclosing, Mode::Refs, None),
-            _ if CONTROL.contains(&head) => {}
+            _ if CONTROL.contains(&head) => {
+                if !self.control(i, s) {
+                    return self.r.leaf(range, self.enclosing, Mode::Refs, None);
+                }
+            }
             _ => {
                 let assign = self.scan(i, |b, j| b.tok(j) == Some(&Token::Assignment));
                 if assign < s {
@@ -730,6 +734,108 @@ impl Block<'_, '_, '_, '_> {
             }
         }
         self.r.own += 1;
+    }
+
+    /// Control statements with a closed grammar, at tokens `[i, s)`:
+    /// `RAISE [name]`, `GOTO | LEAVE | ITERATE label`, `COMMIT [WORK]`,
+    /// `ROLLBACK [WORK] [TO [SAVEPOINT] name]`, `SAVEPOINT name`, `CLOSE
+    /// cursor`, `FETCH cursor [BULK COLLECT] INTO name, … [LIMIT n]`, `PIPE
+    /// ROW (expr)`, `EXECUTE IMMEDIATE expr [INTO name, …] [USING [IN | OUT]
+    /// expr, …]`. Anything else is left to the other readers.
+    fn control(&mut self, i: usize, s: usize) -> bool {
+        let word = |b: &Self, k: usize| k < s && matches!(b.tok(k), Some(Token::Word(_)));
+        // `a, b.c, d` from `k` to `end`
+        let names = |b: &Self, mut k: usize, end: usize| {
+            loop {
+                if !word(b, k) {
+                    return false;
+                }
+                k += 1;
+                while k + 1 < end && b.tok(k) == Some(&Token::Period) && word(b, k + 1) {
+                    k += 2;
+                }
+                if k == end {
+                    return true;
+                }
+                if b.tok(k) != Some(&Token::Comma) {
+                    return false;
+                }
+                k += 1;
+            }
+        };
+        match self.up(i) {
+            "RAISE" => s == i + 1 || (s == i + 2 && word(self, i + 1)) || names(self, i + 1, s),
+            "GOTO" | "LEAVE" | "ITERATE" | "SAVEPOINT" | "CLOSE" => s == i + 2 && word(self, i + 1),
+            "COMMIT" => s == i + 1 || (s == i + 2 && self.up(i + 1) == "WORK"),
+            "ROLLBACK" => {
+                let mut k = i + 1;
+                k += usize::from(self.up(k) == "WORK");
+                if k == s {
+                    return true;
+                }
+                if self.up(k) != "TO" {
+                    return false;
+                }
+                k += 1;
+                k += usize::from(self.up(k) == "SAVEPOINT");
+                k + 1 == s && word(self, k)
+            }
+            "FETCH" => {
+                let Some(into) = (i + 2..s).find(|&k| self.up(k) == "INTO") else { return false };
+                let head = into == i + 2 || (into == i + 4 && self.up(i + 2) == "BULK" && self.up(i + 3) == "COLLECT");
+                let limit = (into + 1..s).find(|&k| self.up(k) == "LIMIT").unwrap_or(s);
+                let limit_ok = limit == s
+                    || (limit + 2 == s && matches!(self.tok(limit + 1), Some(Token::Number(..) | Token::Word(_))));
+                word(self, i + 1) && head && limit_ok && names(self, into + 1, limit)
+            }
+            "PIPE" => {
+                self.up(i + 1) == "ROW"
+                    && self.tok(i + 2) == Some(&Token::LParen)
+                    && self.close(i + 2) == s
+                    && s > i + 4
+                    && self.r.expr_parses(self.span(i + 3, s - 1))
+            }
+            "EXECUTE" => {
+                if self.up(i + 1) != "IMMEDIATE" {
+                    return false;
+                }
+                let stop = self
+                    .scan(i + 2, |b, k| {
+                        matches!(b.up(k), "INTO" | "USING" | "RETURNING") || b.tok(k) == Some(&Token::SemiColon)
+                    })
+                    .min(s);
+                if stop <= i + 2 || !self.r.expr_parses(self.span(i + 2, stop)) {
+                    return false;
+                }
+                // `INTO a, b` and `USING [IN | OUT] expr, …`: names and expressions
+                let mut k = stop;
+                if self.up(k) == "INTO" {
+                    let end = (k + 1..s).find(|&j| self.up(j) == "USING").unwrap_or(s);
+                    if !names(self, k + 1, end) {
+                        return false;
+                    }
+                    k = end;
+                }
+                if k < s {
+                    if self.up(k) != "USING" {
+                        return false;
+                    }
+                    k += 1;
+                    while k < s {
+                        while matches!(self.up(k), "IN" | "OUT") {
+                            k += 1;
+                        }
+                        let end = self.scan(k, |b, j| b.tok(j) == Some(&Token::Comma)).min(s);
+                        if end <= k || !self.r.expr_parses(self.span(k, end)) {
+                            return false;
+                        }
+                        k = end + 1;
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     /// A procedure call statement at tokens `[i, s)`: `name[(arguments)]`

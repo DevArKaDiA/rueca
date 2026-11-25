@@ -88,20 +88,32 @@
 //!    attributes, hints, `CLUSTERED`, `INCLUDING ALL`, Jinja placeholders
 //!    that expand to clauses, …) are blanked or replaced by an equivalent
 //!    of the same length, so positions do not move;
-//! 3. **the pack's own readers**: procedural code (*Procedural code*
-//!    below), and statements whose facts are all in their first words —
-//!    session settings, permissions, transaction and cursor control,
-//!    administration, `CREATE` / `ALTER` of objects that are not
-//!    definitions of the model (`utility` module): the first words must
-//!    match a known form and the parentheses balance; the token scanner
-//!    gives their references. Queries, DML, tables, views and routine
-//!    bodies are never accepted this way;
+//! 3. **the pack's own grammars**: procedural code (*Procedural code*
+//!    below), and the productions of the `forms` module for statements
+//!    sqlparser has no grammar for — T-SQL flow, transaction, cursor,
+//!    `SET`, `EXEC`, `DBCC`, `BACKUP` and security statements, `GRANT`,
+//!    `DROP` of kinds sqlparser does not know, type and synonym
+//!    definitions, non-column `ALTER TABLE` actions, PostgreSQL `DO`,
+//!    routine heads with a text body, `ALTER EXTENSION`, MySQL `LOAD
+//!    DATA`. A production is a grammar for one form and must consume
+//!    every token of the statement: names, typed argument lists, option
+//!    keywords from closed sets, and expressions, which sqlparser's
+//!    expression parser must accept;
 //! 4. else the statement is **one parse error** (the file is `partial`)
 //!    and the token scanner (`scan` module) reads what it can: its
 //!    `CREATE` definition (table columns from the column list), relation
 //!    names after `FROM` / `JOIN` / `INTO` / `UPDATE` / `REFERENCES` /
 //!    `ALTER TABLE` / `DROP TABLE` / `TRUNCATE`, and calls (`CALL` / `EXEC`
 //!    / `PERFORM name`, `name(`).
+//!
+//! A statement no production reads in full but whose first words name a
+//! statement kind whose facts are in its head (`utility` module: other
+//! administration statements, `CREATE` of objects that are not
+//! definitions of the model) still gives the references the token
+//! scanner reads, and **is a parse error too**: nothing validated it.
+//! `Stats::unparsed_strict` / `FileFacts::parse_errors` count it (the
+//! *strict* rate, the one the health metric uses); `Stats::unparsed`
+//! leaves it out (the *lenient* rate, reported next to it).
 //!
 //! Inside procedural code the unit is the statement of the body: a
 //! routine with one statement nothing parses has one parse error and
@@ -215,6 +227,7 @@ mod builtins;
 mod dialect;
 mod extract;
 mod facts;
+mod forms;
 mod names;
 mod prep;
 mod read;

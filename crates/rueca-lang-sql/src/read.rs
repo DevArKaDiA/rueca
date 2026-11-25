@@ -1,11 +1,12 @@
 //! Reading one statement (crate docs, *Statements and recovery*), in
 //! order: sqlparser in the file's dialect and then the others; the same
 //! after the same-length repairs ([`crate::repair`]); the pack's own
-//! readers — statements whose facts are in their head
-//! ([`crate::utility`]), T-SQL batches and routines ([`crate::tsql`]),
-//! and `;`-terminated procedural code ([`crate::block`]: PL/SQL, MySQL
-//! and DB2 routines, BigQuery scripts). What none of them reads is one
-//! parse error and goes to the token scanner ([`crate::scan`]).
+//! grammars — T-SQL batches and routines ([`crate::tsql`]),
+//! `;`-terminated procedural code ([`crate::block`]: PL/SQL, MySQL and
+//! DB2 routines, BigQuery scripts) and the productions of
+//! [`crate::forms`]. What none of them reads is one parse error and goes
+//! to the token scanner ([`crate::scan`]); a statement only known by its
+//! head ([`crate::utility`]) is a parse error of the strict count.
 
 use rueca_model::LocalDefId;
 use sqlparser::ast::{Expr, Statement};
@@ -20,7 +21,7 @@ use crate::repair;
 use crate::scan;
 use crate::text::Lines;
 use crate::utility::{self, Own};
-use crate::{block, tsql};
+use crate::{block, forms, tsql};
 
 /// Whether a statement may define something.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +47,10 @@ pub struct Reader<'a, 's> {
     /// parser validated them, so they count as parse errors of the file
     /// (the strict rate, the one `Facts::parse_errors` carries).
     pub head_only: u32,
-    /// With `Some`, the first word of every head-only statement.
+    /// Statements read in full by the pack's productions ([`crate::forms`]).
+    pub productions: u32,
+    /// With `Some`, the text (one line, truncated) of every head-only
+    /// statement.
     pub heads: Option<Vec<String>>,
     /// With `Some`, the text and parser error of every failure.
     pub failures: Option<Vec<(String, String)>>,
@@ -54,7 +58,7 @@ pub struct Reader<'a, 's> {
 
 impl<'a, 's> Reader<'a, 's> {
     pub fn new(b: &'a mut Builder<'s>, masked: &'a str, alone: &'a [(usize, usize)]) -> Reader<'a, 's> {
-        Reader { b, masked, alone, errors: 0, own: 0, head_only: 0, heads: None, failures: None }
+        Reader { b, masked, alone, errors: 0, own: 0, head_only: 0, productions: 0, heads: None, failures: None }
     }
 
     /// One top-level statement at `ctx.range`.
@@ -80,6 +84,9 @@ impl<'a, 's> Reader<'a, 's> {
     /// a parse error.
     pub fn leaf_own(&mut self, range: (usize, usize), enclosing: Option<LocalDefId>, mode: Mode, doc: Option<String>) {
         let toks = scan::tokens(self.masked, range.0, range.1, self.b.dialect);
+        if let Some(p) = forms::parse(self, &toks) {
+            return self.production(p, &toks, range, enclosing, mode, doc);
+        }
         match utility::own(&toks) {
             Own::No => return self.fail(range, enclosing, mode, doc),
             Own::Refs => scan::refs(self.b, self.masked, range, enclosing),
@@ -101,8 +108,51 @@ impl<'a, 's> Reader<'a, 's> {
         self.head_only += 1;
         if let Some(h) = &mut self.heads {
             let (text, _) = chunk(self.masked, range);
-            h.push(text.split_whitespace().take(2).collect::<Vec<_>>().join(" ").to_ascii_uppercase());
+            h.push(text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(240).collect());
         }
+    }
+
+    /// Adds the facts of a statement one of the pack's productions
+    /// ([`crate::forms`]) read in full.
+    fn production(
+        &mut self,
+        p: forms::Parsed,
+        toks: &[scan::Tok],
+        range: (usize, usize),
+        enclosing: Option<LocalDefId>,
+        mode: Mode,
+        doc: Option<String>,
+    ) {
+        let mut inside = enclosing;
+        if p.define && mode == Mode::Define {
+            inside = scan::head(self.b, toks, range, doc).map(|(d, _)| d).or(enclosing);
+        }
+        for (a, b) in p.exprs {
+            self.expr((toks[a].range.0, toks[b - 1].range.1), inside);
+        }
+        for n in &p.calls {
+            self.b.call_ref(n, inside);
+        }
+        for n in &p.reads {
+            self.b.relation_ref(rueca_model::RefKind::Read, n, inside);
+        }
+        for n in &p.writes {
+            self.b.relation_ref(rueca_model::RefKind::Write, n, inside);
+        }
+        if let Some(body) = p.body {
+            scan::refs(self.b, self.masked, body, inside);
+        }
+        self.own += 1;
+        self.productions += 1;
+    }
+
+    /// Whether `range` parses as one expression (no facts).
+    pub fn expr_parses(&self, range: (usize, usize)) -> bool {
+        if range.1 <= range.0 {
+            return false;
+        }
+        let (text, base) = chunk(self.masked, range);
+        self.parse_variants(text, base, parse_expr).is_some()
     }
 
     /// A statement: sqlparser, else the pack's own forms, else an error.

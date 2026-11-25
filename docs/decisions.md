@@ -32,22 +32,32 @@ statement, and Oracle / DB2 files were read as ANSI. Choices:
      a clause — blanked or replaced by an equivalent of the same length.
      Positions do not move; no relation, column or routine name is
      removed (storage names are);
-  3. **the pack's own readers**: the procedural readers above, and
-     statements whose facts are in their first words (`utility` module:
-     `SET`, `GRANT`, `ALTER EXTENSION`, `DBCC`, `CREATE LOGIN`, `ALTER
-     TABLE` forms that add no column, `CREATE INDEX` / `SYNONYM` / alias
-     and object types by their head, PostgreSQL `DO` and routines with a
-     text body). These must match a known head and have balanced
-     parentheses; they are not validated further, which is the weak
-     point and is stated in the crate docs. Queries, DML, `CREATE TABLE`
-     / `VIEW`, and anything inside a routine body that is a query or DML
-     are never accepted this way: they parse or they are errors (tested:
-     `own_readers_do_not_accept_broken_sql`).
-  Also not validated: parameter lists of routine heads, declared types,
-  cursor control, the arguments of chained member calls. The `dialects`
-  example prints, per dialect, how many statements each path read, so the
-  share read by the pack itself is visible (13,637 of the statements and
-  body statements of the evaluation corpus, most of them PL/SQL).
+  3. **the pack's own grammars**: the procedural readers above, and
+     the productions of the `forms` module — one grammar per statement
+     form sqlparser lacks (T-SQL flow, transaction, cursor, `SET`, `EXEC`,
+     `DBCC`, `BACKUP`, security statements; `GRANT`; `DROP` kinds; type
+     and synonym definitions; non-column `ALTER TABLE` actions;
+     PostgreSQL `DO`, routine heads with a text body, `ALTER EXTENSION`;
+     MySQL `LOAD DATA`). A production must consume every token of the
+     statement — names, typed argument lists, option keywords from closed
+     sets — and every expression in it must parse with sqlparser's
+     expression parser. Each has accepted and rejected (malformed) cases
+     in `forms::tests`.
+  **Known by the head is not parsed (strict rate).** The first version of
+  this work also accepted statements by their first words and balanced
+  parentheses (`utility` module). That is not parsing, and the gated
+  health number does not count it: such a statement keeps the references
+  the token scanner reads but is a parse error (`FileFacts::parse_errors`,
+  `Stats::unparsed_strict`). The lenient rate, which leaves those out, is
+  printed next to the strict one by the `dialects` example (`--heads`
+  lists the forms still known by their head only). PL/SQL control
+  statements read by the block reader (`RAISE`, `FETCH … INTO`, `EXECUTE
+  IMMEDIATE`, …) have closed grammars too; what does not fit goes through
+  the same strict count.
+  Still not validated inside the procedural readers: parameter lists of
+  T-SQL and PL/SQL routine heads, declared types of PL/SQL variables,
+  `TYPE` / `SUBTYPE` / `PRAGMA` declarations, and the arguments of
+  chained member calls (`a.b(x).c(y)`), read by the token scanner.
 - **Not excluded, not relabelled.** No file was taken out of the health
   metric and no `[[health.not_language]]` entry was added. Client
   commands (SQL*Plus, sqlcmd, psql) were already masked as commands; the
@@ -113,6 +123,25 @@ statement, and Oracle / DB2 files were read as ANSI. Choices:
   `oracle/procedures_and_loops` and `db2/trigger_and_procedure` (32
   cases, 102 callables, 76 edges; the labeler agrees on 74, the 2 are the
   migration-order edges as before).
+- **Strict rate on the health corpus** (every SQL file of the gated S3
+  and S1 repositories; measured at the heads of sakila, dbt_hubspot, pgmq,
+  tSQLt, mimic-code, dbt-utils, dbt-project-evaluator,
+  dbt-external-tables, dbt-date, dbt_artifacts, dbt-snowflake-monitoring,
+  tuva-core, First Responder Kit, pg_partman, bigquery-utils): 32 of
+  2,671 files with a strict parse error (1.20%), 28 lenient (1.05%); it
+  was 238 (8.9%) strict when head-only acceptance was first counted. Of
+  21,745 statements, 118 have a strict error (61 head-only statements),
+  and 799 statements are read by the pack's productions rather than by
+  sqlparser (491 T-SQL, 201 PostgreSQL, 63 MySQL). What is left: tSQLt 15
+  files (12 of them experiments with unterminated comments, sqlcmd `:!!`,
+  broken or Service Broker statements; an SSMS template with
+  `<login_name, sysname, …>` parameters), mimic-code 5 (a HANA script:
+  `CREATE COLUMN TABLE`, `IMPORT FROM CSV FILE`; psql `\copy`
+  continuation lines; DuckDB and Oracle one-offs), bigquery-utils 5
+  (`<placeholder>` templates, a deliberate syntax error, `#legacySQL`),
+  First Responder Kit 4 (`FOR XML` without `FROM`, computed columns in a
+  2005 script), dbt_artifacts 2, dbt-utils 1 (a model that is only Jinja
+  `set` blocks).
 - **What still fails, and stays counted**: T-SQL at 6.4% of files (`FOR
   XML` without `FROM`, `GROUPING SETS`, `VECTOR_SEARCH`, `xml.modify`,
   deliberately broken experiment scripts), SQL*Plus substitution

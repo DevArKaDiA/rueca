@@ -376,7 +376,10 @@ fn substitutions(bytes: &mut [u8], dialect: Dialect) {
             b':' if matches!(dialect, Dialect::Postgres | Dialect::Generic | Dialect::Redshift)
                 && matches!(bytes.get(i + 1), Some(b'\'' | b'"'))
                 && i > 0
-                && bytes[i - 1] != b':'
+                // not `::`, and not a path into semi-structured data
+                // (Snowflake `value:"key"`)
+                && !matches!(bytes[i - 1], b':' | b'_' | b')' | b']' | b'"')
+                && !bytes[i - 1].is_ascii_alphanumeric()
                 && psql_variable(bytes, i + 1) =>
             {
                 bytes[i] = b' ';
@@ -477,6 +480,8 @@ fn command_line(line: &str) -> Option<Option<(String, usize)>> {
     let include = match lower.as_str() {
         "\\i" | "\\ir" | "\\include" | "\\include_relative" | ":r" | ".read" | "source" | "\\." => true,
         _ if first.starts_with('\\') => false,
+        // mysql client: show warnings after every statement, or not
+        "warnings" | "nowarning" if line.trim().trim_end_matches(';') == first => false,
         ":setvar" | ":on" | ":connect" | ":out" | ":error" | ":reset" | ":ed" | ":list" | ":help" | ":xml"
         | ":perftrace" | ":serverlist" | ":listvar" | "!!" => false,
         _ if lower.starts_with(":exit") || lower.starts_with(":quit") => false,

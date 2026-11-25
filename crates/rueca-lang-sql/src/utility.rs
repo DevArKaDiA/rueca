@@ -1,16 +1,16 @@
-//! Statements the pack reads itself (crate docs, *Statements and
-//! recovery*): statement kinds sqlparser has no grammar for and whose
-//! facts are all in their head — session settings, permissions,
-//! transaction and cursor control, administration, objects that are not
-//! definitions of the model (extensions, publications, logins, …), and
-//! definitions fully named by their head (`CREATE INDEX i ON t`,
-//! `CREATE SYNONYM a FOR b`, `CREATE TYPE t FROM …`).
+//! Statements known by their head alone (crate docs, *Statements and
+//! recovery*): statement kinds sqlparser has no grammar for, no
+//! production of [`crate::forms`] read in full, and whose facts are all
+//! in their head — administration, objects that are not definitions of
+//! the model (events, queues, certificates, …), definitions named by
+//! their head.
 //!
-//! A statement is accepted only when its first words match one of the
-//! forms below and its parentheses balance; it then gives the references
-//! the token scanner reads (`ALTER TABLE t` writes `t`, `EXEC p` calls
-//! `p`). Queries, DML, tables, views and routines are never accepted
-//! here: when sqlparser rejects them they count as parse errors.
+//! Matching here is **not parsing**: the first words match a known form
+//! and the parentheses balance, nothing more. Such a statement gives the
+//! references the token scanner reads (`ALTER TABLE t` writes `t`) and
+//! counts as a parse error of the strict rate (`Reader::head_only`); the
+//! lenient rate leaves it out. Queries, DML, tables, views and routines
+//! never match.
 
 use sqlparser::tokenizer::Token;
 

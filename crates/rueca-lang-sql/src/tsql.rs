@@ -494,7 +494,8 @@ impl Tsql<'_, '_, '_, '_> {
             st.seen_to = matches!(w, "TO" | "FROM");
             return false;
         }
-        if NAME_AFTER.contains(&prev) {
+        // `SET NOCOUNT ON` ends at its `ON`: the next word is a statement.
+        if NAME_AFTER.contains(&prev) && !(head == "SET" && prev == "ON") {
             return false;
         }
         let dml = |st: &mut State| {

@@ -550,3 +550,24 @@ select id, row_number() over (partition by id {{ partition_extra() }} order by n
     let stray = "{% macro m() %}select 1{% endmacro %}}\n";
     assert_eq!(facts("macros/m.sql", stray).parse_errors, 0, "text outside the macros of a macros file is not SQL");
 }
+
+#[test]
+fn head_only_statements_are_strict_parse_errors() {
+    // A statement kind with no production: known by its head, references
+    // kept, and a parse error of the strict count.
+    let src = "CREATE EVENT SESSION [s] ON SERVER ADD EVENT sqlserver.rpc_completed\nGO\nSELECT 1 FROM t\nGO\n";
+    let f = facts("mssql/x.sql", src);
+    assert_eq!(f.parse_errors, 1);
+    let s = stats("mssql/x.sql", src.as_bytes());
+    assert_eq!((s.statements, s.unparsed, s.unparsed_strict, s.head_only, s.productions), (2, 0, 1, 1, 0));
+    // The same kind of statement read by a production is parsed.
+    let src = "ALTER DATABASE db SET RECOVERY FULL\nGO\nEXEC dbo.Audit @Id = 1, @Note = N'x'\nGO\n";
+    let f = facts("mssql/y.sql", src);
+    assert_eq!(f.parse_errors, 0);
+    assert!(has_ref(&f, RefKind::Call, "", "audit", "-"), "{:?}", refs(&f));
+    let s = stats("mssql/y.sql", src.as_bytes());
+    assert_eq!((s.unparsed_strict, s.head_only), (0, 0));
+    assert!(s.productions >= 1, "{s:?}");
+    // A malformed statement of a production's form is not rescued.
+    assert_eq!(facts("mssql/z.sql", "ALTER DATABASE db SET\nGO\n").parse_errors, 1);
+}
