@@ -221,24 +221,34 @@ fn resolve_require(from_path: &str, import: &Import, project: &ProjectFiles) -> 
         return project.contains(&p).then_some(p);
     }
     let rel = with_rb(module.trim_start_matches("./"));
-    let mut ancestor = Some(dir);
-    while let Some(a) = ancestor {
-        for root in ["lib", "test", "spec"] {
-            let p = if a.is_empty() { format!("{root}/{rel}") } else { format!("{a}/{root}/{rel}") };
-            if project.contains(&p) {
-                return Some(p);
-            }
-        }
-        // The requiring file is itself under a `lib/` root.
-        if (a == "lib" || a.ends_with("/lib")) && project.contains(&format!("{a}/{rel}")) {
-            return Some(format!("{a}/{rel}"));
-        }
-        ancestor = if a.is_empty() { None } else { Some(a.rsplit_once('/').map_or("", |(d, _)| d)) };
+    if let Some(p) = on_load_path(dir, &rel, project) {
+        return Some(p);
     }
     let suffix = format!("/lib/{rel}");
     let mut hits = project.paths.iter().filter(|p| p.ends_with(&suffix));
     let first = hits.next()?;
     hits.next().is_none().then(|| first.clone())
+}
+
+/// `<ancestor>/{lib,test,spec}/<rel>` for the nearest ancestor of `dir`
+/// that has it, or `<dir>/<rel>` when `dir` is itself a `lib/` root.
+fn on_load_path(dir: &str, rel: &str, project: &ProjectFiles) -> Option<String> {
+    let mut ancestor = Some(dir);
+    while let Some(a) = ancestor {
+        let found = ["lib", "test", "spec"]
+            .iter()
+            .map(|root| if a.is_empty() { format!("{root}/{rel}") } else { format!("{a}/{root}/{rel}") })
+            .find(|p| project.contains(p));
+        if found.is_some() {
+            return found;
+        }
+        let own = format!("{a}/{rel}");
+        if (a == "lib" || a.ends_with("/lib")) && project.contains(&own) {
+            return Some(own);
+        }
+        ancestor = if a.is_empty() { None } else { Some(a.rsplit_once('/').map_or("", |(d, _)| d)) };
+    }
+    None
 }
 
 #[cfg(test)]
