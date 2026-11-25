@@ -1,0 +1,8 @@
+{
+  "models/staging/stg_orders.sql:stg_orders": [],
+  "models/staging/stg_payments.sql:stg_payments": [],
+  "models/marts/orders.sql:orders": [
+    "models/staging/stg_orders.sql:stg_orders",
+    "models/staging/stg_payments.sql:stg_payments"
+  ]
+}

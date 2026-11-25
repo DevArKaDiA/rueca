@@ -1,0 +1,6 @@
+{
+  "migrations/001_create_users.sql:users": [],
+  "migrations/002_create_posts.sql:posts": [
+    "migrations/001_create_users.sql:users"
+  ]
+}

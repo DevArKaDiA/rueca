@@ -1,0 +1,8 @@
+{
+  "schema.sql:billing.invoice": [],
+  "schema.sql:customer": [],
+  "schema.sql:billing.open_invoices": [
+    "schema.sql:billing.invoice",
+    "schema.sql:customer"
+  ]
+}

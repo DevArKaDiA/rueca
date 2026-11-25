@@ -1,0 +1,10 @@
+{
+  "schema.sql:payment": [],
+  "schema.sql:customer_total": [
+    "schema.sql:payment"
+  ],
+  "schema.sql:big_spenders": [
+    "schema.sql:customer_total",
+    "schema.sql:payment"
+  ]
+}

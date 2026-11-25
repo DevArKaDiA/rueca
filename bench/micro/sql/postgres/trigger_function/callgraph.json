@@ -1,0 +1,8 @@
+{
+  "schema.sql:film": [],
+  "schema.sql:touch": [],
+  "schema.sql:film.film_touch": [
+    "schema.sql:film",
+    "schema.sql:touch"
+  ]
+}

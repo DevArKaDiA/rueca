@@ -1,0 +1,7 @@
+CREATE TABLE "ORDERS" (
+  "ID" NUMBER,
+  "AMOUNT" NUMBER(10, 2)
+);
+
+CREATE OR REPLACE TRANSIENT TABLE order_totals AS
+SELECT SUM(amount) AS total FROM orders;

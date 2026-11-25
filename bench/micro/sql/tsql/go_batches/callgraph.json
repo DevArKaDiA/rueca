@@ -1,0 +1,9 @@
+{
+  "procs.sql:orders": [],
+  "procs.sql:getorders": [
+    "procs.sql:orders"
+  ],
+  "procs.sql:report": [
+    "procs.sql:getorders"
+  ]
+}

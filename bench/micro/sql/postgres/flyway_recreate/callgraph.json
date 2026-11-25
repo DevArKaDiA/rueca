@@ -1,0 +1,15 @@
+{
+  "db/migration/V1__init.sql:customers": [],
+  "db/migration/V1__init.sql:orders": [
+    "db/migration/V1__init.sql:customers"
+  ],
+  "db/migration/V2__items.sql:order_items": [
+    "db/migration/V1__init.sql:orders"
+  ],
+  "db/migration/V3__rebuild_orders.sql:orders": [
+    "db/migration/V1__init.sql:customers"
+  ],
+  "db/views/report.sql:order_report": [
+    "db/migration/V3__rebuild_orders.sql:orders"
+  ]
+}

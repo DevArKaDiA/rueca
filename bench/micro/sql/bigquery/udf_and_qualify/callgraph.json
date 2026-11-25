@@ -1,0 +1,8 @@
+{
+  "warehouse.sql:sales.net": [],
+  "warehouse.sql:sales.events": [],
+  "warehouse.sql:sales.latest": [
+    "warehouse.sql:sales.events",
+    "warehouse.sql:sales.net"
+  ]
+}

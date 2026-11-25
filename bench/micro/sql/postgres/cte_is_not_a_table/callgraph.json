@@ -1,0 +1,7 @@
+{
+  "schema.sql:orders": [],
+  "schema.sql:recent": [],
+  "schema.sql:last_week": [
+    "schema.sql:orders"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "models/customers.sql:customers": [],
+  "models/stg_customers.sql:stg_customers": [],
+  "models/customer_report.sql:customer_report": [
+    "models/stg_customers.sql:stg_customers"
+  ]
+}

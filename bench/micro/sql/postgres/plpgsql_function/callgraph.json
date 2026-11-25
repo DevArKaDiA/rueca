@@ -1,0 +1,8 @@
+{
+  "schema.sql:orders": [],
+  "schema.sql:cents_to_euros": [],
+  "schema.sql:order_total": [
+    "schema.sql:cents_to_euros",
+    "schema.sql:orders"
+  ]
+}

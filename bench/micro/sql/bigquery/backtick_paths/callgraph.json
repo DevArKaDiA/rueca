@@ -1,0 +1,6 @@
+{
+  "warehouse.sql:shop.sales.orders": [],
+  "warehouse.sql:shop.sales.daily": [
+    "warehouse.sql:shop.sales.orders"
+  ]
+}

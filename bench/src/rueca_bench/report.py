@@ -458,7 +458,7 @@ def _count(pred: set, gold: set) -> list[int]:
 def _resolved(hits: list[dict], idx: CallableIndex, meta: dict) -> tuple[list[tuple[str, float | None]], int]:
     """(callable id, confidence) of the in-scope callable hits that resolve
     to a gold callable, and how many in-scope callable hits did not."""
-    scoped = [h for h in hits if prediction_in_scope(h.get("path"), meta) and is_callable_label(h.get("label"))]
+    scoped = [h for h in hits if prediction_in_scope(h.get("path"), meta) and is_callable_label(h.get("label"), meta.get("language"))]
     out = []
     for h in scoped:
         k = idx.resolve(h)
@@ -515,7 +515,7 @@ def score_answers(answers: list[dict], graph: dict, meta: dict, cut: float) -> l
         if "lookup" in a:
             lk = a["lookup"]
             hits = lk.get("hits", []) if lk.get("ok") else []
-            hits = [h for h in hits if prediction_in_scope(h.get("path"), meta) and is_callable_label(h.get("label"))]
+            hits = [h for h in hits if prediction_in_scope(h.get("path"), meta) and is_callable_label(h.get("label"), meta.get("language"))]
             row["lk"] = next((i + 1 for i, h in enumerate(hits) if idx.resolve(h) == q), 0)
             if lk.get("seconds") is not None:
                 row["s"].append(round(lk["seconds"], 4))

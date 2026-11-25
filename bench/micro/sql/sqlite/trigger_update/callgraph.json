@@ -1,0 +1,6 @@
+{
+  "schema.sql:city": [],
+  "schema.sql:city.city_trigger_au": [
+    "schema.sql:city"
+  ]
+}

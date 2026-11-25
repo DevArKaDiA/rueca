@@ -1,0 +1,7 @@
+{
+  "schema.sql:real_table": [],
+  "schema.sql:ghost": [],
+  "schema.sql:notes": [
+    "schema.sql:real_table"
+  ]
+}
