@@ -70,7 +70,8 @@ trait items named `Type.method` / `Trait.method`, receivers from `self` /
 `macro_rules!` as callables and calls recovered inside macro arguments,
 `#[test]` / `#[cfg(test)]` / `tests/` tests, `env!` / `option_env!` /
 `env::var` reads, Cargo dependencies for cross-repository package edges),
-shell — `preview` (sh and bash, zsh and ksh best effort; extension-less
+shell — `preview` (POSIX sh, bash, zsh, ksh and bats, one dialect per
+file, zsh read with its own grammar; extension-less
 scripts by their `#!` line; functions in both forms, `source` / `.` paths
 through `$(dirname "$0")` / `${BASH_SOURCE%/*}` / directory variables,
 sourced functions resolved transitively, scripts run by path as calls of
@@ -542,7 +543,7 @@ More languages follow the same gate.
 | [`rueca-lang-kotlin`](crates/rueca-lang-kotlin) | Kotlin extraction, packages shared with Java, receivers and extension functions |
 | [`rueca-lang-swift`](crates/rueca-lang-swift) | Swift extraction, SwiftPM targets as modules, extensions, selectors and labels |
 | [`rueca-lang-proto`](crates/rueca-lang-proto) | Protocol Buffers services, RPC methods, messages and enums; RPC contracts |
-| [`rueca-lang-shell`](crates/rueca-lang-shell) | Shell scripts (sh, bash; zsh / ksh best effort): functions, `source` paths, script runs, bats / shunit2 tests, env reads and providers |
+| [`rueca-lang-shell`](crates/rueca-lang-shell) | Shell scripts (sh, bash, zsh, ksh, bats; one dialect per file): functions, `source` paths, script runs, bats / shunit2 tests, env reads and providers |
 | [`rueca-lang-ruby`](crates/rueca-lang-ruby) | Ruby extraction, constant paths, receivers, `require` paths and gem manifests |
 | [`rueca-lang-sql`](crates/rueca-lang-sql) | SQL in several dialects (sqlparser): tables, columns, views, routines, triggers, migrations, dbt models and macros |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |

@@ -10,6 +10,7 @@ use rueca_model::{Definition, FileFacts, Import, ImportedName, Label, LocalDefId
 
 use crate::bats::{self, TestBlock};
 use crate::builtins::is_env_name;
+use crate::dialect::{self, Dialect, Grammar};
 use crate::locals::{self, FileVarKind, Locals, declaration_flags, declaration_keyword, is_name, text};
 use crate::paths::{PathEval, PathPattern};
 
@@ -29,8 +30,9 @@ const MASK: &str = "•••";
 const LOCALS_TIME: Duration = Duration::from_secs(2);
 
 /// Commands that run their first operand as a command of the same shell
-/// (functions included).
-const SAME_SHELL_RUNNERS: &[&str] = &["time", "!"];
+/// (functions included); `noglob` and `nocorrect` are zsh's precommand
+/// modifiers.
+const SAME_SHELL_RUNNERS: &[&str] = &["time", "!", "noglob", "nocorrect"];
 /// Commands that run their first operand as an external program: a
 /// script path there is a script invocation, a bare name never a function.
 const EXTERNAL_RUNNERS: &[&str] =
@@ -43,21 +45,76 @@ const SCRIPT_EXTENSIONS: &[&str] = &[".sh", ".bash", ".zsh", ".ksh", ".bats"];
 const SHUNIT2_HOOKS: &[&str] = &["setUp", "tearDown", "oneTimeSetUp", "oneTimeTearDown", "suite"];
 
 pub fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<FileFacts, ExtractError> {
-    let repaired = crate::repair::repair(source);
-    let source: &[u8] = &repaired;
-    let tree = parse(source, budget)?;
-    let locals = locals::build(&tree, source, LOCALS_TIME.min(budget.max_parse_time))?;
-    let mut ex = Extractor::new(path, source, locals, budget.max_depth);
-    ex.prescan(tree.root_node());
-    ex.program(tree.root_node());
+    let (dialect, _) = dialect::detect(path, source);
+    facts_of(path, source, dialect, parse_file(dialect, source, budget)?, budget)
+}
+
+/// The facts of a file read with `grammar` whatever its dialect's (for the
+/// grammar comparison of `examples/grammars.rs`).
+pub fn extract_with(path: &str, source: &[u8], grammar: Grammar, budget: &Budget) -> Result<FileFacts, ExtractError> {
+    let (dialect, _) = dialect::detect(path, source);
+    facts_of(path, source, dialect, parse_with(grammar, source, budget)?, budget)
+}
+
+/// `written`: the file as written (signatures, value previews and docs
+/// quote it; the tree is of the repaired text, of the same length).
+fn facts_of(
+    path: &str,
+    written: &[u8],
+    dialect: Dialect,
+    parsed: Parsed<'_>,
+    budget: &Budget,
+) -> Result<FileFacts, ExtractError> {
+    let source: &[u8] = &parsed.source;
+    let locals = locals::build(&parsed.tree, source, parsed.grammar, LOCALS_TIME.min(budget.max_parse_time))?;
+    let mut ex = Extractor::new(path, source, written, dialect, locals, budget.max_depth);
+    ex.prescan(parsed.tree.root_node());
+    ex.program(parsed.tree.root_node());
     let mut facts = ex.facts;
-    facts.parse_errors = count_errors(&tree);
+    facts.parse_errors = parsed.errors;
     facts.line_count = line_count(source);
     Ok(facts)
 }
 
-fn parse(source: &[u8], budget: &Budget) -> Result<Tree, ExtractError> {
-    rueca_extract::parse(&tree_sitter_bash::LANGUAGE.into(), source, budget)
+/// A file as one grammar reads it: the repaired text, the tree and its
+/// ERROR / MISSING count.
+pub(crate) struct Parsed<'s> {
+    pub(crate) grammar: Grammar,
+    pub(crate) source: std::borrow::Cow<'s, [u8]>,
+    pub(crate) tree: Tree,
+    pub(crate) errors: u32,
+}
+
+pub(crate) fn language(grammar: Grammar) -> rueca_extract::tree_sitter::Language {
+    match grammar {
+        Grammar::Bash => tree_sitter_bash::LANGUAGE.into(),
+        Grammar::Zsh => tree_sitter_zsh::LANGUAGE.into(),
+    }
+}
+
+fn parse_with<'s>(grammar: Grammar, source: &'s [u8], budget: &Budget) -> Result<Parsed<'s>, ExtractError> {
+    let repaired = crate::repair::repair(source, grammar);
+    let tree = rueca_extract::parse(&language(grammar), &repaired, budget)?;
+    let errors = count_errors(&tree);
+    Ok(Parsed { grammar, source: repaired, tree, errors })
+}
+
+/// Parses with the dialect's grammar; when that leaves errors and the
+/// other grammar reads the whole file without any, that tree is kept
+/// (tree-sitter-zsh is a fork of tree-sitter-bash that also accepts some
+/// bash the original rejects, and a mislabelled file is still read). A
+/// file both grammars reject keeps its dialect's tree: error counts of two
+/// broken trees say nothing about which one is closer. A bats file is only
+/// read as bash (`@test` blocks, `bats.rs`).
+pub(crate) fn parse_file<'s>(dialect: Dialect, source: &'s [u8], budget: &Budget) -> Result<Parsed<'s>, ExtractError> {
+    let first = parse_with(dialect.grammar(), source, budget)?;
+    if first.errors == 0 || dialect == Dialect::Bats {
+        return Ok(first);
+    }
+    match parse_with(dialect.grammar().other(), source, budget) {
+        Ok(second) if second.errors == 0 => Ok(second),
+        _ => Ok(first),
+    }
 }
 
 /// Parses a fragment (a `trap` handler, an `eval` string) on its own.
@@ -119,9 +176,13 @@ impl Origin {
 }
 
 struct Extractor<'s> {
+    /// The text the grammar read (after the same-length repairs).
     src: &'s [u8],
+    /// The text as written: what signatures, previews and docs quote.
+    written: &'s [u8],
     locals: Locals,
     max_depth: usize,
+    dialect: Dialect,
     facts: FileFacts,
     test_file: bool,
     bats_file: bool,
@@ -140,14 +201,16 @@ struct Extractor<'s> {
 }
 
 impl<'s> Extractor<'s> {
-    fn new(path: &str, src: &'s [u8], locals: Locals, max_depth: usize) -> Self {
+    fn new(path: &str, src: &'s [u8], written: &'s [u8], dialect: Dialect, locals: Locals, max_depth: usize) -> Self {
         Extractor {
             src,
+            written,
             locals,
             max_depth,
+            dialect,
             facts: FileFacts::default(),
-            test_file: is_test_file(path),
-            bats_file: path.ends_with(".bats"),
+            test_file: is_test_file(path) || dialect == Dialect::Bats,
+            bats_file: dialect == Dialect::Bats,
             shunit2: false,
             dir_vars: HashMap::new(),
             dir_conflicts: HashSet::new(),
@@ -160,6 +223,11 @@ impl<'s> Extractor<'s> {
 
     fn text(&self, node: Node<'_>) -> &'s str {
         text(node, self.src)
+    }
+
+    /// The node's text as written in the file.
+    fn written(&self, node: Node<'_>) -> &'s str {
+        text(node, self.written)
     }
 
     // -- pre-scan: path variables, shunit2 -----------------------------------
@@ -278,7 +346,7 @@ impl<'s> Extractor<'s> {
             "command" => self.command(node, ctx, depth),
             "declaration_command" => self.declaration(node, ctx, depth),
             "variable_assignment" => self.assignment(node, ctx, depth),
-            "simple_expansion" | "expansion" => self.expansion(node, ctx, depth),
+            "simple_expansion" | "variable_ref" | "expansion" => self.expansion(node, ctx, depth),
             "comment" => {}
             _ => self.walk_children(node, ctx, depth),
         }
@@ -328,11 +396,12 @@ impl<'s> Extractor<'s> {
         }
     }
 
-    /// `f()` / `function f` / `function f()`: the text before the body.
+    /// `f()` / `function f` / `function f()`: the text before the body,
+    /// then the file's dialect as a comment (`f() # zsh`).
     fn function_signature(&self, node: Node<'_>) -> String {
         let body_start = node.child_by_field_name("body").map_or(node.end_byte(), |b| b.start_byte());
-        let head = String::from_utf8_lossy(&self.src[node.start_byte()..body_start]);
-        first_line(head.trim(), MAX_SIGNATURE_CHARS)
+        let head = String::from_utf8_lossy(&self.written[node.start_byte()..body_start]);
+        format!("{} # {}", first_line(head.trim(), MAX_SIGNATURE_CHARS), self.dialect.as_str())
     }
 
     /// The `#` comment block right above `node` (the shebang excluded).
@@ -341,7 +410,7 @@ impl<'s> Extractor<'s> {
         let mut expected = node.start_position().row;
         let mut cur = node.prev_sibling();
         while let Some(c) = cur.filter(|c| c.kind() == "comment" && c.end_position().row + 1 == expected) {
-            let t = self.text(c);
+            let t = self.written(c);
             if t.starts_with("#!") && c.start_position().row == 0 {
                 break;
             }
@@ -358,6 +427,9 @@ impl<'s> Extractor<'s> {
     /// `Constant`, first binding only.
     fn variable_def(&mut self, name_node: Node<'_>, stmt: Node<'_>, value: Option<Node<'_>>) {
         let name = self.text(name_node).to_string();
+        if !is_name(&name) {
+            return;
+        }
         let label = match self.locals.file_level(&name) {
             Some(FileVarKind::Variable) => Label::Variable,
             Some(FileVarKind::Constant) => Label::Constant,
@@ -392,7 +464,7 @@ impl<'s> Extractor<'s> {
         if is_secret_name(name) {
             return MASK.to_string();
         }
-        let v = first_line(self.text(value), MAX_PREVIEW_CHARS);
+        let v = first_line(self.written(value), MAX_PREVIEW_CHARS);
         if v.is_empty() { "''".to_string() } else { v }
     }
 
@@ -459,6 +531,8 @@ impl<'s> Extractor<'s> {
             match c.kind() {
                 "variable_assignment" => self.declared(c, node, Some(c), exports, ctx, depth),
                 "variable_name" => self.declared(c, node, None, exports, ctx, depth),
+                // tree-sitter-zsh reads a bare name as a `word` argument
+                "word" if is_name(self.text(c)) => self.declared(c, node, None, exports, ctx, depth),
                 "word" => {}
                 _ => self.walk(c, ctx, depth + 1),
             }
@@ -511,7 +585,7 @@ impl<'s> Extractor<'s> {
         // Operands of `${X:-$(f)}`, `${X/$a/$b}`, subscripts.
         let mut cursor = node.walk();
         let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
-        for c in children.into_iter().filter(|c| c.kind() != "variable_name") {
+        for c in children.into_iter().filter(|c| !matches!(c.kind(), "variable_name" | "simple_variable_name")) {
             self.walk(c, ctx, depth + 1);
         }
     }
@@ -735,14 +809,21 @@ fn assignment_name(node: Node<'_>) -> Option<Node<'_>> {
 }
 
 /// The variable an expansion reads (`X` of `$X`, `${X:-d}`, `${#X}`,
-/// `${X[@]}`); `None` for special and positional parameters.
+/// `${X[@]}`); `None` for special and positional parameters. In a
+/// tree-sitter-zsh tree the name is a `simple_variable_name`, directly or
+/// under the node of the expansion's operator (`expansion_default`, …).
 fn expansion_name(node: Node<'_>) -> Option<Node<'_>> {
     let mut cursor = node.walk();
     for c in node.named_children(&mut cursor) {
         match c.kind() {
-            "variable_name" => return Some(c),
+            "variable_name" | "simple_variable_name" => return Some(c),
             "subscript" => return c.child_by_field_name("name"),
             "special_variable_name" => return None,
+            k if k.starts_with("expansion_") => match c.child_by_field_name("name") {
+                Some(n) if n.kind() == "simple_variable_name" => return Some(n),
+                Some(_) => return None,
+                None => {}
+            },
             _ => {}
         }
     }

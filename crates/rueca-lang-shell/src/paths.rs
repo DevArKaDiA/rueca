@@ -177,7 +177,7 @@ impl PathEval<'_> {
                     self.parts(c, out, depth + 1);
                 }
             }
-            "simple_expansion" | "expansion" => out.push(self.expansion(node)),
+            "simple_expansion" | "variable_ref" | "expansion" => out.push(self.expansion(node)),
             "command_substitution" => out.push(self.substitution(node, depth)),
             _ => out.push(Part::Dynamic),
         }

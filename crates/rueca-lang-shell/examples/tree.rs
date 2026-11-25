@@ -1,8 +1,11 @@
-//! Prints the syntax tree of a file: `cargo run -p rueca-lang-shell --example tree -- <path>`.
+//! Prints the syntax tree of a file: `cargo run -p rueca-lang-shell --example tree -- <path> [--zsh]`
+//! (tree-sitter-bash, or tree-sitter-zsh with `--zsh`).
 fn main() {
     let path = std::env::args().nth(1).expect("usage: tree <path>");
     let src = std::fs::read(&path).expect("read");
-    let lang: tree_sitter::Language = tree_sitter_bash::LANGUAGE.into();
+    let zsh = std::env::args().any(|a| a == "--zsh");
+    let lang: tree_sitter::Language =
+        if zsh { tree_sitter_zsh::LANGUAGE.into() } else { tree_sitter_bash::LANGUAGE.into() };
     let mut p = tree_sitter::Parser::new();
     p.set_language(&lang).unwrap();
     let t = p.parse(&src, None).unwrap();

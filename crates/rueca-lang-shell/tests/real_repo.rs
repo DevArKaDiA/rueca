@@ -12,16 +12,19 @@
 //! directories, `vendor/` and `node_modules/` skipped), checks the
 //! extractor's invariants and determinism, and prints totals, the `source`
 //! imports that resolve to a file of the checkout, env reads and
-//! providers, the share of files with parse errors (bash and zsh apart) and
-//! timing. Cross-file resolution is tested (not ignored) in
+//! providers, the share of files with parse errors (zsh files, by the
+//! pack's dialect rules, apart from the others) and timing. Cross-file resolution is tested (not ignored) in
 //! `rueca-resolve/tests/shell.rs`.
 //!
-//! Recorded on 2026-11-25 (extractor version 1; files with parse errors /
-//! files, extension-less scripts and tests included): nvm v0.41.0 2 / 400,
-//! acme.sh v3.1.7 8 / 304, bash-it v3.2.0 4 / 358, bats-core v1.13.0 4 / 293
-//! (two fixtures written to fail), ohmyzsh at `799f9a8` 303 / 586 (288 of its
-//! 545 zsh files: glob qualifiers, `for x (…)` loops, nested `${${…}}`,
-//! subscript flags).
+//! Recorded on 2026-11-25 with one grammar for every file (extractor
+//! version 1; files with parse errors / files, extension-less scripts and
+//! tests included): nvm v0.41.0 2 / 400, acme.sh v3.1.7 8 / 304, bash-it
+//! v3.2.0 4 / 358, bats-core v1.13.0 4 / 293 (two fixtures written to
+//! fail), ohmyzsh at `799f9a8` 303 / 586 (288 of its 545 zsh files). With a
+//! grammar per dialect (extractor version 2; `examples/dialects.rs` prints
+//! the table per dialect): nvm 1 / 402, acme.sh 2 / 304, bash-it 1 / 358,
+//! bats-core 2 / 285, ohmyzsh at `1eebae3` 9 / 572 (8 of its 556 zsh
+//! files).
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -64,12 +67,16 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, all: &mut Vec<PathBuf>) {
 
 /// Prints the line of the first parse error of a file.
 fn print_first_error(p: &str, source: &[u8]) {
-    let language = tree_sitter_bash::LANGUAGE.into();
+    let Some(stats) = rueca_lang_shell::stats(p, source) else { return };
+    let language: rueca_extract::tree_sitter::Language = match stats.grammar {
+        rueca_lang_shell::Grammar::Bash => tree_sitter_bash::LANGUAGE.into(),
+        rueca_lang_shell::Grammar::Zsh => tree_sitter_zsh::LANGUAGE.into(),
+    };
     let mut parser = rueca_extract::tree_sitter::Parser::new();
     if parser.set_language(&language).is_err() {
         return;
     }
-    let source = &rueca_lang_shell::repaired_source(source)[..];
+    let source = &rueca_lang_shell::repaired_source(source, stats.grammar)[..];
     let Some(tree) = parser.parse(source, None) else { return };
     let mut stack = vec![tree.root_node()];
     while let Some(n) = stack.pop() {
@@ -104,8 +111,7 @@ struct Totals {
 }
 
 impl Totals {
-    fn record(&mut self, p: &str, f: &FileFacts, project: &ProjectFiles) {
-        let zsh = p.ends_with(".zsh") || p.ends_with(".zsh-theme");
+    fn record(&mut self, p: &str, zsh: bool, f: &FileFacts, project: &ProjectFiles) {
         self.files += 1;
         self.zsh_files += usize::from(zsh);
         if f.parse_errors > 0 {
@@ -172,7 +178,8 @@ fn extract_real_repository() {
                 if show_errors && f.parse_errors > 0 {
                     print_first_error(&p, &source);
                 }
-                totals.record(&p, &f, &project);
+                let zsh = rueca_lang_shell::dialect::detect(&p, &source).0 == rueca_lang_shell::Dialect::Zsh;
+                totals.record(&p, zsh, &f, &project);
             }
             Err(e) => eprintln!("SKIP {p}: {e}"),
         }
@@ -180,7 +187,7 @@ fn extract_real_repository() {
     let t = &totals;
     let pct = |a: usize, b: usize| if b == 0 { 0.0 } else { 100.0 * a as f64 / b as f64 };
     eprintln!(
-        "{} files ({} zsh) in {:?}; parse errors: {} files ({:.1}%), zsh {} ({:.1}%), bash/sh {} ({:.1}%)",
+        "{} files ({} zsh) in {:?}; parse errors: {} files ({:.1}%), zsh {} ({:.1}%), others {} ({:.1}%)",
         t.files,
         t.zsh_files,
         started.elapsed(),
