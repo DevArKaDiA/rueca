@@ -15,47 +15,87 @@ use std::borrow::Cow;
 
 /// Applies the rules of the module docs; borrows when nothing changes.
 pub(crate) fn repair(source: &[u8]) -> Cow<'_, [u8]> {
-    let mut out: Option<Vec<u8>> = None;
-    let mut set = |i: usize, b: u8| out.get_or_insert_with(|| source.to_vec())[i] = b;
+    let mut r = Repair { src: source, out: None, depth: 0 };
     let mut line_start = true;
-    let mut depth = 0usize;
     let mut i = 0;
     while i < source.len() {
         let b = source[i];
-        let next = source.get(i + 1).copied().unwrap_or(b' ');
-        match b {
-            b'\\' if line_start && is_command_start(next) => set(i, b' '),
-            b'\\' => {
-                if depth > 0 && matches!(next, b'&' | b'<' | b'>') {
-                    set(i + 1, b'_');
-                }
-                i += 1;
-            }
-            b'$' if next == b'{' => {
-                depth += 1;
-                if source.get(i + 2) == Some(&b'(') {
-                    if let Some(close) = flags_end(source, i + 2) {
-                        (i + 2..=close).for_each(|k| set(k, b'_'));
-                        i = close;
-                    }
-                } else {
-                    i += 1;
-                }
-            }
-            b'}' if depth > 0 => depth -= 1,
-            b':' if depth > 0
-                && next == b'$'
-                && source.get(i + 2).is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_') =>
-            {
-                set(i + 1, b' ');
-            }
-            b'&' | b'<' | b'>' if depth > 0 => set(i, b'_'),
-            _ => {}
-        }
-        line_start = b == b'\n' || (line_start && (b == b' ' || b == b'\t'));
-        i += 1;
+        i = r.byte(i, line_start);
+        line_start = b == b'\n' || (line_start && matches!(b, b' ' | b'\t'));
     }
-    out.map_or(Cow::Borrowed(source), Cow::Owned)
+    r.out.map_or(Cow::Borrowed(source), Cow::Owned)
+}
+
+/// The scan: the text, the copy once something changes, and the nesting
+/// of `${…}` at the current byte.
+struct Repair<'s> {
+    src: &'s [u8],
+    out: Option<Vec<u8>>,
+    depth: usize,
+}
+
+impl Repair<'_> {
+    fn set(&mut self, i: usize, b: u8) {
+        self.out.get_or_insert_with(|| self.src.to_vec())[i] = b;
+    }
+
+    fn at(&self, i: usize) -> u8 {
+        self.src.get(i).copied().unwrap_or(b' ')
+    }
+
+    /// Handles the byte at `i`; the index of the next byte to look at.
+    fn byte(&mut self, i: usize, line_start: bool) -> usize {
+        let next = self.at(i + 1);
+        match self.src[i] {
+            b'\\' => self.backslash(i, line_start, next),
+            b'$' if next == b'{' => self.expansion_start(i),
+            b'}' if self.depth > 0 => {
+                self.depth -= 1;
+                i + 1
+            }
+            b':' if self.depth > 0 && next == b'$' && is_name_start(self.at(i + 2)) => {
+                self.set(i + 1, b' ');
+                i + 1
+            }
+            b'&' | b'<' | b'>' if self.depth > 0 => {
+                self.set(i, b'_');
+                i + 1
+            }
+            _ => i + 1,
+        }
+    }
+
+    /// `\cmd` at the start of a line loses its backslash; `\&` (`\<`,
+    /// `\>`) inside an expansion becomes `\_`; any other escape is skipped.
+    fn backslash(&mut self, i: usize, line_start: bool, next: u8) -> usize {
+        if line_start && is_command_start(next) {
+            self.set(i, b' ');
+            return i + 1;
+        }
+        if self.depth > 0 && matches!(next, b'&' | b'<' | b'>') {
+            self.set(i + 1, b'_');
+        }
+        i + 2
+    }
+
+    /// `${`: one level deeper; zsh flags right after it are masked.
+    fn expansion_start(&mut self, i: usize) -> usize {
+        self.depth += 1;
+        if self.at(i + 2) != b'(' {
+            return i + 2;
+        }
+        match flags_end(self.src, i + 2) {
+            Some(close) => {
+                (i + 2..=close).for_each(|k| self.set(k, b'_'));
+                close + 1
+            }
+            None => i + 2,
+        }
+    }
+}
+
+fn is_name_start(b: u8) -> bool {
+    b.is_ascii_alphabetic() || b == b'_'
 }
 
 fn is_command_start(b: u8) -> bool {
