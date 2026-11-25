@@ -39,7 +39,8 @@ def tool_binary(key: str) -> Path:
 
 def tool_available(key: str) -> tuple[bool, str]:
     spec = tool_spec(key)
-    if _platform(spec) is None:
+    image_only = bool(spec.get("image")) and not spec.get("binaries")
+    if _platform(spec) is None and not image_only:
         return False, f"no pinned {spec['name']} binary for {cbm_platform_key()}"
     if spec.get("image"):
         from .phpstan import docker_available

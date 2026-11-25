@@ -1,0 +1,6 @@
+{
+  "Main.cs:Catalog.Available": [
+    "Main.cs:Product.InStock"
+  ],
+  "Main.cs:Product.InStock": []
+}

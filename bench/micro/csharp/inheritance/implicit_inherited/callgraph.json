@@ -1,0 +1,6 @@
+{
+  "Main.cs:Base.Log": [],
+  "Main.cs:Service.Run": [
+    "Main.cs:Base.Log"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "Clock.cs:Clock.Tick": [],
+  "Main.cs:Endpoint.Handle": [
+    "Clock.cs:Clock.Tick"
+  ]
+}

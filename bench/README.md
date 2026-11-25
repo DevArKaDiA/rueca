@@ -28,7 +28,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Multi-step** (RFC 0009 §8, experimental code mode) | "How many tokens does a multi-step question cost as tool calls, as one code-mode script, and with cbm?" | reported; RFC 0009's per-language graduation gate |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
-the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust,shell}/` and the
+the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust,shell,csharp}/` and the
 env-bridge labels in `labels/bridge/`). Datasets, repositories and tool
 binaries are fetched at runtime at pinned revisions into `bench/.cache`
 (git-ignored), so nothing with an unclear licence is vendored.
@@ -54,7 +54,7 @@ uv run --project bench rueca-bench check                 # regression check vs t
 
 - `setup [--lang FAMILY ...]` and `run ... [--lang FAMILY ...]` restrict work
   to language families (manifest `[languages]` keys: `python`, `ecma`,
-  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`) and/or `data` (the data-format suite);
+  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`, `csharp`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
 - `run --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all|a,b} --suite {s1,s3,data,health,org,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--workers N] [--force] [--prune]`.
   `--split` restricts S1 to one split; the `vector`, `rueca-hybrid` and
@@ -419,6 +419,9 @@ pinned `linux-amd64` scip-clang binary), a Rust toolchain with `cargo`,
 `rustc` and the `rust-src` component on `PATH` (rust-analyzer's `scip`
 command runs `cargo metadata`, and `cargo check` for build scripts and proc
 macros; the pinned rust-analyzer is a release binary, not the toolchain's
+own), Docker for the C# gold (scip-dotnet's pinned `linux/amd64` image,
+≈ 2.4 GB in Docker's storage, with the .NET SDK inside; `dotnet restore`
+needs network to nuget.org; nothing .NET is installed on the host
 own), network for `setup` (and for the
 first token count: tiktoken fetches `cl100k_base` once into
 `bench/.cache/tiktoken`, verified by its own hash). `git-lfs` is not needed:
@@ -453,7 +456,11 @@ coreutils and ruff are the large ones) and the 3 S3 repositories ≈ 10 MB,
 rust-analyzer 37 MB (+ 14 MB archive), and what rust-analyzer's cargo runs
 leave in the cache: the crates.io registry (`.cache/registry`, ≈ 70 MB) and
 build-script / proc-macro outputs (`.cache/cargo-target`, ≈ 120 MB), both
-deletable after `setup`. With `--prune` a full
+deletable after `setup`. C# adds ≈ 1.5 GB: shallow per-commit clones of the
+11 S1 repositories and the 3 S3 repositories (≈ 0.2 GB), the scip-dotnet
+image (≈ 2.4 GB in Docker's storage, not counted), and the NuGet packages
+`dotnet restore` downloads for the S3 gold (`.cache/nuget`, ≈ 1 GB,
+deletable after `setup`). With `--prune` a full
 run peaks at about 2 GB of cache (clones are deleted as soon as their runs
 are done; gold, datasets and tools stay). The vector arm adds its cache
 (`.cache/vectors`, 2 KB per distinct function text at 1024 dimensions, per
@@ -503,7 +510,10 @@ Adding a language is data plus, at most, one labeler entry:
    scip-java a `javac` source list), `include` / `exclude` path prefixes,
    `license`, optional `split` (`calibration`, `diagnostic`), or another
    gold method (`phpstan` for PHP, `shell` for the code-backed shell
-   labeler); and a `[[s3.micro]]` micro-benchmark
+   labeler); scip-dotnet takes `dotnet = { projects
+   = [...], framework = "net8.0", remove = ["global.json"] }`: a scratch
+   copy of the tree gets a generated solution of the listed projects, each
+   made single-target, and runs in the pinned image; and a `[[s3.micro]]` micro-benchmark
    (`format = "rueca"` with snippets under `bench/micro/<lang>/`,
    `crosscheck = "<SCIP indexer>"`, `crosscheck_args` for npm indexers;
    a snippet carries whatever its indexer needs to see a project: Go a
@@ -609,6 +619,7 @@ stays untuned:
 | cpp (13) | randombit/botan (5), zeek/zeek (5), ccache/ccache (3); SWE-rebench V2 | — |
 | rust (15) | tokio-rs/bytes (5), tokio-rs/tracing (5), sharkdp/fd (5); Multi-SWE-bench | tokio-rs/bytes v1.12.1 (rust-analyzer) |
 | shell (0) | none (no dataset has shell instances) | bats-core/bats-core v1.13.0 (shell labeler) |
+| csharp (11) | btcpayserver/btcpayserver (5), ant-design-blazor/ant-design-blazor (3), spectreconsole/spectre.console (3); SWE-rebench V2 | aaubry/YamlDotNet v18.1.0 (scip-dotnet) |
 
 C++ stops at 13: outside the gated repositories, Multi-SWE-bench has only
 cpp-httplib (one eligible instance) and SWE-rebench V2 only zeek (70
@@ -698,6 +709,18 @@ per language (13 for C++) on 24 repositories of its own (above; 45 of the
 78 added when it grew carry assembled gold: SWE-PolyBench
 `modified_nodes` or ContextBench context); they are run by every arm and
 reported apart.
+
+C# (39): SWE-bench Multilingual and Multi-SWE-bench have no C#
+instances; SWE-rebench V2 has 173 C# rows, 134 of them rated `A` by its
+own LLM screen (the PHP filter). Gated: microsoft/kiota (25 of its 105
+`A` rows, by sha256 of the instance id), devlooped/moq (all 7), and every
+eligible row of the other small repositories (dapr/dotnet-sdk 2,
+radzen-blazor, grpc-dotnet, yarp, dotnet-script, mathnet-numerics 1
+each); every patch touches a non-test `.cs` file. Calibration: the three
+other repositories with at least three `A` rows (btcpayserver 5,
+ant-design-blazor 3, spectre.console 3). Function gold comes from the
+tree-sitter labeler (C# test projects, `*.Tests` / `*.UnitTests` / …
+directories, are test paths).
 
 Rust (43): every SWE-bench Multilingual Rust instance (tokio 9, bat 8,
 axum 7, ruff 7, coreutils 5, nushell 5, ripgrep 2; every patch touches a
@@ -1010,6 +1033,7 @@ labeler's qualified names; overloads (Java, C++) are told apart as
 | Java | 65 | 195 | 109 | packages (same package, single-type / on-demand / static imports, fully qualified calls), methods (`this`, implicit this, typed receivers, `var`, chains, builders), overloads (arity, type, varargs, widening, constructors), constructors (`new`, `this(...)`, `super(...)`), inheritance and overrides, interfaces (default, static, abstract, `I.super.m()`), nested / inner / anonymous / local classes, lambdas and method references, statics, enums and records, generics |
 | C | 26 | 82 | 50 | prototypes in headers vs definitions, `static` same-name functions in two files, `static inline` in headers, includes from sub-directories, function pointers and dispatch tables, function-like macros, opaque handles and callbacks |
 | Shell | 43 | 109 | 54 | functions (both forms, recursion, nested definitions, wrappers named like utilities, a function passed as an argument), call positions (`$(…)`, backticks, pipelines, `&&` / `||`, subshells, `&`, conditions and loops, `<(…)`, `!`, `time`, here-documents, arithmetic), runners (`command`, `exec`, `xargs`, `sudo`, `env`, `nohup`, `eval` literals, `trap` handlers), sourcing (`$(dirname "$0")`, `.` literal paths, `${BASH_SOURCE%/*}`, directory variables, transitive sources, a library calling a sibling library, the own definition winning, one name in two sourced files, sourcing loops, unknown prefixes, `\.` after a word), script runs (by path, through `bash` / `sh -c` / `zsh`, a script named like a function), env syntax around calls (`VAR=1 cmd`, `${X:-$(f)}`, `export -f`, a variable named like a function), zsh (common syntax, parameter flags, `${0:A:h}`), name traps (dynamic command words, strings and comments, one name in unrelated scripts) |
+| C# | 72 | 164 | 76 | methods (`this`, typed parameters / fields / properties, `var`, conditional access `?.`, `out var`, patterns, casts and `as`, `foreach`, chains through return types, same name in two types), statics (`using static`, inherited statics, factory chains), inheritance (inherited and implicit-`this` calls, `base.M()`, overrides through base- and sub-typed receivers, multilevel), interfaces (interface and concrete receivers, default interface methods, explicit implementations), constructors (`new`, `: base(…)`, `: this(…)`, target-typed `new()`, object initializers, exception constructors), overloads (arity, argument type, optional parameters, `params`), namespaces (same namespace in two files, `using`, enclosing namespace, fully qualified calls, aliases, a type name in two namespaces, `global using`, nested blocks), partial classes over two files, extension methods (receiver and static form), nested types, local functions, generics (generic classes and methods, constrained type parameters), lambdas, LINQ, method groups, `async` / `await`, records, structs, enums and switch expressions, expression-bodied properties, traps (a local delegate shadowing a method, `nameof`, strings and comments, a library method named like a project one), recursion, top-level statements |
 | Rust | 58 | 190 | 133 | functions (nested `fn`, items local to a function, turbofish, recursion), modules (inline `mod`, `mod` file and `mod.rs`, same-name functions in two modules, `use` / glob / alias imports, `super::` / `crate::`, `pub use` re-export chains, library + binary crate), methods (`self`, `Self::` / `Type::new()`, builder chains, field receivers, `&T` / `Box<T>` / `Option<T>` / slice receivers, two impl blocks in two files, returned receivers), traits (default methods, `impl Tr for T` on a concrete receiver, `T: Tr` bounds and `where`, `dyn Tr`, `impl Tr` parameters and returns, supertraits, `T::create()` / `<T as Tr>::f()`, blanket impls, operator traits, `Default`, `From` / `Into`), closures and iterator adapters, `macro_rules!` (invoked, in another module with `#[macro_use]`, `crate::m!`, inside `println!`), calls in `println!` / `format!` / `vec!` / `assert_eq!` arguments, derives, struct / tuple-struct / enum-variant literals, generics, traps (strings and comments, a closure shadowing a function, a method and a function of one name, `?`, test functions) |
 | C++ | 46 | 148 | 82 | namespaces (nested, `using`, aliases, anonymous), classes (inline and out-of-line methods across `.h` / `.cpp`, implicit `this`, static methods, nested classes), overloads, constructors, inheritance and virtuals, templates, operators, lambdas, name traps |
 
@@ -1115,7 +1139,21 @@ return points to `Page.render`, the impl `make` returns, not to the trait
 method), shell vs the shell labeler 51 / 54 with no extra edge (40 of 43
 snippets identical: the labeler, like the S3 gold, follows neither `time
 f` nor `eval 'f'`, and gives no edge for a name two sourced files define,
-where the key follows the order the script sources them).
+where the key follows the order the script sources them), C# vs scip-dotnet 72 / 76 with no extra edge (68 of 72 snippets
+identical: scip-dotnet records no occurrence for `: base(…)` / `: this(…)`
+initializers, target-typed `new()` and explicit generic calls `M<T>()`).
+**C#**: callables are methods (with or without a body), constructors,
+destructors, operators, conversion operators and local functions (named as
+in the pack: `Type.member`, constructors `Type.Type`, explicit interface
+implementations `Type.IFace.member`, local functions `Type.method.local`);
+a call on a typed receiver points to the member of the static type
+(interface and abstract receivers to the declaration, no expansion to
+implementations); `new T(…)`, target-typed `new(…)`, `: base(…)` and
+`: this(…)` point to the constructor the arguments choose (none when the
+type has no explicit constructor); an extension method called on a value
+points to the extension method; property and indexer accessors, operators
+used as operators, delegate invocations, method groups (`return Tick;`)
+and `nameof` give none; lambdas and LINQ belong to the enclosing method.
 
 **Gold from PyCG** (Apache-2.0, **diagnostic**): the hand-written
 `callgraph.json` of every snippet of the PyCG micro-benchmark, restricted to
@@ -1830,15 +1868,15 @@ and the summary printed at the end.
 | SWE-bench Multilingual (`SWE-bench/SWE-bench_Multilingual`) | HF revision + sha256 | MIT | S1 TS/JS issues, patches |
 | LocAgent / Loc-Bench labels (`czlll/SWE-bench_Lite`) | HF revision + sha256 | none stated on the card (LocAgent code: Apache-2.0) | S1 function gold |
 | ContextBench (`Contextbench/ContextBench`) | HF revision + sha256 | none stated on the card (ContextBench code: Apache-2.0) | S1 context-file gold |
-| SWE-rebench V2 (`nebius/SWE-rebench-V2`) | HF revision + sha256 | CC-BY-4.0 (attribution: Nebius, SWE-rebench V2) | S1 PHP issues, patches (Twig, monolog, commonmark); calibration repositories of every language but Rust |
+| SWE-rebench V2 (`nebius/SWE-rebench-V2`) | HF revision + sha256 | CC-BY-4.0 (attribution: Nebius, SWE-rebench V2) | S1 PHP issues, patches (Twig, monolog, commonmark); S1 C# issues, patches (kiota, moq and six smaller repositories); calibration repositories of every language but Rust |
 | Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`), four C++, three Rust, two C, two Go, two Java and one JS JSONL file | HF revision + per-file sha256 | CC0 (dataset README; upstream repository licences apply) | S1 C++ issues, patches (fmt, nlohmann/json, Catch2, simdjson); calibration repositories: Rust (bytes, tracing, fd), C (zstd, ponyc), Go (grpc-go, go-zero), Java (jackson-core, mockito), JS (dayjs) |
 | PyCG micro-benchmark (`vitsalis/PyCG`) | commit | Apache-2.0 | S3 Python call-graph gold (diagnostic) |
 | PHP micro-benchmark (`bench/micro/php`) | in repository | Apache-2.0 (Rueca's own labels) | S3 PHP call-graph gold |
-| Python / TS/JS / Go / Java / C / C++ / Rust / shell micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
+| Python / TS/JS / Go / Java / C / C++ / Rust / shell / C# micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell,csharp}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
 | Env bridge labels (`bench/labels/bridge`) | in repository | Apache-2.0 (Rueca's own labels) | data-format suite gold |
 | PHPStan (`phpstan/phpstan`) release PHAR | version + sha256 | MIT | S3 PHP gold (run in Docker, never vendored) |
 | `php:8.3-cli` Docker official image | digest | PHP-3.01 (separate process) | runtime for PHPStan |
-| tree-sitter-php, -go, -java, -c, -cpp, -rust, -bash (PyPI) | `uv.lock` | MIT | bench labeler for PHP, Go, Java, C, C++, Rust, shell (and the shell S3 gold) |
+| tree-sitter-php, -go, -java, -c, -cpp, -rust, -bash, -c-sharp (PyPI) | `uv.lock` | MIT | bench labeler for PHP, Go, Java, C, C++, Rust, shell (and the shell S3 gold), C# |
 | PyYAML, python-hcl2 (+ lark, regex) (PyPI) | `uv.lock` | MIT / MIT (+ MIT, Apache-2.0) | data-format reference parsers |
 | numpy (PyPI) | `uv.lock` | BSD-3-Clause | bootstrap intervals |
 | tiktoken (PyPI) + the `cl100k_base` encoding file | `uv.lock`; the encoding by tiktoken's own sha256 | MIT | efficiency (tokens per correct answer) |
@@ -1847,6 +1885,7 @@ and the summary printed at the end.
 | scip-clang 0.4.1 | release binary sha256 (darwin-arm64, linux-amd64) | Apache-2.0 | S3 C / C++ gold, micro cross-checks |
 | scip-java 0.13.2 | release launcher sha256 (JVM, any platform) | Apache-2.0 | S3 Java gold, Java micro cross-check |
 | rust-analyzer 2026-11-09 (`0.3.3113-standalone`, e5e7830640) | release archive (`.gz`) + binary sha256 (darwin-arm64, linux-amd64) | MIT OR Apache-2.0 | S3 Rust gold (`rust-analyzer scip`), Rust micro cross-check; runs the host's `cargo` (crates.io dependencies of the indexed repositories are downloaded into the cache, never vendored) |
+| scip-dotnet 0.2.16 (`sourcegraph/scip-dotnet`, `linux/amd64` image with the .NET SDK 10.0.402) | Docker image digest | Apache-2.0 | S3 C# gold, C# micro cross-check; restores the indexed projects' NuGet packages from nuget.org into the cache (never vendored) |
 | `eclipse-temurin:21-jdk` Docker official image | digest | GPL-2.0 with Classpath Exception (separate process) | runtime for javac + scip-java |
 | `error_prone_annotations` 2.50.0 (Maven Central) | sha256 | Apache-2.0 | compile-only classpath for the gson gold |
 | codebase-memory-mcp v0.12.0 | release URL + archive and binary sha256 (darwin-arm64, linux-amd64) | MIT | `cbm` arm |
@@ -1981,6 +2020,22 @@ file paths and function names of the public corpus repositories.
   out of scope anyway). C/C++ golds built on Linux (CI) use the system
   headers instead of the macOS SDK; the in-project edges are the same up to
   `#if` branches on the platform.
+- **scip-dotnet gold for C#** (serilog, eShopOnWeb, YamlDotNet, micro):
+  - the index is Roslyn's for one configuration: multi-targeting projects
+    are indexed for one framework (`net8.0`, manifest `dotnet.framework`),
+    so the other targets' `#if` branches have no definitions;
+  - scip-dotnet records `new T(…)` as a reference to the type, not to the
+    constructor: the gold turns it into a call of `T`'s constructors, one
+    equivalence class when `T` has several (the overload is not recorded);
+  - no occurrence at all for constructor initializers (`: base(…)`,
+    `: this(…)`), target-typed `new(…)`, and calls or constructions with
+    explicit generic arguments (`M<T>()`, `new Box<T>()`), so those true
+    calls are not gold edges (an arm reporting them loses precision);
+  - a call of a constructed generic method is recorded with the symbol of
+    the first overload of its name (`Write().` for `Write<T>(…)`); the gold
+    sends such a call to the generic overloads that take its argument
+    count (an equivalence class when several);
+  - local functions are `local` symbols, bound per document.
 - **rust-analyzer gold for Rust** (serde_json, ripgrep, bytes, micro):
   - calls on a generic `T: Trait`, an `impl Trait` parameter or a `dyn
     Trait` receiver resolve to the trait method only, so trait impls get no
@@ -2064,6 +2119,11 @@ Rule changes that move published numbers, newest first (the results files
 carry the S3 schema version; rows scored under an older schema are never
 carried forward).
 
+- **2026-11-25 — C# gold and test paths.** scip.py gains three grammar
+  flags used by C# only (`local_callables`, `type_constructions`,
+  `generic_overloads`, *Known biases*), and the shared test-path heuristic
+  gains `test_dir_suffixes` (C# `Foo.Tests/` projects); no other language
+  declares either, so no published number moves.
 - **2026-11-17 — S2, first published run.** Gold labelers: `net/http`
   ServeMux routes, generic tonic wrapper impls, Python verb calls with a
   `path=` / `url=` keyword only, stub / servicer modules re-exporting a

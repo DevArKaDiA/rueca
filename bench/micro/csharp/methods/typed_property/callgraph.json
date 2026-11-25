@@ -1,0 +1,6 @@
+{
+  "Main.cs:Bike.Ride": [
+    "Main.cs:Wheel.Spin"
+  ],
+  "Main.cs:Wheel.Spin": []
+}

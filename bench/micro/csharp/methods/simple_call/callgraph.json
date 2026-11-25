@@ -1,0 +1,6 @@
+{
+  "Main.cs:Calculator.Add": [],
+  "Main.cs:Calculator.Twice": [
+    "Main.cs:Calculator.Add"
+  ]
+}

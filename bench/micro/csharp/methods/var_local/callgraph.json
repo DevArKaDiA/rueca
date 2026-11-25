@@ -1,0 +1,6 @@
+{
+  "Main.cs:Parser.Parse": [],
+  "Main.cs:Tool.Run": [
+    "Main.cs:Parser.Parse"
+  ]
+}

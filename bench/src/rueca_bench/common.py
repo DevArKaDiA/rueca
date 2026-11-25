@@ -95,6 +95,7 @@ class LanguageFamily:
     exclude_suffixes: tuple[str, ...]
     test_files: tuple[str, ...]
     test_dirs: tuple[str, ...] = ()
+    test_dir_suffixes: tuple[str, ...] = ()
 
 
 _FAMILIES: dict[str, LanguageFamily] | None = None
@@ -114,6 +115,7 @@ def families() -> dict[str, LanguageFamily]:
                 exclude_suffixes=tuple(spec.get("exclude_suffixes", [])),
                 test_files=tuple(spec.get("test_files", [])),
                 test_dirs=tuple(spec.get("test_dirs", [])),
+                test_dir_suffixes=tuple(spec.get("test_dir_suffixes", [])),
             )
         _FAMILIES = out
     return _FAMILIES
@@ -160,6 +162,7 @@ def _test_file_re() -> re.Pattern:
 
 
 _EXTRA_TEST_DIRS: frozenset[str] | None = None
+_TEST_DIR_SUFFIXES: tuple[str, ...] | None = None
 
 
 def _extra_test_dirs() -> frozenset[str]:
@@ -169,16 +172,27 @@ def _extra_test_dirs() -> frozenset[str]:
     return _EXTRA_TEST_DIRS
 
 
+def _test_dir_suffixes() -> tuple[str, ...]:
+    global _TEST_DIR_SUFFIXES
+    if _TEST_DIR_SUFFIXES is None:
+        _TEST_DIR_SUFFIXES = tuple(sorted({s for fam in families().values() for s in fam.test_dir_suffixes}))
+    return _TEST_DIR_SUFFIXES
+
+
 def is_test_path(path: str) -> bool:
     """Same heuristic for gold and every arm (documented in bench/README.md):
     a test directory segment (built in, plus every language's `test_dirs`,
-    e.g. Go `testdata`), or a file name matching any language's `test_files`
-    pattern."""
+    e.g. Go `testdata`, or a directory name ending with one of its
+    `test_dir_suffixes`, e.g. C# `Foo.Tests`), or a file name matching any
+    language's `test_files` pattern."""
     parts = path.split("/")
     if parts and parts[0] in _TOP_LEVEL_TEST_SEGMENTS:
         return True
     extra = _extra_test_dirs()
     if any(p in _TEST_SEGMENTS or p in extra for p in parts[:-1]):
+        return True
+    suffixes = _test_dir_suffixes()
+    if suffixes and any(p.endswith(suffixes) for p in parts[:-1]):
         return True
     return bool(_test_file_re().match(parts[-1]))
 

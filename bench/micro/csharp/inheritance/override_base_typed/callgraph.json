@@ -1,0 +1,7 @@
+{
+  "Main.cs:Bus.Send": [
+    "Main.cs:Handler.Handle"
+  ],
+  "Main.cs:Handler.Handle": [],
+  "Main.cs:Ping.Handle": []
+}

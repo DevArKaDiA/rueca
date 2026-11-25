@@ -1,0 +1,7 @@
+{
+  "Main.cs:Log.Info@5": [],
+  "Main.cs:Log.Info@9": [],
+  "Main.cs:Log.Many": [
+    "Main.cs:Log.Info@9"
+  ]
+}

@@ -19,6 +19,8 @@ Raw arm outputs are cached in .cache/runs/s3/<arm>/<suite>.json.
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -137,6 +139,60 @@ def run_scip_java(root: Path, out: Path, sources: list[str], classpath: list[str
     res = sh(["docker", "run", "--rm", "--network=none", *mounts, spec["image"], "sh", "-c", script], timeout=3600)
     if (work / "index.scip").exists():
         shutil.move(str(work / "index.scip"), out)
+    shutil.rmtree(work, ignore_errors=True)
+    return res
+
+
+def _dotnet_prepare(tree: Path, dotnet: dict) -> None:
+    """Bench-side preparation of a C# tree for scip-dotnet (manifest
+    `dotnet`): `framework` makes each listed multi-targeting project
+    single-target (MSBuildWorkspace has no `Compile` target in a
+    multi-targeting outer build), `remove` deletes files such as a
+    `global.json` pinning an SDK the image does not ship."""
+    for rel in dotnet.get("remove", []):
+        (tree / rel).unlink(missing_ok=True)
+    fw = dotnet.get("framework")
+    if not fw:
+        return
+    for rel in dotnet["projects"]:
+        p = tree / rel
+        text = p.read_text()
+        if "<TargetFrameworks" not in text:
+            continue
+        text = re.sub(r"<TargetFrameworks[^>]*>[^<]*</TargetFrameworks>\s*", "", text)
+        text = text.replace("<PropertyGroup>", f"<PropertyGroup>\n    <TargetFramework>{fw}</TargetFramework>", 1)
+        p.write_text(text)
+
+
+def run_scip_dotnet(root: Path, out: Path, dotnet: dict, name: str):
+    """scip-dotnet in its pinned image (linux/amd64): a scratch copy of the
+    tree (so restore outputs never reach the arms' worktree), prepared by
+    [`_dotnet_prepare`], gets a generated solution with the listed projects
+    (their project references load with them) and is indexed. `dotnet
+    restore` downloads packages from nuget.org into the bench's NuGet cache
+    (`.cache/nuget`); NuGet audit is off (an advisory on an old pinned
+    dependency would fail the restore)."""
+    spec = tool_spec("scip_dotnet")
+    work = SCIP_DIR / f"{name}-dotnet"
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(root, work, ignore=shutil.ignore_patterns(".git"))
+    _dotnet_prepare(work, dotnet)
+    nuget = CACHE / "nuget"
+    nuget.mkdir(parents=True, exist_ok=True)
+    projects = " ".join(f"'{p}'" for p in dotnet["projects"])
+    uid = f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "0:0"
+    script = (
+        "dotnet new sln -n rueca-bench --format slnx >/dev/null && "
+        f"dotnet sln rueca-bench.slnx add {projects} >/dev/null && "
+        "scip-dotnet index rueca-bench.slnx --output /src/rueca-bench.scip; rc=$?; "
+        f"chown -R {uid} /src /nuget; exit $rc"
+    )
+    env = ["-e", "NuGetAudit=false", "-e", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "-e", "DOTNET_NOLOGO=1", "-e", "NUGET_PACKAGES=/nuget"]
+    mounts = ["-v", f"{work}:/src", "-v", f"{nuget}:/nuget", "-w", "/src"]
+    cmd = ["docker", "run", "--rm", "--platform", "linux/amd64", *env, *mounts, "--entrypoint", "sh", spec["image"], "-c", script]
+    res = sh(cmd, timeout=3600)
+    if (work / "rueca-bench.scip").exists():
+        shutil.move(str(work / "rueca-bench.scip"), out)
     shutil.rmtree(work, ignore_errors=True)
     return res
 
@@ -278,6 +334,9 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
             if spec["indexer"] == "scip_java":
                 log(f"scip {name}: javac + scip-java plugin over {', '.join(spec['javac']['sources'])}")
                 res = run_scip_java(root, scip_out, spec["javac"]["sources"], spec["javac"].get("classpath", []), name)
+            elif spec["indexer"] == "scip_dotnet":
+                log(f"scip {name}: scip-dotnet over {', '.join(spec['dotnet']['projects'])}")
+                res = run_scip_dotnet(root, scip_out, spec["dotnet"], name)
             else:
                 if "compdb" in spec:
                     write_compdb(spec, root)
@@ -547,7 +606,7 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     ok, why = (shutil.which("npx") is not None, "npx not on PATH") if npm else tool_available(tool)
     if not ok:
         return {"available": False, "reason": why}
-    binary = None if npm else fetch_tool(tool)
+    binary = None if npm or tool == "scip_dotnet" else fetch_tool(tool)
     scratch = CACHE / "scip" / "micro" / spec["name"]
     shutil.rmtree(scratch, ignore_errors=True)
     scratch.mkdir(parents=True)
@@ -572,6 +631,9 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
             res = sh([str(binary), "scip", str(root), "--output", str(out)], cwd=root, env=indexer_env(tool), timeout=600)
         elif tool == "scip_java":
             res = run_scip_java(root, out, ["."], [], f"micro-{sname}")
+        elif tool == "scip_dotnet":
+            projects = sorted(str(p.relative_to(root)) for p in root.glob("*.csproj"))
+            res = run_scip_dotnet(root, out, {"projects": projects}, f"micro-{sname}")
         else:
             files = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.suffix in (".c", ".cc", ".cpp", ".cxx"))
             cspec = {"repo": f"micro/{sname}", "language": lang, "compdb": {"includes": ["."], "files": files}}

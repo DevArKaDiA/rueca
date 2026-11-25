@@ -1,0 +1,9 @@
+{
+  "Main.cs:Client.Defaults": [
+    "Main.cs:Options.Options"
+  ],
+  "Main.cs:Options.Options": [
+    "Main.cs:Options.Reset"
+  ],
+  "Main.cs:Options.Reset": []
+}

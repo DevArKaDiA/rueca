@@ -1,0 +1,10 @@
+{
+  "Main.cs:Address.City": [],
+  "Main.cs:Directory.CityOf": [
+    "Main.cs:Address.City",
+    "Main.cs:Directory.Find",
+    "Main.cs:User.Address"
+  ],
+  "Main.cs:Directory.Find": [],
+  "Main.cs:User.Address": []
+}

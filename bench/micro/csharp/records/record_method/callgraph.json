@@ -1,0 +1,6 @@
+{
+  "Main.cs:Station.Report": [
+    "Main.cs:Temperature.Fahrenheit"
+  ],
+  "Main.cs:Temperature.Fahrenheit": []
+}

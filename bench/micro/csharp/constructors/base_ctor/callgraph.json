@@ -1,0 +1,9 @@
+{
+  "Main.cs:Customer.Customer": [
+    "Main.cs:Entity.Entity"
+  ],
+  "Main.cs:Entity.Entity": [
+    "Main.cs:Entity.Validate"
+  ],
+  "Main.cs:Entity.Validate": []
+}

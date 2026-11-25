@@ -1,0 +1,6 @@
+{
+  "Main.cs:Circle.Radius": [],
+  "Main.cs:Geometry.Size": [
+    "Main.cs:Circle.Radius"
+  ]
+}

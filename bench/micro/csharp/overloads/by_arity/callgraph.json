@@ -1,0 +1,9 @@
+{
+  "Main.cs:Formatter.Format@10": [
+    "Main.cs:Formatter.Format@5"
+  ],
+  "Main.cs:Formatter.Format@5": [],
+  "Main.cs:View.Show": [
+    "Main.cs:Formatter.Format@10"
+  ]
+}

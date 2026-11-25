@@ -1,0 +1,6 @@
+{
+  "Main.cs:Base.Helper": [],
+  "Main.cs:Derived.Use": [
+    "Main.cs:Base.Helper"
+  ]
+}

@@ -156,7 +156,7 @@ def _eligible(patch: str, language: str) -> bool:
     return False
 
 
-_LANG_NORM = {"typescript": "typescript", "javascript": "javascript", "python": "python", "php": "php", "go": "go", "java": "java", "c": "c", "c++": "cpp", "cpp": "cpp", "rust": "rust"}
+_LANG_NORM = {"typescript": "typescript", "javascript": "javascript", "python": "python", "php": "php", "go": "go", "java": "java", "c": "c", "c++": "cpp", "cpp": "cpp", "rust": "rust", "csharp": "csharp", "c#": "csharp"}
 
 
 def _row_language(row: dict, default: str) -> str:

@@ -1,0 +1,7 @@
+{
+  "Main.cs:English.Name": [],
+  "Main.cs:IGreeter.Greet": [
+    "Main.cs:IGreeter.Name"
+  ],
+  "Main.cs:IGreeter.Name": []
+}

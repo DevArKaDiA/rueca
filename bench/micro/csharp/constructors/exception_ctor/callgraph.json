@@ -1,0 +1,6 @@
+{
+  "Main.cs:ValidationException.ValidationException": [],
+  "Main.cs:Validator.Require": [
+    "Main.cs:ValidationException.ValidationException"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "Main.cs:Job.Run": [
+    "Main.cs:Logger.Write"
+  ],
+  "Main.cs:Logger.Write": []
+}

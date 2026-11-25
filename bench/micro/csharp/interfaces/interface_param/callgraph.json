@@ -1,0 +1,7 @@
+{
+  "Main.cs:FileStore.Save": [],
+  "Main.cs:IStore.Save": [],
+  "Main.cs:Saver.Persist": [
+    "Main.cs:IStore.Save"
+  ]
+}

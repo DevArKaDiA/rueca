@@ -1,0 +1,6 @@
+{
+  "Main.cs:Downloader.FetchAsync": [],
+  "Main.cs:Downloader.SizeAsync": [
+    "Main.cs:Downloader.FetchAsync"
+  ]
+}

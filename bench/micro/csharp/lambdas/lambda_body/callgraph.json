@@ -1,0 +1,6 @@
+{
+  "Main.cs:Events.Bind": [
+    "Main.cs:Events.Fire"
+  ],
+  "Main.cs:Events.Fire": []
+}

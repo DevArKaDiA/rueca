@@ -1,0 +1,9 @@
+{
+  "Main.cs:Connection.Connection": [
+    "Main.cs:Connection.Open"
+  ],
+  "Main.cs:Connection.Open": [],
+  "Main.cs:Pool.Create": [
+    "Main.cs:Connection.Connection"
+  ]
+}
