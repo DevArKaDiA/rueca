@@ -18,6 +18,33 @@ use crate::locals::DefKind;
 use crate::refs::first_arg;
 use crate::types;
 
+/// What `self` is inside `n` when `n` decides it: `Some(true)` for the
+/// class itself (`def self.x`, `class << self`, a class body), `Some(false)`
+/// for an instance (`def x`).
+fn self_kind(n: Node<'_>) -> Option<bool> {
+    match n.kind() {
+        "singleton_method" => Some(n.child_by_field_name("object").is_some_and(|o| o.kind() == "self")),
+        "method" => Some(false),
+        "singleton_class" => Some(n.child_by_field_name("value").is_some_and(|v| v.kind() == "self")),
+        // Class-body code runs with `self` = the class.
+        "class" | "module" => Some(true),
+        _ => None,
+    }
+}
+
+/// Every node of a tree in document order.
+fn preorder(root: Node<'_>) -> Vec<Node<'_>> {
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        out.push(n);
+        let mut c = n.walk();
+        let children: Vec<Node<'_>> = n.children(&mut c).collect();
+        stack.extend(children.into_iter().rev());
+    }
+    out
+}
+
 /// Unknown receiver.
 pub(crate) const UNKNOWN: &str = "?";
 /// Nested `$ret:` receivers written at most.
@@ -160,28 +187,16 @@ impl Extractor<'_> {
         let mut singleton: Option<bool> = None;
         let mut cur = node.parent();
         while let Some(n) = cur {
-            match n.kind() {
-                "singleton_method" if singleton.is_none() => {
-                    singleton = Some(n.child_by_field_name("object").is_some_and(|o| o.kind() == "self"));
+            if singleton.is_none() {
+                singleton = self_kind(n);
+            }
+            if matches!(n.kind(), "class" | "module")
+                && let Some(p) = n.child_by_field_name("name").and_then(|x| const_path(x, self.src))
+            {
+                parts.push(p.trim_start_matches("::").to_string());
+                if p.starts_with("::") {
+                    break;
                 }
-                "method" if singleton.is_none() => singleton = Some(false),
-                "singleton_class" if singleton.is_none() => {
-                    singleton = Some(n.child_by_field_name("value").is_some_and(|v| v.kind() == "self"));
-                }
-                "class" | "module" => {
-                    if let Some(p) = n.child_by_field_name("name").and_then(|x| const_path(x, self.src)) {
-                        let absolute = p.starts_with("::");
-                        parts.push(p.trim_start_matches("::").to_string());
-                        if absolute {
-                            break;
-                        }
-                    }
-                    if singleton.is_none() {
-                        // Class-body code runs with `self` = the class.
-                        singleton = Some(true);
-                    }
-                }
-                _ => {}
             }
             cur = n.parent();
         }
@@ -194,10 +209,8 @@ impl Extractor<'_> {
     /// class before references are written (a use may precede the
     /// assignment that types it).
     pub(crate) fn prepass_ivars(&mut self, root: Node<'_>) {
-        let mut cursor = root.walk();
         let mut assigns: Vec<Node<'_>> = Vec::new();
-        loop {
-            let n = cursor.node();
+        for n in preorder(root) {
             match n.kind() {
                 "method" | "singleton_method" => self.prepass_method(n),
                 "assignment" | "operator_assignment"
@@ -207,20 +220,9 @@ impl Extractor<'_> {
                 }
                 _ => {}
             }
-            if cursor.goto_first_child() {
-                continue;
-            }
-            loop {
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    for a in assigns {
-                        self.prepass_ivar(a);
-                    }
-                    return;
-                }
-            }
+        }
+        for a in assigns {
+            self.prepass_ivar(a);
         }
     }
 

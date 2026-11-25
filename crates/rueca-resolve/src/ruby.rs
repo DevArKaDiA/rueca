@@ -442,20 +442,8 @@ impl<'a> Resolver<'a> {
     fn ruby_resolve_ancestors(&mut self, files: &[FileId]) {
         let mut edges: Vec<(NodeId, NodeId, FileId, Span)> = Vec::new();
         for &f in files {
-            for (j, d) in self.defs(f).iter().enumerate() {
-                if !matches!(d.label, Label::Class | Label::Module) || d.bases.is_empty() {
-                    continue;
-                }
-                let node = self.node_of(f, j as LocalDefId);
-                // The superclass is evaluated around the class, mixins in its body.
-                let outer = self.ruby_nesting(f, self.parents[f as usize][j]);
-                let inner = self.ruby_nesting(f, Some(j as LocalDefId));
-                for base in &d.bases {
-                    let nesting = if is_super_base(base) { &outer } else { &inner };
-                    if let Some(target) = self.ruby_record_base(&d.qualified_name, base, nesting, d.label) {
-                        edges.push((node, target, f, d.name_span));
-                    }
-                }
+            for j in 0..self.defs(f).len() {
+                self.ruby_def_bases(f, j, &mut edges);
             }
         }
         for (src, dst, f, span) in edges {
@@ -466,6 +454,24 @@ impl<'a> Resolver<'a> {
                     evidence: Some((f, span)),
                 };
                 self.add_edge(src, dst, EdgeKind::Inherits, meta);
+            }
+        }
+    }
+
+    /// The bases of definition `j` of file `f` (a class or module): the
+    /// superclass is evaluated around the class, mixins in its body.
+    fn ruby_def_bases(&mut self, f: FileId, j: usize, edges: &mut Vec<(NodeId, NodeId, FileId, Span)>) {
+        let d = &self.defs(f)[j];
+        if !matches!(d.label, Label::Class | Label::Module) || d.bases.is_empty() {
+            return;
+        }
+        let node = self.node_of(f, j as LocalDefId);
+        let outer = self.ruby_nesting(f, self.parents[f as usize][j]);
+        let inner = self.ruby_nesting(f, Some(j as LocalDefId));
+        for base in &d.bases {
+            let nesting = if is_super_base(base) { &outer } else { &inner };
+            if let Some(target) = self.ruby_record_base(&d.qualified_name, base, nesting, d.label) {
+                edges.push((node, target, f, d.name_span));
             }
         }
     }

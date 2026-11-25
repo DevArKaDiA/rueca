@@ -195,13 +195,8 @@ fn rbs_param(part: &str, out: &mut MethodTypes) {
         _ => (p, None),
     };
     let t = normalize(ty);
-    match name {
-        Some(n) => {
-            if let Some(t) = t.clone() {
-                out.params.insert(n.to_string(), t);
-            }
-        }
-        None => {}
+    if let (Some(n), Some(t)) = (name, t.clone()) {
+        out.params.insert(n.to_string(), t);
     }
     out.positional.push(t);
 }

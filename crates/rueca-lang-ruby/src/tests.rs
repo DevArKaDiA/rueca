@@ -42,7 +42,7 @@ pub fn is_test_file(path: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
