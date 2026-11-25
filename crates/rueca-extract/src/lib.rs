@@ -229,7 +229,7 @@ pub struct ProjectFiles {
     /// `package.json`, `pyproject.toml`, `setup.cfg`, `setup.py`,
     /// `composer.json`, `go.mod`, `go.work`, `pom.xml`, `build.gradle(.kts)`,
     /// `settings.gradle(.kts)`, `compile_commands.json`, `compile_flags.txt`,
-    /// `Cargo.toml`, `*.csproj` (see [`ProjectFiles::is_config_file`], size limits in
+    /// `Cargo.toml`, `*.csproj`, `Gemfile`, `*.gemspec` (see [`ProjectFiles::is_config_file`], size limits in
     /// [`ProjectFiles::max_config_bytes`]).
     pub configs: BTreeMap<String, String>,
 }
@@ -264,9 +264,12 @@ impl ProjectFiles {
                 | "compile_flags.txt"
                 // Rust: Cargo packages and workspaces
                 | "Cargo.toml"
+                // Ruby: RubyGems packages
+                | "Gemfile"
         ) || (name.starts_with("tsconfig") && name.ends_with(".json"))
             // C#: MSBuild projects (project scopes, NuGet identity)
             || name.ends_with(".csproj")
+            || name.ends_with(".gemspec")
     }
 
     /// Largest config file the indexer loads for `path`: 8 MiB for
@@ -595,6 +598,8 @@ mod tests {
             "build/compile_commands.json",
             "compile_flags.txt",
             "crates/core/Cargo.toml",
+            "Gemfile",
+            "rack.gemspec",
         ] {
             assert!(ProjectFiles::is_config_file(p), "{p}");
         }

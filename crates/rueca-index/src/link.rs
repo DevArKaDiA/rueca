@@ -27,21 +27,25 @@
 //!   every MSBuild C# project (`*.csproj`, not a test project) publishes
 //!   its NuGet identity (`PackageId`, else `AssemblyName`, else the
 //!   project file's name) with the namespaces of the non-test C# files
-//!   under its directory (`cs:<namespace>`).
+//!   under its directory (`cs:<namespace>`);
+//!   every `*.gemspec` with a `name` publishes the features under its
+//!   `lib/` directory (`rb:<first path segment>`).
 //! - **Imports** the repository's own pack cannot resolve inside it (the
 //!   ones a single-repository index reports as external), as keys:
 //!   `npm:<package name>`, `py:<module>`, `go:<import path>`,
 //!   `java:<package>`, `php:<name>`, `c:<include path>`, `rust:<crate>`,
 //!   `cs:<namespace>` (C# usings of namespaces no file of the repository
-//!   declares); Kotlin imports name packages: `java:<package>` for a
+//!   declares), `rb:<feature root>` (Ruby `require "rack/utils"` → `rb:rack`);
+//!   Kotlin imports name packages: `java:<package>` for a
 //!   package no Java or Kotlin file of the repository declares.
 //! - **Requires**: dependencies declared by manifests (`package.json`
 //!   dependencies, `composer.json` require, `go.mod` require, PEP 621
 //!   dependencies, Maven dependencies, Cargo dependency tables, `*.csproj`
-//!   `PackageReference`s), for
+//!   `PackageReference`s, gemspec dependencies and `Gemfile` gems), for
 //!   languages whose code can use a package without an import statement
 //!   (PHP fully qualified names, Rust paths through the extern prelude, C#
-//!   fully qualified names and `global using`s of another project).
+//!   fully qualified names and `global using`s of another project, Ruby
+//!   constants loaded by Bundler).
 //! - **Contracts**: the distinct keys of the segment's contract table
 //!   (`RepoDeps::contracts`), which make a consumer depend on the
 //!   repositories providing what it calls (RFC 0006 phase 4).
@@ -435,6 +439,8 @@ impl Manifests {
             "settings.gradle" | "settings.gradle.kts" => self.gradle_settings(text, &dir, files),
             "Cargo.toml" => self.cargo_toml(text, dir),
             n if n.ends_with(".csproj") => self.csproj(n, text, &dir, files),
+            "Gemfile" => self.gemfile(text),
+            n if n.ends_with(".gemspec") => self.gemspec(text, &dir, files),
             _ => {}
         }
     }
@@ -541,6 +547,22 @@ impl Manifests {
             return;
         }
         self.packages.push(csharp_package(name.to_string(), dir, files));
+    }
+
+    /// A gemspec: its dependencies are requirements; its name is a package
+    /// publishing the features under its `lib/` directory.
+    fn gemspec(&mut self, text: &str, dir: &str, files: &[FileModule]) {
+        let Some(m) = rueca_lang_ruby::parse_gem_manifest(text) else { return };
+        self.requires.extend(m.dependencies.iter().map(|d| format!("rubygems:{}", d.to_lowercase())));
+        if let Some(name) = m.name {
+            self.packages.push(ruby_package(name, dir, files));
+        }
+    }
+
+    /// A Gemfile's gems are requirements.
+    fn gemfile(&mut self, text: &str) {
+        let Some(m) = rueca_lang_ruby::parse_gem_manifest(text) else { return };
+        self.requires.extend(m.dependencies.iter().map(|d| format!("rubygems:{}", d.to_lowercase())));
     }
 
     fn gradle_settings(&mut self, text: &str, dir: &str, files: &[FileModule]) {
@@ -747,6 +769,20 @@ fn external_imports(
     }
 }
 
+/// A gem publishing the features of the non-test Ruby files under
+/// `<dir>/lib/` (`rb:rack` for `lib/rack.rb` and `lib/rack/utils.rb`).
+fn ruby_package(name: String, dir: &str, files: &[FileModule]) -> Package {
+    let lib = if dir.is_empty() { "lib/".to_string() } else { format!("{dir}/lib/") };
+    let keys: BTreeSet<String> = files
+        .iter()
+        .filter(|f| f.1 == Some(Language::Ruby) && !rueca_lang_ruby::is_test_file(&f.0))
+        .filter_map(|f| f.0.strip_prefix(&lib))
+        .filter_map(|rest| rest.split('/').next())
+        .map(|first| format!("rb:{}", first.trim_end_matches(".rb")))
+        .collect();
+    Package { eco: "rubygems".into(), name, dir: dir.to_string(), keys: keys.into_iter().collect() }
+}
+
 /// The import key of an import a pack could not resolve inside its
 /// repository, or `None` for relative imports and languages without
 /// cross-repository packages.
@@ -775,6 +811,7 @@ pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String>
         LanguageFamily::CSharp => (!imp.names.is_empty() || imp.module_alias.is_some()).then(|| format!("cs:{m}")),
         LanguageFamily::Php => Some(format!("php:{}", m.trim_start_matches('\\'))),
         LanguageFamily::C => Some(format!("c:{}", m.trim_start_matches("./"))),
+        LanguageFamily::Ruby => ruby_import_key(imp.relative_level, m),
         // Shell has no package identity: a sourced file is a path.
         LanguageFamily::Markdown
         | LanguageFamily::Data
@@ -782,6 +819,17 @@ pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String>
         | LanguageFamily::Proto
         | LanguageFamily::Shell => None,
     }
+}
+
+/// A Ruby `require`'s feature root (`rb:rack` for `rack/utils`): the
+/// first path segment, which a gem's `lib/` directory publishes; `None`
+/// for relative requires.
+fn ruby_import_key(relative_level: u32, m: &str) -> Option<String> {
+    if relative_level > 0 || m.starts_with('.') || m.starts_with('/') {
+        return None;
+    }
+    let first = m.split('/').next()?.trim_end_matches(".rb");
+    (!first.is_empty()).then(|| format!("rb:{first}"))
 }
 
 /// A Rust import's crate (`rust:serde` for `serde::de`, `::serde` or
@@ -1213,6 +1261,36 @@ mod tests {
         assert_eq!(import_key(LanguageFamily::Rust, &imp("std::fmt", 0)), None);
         assert_eq!(import_key(LanguageFamily::Rust, &imp("a", 2)), None);
         assert_eq!(import_key(LanguageFamily::Shell, &imp("*/nvm.sh", 0)), None);
+        assert_eq!(import_key(LanguageFamily::Ruby, &imp("rack/utils", 0)).as_deref(), Some("rb:rack"));
+        assert_eq!(import_key(LanguageFamily::Ruby, &imp("json", 0)).as_deref(), Some("rb:json"));
+        assert_eq!(import_key(LanguageFamily::Ruby, &imp("../x", 1)), None);
+    }
+
+    #[test]
+    fn ruby_gem_manifests() {
+        let mut configs = BTreeMap::new();
+        configs.insert(
+            "rack.gemspec".to_string(),
+            "Gem::Specification.new do |s|\n  s.name = \"rack\"\n  s.add_dependency \"Rack-Session\"\nend\n"
+                .to_string(),
+        );
+        configs.insert("Gemfile".to_string(), "gemspec\ngem \"minitest\"\n".to_string());
+        let project = ProjectFiles { paths: Default::default(), configs };
+        let files = vec![
+            ("lib/rack.rb".to_string(), Some(Language::Ruby), String::new()),
+            ("lib/rack/utils.rb".to_string(), Some(Language::Ruby), String::new()),
+            ("lib/rackup.rb".to_string(), Some(Language::Ruby), String::new()),
+            ("test/spec_utils.rb".to_string(), Some(Language::Ruby), String::new()),
+        ];
+        let (packages, requires) = manifests(&project, &files);
+        let gem = packages.iter().find(|p| p.eco == "rubygems").unwrap();
+        assert_eq!(
+            (gem.name.as_str(), gem.keys.clone()),
+            ("rack", vec!["rb:rack".to_string(), "rb:rackup".to_string()])
+        );
+        for r in ["rubygems:rack-session", "rubygems:minitest"] {
+            assert!(requires.contains(&r.to_string()), "{r}: {requires:?}");
+        }
     }
 
     #[test]

@@ -26,6 +26,7 @@ rueca-lang-proto = { path = "crates/rueca-lang-proto", version = "0.1.0-alpha.2"
 rueca-lang-shell = { path = "crates/rueca-lang-shell", version = "0.1.0-alpha.2" }
 rueca-lang-csharp = { path = "crates/rueca-lang-csharp", version = "0.1.0-alpha.2" }
 rueca-lang-kotlin = { path = "crates/rueca-lang-kotlin", version = "0.1.0-alpha.2" }
+rueca-lang-ruby = { path = "crates/rueca-lang-ruby", version = "0.1.0-alpha.2" }
 rueca-resolve = { path = "crates/rueca-resolve", version = "0.1.0-alpha.2" }
 rueca-segment = { path = "crates/rueca-segment", version = "0.1.0-alpha.2" }
 rueca-index = { path = "crates/rueca-index", version = "0.1.0-alpha.2" }

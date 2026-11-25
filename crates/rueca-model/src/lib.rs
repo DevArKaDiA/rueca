@@ -83,6 +83,8 @@ pub enum Language {
     CSharp,
     /// Kotlin (`.kt`, `.kts`); JVM family, like Java.
     Kotlin,
+    /// Ruby (`.rb`, `.rake`, `.gemspec`, `.ru`, `Rakefile`, `Gemfile`).
+    Ruby,
 }
 
 /// Shell start-up files detected by name (no extension of their own).
@@ -129,6 +131,7 @@ impl Language {
         Language::Shell,
         Language::CSharp,
         Language::Kotlin,
+        Language::Ruby,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -157,6 +160,7 @@ impl Language {
             Language::Shell => "shell",
             Language::CSharp => "csharp",
             Language::Kotlin => "kotlin",
+            Language::Ruby => "ruby",
         }
     }
 
@@ -208,6 +212,7 @@ impl Language {
             "sh" | "bash" | "zsh" | "ksh" | "bats" | "zsh-theme" => Language::Shell,
             "cs" => Language::CSharp,
             "kt" | "kts" => Language::Kotlin,
+            "rb" | "rake" | "gemspec" | "ru" => Language::Ruby,
             _ => return None,
         })
     }
@@ -225,6 +230,9 @@ impl Language {
         }
         if SHELL_DOTFILES.contains(&name) {
             return Some(Language::Shell);
+        }
+        if name == "Rakefile" || name == "Gemfile" {
+            return Some(Language::Ruby);
         }
         None
     }
@@ -280,6 +288,7 @@ impl Language {
             Language::Proto => LanguageFamily::Proto,
             Language::Shell => LanguageFamily::Shell,
             Language::CSharp => LanguageFamily::CSharp,
+            Language::Ruby => LanguageFamily::Ruby,
         }
     }
 }
@@ -323,6 +332,10 @@ pub enum LanguageFamily {
     /// C#: module name = namespace (`Acme.Shop`); local names join types
     /// and members with `.` (`Store.Add`).
     CSharp,
+    /// Ruby: no module names; local names are constant paths, methods
+    /// after `#` (instance) or `.` (singleton): `Rack::Utils.escape`,
+    /// `Rack::Request#params`.
+    Ruby,
 }
 
 impl LanguageFamily {
@@ -346,7 +359,7 @@ impl LanguageFamily {
             | LanguageFamily::CSharp => ".",
             LanguageFamily::EcmaScript | LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Shell => ":",
             LanguageFamily::Php => "\\",
-            LanguageFamily::C | LanguageFamily::Rust => "::",
+            LanguageFamily::C | LanguageFamily::Rust | LanguageFamily::Ruby => "::",
         }
     }
 }
@@ -833,7 +846,8 @@ pub struct Node {
     /// - Go: `<import path>.<local>`; Java: `<package>.<local>`; C#:
     ///   `<namespace>.<local>`; C/C++: the
     ///   namespace / class path (`fmt::v11::format_to`); Rust: `<module
-    ///   path>::<local>` (`rueca_index::link::Linker.new`).
+    ///   path>::<local>` (`rueca_index::link::Linker.new`); Ruby: the
+    ///   constant path, methods after `#` / `.` (`Rack::Request#params`).
     /// - Canonical env vars (file-less `EnvVar` nodes): `$env:<NAME>`.
     /// - Files and folders: the repository-relative path. Repository: the repo id.
     pub qualified_name: String,
@@ -1133,6 +1147,13 @@ mod tests {
             ("src/Acme.Shop/Store.cs", Some(CSharp)),
             ("src/main/kotlin/com/x/Owner.kt", Some(Kotlin)),
             ("build.gradle.kts", Some(Kotlin)),
+            ("lib/rack/utils.rb", Some(Ruby)),
+            ("lib/tasks/db.rake", Some(Ruby)),
+            ("rack.gemspec", Some(Ruby)),
+            ("config.ru", Some(Ruby)),
+            ("Rakefile", Some(Ruby)),
+            ("Gemfile", Some(Ruby)),
+            ("Gemfile.lock", None),
         ];
         for (path, want) in cases {
             assert_eq!(Language::from_path(path), *want, "{path}");
@@ -1153,6 +1174,7 @@ mod tests {
         assert_eq!(Shell.family().module_separator(), ":");
         assert_eq!(CSharp.family().module_separator(), ".");
         assert_eq!(Kotlin.family(), Java.family());
+        assert_eq!(Ruby.family().module_separator(), "::");
     }
 
     #[test]
@@ -1195,11 +1217,12 @@ mod tests {
             b[0]
         }
         let langs: Vec<u8> = Language::ALL.iter().map(idx).collect();
-        assert_eq!(langs, (0..24).collect::<Vec<u8>>());
+        assert_eq!(langs, (0..25).collect::<Vec<u8>>());
         assert_eq!(idx(&Language::Proto), 20);
         assert_eq!(idx(&Language::Shell), 21);
         assert_eq!(idx(&Language::CSharp), 22);
         assert_eq!(idx(&Language::Kotlin), 23);
+        assert_eq!(idx(&Language::Ruby), 24);
         assert_eq!(idx(&ContractSide::Provides), 0);
         assert_eq!(idx(&ContractSide::Consumes), 1);
         assert_eq!(idx(&ContractKind::Http), 0);
