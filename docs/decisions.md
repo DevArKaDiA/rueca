@@ -1,5 +1,47 @@
 # Decisions log
 
+## 2026-11-24 — Code mode: Starlark stays as built; the API friction is fixed before merge (RFC 0009)
+
+The owner's decisions on RFC 0009 phase 3 (§14.6). Starlark stays the
+optional `code-mode-starlark` build feature exactly as built, with its own
+CI job; `deny.toml` is untouched. The four API friction items of §14.4 (5)
+are fixed at the source before merge, for every tool:
+
+- **Two names.** Every object with an `id` carries `local`, the file-local
+  qualified name the id is built from (the id's `#` part; a file's path),
+  next to `qn`, the global one (contract rows keep `symbol`). Scripts build
+  `path#Qualname` from fields instead of slicing ids.
+- **Origin, one rule.** The same objects carry the `repo` and `ref` of
+  their snapshot in every answer, and `trace`'s root has `dir: "root"`.
+  Weighed: adding them only to multi-snapshot answers would bring back the
+  `.get(…)` workarounds; adding them only in code mode would leave JSON
+  clients parsing ids. The text rendering is unchanged, so the cost is
+  JSON bytes only; a single-repository answer reads the same.
+- **`changed` per symbol.** A multi-ref symbol is `changed` when its span's
+  bytes differ between the requested refs, or it is absent from one; equal
+  blobs short-circuit and a changed file is read once per call. A symbol
+  moved by lines added above it is listed per version (its lines differ)
+  but not `changed`. `get_file_outline` marks each symbol of each version.
+  This settles the price named in *Collapse across refs by file blob*
+  (2026-11-16); collapsing stays by blob.
+- **Tests nested in tests.** The resolver marks a definition nested under a
+  test function, method or test block as a test (no new facts, so no
+  extractor bump for it); a test class does not pass the flag on
+  (`TestClient` is a library name too). The TypeScript pack marks
+  definitions inside `beforeEach`-style hook callbacks (extractor version
+  7). Checked with fixtures: TypeScript `describe` / hooks, Python nested
+  functions in `test_*`, Rust nested functions in `#[test]` (fixed); Go
+  `t.Run` closures (not definitions; their calls already belong to
+  `Test…`). Java local classes in test code were already tests; C++ local
+  classes and lambdas are not definitions. Indexes need a re-index.
+
+Measured with the reference tool-call plans (every answer unchanged): ms25
+reads 1,614 tokens instead of 11,625 (one outline at both refs instead of
+the file twice); `trace` text shrinks where test code was nested (ms17
+7,826 → 2,502, ms19 3,795 → 3,385, ms16 1,042 → 686, ms05 1,626 → 1,602).
+`describe_api` grows to 4,260 (JavaScript) and 4,338 (Starlark) tokens.
+The suite is refreshed separately.
+
 ## 2026-11-24 — Code mode phase 3: verdict and recommendation; the owner decides (RFC 0009)
 
 Phase 3 of RFC 0009 is done: the multi-step suite (phase 2) and a fluency

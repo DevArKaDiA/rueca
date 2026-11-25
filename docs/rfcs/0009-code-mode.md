@@ -15,6 +15,9 @@
 - Amended: 2026-11-24 — phase 3: the fluency probe and the decision
   (§14): keep code mode experimental with JavaScript only; open questions
   updated (§12)
+- Amended: 2026-11-24 — the owner's decisions (§14.6): Starlark stays the
+  optional build feature as built; the four API friction items of §14.4
+  (5) are fixed before merge (§4.4)
 - Depends on: RFC 0001 (§11 tools, §13 security), RFC 0004 (efficiency
   metrics), RFC 0005 (envelope, pinned ids, `repo` / `ref`, tokens per
   correct answer), RFC 0006 (organization, contracts), RFC 0008 (service
@@ -194,6 +197,12 @@ task. Helpers are thin compositions of the eight tools.
 - **Snapshots and `s`.** The calls' snapshot entries are merged (same
   entry once) and numbered in first-read order; every `s` and `in` in a
   call's `results` is renumbered to that list before the script sees it.
+  A script does not need them to place a symbol: every object with an `id`
+  carries `local` (the file-local name the id is built from), `qn` (the
+  global one), `repo` and `ref` — one rule for every tool and every
+  answer, single- or multi-snapshot, in the tools' structured JSON (not in
+  their text, so single-repository answers do not grow), added before merge
+  (§14.6).
   Envelope fields other than `results` are not passed to scripts; a call
   the tool cut (`truncated`) is reported in `partial` with its
   `next_cursor`.
@@ -411,11 +420,12 @@ not an agentic evaluation.
 
 1. Which language(s) to keep — **answered (phase 3)**: JavaScript only is
    recommended; Starlark stays a non-default build feature in this change
-   and its removal is the owner's call (§14.5).
+   and its removal is the owner's call (§14.5). The owner keeps it as
+   built (§14.6).
 2. Should `describe_api` return TypeScript declarations for every tool, or
    a shorter hand-written reference? — **Answered (phases 1, 3)**:
    generated declarations for every tool, result shapes included (§4.4),
-   about 4.1k tokens; in the probe no script failed on the API's shape
+   about 4.1k tokens (4.3k with the fields of §14.6); in the probe no script failed on the API's shape
    (§14.1), so nothing argues for a hand-written reference yet.
 3. Should enabling code mode hide the eight tools (Cloudflare's
    single-tool shape) or keep them alongside? This RFC keeps them. —
@@ -569,7 +579,9 @@ full tables in `docs/bench/multistep-results.md`, records in
   filter); a ref-diff helper (one task; the honest version needs a
   per-symbol comparison in the engine, below).
 
-Friction from writing the 50 reference scripts:
+Friction from writing the 50 reference scripts (all four engine and API
+items were fixed before merge, §14.6; the reference scripts no longer work
+around them):
 
 - Both languages: the result shapes' `qn` is the **global** qualified name
   (`flask.ctx.RequestContext`, `github.com/ollama/ollama/server.Server.ListHandler`)
@@ -719,12 +731,13 @@ counted, a long built-in overruns the deadline: §13); and it adds
    arm answers correctly. But cbm was correct on only 4 of the 16 tasks it
    can express and cannot express the cross-repository, contract and ref
    tasks (9 of 25).
-5. **API friction found while writing scripts** (§13.1): `qn` is the
+5. **API friction found while writing scripts** (§13.1): `qn` was the
    global name while text and ids use the file-local one; a
-   cross-repository node's repository is recoverable only from its id; the
-   multi-ref `changed` flag is per file, not per symbol; `include_tests:
-   false` leaks functions nested in `describe` blocks of test files. These
-   are engine and API issues to fix independently of code mode.
+   cross-repository node's repository was recoverable only from its id; the
+   multi-ref `changed` flag was per file, not per symbol; `include_tests:
+   false` leaked functions nested in `describe` blocks of test files.
+   **Fixed before merge** (§14.6); the suite's numbers above predate the
+   fixes.
 6. **Model-written scripts cost more than the reference ones** (§14.1):
    3.2× / 2.5× the source tokens, so the suite's −87.8% is an upper bound
    on what an agent would see.
@@ -744,9 +757,51 @@ counted, a long built-in overruns the deadline: §13); and it adds
   memory limit and the 5.7 MB — unless the owner wants to keep it, as in
   this change, as a non-default build feature for further comparison.
   This change keeps it; removing it is deleting the `starlark` feature.
+  *(The owner keeps it as built, §14.6.)*
 - **Do not graduate to default-on in this change**; that is the owner's
   decision. Suggested conditions before graduating: fix the API friction
-  of §14.4 (5); give agents a cheap way to surface evidence (e.g.
-  encourage returning counts or sample ids alongside the answer), so a
-  wrong answer can be noticed; and run a real agentic evaluation.
+  of §14.4 (5) — *done before merge, §14.6*; give agents a cheap way to
+  surface evidence (e.g. encourage returning counts or sample ids
+  alongside the answer), so a wrong answer can be noticed; and run a real
+  agentic evaluation.
 - **No helpers (§4.3) were added**: none saved a round trip.
+
+### 14.6 Owner decisions (2026-11-24)
+
+- **Starlark stays as built**: the optional build feature
+  `--features code-mode-starlark`, with its own CI job; `deny.toml` is
+  untouched (the default build has no Starlark, so the advisories of §13
+  do not reach it). JavaScript stays the default language.
+- **The four API friction items of §14.4 (5) are fixed before merge**, at
+  the source, for every tool and so for the script API:
+  1. *Names.* Every object with an `id` carries `local`, the file-local
+     qualified name its id is built from (the id's `#` part; a file's
+     path), next to `qn`, the global qualified name (contract rows keep
+     `symbol` for it). Scripts build `path#Qualname` from fields instead of
+     slicing ids.
+  2. *Origin.* The same objects carry the `repo` and `ref` of their
+     snapshot, in every answer (one rule, not only when an answer spans
+     several snapshots); `trace`'s root has `dir: "root"`, so every node
+     has `dir`. JSON only: the text rendering (what an agent reads) is
+     unchanged, so single-repository answers cost no more tokens.
+  3. *`changed` per symbol.* A multi-ref item is `changed` when the
+     symbol's own text (its span) differs between the requested refs, or
+     it is absent from one; a symbol moved by lines added above it is not.
+     `get_file_outline` marks each symbol of each version, so the ref-diff
+     task (ms25) is one outline call. Versions are still collapsed by file
+     blob (`in`), and the outline's own `changed` stays the file's.
+  4. *Tests nested in tests.* The resolver marks a definition nested in a
+     test function, method or test block as a test (a closure of a
+     `describe` callback, a helper inside a Python `test_*` or a Rust
+     `#[test]` function); the TypeScript pack marks definitions inside
+     `beforeEach`-style hook callbacks (extractor version 7). Go `t.Run`
+     closures and C++ lambdas are not definitions (their calls already
+     belong to the test); Java local classes in test code were already
+     tests. A test *class* does not pass the flag on (`TestClient` is also
+     a library name). Existing indexes need a re-index to pick it up.
+
+  The reference scripts and the ms25 tool-call plan drop their
+  workarounds (every reference answer is unchanged; the ms25 plan reads
+  one outline instead of the file at both refs). `describe_api` grows to
+  4,260 (JavaScript) and 4,338 (Starlark) tokens. The suite numbers of
+  §13.1 and §14 predate the fixes and are refreshed separately.
