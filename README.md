@@ -23,7 +23,7 @@ agent can follow.
 > **Status: alpha (`0.1.0-alpha.2`).** Local mode (one repository, or an
 > organization of local repositories with `--org`); Python,
 > TypeScript/JavaScript, PHP, Go, Java, C, C++, Rust, shell scripts
-> (`preview`), C#, Kotlin and Ruby, plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
+> (`preview`), C#, Kotlin, Ruby and SQL (`preview`), plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
 ## Features
@@ -96,7 +96,15 @@ the ancestors, reopened classes as one constant, `include` / `extend` /
 `initialize`, calls without parentheses told from local variables,
 receivers typed from `Foo.new`, Sorbet `sig`s and RBS comments, `require` /
 `require_relative`, RSpec and Minitest tests, `ENV` reads, gemspec / Gemfile
-packages for cross-repository edges).
+packages for cross-repository edges),
+SQL — `preview` (PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, BigQuery,
+Snowflake, one dialect per file from a directive, the path or the content;
+tables, views and their columns, functions, procedures, triggers, indexes,
+types; relations read and written, columns when the table is certain,
+routine calls and foreign keys as `REFERENCES` / `WRITES` / `CALLS`;
+migrations resolved to the definition effective at each point; dbt models,
+`ref()` / `source()` and macros; `-- name:` queries; per-dialect coverage in
+[`rueca-lang-sql`](crates/rueca-lang-sql/README.md)).
 Documents: Markdown headings become `Section` symbols and file links become
 `IMPORTS` edges, in the same graph as the code.
 Configuration: JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
@@ -398,7 +406,8 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    `mod` / `use` through the Cargo workspace model; shell `source` paths; C# `using`s through
    namespaces, wherever their files are; Kotlin imports through
    packages, wherever their files are, shared with Java; Ruby constants through
-   the lexical nesting and the ancestors, `require` through `lib/` load paths),
+   the lexical nesting and the ancestors, `require` through `lib/` load paths;
+   SQL names over a global namespace, by migration order and nearest directory),
    re-export chains, `self`/`this` with base classes and traits,
    receiver types the file declares or constructs (every code language:
    `c: Context`, `const app = new Hono()`, `x = Session()`), declarations to
@@ -453,6 +462,7 @@ scorecard (`stable` = every floor met; full tables in
 - **C#** `stable` (localization meets the floor at BM25's level: File Acc@5 48.7 vs 48.7, Function Acc@10 26.3 vs 28.9 over 39 SWE-rebench V2 issues, paired intervals cross zero; callers / callees precision 96.9 / 95.5, recall 95.2 / 96.6 against scip-dotnet on serilog and eShopOnWeb; 0.0% of files with parse errors)
 - **Kotlin** `stable` (callees precision at the floor: 90.0, interval 87.9–92.0; callers precision 96.4, recall 86.6 / 85.5 against scip-java's Kotlin indexer on moshi and clikt; localization not significantly below BM25: File Acc@5 56.5 vs 58.7, Function Acc@10 45.5 vs 31.8 over 46 Multi-SWE-bench issues; 0.15% of files with parse errors)
 - **Ruby** `stable` (callers / callees precision 98.4 / 95.4, recall 96.8 / 96.7 against scip-ruby on jekyll and ruby-lsp; localization not significantly below BM25: File Acc@5 55.0 vs 55.0, Function Acc@10 24.2 vs 18.2 over 40 SWE-bench Multilingual issues; 0.2% of files with parse errors)
+- **SQL** `preview` (no localization dataset has SQL instances, so the localization floors are pending; structure measured against the bench's code-backed labeler on sqlglot, not a compiler-grade oracle: callers / callees precision 99.8 / 99.6, recall 98.9 / 97.5 on Sakila in six dialects and a dbt package, callees population 281 < 300, micro callee F1 100.0; 8.9% of files with parse errors against the 2% floor — Oracle / DB2 copies, MySQL routines, T-SQL procedural code, Jinja macros)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 **Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),
@@ -486,7 +496,7 @@ absolute floors and aspirational targets).
 | Stage | What it delivers | Status |
 |---|---|---|
 | **Local mode** | One binary, MCP over stdio, the tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
-| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Ruby, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c) | ✅ done, every language `stable`; shell `preview` (no localization dataset, code-backed structural gold) |
+| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Ruby, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c), SQL (§10.4g) | ✅ done, every language `stable`; shell `preview` (no localization dataset, code-backed structural gold); SQL `preview` (no localization dataset, parse-error floor, code-backed structural gold) |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
@@ -520,6 +530,7 @@ More languages (Swift, …) follow the same gate.
 | [`rueca-lang-proto`](crates/rueca-lang-proto) | Protocol Buffers services, RPC methods, messages and enums; RPC contracts |
 | [`rueca-lang-shell`](crates/rueca-lang-shell) | Shell scripts (sh, bash; zsh / ksh best effort): functions, `source` paths, script runs, bats / shunit2 tests, env reads and providers |
 | [`rueca-lang-ruby`](crates/rueca-lang-ruby) | Ruby extraction, constant paths, receivers, `require` paths and gem manifests |
+| [`rueca-lang-sql`](crates/rueca-lang-sql) | SQL in several dialects (sqlparser): tables, columns, views, routines, triggers, migrations, dbt models and macros |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |
 | [`rueca-segment`](crates/rueca-segment) | segment format, search, content packs, catalog |
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |

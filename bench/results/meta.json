@@ -1,5 +1,5 @@
 {
- "date": "2026-11-25 14:39 UTC",
+ "date": "2026-11-25 15:11 UTC",
  "machine": {
   "platform": "macOS-26.4.1-arm64-arm-64bit",
   "machine": "arm64",
@@ -29,11 +29,12 @@
   "rueca": {
    "available": true,
    "reason": "RUECA_BIN not set",
-   "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 0f16f3062a3f, rfc0005 contract, feat/lang-csharp@wip); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830); rueca 0.1.0-alpha.2 (binary sha256 aeca53b7707c, rfc0005 contract, feat/lang-kotlin@3265ba4); rueca 0.1.0-alpha.2 (binary sha256 c5a6a874ed6b, rfc0005 contract, feat/lang-shell@1b25092); rueca 0.1.0-alpha.2 (binary sha256 c624a58896e5, rfc0005 contract, feat/lang-csharp@1532771); rueca 0.1.0-alpha.2 (binary sha256 e1918daa111e, rfc0005 contract, fix/rust-tokio-gaps@ebc4224); rueca 0.1.0-alpha.2 (binary sha256 eaaabeedec9c, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 f4228890b708, rfc0005 contract, feat/lang-ruby@2e353ab)",
+   "version": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 0f16f3062a3f, rfc0005 contract, feat/lang-csharp@wip); rueca 0.1.0-alpha.2 (binary sha256 10388ab51475, rfc0005 contract, feat/lang-sql@9c6fb5d); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830); rueca 0.1.0-alpha.2 (binary sha256 aeca53b7707c, rfc0005 contract, feat/lang-kotlin@3265ba4); rueca 0.1.0-alpha.2 (binary sha256 c5a6a874ed6b, rfc0005 contract, feat/lang-shell@1b25092); rueca 0.1.0-alpha.2 (binary sha256 c624a58896e5, rfc0005 contract, feat/lang-csharp@1532771); rueca 0.1.0-alpha.2 (binary sha256 e1918daa111e, rfc0005 contract, fix/rust-tokio-gaps@ebc4224); rueca 0.1.0-alpha.2 (binary sha256 eaaabeedec9c, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 f4228890b708, rfc0005 contract, feat/lang-ruby@2e353ab)",
    "recorded_versions": [
     "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract)",
     "rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4)",
     "rueca 0.1.0-alpha.2 (binary sha256 0f16f3062a3f, rfc0005 contract, feat/lang-csharp@wip)",
+    "rueca 0.1.0-alpha.2 (binary sha256 10388ab51475, rfc0005 contract, feat/lang-sql@9c6fb5d)",
     "rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830)",
     "rueca 0.1.0-alpha.2 (binary sha256 aeca53b7707c, rfc0005 contract, feat/lang-kotlin@3265ba4)",
     "rueca 0.1.0-alpha.2 (binary sha256 c5a6a874ed6b, rfc0005 contract, feat/lang-shell@1b25092)",
@@ -199,9 +200,20 @@
    "rueca": [
     "rueca 0.1.0-alpha.2 (binary sha256 f4228890b708, rfc0005 contract, feat/lang-ruby@2e353ab)"
    ]
+  },
+  "sql": {
+   "grep": [
+    "rueca-bench bm25 (k1=1.2,b=0.75) + tree-sitter"
+   ],
+   "cbm": [
+    "codebase-memory-mcp 0.12.0"
+   ],
+   "rueca": [
+    "rueca 0.1.0-alpha.2 (binary sha256 10388ab51475, rfc0005 contract, feat/lang-sql@9c6fb5d)"
+   ]
   }
  },
- "manifest_sha256": "16ecf41f779e5fbdb9a47f41568df80cbb9281e24f2a672a6b939ce7a1a6ea09",
+ "manifest_sha256": "5688ab0d297115c13e16ad9f176b136df3eecaaf3bb50cafff8f28b89f182c2e",
  "manifest_tools": {
   "cbm": {
    "name": "codebase-memory-mcp",
@@ -372,11 +384,12 @@
   "ruby",
   "rust",
   "shell",
+  "sql",
   "ts/js"
  ],
- "carried": "cbm:c (35 instances), cbm:cpp (43 instances), cbm:csharp (50 instances), cbm:go (46 instances), cbm:java (45 instances), cbm:kotlin (61 instances), cbm:php (45 instances), cbm:python (45 instances), cbm:ruby (44 instances), cbm:rust (48 instances), cbm:ts/js (46 instances), grep:c (35 instances), grep:cpp (43 instances), grep:csharp (50 instances), grep:go (46 instances), grep:java (45 instances), grep:kotlin (61 instances), grep:php (45 instances), grep:python (45 instances), grep:ruby (44 instances), grep:rust (48 instances), grep:ts/js (46 instances), rueca:c (35 instances), rueca:cpp (43 instances), rueca:csharp (50 instances), rueca:go (46 instances), rueca:java (45 instances), rueca:kotlin (61 instances), rueca:php (45 instances), rueca:python (45 instances), rueca:ruby (44 instances), rueca:rust (48 instances), rueca:ts/js (46 instances), S3 cbm:YamlDotNet, S3 cbm:acme.sh, S3 cbm:bash-it, S3 cbm:bats-core, S3 cbm:bytes, S3 cbm:c-micro, S3 cbm:cJSON, S3 cbm:cli, S3 cbm:click, S3 cbm:clikt, S3 cbm:commonmark, S3 cbm:cpp-micro, S3 cbm:csharp-micro, S3 cbm:eShopOnWeb, S3 cbm:ecma-micro, S3 cbm:express, S3 cbm:flask, S3 cbm:fmt, S3 cbm:gin, S3 cbm:go-micro, S3 cbm:goawk, S3 cbm:gson, S3 cbm:hono, S3 cbm:java-micro, S3 cbm:javapoet, S3 cbm:jekyll, S3 cbm:jinja, S3 cbm:json, S3 cbm:kotlin-micro, S3 cbm:kotlinpoet, S3 cbm:lua, S3 cbm:monolog, S3 cbm:moshi, S3 cbm:nvm, S3 cbm:packwerk, S3 cbm:php-micro, S3 cbm:pycg, S3 cbm:python-micro, S3 cbm:rack, S3 cbm:requests, S3 cbm:ripgrep, S3 cbm:ruby-lsp, S3 cbm:ruby-micro, S3 cbm:rust-micro, S3 cbm:serilog, S3 cbm:shell-micro, S3 cbm:yaml-cpp, S3 cbm:zod, S3 grep:YamlDotNet, S3 grep:acme.sh, S3 grep:bash-it, S3 grep:bats-core, S3 grep:bytes, S3 grep:c-micro, S3 grep:cJSON, S3 grep:cli, S3 grep:click, S3 grep:clikt, S3 grep:commonmark, S3 grep:cpp-micro, S3 grep:csharp-micro, S3 grep:eShopOnWeb, S3 grep:ecma-micro, S3 grep:express, S3 grep:flask, S3 grep:fmt, S3 grep:gin, S3 grep:go-micro, S3 grep:goawk, S3 grep:gson, S3 grep:hono, S3 grep:java-micro, S3 grep:javapoet, S3 grep:jekyll, S3 grep:jinja, S3 grep:json, S3 grep:kotlin-micro, S3 grep:kotlinpoet, S3 grep:lua, S3 grep:monolog, S3 grep:moshi, S3 grep:nvm, S3 grep:packwerk, S3 grep:php-micro, S3 grep:pycg, S3 grep:python-micro, S3 grep:rack, S3 grep:requests, S3 grep:ripgrep, S3 grep:ruby-lsp, S3 grep:ruby-micro, S3 grep:rust-micro, S3 grep:serilog, S3 grep:shell-micro, S3 grep:yaml-cpp, S3 grep:zod, S3 rueca:YamlDotNet, S3 rueca:acme.sh, S3 rueca:bash-it, S3 rueca:bats-core, S3 rueca:bytes, S3 rueca:c-micro, S3 rueca:cJSON, S3 rueca:cli, S3 rueca:click, S3 rueca:clikt, S3 rueca:commonmark, S3 rueca:cpp-micro, S3 rueca:csharp-micro, S3 rueca:eShopOnWeb, S3 rueca:ecma-micro, S3 rueca:express, S3 rueca:flask, S3 rueca:fmt, S3 rueca:gin, S3 rueca:go-micro, S3 rueca:goawk, S3 rueca:gson, S3 rueca:hono, S3 rueca:java-micro, S3 rueca:javapoet, S3 rueca:jekyll, S3 rueca:jinja, S3 rueca:json, S3 rueca:kotlin-micro, S3 rueca:kotlinpoet, S3 rueca:lua, S3 rueca:monolog, S3 rueca:moshi, S3 rueca:nvm, S3 rueca:packwerk, S3 rueca:php-micro, S3 rueca:pycg, S3 rueca:python-micro, S3 rueca:rack, S3 rueca:requests, S3 rueca:ripgrep, S3 rueca:ruby-lsp, S3 rueca:ruby-micro, S3 rueca:rust-micro, S3 rueca:serilog, S3 rueca:shell-micro, S3 rueca:yaml-cpp, S3 rueca:zod, health (112 repositories)",
+ "carried": "cbm:c (35 instances), cbm:cpp (43 instances), cbm:csharp (50 instances), cbm:go (46 instances), cbm:java (45 instances), cbm:kotlin (61 instances), cbm:php (45 instances), cbm:python (45 instances), cbm:ruby (44 instances), cbm:rust (48 instances), cbm:ts/js (46 instances), grep:c (35 instances), grep:cpp (43 instances), grep:csharp (50 instances), grep:go (46 instances), grep:java (45 instances), grep:kotlin (61 instances), grep:php (45 instances), grep:python (45 instances), grep:ruby (44 instances), grep:rust (48 instances), grep:ts/js (46 instances), rueca:c (35 instances), rueca:cpp (43 instances), rueca:csharp (50 instances), rueca:go (46 instances), rueca:java (45 instances), rueca:kotlin (61 instances), rueca:php (45 instances), rueca:python (45 instances), rueca:ruby (44 instances), rueca:rust (48 instances), rueca:ts/js (46 instances), S3 cbm:YamlDotNet, S3 cbm:acme.sh, S3 cbm:bash-it, S3 cbm:bats-core, S3 cbm:bytes, S3 cbm:c-micro, S3 cbm:cJSON, S3 cbm:cli, S3 cbm:click, S3 cbm:clikt, S3 cbm:commonmark, S3 cbm:cpp-micro, S3 cbm:csharp-micro, S3 cbm:dbt_hubspot, S3 cbm:eShopOnWeb, S3 cbm:ecma-micro, S3 cbm:express, S3 cbm:flask, S3 cbm:fmt, S3 cbm:gin, S3 cbm:go-micro, S3 cbm:goawk, S3 cbm:gson, S3 cbm:hono, S3 cbm:java-micro, S3 cbm:javapoet, S3 cbm:jekyll, S3 cbm:jinja, S3 cbm:json, S3 cbm:kotlin-micro, S3 cbm:kotlinpoet, S3 cbm:lua, S3 cbm:monolog, S3 cbm:moshi, S3 cbm:nvm, S3 cbm:packwerk, S3 cbm:php-micro, S3 cbm:pycg, S3 cbm:python-micro, S3 cbm:rack, S3 cbm:requests, S3 cbm:ripgrep, S3 cbm:ruby-lsp, S3 cbm:ruby-micro, S3 cbm:rust-micro, S3 cbm:sakila, S3 cbm:serilog, S3 cbm:shell-micro, S3 cbm:sql-micro, S3 cbm:sqlc, S3 cbm:yaml-cpp, S3 cbm:zod, S3 grep:YamlDotNet, S3 grep:acme.sh, S3 grep:bash-it, S3 grep:bats-core, S3 grep:bytes, S3 grep:c-micro, S3 grep:cJSON, S3 grep:cli, S3 grep:click, S3 grep:clikt, S3 grep:commonmark, S3 grep:cpp-micro, S3 grep:csharp-micro, S3 grep:dbt_hubspot, S3 grep:eShopOnWeb, S3 grep:ecma-micro, S3 grep:express, S3 grep:flask, S3 grep:fmt, S3 grep:gin, S3 grep:go-micro, S3 grep:goawk, S3 grep:gson, S3 grep:hono, S3 grep:java-micro, S3 grep:javapoet, S3 grep:jekyll, S3 grep:jinja, S3 grep:json, S3 grep:kotlin-micro, S3 grep:kotlinpoet, S3 grep:lua, S3 grep:monolog, S3 grep:moshi, S3 grep:nvm, S3 grep:packwerk, S3 grep:php-micro, S3 grep:pycg, S3 grep:python-micro, S3 grep:rack, S3 grep:requests, S3 grep:ripgrep, S3 grep:ruby-lsp, S3 grep:ruby-micro, S3 grep:rust-micro, S3 grep:sakila, S3 grep:serilog, S3 grep:shell-micro, S3 grep:sql-micro, S3 grep:sqlc, S3 grep:yaml-cpp, S3 grep:zod, S3 rueca:YamlDotNet, S3 rueca:acme.sh, S3 rueca:bash-it, S3 rueca:bats-core, S3 rueca:bytes, S3 rueca:c-micro, S3 rueca:cJSON, S3 rueca:cli, S3 rueca:click, S3 rueca:clikt, S3 rueca:commonmark, S3 rueca:cpp-micro, S3 rueca:csharp-micro, S3 rueca:dbt_hubspot, S3 rueca:eShopOnWeb, S3 rueca:ecma-micro, S3 rueca:express, S3 rueca:flask, S3 rueca:fmt, S3 rueca:gin, S3 rueca:go-micro, S3 rueca:goawk, S3 rueca:gson, S3 rueca:hono, S3 rueca:java-micro, S3 rueca:javapoet, S3 rueca:jekyll, S3 rueca:jinja, S3 rueca:json, S3 rueca:kotlin-micro, S3 rueca:kotlinpoet, S3 rueca:lua, S3 rueca:monolog, S3 rueca:moshi, S3 rueca:nvm, S3 rueca:packwerk, S3 rueca:php-micro, S3 rueca:pycg, S3 rueca:python-micro, S3 rueca:rack, S3 rueca:requests, S3 rueca:ripgrep, S3 rueca:ruby-lsp, S3 rueca:ruby-micro, S3 rueca:rust-micro, S3 rueca:sakila, S3 rueca:serilog, S3 rueca:shell-micro, S3 rueca:sql-micro, S3 rueca:sqlc, S3 rueca:yaml-cpp, S3 rueca:zod, health (115 repositories)",
  "carried_from": {
-  "date": "2026-11-25 14:03 UTC",
+  "date": "2026-11-25 14:39 UTC",
   "machine": {
    "platform": "macOS-26.4.1-arm64-arm-64bit",
    "machine": "arm64",
