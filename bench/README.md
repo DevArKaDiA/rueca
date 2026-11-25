@@ -28,7 +28,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Multi-step** (RFC 0009 §8, experimental code mode) | "How many tokens does a multi-step question cost as tool calls, as one code-mode script, and with cbm?" | reported; RFC 0009's per-language graduation gate |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
-the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust,shell,csharp}/` and the
+the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust,shell,csharp,kotlin}/` and the
 env-bridge labels in `labels/bridge/`). Datasets, repositories and tool
 binaries are fetched at runtime at pinned revisions into `bench/.cache`
 (git-ignored), so nothing with an unclear licence is vendored.
@@ -54,7 +54,7 @@ uv run --project bench rueca-bench check                 # regression check vs t
 
 - `setup [--lang FAMILY ...]` and `run ... [--lang FAMILY ...]` restrict work
   to language families (manifest `[languages]` keys: `python`, `ecma`,
-  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`, `csharp`) and/or `data` (the data-format suite);
+  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`, `csharp`, `kotlin`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
 - `run --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all|a,b} --suite {s1,s3,data,health,org,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--workers N] [--force] [--prune]`.
   `--split` restricts S1 to one split; the `vector`, `rueca-hybrid` and
@@ -620,6 +620,7 @@ stays untuned:
 | rust (15) | tokio-rs/bytes (5), tokio-rs/tracing (5), sharkdp/fd (5); Multi-SWE-bench | tokio-rs/bytes v1.12.1 (rust-analyzer) |
 | shell (0) | none (no dataset has shell instances) | bats-core/bats-core v1.13.0 (shell labeler) |
 | csharp (11) | btcpayserver/btcpayserver (5), ant-design-blazor/ant-design-blazor (3), spectreconsole/spectre.console (3); SWE-rebench V2 | aaubry/YamlDotNet v18.1.0 (scip-dotnet) |
+| kotlin (15) | evant/kotlin-inject (5), square/anvil (5), ajalt/mordant (5); SWE-rebench V2 | square/kotlinpoet 2.4.0 (scip-java) |
 
 C++ stops at 13: outside the gated repositories, Multi-SWE-bench has only
 cpp-httplib (one eligible instance) and SWE-rebench V2 only zeek (70
@@ -721,6 +722,17 @@ other repositories with at least three `A` rows (btcpayserver 5,
 ant-design-blazor 3, spectre.console 3). Function gold comes from the
 tree-sitter labeler (C# test projects, `*.Tests` / `*.UnitTests` / …
 directories, are test paths).
+
+Kotlin (46): SWE-bench Multilingual has no Kotlin instances;
+Multi-SWE-bench (the revision already pinned for C++, which includes its
+Kotlin release) has 105, all touching Kotlin files. Gated: pinterest/ktlint
+16, detekt/detekt 12, oss-review-toolkit/ort 6, TeXiFy-IDEA 5, Kotlin
+DataFrame 4, square/okhttp 2, GradleUp/shadow 1 (by sha256 of the instance
+id; Anki-Android left out: a GPL-3.0 Android application, a large clone);
+every patch touches a non-test `.kt` / `.kts` file. Calibration: three
+SWE-rebench V2 repositories rated `A` by its LLM screen (kotlin-inject,
+anvil, mordant; five each), disjoint from the gated and S3 repositories.
+Function gold comes from the tree-sitter labeler.
 
 Rust (43): every SWE-bench Multilingual Rust instance (tokio 9, bat 8,
 axum 7, ruff 7, coreutils 5, nushell 5, ripgrep 2; every patch touches a
@@ -895,7 +907,17 @@ headers on Linux; nothing is compiled or linked); serde_json v1.0.154
 ships one, default features, build scripts and proc macros run by `cargo
 check` with `CARGO_TARGET_DIR` and `CARGO_HOME` inside the bench cache;
 std and dependencies resolve through the toolchain's `rust-src` and the
-downloaded crates, and are out of scope). SCIP gives references,
+downloaded crates, and are out of scope); moshi 2.0.0-alpha.1
+(`moshi/src/main/java/`, Kotlin sources), clikt 5.2.1
+(`clikt/src/{commonMain,jvmMain}/`) and kotlinpoet 2.4.0 (calibration,
+`kotlinpoet/src/{commonMain,jvmMain}/`) (scip-java 0.14.2's Kotlin indexer,
+built on the Kotlin Analysis API 2.4.0 (K2): a `scip-java.json` build
+(manifest `kotlin = { sources, classpath }`) listing the source
+directories and sha256-pinned classpath jars — kotlin-stdlib and
+kotlin-reflect 2.3.21, okio-jvm 3.16.4, jsr305 — run by the pinned
+launcher in the same `eclipse-temurin:21-jdk` image as the Java gold with
+`--network=none` and read-only sources; nothing is compiled; about 5 s
+per repository, no file skipped). SCIP gives references,
 not calls, so (`scip.py`):
 
 1. callables = tree-sitter functions/methods in scope (`include` prefixes, no
@@ -1015,8 +1037,8 @@ keys against the PHPStan extractor and the report prints the agreement
 `call_user_func` callables, a conditionally declared function and a trait
 `as` alias, which PHPStan does not resolve and the key does).
 
-**Python, TS/JS, Go, Java, C, C++, Rust and shell micro-benchmarks**
-(`micro/{python,ecma,go,java,c,cpp,rust,shell}/`, Rueca's own labels, Apache-2.0), same
+**Python, TS/JS, Go, Java, C, C++, Rust, shell and Kotlin micro-benchmarks**
+(`micro/{python,ecma,go,java,c,cpp,rust,shell,kotlin}/`, Rueca's own labels, Apache-2.0), same
 format and spirit as the PHP one; every snippet compiles (`py_compile`,
 `tsc --strict` 5.6 / `node --check`, `go vet`, `javac` 21 in Docker,
 `clang -fsyntax-only` / `clang++ -std=c++17 -fsyntax-only`, `cargo check
@@ -1081,6 +1103,20 @@ a macro body belongs to the macro's expansion site — the function that uses
 the macro calls the callee, as scip-clang records it (`quiet` → `log_msg`
 through `LOG(m)`) — and so do calls written in a macro's arguments and
 explicit `a.operator+(b)`; `new T(...)` points to `T::T` when it has a body.
+**Kotlin**: callables are named functions (top-level, member, extension,
+abstract interface members, local) and constructors named like their class
+(`Foo.Foo`): the primary one, written or implicit (every class that is
+not an interface and does not declare only secondary constructors), on the
+class name's line with the class header as its extent, so that the
+supertype constructor call and default arguments written there are its
+calls; secondary ones on their first line. Property accessors, `init`
+blocks, property initializers and lambdas are not callables (calls in them
+have no caller, like Java field initializers). A call on a typed receiver
+points to the member of the static type (interfaces to the declaration),
+`Foo(…)` to the constructor, a companion member through its class to the
+companion's member, an extension call to the extension function; callable
+references (`::f`) and infix calls are not call sites.
+
 **Rust**: callables are `fn` items with a body, trait method signatures and
 `macro_rules!` definitions (named as in the pack: `Type.method`,
 `Trait.method`, `mod.fn`, `outer.inner`); a method call on a concrete
@@ -1141,7 +1177,10 @@ snippets identical: the labeler, like the S3 gold, follows neither `time
 f` nor `eval 'f'`, and gives no edge for a name two sourced files define,
 where the key follows the order the script sources them), C# vs scip-dotnet 72 / 76 with no extra edge (68 of 72 snippets
 identical: scip-dotnet records no occurrence for `: base(…)` / `: this(…)`
-initializers, target-typed `new()` and explicit generic calls `M<T>()`).
+initializers, target-typed `new()` and explicit generic calls `M<T>()`), Kotlin vs scip-java 85 / 89 with no extra edge (62 of 65
+snippets identical: scip-java's Kotlin indexer records no occurrence for
+constructor delegation, `: this(…)` / `: super(…)`; the key keeps those
+four edges).
 **C#**: callables are methods (with or without a body), constructors,
 destructors, operators, conversion operators and local functions (named as
 in the pack: `Type.member`, constructors `Type.Type`, explicit interface
@@ -1364,7 +1403,7 @@ gated S1 repository at the base commit of its first gated
 `[[s1.instances]]` entry, then every calibration S1 repository at the base
 commit of its first calibration entry; `org.derive_pins`, checked by a unit
 test; the repositories of the languages listed in `[org]
-pending_languages` — added after the last full run of the scenario, C#
+pending_languages` — added after the last full run of the scenario, C# and Kotlin
 today — are left out until the next full run re-measures every arm, so
 the published organization numbers keep describing the organization they
 were measured on). The **gated organization** is the `split = "gated"` members (42); the
@@ -1876,11 +1915,12 @@ and the summary printed at the end.
 | Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`), four C++, three Rust, two C, two Go, two Java and one JS JSONL file | HF revision + per-file sha256 | CC0 (dataset README; upstream repository licences apply) | S1 C++ issues, patches (fmt, nlohmann/json, Catch2, simdjson); calibration repositories: Rust (bytes, tracing, fd), C (zstd, ponyc), Go (grpc-go, go-zero), Java (jackson-core, mockito), JS (dayjs) |
 | PyCG micro-benchmark (`vitsalis/PyCG`) | commit | Apache-2.0 | S3 Python call-graph gold (diagnostic) |
 | PHP micro-benchmark (`bench/micro/php`) | in repository | Apache-2.0 (Rueca's own labels) | S3 PHP call-graph gold |
-| Python / TS/JS / Go / Java / C / C++ / Rust / shell / C# micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell,csharp}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
+| Python / TS/JS / Go / Java / C / C++ / Rust / shell / C# / Kotlin micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell,csharp,kotlin}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
 | Env bridge labels (`bench/labels/bridge`) | in repository | Apache-2.0 (Rueca's own labels) | data-format suite gold |
 | PHPStan (`phpstan/phpstan`) release PHAR | version + sha256 | MIT | S3 PHP gold (run in Docker, never vendored) |
 | `php:8.3-cli` Docker official image | digest | PHP-3.01 (separate process) | runtime for PHPStan |
 | tree-sitter-php, -go, -java, -c, -cpp, -rust, -bash, -c-sharp (PyPI) | `uv.lock` | MIT | bench labeler for PHP, Go, Java, C, C++, Rust, shell (and the shell S3 gold), C# |
+| fwcd/tree-sitter-kotlin (ast-grep's release, git commit `1a6f9b1`, built from source by uv) | `uv.lock` | MIT | bench labeler for Kotlin |
 | PyYAML, python-hcl2 (+ lark, regex) (PyPI) | `uv.lock` | MIT / MIT (+ MIT, Apache-2.0) | data-format reference parsers |
 | numpy (PyPI) | `uv.lock` | BSD-3-Clause | bootstrap intervals |
 | tiktoken (PyPI) + the `cl100k_base` encoding file | `uv.lock`; the encoding by tiktoken's own sha256 | MIT | efficiency (tokens per correct answer) |
@@ -1888,6 +1928,8 @@ and the summary printed at the end.
 | scip-go 0.2.9 | release archive + binary sha256 (darwin-arm64, linux-amd64) | Apache-2.0 | S3 Go gold, Go micro cross-check |
 | scip-clang 0.4.1 | release binary sha256 (darwin-arm64, linux-amd64) | Apache-2.0 | S3 C / C++ gold, micro cross-checks |
 | scip-java 0.13.2 | release launcher sha256 (JVM, any platform) | Apache-2.0 | S3 Java gold, Java micro cross-check |
+| scip-java 0.14.2 (Kotlin Analysis API indexer) | release launcher sha256 (JVM, any platform) | Apache-2.0 | S3 Kotlin gold, Kotlin micro cross-check |
+| kotlin-stdlib / kotlin-reflect 2.3.21, okio-jvm 3.16.4, jsr305 3.0.2 (Maven Central) | sha256 | Apache-2.0 | classpath of the Kotlin gold |
 | rust-analyzer 2026-11-09 (`0.3.3113-standalone`, e5e7830640) | release archive (`.gz`) + binary sha256 (darwin-arm64, linux-amd64) | MIT OR Apache-2.0 | S3 Rust gold (`rust-analyzer scip`), Rust micro cross-check; runs the host's `cargo` (crates.io dependencies of the indexed repositories are downloaded into the cache, never vendored) |
 | scip-dotnet 0.2.16 (`sourcegraph/scip-dotnet`, `linux/amd64` image with the .NET SDK 10.0.402) | Docker image digest | Apache-2.0 | S3 C# gold, C# micro cross-check; restores the indexed projects' NuGet packages from nuget.org into the cache (never vendored) |
 | `eclipse-temurin:21-jdk` Docker official image | digest | GPL-2.0 with Classpath Exception (separate process) | runtime for javac + scip-java |
@@ -2040,6 +2082,25 @@ file paths and function names of the public corpus repositories.
     sends such a call to the generic overloads that take its argument
     count (an equivalence class when several);
   - local functions are `local` symbols, bound per document.
+- **scip-java gold for Kotlin** (moshi, clikt, kotlinpoet, micro):
+  - the Kotlin indexer analyses the listed sources as one JVM module:
+    Kotlin Multiplatform `expect` / `actual` pairs (kotlinpoet's
+    `commonMain` / `jvmMain`) do not resolve, which is why kotlinpoet is the
+    calibration repository;
+  - constructor delegation (`: this(…)`, `: super(…)`) has no occurrence,
+    and a supertype constructor call (`: Base(x)`) references the class,
+    not its constructor: neither is a gold edge, while Rueca reports both
+    as calls of the constructor;
+  - an annotation written with arguments (`@Delicate(message = …)`) is a
+    call of the annotation class's constructor in the gold (a call site
+    under the labeler's `constructor_invocation` rule);
+  - an extension function's symbol is owned by its receiver's simple name
+    in the file's package (`a/b/String#ext().`), so extensions of two
+    receivers with one simple name are one equivalence class (six groups
+    in kotlinpoet, none in the gated repositories);
+  - a primary constructor written with `constructor` on a line of its own
+    is defined on that keyword: the gold binds it to the callable whose
+    extent (the class header) holds that line.
 - **rust-analyzer gold for Rust** (serde_json, ripgrep, bytes, micro):
   - calls on a generic `T: Trait`, an `impl Trait` parameter or a `dyn
     Trait` receiver resolve to the trait method only, so trait impls get no

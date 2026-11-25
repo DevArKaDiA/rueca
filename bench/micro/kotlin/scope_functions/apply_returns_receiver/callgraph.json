@@ -1,0 +1,10 @@
+{
+  "app/Main.kt:Builder.Builder": [],
+  "app/Main.kt:Builder.build": [],
+  "app/Main.kt:Builder.size": [],
+  "app/Main.kt:make": [
+    "app/Main.kt:Builder.Builder",
+    "app/Main.kt:Builder.build",
+    "app/Main.kt:Builder.size"
+  ]
+}

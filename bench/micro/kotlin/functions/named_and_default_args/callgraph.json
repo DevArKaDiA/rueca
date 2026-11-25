@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:greet": [],
+  "app/Main.kt:hello": [
+    "app/Main.kt:greet"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "app/Main.kt:Conn.Conn": [],
+  "app/Main.kt:Conn.Factory.open": [
+    "app/Main.kt:Conn.Conn"
+  ],
+  "app/Main.kt:a": [
+    "app/Main.kt:Conn.Factory.open"
+  ],
+  "app/Main.kt:b": [
+    "app/Main.kt:Conn.Factory.open"
+  ]
+}

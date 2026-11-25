@@ -1,0 +1,9 @@
+{
+  "app/Main.kt:Pt.Pt@3": [],
+  "app/Main.kt:Pt.Pt@4": [
+    "app/Main.kt:Pt.Pt@3"
+  ],
+  "app/Main.kt:diag": [
+    "app/Main.kt:Pt.Pt@4"
+  ]
+}

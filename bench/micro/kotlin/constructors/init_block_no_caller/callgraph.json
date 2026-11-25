@@ -1,0 +1,9 @@
+{
+  "app/Main.kt:Service.Service": [],
+  "app/Main.kt:Service.start": [],
+  "app/Main.kt:boot": [],
+  "app/Main.kt:run": [
+    "app/Main.kt:Service.Service",
+    "app/Main.kt:Service.start"
+  ]
+}

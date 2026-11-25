@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:Point.Point": [],
+  "app/Main.kt:origin": [
+    "app/Main.kt:Point.Point"
+  ]
+}

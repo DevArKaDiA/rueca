@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:add": [],
+  "app/Main.kt:twice": [
+    "app/Main.kt:add"
+  ]
+}

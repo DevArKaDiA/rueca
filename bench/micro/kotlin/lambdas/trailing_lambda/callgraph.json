@@ -1,0 +1,8 @@
+{
+  "app/Main.kt:go": [
+    "app/Main.kt:helper",
+    "app/Main.kt:repeatTwice"
+  ],
+  "app/Main.kt:helper": [],
+  "app/Main.kt:repeatTwice": []
+}

@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:Box.Box": [],
+  "app/Main.kt:make": [
+    "app/Main.kt:Box.Box"
+  ]
+}

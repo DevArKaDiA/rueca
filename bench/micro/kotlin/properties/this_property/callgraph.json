@@ -1,0 +1,8 @@
+{
+  "app/Main.kt:Car.Car": [],
+  "app/Main.kt:Car.go": [
+    "app/Main.kt:Engine.start"
+  ],
+  "app/Main.kt:Engine.Engine": [],
+  "app/Main.kt:Engine.start": []
+}

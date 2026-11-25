@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:cheer": [
+    "app/Main.kt:shout"
+  ],
+  "app/Main.kt:shout": []
+}

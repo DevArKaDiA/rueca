@@ -18,6 +18,7 @@ dependencies = [
     "tree-sitter-rust>=0.24.2,<0.25",
     "tree-sitter-bash>=0.25.1,<0.26",
     "tree-sitter-c-sharp>=0.24.0,<0.25",
+    "tree-sitter-kotlin==0.4.0",
     "pyyaml>=6.0.3,<7",
     "python-hcl2>=8.1.4,<9",
     "tomli-w>=1.0",
@@ -39,6 +40,13 @@ packages = ["src/rueca_bench"]
 # Rebuild the (non-)editable install when sources change; needed with
 # UV_NO_EDITABLE=1 (see bench/README.md, macOS hidden-.pth note).
 cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
+
+[tool.uv.sources]
+# Kotlin: fwcd/tree-sitter-kotlin as released on crates.io by ast-grep
+# (tree-sitter-kotlin-sg 0.4.1, the Rust pack's grammar); PyPI's
+# `tree-sitter-kotlin` is another grammar (tree-sitter-grammars), so the
+# binding is built from the pinned commit.
+tree-sitter-kotlin = { git = "https://github.com/ast-grep/tree-sitter-kotlin", rev = "1a6f9b1ee1125a7357493eeb95da48d16ac302b4" }
 
 [dependency-groups]
 dev = [

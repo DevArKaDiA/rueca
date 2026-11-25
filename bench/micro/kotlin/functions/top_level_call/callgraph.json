@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:prepare": [],
+  "app/Main.kt:start": [
+    "app/Main.kt:prepare"
+  ]
+}

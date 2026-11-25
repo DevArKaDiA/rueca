@@ -1,0 +1,10 @@
+{
+  "app/Main.kt:Base.Base": [],
+  "app/Main.kt:Base.helper": [],
+  "app/Main.kt:Worker.Worker": [
+    "app/Main.kt:Base.Base"
+  ],
+  "app/Main.kt:Worker.run": [
+    "app/Main.kt:Base.helper"
+  ]
+}

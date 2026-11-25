@@ -1,0 +1,7 @@
+{
+  "app/Main.kt:User.User": [],
+  "app/Main.kt:User.display": [],
+  "app/Main.kt:card": [
+    "app/Main.kt:User.display"
+  ]
+}

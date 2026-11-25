@@ -31,10 +31,16 @@ def _platform(spec: dict) -> dict | None:
     return bins.get(cbm_platform_key()) or bins.get("any")
 
 
+def _bin_name(spec: dict) -> str:
+    """File name of a tool in the cache: `bin_name` when two pinned tools
+    share a name (scip-java for Java and for Kotlin), else `name`."""
+    return spec.get("bin_name", spec["name"])
+
+
 def tool_binary(key: str) -> Path:
     spec = tool_spec(key)
     plat = _platform(spec) or {}
-    return pinned_asset(BIN_DIR / spec["name"], plat.get("binary_sha256"))
+    return pinned_asset(BIN_DIR / _bin_name(spec), plat.get("binary_sha256"))
 
 
 def tool_available(key: str) -> tuple[bool, str]:
@@ -60,7 +66,7 @@ def fetch_tool(key: str) -> Path:
     want = plat.get("binary_sha256")
     if dest.exists() and (want is None or sha256_file(dest) == want):
         return dest
-    dest = BIN_DIR / spec["name"]
+    dest = BIN_DIR / _bin_name(spec)
     dl = CACHE / "dl"
     dl.mkdir(parents=True, exist_ok=True)
     BIN_DIR.mkdir(parents=True, exist_ok=True)

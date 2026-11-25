@@ -1,0 +1,9 @@
+{
+  "app/Main.kt:Log.Log": [],
+  "app/Main.kt:Log.log@4": [],
+  "app/Main.kt:Log.log@6": [],
+  "app/Main.kt:use": [
+    "app/Main.kt:Log.log@4",
+    "app/Main.kt:Log.log@6"
+  ]
+}

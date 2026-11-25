@@ -1,0 +1,8 @@
+{
+  "app/Main.kt:MemRepo.MemRepo": [],
+  "app/Main.kt:MemRepo.save": [],
+  "app/Main.kt:Repo.save": [],
+  "app/Main.kt:persist": [
+    "app/Main.kt:Repo.save"
+  ]
+}

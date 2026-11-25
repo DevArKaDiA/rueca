@@ -1,0 +1,12 @@
+{
+  "app/Main.kt:En.En": [],
+  "app/Main.kt:En.name": [],
+  "app/Main.kt:Greeter.greet": [
+    "app/Main.kt:Greeter.name"
+  ],
+  "app/Main.kt:Greeter.name": [],
+  "app/Main.kt:hi": [
+    "app/Main.kt:En.En",
+    "app/Main.kt:Greeter.greet"
+  ]
+}

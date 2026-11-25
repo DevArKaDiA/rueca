@@ -1,0 +1,7 @@
+{
+  "app/Main.kt:check": [
+    "app/Main.kt:ping"
+  ],
+  "app/Main.kt:ping": [],
+  "other/Ping.kt:ping": []
+}

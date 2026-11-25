@@ -1,0 +1,8 @@
+{
+  "app/Main.kt:Door.Door": [],
+  "app/Main.kt:Door.close": [],
+  "app/Main.kt:Door.shut": [
+    "app/Main.kt:Door.close"
+  ],
+  "app/Main.kt:close": []
+}

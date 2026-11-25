@@ -1,0 +1,12 @@
+{
+  "app/Main.kt:Tag.Tag@3": [],
+  "app/Main.kt:Tag.Tag@4": [
+    "app/Main.kt:Tag.Tag@3"
+  ],
+  "app/Main.kt:Tag.Tag@6": [
+    "app/Main.kt:Tag.Tag@3"
+  ],
+  "app/Main.kt:tag": [
+    "app/Main.kt:Tag.Tag@4"
+  ]
+}

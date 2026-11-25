@@ -1,0 +1,9 @@
+{
+  "app/Main.kt:Base.Base": [],
+  "app/Main.kt:Child.Child": [
+    "app/Main.kt:Base.Base"
+  ],
+  "app/Main.kt:child": [
+    "app/Main.kt:Child.Child"
+  ]
+}

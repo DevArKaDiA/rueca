@@ -1,0 +1,10 @@
+{
+  "app/Main.kt:Circle.Circle": [],
+  "app/Main.kt:Circle.radius": [],
+  "app/Main.kt:Square.Square": [],
+  "app/Main.kt:Square.side": [],
+  "app/Main.kt:size": [
+    "app/Main.kt:Circle.radius",
+    "app/Main.kt:Square.side"
+  ]
+}

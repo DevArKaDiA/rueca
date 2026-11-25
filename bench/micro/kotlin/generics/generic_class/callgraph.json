@@ -1,0 +1,8 @@
+{
+  "app/Main.kt:Box.Box": [],
+  "app/Main.kt:Box.get": [],
+  "app/Main.kt:unbox": [
+    "app/Main.kt:Box.Box",
+    "app/Main.kt:Box.get"
+  ]
+}

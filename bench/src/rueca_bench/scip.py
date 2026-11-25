@@ -235,6 +235,7 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
 
     scoped = [d for d in docs if in_scope(d.path, include, exclude)]
     keep_start = (language or "").lower() in _TREE_SITTER_START
+    kotlin = (language or "").lower() == "kotlin"
     stats["documents_total"] = len(docs)
     stats["documents_in_scope"] = len(scoped)
 
@@ -272,16 +273,21 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
     for d in scoped:
         index = {(f["def_line"], f["name"]): f for f in by_file.get(d.path, [])}
         lines = texts.get(d.path, [])
-        local_ok = bool(grammar_spec(grammar_for(d.path, language)).get("local_callables"))
+        local_ok = kotlin or bool(grammar_spec(grammar_for(d.path, language)).get("local_callables"))
         for o in d.occurrences:
-            if not (o.roles & ROLE_DEFINITION) or (o.symbol.startswith("local ") and not local_ok):
+            sym = _symbol_key(d.path, o.symbol, local_ok)
+            if not (o.roles & ROLE_DEFINITION) or sym is None:
                 continue
             stats["definitions"] += 1
             line0, sc, _, ec = o.range
             if line0 >= len(lines):
                 continue
             name = _slice(lines[line0], sc, ec, d.position_encoding)
+            if kotlin:
+                name = kotlin_def_name(o.symbol, name)
             f = index.get((line0 + 1, name))
+            if f is None and kotlin:
+                f = kotlin_constructor_in(by_file.get(d.path, []), o, name)
             aliased = False
             if f is None:
                 f = overload_alias.get((d.path, line0 + 1, name))
@@ -289,7 +295,6 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
             if f is None:
                 continue
             bound.add(fid(d.path, f))
-            sym = _symbol_key(d.path, o.symbol)
             if sym not in sym_to_fid:
                 sym_to_fid[sym] = fid(d.path, f)
                 stats["definitions_bound"] += 1
@@ -297,7 +302,7 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
             elif sym_to_fid[sym] != fid(d.path, f):
                 # one symbol, several callables: the gold cannot tell them apart
                 same_symbol.union(sym_to_fid[sym], fid(d.path, f))
-            if o.enclosing is not None and not aliased:
+            if o.enclosing is not None and not aliased and not kotlin:
                 stats["definitions_with_enclosing_range"] += 1
                 es, ee = o.enclosing[0] + 1, o.enclosing[2] + 1
                 if es <= f["def_line"] <= ee and not f.get("_enc"):
@@ -320,9 +325,10 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
         lines = texts[d.path]
         funcs = by_file.get(d.path, [])
         for o in d.occurrences:
-            if o.roles & ROLE_DEFINITION or (o.symbol.startswith("local ") and not gspec.get("local_callables")):
+            sym = _symbol_key(d.path, o.symbol, kotlin or bool(gspec.get("local_callables")))
+            if o.roles & ROLE_DEFINITION or sym is None:
                 continue
-            callee = sym_to_fid.get(_symbol_key(d.path, o.symbol))
+            callee = sym_to_fid.get(sym)
             if callee is not None and gspec.get("generic_overloads") and o.symbol.endswith("()."):
                 callee = repair.retarget(callee, o.symbol, tree, o.range, d.position_encoding, texts[d.path])
             if callee is None and gspec.get("type_constructions"):
@@ -369,9 +375,16 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
     return graph
 
 
-def _symbol_key(path: str, symbol: str) -> str:
-    """A SCIP symbol as bound: `local N` symbols are per document."""
-    return f"{path}\x00{symbol}" if symbol.startswith("local ") else symbol
+def _symbol_key(path: str, symbol: str, keep_locals: bool) -> str | None:
+    """The gold's key of a SCIP symbol; `None` = ignored. `local N` symbols
+    are unique within a document only: kept (qualified by the path) where
+    they name callables — Kotlin (scip-java gives local functions and members
+    of local classes / object expressions local symbols) and grammars with
+    `local_callables` (C#: scip-dotnet's local functions) — and ignored
+    elsewhere."""
+    if not symbol.startswith("local "):
+        return symbol
+    return f"{path}::{symbol}" if keep_locals else None
 
 
 class _GenericOverloads:
@@ -422,6 +435,61 @@ def _constructors_by_type(sym_to_fid: dict[str, str], uf: UnionFind) -> dict[str
         for f in fs[1:]:
             uf.union(fs[0], f)
     return {t: fs[0] for t, fs in by_type.items()}
+
+
+_SCIP_TAIL = re.compile(r"(\(\+?\d*\))?\.$|#$|\([^)]*\)$")
+_SCIP_NAME = re.compile(r"(`[^`]+`|[^/#.`]+)$")
+
+
+def scip_last_name(symbol: str) -> str:
+    """Name of a global SCIP symbol's last descriptor (`a/b/Foo#bar(+1).`
+    -> `bar`, `a/b/Foo#` -> `Foo`, `` a/b/Foo#`<init>`(). `` -> `<init>`);
+    empty for parameters and local symbols."""
+    if symbol.startswith("local "):
+        return ""
+    desc = _SCIP_TAIL.sub("", symbol.split(" ", 4)[-1])
+    m = _SCIP_NAME.search(desc)
+    return m.group(1).strip("`") if m else ""
+
+
+def kotlin_def_name(symbol: str, sliced: str) -> str | None:
+    """The callable name a Kotlin definition occurrence binds to. scip-java's
+    Kotlin indexer defines a class's symbol, its primary constructor and
+    synthetic members (`values()`, `entries`, data-class accessors) on the
+    class name, and a secondary constructor on its whole declaration: a
+    constructor binds to the callable named like its class, any other
+    symbol only when its own name is the text at the occurrence (the class
+    symbol does, so supertype constructor calls `: Base(x)`, which
+    reference the class, reach its constructor)."""
+    last = scip_last_name(symbol)
+    sliced = sliced.strip("`")
+    if last == "<init>":
+        return scip_last_name(symbol.rsplit("#`<init>`", 1)[0] + "#")
+    if last == sliced or symbol.startswith("local "):
+        return sliced
+    return None
+
+
+def kotlin_constructor_in(funcs: list[dict], o: Occ, name: str | None) -> dict | None:
+    """The secondary constructor a Kotlin `<init>` definition stands for.
+    scip-java puts it on the declaration's first token (its KDoc or first
+    annotation when it has one) with the whole declaration as enclosing
+    range: the callable named like the class whose first line lies in that
+    range. Only for occurrences that start their enclosing range (a primary
+    constructor's sits on the class name, inside the class's range), or a
+    primary constructor whose `constructor` keyword is on its own line."""
+    enc = o.enclosing
+    if not name or enc is None or scip_last_name(o.symbol) != "<init>":
+        return None
+    if enc[:2] != o.range[:2]:
+        # a primary constructor written with `constructor` on a line of
+        # its own (`class Foo\nprivate constructor(…)`): the callable named
+        # like the class whose extent (the class header) holds that line
+        line = o.range[0] + 1
+        inside = [f for f in funcs if f["name"] == name and f["start"] <= line <= f["end"]]
+        return min(inside, key=lambda f: f["end"] - f["start"], default=None)
+    first, last = enc[0] + 1, enc[2] + 1
+    return next((f for f in funcs if f["name"] == name and first <= f["def_line"] <= last), None)
 
 
 # Indexers whose enclosing range starts above the declaration: rust-analyzer's

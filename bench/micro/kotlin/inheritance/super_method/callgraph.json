@@ -1,0 +1,10 @@
+{
+  "app/Main.kt:A.A": [],
+  "app/Main.kt:A.f": [],
+  "app/Main.kt:B.B": [
+    "app/Main.kt:A.A"
+  ],
+  "app/Main.kt:B.f": [
+    "app/Main.kt:A.f"
+  ]
+}
