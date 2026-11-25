@@ -1,5 +1,70 @@
 # Decisions log
 
+## 2026-11-25 — Shell: a localization set mined by the bench; `stable`
+
+Shell was `preview` for two reasons: no localization dataset has shell
+instances (missing results count as failing, RFC 0004 §6.2) and 1.95% of
+its files kept a parse error, the interval crossing the floor. The second
+is the dialect work below. For the first:
+
+- **The bench mines its own S1 set** (`[datasets.rueca_mined_shell]`,
+  `bench/datasets/`, loader `datasets.py: _local_jsonl_rows`): merged
+  GitHub pull requests that close an issue, in SWE-bench's columns, with
+  the merge base as `base_commit` and the three-dot diff as the patch.
+  Screening is mechanical (issue older than the pull request, ≥ 100
+  characters of prose, no diff in the issue, an existing non-test shell
+  file changed, shell the majority of the change, ≤ 10 shell files, patch
+  ≤ 100 KB, one pull request per issue); no LLM and no person rated the
+  issues, which is weaker than SWE-bench Multilingual's validation and
+  than SWE-rebench V2's LLM screen, and is said so wherever the row is
+  shown. Rejected: waiting for a dataset (none of the six checked has
+  shell), and an LLM screen (not reproducible from the manifest).
+- **Repositories and quotas were fixed from the mining counts alone**,
+  before any arm ran on them (`bench/datasets/mined/PROVENANCE.md` has
+  every candidate and the count each rule dropped): shell is the
+  repository's content, permissive licence, ≥ 5 eligible pairs, more than
+  one script. Gated (72): ohmyzsh 12, spaceship-prompt 6, prezto 5 (zsh);
+  bash-it 10, docker-mailserver 10, asdf 8, sdkman-cli 5 (bash); linutil
+  8, shellspec 8 (POSIX sh). Calibration (15): zinit, oh-my-bash,
+  bats-core. Left out: single-script repositories (nvm, openvpn-install,
+  Homebrew/install), copyleft ones (pi-hole, RetroPie-Setup, acme.sh),
+  and those whose code is in extension-less scripts, outside the bench's
+  file set (pyenv, rbenv, dokku, git-extras). No ksh repository with
+  linked issue → fix pairs was found.
+- **Issues that name the file are reported apart.** 34 of the 72 gated
+  issues contain a gold file's name (or the name without its extension).
+  That helps every lexical arm alike, so the gate stays on all 72, and the
+  scorecard prints the same two metrics for every arm on the other 38
+  (`gold.py: issue_names_gold_file`; a diagnostic line, not a floor).
+- **Nothing was tuned for it.** The calibration split ran first (15
+  instances: File Acc@5 73.3 for Rueca and BM25, Function Acc@10 45.5 vs
+  54.5 over 11; bats-core structure 100 / 100; micro F1 99.1) and no
+  ranking weight, heuristic or repair was changed afterwards. The gated
+  sets ran once, with the binary built from the dialect commits
+  (`fix/shell-stable@62caa40`), and nothing in the pack changed after it.
+- **Result** (gated, lexical mode): File Acc@5 72.2 (61.0–81.2) vs BM25
+  77.8, paired Δ −5.6 (−15.3 to +4.2); Function Acc@10 64.2 (50.7–75.7)
+  over 53 vs BM25 73.6, paired Δ −9.4 (−18.9 to +0.0); cbm 50.0 / 45.3.
+  Both floors are met by the rule of §6.1 (the whole interval is not below
+  zero) and both trail BM25 on the point estimate; the function interval
+  ends at zero, so this is the narrowest pass on the scorecard and is
+  written that way in the README. Where the issue names no gold file (38;
+  28 with function gold): File Acc@5 68.4 vs BM25 71.1 vs cbm 44.7,
+  Function Acc@10 64.3 vs 71.4 vs 42.9. Structure after the dialect work:
+  callers / callees precision 100.0 / 100.0, recall 99.9 / 99.9 (n =
+  1,740 / 2,182; the labeler now reads each file as the pack does, which
+  moved the population by 2 and 12 questions), definition found 100.0,
+  micro F1 99.1. Files with parse errors over the 12 gated corpus
+  repositories (the three S3 ones and the nine S1 ones at the base commit
+  of their first instance): 15 of 1,851, 0.8% (0.5–1.3); by dialect, on
+  the same files with the pack's `dialects` example: sh 4 / 532, bash 6 /
+  762, zsh 5 / 446, bats 0 / 112, ksh none in the corpus.
+- **What `stable` does not say.** The structural gold is still the
+  bench's code-backed labeler (it shares bash's lookup rules with the
+  pack, and since the dialect work the pack's dialect rules and repairs
+  too), and the localization set is unvalidated by people. Both are
+  disclosed next to the scorecard; neither is a floor of RFC 0004.
+
 ## 2026-11-25 — Shell: one dialect per file, tree-sitter-zsh for zsh files
 
 The shell pack read every file with tree-sitter-bash; zsh and ksh were

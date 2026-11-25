@@ -502,7 +502,9 @@ Adding a language is data plus, at most, one labeler entry:
    sources, `split = "calibration"` for the calibration repository) and, if needed, a `[datasets.<key>]` pin (HF revision, `file` +
    `sha256` or `files = { path = sha256 }`, `format` for non-SWE-bench
    layouts such as `multi_swe_bench`, licence, optional `row_filter` /
-   `filter_repos`). `rueca-bench setup --select --lang <family>` selects that
+   `filter_repos`; or `local = "datasets/<file>.jsonl"` + `sha256` for a
+   set committed with the bench — one JSON object per line with the
+   SWE-bench columns and `language`, as the mined shell set). `rueca-bench setup --select --lang <family>` selects that
    family's instances deterministically; other instances do not move.
 4. **S3** — at least two `[[s3.repos]]` (RFC 0004 §7.2: ≥ 300 questions
    per direction once pooled) with `gold = "scip"` (an `indexer` from
@@ -622,7 +624,7 @@ stays untuned:
 | c (15) | nanomsg/nng (5; SWE-rebench V2) · facebook/zstd (5), ponylang/ponyc (5; Multi-SWE-bench) | — |
 | cpp (13) | randombit/botan (5), zeek/zeek (5), ccache/ccache (3); SWE-rebench V2 | — |
 | rust (15) | tokio-rs/bytes (5), tokio-rs/tracing (5), sharkdp/fd (5); Multi-SWE-bench | tokio-rs/bytes v1.12.1 (rust-analyzer) |
-| shell (0) | none (no dataset has shell instances) | bats-core/bats-core v1.13.0 (shell labeler) |
+| shell (15) | zdharma-continuum/zinit (5, zsh), ohmybash/oh-my-bash (5), bats-core/bats-core (5); rueca-bench mined set | bats-core/bats-core v1.13.0 (shell labeler) |
 | csharp (11) | btcpayserver/btcpayserver (5), ant-design-blazor/ant-design-blazor (3), spectreconsole/spectre.console (3); SWE-rebench V2 | aaubry/YamlDotNet v18.1.0 (scip-dotnet) |
 | kotlin (15) | evant/kotlin-inject (5), square/anvil (5), ajalt/mordant (5); SWE-rebench V2 | square/kotlinpoet 2.4.0 (scip-java) |
 | ruby (4) | faker-ruby/faker (2), jordansissel/fpm (2); SWE-bench Multilingual | rack/rack v3.2.9, Shopify/packwerk v3.3.1 (scip-ruby) |
@@ -761,6 +763,44 @@ fields and `static` vtable initializers). ruff and nushell are the large reposit
 (≈ 40,000 and ≈ 20,000 cbm nodes); cbm indexes each in seconds, so no
 instance is left out for size.
 
+Shell (72): no localization dataset has shell instances (SWE-bench
+Multilingual / Verified / Lite, SWE-PolyBench, Multi-SWE-bench and
+SWE-rebench V2 were checked), so the set is **mined by the bench**
+(`[datasets.rueca_mined_shell]`, committed as
+`bench/datasets/rueca_mined_shell.jsonl` and pinned by sha256;
+`bench/datasets/mined/mine_s1.py` and `PROVENANCE.md` hold the miner, its
+API queries and the counts at every step). An instance is a merged GitHub
+pull request that closes an issue of the same repository
+(`closingIssuesReferences`), kept when, in order: no closed issue was
+opened by a bot; every closed issue is older than the pull request; title
+and body hold at least 100 characters of prose (templates, code fences and
+HTML comments stripped); the issue carries no diff (` ```diff ` fences,
+`+++ b/` lines, hunk headers; path mentions stay, as in SWE-bench); the
+patch changes an existing non-test shell file, shell files are the
+majority of its non-doc, non-test files, at most 10 of them, and it is at
+most 100 KB; the base commit is still served; one pull request per issue
+(the earliest merged). `base_commit` is the merge base and `patch` the
+three-dot diff of the pull request; `problem_statement` is title and body
+of each closed issue (no comments), as in SWE-bench and Multi-SWE-bench.
+No LLM or human screened the issues. Repositories were chosen from the
+mining counts alone, before any arm ran on them: shell is the repository's
+content, permissive licence, at least five eligible pairs, more than a
+single script (nvm, openvpn-install and Homebrew/install were left out:
+file localization on a one-file repository is trivial; pi-hole,
+RetroPie-Setup and acme.sh for their copyleft licences; pyenv, rbenv,
+dokku and git-extras because their code is in extension-less scripts,
+outside the bench's file set). Gated: ohmyzsh 12, spaceship-prompt 6,
+prezto 5 (zsh), bash-it 10, docker-mailserver 10, asdf 8 (its bash years,
+before the Go rewrite), sdkman-cli 5 (bash), linutil 8, shellspec 8 (POSIX
+sh), by sha256 of the instance id inside each quota; 53 of the 72 patches
+change a function. Calibration: zinit, oh-my-bash, bats-core (5 each).
+Function gold comes from the shell labeler. No ksh repository with linked
+issue → fix pairs was found. In 34 of the 72 gated issues the text names a
+gold file (its file name, or the name without its last extension, as a
+substring: `gold.py: issue_names_gold_file`), which helps every lexical
+arm alike; the scorecard prints File Acc@5 and Function Acc@10 of every arm
+on the other 38 as a diagnostic line (not gated).
+
 **Queries.** Same strings for every arm (`queries.py`):
 
 - `kw` — up to 12 tokens: identifiers from inline/fenced code first, then
@@ -886,8 +926,8 @@ line tolerance) is a class too; the two PHP repositories have none.
 365 / 372, zod 75 / 190), PHP 710 / 811 (monolog, commonmark), Go 351 / 521
 (gin, urfave/cli), Java 667 / 884 (gson, javapoet), C 978 / 1035 (cJSON,
 Lua), C++ 878 / 1085 (fmt, yaml-cpp), Rust 1417 / 1296 (serde_json
-342 / 513, ripgrep 1075 / 783), shell 1738 / 2170 (nvm 119 / 125, acme.sh
-1238 / 1630, bash-it 381 / 415), Ruby 1233 / 1205 (jekyll 585 / 513,
+342 / 513, ripgrep 1075 / 783), shell 1740 / 2182 (nvm 119 / 125, acme.sh
+1238 / 1631, bash-it 383 / 426), Ruby 1233 / 1205 (jekyll 585 / 513,
 ruby-lsp 648 / 692) — every language above the ≥ 300 per
 direction of §7.2 — and SQL 349 / 281 (Sakila 94 / 136, dbt_hubspot
 255 / 145; callees under 300). Calibration: click 210 / 191, goawk
@@ -2039,6 +2079,7 @@ and the summary printed at the end.
 | ContextBench (`Contextbench/ContextBench`) | HF revision + sha256 | none stated on the card (ContextBench code: Apache-2.0) | S1 context-file gold |
 | SWE-rebench V2 (`nebius/SWE-rebench-V2`) | HF revision + sha256 | CC-BY-4.0 (attribution: Nebius, SWE-rebench V2) | S1 PHP issues, patches (Twig, monolog, commonmark); S1 C# issues, patches (kiota, moq and six smaller repositories); calibration repositories of every language but Rust |
 | Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`), four C++, three Rust, two C, two Go, two Java and one JS JSONL file | HF revision + per-file sha256 | CC0 (dataset README; upstream repository licences apply) | S1 C++ issues, patches (fmt, nlohmann/json, Catch2, simdjson); calibration repositories: Rust (bytes, tracing, fd), C (zstd, ponyc), Go (grpc-go, go-zero), Java (jackson-core, mockito), JS (dayjs) |
+| rueca-bench mined shell set (`bench/datasets/rueca_mined_shell.jsonl`, miner and provenance in `bench/datasets/mined/`) | in repository, sha256 | issue and pull-request text from GitHub; patches under each repository's licence (MIT; sdkman-cli Apache-2.0), recorded per row | S1 shell issues and patches, gated and calibration |
 | PyCG micro-benchmark (`vitsalis/PyCG`) | commit | Apache-2.0 | S3 Python call-graph gold (diagnostic) |
 | PHP micro-benchmark (`bench/micro/php`) | in repository | Apache-2.0 (Rueca's own labels) | S3 PHP call-graph gold |
 | Python / TS/JS / Go / Java / C / C++ / Rust / shell / C# / Kotlin / Swift micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell,csharp,kotlin,swift}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
@@ -2305,8 +2346,16 @@ file paths and function names of the public corpus repositories.
   from unique names (acme.sh's hooks calling its helpers: 13,242 call
   sites); sourced paths are exercised by bash-it (33 of 57 `source` paths
   resolve, 24 call sites through them), the calibration set and the
-  micro-benchmark. No localization dataset has shell instances, so shell
-  has no S1 row and cannot be `stable`.
+  micro-benchmark.
+- **Mined localization set (shell).** No dataset has shell instances, so
+  the S1 set is mined from GitHub by rule (above): nobody validated that an
+  issue is well specified or that its pull request is the minimal fix, and
+  only issues a pull request closes by keyword are sampled. 34 of the 72
+  gated issues name a gold file (reported apart); asdf's instances are
+  commits from its bash years; zsh, bash and POSIX sh are covered, ksh is
+  not. Extension-less scripts are outside the bench's file set, so
+  repositories that keep their code in them (pyenv, rbenv, dokku) could
+  not be used.
 - **scip-ruby gold for Ruby** (jekyll, ruby-lsp, rack, packwerk, micro) is
   Sorbet's view of the code:
   - untyped code is inferred (as `# typed: true`, also in `# typed: false`
