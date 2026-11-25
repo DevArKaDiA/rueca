@@ -1212,7 +1212,8 @@ def score_collapse(items: list[dict], gold: dict, base: int, fix: int) -> dict:
     changed_flag tp / fp / fn, in_ok / in_total (added -> [fix], removed ->
     [base], changed versions one ref each). A symbol unchanged inside a
     changed file that is flagged counts as `changed_same_file`, not as a
-    false positive: Rueca compares versions by file blob (RFC 0006 §9.3)."""
+    false positive: Rueca compared versions by file blob until it compared
+    each symbol's own text (RFC 0006 §9.3), so it is 0 from then on."""
     by_key: dict[tuple, list[dict]] = {}
     for it in items:
         by_key.setdefault((it.get("path"), it.get("qn")), []).append(it)

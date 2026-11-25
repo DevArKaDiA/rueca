@@ -135,18 +135,17 @@ def test_trace_parser():
     assert one == [plans.Node(3, 1, "both", 2, "Method", "A.b c", "src/a.py", 0)]
 
 
-def test_outline_contract_and_snippet_parsers():
-    outline = "r@1 (HEAD)\nf.py (python, 9 lines) [0] changed\n  Function a L1-2  def a()\n  Class C L3-9  class C\n    Method C.m L4-5  def m(self)\nversion [1] changed: f.py (python, 9 lines)\n  Function a L1-3  def a()\n"
+def test_outline_and_contract_parsers():
+    outline = "r@1 (HEAD)\nf.py (python, 9 lines) [0] changed\n  Function a L1-2  def a() changed\n  Class C L3-9  class C\n    Method C.m L4-5  def m(self)\nversion [1] changed: f.py (python, 9 lines)\n  Function a L1-3  def a() changed\n"
     v = plans.outline_versions(outline)
     assert [s.qn for s in v[0]] == ["a", "C", "C.m"] and [(s.qn, s.end) for s in v[1]] == [("a", 3)]
-    assert plans.diff_functions("f.py", v[0], v[1], ["x", "y", "", "  m", ""], ["x", "y", "z"]) == ["f.py#C.m", "f.py#a"]
+    assert [s.qn for s in v[0] if s.changed] == ["a"] and v[1][0].changed
     rows = "o@b8 (HEAD)\nGET /api/tags  provides  gin  github.com/o/o:server/routes.go#Server.ListHandler L2407  (7)\nGET /  consumes  js-http  github.com/o/js:test/u.test.ts#get Function Header Tests > x L20  (3)\n"
     es = plans.contracts(rows)
     assert es[0].key == "GET /api/tags" and es[0].symbol == "Server.ListHandler" and es[0].path == "server/routes.go"
     assert plans.is_test_file(es[1].path) and not plans.is_test_file("src/flask/app.py")
     assert plans.contracts("GET /  provides  gin  r:p.go L1  (2)\nGET /  uses  gin  r:p.go L1  (2)\nGET /  provides  gin  r:p.go L1  2")[0].symbol == ""
     assert len(plans.contracts("GET /  provides  gin  r:p.go L1  (2)\nGET /  uses  gin  r:p.go L1  (2)")) == 1
-    assert plans.snippet_lines("r@1 (x)\nf.py L1-3\nline1\nline2") == ["line1", "line2"]
 
 
 def test_cbm_rows_and_names():

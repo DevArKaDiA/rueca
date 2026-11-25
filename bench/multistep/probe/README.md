@@ -27,6 +27,10 @@ script from the API reference alone? Results and their reading:
   returned answer when there was no error).
 - **Limits of the method**: n = 1 per cell and one model. An indication,
   not a measurement of model fluency in general.
+- **API version**: the scripts were written against the API before the
+  four friction fixes of RFC 0009 §14.6 (`local`, `repo` / `ref` on every
+  symbol, per-symbol `changed`, tests nested in test blocks); they are kept
+  as written, so re-scoring them today may not reproduce `out/`.
 
 The `describe_api` texts the writers read had SHA-256
 `ef64f53a2b462fe975d41520b5e27975456f2b3e92d9820b8e3db956e1cd78fc` (`js`,

@@ -119,6 +119,7 @@ class OutlineSym:
     qn: str
     start: int
     end: int
+    changed: bool = False
 
     def fid(self, path: str) -> str:
         return f"{path}#{self.qn}"
@@ -138,7 +139,7 @@ def outline_versions(text: str) -> list[list[OutlineSym]]:
         m = _OUT.match(line)
         if m:
             ind, label, qn, s, e = m.groups()
-            versions[-1].append(OutlineSym(len(ind), label, qn, int(s), int(e or s)))
+            versions[-1].append(OutlineSym(len(ind), label, qn, int(s), int(e or s), line.endswith(" changed")))
     return versions
 
 
@@ -386,25 +387,12 @@ def ms24(agent: Agent) -> list[str]:
 BASE, FIX = "091991be0da1", "fa64e474afe1"
 
 
-def snippet_lines(text: str) -> list[str]:
-    """The code lines of a `get_snippet` text answer (after its header)."""
-    lines = text.split("\n")
-    start = next(i for i, ln in enumerate(lines) if re.match(r"^\S+ L\d+-\d+$", ln)) + 1
-    return lines[start:]
-
-
 def ms25(agent: Agent) -> list[str]:
+    """One outline at both refs: each symbol line whose own text differs
+    between them (or that exists in one only) ends with ` changed`."""
     path = "requests/sessions.py"
     versions = outline_versions(agent.call("get_file_outline", {"path": path, "ref": [BASE, FIX], **WHOLE}))
-    base, fix = versions[0], versions[-1]
-    texts = [snippet_lines(agent.call("get_snippet", {"path": path, "start_line": 1, "max_lines": 2000, "ref": r, **WHOLE})) for r in (BASE, FIX)]
-    return diff_functions(path, base, fix, texts[0], texts[1])
-
-
-def diff_functions(path: str, base: list[OutlineSym], fix: list[OutlineSym], a: list[str], b: list[str]) -> list[str]:
-    old = {s.qn: a[s.start - 1 : s.end] for s in base if s.label in FUNCS}
-    new = {s.qn: b[s.start - 1 : s.end] for s in fix if s.label in FUNCS}
-    return sorted(f"{path}#{qn}" for qn in set(old) | set(new) if old.get(qn) != new.get(qn))
+    return sorted({s.fid(path) for v in versions for s in v if s.changed and s.label in FUNCS})
 
 
 PLANS: dict[str, Callable[[Agent], Any]] = {name: obj for name, obj in globals().items() if re.fullmatch(r"ms\d\d", name)}

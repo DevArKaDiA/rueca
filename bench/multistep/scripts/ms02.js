@@ -1,5 +1,5 @@
 const SRC = "src/flask/";
-const fid = (n) => n.id.slice(n.id.indexOf(":") + 1); // "<path>#<Qualname>"
+const fid = (n) => n.path + "#" + n.local; // "<path>#<Qualname>"
 const isTest = (p) => /\.test\.|(^|\/)tests?\//.test(p);
 const inScope = (n) => ["Function", "Method"].includes(n.label) && (n.path || "").startsWith(SRC) && !isTest(n.path);
 async function neighbours(root, direction) {

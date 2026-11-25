@@ -1,5 +1,5 @@
 const SRC = "src/requests/";
-const fid = (n) => n.id.slice(n.id.indexOf(":") + 1); // "<path>#<Qualname>"
+const fid = (n) => n.path + "#" + n.local; // "<path>#<Qualname>"
 const isTest = (p) => /\.test\.|(^|\/)tests?\//.test(p);
 const inScope = (n) => ["Function", "Method"].includes(n.label) && (n.path || "").startsWith(SRC) && !isTest(n.path);
 async function neighbours(root, direction) {
@@ -10,6 +10,6 @@ async function neighbours(root, direction) {
 const groups = await rueca.searchSymbols({ query: "proxy", path_glob: "src/requests/utils.py", labels: ["Function", "Method"], limit: 50 });
 const out = {};
 for (const g of groups) for (const s of g.symbols) {
-  if (s.name.toLowerCase().includes("proxy")) out[fid(s)] = new Set(await neighbours({ id: s.id }, "callers")).size;
+  if (s.name.toLowerCase().includes("proxy")) out[g.path + "#" + s.local] = new Set(await neighbours({ id: s.id }, "callers")).size;
 }
 return out;

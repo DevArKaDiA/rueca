@@ -1,5 +1,5 @@
 const SRC = "src/requests/";
-const fid = (n) => n.id.slice(n.id.indexOf(":") + 1); // "<path>#<Qualname>"
+const fid = (n) => n.path + "#" + n.local; // "<path>#<Qualname>"
 const isTest = (p) => /\.test\.|(^|\/)tests?\//.test(p);
 const inScope = (n) => ["Function", "Method"].includes(n.label) && (n.path || "").startsWith(SRC) && !isTest(n.path);
 async function neighbours(root, direction) {
@@ -12,7 +12,7 @@ const outline = await rueca.getFileOutline({ path });
 const flat = (syms) => syms.flatMap((s) => [s, ...flat(s.children || [])]);
 const counts = [];
 for (const s of flat(outline.symbols).filter((s) => ["Function", "Method"].includes(s.label))) {
-  counts.push([fid(s), new Set(await neighbours({ id: s.id }, "callers")).size]);
+  counts.push([path + "#" + s.local, new Set(await neighbours({ id: s.id }, "callers")).size]);
 }
 counts.sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1));
 return counts.slice(0, 3);

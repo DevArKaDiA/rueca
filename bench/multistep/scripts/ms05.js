@@ -1,5 +1,5 @@
 const SRC = "src/flask/";
-const fid = (n) => n.id.slice(n.id.indexOf(":") + 1); // "<path>#<Qualname>"
+const fid = (n) => n.path + "#" + n.local; // "<path>#<Qualname>"
 const isTest = (p) => /\.test\.|(^|\/)tests?\//.test(p);
 const inScope = (n) => ["Function", "Method"].includes(n.label) && (n.path || "").startsWith(SRC) && !isTest(n.path);
 async function neighbours(root, direction) {
@@ -11,6 +11,6 @@ const outline = await rueca.getFileOutline({ path: "src/flask/ctx.py" });
 const cls = outline.symbols.find((s) => s.label === "Class" && s.name === "RequestContext");
 const out = {};
 for (const m of cls.children.filter((c) => c.label === "Method")) {
-  out[fid(m)] = new Set(await neighbours({ id: m.id }, "callers")).size;
+  out[outline.path + "#" + m.local] = new Set(await neighbours({ id: m.id }, "callers")).size;
 }
 return out;
