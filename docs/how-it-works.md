@@ -1546,8 +1546,10 @@ an agent:
   together with the header and the group path spells the id.
 - **Several refs, once.** With a `ref` list, a symbol whose file blob is the
   same in two refs is one item `in` both (facts are per blob, so it is
-  identical); versions that differ, or exist in one ref only, are marked
-  `changed` — the unchanged code once, the difference highlighted. `trace`
+  identical); a symbol whose own text (its span) differs between the refs,
+  or that exists in one ref only, is marked `changed` — the unchanged code
+  once, the difference highlighted; a symbol that only moved within a
+  changed file is listed per version but not `changed`. `trace`
   returns the union of the walks from every version of the root.
 - **Budget.** `budget_tokens` (default 2,000) bounds the text: the builder
   binary-searches the longest prefix of items whose rendering fits

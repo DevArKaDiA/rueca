@@ -86,12 +86,17 @@ fn lines() -> Value {
     doc(json!({ "type": "array", "prefixItems": [int(), int()] }), "[start, end], 1-based, inclusive")
 }
 
-/// `in` / `changed` of an item of a repository read at several refs.
+/// `in` / `changed` of a symbol of a repository read at several refs.
 fn marks() -> [(&'static str, Value); 2] {
     [
-        ("in?", doc(array(int()), "snapshots it is in (several refs only)")),
-        ("changed?", doc(boolean(), "not identical in every requested ref")),
+        ("in?", doc(array(int()), "snapshots this version is in (several refs only)")),
+        ("changed?", doc(boolean(), "own text differs between the refs, or absent from one")),
     ]
+}
+
+/// `in` / `changed` of a whole file (`get_file_outline`) or a `trace` edge.
+fn file_marks(what: &str) -> [(&'static str, Value); 2] {
+    [("in?", doc(array(int()), "snapshots it is in (several refs only)")), ("changed?", doc(boolean(), what))]
 }
 
 /// `local`, `qn`: the two names of a symbol (described once, on `Brief`;
@@ -149,7 +154,10 @@ fn symbol_item() -> Value {
 
 fn outline_symbol() -> Value {
     let fields = [("id", string()), ("name", string()), ("label", string()), ("lines?", lines()), ("sig?", string())];
-    let more = [("children?", array(named("OutlineSymbol")))];
+    let more = [
+        ("changed?", doc(boolean(), "several refs: own text differs, or absent from one")),
+        ("children?", array(named("OutlineSymbol"))),
+    ];
     titled("OutlineSymbol", symbol_fields(&fields, 2, &more, false))
 }
 
@@ -232,7 +240,7 @@ fn trace() -> Value {
     let [in_, changed] = marks();
     let more = [("d", doc(int(), "depth; the root (node 0) is 0")), ("dir", dir), in_, changed];
     let node = titled("TraceNode", symbol_fields(&fields, 2, &more, false));
-    let tail = json!({ "anyOf": [string(), object(&marks())] });
+    let tail = json!({ "anyOf": [string(), object(&file_marks("not found in every requested ref"))] });
     let edge = titled(
         "TraceEdge",
         doc(
@@ -255,9 +263,10 @@ fn trace() -> Value {
 }
 
 fn get_file_outline() -> Value {
+    let marks = file_marks("the file is not identical in every requested ref");
     let version = object_of(with(
         &[("s", snapshot()), ("line_count", int()), ("symbols", array(named("OutlineSymbol")))],
-        &marks(),
+        &marks,
     ));
     let base = [
         ("s", snapshot()),
@@ -267,7 +276,7 @@ fn get_file_outline() -> Value {
         ("symbols", array(outline_symbol())),
         ("versions?", array(version)),
     ];
-    object_of(with(&base, &marks()))
+    object_of(with(&base, &marks))
 }
 
 fn list_repositories() -> Value {

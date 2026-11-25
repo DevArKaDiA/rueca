@@ -1,7 +1,8 @@
 //! A [`View`] is one opened segment (one snapshot) plus the helpers every
 //! tool needs: brief symbols, stable ids, symbol lookup and path resolution.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use rueca_model::{ENV_PATH, EdgeKind, FileId, Label, LanguageFamily, Node, NodeId, Span, env_var_qualified_name};
 use rueca_segment::org::OrgSlot;
@@ -23,6 +24,8 @@ pub struct View {
     /// The organization entry this snapshot is (organization mode): its
     /// repository's index in the generation and which of its refs.
     pub org_slot: Option<OrgSlot>,
+    /// File contents read during the call (multi-ref symbol comparison).
+    contents: Mutex<HashMap<FileId, Option<Arc<[u8]>>>>,
 }
 
 /// How a tool names a symbol.
@@ -56,7 +59,7 @@ impl View {
     pub fn new(seg: Arc<Segment>, entry: CatalogEntry) -> View {
         let snap = SnapshotDesc::from_info(seg.snapshot());
         let id_commit = snap.id_commit();
-        View { seg, entry, snap, id_commit, org_slot: None }
+        View { seg, entry, snap, id_commit, org_slot: None, contents: Mutex::default() }
     }
 
     pub fn repo(&self) -> &str {
@@ -93,6 +96,29 @@ impl View {
         hits.retain(|&m| self.node(m).label == label && self.node_path(m) == path);
         hits.sort_unstable_by_key(|&m| (self.node(m).span.map_or(u32::MAX, |s| s.start_byte), m));
         hits
+    }
+
+    /// Whether node `n` of this snapshot and node `m` of `other` (the same
+    /// symbol in another snapshot of the repository) have the same source
+    /// text: the bytes of their spans (the whole file for a node without a
+    /// span). Equal blobs are equal without reading; a file that cannot be
+    /// read compares by blob.
+    pub fn same_text(&self, n: NodeId, other: &View, m: NodeId) -> bool {
+        let (a, b) = (self.node(n), other.node(m));
+        let (Some(fa), Some(fb)) = (a.file, b.file) else { return a.file == b.file };
+        if self.seg.file(fa).blob_sha == other.seg.file(fb).blob_sha {
+            return true;
+        }
+        match (self.content(fa), other.content(fb)) {
+            (Some(ca), Some(cb)) => span_bytes(&ca, a.span) == span_bytes(&cb, b.span),
+            _ => false,
+        }
+    }
+
+    /// The content of `file`, read once per call.
+    fn content(&self, file: FileId) -> Option<Arc<[u8]>> {
+        let mut cache = self.contents.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.entry(file).or_insert_with(|| self.seg.content(file).ok().map(Arc::from)).clone()
     }
 
     pub fn node(&self, id: NodeId) -> &Node {
@@ -427,6 +453,13 @@ impl View {
             })
             .collect()
     }
+}
+
+/// The bytes of `span` in `content` (all of it without a span; clamped).
+fn span_bytes(content: &[u8], span: Option<Span>) -> &[u8] {
+    let Some(s) = span else { return content };
+    let end = (s.end_byte as usize).min(content.len());
+    &content[(s.start_byte as usize).min(end)..end]
 }
 
 /// Name of a canonical env var node (`$env:NAME`, no file).

@@ -192,6 +192,11 @@ pub struct OutlineSymbol {
     pub brief: Brief,
     pub signature: Option<String>,
     pub children: Vec<OutlineSymbol>,
+    /// Several refs of the file's repository were read and the symbol's text
+    /// is not the same in all of them (compact only).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub changed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]

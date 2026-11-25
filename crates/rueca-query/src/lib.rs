@@ -90,8 +90,10 @@
 //! `search_symbols`, `get_symbol`, `trace` and `get_file_outline` find the
 //! same symbol in each (same label, qualified name and path) and collapse
 //! identical versions — same file blob — with [`multiref`]: one item with the
-//! snapshots it is `in`, `changed` when it is not identical in every
-//! requested snapshot of its repository; search collapses before cutting at
+//! snapshots it is `in`, `changed` when the symbol's own text (its span) is
+//! not the same in every requested snapshot of its repository, or it is
+//! absent from one (a symbol moved by lines added above it is not); outline
+//! symbols are marked the same way; search collapses before cutting at
 //! `limit`; `trace` walks from every version of the root and returns the
 //! union graph. Repositories read at one snapshot are answered exactly as
 //! before; `format: "verbose"` never collapses.

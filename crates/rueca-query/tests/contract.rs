@@ -589,9 +589,10 @@ fn ref_lists_collapse_identical_symbols_and_flag_changes() {
 
     // Collapse happens before the limit: an identical symbol counts once.
     let all = marks(&call(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "limit": 50})));
-    // 3 symbols of the changed file in both versions, the TS helper once.
+    // 3 symbols of the changed file in both versions, the TS helper once;
+    // `helper` itself only moved down a line: not `changed`.
     assert_eq!(all.len(), 7, "{all:?}");
-    assert_eq!(all.iter().filter(|m| m.2).count(), 6, "{all:?}");
+    assert_eq!(all.iter().filter(|m| m.2).count(), 4, "{all:?}");
     let page1 = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "limit": 4}));
     assert_eq!((marks(&page1).len(), page1["next_cursor"].as_str()), (4, Some("4")));
     let page2 = call(&t.engine, "search_symbols", json!({"query": "helper", "ref": BOTH, "limit": 4, "cursor": "4"}));
@@ -612,10 +613,88 @@ fn ref_lists_collapse_identical_symbols_and_flag_changes() {
         "{txt}"
     );
     assert!(txt.contains("  Function helper L7  function helper() [0,1]\n"), "{txt}");
-    assert!(txt.contains("  Function helper L13-14  def helper() changed\n"), "{txt}");
+    assert!(txt.contains("  Function helper L13-14  def helper()\n"), "{txt}");
+    assert!(txt.contains("  Method InvoiceService.issue L9-11  def issue(self, invoice) changed\n"), "{txt}");
     // Verbose keeps the alpha shapes: no collapse, no marks.
     let v = call(&t.engine, "search_symbols", json!({"query": "formatAmount", "ref": BOTH, "format": "verbose"}));
     assert_eq!(v["results"].as_array().unwrap().iter().filter(|h| h["name"] == "formatAmount").count(), 2);
+}
+
+/// `changed` compares each symbol's own text between the refs: in the
+/// changed `pkg/service.py`, `InvoiceService.issue` was edited, `Base.run`
+/// is untouched and `helper` only moved down a line (both not `changed`),
+/// `test_issue` was removed and `audit` added (both `changed`).
+#[test]
+fn changed_is_per_symbol_not_per_file() {
+    let t = two_refs();
+    let flags = |v: &Value| -> Vec<(String, bool)> {
+        fn walk(syms: &Value, out: &mut Vec<(String, bool)>) {
+            for s in syms.as_array().into_iter().flatten() {
+                out.push((s["local"].as_str().unwrap().to_string(), s["changed"] == true));
+                walk(&s["children"], out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(&v["symbols"], &mut out);
+        out
+    };
+    let r = call(&t.engine, "get_file_outline", json!({"path": "pkg/service.py", "ref": BOTH}));
+    let main: Vec<(String, bool)> = flags(&r["results"]);
+    let feature: Vec<(String, bool)> = flags(&r["results"]["versions"][0]);
+    let s = |v: &[(&str, bool)]| v.iter().map(|(n, c)| (n.to_string(), *c)).collect::<Vec<_>>();
+    assert_eq!(
+        main,
+        s(&[
+            ("Base", false),
+            ("Base.run", false),
+            ("InvoiceService", true),
+            ("InvoiceService.issue", true),
+            ("helper", false),
+            ("test_issue", true)
+        ]),
+        "{r}"
+    );
+    assert_eq!(
+        feature,
+        s(&[
+            ("Base", false),
+            ("Base.run", false),
+            ("InvoiceService", true),
+            ("InvoiceService.issue", true),
+            ("helper", false),
+            ("audit", true)
+        ]),
+        "{r}"
+    );
+    // The file itself changed; each version carries its own ref.
+    assert_eq!(
+        (r["results"]["changed"].clone(), r["results"]["versions"][0]["changed"].clone()),
+        (json!(true), json!(true))
+    );
+    assert_eq!(r["results"]["versions"][0]["symbols"][0]["ref"], "feature/x");
+    let txt = text(&t.engine, "get_file_outline", json!({"path": "pkg/service.py", "ref": BOTH}));
+    assert!(txt.contains("\n  Function helper L13-14  def helper()\n"), "{txt}");
+    assert!(txt.contains("\n    Method InvoiceService.issue L9-11  def issue(self, invoice) changed\n"), "{txt}");
+    assert!(txt.contains("\n  Function audit L17-18  def audit(invoice) changed\n"), "{txt}");
+    // One ref: no marks at all.
+    let r = call(&t.engine, "get_file_outline", json!({"path": "pkg/service.py"}));
+    assert!(flags(&r["results"]).iter().all(|(_, c)| !c), "{r}");
+
+    // get_symbol: a symbol that only moved has two versions (its lines
+    // differ), neither `changed`.
+    let r = call(&t.engine, "get_symbol", json!({"qualified_name": "pkg.service.helper", "ref": BOTH}));
+    let res = &r["results"];
+    assert_eq!(
+        (res["in"].clone(), res.get("changed"), res["symbol"]["lines"].clone()),
+        (json!([0]), None, json!([13, 14]))
+    );
+    let v = &res["versions"][0];
+    assert_eq!(
+        (v["in"].clone(), v.get("changed"), v["symbol"]["lines"].clone()),
+        (json!([1]), None, json!([14, 15])),
+        "{r}"
+    );
+    assert_eq!(v["symbol"]["ref"], "feature/x");
 }
 
 #[test]
@@ -660,7 +739,7 @@ fn ref_lists_in_get_symbol_trace_and_outline() {
     assert_eq!(edge(audit)[6], json!({"in": [1], "changed": true}), "only on the branch: {r}");
     let txt = text(&t.engine, "trace", args);
     assert!(txt.contains(&format!("{audit} [1] out d1 Function audit  pkg/service.py L17-18 changed  ←0 CALLS 0.95 same_module @11 [1] changed\n")), "{txt}");
-    assert!(txt.contains(" [0,1] changed  ←0 CALLS 0.95 same_module @10\n"), "{txt}");
+    assert!(txt.contains(" Function helper  pkg/service.py L13-14 [0,1]  ←0 CALLS 0.95 same_module @10\n"), "{txt}");
     // Callers on main only: the test that the branch deleted.
     let r = call(
         &t.engine,

@@ -575,6 +575,9 @@ fn outline_page(flat: &Flat<'_>, start: usize, k: usize) -> Vec<Value> {
     fn build(j: usize, start: usize, flat: &Flat<'_>, children: &[Vec<usize>]) -> Value {
         let s = flat[start + j].1;
         let mut m = symbol_item(&s.brief, s.signature.as_ref());
+        if s.changed {
+            put(&mut m, "changed", true);
+        }
         if !children[j].is_empty() {
             let kids = children[j].iter().map(|&c| build(c, start, flat, children)).collect();
             put(&mut m, "children", Value::Array(kids));
@@ -1197,6 +1200,9 @@ fn text_outline_symbols(out: &mut String, syms: &Value, depth: usize) {
             }
             if let Some(sig) = s.get("sig").and_then(Value::as_str) {
                 let _ = write!(out, "  {}", one_line(sig));
+            }
+            if s["changed"] == true {
+                out.push_str(" changed");
             }
             out.push('\n');
             if let Some(c) = s.get("children") {

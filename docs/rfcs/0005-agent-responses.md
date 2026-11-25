@@ -146,6 +146,11 @@ repository:
 - symbols that differ appear once per distinct version, each with its own
   `in` list; a `changed: true` flag marks items whose content differs across
   the requested refs;
+  *(amended 2026-11-24: "content" is the symbol's own text, the bytes of
+  its span, compared in every requested ref — absent from one is changed
+  too; a symbol whose file changed elsewhere, moved by lines added above
+  it, is listed once per version but not `changed`. Before, versions were
+  compared by file blob and every symbol of a changed file was flagged.)*
 - `trace` over several refs returns the union graph with each edge's `in`
   list, so "who calls `f` on the PR but not on `main`" is answerable from one
   response.

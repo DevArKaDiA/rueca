@@ -195,25 +195,33 @@ snapshots of one repository.
 side; the envelope lists every requested snapshot of such a repository.
 Extraction is per blob, so a symbol whose file blob is the same in two refs
 has identical facts: a symbol is found in each snapshot by (label,
-qualified name, path), and its versions are compared by file blob.
+qualified name, path), its versions are collapsed by file blob, and it is
+`changed` when its own text differs.
 
 - An item identical in several snapshots is **one item** with `"in": [s, …]`
   (snapshot indexes); its `s` and id are those of the first. A symbol whose
-  file differs appears once per distinct version, each with its own `in`.
-  Every item of such a repository carries `in`; `"changed": true` marks
-  those not identical in every requested ref (another version, or absent:
-  added or deleted on a ref). Repositories read at one snapshot get neither,
-  so their items are exactly the single-ref ones.
+  file differs appears once per distinct version, each with its own `in`
+  (its lines, edges and id differ). Every item of such a repository
+  carries `in`; `"changed": true` marks a symbol whose **own text** (the
+  bytes of its span) is not the same in every requested ref, or that is
+  absent from one (added or deleted on a ref). A symbol of a changed file
+  whose text did not change — moved by lines added above it — is listed per
+  version but not `changed`; `in` still tells the file-level story (the
+  snapshots whose file blob the version shares). Repositories read at one
+  snapshot get neither, so their items are exactly the single-ref ones.
 - `search_symbols` collapses before cutting at `limit` (an identical symbol
   counts once; `next_cursor` counts collapsed items). `get_symbol` answers
   the best match's version with its `in` / `changed` and lists the other
   versions in `"versions": [{"s", "in", "changed", "symbol", "callers",
   "callees"}]` (not as candidates). `get_file_outline` is grouped per ref:
-  the first listed ref's outline with its `in` / `changed`, then each other
-  distinct version of the file in `"versions": [{"s", "in", "changed",
-  "line_count", "symbols"}]`, the cursor counting symbols over all of them.
-  `trace` walks from every version of the root and returns the **union
-  graph**: a node per symbol (its `in`: the snapshots it was reached in) and
+  the first listed ref's outline with its `in` / `changed` (of the **file**),
+  then each other distinct version of the file in `"versions": [{"s", "in",
+  "changed", "line_count", "symbols"}]`, the cursor counting symbols over
+  all of them; each symbol of each version is `"changed": true` by the rule
+  above, so "which functions of this file differ between the refs" is one
+  call. `trace` walks from every version of the root and returns the **union
+  graph**: a node per symbol (its `in`: the snapshots it was reached in;
+  `changed` by the rule above) and
   an edge per (source, destination, kind), whose `in` (the snapshots whose
   walk found it) ends the edge array as `{"in": [s, …], "changed": true}`
   (see [`trace`](#trace)), so "who calls `f` on the PR but not on `main`"
@@ -556,7 +564,7 @@ some requested ref did not find it); text:
 [1] github.com/acme/billing@c0ffee00c0ff (feature/x)
 0 [0] Method InvoiceService.issue  pkg/service.py L9-11 [0,1] changed
 2 [1] out d1 Function audit  pkg/service.py L17-18 changed  ←0 CALLS 0.95 same_module @11 [1] changed
-3 [0] out d1 Function helper  pkg/service.py L13-14 [0,1] changed  ←0 CALLS 0.95 same_module @10
+3 [0] out d1 Function helper  pkg/service.py L13-14 [0,1]  ←0 CALLS 0.95 same_module @10
 ```
 
 `next_cursor` is the number of non-root nodes already returned; a later
@@ -602,7 +610,10 @@ symbols already returned in pre-order; a later page nests what it can and
 lists the rest at the top level. With a `ref` list: `"in"` / `"changed"`
 and `"versions": [{"s", "in", "changed", "line_count", "symbols"}]`, one
 per other distinct version of the file (text: `version [1] changed:
-pkg/service.py (python, 18 lines)` and its symbols).
+pkg/service.py (python, 18 lines)` and its symbols); there `changed` is the
+file's, and each symbol whose own text differs between the refs (or that
+one ref lacks) has `"changed": true` (text: ` changed` at the end of its
+line).
 
 ### `list_repositories`
 
