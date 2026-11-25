@@ -136,7 +136,7 @@ such edges disappear. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-shell`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -215,6 +215,30 @@ What packs deliberately do and don't do:
   own callers and `OVERRIDES`. Fully qualified type names
   (`com.acme.Owner`) and static on-demand imports are recorded as extra
   single imports so they resolve like explicit ones.
+- **Shell functions are file-level, whatever their nesting.** A shell
+  (sh, bash; zsh and ksh read with the bash grammar, best effort) function
+  is global once its definition runs, so `f() {…}`, `function f {…}` and
+  a function defined inside another function or an `if` are all `Function`
+  definitions named `f` at file level (two definitions of one name in a
+  file are one node, the first). The module name is the path
+  (`scripts/deploy.sh:deploy`). File-level assignments are `Variable`s
+  (`readonly` / `declare -r`: `Constant`), and `export NAME=…`, `declare
+  -x NAME`, `local -x` and a command's `NAME=value cmd` prefix are
+  `EnvVar` providers (children of the enclosing function, values never
+  shown). Calls are command words that are literal names, wherever the
+  command sits (pipelines, `&&` / `||` lists, subshells, `$(…)`, `<(…)`,
+  conditions, `time` / `!`, `eval 'literal'`); `command f`, `exec f`,
+  `xargs f`, `sudo f` never run a shell function and give nothing; a
+  `trap` handler names a callback (a `Read`, so a `REFERENCES` edge, not
+  `CALLS`); a command word that is a path or a script name (`./deploy.sh`,
+  `bash scripts/x.sh`, `"$DIR/x.sh"`) is a `Call` with the `$script`
+  receiver, which the resolver links to the script's `File` node. A few
+  constructs tree-sitter-bash 0.25 rejects although the shell accepts them
+  are rewritten before parsing with same-length text (spans stay exact):
+  `${s:$i:1}`, `&` / `<` / `>` in an expansion's pattern, a line-start
+  `\.` (nvm's alias bypass), zsh parameter flags `${(j:,:)xs}`. Other zsh
+  syntax (glob qualifiers `*(.)`, `for x (…)` loops, nested `${${…}}`)
+  stays an ERROR node, counted as a parse error.
 - **Rust names follow the module tree, items join with `.`.** The module
   name of a file is its module path, crate name first
   (`rueca_index::link`, from `Cargo.toml` and the file layout, §4.3); the
@@ -357,7 +381,11 @@ What packs deliberately do and don't do:
   (`Suite::Name`) and Catch2 / doctest `TEST_CASE("title")` blocks; in
   Rust, functions with a test attribute (`#[test]`, `#[tokio::test]`,
   `#[bench]`, `#[rstest]`, …), everything in a `#[cfg(test)]` module and
-  every definition under `tests/` or `benches/`.
+  every definition under `tests/` or `benches/`; in shell, bats `@test
+  "name" { … }` blocks (`Test` definitions; the grammar reads them as
+  commands, the pack rebuilds the blocks), every definition of a test file
+  (test directories, `*.bats`, `test_*.sh`, `*_test.sh`, `*_spec.sh`) and,
+  in a file that sources shunit2, its `test*` functions and hooks.
 - **Named function expressions are definitions** in JS/TS wherever they
   appear (`app.use(function handler() {})`, `defineGetter(req, "query",
   function query() {})`, `return function timing() {}`): a `Function` child
@@ -450,7 +478,11 @@ literal names: Python `os.environ["X"]`, `os.environ.get("X")`,
 `getenv('X')`, `$_ENV['X']`, `$_SERVER['X']`, Laravel `env('X')`,
 `config('app.name')` and `Config::get(…)`; Rust `std::env::var("X")`,
 `env::var("X")` / `var("X")` with `std::env` / `std::env::var` imported (and
-`var_os`), `env!("X")` and `option_env!("X")`. Laravel config files are PHP:
+`var_os`), `env!("X")` and `option_env!("X")`; shell `$NAME`, `${NAME}`,
+`${NAME:-default}`, `${NAME:?msg}` (also in strings and here-documents)
+when the file binds `NAME` nowhere (no assignment, `local`, `export`,
+`read`, `for`, …), the name is upper case and not a shell variable
+(`BASH_SOURCE`, `LINENO`, …). Laravel config files are PHP:
 the array a `config/<file>.php` returns becomes `Key`s (`name`,
 `providers.cache.driver`), and `env()` calls inside an entry are reads by
 that key.
@@ -529,10 +561,15 @@ facts depend on the path as well as the bytes (data file kinds are chosen by
 name) add a hash of the path to the key. A pack may also decline a file with
 a reason (`skipped:data-shape`): the file stays listed and searchable.
 
-**Detection** is by extension (`.rs` is Rust), then by file name (`Dockerfile`,
+**Detection** is by extension (`.rs` is Rust, `.sh` / `.bash` / `.zsh` /
+`.ksh` / `.bats` shell), then by file name (`Dockerfile`,
 `Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`,
-`AndroidManifest.xml`; other XML stays text); a C header
-(`.h`) is C++ when the snapshot has C++ sources. A file gets a language in
+`AndroidManifest.xml`, the shell start-up files `.bashrc`, `.profile`,
+`.zshrc`, …; other XML stays text); a C header
+(`.h`) is C++ when the snapshot has C++ sources; a file name without an
+extension is shell when its `#!` line names a shell (`#!/bin/sh`,
+`#!/usr/bin/env bash`, `#!/usr/bin/env -S zsh -f`), which the indexer reads
+from the bytes it already loaded. A file gets a language in
 the graph only when a pack for it is registered; otherwise it is plain text
 (listed, content-searchable).
 
@@ -562,7 +599,8 @@ Two per-language hooks, still without guessing symbols:
   it is or whose directory holds it (else the library), and its module path
   is the crate name plus the directories and stem below the crate root
   (`rueca_index::link`; `mod.rs` names its directory). Every file is its
-  own module.
+  own module. Shell keeps the path with its extension (`bin/deploy`,
+  `lib/util.sh`); a shell library has no package identity.
 - `resolve_import(from, import)`: maps a specifier to a project file or to
   *nothing* (third-party, builtin). Python follows relative levels and source
   roots (`from .http` in `shop/api.py` → `shop/http.py`). TS/JS uses
@@ -617,6 +655,15 @@ Two per-language hooks, still without guessing symbols:
   third-party crates resolve to nothing. `resolve_import` maps module
   paths to files; the resolver walks the rest of a `use` path itself
   (inline modules, re-exports, types, §4.4).
+  Shell `source P` / `. P` (bats: `load NAME` → `NAME.bash` next to the
+  test) are star imports of the path the file determines: literal paths
+  (tried against the file's directory, then the repository root), the
+  script's directory through `$(dirname "$0")`, `${BASH_SOURCE%/*}`,
+  `$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)` or zsh `${0:A:h}`, a
+  variable the file assigns one of those (`ROOT=…; . "$ROOT/lib/x.sh"`),
+  and, for an unknown prefix (`"$NVM_DIR/nvm.sh"`), the only file whose
+  path ends with the literal tail; dynamic paths (`source "$f"`) import
+  nothing.
 
 Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0);
 for documents that means "links to" (docs → docs, code files, images).
@@ -820,6 +867,19 @@ In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
 → 0.95; `Session().request` has the receiver `$type:Session`, so rung 5
 applies → 0.85.
 
+Shell references are resolved by the `shell` module (`rueca-resolve`
+crate docs, *Shell*): bash looks a function up by name when the command
+runs, so a name is the file's own file-level definition (`same_module`,
+0.90), else the only definition among the files it sources, transitively
+(`import_resolved`, 0.95; definitions in two sourced files: nothing,
+which one runs depends on the order), else the only non-test shell
+function of that name in the snapshot (`unique_name`, 0.60: a library
+calling a sibling library its entry script sources). A `$script` call
+(`./deploy.sh`) is a `CALLS` edge to the script's `File` node
+(`import_resolved`, 0.90), so `trace` on `bin/deploy` lists who runs it;
+an env read of a variable a sourced file assigns is a `REFERENCES` edge
+to that variable instead of a `READS` of `$env:NAME`.
+
 **From reference kind to edge kind.**
 
 | Reference | Edge |
@@ -837,7 +897,8 @@ applies → 0.85.
 env var reads — `os.Getenv("X")`, `os.LookupEnv` — and viper config key
 reads; Java emits env var and Spring config key reads; C and C++ emit `getenv("X")`
 reads; Rust emits `std::env::var("X")`, `env!("X")` and `option_env!("X")`
-reads). These
+reads; shell emits `$NAME` reads of unbound upper-case names and its
+`export` / `declare -x` / `NAME=value cmd` providers). These
 references never go through the
 ladder: they match exact names only, so an env var or a key path can never
 be fuzzy-matched to a code symbol.
@@ -1685,8 +1746,9 @@ gaps show up on real repositories.
 | C/C++ extraction, preprocessing (masking, conditionals, repairs), include directories | `rueca-lang-cpp` | crate docs, `src/extract.rs`, `src/preprocess.rs`, `src/mask.rs`, `src/cond.rs`, `src/repair.rs`, `src/includes.rs` |
 | Rust extraction, receivers, macro arguments, Cargo module model | `rueca-lang-rust` | crate docs, `src/extract.rs`, `src/receivers.rs`, `src/macros.rs`, `src/modules.rs` |
 | `.proto` services, RPC methods, messages (`protox-parse`) | `rueca-lang-proto` | crate docs, `src/extract.rs` |
+| Shell functions, `source` paths, script runs, bats blocks, env bridge, parser repairs | `rueca-lang-shell` | crate docs, `src/extract.rs`, `src/paths.rs`, `src/repair.rs`, `queries/locals.scm` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
-| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/contracts.rs` (contract table and edges) |
+| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/shell.rs` (sourced functions, script runs), `src/contracts.rs` (contract table and edges) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
 | Organization index, generations, visibility | `rueca-segment` | `src/org.rs` (module docs) |
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |
