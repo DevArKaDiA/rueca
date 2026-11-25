@@ -44,6 +44,8 @@ from __future__ import annotations
 import logging
 import re
 from collections import defaultdict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 import sqlglot
@@ -540,8 +542,26 @@ def sql_call_graph(root: Path, include: list[str], exclude: list[str] | None = N
     return graph
 
 
-def sql_functions(path: str, source: bytes, dialect: str = "ansi") -> list[Func]:
-    """Callables of one file (the micro-benchmark labels)."""
+# The manifest `dialects` (path prefix -> dialect) of the S1 repository at
+# hand: `sql_functions` has no repository argument (it is called through
+# `treesitter.extract_functions`, like every other labeler), so the S1 gold
+# and the BM25 arm set it around their work on one instance.
+_FILE_DIALECTS: ContextVar[dict[str, str]] = ContextVar("sql_file_dialects", default={})
+
+
+@contextmanager
+def file_dialects(dialects: dict[str, str] | None):
+    token = _FILE_DIALECTS.set(dict(dialects or {}))
+    try:
+        yield
+    finally:
+        _FILE_DIALECTS.reset(token)
+
+
+def sql_functions(path: str, source: bytes, dialect: str | None = None) -> list[Func]:
+    """Callables of one file (the micro-benchmark labels; S1 function gold
+    with the dialect `file_dialects` gives the path, `ansi` without one)."""
+    dialect = dialect or dialect_for(path, _FILE_DIALECTS.get())
     sf = SqlFile(path, source.decode("utf-8", errors="replace"), dialect)
     keys = ("name", "qualname", "label", "start", "end", "def_line", "outer_start", "indent")
     return [Func(**{k: f[k] for k in keys}) for f in sf.funcs]

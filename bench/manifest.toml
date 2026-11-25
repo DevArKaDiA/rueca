@@ -316,8 +316,8 @@ reason = "not the language (Objective-C)"
 # numbers above were measured without them, so they join (and the pin rule
 # covers them) at the next full run of the organization scenario, which
 # re-measures every arm. C#, Kotlin, Ruby and Swift were added after the last
-# run, and so were the mined shell instances.
-pending_languages = ["csharp", "kotlin", "ruby", "swift", "shell"]
+# run, and so were the mined shell and SQL instances.
+pending_languages = ["csharp", "kotlin", "ruby", "swift", "shell", "sql"]
 max_instances_per_repo = 3
 calibration_max_instances_per_repo = 5
 
@@ -928,11 +928,14 @@ notes = "Ruby methods are named `Const::Path#method` (instance) and `Const::Path
 [languages.sql]
 label = "sql"
 members = ["sql"]
-extensions = [".sql", ".psql", ".pgsql", ".plpgsql", ".mysql", ".tsql", ".bq"]
+extensions = [".sql", ".psql", ".pgsql", ".plpgsql", ".mysql", ".tsql", ".bq", ".pks", ".pkb", ".pck", ".pls", ".plsql", ".tps", ".tpb"]
 # pgTAP / plain SQL test scripts by name; dbt singular tests live in `tests/`
 # (a built-in test directory).
 test_files = ['^test_.*\.sql$', '.*_test\.sql$']
-s1_sources = "none: no localization dataset has SQL instances (SWE-bench Multilingual, SWE-bench Verified / Lite, SWE-PolyBench, Multi-SWE-bench, SWE-rebench V2)"
+# dbt packages keep a test project in `integration_tests/` (models, seeds
+# and tests that exercise the package): test code of SQL files only.
+own_test_dirs = ["integration_tests"]
+s1_sources = "rueca-bench mined set (no localization dataset has SQL instances): merged GitHub pull requests that close an issue, screened by rule, on seven dbt packages (dbt-utils, dbt-project-evaluator, dbt-external-tables, dbt-date, dbt_artifacts, dbt-snowflake-monitoring, tuva-core), First Responder Kit (T-SQL), pgmq and pg_partman (PL/pgSQL), mimic-code and bigquery-utils (BigQuery / analytical SQL); function gold from the SQL labeler with the dialect the manifest gives each tree"
 s3_gold = "rueca-bench SQL labeler (code-backed, sqlglot 30.35.0; jOOQ/sakila multi-dialect schemas, fivetran/dbt_hubspot v1.11.0 dbt models; sqlc examples = calibration) and the rueca-bench SQL micro-benchmark (per dialect)"
 notes = "No cross-reference tool exists for SQL repositories: the structural gold is the bench's own labeler (sqlgold.py, sqlglot + dbt Jinja regexes), independent of the pack's parser (sqlparser-rs). Edges are any dependency between definitions (tables, views, routines, triggers, dbt models and macros, named queries): relation references, foreign keys, calls; the Rueca arm traces CALLS, REFERENCES and WRITES (`trace_edges`)."
 trace_edges = ["CALLS", "REFERENCES", "WRITES"]
@@ -1126,7 +1129,7 @@ separator = "::"
 # macros, named queries (`labeler = "sql"`, no `binding`).
 [grammars.sql]
 package = "sqlglot 30.35.0 (MIT)"
-extensions = [".sql", ".psql", ".pgsql", ".plpgsql", ".mysql", ".tsql", ".bq"]
+extensions = [".sql", ".psql", ".pgsql", ".plpgsql", ".mysql", ".tsql", ".bq", ".pks", ".pkb", ".pck", ".pls", ".plsql", ".tps", ".tpb"]
 labeler = "sql"
 separator = "."
 
@@ -1541,6 +1544,17 @@ sha256 = "e7fca8b0301da19c143725bacff64ae0ff8ce92c56a77a119a34a6daab8b0f04"
 card_license = "issue and pull-request text from GitHub; patches under each repository's licence (MIT; sdkman-cli Apache-2.0), recorded per row"
 citation = "rueca-bench mined set (this repository), 2026-11-25"
 role = "S1 shell issues and patches, gated and calibration"
+
+# The SQL counterpart of `rueca_mined_shell` (same miner, rules and date):
+# merged pull requests that close an issue and change mostly SQL / dbt
+# files. The file holds the rows the repository quotas select (93 of 897
+# eligible pairs).
+[datasets.rueca_mined_sql]
+local = "datasets/rueca_mined_sql.jsonl"
+sha256 = "9b5cfe30b0adf008d61f0914892214c5e3aa6c9fe9fc926b879c56c80f0b66c9"
+card_license = "issue and pull-request text from GitHub; patches under each repository's licence (Apache-2.0, MIT, PostgreSQL, BSD-3-Clause), recorded per row"
+citation = "rueca-bench mined set (this repository), 2026-11-25"
+role = "S1 SQL issues and patches, gated and calibration"
 
 # Assembled localization gold (RFC 0002 §8/§9). Used for gold labels only;
 # issue text / patches still come from the source dataset of each instance.
@@ -2373,6 +2387,125 @@ quota = 5
 sources = ["rueca_mined_shell"]
 split = "calibration"
 
+# SQL: mined like the shell set (`[datasets.rueca_mined_sql]`,
+# bench/datasets/mined/PROVENANCE.md); repositories, quotas and the split
+# fixed from the mining counts alone, before any arm ran. dbt packages
+# (dbt-utils, dbt-project-evaluator, dbt-external-tables, dbt-date,
+# dbt_artifacts, dbt-snowflake-monitoring, tuva-core), T-SQL (First
+# Responder Kit), PL/pgSQL (pgmq, pg_partman), BigQuery / analytical SQL
+# (mimic-code, bigquery-utils). Calibration: dbt-codegen, DarlingData
+# (T-SQL), postgres_dba (psql). `dialects` (path prefix -> labeler dialect,
+# as for the S3 sets) is what the SQL labeler reads each file as, for the
+# function gold and the BM25 arm's function documents; it comes from what
+# the repository is, never from the pack's detection.
+[[s1.repos]]
+repo = "dbt-labs/dbt-utils"
+language = "sql"
+dialects = { "" = "dbt" }
+quota = 8
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "dbt-labs/dbt-project-evaluator"
+language = "sql"
+dialects = { "" = "dbt" }
+quota = 8
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "dbt-labs/dbt-external-tables"
+language = "sql"
+dialects = { "" = "dbt" }
+quota = 5
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "calogica/dbt-date"
+language = "sql"
+dialects = { "" = "dbt" }
+quota = 4
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "brooklyn-data/dbt_artifacts"
+language = "sql"
+dialects = { "" = "dbt" }
+quota = 4
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "get-select/dbt-snowflake-monitoring"
+language = "sql"
+dialects = { "" = "dbt" }
+quota = 4
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "tuva-health/tuva-core"
+language = "sql"
+dialects = { "" = "dbt" }
+quota = 8
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+dialects = { "" = "tsql" }
+quota = 12
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "pgmq/pgmq"
+language = "sql"
+dialects = { "" = "postgres" }
+quota = 6
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "pgpartman/pg_partman"
+language = "sql"
+dialects = { "" = "postgres" }
+quota = 6
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+dialects = { "" = "bigquery", "mimic-iv/concepts_postgres/" = "postgres", "mimic-iii/concepts_postgres/" = "postgres", "mimic-iv/concepts_duckdb/" = "postgres", "mimic-iii/concepts_duckdb/" = "postgres", "mimic-iv/buildmimic/postgres/" = "postgres", "mimic-iii/buildmimic/postgres/" = "postgres", "mimic-iv/buildmimic/duckdb/" = "postgres", "mimic-iii/buildmimic/duckdb/" = "postgres", "mimic-iv/buildmimic/mysql/" = "mysql", "mimic-iii/buildmimic/mysql/" = "mysql", "mimic-iv/buildmimic/sqlite/" = "sqlite", "mimic-iii/buildmimic/sqlite/" = "sqlite" }
+quota = 8
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "GoogleCloudPlatform/bigquery-utils"
+language = "sql"
+dialects = { "" = "bigquery" }
+quota = 5
+sources = ["rueca_mined_sql"]
+
+[[s1.repos]]
+repo = "dbt-labs/dbt-codegen"
+language = "sql"
+dialects = { "" = "dbt" }
+quota = 5
+sources = ["rueca_mined_sql"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "erikdarlingdata/DarlingData"
+language = "sql"
+dialects = { "" = "tsql" }
+quota = 5
+sources = ["rueca_mined_sql"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "NikolayS/postgres_dba"
+language = "sql"
+dialects = { "" = "postgres" }
+quota = 5
+sources = ["rueca_mined_sql"]
+split = "calibration"
+
 
 # RFC 0004 §7.1: questions are every in-scope callable with at least one gold
 # edge in that direction, minus dunders and one-line bodies (extent shorter
@@ -2789,6 +2922,45 @@ commit = "6de2fe2fb2e3cb67e5d2cb525646bce3de8e6623"
 license = "Apache-2.0"
 include = ["models/", "macros/"]
 dialects = { "" = "dbt" }
+gold = "sql"
+
+# Added so each direction pools at least 300 questions (RFC 0004 §7.2),
+# chosen from the labeler's own counts before any arm ran on them
+# (bench/datasets/mined/s3_sql_candidates.md): a PostgreSQL extension written
+# in PL/pgSQL (pgmq: its install script; the upgrade scripts redefine the
+# same functions and are out of scope), a T-SQL framework of procedures,
+# functions and views (tSQLt: no release tags, pinned by commit; licence in
+# Build/License.txt), and analytical PostgreSQL where each concept is a
+# `CREATE TABLE ... AS SELECT` over other concepts (mimic-code; this tree is
+# generated with sqlglot, the labeler's own parser, so the gold reads it
+# unusually well).
+[[s3.repos]]
+repo = "pgmq/pgmq"
+language = "sql"
+tag = "v1.13.2"
+commit = "51468f6ba2afeb4a4a9a67e9a532f37b590a0929"
+license = "PostgreSQL"
+include = ["pgmq-extension/sql/pgmq.sql"]
+dialects = { "" = "postgres" }
+gold = "sql"
+
+[[s3.repos]]
+repo = "tSQLt-org/tSQLt"
+language = "sql"
+commit = "4a921d0dacfb1d66b3db124c58158c80e5e910e6"
+license = "Apache-2.0"
+include = ["Source/"]
+dialects = { "" = "tsql" }
+gold = "sql"
+
+[[s3.repos]]
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+tag = "v3.0.1"
+commit = "c7e07560dc847e32cbb0b2890213e8e7cbd8bc7e"
+license = "MIT"
+include = ["mimic-iv/concepts_postgres/"]
+dialects = { "" = "postgres" }
 gold = "sql"
 
 [[s3.repos]]
@@ -8985,4 +9157,748 @@ repo = "bats-core/bats-core"
 language = "shell"
 base_commit = "2c32061e80431aa44399cb0f99f6c317c0cd77d8"
 dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-utils-554"
+repo = "dbt-labs/dbt-utils"
+language = "sql"
+base_commit = "2dfdb3c4b1ef600e77f4a4a2d5a60fa09a82a42f"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-utils-473"
+repo = "dbt-labs/dbt-utils"
+language = "sql"
+base_commit = "58b872604655e81f10b9cf7f21dddba850aafd28"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-utils-769"
+repo = "dbt-labs/dbt-utils"
+language = "sql"
+base_commit = "dcc9f47e805dbe83e862628591d2451c29cee7b5"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-utils-636"
+repo = "dbt-labs/dbt-utils"
+language = "sql"
+base_commit = "77dcf2e609bd0528de51d2a30f1bd59110c1b12f"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-utils-792"
+repo = "dbt-labs/dbt-utils"
+language = "sql"
+base_commit = "9e2b498028c03c13056e4ea58ece1368d4857458"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-utils-152"
+repo = "dbt-labs/dbt-utils"
+language = "sql"
+base_commit = "fce12d14c2ec167d6db4d65143be848b5fe9ae9e"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-utils-440"
+repo = "dbt-labs/dbt-utils"
+language = "sql"
+base_commit = "09ec4437ff058b13870c92d639aef79db1e8667b"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-utils-1055"
+repo = "dbt-labs/dbt-utils"
+language = "sql"
+base_commit = "7672637704c7ae428125d8aa1769e5e34ae32251"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-project-evaluator-203"
+repo = "dbt-labs/dbt-project-evaluator"
+language = "sql"
+base_commit = "8269c67c0fe13320e0cafd7d5c79c272621e546b"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-project-evaluator-503"
+repo = "dbt-labs/dbt-project-evaluator"
+language = "sql"
+base_commit = "6be0a27406f135bfdb69db564a2adc2d354795c1"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-project-evaluator-400"
+repo = "dbt-labs/dbt-project-evaluator"
+language = "sql"
+base_commit = "a1a6d01d952a2b1d0c74fbbb930b3a6094013323"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-project-evaluator-508"
+repo = "dbt-labs/dbt-project-evaluator"
+language = "sql"
+base_commit = "77384c6ce5c2782ed6c8c5b594a22b74d88580fc"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-project-evaluator-440"
+repo = "dbt-labs/dbt-project-evaluator"
+language = "sql"
+base_commit = "a46d0da442c7b35f315e44424abe1ad9aec6c0f3"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-project-evaluator-362"
+repo = "dbt-labs/dbt-project-evaluator"
+language = "sql"
+base_commit = "6db4b252b1932f4338201fb46fea13477967c3da"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-project-evaluator-452"
+repo = "dbt-labs/dbt-project-evaluator"
+language = "sql"
+base_commit = "fcb464c4de8bd6c2f509fee7200087274b8192ea"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-project-evaluator-188"
+repo = "dbt-labs/dbt-project-evaluator"
+language = "sql"
+base_commit = "4676f7c6b2fcfdbf7f83ab3dc672783b614faeee"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-external-tables-311"
+repo = "dbt-labs/dbt-external-tables"
+language = "sql"
+base_commit = "c33165e5d8b2f8908571f11dfa61654109b8c5b5"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-external-tables-242"
+repo = "dbt-labs/dbt-external-tables"
+language = "sql"
+base_commit = "9a4d4da8094a97400a8bd7dc429db06e2a0284a0"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-external-tables-318"
+repo = "dbt-labs/dbt-external-tables"
+language = "sql"
+base_commit = "4d26c38c81ac7c39e9ed8f50792b43de769e88cb"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-external-tables-237"
+repo = "dbt-labs/dbt-external-tables"
+language = "sql"
+base_commit = "9a4d4da8094a97400a8bd7dc429db06e2a0284a0"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-external-tables-341"
+repo = "dbt-labs/dbt-external-tables"
+language = "sql"
+base_commit = "a65d178c17f74f92b8ab86a68ba085cdd44f9596"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "calogica__dbt-date-66"
+repo = "calogica/dbt-date"
+language = "sql"
+base_commit = "d2295ed0abfeb904888c35a9139250f6e7477ecd"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "calogica__dbt-date-56"
+repo = "calogica/dbt-date"
+language = "sql"
+base_commit = "a6a967a9e0187e47a255505846f0b50d1873d510"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "calogica__dbt-date-86"
+repo = "calogica/dbt-date"
+language = "sql"
+base_commit = "428c817a177ef250a1454013cd1cf59cbb93a60f"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "calogica__dbt-date-95"
+repo = "calogica/dbt-date"
+language = "sql"
+base_commit = "7310f6b2bc53103fd66ad34b1080c798ba818655"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "brooklyn-data__dbt_artifacts-128"
+repo = "brooklyn-data/dbt_artifacts"
+language = "sql"
+base_commit = "2d5be7aec567c2b9db9133030fe2754b735a08f3"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "brooklyn-data__dbt_artifacts-189"
+repo = "brooklyn-data/dbt_artifacts"
+language = "sql"
+base_commit = "4c1d79f03baa4636a42f67d7fa72608e88bcb396"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "brooklyn-data__dbt_artifacts-229"
+repo = "brooklyn-data/dbt_artifacts"
+language = "sql"
+base_commit = "f901fe36bc03a32cf5f8c15c67782a6fdefae4ab"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "brooklyn-data__dbt_artifacts-301"
+repo = "brooklyn-data/dbt_artifacts"
+language = "sql"
+base_commit = "b77842223bfbb41d8813b2fa4672f6eeeff87d05"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "get-select__dbt-snowflake-monitoring-37"
+repo = "get-select/dbt-snowflake-monitoring"
+language = "sql"
+base_commit = "4c2bde6707883322314ac1b33a8a56429370c0c5"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "get-select__dbt-snowflake-monitoring-87"
+repo = "get-select/dbt-snowflake-monitoring"
+language = "sql"
+base_commit = "51b91a61646ebe82bda81928f5d0c5394ddc45ac"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "get-select__dbt-snowflake-monitoring-59"
+repo = "get-select/dbt-snowflake-monitoring"
+language = "sql"
+base_commit = "47b470ff89ed00c583e8d23362504285e36a5914"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "get-select__dbt-snowflake-monitoring-34"
+repo = "get-select/dbt-snowflake-monitoring"
+language = "sql"
+base_commit = "62f59407e604f4d01802a98ff98b77180b071b46"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "tuva-health__tuva-core-1182"
+repo = "tuva-health/tuva-core"
+language = "sql"
+base_commit = "5ca87115a4a4b4c940857715122bbeadfad770aa"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "tuva-health__tuva-core-640"
+repo = "tuva-health/tuva-core"
+language = "sql"
+base_commit = "42913694811dcf2e58dc4fc955269fe4ed2947d7"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "tuva-health__tuva-core-1238"
+repo = "tuva-health/tuva-core"
+language = "sql"
+base_commit = "01e4ea00cceffa89d1466cace3130eec5ab58152"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "tuva-health__tuva-core-1246"
+repo = "tuva-health/tuva-core"
+language = "sql"
+base_commit = "01e4ea00cceffa89d1466cace3130eec5ab58152"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "tuva-health__tuva-core-454"
+repo = "tuva-health/tuva-core"
+language = "sql"
+base_commit = "91cf3bb9878876725fe7e1b73f37e23dc954c611"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "tuva-health__tuva-core-721"
+repo = "tuva-health/tuva-core"
+language = "sql"
+base_commit = "34f61c78a09178f3893f4536cdd808ce0ee87eac"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "tuva-health__tuva-core-512"
+repo = "tuva-health/tuva-core"
+language = "sql"
+base_commit = "c8520db3441f707d7abc7ded513b18f28cdffd7c"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "tuva-health__tuva-core-1244"
+repo = "tuva-health/tuva-core"
+language = "sql"
+base_commit = "96f2afb544ccd79b57803625ee2aedf25c4a10b9"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-2641"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "ddf866623593e082969d1a82d41487a52abd2296"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-2422"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "6af9726b0952d60763647d7a3e32a765ebc3a784"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-2144"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "d6ceb1b97155b0bfcc789dc2f28dd7361d41c25b"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-3731"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "56ac912fc1fb0cb260a96cf9125af8055ffbaddb"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-2483"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "68ca6f03cfcd79443c47050d13c262d75158d602"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-3600"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "6d6fdfb6de28f2f33aab5282df53ff1fb2d0aa14"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-3054"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "9434afb9f72ebde2991b2c0b4ee1ec62cd2fe861"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-4116"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "39b3e4320ee8213d99085ef3b6ac7ba9f1a6fac3"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-1487"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "b76fed9b889250d548fbca167b55e7ef948f9bc1"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-3851"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "659d68ae1d5e8f3f1704670f704091448bfdb80f"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-3467"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "0dd8c89c8f11e5181ea3e6d6131a870a391bc2b2"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "BrentOzarULTD__SQL-Server-First-Responder-Kit-3937"
+repo = "BrentOzarULTD/SQL-Server-First-Responder-Kit"
+language = "sql"
+base_commit = "324ec1d514d21b95030bc2e2054d1c82666a18e6"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgmq__pgmq-385"
+repo = "pgmq/pgmq"
+language = "sql"
+base_commit = "7fd411d8ffd53b5313039f59167124c861d46430"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgmq__pgmq-480"
+repo = "pgmq/pgmq"
+language = "sql"
+base_commit = "2129a38119afa29a5d302fea48cfe28e442984ff"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgmq__pgmq-602"
+repo = "pgmq/pgmq"
+language = "sql"
+base_commit = "529e881ec7cd2f234229e6ee6faaa2ede6e5b0e0"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgmq__pgmq-338"
+repo = "pgmq/pgmq"
+language = "sql"
+base_commit = "aed73881153bab459d9cc1e63536b775533e10a7"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgmq__pgmq-442"
+repo = "pgmq/pgmq"
+language = "sql"
+base_commit = "b8058b267cd548553b07ae22be6f8162ad21b3d0"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgmq__pgmq-383"
+repo = "pgmq/pgmq"
+language = "sql"
+base_commit = "87530eda15c53448dc1e0f222dac67ea4731ff4c"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgpartman__pg_partman-386"
+repo = "pgpartman/pg_partman"
+language = "sql"
+base_commit = "cb0133a25d5c871517f9c40fcdef71ff0b657e0e"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgpartman__pg_partman-852"
+repo = "pgpartman/pg_partman"
+language = "sql"
+base_commit = "30c5efed427c98e6d91d24adee887a91a58f8fa2"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgpartman__pg_partman-829"
+repo = "pgpartman/pg_partman"
+language = "sql"
+base_commit = "b5be3ddac25e809e5e23469124f7eb6463d44406"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgpartman__pg_partman-443"
+repo = "pgpartman/pg_partman"
+language = "sql"
+base_commit = "67519be54aee6f3963019cd1c8db39a9a36dc62f"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgpartman__pg_partman-851"
+repo = "pgpartman/pg_partman"
+language = "sql"
+base_commit = "a12b23ee6615d179dfaa38cc6fed8ed44cd61ba2"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "pgpartman__pg_partman-871"
+repo = "pgpartman/pg_partman"
+language = "sql"
+base_commit = "a12b23ee6615d179dfaa38cc6fed8ed44cd61ba2"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "MIT-LCP__mimic-code-1200"
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+base_commit = "ccb69726e52fbbe62cd9a42131e5786f312e6f61"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "MIT-LCP__mimic-code-2016"
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+base_commit = "57069783095e7770e66ea97da264c0200078ddbf"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "MIT-LCP__mimic-code-1402"
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+base_commit = "2aa9e5bb83799034491ce879993e481949fc8b55"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "MIT-LCP__mimic-code-1508"
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+base_commit = "87f3a027267afee82d3bb4526872fc1f48ed2161"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "MIT-LCP__mimic-code-2120"
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+base_commit = "780de1cc815f1918d3013b5aa47e624362163d42"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "MIT-LCP__mimic-code-1587"
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+base_commit = "a8308706d8f2bf3bbf42f5e7065094c648f64576"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "MIT-LCP__mimic-code-2055"
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+base_commit = "5bdb9a0eb9f319c9b9dd6d533de33533ff3932e4"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "MIT-LCP__mimic-code-1502"
+repo = "MIT-LCP/mimic-code"
+language = "sql"
+base_commit = "81deb222071cd25f861fdb817fec3adda3c43c21"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "GoogleCloudPlatform__bigquery-utils-261"
+repo = "GoogleCloudPlatform/bigquery-utils"
+language = "sql"
+base_commit = "7bd8ba2faa7ba8b22c2e6152b3e783eb2386cf67"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "GoogleCloudPlatform__bigquery-utils-36"
+repo = "GoogleCloudPlatform/bigquery-utils"
+language = "sql"
+base_commit = "d16cb61234233db9fe15a6f8a0be5d3e3da0ac73"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "GoogleCloudPlatform__bigquery-utils-259"
+repo = "GoogleCloudPlatform/bigquery-utils"
+language = "sql"
+base_commit = "73a82837d02057e7e547cee7b5c2728c8c14ec1d"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "GoogleCloudPlatform__bigquery-utils-23"
+repo = "GoogleCloudPlatform/bigquery-utils"
+language = "sql"
+base_commit = "a4d8fd818c7951920cac4516e8cd21fcad31a022"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "GoogleCloudPlatform__bigquery-utils-305"
+repo = "GoogleCloudPlatform/bigquery-utils"
+language = "sql"
+base_commit = "36edd4c06e3e3dab430bb2052f032d55e24bb613"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-codegen-124"
+repo = "dbt-labs/dbt-codegen"
+language = "sql"
+base_commit = "e24e5dc5daca47ba350415a59790d6b741be246b"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-codegen-251"
+repo = "dbt-labs/dbt-codegen"
+language = "sql"
+base_commit = "95bb09354cae3b1cfec88b74de099f28940fc5b6"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-codegen-41"
+repo = "dbt-labs/dbt-codegen"
+language = "sql"
+base_commit = "ec1b69bfd670c086ac79eba1a67ad59b6d5700e2"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-codegen-76"
+repo = "dbt-labs/dbt-codegen"
+language = "sql"
+base_commit = "39cbe0f613037418776c9f15d4b50a62b7eaea5a"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "dbt-labs__dbt-codegen-93"
+repo = "dbt-labs/dbt-codegen"
+language = "sql"
+base_commit = "8e42e2c5b50e76921214222e835663ff4535381c"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "erikdarlingdata__DarlingData-294"
+repo = "erikdarlingdata/DarlingData"
+language = "sql"
+base_commit = "a0b7f3086b260f766233d104bc949260b4f16066"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "erikdarlingdata__DarlingData-217"
+repo = "erikdarlingdata/DarlingData"
+language = "sql"
+base_commit = "794ad7134c73a145e2521d8b8a34b712969ecb2b"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "erikdarlingdata__DarlingData-52"
+repo = "erikdarlingdata/DarlingData"
+language = "sql"
+base_commit = "c2c52ba7055d682a31e8939c4397ce466ace0f08"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "erikdarlingdata__DarlingData-452"
+repo = "erikdarlingdata/DarlingData"
+language = "sql"
+base_commit = "84de4b7b4e984795fe9ebbbd62f8a9136496ef43"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "erikdarlingdata__DarlingData-421"
+repo = "erikdarlingdata/DarlingData"
+language = "sql"
+base_commit = "eddba1022840bb09ae9442a977bc7f437f8dd142"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "NikolayS__postgres_dba-81"
+repo = "NikolayS/postgres_dba"
+language = "sql"
+base_commit = "8eec2ea90f34b25bba14ada58666be6c2b46cccb"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "NikolayS__postgres_dba-84"
+repo = "NikolayS/postgres_dba"
+language = "sql"
+base_commit = "350ca05301452e4b6a1c3288bf57204f75000c15"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "NikolayS__postgres_dba-82"
+repo = "NikolayS/postgres_dba"
+language = "sql"
+base_commit = "8eec2ea90f34b25bba14ada58666be6c2b46cccb"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "NikolayS__postgres_dba-86"
+repo = "NikolayS/postgres_dba"
+language = "sql"
+base_commit = "350ca05301452e4b6a1c3288bf57204f75000c15"
+dataset = "rueca_mined_sql"
+assets = []
+
+[[s1.instances]]
+id = "NikolayS__postgres_dba-26"
+repo = "NikolayS/postgres_dba"
+language = "sql"
+base_commit = "b911ac8eda18337111cda862dab422179860f80f"
+dataset = "rueca_mined_sql"
 assets = []
