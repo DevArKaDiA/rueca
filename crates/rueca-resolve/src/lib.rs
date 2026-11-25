@@ -24,6 +24,11 @@
 //!   declaration with its out-of-line body), the node takes the body's span
 //!   and signature (and its doc, if it has one): the node is the
 //!   definition, still a member of its class.
+//! - A definition nested in test code — under a function, method or test
+//!   block (`Test`) that is a test — is a test node (`is_test`) whatever
+//!   its facts say: a helper function inside a test, a closure of a
+//!   `describe` callback. A test class does not pass it on (library classes
+//!   are named `TestClient` too); each pack classifies class members.
 //! - Structural edges (`Syntactic`, 1.0): `CONTAINS` Repository→Folder/File and
 //!   Folder→Folder/File; `DEFINES` File→top-level definition and
 //!   parent→child definition.
@@ -884,6 +889,29 @@ fn sanitized_parents(defs: &[Definition]) -> Vec<Option<LocalDefId>> {
     parents
 }
 
+/// Whether definition `j` is nested in test code: some enclosing definition
+/// is a test function, method or test block (`describe`, `it`, `TEST`). A
+/// helper function inside a test, or a closure of a `describe` callback, is
+/// test code that `trace` leaves out with `include_tests: false`. A test
+/// *class* does not pass it on: names like `TestClient` are also library
+/// classes, so each pack decides its members itself.
+fn in_test_code(defs: &[Definition], parents: &[Option<LocalDefId>], j: usize) -> bool {
+    let mut cur = parents[j];
+    let mut steps = 0;
+    while let Some(p) = cur {
+        let d = &defs[p as usize];
+        if d.is_test && matches!(d.label, Label::Function | Label::Method | Label::Test) {
+            return true;
+        }
+        steps += 1;
+        if steps > parents.len() {
+            return false;
+        }
+        cur = parents[p as usize];
+    }
+    false
+}
+
 /// Whether the parent chain of `j` comes back to `j` (or is longer than
 /// the definitions, which only a cycle makes it).
 fn in_parent_cycle(parents: &[Option<LocalDefId>], j: usize) -> bool {
@@ -1249,8 +1277,9 @@ impl<'a> Resolver<'a> {
         let defs = self.defs(fid);
         let sep = self.families[i].map_or(":", LanguageFamily::module_separator);
         let module = self.module_names[i].clone();
+        let parents = sanitized_parents(defs);
         let mut map = Vec::with_capacity(defs.len());
-        for d in defs {
+        for (j, d) in defs.iter().enumerate() {
             let qn =
                 if module.is_empty() { d.qualified_name.clone() } else { format!("{module}{sep}{}", d.qualified_name) };
             let key = (d.label, qn, fid);
@@ -1275,7 +1304,7 @@ impl<'a> Resolver<'a> {
                 signature: d.signature.clone(),
                 doc: d.doc.clone(),
                 exported: d.exported,
-                is_test: d.is_test,
+                is_test: d.is_test || in_test_code(defs, &parents, j),
             });
             seen.insert(key, id);
             map.push(id);

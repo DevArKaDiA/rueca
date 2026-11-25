@@ -492,7 +492,7 @@ Call graph traversal.
 | `min_confidence` | float 0–1 | 0.0 |
 | `limit` | int (nodes), 1–2000 | 50 |
 | `labels` | array of label names: only neighbours with these labels are reported and traversed | all labels |
-| `include_tests` | bool: report and traverse tests (`is_test` or label `Test`) | false, or true when `edge_types` contains `TESTS` |
+| `include_tests` | bool: report and traverse tests (`is_test` or label `Test`; code nested in a test function or test block — a helper inside a test, a closure of a `describe` / `it` callback or of a `beforeEach`-style hook — is a test too) | false, or true when `edge_types` contains `TESTS` |
 
 Results:
 

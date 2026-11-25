@@ -182,7 +182,9 @@
 //!   later endpoint, repeating an endpoint from an earlier page when needed.
 //!   `get_symbol` cuts its lists (children, bases, subtypes, candidates, in
 //!   that order) and reports what it left out in `omitted`, without a cursor.
-//! - `trace` neighbour filter: tests (`is_test` or label `Test`) are skipped
+//! - `trace` neighbour filter: tests (`is_test` or label `Test`; the
+//!   resolver also marks code nested in a test function or test block, such
+//!   as a closure of a `describe` callback) are skipped
 //!   unless `include_tests` is true or `edge_types` contains `TESTS`; with
 //!   `labels`, only neighbours with those labels are kept. Skipped nodes are
 //!   neither reported nor expanded and their edges are dropped; the root is

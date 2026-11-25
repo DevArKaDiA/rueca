@@ -39,6 +39,7 @@
 //! | CommonJS `module.exports = function f`, `exports.x = function`, `X.prototype.y = function`, `X.y = function` | `Function`, or `Method` of a module-level `X` | |
 //! | named function expression anywhere else: call arguments (`defineGetter(req, "query", function query() {})`, `app.use(function handler() {})`), `return function timing() {}`, operands | `Function` child of the enclosing definition | span = the function expression; doc = JSDoc before it or before the statement holding it. Anonymous ones are not definitions |
 //! | `describe` / `it` / `test` (also `context`, `suite`, `specify`, `fit`, `xit`, `.each`, `.only`, `.skip`, `.todo`) with a string first argument and a function argument | `Test` | `is_test`; qualified name = describe chain joined by ` > ` (dots in titles become `_`); references inside get the test as `enclosing` |
+//! | definitions inside the callback of a setup / teardown hook (`beforeEach`, `afterEach`, `beforeAll`, `afterAll`, `before`, `after`, not shadowed) | their own label | `is_test` (definitions inside a `Test` get it from the resolver: code nested in a test is test code) |
 //!
 //! - `exported`: `export` declarations, `export { a, b as c }`,
 //!   `export default x`, `export = x`, `module.exports = x` /
@@ -239,8 +240,9 @@ impl LanguagePack for TypeScriptPack {
         // receivers from declarations and assignments; 5: object-literal
         // methods and assigned functions as definitions, `super(…)`,
         // bounds / elements / return types for receivers, local callees; 6:
-        // contract hints (RFC 0006 phase 4).
-        6
+        // contract hints (RFC 0006 phase 4); 7: definitions inside setup /
+        // teardown hook callbacks (`beforeEach(() => …)`) are tests.
+        7
     }
 
     fn extract(
