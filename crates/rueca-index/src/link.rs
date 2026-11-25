@@ -724,6 +724,29 @@ fn csharp_package(name: String, dir: &str, files: &[FileModule]) -> Package {
     Package { eco: "nuget".into(), name, dir: dir.to_string(), keys: keys.into_iter().collect() }
 }
 
+/// Adds the keys of the imports of `f` its pack cannot resolve inside the
+/// repository (Kotlin imports of a JVM package the repository declares
+/// resolve inside it).
+fn external_imports(
+    f: &FileInput,
+    registry: &Registry,
+    project: &ProjectFiles,
+    own_jvm: &HashSet<String>,
+    imports: &mut BTreeSet<String>,
+) {
+    let (Some(lang), Some(facts)) = (f.language, f.facts.as_ref()) else { return };
+    let Some(pack) = registry.for_language(lang) else { return };
+    for imp in &facts.imports {
+        let Some(key) = import_key(lang.family(), imp) else { continue };
+        if imports.contains(&key) || (lang == Language::Kotlin && own_jvm.contains(&key)) {
+            continue;
+        }
+        if pack.resolve_import(&f.path, imp, project).is_none() {
+            imports.insert(key);
+        }
+    }
+}
+
 /// The import key of an import a pack could not resolve inside its
 /// repository, or `None` for relative imports and languages without
 /// cross-repository packages.
@@ -810,17 +833,7 @@ impl OrgLinker for PackageLinker {
         let mut imports = BTreeSet::new();
         let resolved = catch_unwind(AssertUnwindSafe(|| {
             for f in &loaded.files {
-                let (Some(lang), Some(facts)) = (f.language, f.facts.as_ref()) else { continue };
-                let Some(pack) = registry.for_language(lang) else { continue };
-                for imp in &facts.imports {
-                    let Some(key) = import_key(lang.family(), imp) else { continue };
-                    if imports.contains(&key) || (lang == Language::Kotlin && own_jvm.contains(&key)) {
-                        continue;
-                    }
-                    if pack.resolve_import(&f.path, imp, &loaded.project).is_none() {
-                        imports.insert(key);
-                    }
-                }
+                external_imports(f, &registry, &loaded.project, &own_jvm, &mut imports);
             }
         }));
         if resolved.is_err() {

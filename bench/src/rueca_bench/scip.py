@@ -437,8 +437,22 @@ def _constructors_by_type(sym_to_fid: dict[str, str], uf: UnionFind) -> dict[str
     return {t: fs[0] for t, fs in by_type.items()}
 
 
-_SCIP_TAIL = re.compile(r"(\(\+?\d*\))?\.$|#$|\([^)]*\)$")
-_SCIP_NAME = re.compile(r"(`[^`]+`|[^/#.`]+)$")
+def _strip_descriptor_suffix(desc: str) -> str:
+    """A descriptor without its suffix: `#` (type), `.` / `(+1).` (term,
+    method), or a trailing `(x)` (parameter, which then ends in `.` and
+    names nothing)."""
+    if desc.endswith("#"):
+        return desc[:-1]
+    if desc.endswith(")"):
+        return desc[: desc.rfind("(")]
+    if not desc.endswith("."):
+        return desc
+    desc = desc[:-1]
+    if desc.endswith(")"):
+        i = desc.rfind("(")
+        if desc[i + 1 : -1].lstrip("+").isdigit() or desc[i + 1 : -1] in ("", "+"):
+            desc = desc[:i]
+    return desc
 
 
 def scip_last_name(symbol: str) -> str:
@@ -447,9 +461,11 @@ def scip_last_name(symbol: str) -> str:
     empty for parameters and local symbols."""
     if symbol.startswith("local "):
         return ""
-    desc = _SCIP_TAIL.sub("", symbol.split(" ", 4)[-1])
-    m = _SCIP_NAME.search(desc)
-    return m.group(1).strip("`") if m else ""
+    desc = _strip_descriptor_suffix(symbol.split(" ", 4)[-1])
+    if desc.endswith("`"):
+        i = desc.rfind("`", 0, len(desc) - 1)
+        return desc[i + 1 : -1] if i >= 0 else ""
+    return desc[max(desc.rfind(c) for c in "/#.`") + 1 :]
 
 
 def kotlin_def_name(symbol: str, sliced: str) -> str | None:

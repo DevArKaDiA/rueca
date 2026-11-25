@@ -651,35 +651,42 @@ impl<'s> Extractor<'s> {
     fn prescan_members(&mut self, node: Node<'_>, body: Option<Node<'_>>) {
         if let Some(pc) = child_of_kind(node, "primary_constructor") {
             for p in named_children(pc).into_iter().filter(|p| p.kind() == "class_parameter") {
-                if child_of_kind(p, "binding_pattern_kind").is_none() {
-                    continue;
-                }
-                let Some(n) = child_of_kind(p, "simple_identifier") else { continue };
-                let class = declared_type(p).and_then(|t| class_of_type(t, self.source));
-                let name = self.text(n).to_string();
-                self.cur_class().props.insert(name, class);
+                self.prescan_class_parameter(p);
             }
         }
-        let Some(body) = body else { return };
-        for m in named_children(body) {
+        for m in body.map(named_children).unwrap_or_default() {
             match m.kind() {
-                "property_declaration" => {
-                    if let Some((n, c)) = self.property_name_and_class(m) {
-                        if let Some(r) = self.untyped_init(m) {
-                            self.cur_class().prop_inits.insert(n.clone(), r);
-                        }
-                        self.cur_class().props.insert(n, c);
-                    }
-                }
-                "function_declaration" => {
-                    let Some(n) = child_of_kind(m, "simple_identifier") else { continue };
-                    let ret = self.return_class(m);
-                    let name = self.text(n);
-                    merge_return(&mut self.cur_class().methods, name, ret);
-                }
+                "property_declaration" => self.prescan_member_property(m),
+                "function_declaration" => self.prescan_method(m),
                 _ => {}
             }
         }
+    }
+
+    /// A `val` / `var` primary-constructor parameter: a property.
+    fn prescan_class_parameter(&mut self, p: Node<'_>) {
+        if child_of_kind(p, "binding_pattern_kind").is_none() {
+            return;
+        }
+        let Some(n) = child_of_kind(p, "simple_identifier") else { return };
+        let class = declared_type(p).and_then(|t| class_of_type(t, self.source));
+        let name = self.text(n).to_string();
+        self.cur_class().props.insert(name, class);
+    }
+
+    fn prescan_member_property(&mut self, m: Node<'_>) {
+        let Some((n, c)) = self.property_name_and_class(m) else { return };
+        if let Some(r) = self.untyped_init(m) {
+            self.cur_class().prop_inits.insert(n.clone(), r);
+        }
+        self.cur_class().props.insert(n, c);
+    }
+
+    fn prescan_method(&mut self, m: Node<'_>) {
+        let Some(n) = child_of_kind(m, "simple_identifier") else { return };
+        let ret = self.return_class(m);
+        let name = self.text(n);
+        merge_return(&mut self.cur_class().methods, name, ret);
     }
 
     pub(crate) fn cur_class(&mut self) -> &mut ClassCtx {
