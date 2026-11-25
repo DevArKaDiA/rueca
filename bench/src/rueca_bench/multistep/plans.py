@@ -45,21 +45,49 @@ class Node:
         return f"{self.path}#{self.qn}"
 
 
-_NODE = re.compile(r"^(\d+) (?:\[(\d+)\] )?(?:(in|out|both) )?(?:d(\d+) )?(\w+) (.+?)  (\S+) L\d+(?:-\d+)?(.*)$")
 _ARROW = re.compile(r"[→←](\d+) ")
+_LINES = re.compile(r"L\d+(?:-\d+)?")
+_SNAP = re.compile(r"\[(\d+)\]")
+_DIR = re.compile(r"(in|out|both)")
+_DEPTH = re.compile(r"d(\d+)")
+_WORD = re.compile(r"\w+")
+
+
+def _location(field: str) -> str | None:
+    """`path L12` / `path L12-30` -> the path (no whitespace in it), else None."""
+    path, _, lines = field.rpartition(" ")
+    if not path or any(c.isspace() for c in path) or not _LINES.fullmatch(lines):
+        return None
+    return path
+
+
+def _take(tokens: list[str], pattern: re.Pattern) -> str | None:
+    """Pop the first token when it matches `pattern`; its first group, else None."""
+    m = pattern.fullmatch(tokens[0]) if tokens else None
+    if m:
+        tokens.pop(0)
+    return m.group(1) if m else None
+
+
+def _node(line: str) -> Node | None:
+    """One node line: `idx [s] dir dN Label qn  path Lx-y  rest`, the
+    bracketed snapshot, direction and depth optional (the root has none)."""
+    fields = line.split("  ", 2)
+    path = _location(fields[1]) if len(fields) > 1 else None
+    head = fields[0].split(" ")
+    if path is None or not head[0].isdecimal():
+        return None
+    idx, rest = int(head[0]), head[1:]
+    snap, dir_, depth = _take(rest, _SNAP), _take(rest, _DIR), _take(rest, _DEPTH)
+    if len(rest) < 2 or not _WORD.fullmatch(rest[0]):
+        return None
+    arrow = _ARROW.search(fields[2]) if len(fields) > 2 else None
+    return Node(idx, int(snap or 0), dir_, int(depth or 0), rest[0], " ".join(rest[1:]), path, int(arrow.group(1)) if arrow else None)
 
 
 def trace_nodes(text: str) -> list[Node]:
     """Every node line of a `trace` text answer (the root first)."""
-    out = []
-    for line in text.splitlines():
-        m = _NODE.match(line)
-        if not m:
-            continue
-        idx, snap, dir_, depth, label, qn, path, rest = m.groups()
-        arrow = _ARROW.search(rest)
-        out.append(Node(int(idx), int(snap or 0), dir_, int(depth or 0), label, qn, path, int(arrow.group(1)) if arrow else None))
-    return out
+    return [n for n in map(_node, text.splitlines()) if n is not None]
 
 
 def snapshots(text: str) -> dict[int, str]:
@@ -128,17 +156,25 @@ class Entry:
     symbol: str
 
 
-_CONTRACT = re.compile(r"^(.+?)  (provides|consumes)  (\S+)  (\S+?):(\S+?)(?:#(.+?))? L\d+  \(\d+\)$")
+_COUNT = re.compile(r"\(\d+\)")
+_LINE = re.compile(r"L\d+")
+
+
+def _contract(line: str) -> Entry | None:
+    """One entry line: `key  side  framework  repo:path#symbol L7  (n)`."""
+    fields = line.split("  ")
+    if len(fields) != 5 or fields[1] not in ("provides", "consumes") or not _COUNT.fullmatch(fields[4]):
+        return None
+    loc, _, lines = fields[3].rpartition(" ")
+    repo, _, tail = loc.partition(":")
+    path, _, sym = tail.partition("#")
+    if not (fields[0] and fields[2] and repo and path and _LINE.fullmatch(lines)) or any(c.isspace() for c in fields[2] + repo + path):
+        return None
+    return Entry(fields[0], fields[1], fields[2], repo, path, sym)
 
 
 def contracts(text: str) -> list[Entry]:
-    out = []
-    for line in text.splitlines():
-        m = _CONTRACT.match(line)
-        if m:
-            key, side, fw, repo, path, sym = m.groups()
-            out.append(Entry(key, side, fw, repo, path, sym or ""))
-    return out
+    return [e for e in map(_contract, text.splitlines()) if e is not None]
 
 
 def is_test_file(path: str) -> bool:

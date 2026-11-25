@@ -131,6 +131,8 @@ def test_trace_parser():
     assert plans.neighbours(TRACE, "out", "src/") == []  # a Class is not a function
     assert plans.flask_files(ORG_TRACE) == ["src/flask/cli.py"]
     assert plans.snapshots(ORG_TRACE) == {0: "github.com/pallets/click", 1: "github.com/pallets/flask"}
+    one = plans.trace_nodes("3 [1] both d2 Method A.b c  src/a.py L4-9  →0 CALLS 0.9\nx Function f  a.py L1\n1 Function f  a b.py L1")
+    assert one == [plans.Node(3, 1, "both", 2, "Method", "A.b c", "src/a.py", 0)]
 
 
 def test_outline_contract_and_snippet_parsers():
@@ -142,6 +144,8 @@ def test_outline_contract_and_snippet_parsers():
     es = plans.contracts(rows)
     assert es[0].key == "GET /api/tags" and es[0].symbol == "Server.ListHandler" and es[0].path == "server/routes.go"
     assert plans.is_test_file(es[1].path) and not plans.is_test_file("src/flask/app.py")
+    assert plans.contracts("GET /  provides  gin  r:p.go L1  (2)\nGET /  uses  gin  r:p.go L1  (2)\nGET /  provides  gin  r:p.go L1  2")[0].symbol == ""
+    assert len(plans.contracts("GET /  provides  gin  r:p.go L1  (2)\nGET /  uses  gin  r:p.go L1  (2)")) == 1
     assert plans.snippet_lines("r@1 (x)\nf.py L1-3\nline1\nline2") == ["line1", "line2"]
 
 
