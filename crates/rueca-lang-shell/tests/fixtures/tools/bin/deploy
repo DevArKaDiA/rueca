@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Deploys the service: builds, uploads, records the release.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+. "$ROOT/lib/pick_a.sh"
+. "$ROOT/lib/pick_b.sh"
+
+# Removes temporary files.
+cleanup() {
+  log "cleaning up"
+}
+
+deploy() {
+  local target="${1:-staging}"
+  trap cleanup EXIT
+  log "deploying to $target"
+  fetch "$DEPLOY_URL"
+  "$ROOT/scripts/build.sh" --release
+  pick
+  command fetch "$DEPLOY_URL"
+  export DEPLOY_TARGET="$target"
+  echo "$(version)"
+}
+
+version() {
+  echo "$APP_VERSION"
+}
+
+deploy "$@"

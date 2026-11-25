@@ -22,7 +22,9 @@
 //!    listed and content-searchable) and have no language in the graph, even
 //!    when `Language::from_path` recognizes them. Detection is by extension
 //!    and file name (`Dockerfile`, `.env.*`); a C header (`.h`) is C++ when
-//!    the snapshot has any C++ source or header.
+//!    the snapshot has any C++ source or header; a file name without an
+//!    extension whose `#!` line names a shell is shell
+//!    (`Language::from_shebang`).
 //! 3. **Facts cache**:
 //!    `<store>/facts/<sha[0..2]>/<sha>-<lang>-v<version>-f<FACTS_FORMAT>.bin`
 //!    holds `zstd(postcard(FileFacts))`, checked before extracting and written
@@ -180,8 +182,8 @@ pub struct PhaseTimings {
 }
 
 /// Language packs shipped with this build (Python, TypeScript/TSX/JavaScript,
-/// PHP, Java, C/C++, Markdown, Go, and the structured data formats of
-/// `rueca-lang-data`).
+/// PHP, Java, C/C++, Markdown, Go, Rust, Protocol Buffers, shell, and the
+/// structured data formats of `rueca-lang-data`).
 pub fn default_registry() -> Registry {
     let mut r = Registry::new();
     r.register(Box::new(rueca_lang_python::PythonPack));
@@ -193,6 +195,7 @@ pub fn default_registry() -> Registry {
     r.register(Box::new(rueca_lang_go::GoPack::default()));
     r.register(Box::new(rueca_lang_rust::RustPack::default()));
     r.register(Box::new(rueca_lang_proto::ProtoPack));
+    r.register(Box::new(rueca_lang_shell::ShellPack));
     r.register(Box::new(rueca_lang_data::DataPack));
     r
 }
@@ -647,6 +650,17 @@ struct ExtractCtx<'a> {
     cpp_headers: bool,
 }
 
+/// The language of a file: by path (a `.h` header is C++ when the
+/// snapshot has C++), else, for a name without an extension, by its `#!`
+/// line (shell scripts such as `bin/tool`; RFC 0003 §10.4c).
+fn detect_language(rel: &str, cpp_headers: bool, bytes: &[u8]) -> Option<Language> {
+    Language::header_language(rel, cpp_headers).or_else(|| {
+        let name = rel.rsplit('/').next().unwrap_or(rel);
+        let extensionless = !name.trim_start_matches('.').contains('.');
+        if extensionless { Language::from_shebang(&bytes[..bytes.len().min(256)]) } else { None }
+    })
+}
+
 /// Whether any path is a C++ source or header (decides `.h`).
 fn has_cpp(paths: &[String]) -> bool {
     paths.iter().any(|p| Language::from_path(p) == Some(Language::Cpp))
@@ -667,7 +681,7 @@ impl ExtractCtx<'_> {
         let bytes = fs::read(&abs).with_context(|| format!("reading {}", abs.display()))?;
         let blob_sha = git_blob_sha(&bytes);
         let size = bytes.len() as u64;
-        let detected = Language::header_language(rel, self.cpp_headers);
+        let detected = detect_language(rel, self.cpp_headers, &bytes);
         let pack = detected.and_then(|l| self.registry.for_language(l).map(|p| (l, p)));
         // A language without a registered pack is not recorded (status `text`).
         let language = pack.map(|(l, _)| l);

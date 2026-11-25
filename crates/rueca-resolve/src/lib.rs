@@ -292,6 +292,16 @@
 //! macros by name (`unique_name` 0.6) are the `rust` module; `$self`,
 //! `$type:` and `$member:` are the hooks above.
 //!
+//! # Shell
+//!
+//! Shell functions are global once their file has run or been sourced: a
+//! name resolves in the file, then through the files it sources
+//! (transitively; several sourced definitions are ambiguous and resolve to
+//! nothing), then by unique name; a script run by path (`$script`
+//! receiver) is a `CALLS` edge to the script's `File` node; an env read
+//! of a variable a sourced file assigns is a `REFERENCES` edge to that
+//! variable. See the `shell` module.
+//!
 //! # Bridge and data references (RFC 0003 §6–§7)
 //!
 //! Handled outside the ladder (exact matches only, never name matching; see
@@ -383,6 +393,7 @@ mod contracts;
 mod go;
 mod hooks;
 mod rust;
+mod shell;
 
 /// One file of the snapshot as seen by the resolver.
 #[derive(Debug, Clone)]
@@ -718,6 +729,9 @@ struct Resolver<'a> {
     /// Per Rust file, the names its imports bind in the value namespace
     /// where that differs from [`Resolver::envs`] (the type namespace).
     rust_value_envs: Vec<Env>,
+    /// Shell file → the files it sources, transitively (see the `shell`
+    /// module).
+    shell_memo: RefCell<HashMap<FileId, std::rc::Rc<Vec<FileId>>>>,
     /// Rust module files that are test code (declared by `#[cfg(test)] mod
     /// x;`, or below one).
     rust_test_files: HashSet<FileId>,
@@ -1180,6 +1194,7 @@ impl<'a> Resolver<'a> {
             rust_depth: std::cell::Cell::new(0),
             rust_macros: HashMap::new(),
             rust_value_envs: Vec::new(),
+            shell_memo: RefCell::new(HashMap::new()),
             rust_test_files: HashSet::new(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
@@ -2426,6 +2441,9 @@ impl<'a> Resolver<'a> {
         if self.is_php(f) {
             return self.resolve_php(f, item, scope);
         }
+        if self.is_shell(f) {
+            return self.resolve_shell(f, item);
+        }
         match item.receiver.map(str::trim) {
             None => self.resolve_bare(f, item, scope),
             Some(receiver) => self.resolve_with_receiver(f, item, scope, receiver),
@@ -2759,6 +2777,14 @@ impl<'a> Resolver<'a> {
         self.stats.references_total += 1;
         let fnode = self.file_node[f as usize];
         let caller = item.enclosing.map_or(fnode, |e| self.node_of(f, e));
+        if let Some(var) = self.shell_sourced_variable(f, item) {
+            let meta =
+                EdgeMeta { confidence: 0.95, strategy: Strategy::ImportResolved, evidence: Some((f, item.span)) };
+            self.stats.references_resolved += 1;
+            *self.stats.resolved_by_strategy.entry(Strategy::ImportResolved.as_str().to_string()).or_default() += 1;
+            self.add_edge(caller, var, EdgeKind::References, meta);
+            return;
+        }
         if matches!(item.kind, RefKind::EnvVar | RefKind::ConfigKey | RefKind::DataRef) {
             self.resolve_bridge(f, item, caller);
             return;

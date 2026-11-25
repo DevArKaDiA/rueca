@@ -30,6 +30,9 @@
 //!   namespace-qualified name) and [`member_receiver`] (`$member:a.b`, a
 //!   chain of members of the enclosing type whose types are declared in
 //!   another file).
+//! - [`SCRIPT_RECEIVER`] (`$script`): a `Call` whose name is a path the
+//!   pack's [`LanguagePack::resolve_import`] understands (shell
+//!   `./deploy.sh`); the resolver links it to that file's `File` node.
 //! - Call and `New` names: [`with_arg_types`] (`value$args:long,?`, the
 //!   static types of the arguments, for choosing overloads; the resolver
 //!   strips it before any lookup).
@@ -100,6 +103,13 @@ pub enum ExtractError {
 /// finds the receiver type from the enclosing type definition, else from the
 /// method's local qualified-name prefix (`Server` for `Server.Handle`).
 pub const SELF_RECEIVER: &str = "$self";
+
+/// Receiver of a script run (shell `./deploy.sh`, `bash scripts/x.sh`):
+/// the reference name is the path written in the file, encoded as the
+/// pack's [`LanguagePack::resolve_import`] reads it in `Import::module`.
+/// The resolver links the call to the `File` node of the file the path
+/// resolves to (`import_resolved`, 0.9); an unresolved path is external.
+pub const SCRIPT_RECEIVER: &str = "$script";
 
 /// Prefix of a typed receiver: `$type:<T>` means "the receiver's type is
 /// `T`" as the file says it: a local, parameter or field declared with a

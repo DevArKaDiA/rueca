@@ -25,3 +25,5 @@ rueca-lang-php = { path = "../rueca-lang-php" }
 rueca-lang-go = { path = "../rueca-lang-go" }
 # Path-only so `cargo publish` drops it (it would form a publish cycle).
 rueca-lang-rust = { path = "../rueca-lang-rust" }
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-lang-shell = { path = "../rueca-lang-shell" }
