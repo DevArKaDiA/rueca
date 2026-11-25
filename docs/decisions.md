@@ -1,5 +1,119 @@
 # Decisions log
 
+## 2026-11-25 — SQL: procedural code read by the pack, Oracle and DB2 as dialects, what a parse error is
+
+The SQL pack's files with parse errors were 8.9% on the gated corpus
+(floor ≤ 2%). The cause was one rule — "a statement sqlparser rejects in
+every dialect is a parse error" — applied to code sqlparser has no
+grammar for: a T-SQL procedure is one statement, a PL/SQL package is one
+statement, and Oracle / DB2 files were read as ANSI. Choices:
+
+- **The parser stays sqlparser; the pack reads the structure around it.**
+  sqlparser 0.64 is the latest release and already has an Oracle dialect
+  (SQL only; no PL/SQL) and none for DB2; no other maintained pure-Rust
+  parser covers procedural T-SQL or PL/SQL. So the pack now reads, itself:
+  T-SQL batches (statement boundaries without `;`, `BEGIN … END`, `TRY` /
+  `CATCH`, `IF` / `WHILE`, routine heads; `tsql` module) and
+  `;`-terminated procedural code (PL/SQL packages, routines, triggers,
+  type bodies, anonymous blocks; MySQL and DB2 SQL PL routines and
+  triggers; BigQuery scripts; `block` module). Every query, DML statement,
+  condition, assigned value and call inside is still parsed by sqlparser,
+  one at a time, with the routine as the enclosing definition — so a
+  10,000-line procedure with one exotic statement loses that statement
+  only, and procedure bodies now give column references too.
+- **A parse error is unchanged in meaning and finer in grain.** It is a
+  statement — now also a statement *of a routine body* — that nothing
+  parses and that only the token scanner reads. A file is `partial` when
+  it has one. What changed is what counts as parsed:
+  1. sqlparser, as before;
+  2. sqlparser after **same-length repairs** (`repair` module): a
+     documented table of constructs — physical attributes, `CLUSTERED`,
+     hints, `INCLUDING ALL`, `%TYPE`, a Jinja placeholder that expands to
+     a clause — blanked or replaced by an equivalent of the same length.
+     Positions do not move; no relation, column or routine name is
+     removed (storage names are);
+  3. **the pack's own readers**: the procedural readers above, and
+     statements whose facts are in their first words (`utility` module:
+     `SET`, `GRANT`, `ALTER EXTENSION`, `DBCC`, `CREATE LOGIN`, `ALTER
+     TABLE` forms that add no column, `CREATE INDEX` / `SYNONYM` / alias
+     and object types by their head, PostgreSQL `DO` and routines with a
+     text body). These must match a known head and have balanced
+     parentheses; they are not validated further, which is the weak
+     point and is stated in the crate docs. Queries, DML, `CREATE TABLE`
+     / `VIEW`, and anything inside a routine body that is a query or DML
+     are never accepted this way: they parse or they are errors (tested:
+     `own_readers_do_not_accept_broken_sql`).
+  Also not validated: parameter lists of routine heads, declared types,
+  cursor control, the arguments of chained member calls. The `dialects`
+  example prints, per dialect, how many statements each path read, so the
+  share read by the pack itself is visible (13,637 of the statements and
+  body statements of the evaluation corpus, most of them PL/SQL).
+- **Not excluded, not relabelled.** No file was taken out of the health
+  metric and no `[[health.not_language]]` entry was added. Client
+  commands (SQL*Plus, sqlcmd, psql) were already masked as commands; the
+  new ones follow the same rule (a line that is a command between
+  statements). Two rules skip text that is not SQL by construction: in a
+  dbt file under `macros/` only macro blocks are read (text outside them
+  is never rendered), and a statement that is only `{{ ref() }}` tags is
+  template output (its relations are still references).
+- **Oracle and DB2 are dialects; their unit files are SQL.** Detection
+  follows the existing ladder (directive → extension → path word →
+  content signals). `.pks`, `.pkb`, `.pck`, `.pls`, `.plsql`, `.tps`,
+  `.tpb` are now `Language::Sql` (they were not indexed at all: utPLSQL
+  has 415 such files and 78 `.sql`). `.prc`, `.fnc`, `.trg`, `.ddl` stay
+  out: the names are not specific to Oracle. A package is a `Module`, its
+  subprograms `Function`s named `package.name` (specification entries are
+  declarations), so calls `pkg.proc(…)` resolve by qualified name like
+  schema-qualified routines. ClickHouse, Hive and Databricks get their
+  sqlparser dialects by path word or directive only.
+- **Parameters and variables are not columns.** Inside routines the
+  variable lists of `SELECT … INTO` / `RETURNING … INTO` are blanked
+  before parsing (they were `Write` references to tables named like the
+  variables), and declared names and parameters are never column
+  references.
+- **Measured** (files with a parse error; `cargo run --release -p
+  rueca-lang-sql --example dialects -- <tree>`), evaluation corpus pinned
+  at: pg_partman `e0a6c38`, pgmq `51468f6`, pgTAP `21ceed1`,
+  First Responder Kit `5d3a681`, DarlingData `bf5a066`, tSQLt `4a921d0`,
+  sql-server-maintenance-solution `4161757`, utPLSQL `01a89ea`, Logger
+  `600f0c4`, bigquery-utils `d5bde4f`, dbt-utils `5e1e195`,
+  dbt-project-evaluator `5104628`, dbt-expectations `db3dc81`,
+  dbt_artifacts `433dbd6`, elementary `b7fdff1`, plus the bench's sakila
+  `e089a5b` and dbt_hubspot `6de2fe2`:
+
+  | Dialect | Before | After |
+  |---|---|---|
+  | PostgreSQL | 156 / 415 (37.6%) | 1 / 413 (0.2%) |
+  | MySQL | 4 / 94 | 2 / 94 |
+  | SQLite | 1 / 3 (Sakila) | 0 / 3 |
+  | T-SQL | 335 / 443 (75.6%) | 26 / 404 (6.4%) |
+  | Oracle | read as ANSI / T-SQL / SQLite | 12 / 515 (2.3%) |
+  | DB2 | read as ANSI | 0 / 4 |
+  | BigQuery | 13 / 79 | 4 / 79 |
+  | Snowflake | 11 / 39 | 0 / 39 |
+  | ANSI and dbt Jinja | 102 / 1,108 (9.2%) | 3 / 1,052 (0.3%) |
+  | All | 626 / 2,185 (28.6%) | 48 / 2,603 (1.8%) |
+
+  Gated corpus alone: Sakila 10 → 0 of 25 files, dbt_hubspot 22 → 0 of
+  335. These repositories were used to find constructs, as every pack's
+  repairs were; no structural or localization score was read on a gated
+  set while doing it. Extraction on the calibration repository (sqlc
+  `examples/`), the micro-benchmark and the crate fixture was compared
+  before and after file by file: 7 of 93 files differ, all by statements
+  that were unparsed and now give column references, one wrong `Write`
+  reference to a variable removed, and the dialect of two ClickHouse
+  files.
+- **What still fails, and stays counted**: T-SQL at 6.4% of files (`FOR
+  XML` without `FROM`, `GROUPING SETS`, `VECTOR_SEARCH`, `xml.modify`,
+  deliberately broken experiment scripts), SQL*Plus substitution
+  variables that stand for keywords, Oracle XML functions, BigQuery
+  templates with `<placeholders>`. A repository of procedural T-SQL alone
+  is therefore still above 2%.
+- **Not done**: SQL in string literals and dynamic SQL, PL/pgSQL bodies
+  beyond the token scanner (sqlparser keeps them as text; they are not
+  counted as errors either, as before), compound triggers, Snowflake
+  Scripting, Oracle conditional compilation beyond "read every branch".
+
 ## 2026-11-25 — Shell: a localization set mined by the bench; `stable`
 
 Shell was `preview` for two reasons: no localization dataset has shell
@@ -64,6 +178,7 @@ is the dialect work below. For the first:
   pack, and since the dialect work the pack's dialect rules and repairs
   too), and the localization set is unvalidated by people. Both are
   disclosed next to the scorecard; neither is a floor of RFC 0004.
+
 
 ## 2026-11-25 — Shell: one dialect per file, tree-sitter-zsh for zsh files
 
@@ -187,6 +302,7 @@ now has dialects the way SQL has (`rueca-lang-shell` `dialect.rs`):
 - **Cost.** tree-sitter-zsh's generated parser is 43 MB of C (the bash
   grammar's is 9.5 MB); ohmyzsh's 572 files are read in 0.37 s and
   acme.sh's 304 in 0.30 s (dialect, repairs, both grammars when needed).
+
 
 ## 2026-11-25 — SQL pack: sqlparser per statement over a tree-sitter grammar, one dialect per file, a code-backed gold; `preview`
 
