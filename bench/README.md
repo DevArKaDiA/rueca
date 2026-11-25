@@ -1363,7 +1363,11 @@ better.
 gated S1 repository at the base commit of its first gated
 `[[s1.instances]]` entry, then every calibration S1 repository at the base
 commit of its first calibration entry; `org.derive_pins`, checked by a unit
-test). The **gated organization** is the `split = "gated"` members (42); the
+test; the repositories of the languages listed in `[org]
+pending_languages` — added after the last full run of the scenario, C#
+today — are left out until the next full run re-measures every arm, so
+the published organization numbers keep describing the organization they
+were measured on). The **gated organization** is the `split = "gated"` members (42); the
 **calibration organization** is the gated one plus the `split =
 "calibration"` members (24 since the calibration split grew from 8; RFC 0007
 phase 0), the gated ones acting as distractors. A member

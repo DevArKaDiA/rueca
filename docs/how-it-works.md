@@ -9,7 +9,7 @@ live in the crate docs (`rueca-segment`). Structured data (config keys,
 env vars, the code ↔ config bridge) and the extension to Go, C/C++ and Java
 are designed in [RFC 0003](rfcs/0003-structured-data-and-languages.md); this
 document changes as each part lands. Structured data and the bridge are
-implemented (§4.2–§4.4, §5); Go, Java and C/C++ are built on the shared
+implemented (§4.2–§4.4, §5); Go, Java, C# and C/C++ are built on the shared
 resolver rules.
 
 Contents:
@@ -60,9 +60,9 @@ Two ideas carry the whole design:
 | **Definition** | A named thing declared in a file (class, function, method, field, variable, constant, interface, type alias, enum, test…), with its span, signature, docstring and parent. |
 | **Reference** | A use of a name: a call, `new`, type annotation, decorator, `raise`/`throw`, read or write. Has a name, an optional receiver (`self`, `app`, `a.b`) and the definition that encloses it. |
 | **Import** | A module specifier plus imported names (`from .http import Session`). |
-| **Module name** | How other files refer to a file: Python `shop.http`; ECMAScript `src/util/index` (path without extension); Markdown and data files `docs/guide.md` (path with extension); Go the package import path; Java the package. PHP and C/C++ files have none: code refers to classes and functions by namespace, never to files. |
-| **Qualified name** | Global name of a definition: module name + separator + local name. Python `shop.http.Session.send`; ECMAScript `src/util/index:formatAmount`; Markdown `docs/guide.md:Install > Linux`; PHP the fully qualified name, members after `::` (`App\Models\User::save`); data `config/app.yaml:database.host` (the local name is a **key path**); Go `github.com/gin-gonic/gin.Engine.ServeHTTP`; Java `com.example.Owner.getPets`; C/C++ `fmt::v11::format_to`. |
-| **Package** | Files that share one module namespace without imports: Go and Java packages (same module name), Terraform modules (same directory). Declared by the pack (`module_scope`). |
+| **Module name** | How other files refer to a file: Python `shop.http`; ECMAScript `src/util/index` (path without extension); Markdown and data files `docs/guide.md` (path with extension); Go the package import path; Java the package; C# the namespace. PHP and C/C++ files have none: code refers to classes and functions by namespace, never to files. |
+| **Qualified name** | Global name of a definition: module name + separator + local name. Python `shop.http.Session.send`; ECMAScript `src/util/index:formatAmount`; Markdown `docs/guide.md:Install > Linux`; PHP the fully qualified name, members after `::` (`App\Models\User::save`); data `config/app.yaml:database.host` (the local name is a **key path**); Go `github.com/gin-gonic/gin.Engine.ServeHTTP`; Java `com.example.Owner.getPets`; C# `Acme.Shop.Store.Add`; C/C++ `fmt::v11::format_to`. |
+| **Package** | Files that share one module namespace without imports: Go and Java packages and C# namespaces (same module name), Terraform modules (same directory). Declared by the pack (`module_scope`). |
 | **Canonical env var** | One file-less `EnvVar` node per environment variable name (`$env:DATABASE_URL`): code that reads it has a `READS` edge to it, manifests that set it a `WRITES` edge. |
 | **Node / edge** | The resolved graph. Nodes are definitions plus `Repository` / `Folder` / `File`; edges are typed relations between them. |
 | **Strategy / confidence** | How a reference edge was resolved, and how much to trust it (0–1). |
@@ -239,6 +239,28 @@ What packs deliberately do and don't do:
   `\.` (nvm's alias bypass), zsh parameter flags `${(j:,:)xs}`. Other zsh
   syntax (glob qualifiers `*(.)`, `for x (…)` loops, nested `${${…}}`)
   stays an ERROR node, counted as a parse error.
+- **C# names follow the namespace.** The module name of a file is the
+  namespace its types share (block `namespace A.B { … }`, nested blocks or
+  file-scoped `namespace A.B;`), so the global name of a method is
+  `Acme.Shop.Store.Add`; files of one namespace are one package wherever
+  they live (§4.3). Classes and records are `Class`, structs and record
+  structs `Struct`, interfaces `Interface`, enums `Enum` (members
+  `Constant`s), delegates `TypeAlias`; methods, constructors (named like
+  their type), destructors, operators and explicit interface
+  implementations (`Store.IStore.Run`) are `Method`s, local functions
+  `Function`s under their method, fields, properties, events, indexers and
+  record parameters `Field`s, `const` fields `Constant`s. Receivers are
+  typed from declarations as in Java (parameters, locals, `var x = new
+  T()`, casts, `as`, patterns, `out` declarations, `foreach` and `catch`
+  variables, primary-constructor parameters, fields and properties of the
+  enclosing types; a constrained type parameter stands for its first class
+  constraint), and a call on the result of a call the file cannot type is
+  `$ret:<receiver>#<name>` (`?` when awaited), which the resolver types
+  from the callee's declared return type (`Task<T>` awaited is `T`).
+  Overloads get Java's parameter suffix (`Add(Item)`, `Add(string,int)`,
+  `params object[]` written `object...`), calls carry their arity and
+  argument types. A file whose `#if` blocks split a declaration is read in
+  its first-branch configuration when that parses better.
 - **Rust names follow the module tree, items join with `.`.** The module
   name of a file is its module path, crate name first
   (`rueca_index::link`, from `Cargo.toml` and the file layout, §4.3); the
@@ -385,7 +407,12 @@ What packs deliberately do and don't do:
   "name" { … }` blocks (`Test` definitions; the grammar reads them as
   commands, the pack rebuilds the blocks), every definition of a test file
   (test directories, `*.bats`, `test_*.sh`, `*_test.sh`, `*_spec.sh`) and,
-  in a file that sources shunit2, its `test*` functions and hooks.
+  in a file that sources shunit2, its `test*` functions and hooks; in C#, xUnit `[Fact]` /
+  `[Theory]`, NUnit `[Test]` / `[TestCase]` / `[TestCaseSource]` and MSTest
+  `[TestMethod]` / `[DataTestMethod]` methods, fixture methods of test
+  classes, classes with `[TestClass]` / `[TestFixture]` or a test, and
+  every definition of a test project (`Foo.Tests/`, `Foo.UnitTests/`, …)
+  or under `test/` / `tests/`.
 - **Named function expressions are definitions** in JS/TS wherever they
   appear (`app.use(function handler() {})`, `defineGetter(req, "query",
   function query() {})`, `return function timing() {}`): a `Function` child
@@ -482,7 +509,12 @@ literal names: Python `os.environ["X"]`, `os.environ.get("X")`,
 `${NAME:-default}`, `${NAME:?msg}` (also in strings and here-documents)
 when the file binds `NAME` nowhere (no assignment, `local`, `export`,
 `read`, `for`, …), the name is upper case and not a shell variable
-(`BASH_SOURCE`, `LINENO`, …). Laravel config files are PHP:
+(`BASH_SOURCE`, `LINENO`, …); C#
+`Environment.GetEnvironmentVariable("X")`, and on an `IConfiguration`
+receiver (or a `Configuration` property) `config["A:B"]`,
+`GetValue<T>("A:B")`, `GetSection("A:B")` and `GetConnectionString("Db")`
+(`ConnectionStrings:Db`), namespace `dotnet` (`appsettings*.json`, `:`
+read as `.`). Laravel config files are PHP:
 the array a `config/<file>.php` returns becomes `Key`s (`name`,
 `providers.cache.driver`), and `env()` calls inside an entry are reads by
 that key.
@@ -551,6 +583,8 @@ provide, `reqwest` calls consume; the methods of a tonic service trait
 impl (`impl Points for S`, `Request<…>` → `Response<…>`) provide
 `Points/Upsert` (snake_case back to the proto's PascalCase) and calls on
 names bound to a `PointsClient` consume it.
+**C#**: no contract hints yet (ASP.NET routes and `HttpClient` calls are
+future work).
 
 Facts are cached at
 `<store>/facts/<sha>-<lang>-v<extractor version>-f<facts format>.bin`.
@@ -562,7 +596,7 @@ name) add a hash of the path to the key. A pack may also decline a file with
 a reason (`skipped:data-shape`): the file stays listed and searchable.
 
 **Detection** is by extension (`.rs` is Rust, `.sh` / `.bash` / `.zsh` /
-`.ksh` / `.bats` shell), then by file name (`Dockerfile`,
+`.ksh` / `.bats` shell, `.cs` C#), then by file name (`Dockerfile`,
 `Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`,
 `AndroidManifest.xml`, the shell start-up files `.bashrc`, `.profile`,
 `.zshrc`, …; other XML stays text); a C header
@@ -601,6 +635,9 @@ Two per-language hooks, still without guessing symbols:
   (`rueca_index::link`; `mod.rs` names its directory). Every file is its
   own module. Shell keeps the path with its extension (`bin/deploy`,
   `lib/util.sh`); a shell library has no package identity.
+  C# reads the namespace its types share (recorded by the
+  pack, as Java's `package`; the global namespace is empty): every file of
+  one namespace is one package, wherever it lives.
 - `resolve_import(from, import)`: maps a specifier to a project file or to
   *nothing* (third-party, builtin). Python follows relative levels and source
   roots (`from .http` in `shop/api.py` → `shop/http.py`). TS/JS uses
@@ -642,6 +679,11 @@ Two per-language hooks, still without guessing symbols:
   `include/`, `src/` and the repository root, then the only project file
   whose path ends with `/x.h`; `#include <x.h>` is a system header unless a
   project include directory (or `include/`) has it.
+  C# `using`s name namespaces, not files: the pack opts into
+  `namespace_imports`, and the resolver binds `using A.B;` to the package
+  whose module name is `A.B` (its `IMPORTS` edge goes to the directory
+  holding most of its files); `using static`, aliases and project-wide
+  `global using`s are described with the C# rules (§4.4).
   Rust imports are module paths normalized at their site (`self::` and
   `super::` inside inline modules folded into the file's module, see the
   crate docs, *Imports*): `mod x;` is `<dir>/x.rs` or `<dir>/x/mod.rs` of
@@ -863,6 +905,29 @@ blanket implementation outside the project), and so is a method call on
 an unknown receiver whose name no project method has or that is a common
 standard-library method (`unwrap`, `iter`, `insert`, …).
 
+C# references go through the same ladder with the Java rules and the
+`csharp` module of the resolver (crate docs, *C#*):
+
+| C# reference | Rule (edge `strategy`) | Confidence |
+|---|---|---|
+| `M()` inside a type: own, outer, inherited or other-partial-part member; a local function | implicit self / local scope | 0.90 / 0.85 inherited / 0.95 |
+| `Order`, `new Order(…)` in the file's namespace (any file), an enclosing namespace, the global namespace | same module / `import_resolved` | 0.90 (constructor × 0.95) |
+| `Order` bound by `using A.B;`, `using X = A.B.Order;` or a `global using` of the project | imported binding (`import_resolved`) | 0.95 |
+| `Shout()` bound by `using static A.B.Util;` (a project member wins over a library one) | imported binding (`import_resolved`) | 0.95 |
+| `Util.M()`, `Outer.Inner.M()`, `A.B.Util.M()` (a namespace path, absolute or relative to an enclosing namespace) | imported / same-module type (`import_resolved` / `same_module`) | 0.85 / 0.90 |
+| `x.M()` with `x` declared as `T` (`$type:T`), `this.M()`, `base.M()`, `: base(…)`, `: this(…)` | typed / self / base receiver (`type_resolved`) | 0.85 / 0.90 |
+| `Make().M()`, `(await GetAsync()).M()`: the callee's declared return type (`$ret:`; `Task<T>` awaited is `T`) | typed receiver (`type_resolved`; `heuristic` 0.50 when the callee was a guess) | 0.85 |
+| `x.Ext()` with no member `Ext` on `x`'s type: the extension method whose `this` parameter is that type or one of its bases, all candidates in one static class | typed receiver (`type_resolved`) | 0.85 |
+| several overloads fitting the call, scored by C# conversions (exact type > type parameter > conversion; for an unknown argument a type parameter > a type > `object` / `params`); the best ties are all linked | as the rule, × 0.8 each when several | |
+| anything else | unique method (`heuristic`) | 0.50 |
+
+The parts of a `partial` type share their members and bases, so a member
+declared in one file is found through the other's node. Overriding methods
+and interface implementations get `OVERRIDES` as in Java. Base class
+library and NuGet types are external; `System`, `Microsoft` and common
+library types and methods are builtins unless a project namespace has the
+same head.
+
 In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
 → 0.95; `Session().request` has the receiver `$type:Session`, so rung 5
 applies → 0.85.
@@ -898,7 +963,8 @@ env var reads — `os.Getenv("X")`, `os.LookupEnv` — and viper config key
 reads; Java emits env var and Spring config key reads; C and C++ emit `getenv("X")`
 reads; Rust emits `std::env::var("X")`, `env!("X")` and `option_env!("X")`
 reads; shell emits `$NAME` reads of unbound upper-case names and its
-`export` / `declare -x` / `NAME=value cmd` providers). These
+`export` / `declare -x` / `NAME=value cmd` providers; C# emits `Environment.GetEnvironmentVariable("X")` and .NET
+configuration key reads). These
 references never go through the
 ladder: they match exact names only, so an env var or a key path can never
 be fuzzy-matched to a code symbol.
@@ -1087,7 +1153,8 @@ index**, so a question asked of the whole organization gets one ranking.
   names, Python distributions and their top-level packages, `go.mod`
   modules, Composer PSR-4 namespaces, Maven / Gradle artifacts with their
   Java packages, C / C++ `include/` directories, Cargo packages with their
-  library crate name) and records the imports
+  library crate name, C# projects (`*.csproj`: NuGet `PackageId` /
+  `AssemblyName`) with their namespaces) and records the imports
   each repository's own pack could not resolve inside it. A repository
   that imports (or, by its manifests, requires) a package another one
   publishes depends on it; the consumer and its dependencies are then
@@ -1353,10 +1420,10 @@ lists every ref with its kind, commit, age and `closed_at`.
 |---|---|
 | `Repository`, `Folder`, `File` | the walk (every listed file, any language) |
 | `Module` | TS `namespace` / `declare module`; Rust inline `mod m { … }` |
-| `Class`, `Interface`, `Trait`, `Struct`, `Enum`, `TypeAlias` | class / interface / PHP trait / Go struct / C and C++ `struct` and `union` / enum / type declarations (`typedef`, `using`); Rust `struct` / `union` (`Struct`), `enum`, `trait` (`Interface`), `type` |
-| `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters; Go methods (`Server.Start`, attached to their type through the package) and interface methods; C/C++ prototypes and out-of-line bodies, function-like macros; Rust `impl` and trait items (`Type.method`, `Trait.method`), `macro_rules!` |
+| `Class`, `Interface`, `Trait`, `Struct`, `Enum`, `TypeAlias` | class / interface / PHP trait / Go struct / C and C++ `struct` and `union` / enum / type declarations (`typedef`, `using`); Rust `struct` / `union` (`Struct`), `enum`, `trait` (`Interface`), `type`; C# `class` / `record` (`Class`), `struct` / `record struct` (`Struct`), `interface`, `enum`, `delegate` (`TypeAlias`) |
+| `Function`, `Method` | functions, methods, arrow functions assigned to names, getters/setters; Go methods (`Server.Start`, attached to their type through the package) and interface methods; C/C++ prototypes and out-of-line bodies, function-like macros; Rust `impl` and trait items (`Type.method`, `Trait.method`), `macro_rules!`; C# methods, constructors, destructors, operators (`Method`) and local functions (`Function`) |
 | `Package` | Go external test packages (`package x_test`), marking the module |
-| `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, PHP properties (`$email`, also promoted constructor parameters), module-level assignments (`UPPER_CASE` → `Constant`), PHP `const` / `define()` / enum cases |
+| `Field`, `Variable`, `Constant` | class fields, `self.x =` in `__init__`, PHP properties (`$email`, also promoted constructor parameters), module-level assignments (`UPPER_CASE` → `Constant`), PHP `const` / `define()` / enum cases; C# fields, properties, events, indexers and record parameters (`Field`), `const` fields and enum members (`Constant`) |
 | `Test` | JS/TS `describe` / `it` / `test` blocks, Pest tests, GoogleTest `TEST*` and Catch2 `TEST_CASE` blocks (Python and PHPUnit tests are `Function` / `Method` / `Class` with `is_test: true`) |
 | `Section` | Markdown headings, nested by `DEFINES` |
 | `EnvVar` | canonical env vars `$env:NAME` (file-less) and env var providers (`.env` lines, compose / Kubernetes / GitHub Actions `env` entries, Dockerfile `ENV`) |
@@ -1681,6 +1748,12 @@ Known gaps behind low-confidence or missing edges, in rough order of impact:
   another file; overloads that differ only by class parameters (subtyping
   is not known) are linked together (× 0.8) unless an argument type matches
   one exactly; method references (`Text::upper`) are calls without arity.
+- C#: receivers are typed in the file (and through declared return
+  types, `$ret:`), not through properties of other types (`a.B.C()`) or
+  generic arguments (`List<Foo>` elements); base classes and interfaces
+  are told apart by the `I` + upper-case convention; extension methods are
+  matched by receiver type name; source generators, reflection and
+  `dynamic` are invisible.
 - Python MRO is approximated depth-first (differs from C3 only for diamond
   inheritance).
 - Dynamic dispatch, decorators that replace functions, `getattr`,
@@ -1747,8 +1820,9 @@ gaps show up on real repositories.
 | Rust extraction, receivers, macro arguments, Cargo module model | `rueca-lang-rust` | crate docs, `src/extract.rs`, `src/receivers.rs`, `src/macros.rs`, `src/modules.rs` |
 | `.proto` services, RPC methods, messages (`protox-parse`) | `rueca-lang-proto` | crate docs, `src/extract.rs` |
 | Shell functions, `source` paths, script runs, bats blocks, env bridge, parser repairs | `rueca-lang-shell` | crate docs, `src/extract.rs`, `src/paths.rs`, `src/repair.rs`, `queries/locals.scm` |
+| C# extraction, namespaces, receivers, `#if` configurations, the .NET bridge | `rueca-lang-csharp` | crate docs, `src/extract.rs`, `src/refs.rs`, `src/bridge.rs`, `src/preproc.rs`, `queries/locals.scm` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
-| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/shell.rs` (sourced functions, script runs), `src/contracts.rs` (contract table and edges) |
+| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/shell.rs` (sourced functions, script runs), `src/csharp.rs` (C# namespaces and usings, partial types, extension methods, return-type receivers, overload choice), `src/contracts.rs` (contract table and edges) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
 | Organization index, generations, visibility | `rueca-segment` | `src/org.rs` (module docs) |
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |

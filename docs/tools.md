@@ -389,8 +389,8 @@ refs](#several-refs-of-one-repository)).
 
 **Language names** (`search_symbols`, `search_code`): `python`,
 `typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`, `java`, `cpp`, `c` (a `.h` header is `cpp` when the
-repository has C++ sources), `rust`, `shell` (sh, bash, zsh, ksh, bats;
-extension-less scripts by their `#!` line), the data languages
+repository has C++ sources), `rust`, `proto`, `shell` (sh, bash, zsh, ksh, bats;
+extension-less scripts by their `#!` line), `csharp`, the data languages
 `json` (JSONC included), `yaml`, `toml`, `dotenv`, `ini`, `properties`,
 `xml` (`pom.xml`, `*.csproj`, `AndroidManifest.xml` only), `hcl`
 (Terraform / OpenTofu included) and `dockerfile`. A language whose pack is not in

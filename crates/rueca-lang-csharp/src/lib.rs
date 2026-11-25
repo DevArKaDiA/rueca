@@ -1,4 +1,4 @@
-//! C# language pack for Rueca (`tree-sitter-c-sharp` 0.24.0, RFC 0003 §10.4c).
+//! C# language pack for Rueca (`tree-sitter-c-sharp` 0.24.0, RFC 0003 §10.4d).
 //!
 //! See `rueca_extract::LanguagePack` for the contract. This crate turns one
 //! `.cs` file into [`FileFacts`] and declares C#'s module semantics:

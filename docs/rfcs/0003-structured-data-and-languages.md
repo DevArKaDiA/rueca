@@ -6,7 +6,7 @@
   `rueca-lang-data` plus the Python, TS/JS and PHP packs) — see the
   *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. Go (§10.2), Java
   (§10.4) and C/C++ (§10.3) have landed as `preview`; Rust followed
-  (addendum §10.4b).
+  (addendum §10.4b), then shell (addendum §10.4c) and C# (addendum §10.4d).
 - Created: 2026-10-24
 - Depends on: RFC 0001 (architecture), RFC 0002 (building blocks)
 - Research date: 2026-10-24. Crate versions, licenses and dependency
@@ -444,6 +444,7 @@ builtin `getenv`), never by function name alone.
 | C / C++ | `getenv("X")`, `std::getenv("X")`, `secure_getenv` | — |
 | Rust (§10.4b) | `std::env::var("X")` / `var_os`, `env::var("X")` and `var("X")` with `std::env` / `std::env::var` imported, `env!("X")`, `option_env!("X")` | — |
 | Shell (§10.4c) | `$X`, `${X}`, `${X:-default}`, `${X:?msg}` with `X` upper case, bound nowhere in the file and not a shell variable; providers: `export X=…`, `declare -x X`, `X=value cmd` | — |
+| C# (§10.4d) | `Environment.GetEnvironmentVariable("X")` (also `System.Environment`) | on an `IConfiguration` / `IConfigurationRoot` / `IConfigurationManager` / `ConfigurationManager` receiver or a `Configuration` property: `config["A:B"]`, `GetValue<T>("A:B")`, `GetSection` / `GetRequiredSection("A:B")`, `GetConnectionString("Db")` → `ConnectionStrings:Db` (namespace `dotnet`) |
 
 *Implemented* for Python, TS / JS and PHP as listed, except Django
 `settings.X` and pydantic `BaseSettings` (later). Evidence: Python needs the
@@ -944,6 +945,39 @@ with the pack measures the pack against bash's lookup rules, not against
 an independent tool. Not done: aliases, functions defined by `eval` or
 zsh `autoload` files, variable command words (`$cmd args`), zsh-only
 syntax beyond parameter flags (parse errors, counted).
+
+### 10.4d C# (addendum, 2026-11-25)
+
+§2 left C# to a later tier; it follows the same gate, designed in the form
+of §10.2–§10.4. It is Java-shaped (classes, overloads, implicit `this`,
+`OVERRIDES`), with namespaces in place of packages.
+
+| Aspect | Design |
+|---|---|
+| Grammar | `tree-sitter-c-sharp` 0.24.0, MIT (links with tree-sitter 0.27) |
+| Module model | module = the namespace a file's types share (block, nested or file-scoped `namespace`; global namespace empty); every file of one namespace is one package wherever it lives (`ModuleScope::Package`); a file whose types span namespaces keeps the common prefix as module and the rest in local names |
+| Imports | `using A.B;` binds the namespace `A.B` by module name through a new hook, `LanguagePack::namespace_imports` (no path resolution); `using X = A.B.T;` / `using X = A;` aliases; `using static A.B.T;` binds the bare names the file uses to `T`'s members; `global using` applies to every file of the project (nearest `*.csproj`); the enclosing namespaces and the global namespace are in scope without usings |
+| Qualified names | namespace + `.` + type path + member: `Acme.Shop.Store.Add`; constructors `Store.Store`, destructors `Store.~Store`, explicit interface implementations `Store.IStore.Run`, local functions `Store.Add.Local`; Java's overload suffixes (`Add(string,int)`, `params T[]` as `T...`) |
+| Receivers | as Java (§10.4): declared types of locals, parameters, patterns, `out` declarations, `foreach` / `catch` variables, primary-constructor parameters, fields and properties; `var` from `new` / cast / `as`; constrained type parameters by their first class constraint; `$ret:` for call results typed from the callee's declared return type by the resolver (`Task<T>` awaited is `T`); `this`, `base` |
+| Types | partial types share members and bases across their parts; base vs interface by the `I` + upper-case convention; extension methods bound by the `this` parameter's type (and its bases) when the receiver's type lacks the member |
+| Overloads | arity from the signature (default values optional, `params` variadic); choice by C# conversions over the known argument types (exact, type parameter, conversion; `object` / `params` expansion last) |
+| Preprocessor | every `#if` branch is walked; a file whose directives split a declaration is re-parsed with the first branch of each conditional kept (same offsets), when that has fewer parse errors |
+| Tests | xUnit `[Fact]` / `[Theory]`, NUnit `[Test]` / `[TestCase]` / `[TestCaseSource]`, MSTest `[TestMethod]` / `[DataTestMethod]`, fixtures of test classes, `[TestClass]` / `[TestFixture]`, test projects (`*.Tests`, `*.UnitTests`, …) and `test/` / `tests/` |
+| Bridge | §7.2 table; `appsettings*.json` keys are the data pack's (`dotnet` scope, `A:B` ≡ `A.B`) |
+| Packages | RFC 0006: a non-test `*.csproj` publishes its NuGet identity (`PackageId`, `AssemblyName`, file name) with `cs:<namespace>` keys; `PackageReference`s are requirements; usings of namespaces no file declares are the repository's imports |
+| Heuristic | methods on receivers of unknown type by name (a unique candidate only); dependency injection, reflection, source generators and `dynamic` are invisible |
+| Precision | scip-dotnet (Apache-2.0, Roslyn) in its pinned Docker image |
+| Bench | S1: SWE-rebench V2 C# rows (no C# in SWE-bench Multilingual or Multi-SWE-bench); S3: scip-dotnet gold on serilog and eShopOnWeb (YamlDotNet calibration), and the `bench/micro/csharp` micro-benchmarks |
+
+*Implemented* (`rueca-lang-csharp` plus the `csharp` module of
+`rueca-resolve`; crate docs and [how-it-works](../how-it-works.md)):
+everything in the table; `stable` under RFC 0004 (callers / callees
+precision 96.9 / 95.5, recall 95.2 / 96.6 against scip-dotnet; parse
+errors in 1 of 4,590 files over the 10 corpus repositories, decisions log
+2026-11-25). Not done: contract hints (ASP.NET routes,
+`HttpClient` calls), `Directory.Packages.props` (central versions add no
+identity), property chains across types (`a.B.C()`), generic arguments as
+receiver types, `#if` evaluation.
 
 ### 10.5 Risks
 

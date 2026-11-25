@@ -1,4 +1,4 @@
-//! C# resolver rules (RFC 0003 §10.4c): namespaces bound by name, partial
+//! C# resolver rules (RFC 0003 §10.4d): namespaces bound by name, partial
 //! types and extension methods.
 //!
 //! The C# pack is package-scoped like Java (files of one namespace are one
