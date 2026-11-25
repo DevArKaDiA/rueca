@@ -229,7 +229,7 @@ use rueca_extract::{Budget, ExtractError, LanguagePack, ProjectFiles};
 use rueca_model::{FileFacts, Import, Language};
 
 pub use dialect::{Dialect, Source as DialectSource, detect as detect_dialect};
-pub use extract::{Stats, stats, unparsed_statements};
+pub use extract::{Stats, head_only_statements, stats, unparsed_statements};
 pub use facts::MAX_DOC_CHARS;
 
 /// The SQL pack. Stateless; construct with `SqlPack` or `SqlPack::default()`.

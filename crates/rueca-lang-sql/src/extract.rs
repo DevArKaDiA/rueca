@@ -27,6 +27,12 @@ pub struct Stats {
     pub errors: u32,
     /// Statements read by the pack's own readers rather than sqlparser.
     pub own: u32,
+    /// Statements accepted by their head alone (a subset of `own`): parse
+    /// errors of the strict count, which is what `Facts::parse_errors` and
+    /// the health metric use.
+    pub head_only: u32,
+    /// Statements with at least one parse error or head-only statement.
+    pub unparsed_strict: u32,
 }
 
 /// Statement counts of the SQL file at `path` (no facts kept).
@@ -43,6 +49,22 @@ pub fn unparsed_statements(path: &str, source: &[u8]) -> Vec<(String, String)> {
     run(path, source, true).1
 }
 
+/// The first words of the statements of a file accepted by their head
+/// alone (for the strict / lenient coverage table).
+#[doc(hidden)]
+pub fn head_only_statements(path: &str, source: &[u8]) -> Vec<String> {
+    let text = String::from_utf8_lossy(source);
+    let mut pass = Pass::new(path, &text);
+    let mut b = Builder::new(&text, pass.dialect, false);
+    let model = pass.definitions(&mut b, path);
+    let mut r = Reader::new(&mut b, &pass.masked, &pass.prepared.alone);
+    r.heads = Some(Vec::new());
+    for st in &pass.stmts {
+        statement(&mut r, st, model, &pass.prepared.relations);
+    }
+    r.heads.take().unwrap_or_default()
+}
+
 fn run(path: &str, source: &[u8], failures: bool) -> (Stats, Vec<(String, String)>) {
     let text = String::from_utf8_lossy(source);
     let mut pass = Pass::new(path, &text);
@@ -52,15 +74,24 @@ fn run(path: &str, source: &[u8], failures: bool) -> (Stats, Vec<(String, String
     if failures {
         r.failures = Some(Vec::new());
     }
-    let (mut statements, mut unparsed) = (0u32, 0u32);
+    let (mut statements, mut unparsed, mut unparsed_strict) = (0u32, 0u32, 0u32);
     for st in &pass.stmts {
-        let before = r.errors;
+        let (before, before_strict) = (r.errors, r.errors + r.head_only);
         if statement(&mut r, st, model, &pass.prepared.relations) {
             statements += 1;
             unparsed += u32::from(r.errors > before);
+            unparsed_strict += u32::from(r.errors + r.head_only > before_strict);
         }
     }
-    let stats = Stats { dialect: pass.dialect, statements, unparsed, errors: r.errors, own: r.own };
+    let stats = Stats {
+        dialect: pass.dialect,
+        statements,
+        unparsed,
+        errors: r.errors,
+        own: r.own,
+        head_only: r.head_only,
+        unparsed_strict,
+    };
     (stats, r.failures.take().unwrap_or_default())
 }
 
@@ -113,7 +144,8 @@ pub fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<FileFacts, 
         }
         statement(&mut r, st, model, &pass.prepared.relations);
     }
-    let errors = r.errors;
+    // strict: a statement accepted by its head alone was not parsed
+    let errors = r.errors + r.head_only;
     jinja_refs(&mut b, &pass.prepared);
     let mut facts = b.facts;
     facts.parse_errors = errors + invalid_utf8;

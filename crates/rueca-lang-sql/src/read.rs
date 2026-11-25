@@ -42,13 +42,19 @@ pub struct Reader<'a, 's> {
     pub errors: u32,
     /// Statements read by the pack's own readers rather than sqlparser.
     pub own: u32,
+    /// Statements accepted by their head alone ([`crate::utility`]): no
+    /// parser validated them, so they count as parse errors of the file
+    /// (the strict rate, the one `Facts::parse_errors` carries).
+    pub head_only: u32,
+    /// With `Some`, the first word of every head-only statement.
+    pub heads: Option<Vec<String>>,
     /// With `Some`, the text and parser error of every failure.
     pub failures: Option<Vec<(String, String)>>,
 }
 
 impl<'a, 's> Reader<'a, 's> {
     pub fn new(b: &'a mut Builder<'s>, masked: &'a str, alone: &'a [(usize, usize)]) -> Reader<'a, 's> {
-        Reader { b, masked, alone, errors: 0, own: 0, failures: None }
+        Reader { b, masked, alone, errors: 0, own: 0, head_only: 0, heads: None, failures: None }
     }
 
     /// One top-level statement at `ctx.range`.
@@ -92,6 +98,11 @@ impl<'a, 's> Reader<'a, 's> {
             }
         }
         self.own += 1;
+        self.head_only += 1;
+        if let Some(h) = &mut self.heads {
+            let (text, _) = chunk(self.masked, range);
+            h.push(text.split_whitespace().take(2).collect::<Vec<_>>().join(" ").to_ascii_uppercase());
+        }
     }
 
     /// A statement: sqlparser, else the pack's own forms, else an error.

@@ -1,6 +1,9 @@
 //! Statement parse-failure rates per detected dialect over a directory
 //! tree (the dialect coverage table of the crate README):
-//! `cargo run -p rueca-lang-sql --example dialects -- <dir> [--files]`.
+//! `cargo run -p rueca-lang-sql --example dialects -- <dir> [--files] [--heads]`.
+//! Two rates: *strict* (a statement accepted by its head alone counts as a
+//! parse error; what `Facts::parse_errors` and the health metric use) and
+//! *lenient* (only statements nothing reads but the token scanner).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -28,7 +31,9 @@ fn main() {
     walk(Path::new(&root), &mut files);
     // dialect -> (files, files with a parse error, statements, statements
     // with an error, parse errors, statements read by the pack's own readers)
-    let mut by: BTreeMap<&'static str, (u32, u32, u32, u32, u32, u32)> = BTreeMap::new();
+    let heads = std::env::args().any(|a| a == "--heads");
+    let mut head_words: BTreeMap<String, u32> = BTreeMap::new();
+    let mut by: BTreeMap<&'static str, (u32, u32, u32, u32, u32, u32, u32, u32, u32)> = BTreeMap::new();
     for f in files {
         let Ok(bytes) = std::fs::read(&f) else { continue };
         if bytes.len() > 2 * 1024 * 1024 {
@@ -43,14 +48,37 @@ fn main() {
         e.3 += s.unparsed;
         e.4 += s.errors;
         e.5 += s.own;
-        if list && s.unparsed > 0 {
-            println!("{} {} {}/{}", s.dialect.as_str(), rel, s.unparsed, s.statements);
+        e.6 += u32::from(s.unparsed_strict > 0);
+        e.7 += s.unparsed_strict;
+        e.8 += s.head_only;
+        if list && s.unparsed_strict > 0 {
+            println!(
+                "{} {} strict {}/{} lenient {}",
+                s.dialect.as_str(),
+                rel,
+                s.unparsed_strict,
+                s.statements,
+                s.unparsed
+            );
+        }
+        if heads && s.head_only > 0 {
+            for h in rueca_lang_sql::head_only_statements(&rel, &bytes) {
+                *head_words.entry(h).or_default() += 1;
+            }
         }
     }
-    for (d, (files, ferr, st, un, errors, own)) in by {
-        let pct = if st > 0 { 100.0 * f64::from(un) / f64::from(st) } else { 0.0 };
+    for (d, (files, ferr, st, un, errors, own, ferr_strict, un_strict, head_only)) in by {
+        let pct = |n: u32, d: u32| if d > 0 { 100.0 * f64::from(n) / f64::from(d) } else { 0.0 };
         println!(
-            "{d}\tfiles {files}\tfiles with unparsed {ferr}\tstatements {st}\tunparsed {un}\t{pct:.1}%\terrors {errors}\town readers {own}"
+            "{d}\tfiles {files}\tstrict: files with errors {ferr_strict} ({:.1}%) statements {un_strict}/{st} ({:.1}%) head-only {head_only}\tlenient: files {ferr} ({:.1}%) statements {un} errors {errors}\town readers {own}",
+            pct(ferr_strict, files),
+            pct(un_strict, st),
+            pct(ferr, files),
         );
+    }
+    let mut words: Vec<_> = head_words.into_iter().collect();
+    words.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    for (w, n) in words {
+        println!("head-only\t{n}\t{w}");
     }
 }
