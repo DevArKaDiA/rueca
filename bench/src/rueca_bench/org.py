@@ -170,10 +170,14 @@ SELECT_WORKERS = 4
 # --- members and pins ------------------------------------------------------------------
 
 
-def derive_pins(s1_repos: list[dict], s1_insts: list[dict]) -> list[dict]:
+def derive_pins(s1_repos: list[dict], s1_insts: list[dict], pending: set[str] | None = None) -> list[dict]:
     """The manifest's pin rule: every gated S1 repository at the base commit of
     its first `[[s1.instances]]` entry, then every calibration one (manifest
-    order; repositories without instances are left out)."""
+    order; repositories without instances are left out, and so are those of
+    the `[org] pending_languages`, which join at the next full run)."""
+    if pending is None:
+        pending = set(load_manifest().get("org", {}).get("pending_languages", []))
+    s1_repos = [r for r in s1_repos if r["language"] not in pending]
     first: dict[str, dict] = {}
     for inst in s1_insts:
         first.setdefault(inst["repo"], inst)
