@@ -63,6 +63,9 @@ pub struct Builder<'s> {
     /// Tables and views defined in this file, by qualified name (for
     /// `ALTER TABLE … ADD COLUMN` members).
     pub relations: HashMap<String, LocalDefId>,
+    /// Parameters and variables of the routine being read (normalized):
+    /// never columns.
+    pub locals: std::collections::HashSet<String>,
 }
 
 impl<'s> Builder<'s> {
@@ -74,6 +77,7 @@ impl<'s> Builder<'s> {
             is_test,
             facts: FileFacts::default(),
             relations: HashMap::new(),
+            locals: std::collections::HashSet::new(),
         }
     }
 
@@ -155,7 +159,7 @@ impl<'s> Builder<'s> {
         range: (usize, usize),
     ) {
         let col = names::fold(self.dialect, column);
-        if col.starts_with(['@', ':', '$', '#']) {
+        if col.starts_with(['@', ':', '$', '#']) || self.locals.contains(&col) {
             return;
         }
         self.add_ref(kind, col, Some(type_receiver(table)), enclosing, range);

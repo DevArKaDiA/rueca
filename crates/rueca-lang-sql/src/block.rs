@@ -260,8 +260,9 @@ impl Block<'_, '_, '_, '_> {
             }
             k
         };
-        let Some((d, _)) = scan::head(self.r.b, self.toks, self.range, self.doc.take()) else { return false };
+        let Some((d, after)) = scan::head(self.r.b, self.toks, self.range, self.doc.take()) else { return false };
         self.enclosing = Some(d);
+        self.parameters(after);
         let b = if body == is + 1 && is < begin { self.declarations(body) } else { body };
         if b < n {
             self.statement(b);
@@ -325,6 +326,7 @@ impl Block<'_, '_, '_, '_> {
                 "TYPE" | "SUBTYPE" | "PRAGMA" => i = self.semi(i) + 1,
                 _ => {
                     let s = self.semi(i);
+                    self.local(i);
                     let value = self.scan(i, |b, j| b.tok(j) == Some(&Token::Assignment) || b.up(j) == "DEFAULT");
                     if value < s {
                         self.value(value + 1, s);
@@ -368,14 +370,46 @@ impl Block<'_, '_, '_, '_> {
         if matches!(self.up(head_end + 1), "LANGUAGE" | "EXTERNAL") {
             return self.semi(head_end) + 1;
         }
-        let saved = self.enclosing;
+        let saved = (self.enclosing, self.r.b.locals.clone());
         self.enclosing = Some(d);
+        self.parameters(after);
         let b = self.declarations(head_end + 1);
         let end = if self.up(b) == "BEGIN" { self.statement(b) } else { b };
-        self.enclosing = saved;
+        (self.enclosing, self.r.b.locals) = saved;
         let last = end.clamp(1, n) - 1;
         self.r.b.facts.definitions[d as usize].span = self.r.b.span((start, self.toks[last].range.1));
         end.max(head_end + 1)
+    }
+
+    /// Records the parameters of the list opening at `open` (if a `(`):
+    /// the first word of each item that is not a mode.
+    fn parameters(&mut self, open: usize) {
+        if self.tok(open) != Some(&Token::LParen) {
+            return;
+        }
+        let close = self.close(open);
+        let mut depth = 0i32;
+        let mut start = true;
+        for k in open..close {
+            match self.toks[k].token {
+                Token::LParen => depth += 1,
+                Token::RParen => depth -= 1,
+                Token::Comma if depth == 1 => start = true,
+                Token::Word(_) if depth == 1 && start && !matches!(self.up(k), "IN" | "OUT" | "INOUT") => {
+                    self.local(k);
+                    start = false;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Records the word at `k` as a local name of the routine.
+    fn local(&mut self, k: usize) {
+        if let Some(Token::Word(w)) = self.tok(k) {
+            let name = w.value.to_lowercase();
+            self.r.b.locals.insert(name);
+        }
     }
 
     // -----------------------------------------------------------------
@@ -654,6 +688,15 @@ impl Block<'_, '_, '_, '_> {
                 }
             }
             "DECLARE" => {
+                // `DECLARE a, b INT`: the names before the type
+                let mut k = i + 1;
+                while k < s && matches!(self.tok(k), Some(Token::Word(_))) {
+                    self.local(k);
+                    if self.tok(k + 1) != Some(&Token::Comma) {
+                        break;
+                    }
+                    k += 2;
+                }
                 let f = self.find(i + 1, &["FOR", "IS"]);
                 if f < s && (i + 1..f).any(|k| self.up(k) == "CURSOR") {
                     return self.query(f + 1, s);

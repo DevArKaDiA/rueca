@@ -222,6 +222,7 @@ fn statement(r: &mut Reader<'_, '_>, st: &Stmt, model: Option<LocalDefId>, relat
     let named = named_query(r.b, st);
     let enclosing = named.or_else(|| r.b.enclosing_of((st.start, st.end))).or(model);
     let ctx = Ctx { enclosing, range: (st.start, st.end), doc: if named.is_some() { None } else { doc } };
+    r.b.locals.clear();
     r.statement(&ctx);
     true
 }

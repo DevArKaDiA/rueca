@@ -443,7 +443,11 @@ DELIMITER ;
     assert!(has_ref(&f, RefKind::Read, "", "payment", "get_balance"), "{r:?}");
     assert!(has_ref(&f, RefKind::Read, "", "rental", "get_balance"), "{r:?}");
     assert!(has_ref(&f, RefKind::Call, "", "late_fee", "get_balance"), "{r:?}");
-    assert!(!r.iter().any(|x| x.2 == "v_rent"), "{r:?}");
+    assert!(
+        !r.iter().any(|x| x.2 == "v_rent" || x.2 == "p_customer"),
+        "variables and parameters are not columns: {r:?}"
+    );
+    assert!(has_ref(&f, RefKind::Read, "$type:payment", "amount", "get_balance"), "{r:?}");
 }
 
 #[test]
