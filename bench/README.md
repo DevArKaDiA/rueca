@@ -524,12 +524,17 @@ checkout that only adds a language, or the CI regression check that runs
 only the Rueca arm, reproduces every other number without re-running it,
 and the report lists what was carried, from which run (date, machine).
 Local outputs always win over carried ones. Tokens per correct answer
-(efficiency) is the exception in one direction: a language whose Rueca rows
-were carried keeps its published entry whole, because the compact carried
-rows cannot reproduce it and a partial local recomputation (say, only the
-baseline arms re-run) would misreport it. Delete stale local runs of
-languages you did not mean to re-measure (`rueca-bench clean --runs <arm>`,
-or the files under `bench/.cache/runs/{s1,s3}/<arm>/`) before `report`.
+(efficiency) pairs Rueca and cbm on the same queries and is recomputed from
+the rows at hand, local or carried: carried S1 rows keep their efficiency
+record (`e`) and carried S3 rows the tokens an agent reads (`ta`, `lta`),
+so re-running one arm of one suite (say, only the Rueca arm of S3) rescores
+it against the published rows of the other arm. A part of a language's
+entry (`search` from S1, `trace` / `lookup` / `raw` from the gated S3 sets)
+keeps its published value only when some carried row behind it lacks those
+counts (a publication older than them); the entry then lists it under
+`carried` and the report says so. Delete stale local runs of languages you
+did not mean to re-measure (`rueca-bench clean --runs <arm>`, or the files
+under `bench/.cache/runs/{s1,s3}/<arm>/`) before `report`.
 
 ## Scorecard (RFC 0004 §5–§9)
 
@@ -1475,11 +1480,12 @@ snapshots). Queries: every changed / added / removed function name and a
 fixed sample of unchanged ones, each a `search_symbols` with `ref: [base,
 fix]` against the two single-ref answers (`ref: base`, `ref: fix`: the
 uncollapsed baseline, in tokens); `score_collapse` counts collapsed
-identical symbols, `in` lists and `changed` flags. Rueca compares versions
-by file blob, so an unchanged callable of a changed file comes back once
-per ref and flagged: it is counted apart (`changed_same_file`), not as a
-false positive. Trace collapse needs per-commit call-graph gold and is not
-scored yet.
+identical symbols, `in` lists and `changed` flags, matching items to gold
+by path and file-local name (`local`). Rueca compared versions by file
+blob until RFC 0009 §14.6, so an unchanged callable of a changed file came
+back flagged; it is counted apart (`changed_same_file`, 0 since `changed`
+compares each symbol's own text), not as a false positive. Trace collapse
+needs per-commit call-graph gold and is not scored yet.
 
 ### Cross-service edges (S2, RFC 0004 §4, `contracts.py`)
 

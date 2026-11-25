@@ -2,7 +2,7 @@
 
 from rueca_bench.common import count_tokens
 from rueca_bench.efficiency import json_prefix_tokens, search_aggregate, search_row, text_prefix_tokens, trace_aggregate
-from rueca_bench.report import carried_rueca_groups, carry_efficiency
+from rueca_bench.report import carried_eff_parts, carry_efficiency
 
 TREE = "results: 3  (cols: qn label file lines rank)\n  a.f Function a.c 1-2 -3.1\n  a.g Function a.c 4-9 -2.0\n  b.h Function b.c 1-2 -1.0\ntotal: 3\n"
 
@@ -58,16 +58,42 @@ def test_trace_aggregate():
     assert trace_aggregate([10], [0])["per_true_edge"] is None
 
 
-def test_carried_rueca_groups_from_s1_and_s3():
-    s1 = {"carried": {"rueca:python": 45, "cbm:go": 46, "grep:php": 45}}
-    s3 = {"carried": ["rueca:gin", "cbm:gson"]}
-    assert carried_rueca_groups(s1, s3) == {"python", "go"}
+def test_carried_eff_parts_only_where_carried_rows_lack_token_counts():
+    row = {"variant": "kw", "split": "gated", "ok": True}
+    s1 = {
+        "per_instance": [
+            {**row, "arm": "rueca", "group": "python", "e": {"t": 10}},
+            {**row, "arm": "cbm", "group": "python"},  # carried without `e`
+            {**row, "arm": "grep", "group": "php"},  # not an efficiency arm
+            {**row, "arm": "rueca", "group": "go", "variant": "raw"},  # not the efficiency variant
+        ]
+    }
+    # gin is a gated Go set, gson a gated Java one, goawk calibration, go-micro a micro-benchmark
+    s3 = {
+        "carried": ["rueca:gin", "cbm:gson", "rueca:goawk", "cbm:go-micro", "grep:fmt"],
+        "rows": {
+            "rueca": {"gin": [{"t": 50, "ta": 20}, {"ok": 0}], "goawk": [{"t": 9}]},
+            "cbm": {"gson": [{"t": 40}], "go-micro": [{"t": 9}]},
+            "grep": {"fmt": [{"t": 9}]},
+        },
+    }
+    assert carried_eff_parts(s1, s3) == {"python": {"search"}, "java": {"trace", "lookup", "raw"}}
 
 
-def test_carry_efficiency_keeps_published_entry_for_carried_groups():
-    eff = {"python": {"trace": {"rueca": {"n": 10}}}, "rust": {"trace": {"rueca": {"n": 5}}}}
-    published = {"tokens_per_correct_answer": {"python": {"trace": {"rueca": {"n": 745}}, "search": {"rueca": {"n": 40}}}}}
-    carry_efficiency(eff, published, {"python", "go"})
-    assert eff["python"] == {"trace": {"rueca": {"n": 745}}, "search": {"rueca": {"n": 40}}, "carried": True}
+def test_carry_efficiency_replaces_only_the_carried_parts():
+    eff = {
+        "python": {"trace": {"rueca": {"n": 10}}, "search": {"rueca": {"n": 3}}},
+        "rust": {"trace": {"rueca": {"n": 5}}},
+        "java": {"search": {"rueca": {"n": 7}}},
+    }
+    published = {
+        "tokens_per_correct_answer": {
+            "python": {"trace": {"rueca": {"n": 745}}, "search": {"rueca": {"n": 40}}, "carried": True},
+            "go": {"trace": {"rueca": {"n": 9}}},
+        }
+    }
+    carry_efficiency(eff, published, {"python": {"search"}, "go": {"trace", "lookup", "raw"}, "java": {"search"}})
+    assert eff["python"] == {"trace": {"rueca": {"n": 10}}, "search": {"rueca": {"n": 40}}, "carried": ["search"]}
+    assert eff["go"] == {"trace": {"rueca": {"n": 9}}, "carried": ["lookup", "raw", "trace"]}
     assert eff["rust"] == {"trace": {"rueca": {"n": 5}}}
-    assert "go" not in eff
+    assert "java" not in eff

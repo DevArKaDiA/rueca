@@ -886,26 +886,45 @@ def score_efficiency(s1: dict, s3: dict) -> dict:
     return out
 
 
-def carried_rueca_groups(s1: dict, s3: dict) -> set[str]:
-    """Language groups whose Rueca rows (S1 instances or any S3 set) were
-    carried from the published results rather than scored from this run."""
-    groups = {k.split(":", 1)[1] for k in s1.get("carried", {}) if k.startswith("rueca:")}
-    by_set = {name: lang_group(spec["language"]) for name, spec, _ in suites()}
+EFF_ARMS = ("rueca", "cbm")  # the two arms a tokens-per-correct-answer entry pairs
+EFF_S1_PARTS = ("search",)  # parts scored from S1 rows (`e`)
+EFF_S3_PARTS = ("trace", "lookup", "raw")  # parts scored from S3 rows (`t`, `ta`, `lt`, `lta`)
+
+
+def carried_eff_parts(s1: dict, s3: dict) -> dict[str, set[str]]:
+    """Per language group, the parts of its tokens-per-correct-answer entry
+    that cannot be recomputed from the rows at hand: rows carried from a
+    publication that did not keep what an agent reads (S1 rows without `e`,
+    S3 rows with the JSON count `t` but no `ta`). Rows of this run, and
+    carried rows that kept them, are scored like any other."""
+    parts: dict[str, set[str]] = defaultdict(set)
+    for r in s1.get("per_instance", []):
+        if r["arm"] in EFF_ARMS and r["variant"] == EFF_VARIANT and r["split"] == "gated" and r.get("ok") and "e" not in r:
+            parts[r["group"]].update(EFF_S1_PARTS)
+    gated = {name: lang_group(spec["language"]) for name, spec, micro in suites() if not micro and split_of(spec) == "gated"}
     for k in s3.get("carried", []):
         arm, name = k.split(":", 1)
-        if arm == "rueca" and name in by_set:
-            groups.add(by_set[name])
-    return groups
+        rows = (s3.get("rows") or {}).get(arm, {}).get(name, [])
+        if arm in EFF_ARMS and name in gated and any("t" in r and "ta" not in r for r in rows):
+            parts[gated[name]].update(EFF_S3_PARTS)
+    return dict(parts)
 
 
-def carry_efficiency(eff: dict, published_eff: dict, groups: set[str]) -> None:
-    """A language whose Rueca rows were carried keeps its published
-    tokens-per-correct-answer entry: the compact carried rows cannot
-    reproduce it, and a partial local recomputation would misreport it."""
+def carry_efficiency(eff: dict, published_eff: dict, parts: dict[str, set[str]]) -> None:
+    """Replace the parts of each language's entry that this run could not
+    recompute (`carried_eff_parts`) with the published ones, so a partial
+    local run (one arm, or one suite) never misreports them; `carried`
+    lists the parts taken from the publication."""
     published = published_eff.get("tokens_per_correct_answer") or {}
-    for grp in groups:
-        if published.get(grp):
-            eff[grp] = dict(published[grp], carried=True)
+    for grp, names in parts.items():
+        pub = published.get(grp) or {}
+        cur = {k: v for k, v in (eff.get(grp) or {}).items() if k not in names}
+        cur.update({k: pub[k] for k in sorted(names) if k in pub})
+        if set(cur) - {"carried"}:
+            cur["carried"] = sorted(names)
+            eff[grp] = cur
+        else:
+            eff.pop(grp, None)
 
 
 def _judge(spec: dict, value, ci, n, min_n: int | None, paired: dict | None = None) -> str:
@@ -1713,6 +1732,10 @@ def _render_efficiency(L: list[str], eff: dict, s3: dict, meta: dict) -> None:
             r, c = lk["rueca"], lk["cbm"]
             L.append(f"| {grp} | search_symbols (name lookup) | (tokens per definition found in top 10) | {r['n']} | {_tok(r.get('per_found'))} | {_tok(c.get('per_found'))} | {_ratio_txt(r.get('per_found'), c.get('per_found'))} | |")
     L.append("")
+    carried = [f"{grp} ({', '.join(g['carried'])})" for grp in language_groups() if isinstance((g := eff.get(grp) or {}).get("carried"), list)]
+    if carried:
+        L.append("Carried from the published results (this run did not re-measure the Rueca and cbm rows behind them): " + "; ".join(carried) + ".")
+        L.append("")
     L.append("**Diagnostic — raw tokens per answer** (the alpha metric: median over the same paired structural questions; *JSON* = the JSON each tool prints, cbm with `format: json`; *read* = what an agent reads, as above).")
     L.append("")
     L.append("| Language | Answer | n | Rueca JSON | cbm JSON | Rueca / cbm | Rueca read | cbm read | Rueca / cbm |")
@@ -2077,7 +2100,7 @@ def _render_org(L: list[str], orgs: dict) -> None:
         c = mf["counts"]
         L.append(
             f"Rueca: unchanged symbols collapsed {c['identical_ok']} / {c['identical']}; changed flags TP {c['changed_tp']}, FP {c['changed_fp']}, FN {c['changed_fn']} "
-            f"(plus {c.get('changed_same_file', 0)} unchanged symbols of changed files, flagged by blob); "
+            f"(unchanged symbols of changed files flagged: {c.get('changed_same_file', 0)}); "
             f"`in` lists correct {c['in_ok']} / {c['in_total']}; tokens {mf['multi_tokens_sum']:,} for the multi-ref answers vs {mf['paired_single_tokens_sum']:,} for two single-ref answers."
         )
     L.append("")
@@ -2267,7 +2290,7 @@ def report() -> None:
     health = health_mod.score(published["health"])
     eff = score_efficiency(s1, s3)
     published_eff = published.get("efficiency") or {}
-    carry_efficiency(eff, published_eff, carried_rueca_groups(s1, s3))
+    carry_efficiency(eff, published_eff, carried_eff_parts(s1, s3))
     orgs = score_orgs(published.get("org") or {})
     log("report: scorecard")
     card = build_scorecard(s1, s3, health, data, eff)

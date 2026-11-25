@@ -1329,7 +1329,7 @@ def _multiref(arm, inst: dict) -> dict:
                 snaps = [s.get("commit", "") for s in data.get("snapshots") or []]
                 b = next((i for i, c in enumerate(snaps) if c.startswith(inst["base_commit"][:12])), 0)
                 f_ = next((i for i, c in enumerate(snaps) if c.startswith(fix_commit[:12])), 1)
-                items = [{"path": h["path"], "qn": h["qualified_name"], "name": h["name"], "in": h.get("in"), "changed": h.get("changed")} for h in flat_results(data)]
+                items = [{"path": h["path"], "qn": h["local"], "name": h["name"], "in": h.get("in"), "changed": h.get("changed")} for h in flat_results(data)]
                 tokens, _ = arm.agent_tokens(None, "search_symbols", {"query": q, "limit": EFF_LIMIT, "ref": [inst["base_commit"][:12], fix_commit[:12]]}, raw, root=base_root, store=store, mode="agent")
                 entry["multi"] = {"ok": True, "tokens": tokens, "score": score_collapse(items, gold, b, f_)}
             queries.append(entry)
