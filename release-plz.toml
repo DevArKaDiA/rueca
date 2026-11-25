@@ -89,3 +89,23 @@ version_group = "rueca"
 [[package]]
 name = "rueca-mcp"
 version_group = "rueca"
+
+[[package]]
+name = "rueca-storage"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-service"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-serve"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-embed"
+version_group = "rueca"
+
+[[package]]
+name = "rueca-lang-proto"
+version_group = "rueca"
