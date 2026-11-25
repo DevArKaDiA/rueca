@@ -1,0 +1,22 @@
+[package]
+name = "rueca-lang-kotlin"
+description = "Kotlin language pack for Rueca"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rueca-extract.workspace = true
+rueca-model.workspace = true
+tree-sitter.workspace = true
+# ast-grep's crates.io release of fwcd/tree-sitter-kotlin (the grammar
+# nvim-treesitter uses); depends only on tree-sitter-language ^0.1.
+tree-sitter-kotlin-sg = "0.4.1"
+
+[dev-dependencies]
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-resolve = { path = "../rueca-resolve" }
+rueca-lang-java = { path = "../rueca-lang-java" }

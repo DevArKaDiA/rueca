@@ -19,7 +19,8 @@
 //!   namespace prefixes (`php:<Namespace>`); Maven `groupId:artifactId`
 //!   (`pom.xml`, the parent's group when the project has none) and Gradle
 //!   (`settings.gradle` root project, `build.gradle` `group`) with the Java
-//!   packages under the build file's directory (`java:<package>`); C / C++
+//!   and Kotlin packages under the build file's directory
+//!   (`java:<package>`; Kotlin shares the JVM package namespace); C / C++
 //!   repositories publish the directories and headers directly under their
 //!   `include/` (or `single_include/`) directories (`c:<dir>`); every Cargo
 //!   package with a library publishes its crate (`rust:<crate name>`);
@@ -32,7 +33,8 @@
 //!   `npm:<package name>`, `py:<module>`, `go:<import path>`,
 //!   `java:<package>`, `php:<name>`, `c:<include path>`, `rust:<crate>`,
 //!   `cs:<namespace>` (C# usings of namespaces no file of the repository
-//!   declares).
+//!   declares); Kotlin imports name packages: `java:<package>` for a
+//!   package no Java or Kotlin file of the repository declares.
 //! - **Requires**: dependencies declared by manifests (`package.json`
 //!   dependencies, `composer.json` require, `go.mod` require, PEP 621
 //!   dependencies, Maven dependencies, Cargo dependency tables, `*.csproj`
@@ -670,13 +672,16 @@ fn c_package(files: &[FileModule]) -> Option<Package> {
 }
 
 /// A Java build (Maven / Gradle) publishing the packages of the non-test
-/// Java files under `dir`.
+/// Java and Kotlin files under `dir`.
 fn java_package(name: String, dir: &str, files: &[FileModule]) -> Package {
+    let jvm = |f: &FileModule| match f.1 {
+        Some(Language::Java) => true,
+        Some(Language::Kotlin) => !rueca_lang_kotlin::is_test_path(&f.0),
+        _ => false,
+    };
     let keys: BTreeSet<String> = files
         .iter()
-        .filter(|f| {
-            f.1 == Some(Language::Java) && under(dir, &f.0) && !rueca_segment::is_test_path(&f.0) && !f.2.is_empty()
-        })
+        .filter(|f| jvm(f) && under(dir, &f.0) && !rueca_segment::is_test_path(&f.0) && !f.2.is_empty())
         .map(|f| format!("java:{}", f.2))
         .collect();
     Package { eco: "maven".into(), name, dir: dir.to_string(), keys: keys.into_iter().collect() }
@@ -795,6 +800,13 @@ impl OrgLinker for PackageLinker {
         // resolve inside it.
         let own_namespaces: HashSet<String> =
             modules.iter().filter(|f| f.1 == Some(Language::CSharp)).map(|f| format!("cs:{}", f.2)).collect();
+        // Kotlin imports name packages: those a JVM file of the repository
+        // declares resolve inside it.
+        let own_jvm: HashSet<String> = modules
+            .iter()
+            .filter(|f| f.1.map(Language::family) == Some(LanguageFamily::Java) && !f.2.is_empty())
+            .map(|f| format!("java:{}", f.2))
+            .collect();
         let mut imports = BTreeSet::new();
         let resolved = catch_unwind(AssertUnwindSafe(|| {
             for f in &loaded.files {
@@ -802,7 +814,7 @@ impl OrgLinker for PackageLinker {
                 let Some(pack) = registry.for_language(lang) else { continue };
                 for imp in &facts.imports {
                     let Some(key) = import_key(lang.family(), imp) else { continue };
-                    if imports.contains(&key) {
+                    if imports.contains(&key) || (lang == Language::Kotlin && own_jvm.contains(&key)) {
                         continue;
                     }
                     if pack.resolve_import(&f.path, imp, &loaded.project).is_none() {

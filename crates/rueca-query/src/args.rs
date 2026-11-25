@@ -39,6 +39,7 @@ pub enum LanguageArg {
     Proto,
     Shell,
     Csharp,
+    Kotlin,
 }
 
 impl LanguageArg {
@@ -68,6 +69,7 @@ impl LanguageArg {
             LanguageArg::Proto => L::Proto,
             LanguageArg::Shell => L::Shell,
             LanguageArg::Csharp => L::CSharp,
+            LanguageArg::Kotlin => L::Kotlin,
         }
     }
 }

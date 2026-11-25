@@ -977,6 +977,9 @@ impl Resolver<'_> {
     fn rust_return_type(&self, callee: NodeId, unwrap: bool) -> TypeLookup {
         let node = &self.nodes[callee as usize];
         let (Some(file), Some(sig)) = (node.file, node.signature.as_deref()) else { return TypeLookup::Unknown };
+        if node.language == Some(Language::Kotlin) {
+            return self.kotlin_return_lookup(callee);
+        }
         if node.language.map(Language::family) != Some(LanguageFamily::Rust) {
             return TypeLookup::Unknown;
         }

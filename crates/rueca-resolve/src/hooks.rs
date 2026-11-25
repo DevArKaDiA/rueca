@@ -785,6 +785,9 @@ impl<'a> Resolver<'a> {
             Some(LanguageFamily::CSharp) => {
                 node.signature.as_deref().and_then(|s| crate::csharp::signature_arity(s, &node.name))
             }
+            _ if node.language == Some(Language::Kotlin) => {
+                node.signature.as_deref().and_then(|s| crate::jvm::kotlin_signature_arity(s, &node.name))
+            }
             _ => None,
         };
         from_signature.or_else(|| overload_suffix(&node.qualified_name).map(|(_, p)| params_arity(p)))
@@ -864,7 +867,9 @@ impl<'a> Resolver<'a> {
             Some(a) => set.iter().copied().filter(|&n| fits(n, a)).collect(),
             None => Vec::new(),
         };
-        if chosen.len() > 1 {
+        if chosen.len() > 1 && self.is_kotlin(from) {
+            chosen = self.kotlin_narrow(from, item.enclosing, chosen, args);
+        } else if chosen.len() > 1 {
             chosen = self.narrow_overloads(from, chosen, arity, args);
         }
         let fan_out = |cands: &[NodeId]| {

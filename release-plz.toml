@@ -117,3 +117,7 @@ version_group = "rueca"
 [[package]]
 name = "rueca-lang-csharp"
 version_group = "rueca"
+
+[[package]]
+name = "rueca-lang-kotlin"
+version_group = "rueca"

@@ -81,6 +81,8 @@ pub enum Language {
     Shell,
     /// C# (`.cs`).
     CSharp,
+    /// Kotlin (`.kt`, `.kts`); JVM family, like Java.
+    Kotlin,
 }
 
 /// Shell start-up files detected by name (no extension of their own).
@@ -126,6 +128,7 @@ impl Language {
         Language::Proto,
         Language::Shell,
         Language::CSharp,
+        Language::Kotlin,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -153,6 +156,7 @@ impl Language {
             Language::Proto => "proto",
             Language::Shell => "shell",
             Language::CSharp => "csharp",
+            Language::Kotlin => "kotlin",
         }
     }
 
@@ -203,6 +207,7 @@ impl Language {
             "proto" => Language::Proto,
             "sh" | "bash" | "zsh" | "ksh" | "bats" | "zsh-theme" => Language::Shell,
             "cs" => Language::CSharp,
+            "kt" | "kts" => Language::Kotlin,
             _ => return None,
         })
     }
@@ -270,7 +275,7 @@ impl Language {
             | Language::Dockerfile => LanguageFamily::Data,
             Language::Go => LanguageFamily::Go,
             Language::Cpp | Language::C => LanguageFamily::C,
-            Language::Java => LanguageFamily::Java,
+            Language::Java | Language::Kotlin => LanguageFamily::Java,
             Language::Rust => LanguageFamily::Rust,
             Language::Proto => LanguageFamily::Proto,
             Language::Shell => LanguageFamily::Shell,
@@ -303,7 +308,8 @@ pub enum LanguageFamily {
     Go,
     /// C and C++: no modules; names carry their namespace / class path.
     C,
-    /// Java: module name = package.
+    /// JVM languages (Java, Kotlin): module name = package; Kotlin and Java
+    /// files of one package share it.
     Java,
     /// Rust: module name = module path (`rueca_index::link`); local names
     /// join items with `.` (`Linker.new`, `tests.helper`).
@@ -1125,6 +1131,8 @@ mod tests {
             (".zshrc", Some(Shell)),
             ("bin/nvm-exec", None),
             ("src/Acme.Shop/Store.cs", Some(CSharp)),
+            ("src/main/kotlin/com/x/Owner.kt", Some(Kotlin)),
+            ("build.gradle.kts", Some(Kotlin)),
         ];
         for (path, want) in cases {
             assert_eq!(Language::from_path(path), *want, "{path}");
@@ -1144,6 +1152,7 @@ mod tests {
         assert_eq!(Rust.family().module_separator(), "::");
         assert_eq!(Shell.family().module_separator(), ":");
         assert_eq!(CSharp.family().module_separator(), ".");
+        assert_eq!(Kotlin.family(), Java.family());
     }
 
     #[test]
@@ -1186,10 +1195,11 @@ mod tests {
             b[0]
         }
         let langs: Vec<u8> = Language::ALL.iter().map(idx).collect();
-        assert_eq!(langs, (0..23).collect::<Vec<u8>>());
+        assert_eq!(langs, (0..24).collect::<Vec<u8>>());
         assert_eq!(idx(&Language::Proto), 20);
         assert_eq!(idx(&Language::Shell), 21);
         assert_eq!(idx(&Language::CSharp), 22);
+        assert_eq!(idx(&Language::Kotlin), 23);
         assert_eq!(idx(&ContractSide::Provides), 0);
         assert_eq!(idx(&ContractSide::Consumes), 1);
         assert_eq!(idx(&ContractKind::Http), 0);
