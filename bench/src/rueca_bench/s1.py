@@ -21,7 +21,7 @@ from .arms.base import Arm
 from .common import GOLD_DIR, RUNS_DIR, candidate_path, lang_family, load_manifest, log, read_json, safe_name, split_of, write_json
 from .corpus import ensure_commit, prune_clone, worktree
 from .datasets import instance_row, rows_by_id
-from .gold import assembled_functions, compute_s1_gold, context_files, parse_list
+from .gold import assembled_functions, compute_s1_gold, context_files, issue_names_gold_file, parse_list
 from .queries import derive_keywords, raw_query
 
 KEEP_RANKED = 50
@@ -62,7 +62,13 @@ def s1_gold(inst: dict) -> dict:
     `modified_nodes` > Rueca's tree-sitter labeler (see gold.py)."""
     out_path = GOLD_DIR / "s1" / f"{safe_name(inst['id'])}.json"
     if out_path.exists():
-        return read_json(out_path)
+        cached = read_json(out_path)
+        if "issue_names_file" not in cached:
+            # gold cached before the flag existed: add it, labels unchanged
+            text = instance_row(inst).get("problem_statement") or ""
+            cached["issue_names_file"] = issue_names_gold_file(text, cached["files"])
+            write_json(out_path, cached)
+        return cached
     ensure_commit(inst["repo"], inst["base_commit"])
     man = load_manifest()
     row = instance_row(inst)
@@ -75,6 +81,7 @@ def s1_gold(inst: dict) -> dict:
         "function_source": "treesitter",
         "functions": ts["functions"],
     }
+    gold["issue_names_file"] = issue_names_gold_file(row.get("problem_statement") or "", ts["files"])
     assembled = None
     loc = rows_by_id("locagent_lite").get(inst["id"])
     if loc is not None:

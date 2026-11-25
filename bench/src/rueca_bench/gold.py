@@ -129,6 +129,18 @@ def compute_s1_gold(repo: str, base_commit: str, patch: str, language: str) -> d
     return {"files": sorted(set(gold_files)), "functions": gold_funcs, "skipped": skipped}
 
 
+def issue_names_gold_file(text: str, files: list[str]) -> bool:
+    """Whether the issue text names a gold file: its file name, or the name
+    without its last extension, occurs in the text (substring, case kept).
+    Diagnostic only (the report's "issue does not name a gold file" row):
+    a named file helps every lexical arm alike."""
+    for f in files:
+        name = f.rsplit("/", 1)[-1]
+        if name in text or name.rsplit(".", 1)[0] in text:
+            return True
+    return False
+
+
 # --- assembled gold (RFC 0002 §8/§9: prefer existing labels) -------------------
 #
 # Function-level edit gold, in order of preference:
