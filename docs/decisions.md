@@ -1,5 +1,33 @@
 # Decisions log
 
+## 2026-11-24 — Code mode phase 3: verdict and recommendation; the owner decides (RFC 0009)
+
+Phase 3 of RFC 0009 is done: the multi-step suite (phase 2) and a fluency
+probe give a per-language verdict (RFC 0009 §14). Nothing changes in the
+code's defaults: code mode stays off unless `--experimental-code-mode` is
+given, and Starlark stays the non-default `code-mode-starlark` feature.
+
+- **Gate**: both languages pass. Tokens read per correct answer −87.8%
+  (JavaScript) and −87.7% (Starlark) against the tool-call plans (−81.6% /
+  −81.3% with `describe_api` amortised), no task regressed (18/25 in all
+  three Rueca arms), median `execute` overhead 0.56 / 0.32 ms. Five
+  listing-heavy tasks dominate the pooled ratio; without them the cut is
+  76%.
+- **Fluency probe** (10 tasks × 2 languages, one fresh model per cell with
+  only the statement and `describe_api`, n = 1): 9/10 correct on the first
+  try in each language, no script error of any kind. The one failure
+  (ms19, both languages) is a silent wrong answer from an ambiguous answer
+  shape, which one repair did not fix. Model-written scripts were 2.5–3.2×
+  longer than the reference scripts, so the suite's cut is an upper bound
+  (76% / 81% on the probe's tasks).
+- **Recommendation** (the owner decides): keep code mode opt-in and
+  experimental with **JavaScript only**; remove Starlark (advisory policy
+  failure, memory limit not enforceable in-process, +5.7 MB) unless the
+  owner wants it kept as the non-default feature it is now; do not make
+  code mode default-on before the API friction of RFC 0009 §14.4 is fixed,
+  agents have a cheap way to surface evidence, and an agentic evaluation
+  has run. No helpers were added.
+
 ## 2026-11-24 — Code mode phase 1: `execute` and `describe_api` behind a flag; Starlark opt-in (RFC 0009)
 
 `rueca mcp --experimental-code-mode` (or `RUECA_EXPERIMENTAL_CODE_MODE=1`)

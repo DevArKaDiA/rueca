@@ -1215,6 +1215,13 @@ only for Starlark) against the task's corpus and prints one JSON line:
 result_preview, script_tokens, result_tokens, calls (engine calls),
 truncated}`.
 
+The phase 3 probe itself (10 tasks × 2 languages, one fresh model per
+cell given only the statement and `describe_api`) is committed in
+`multistep/probe/`: its protocol (`README.md`), the prompt template, the
+model-written scripts unchanged and the runner's output lines.
+`multistep report` adds them to `docs/bench/multistep-results.md`
+(*Fluency probe*); the reading is in RFC 0009 §14.
+
 ### Efficiency — tokens per correct answer (RFC 0005 §8)
 
 Measured with tiktoken `cl100k_base` on **what an agent reads**: Rueca's

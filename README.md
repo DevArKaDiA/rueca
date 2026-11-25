@@ -299,7 +299,7 @@ claude mcp add --transport http rueca https://rueca.acme.internal/mcp --header "
   "headers": { "Authorization": "Bearer ${input:rueca-token}" } } } }
 ```
 
-**Code mode (experimental)**: `rueca mcp --experimental-code-mode` (or `RUECA_EXPERIMENTAL_CODE_MODE=1`) adds `execute` and `describe_api`, which run a short JavaScript script (Starlark with a build `--features code-mode-starlark`) against the tools and return only its answer ([details](docs/tools.md#experimental-code-mode)).
+**Code mode (experimental)**: `rueca mcp --experimental-code-mode` (or `RUECA_EXPERIMENTAL_CODE_MODE=1`) adds `execute` and `describe_api`, which run a short JavaScript script (Starlark only in a build with `--features code-mode-starlark`, off by default) against the tools and return only its answer ([details](docs/tools.md#experimental-code-mode)).
 
 (VS Code, `.vscode/mcp.json`; Cursor: `{"mcpServers": {"rueca": {"url":
 "https://rueca.acme.internal/mcp", "headers": {"Authorization": "Bearer
@@ -487,6 +487,7 @@ More languages (Kotlin, Swift, Ruby, C#, …) follow the same gate.
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
 | [`rueca-query`](crates/rueca-query) | the tools, organization scope |
 | [`rueca-mcp`](crates/rueca-mcp) | MCP server: its own protocol layer ([reference](docs/mcp-protocol.md)), stdio |
+| [`rueca-codemode`](crates/rueca-codemode) | experimental code mode: sandboxed script engines (QuickJS; Starlark opt-in) behind one trait ([RFC 0009](docs/rfcs/0009-code-mode.md)) |
 | [`rueca-embed`](crates/rueca-embed) | embedding presets, weights cache, llama.cpp runtime |
 | [`rueca-storage`](crates/rueca-storage) | object storage behind a `Storage` trait: `memory://`, `file://`, `s3://`, `gs://`, conditional writes |
 | [`rueca-service`](crates/rueca-service) | service store: publish, pull, organization generations, garbage collection |

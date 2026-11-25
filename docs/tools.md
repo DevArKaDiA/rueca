@@ -659,8 +659,10 @@ snapshots):
 
 ## Experimental: code mode
 
-[RFC 0009](rfcs/0009-code-mode.md), phases 0–1. Off by default; nothing
-above changes when it is off (same tool list, schemas and answers).
+[RFC 0009](rfcs/0009-code-mode.md), phases 0–3. Off by default; nothing
+above changes when it is off (same tool list, schemas and answers). The
+phase 3 verdict (RFC 0009 §14) recommends keeping it experimental with
+JavaScript only; making it a normal tool is the owner's decision.
 
 **Enabling.** `rueca mcp --experimental-code-mode`, or the environment
 variable `RUECA_EXPERIMENTAL_CODE_MODE=1` (or `true`), adds two tools after
@@ -677,7 +679,8 @@ built. Starlark (`starlark`) needs the cargo feature `code-mode-starlark`
 depends on crates with "unmaintained" RUSTSEC advisories that the
 repository's `cargo deny` policy rejects, so it is not in the default
 build. Without it, `language: "starlark"` is an error that says how to
-rebuild.
+rebuild. Starlark is kept for comparison during the experiment; RFC 0009
+§14 recommends removing it.
 
 **`describe_api`** (`language`, default `js`) returns the script API,
 generated from the tool definitions (one function per tool, the tools'

@@ -1,8 +1,9 @@
 # RFC 0009 — Code mode (experimental)
 
-- Status: Draft — phases 0–2 implemented, experimental (behind
-  `--experimental-code-mode`; Starlark behind the `code-mode-starlark`
-  cargo feature, §13; phase 2 suite and results in §8, §13.1)
+- Status: Experimental — phases 0–3 implemented; off by default (behind
+  `--experimental-code-mode`; Starlark behind the non-default
+  `code-mode-starlark` cargo feature, §13); verdict and recommendation in
+  §14; graduation pending the owner's decision
 - Created: 2026-11-24
 - Amended: 2026-11-24 — both languages ship behind one `Sandbox` trait
   during the experiment so they can be compared; the language is an output
@@ -11,6 +12,9 @@
   (§4.4), and Starlark is a non-default cargo feature (§13)
 - Amended: 2026-11-24 — phase 2: the multi-step suite as built (§8) and
   its results (§13.1); no helper earned a place (§4.3)
+- Amended: 2026-11-24 — phase 3: the fluency probe and the decision
+  (§14): keep code mode experimental with JavaScript only; open questions
+  updated (§12)
 - Depends on: RFC 0001 (§11 tools, §13 security), RFC 0004 (efficiency
   metrics), RFC 0005 (envelope, pinned ids, `repo` / `ref`, tokens per
   correct answer), RFC 0006 (organization, contracts), RFC 0008 (service
@@ -388,6 +392,7 @@ not an agentic evaluation.
   numbers it writes a per-language verdict and a recommendation in §14:
   keep both, keep one, or remove code mode. Graduation (tools.md as a
   normal tool, on by default) is the owner's decision, not this work's.
+  Done: §14.
 
 ## 11. References
 
@@ -404,14 +409,23 @@ not an agentic evaluation.
 
 ## 12. Open questions
 
-1. Which language(s) to keep — an output of phase 3 (§14); §6's
-   hypothesis is JavaScript. If both stay, which is the default.
+1. Which language(s) to keep — **answered (phase 3)**: JavaScript only is
+   recommended; Starlark stays a non-default build feature in this change
+   and its removal is the owner's call (§14.5).
 2. Should `describe_api` return TypeScript declarations for every tool, or
-   a shorter hand-written reference?
+   a shorter hand-written reference? — **Answered (phases 1, 3)**:
+   generated declarations for every tool, result shapes included (§4.4),
+   about 4.1k tokens; in the probe no script failed on the API's shape
+   (§14.1), so nothing argues for a hand-written reference yet.
 3. Should enabling code mode hide the eight tools (Cloudflare's
-   single-tool shape) or keep them alongside? This RFC keeps them.
-4. Default `budget_tokens` and `timeout_ms`.
-5. Which helpers (§4.3) earn a place, if any. Phase 2: none (§13.1).
+   single-tool shape) or keep them alongside? This RFC keeps them. —
+   **Open**: the suite and the probe do not test it; it needs an agentic
+   evaluation.
+4. Default `budget_tokens` and `timeout_ms`. — **Answered for now**: 2,000
+   tokens and 2 s; no task of the suite or the probe hit a limit (§13.1,
+   §14.1).
+5. Which helpers (§4.3) earn a place, if any. — **Answered**: none; none
+   saves a round trip (§13.1).
 
 ## 13. Phase 0 results
 
@@ -588,4 +602,151 @@ Friction from writing the 50 reference scripts:
 
 ## 14. Decision
 
-*To be written in phase 3 (§10).*
+Phase 3, 2026-11-24. The evidence is the multi-step suite (§8, §13.1),
+the engine measurements of phase 0 (§13) and the fluency probe (§14.1).
+This section is a verdict and a recommendation; graduating code mode is
+the owner's decision.
+
+### 14.1 Fluency probe
+
+Protocol (`bench/multistep/probe/README.md`): 10 tasks of the suite
+(ms01, ms02, ms07, ms09, ms14, ms15, ms17, ms19, ms22, ms25), chosen among
+the 18 whose reference answers match gold and spanning kinds, × 2
+languages. One fresh Claude Opus subagent per (task, language) was given
+only that language's `describe_api` output and the task statement — no
+repository access, no reference script, no way to run anything — and
+wrote one script, run unchanged with `rueca-bench multistep probe`. On a
+failure, exactly one repair attempt, given the `execute` output. n = 1
+per cell and one model: an indication, not a measurement of model fluency
+in general. Scripts, runner output and prompt template are committed in
+`bench/multistep/probe/`; per-task table in
+`docs/bench/multistep-results.md` (*Fluency probe*).
+
+| | JavaScript | Starlark |
+|---|---|---|
+| Correct, first try | 9/10 | 9/10 |
+| Correct after one repair | 9/10 | 9/10 (repair not run) |
+| Script tokens, mean / median | 830 / 771 | 640 / 622.5 |
+| Engine calls, all first tries | 166 | 167 |
+| Script errors (syntax, runtime, timeout, limits) | none | none |
+| Tokens read per correct answer on these 10 tasks: first-try scripts / reference scripts / plans | 1,007 / 339 / 4,169 | 796 / 338 / 4,169 |
+
+- **No failure came from the language or the API's shape.** All 20
+  first-try scripts ran without an error and no limit was hit. All 10
+  Starlark scripts defined helper functions; none reached for `while` or
+  exceptions (six used `set()`, which `starlark-rust` provides). The worry
+  of §6 that models would trip over the dialect was not confirmed at this
+  sample size.
+- **The one failure is a silent wrong answer.** ms19 (classes of another
+  repository) failed in both languages the same way: both scripts returned
+  the gold file lists but keyed the object by the short class names
+  (`HTTPException`) where the statement asks for the names "exactly as
+  written" (`werkzeug.exceptions.HTTPException`) — an ambiguity in the
+  statement's answer shape. With no error to read, the JavaScript repair
+  guessed at a different cause (it widened what counts as a use) and
+  returned a worse answer, still wrong. The Starlark repair was not
+  obtained: the repair subagent's file write was blocked by the harness's
+  permission system, a tooling failure unrelated to the language.
+- **Model-written scripts are longer than the reference ones.** On these
+  tasks the first-try scripts have 3.2× (JavaScript) and 2.5× (Starlark)
+  the source tokens of the reference scripts (defensive checks,
+  `try`/`catch` in 9 of 10 JavaScript scripts, helper functions) and make
+  twice the engine calls (166 and 167 vs 83). Tokens read per correct
+  answer still fall 76% (JavaScript) and 81% (Starlark) against the plans
+  on the same tasks — above the 40% gate, but short of the 92% the
+  reference scripts show there; on ms01, ms02 and ms09 the JavaScript
+  script reads as much as the plan or more (Starlark about the same).
+  Starlark scripts were about 23% shorter than JavaScript ones.
+
+### 14.2 Gate (§8)
+
+| Language | Read / correct vs plans (≥ 40%) | … `describe_api` amortised | Tasks regressed (none) | Median overhead (< 20 ms) | Gate |
+|---|---|---|---|---|---|
+| JavaScript | −87.8% (444 vs 3,639) | −81.6% (671) | none | 0.56 ms | pass |
+| Starlark | −87.7% (448 vs 3,639) | −81.3% (680) | none | 0.32 ms | pass |
+
+The same 18 of 25 tasks are correct in all three Rueca arms. The pooled
+ratio is dominated by five listing-heavy tasks (ms17, ms21–ms23, ms25:
+6,533–11,625 tokens as plans); without them the cut is 76%, and the
+median per-task ratio of code mode to plan is 0.36. Both numbers come
+from the reference scripts; the probe's model-written scripts read more
+(§14.1).
+
+### 14.3 Per-language verdict
+
+**JavaScript: keep (experimental).** Passes the gate. Its limits are
+enforceable in-process: the memory limit is checked on every allocation,
+the deadline is polled by the interpreter and the regex engine, and the
+one non-polling built-in found is closed by the array-length guard (§13).
+It passes `cargo deny` in the default build. Cost: +1.03 MB stripped, +10
+crates, a C compiler (already required by the workspace). Probe: 9/10 on
+the first try, no script error; its one miss is the statement ambiguity
+both languages share.
+
+**Starlark: works, but costs what JavaScript does not.** It passes the
+gate with numbers indistinguishable from JavaScript's, and starts faster
+(about 1.5 µs against about 0.1 ms; irrelevant next to engine calls that
+take milliseconds). In the probe its scripts were about 23% shorter (796
+vs 1,007 tokens read per correct answer on those tasks, n = 1 per cell;
+the reference scripts show no such gap: 448 vs 444 suite-wide) and it
+scored 9/10 on the first try: the hypothesis that models would trip over
+the dialect was not confirmed at this sample size. Against it: its
+dependency tree fails the repository's `cargo deny` advisory policy (three
+unmaintained crates: `derivative`, `paste`, `fxhash`), so it cannot be a
+default feature; its memory limit cannot be enforced in-process (an
+impossible allocation aborts the process, dictionary tables are not
+counted, a long built-in overruns the deadline: §13); and it adds
++5.72 MB and +145 crates.
+
+### 14.4 Where code mode falls short
+
+1. **Single-step and near-single-step questions**: the script costs more
+   than the answer (ms04: 71 tokens as a tool call, 229 as a script; ms10:
+   296 vs 334).
+2. **`describe_api` costs about 4.1k tokens (cl100k_base; 4,086 for
+   JavaScript, 4,166 for Starlark) once per session.** The suite
+   saves about 2,300 tokens per task on average, so it pays back after
+   roughly two multi-step questions and is a net loss in a session with
+   one small question.
+3. **It does not improve correctness, and it can hide evidence.** The 7
+   tasks the tool-call plans get wrong are wrong identically in both
+   languages (engine precision against the SCIP gold, §13.1). A script
+   returns only its answer: a wrong but plausible answer gives the agent
+   no signal to repair, and the intermediate answers that might have let
+   it notice never reach it (probe ms19).
+4. **cbm's single Cypher query reads less where it can express a task and
+   gets it right**: 446 vs 1,132 tokens (JavaScript) on the 4 tasks every
+   arm answers correctly. But cbm was correct on only 4 of the 16 tasks it
+   can express and cannot express the cross-repository, contract and ref
+   tasks (9 of 25).
+5. **API friction found while writing scripts** (§13.1): `qn` is the
+   global name while text and ids use the file-local one; a
+   cross-repository node's repository is recoverable only from its id; the
+   multi-ref `changed` flag is per file, not per symbol; `include_tests:
+   false` leaks functions nested in `describe` blocks of test files. These
+   are engine and API issues to fix independently of code mode.
+6. **Model-written scripts cost more than the reference ones** (§14.1):
+   3.2× / 2.5× the source tokens, so the suite's −87.8% is an upper bound
+   on what an agent would see.
+7. **Measurement limits**: reference scripts stand in for an agent; the
+   probe is n = 1 per cell with one model; a plan's wall time is inflated
+   by one process per call, so latency comparisons other than the
+   in-process overhead are not evidence.
+
+### 14.5 Recommendation
+
+- **Keep code mode as an opt-in experimental feature with JavaScript
+  only.** It passes the gate, its limits hold in-process, it passes the
+  dependency policy, and a fresh model wrote correct scripts from the
+  reference alone in 9 of 10 tasks.
+- **Remove Starlark**: its one measured edge (shorter model-written
+  scripts) does not offset the advisory policy failure, the unenforceable
+  memory limit and the 5.7 MB — unless the owner wants to keep it, as in
+  this change, as a non-default build feature for further comparison.
+  This change keeps it; removing it is deleting the `starlark` feature.
+- **Do not graduate to default-on in this change**; that is the owner's
+  decision. Suggested conditions before graduating: fix the API friction
+  of §14.4 (5); give agents a cheap way to surface evidence (e.g.
+  encourage returning counts or sample ids alongside the answer), so a
+  wrong answer can be noticed; and run a real agentic evaluation.
+- **No helpers (§4.3) were added**: none saved a round trip.

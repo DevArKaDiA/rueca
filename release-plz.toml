@@ -83,5 +83,9 @@ name = "rueca-query"
 version_group = "rueca"
 
 [[package]]
+name = "rueca-codemode"
+version_group = "rueca"
+
+[[package]]
 name = "rueca-mcp"
 version_group = "rueca"
