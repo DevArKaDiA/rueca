@@ -51,9 +51,11 @@ Today's `describe_api` is longer (4,260 / 4,338 tokens with the new fields).
   run (`correct`, `error`, `result_preview`, `script_tokens`,
   `result_tokens`, `calls` = engine calls, `truncated`).
 
-The Starlark repair of ms19 was not obtained: the repair subagent's file
-write was blocked by the harness's permission system, a tooling failure
-unrelated to the language.
+The Starlark repair of ms19 was run afterwards (2026-11-24) against the API
+after the fixes of RFC 0009 §14.6, with the previous script summarised rather
+than pasted in the prompt: `scripts/ms19-starlark.try2.star`,
+`out/ms19-starlark.try2.json`. It returned the same answer as the first try
+(the gold file lists, keyed by the short class names), so it stays incorrect.
 
 To re-score a script:
 

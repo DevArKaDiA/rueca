@@ -672,7 +672,7 @@ scripts and plans it is compared with below are the re-measured ones of
 | | JavaScript | Starlark |
 |---|---|---|
 | Correct, first try | 9/10 | 9/10 |
-| Correct after one repair | 9/10 | 9/10 (repair not run) |
+| Correct after one repair | 9/10 | 9/10 |
 | Script tokens, mean / median | 830 / 771 | 640 / 622.5 |
 | Engine calls, all first tries | 166 | 167 |
 | Script errors (syntax, runtime, timeout, limits) | none | none |

@@ -164,6 +164,6 @@ compared with below are this run's.
 | ms25 | ref-diff | ✓ 658 / 4 | ✓ 447 / 4 |
 
 - JavaScript: first try 9/10; after one repair 9/10 (repairs run: 1 of 1); script tokens mean 830, median 771.0; engine calls 166 (first tries); script errors 0.
-- Starlark: first try 9/10; after one repair 9/10 (repairs run: 0 of 1); script tokens mean 640, median 622.5; engine calls 167 (first tries); script errors 0.
+- Starlark: first try 9/10; after one repair 9/10 (repairs run: 1 of 1; ms19 unchanged, still keyed by short names); script tokens mean 640, median 622.5; engine calls 167 (first tries); script errors 0.
 - JavaScript, tokens read per correct answer on these tasks: first-try scripts 1,007, reference scripts 316, tool-call plans 2,594.
 - Starlark, tokens read per correct answer on these tasks: first-try scripts 796, reference scripts 318, tool-call plans 2,594.
