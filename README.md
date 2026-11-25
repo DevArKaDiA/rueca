@@ -98,10 +98,12 @@ the ancestors, reopened classes as one constant, `include` / `extend` /
 receivers typed from `Foo.new`, Sorbet `sig`s and RBS comments, `require` /
 `require_relative`, RSpec and Minitest tests, `ENV` reads, gemspec / Gemfile
 packages for cross-repository edges),
-SQL — `preview` (PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, BigQuery,
-Snowflake, one dialect per file from a directive, the path or the content;
-tables, views and their columns, functions, procedures, triggers, indexes,
-types; relations read and written, columns when the table is certain,
+SQL — `preview` (PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, Oracle with
+PL/SQL, DB2, BigQuery, Snowflake, one dialect per file from a directive,
+the path or the content; tables, views and their columns, functions,
+procedures, triggers, packages, indexes, types; procedural code read
+statement by statement; relations read and written, columns when the
+table is certain,
 routine calls and foreign keys as `REFERENCES` / `WRITES` / `CALLS`;
 migrations resolved to the definition effective at each point; dbt models,
 `ref()` / `source()` and macros; `-- name:` queries; per-dialect coverage in

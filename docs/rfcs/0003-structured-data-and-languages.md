@@ -1058,11 +1058,11 @@ tier 2, RFC 0002 §3.3 named `sqlparser` for it.
 
 | Aspect | Design |
 |---|---|
-| Parser | `sqlparser` 0.64, Apache-2.0, pure Rust, one statement at a time (spans on identifiers); a token scanner reads statements no dialect parses and `$$` bodies. Chosen over tree-sitter SQL grammars by measured failure rates (decisions log, 2026-11-25) |
-| Files | `.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq` |
-| Dialects | PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, BigQuery, Snowflake (Redshift, DuckDB), ANSI; one per file: directive comment, path (extension, dialect words), content signals; a statement the file's dialect rejects is retried in the others; dbt Jinja masked |
+| Parser | `sqlparser` 0.64, Apache-2.0, pure Rust, one statement at a time (spans on identifiers), after same-length repairs when needed; the pack reads procedural code itself (T-SQL batches and routines, PL/SQL, MySQL and DB2 routines, BigQuery scripts) and hands every query, DML statement and expression inside to sqlparser; statements whose facts are in their head (settings, permissions, administration) are read by their form; a token scanner reads what nothing parses (one parse error) and `$$` bodies. Chosen over tree-sitter SQL grammars by measured failure rates (decisions log, 2026-11-25, two entries) |
+| Files | `.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq`, Oracle `.pks`, `.pkb`, `.pck`, `.pls`, `.plsql`, `.tps`, `.tpb` |
+| Dialects | PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, Oracle (SQL, SQL*Plus, PL/SQL), DB2, BigQuery, Snowflake (Redshift, DuckDB, ClickHouse, Hive, Databricks through their sqlparser dialects), ANSI; one per file: directive comment, path (extension, dialect words), content signals; a statement the file's dialect rejects is retried in the others; dbt Jinja masked |
 | Module model | empty module name: a database namespace is global; local names are normalized object names (`users`, `billing.invoices`, `users.email`; quoting and case per dialect, default schema dropped) |
-| Definitions | tables, views, materialized and virtual tables (`Struct`) with columns (`Field`), functions, procedures, macros, triggers (`Function`; triggers `table.trigger`), indexes, sequences, enum and other types, CTEs inside definitions, `-- name:` queries, dbt models, macros and snapshots |
+| Definitions | tables, views, materialized and virtual tables (`Struct`) with columns (`Field`), functions, procedures, macros, triggers (`Function`; triggers `table.trigger`), Oracle packages and type bodies (`Module`) with their subprograms (`Function` `package.name`), indexes, sequences, enum and other types, CTEs inside definitions, `-- name:` queries, dbt models, macros and snapshots |
 | References | relations read (`REFERENCES`) or written (`WRITES`: DML targets, `ALTER`, `DROP`, `TRUNCATE`), foreign keys, columns when the table is certain, routine calls (`CALLS`: `f()`, `FROM f()`, `CALL`, `EXEC`, `PERFORM`, trigger functions), dbt `ref` / `source` / macro calls; client includes (`\i`, `:r`, `.read`, `SOURCE`) are imports |
 | Resolution | by normalized qualified name over every SQL definition, then by place: earlier in the file, migration order (the effective definition), later in the file, nearest directory; partial qualification is a unique-name guess; ambiguous → none |
 | Migrations | one node per `CREATE`; references go to the definition effective at their point by migration order (Flyway, timestamps, numeric prefixes, `up.sql` directories); `ADD COLUMN` adds a column member in its migration; `ALTER` / `DROP` are writes from the migration file |
@@ -1072,19 +1072,21 @@ tier 2, RFC 0002 §3.3 named `sqlparser` for it.
 | Precision | none: no cross-reference tool exists for SQL repositories |
 | Bench | S1: none (no localization dataset has SQL instances); S3: the bench's code-backed labeler on sqlglot (independent of the pack's parser) on Sakila in six dialects and fivetran/dbt_hubspot (sqlc examples = calibration), and the `bench/micro/sql` micro-benchmark, one directory per dialect |
 
-Dialect coverage (statements no dialect parses, by detected dialect, on
-the bench corpus; the crate README has the constructs behind each row):
+Dialect coverage (files with a parse error, by detected dialect, on the
+bench corpus and the parser-evaluation corpus pooled; the crate README has
+the corpus, the statement counts and the constructs behind each row):
 
-| Dialect | Support | Unparsed statements |
+| Dialect | Support | Files with a parse error |
 |---|---|---|
-| PostgreSQL | fully parsed; `$$` bodies read by the scanner (relations, calls; no columns) | 2.3% (67 / 2,932) |
-| MySQL / MariaDB | fully parsed except routine bodies (scanner) | 3.1% (20 / 645) |
-| SQLite | fully parsed | 1.1% (7 / 619) |
-| T-SQL | parsed; procedural code best effort | 16.5% (21 / 127); 45% on sql-server-maintenance-solution |
-| BigQuery | parsed; scripting best effort | 16.7% (19 / 114, bigquery-utils; none in the bench corpus) |
-| Snowflake | parsed; JavaScript / Python UDF bodies not read | 0 / 19 (not measured at scale) |
-| dbt Jinja | best effort (masked, not rendered) | 13.6% (22 / 162) |
-| ANSI, other dialects | generic dialect; Oracle PL/SQL, DB2 read as ANSI | 0% (sqlc); 32.4% on Sakila's Oracle / DB2 copies |
+| PostgreSQL | parsed; `DO` blocks and routine heads sqlparser rejects read by the pack; `$$` bodies read by the scanner (relations, calls; no columns) | 1 / 413 (0.2%) |
+| MySQL / MariaDB | parsed; routine and trigger bodies read statement by statement | 2 / 94 (2.1%) |
+| SQLite | parsed | 0 / 3 |
+| T-SQL | batches and routines read statement by statement | 26 / 404 (6.4%) |
+| Oracle | SQL parsed; SQL*Plus scripts and PL/SQL units read by the pack | 12 / 515 (2.3%) |
+| DB2 | parsed as ANSI; SQL PL routines and triggers read by the pack | 0 / 4 (Sakila only) |
+| BigQuery | parsed; scripts read statement by statement | 4 / 79 (5.1%) |
+| Snowflake | parsed; JavaScript / Python UDF bodies not read | 0 / 39 (not measured at scale) |
+| ANSI and dbt Jinja | generic dialect; Jinja masked, not rendered | 3 / 1,052 (0.3%) |
 
 *Implemented* (`rueca-lang-sql` plus the `sql` module of `rueca-resolve`;
 crate docs and README, [how-it-works](../how-it-works.md)): everything in

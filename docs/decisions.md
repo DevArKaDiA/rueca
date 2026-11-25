@@ -103,6 +103,16 @@ statement, and Oracle / DB2 files were read as ANSI. Choices:
   that were unparsed and now give column references, one wrong `Write`
   reference to a variable removed, and the dialect of two ClickHouse
   files.
+- **The labeler reads Oracle and DB2 trees; three micro cases.**
+  `sqlgold.py` learns the two dialect names (`/` buffers and PL/SQL units,
+  `--#SET TERMINATOR`, bodies read as text, upper-case folding), all
+  conditional on the dialect: the gold of Sakila, dbt_hubspot and sqlc was
+  compared before and after and is identical. Package subprograms are not
+  labeler callables (a blind spot, listed with the others).
+  `bench/micro/sql` gains `oracle/standalone_units`,
+  `oracle/procedures_and_loops` and `db2/trigger_and_procedure` (32
+  cases, 102 callables, 76 edges; the labeler agrees on 74, the 2 are the
+  migration-order edges as before).
 - **What still fails, and stays counted**: T-SQL at 6.4% of files (`FOR
   XML` without `FROM`, `GROUPING SETS`, `VECTOR_SEARCH`, `xml.modify`,
   deliberately broken experiment scripts), SQL*Plus substitution
