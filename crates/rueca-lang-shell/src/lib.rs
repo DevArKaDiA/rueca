@@ -13,7 +13,10 @@
 //!   `queries/locals.scm` (nvim-treesitter, Apache-2.0; provenance in
 //!   `queries/README.md`, semantics in `locals.rs`).
 //! - Definitions, `source` paths, script runs, bats blocks and the env
-//!   bridge are Rueca code (`extract.rs`, `paths.rs`, `bats.rs`).
+//!   bridge are Rueca code (`extract.rs`, `paths.rs`, `bats.rs`); a few
+//!   same-length repairs of constructs the grammar rejects run before
+//!   parsing (`repair.rs`: `${s:$i:1}`, `&` in an expansion, a
+//!   line-start `\.`, zsh parameter flags).
 //!
 //! # Files
 //!
@@ -122,11 +125,19 @@ mod builtins;
 mod extract;
 mod locals;
 mod paths;
+mod repair;
 
 use rueca_extract::{Budget, ExtractError, LanguagePack, ProjectFiles};
 use rueca_model::{FileFacts, Import, Language};
 
 pub use extract::{MAX_REFS, SCRIPT_RECEIVER};
+
+/// The source as the grammar reads it, after the same-length repairs of
+/// `repair.rs` (for tools that print parse errors, such as the real-repo
+/// smoke test).
+pub fn repaired_source(source: &[u8]) -> Vec<u8> {
+    repair::repair(source).into_owned()
+}
 
 /// Shell pack. Stateless; construct with `ShellPack`.
 #[derive(Debug, Default, Clone, Copy)]

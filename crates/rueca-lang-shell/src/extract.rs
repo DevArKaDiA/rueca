@@ -1,7 +1,6 @@
 //! One shell file → [`FileFacts`]. The rules are documented in the crate
 //! root; this module walks the tree-sitter-bash syntax tree.
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -44,7 +43,7 @@ const SCRIPT_EXTENSIONS: &[&str] = &[".sh", ".bash", ".zsh", ".ksh", ".bats"];
 const SHUNIT2_HOOKS: &[&str] = &["setUp", "tearDown", "oneTimeSetUp", "oneTimeTearDown", "suite"];
 
 pub fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<FileFacts, ExtractError> {
-    let repaired = repair(source);
+    let repaired = crate::repair::repair(source);
     let source: &[u8] = &repaired;
     let tree = parse(source, budget)?;
     let locals = locals::build(&tree, source, LOCALS_TIME.min(budget.max_parse_time))?;
@@ -55,23 +54,6 @@ pub fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<FileFacts, 
     facts.parse_errors = count_errors(&tree);
     facts.line_count = line_count(source);
     Ok(facts)
-}
-
-/// Same-length repair before parsing (spans stay exact): a backslash that
-/// starts a line before a command name (`\. "$NVM_DIR/nvm.sh"`, `\command
-/// ls`: an alias bypass) is read by tree-sitter-bash 0.25 as part of the
-/// previous line's last word; it becomes a space.
-fn repair(source: &[u8]) -> Cow<'_, [u8]> {
-    let mut out: Option<Vec<u8>> = None;
-    let mut line_start = true;
-    for (i, &b) in source.iter().enumerate() {
-        let next = source.get(i + 1).copied().unwrap_or(b' ');
-        if line_start && b == b'\\' && (next.is_ascii_alphabetic() || next == b'.' || next == b'_') {
-            out.get_or_insert_with(|| source.to_vec())[i] = b' ';
-        }
-        line_start = b == b'\n' || (line_start && (b == b' ' || b == b'\t'));
-    }
-    out.map_or(Cow::Borrowed(source), Cow::Owned)
 }
 
 fn parse(source: &[u8], budget: &Budget) -> Result<Tree, ExtractError> {

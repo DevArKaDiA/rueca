@@ -299,16 +299,17 @@ fn test_files_by_path() {
 
 #[test]
 fn zsh_best_effort() {
-    // The bash-compatible part of a zsh file is extracted; zsh-only syntax
-    // (a parameter flag here) is an ERROR node, counted, and the walk goes on.
+    // The bash-compatible part of a zsh file is extracted; parameter flags
+    // are repaired (`repair.rs`).
     let src = "autoload -Uz compinit\nzfn() {\n  print -P '%F{red}x%f'\n  [[ $a == b ]] && helper\n}\nhelper() { echo ok; }\nx=${(j:,:)parts}\nafter() { helper; }\n";
     let f = facts_at("lib/x.zsh", src);
     assert_eq!(defs(&f, Label::Function), ["zfn", "helper", "after"]);
     assert!(calls(&f, Some("zfn")).contains(&"helper".to_string()));
     assert_eq!(calls(&f, Some("after")), ["helper"]);
-    assert!(f.parse_errors > 0);
-    // Whole-function zsh syntax collapses the function (documented).
-    let f = facts_at("lib/y.zsh", "function zfn {\n  parts=(${(s:/:)PWD})\n}\n");
+    assert_eq!(f.parse_errors, 0);
+    // zsh-only syntax the grammar cannot read is an ERROR node, counted,
+    // and the walk goes on (glob qualifiers, `for x (…)` loops).
+    let f = facts_at("lib/y.zsh", "for f in *(.); do :; done\nfor x (a b c) { print $x }\nlater() { helper; }\n");
     assert!(f.parse_errors > 0);
 }
 
