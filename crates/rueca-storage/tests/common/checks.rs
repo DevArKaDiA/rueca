@@ -2,7 +2,7 @@
 //! under its own `prefix` so they can share one bucket.
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 
 use bytes::Bytes;
 use rueca_storage::{CasExhausted, CasStep, ObjectVersion, PutError, Storage, cas_update};
@@ -78,15 +78,23 @@ pub fn delete_and_ranges(s: &dyn Storage, prefix: &str) {
 /// 8 threads × 50 increments of a JSON counter through `cas_update`.
 pub fn cas_counter(s: Arc<dyn Storage>, prefix: &str, attempts: u32) -> u32 {
     let p = format!("{prefix}/counter.json");
+    // Every writer reads the counter before any of them writes, once: the
+    // first round always conflicts, however the scheduler runs the threads.
+    let ready = Arc::new(Barrier::new(8));
     let handles: Vec<_> = (0..8)
         .map(|_| {
-            let (s, p) = (s.clone(), p.clone());
+            let (s, p, ready) = (s.clone(), p.clone(), ready.clone());
             std::thread::spawn(move || {
                 let mut conflicts = 0;
+                let mut first = true;
                 for _ in 0..50 {
-                    let out =
-                        cas_update(s.as_ref(), &p, attempts, |n: Option<u64>| Ok(CasStep::Write(n.unwrap_or(0) + 1)))
-                            .unwrap();
+                    let out = cas_update(s.as_ref(), &p, attempts, |n: Option<u64>| {
+                        if std::mem::take(&mut first) {
+                            ready.wait();
+                        }
+                        Ok(CasStep::Write(n.unwrap_or(0) + 1))
+                    })
+                    .unwrap();
                     assert!(out.written);
                     conflicts += out.conflicts;
                 }
