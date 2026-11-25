@@ -7,7 +7,8 @@
 //! rueca index --org FILE [PATH] [--store DIR] [--json]
 //! rueca index --org FILE PATH --ref NAME [--remove] [--store DIR] [--json]
 //! rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [--pretty] [--text]
-//! rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
+//! rueca query execute '<JSON ARGS>' --experimental-code-mode [--code-file FILE|-] [...]
+//! rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index] [--experimental-code-mode]
 //! rueca status [--store DIR] [--json]
 //! rueca status --store-url URL [--store-option KEY=VALUE]... [--json]
 //! rueca serve [--config FILE] [--role query|indexer|all] [--check-config]
@@ -68,6 +69,13 @@
 //! whose weights were pulled (the batch entry point of the bench's vector
 //! arm). Both need the `embeddings` feature (on by default) to download or
 //! embed.
+//!
+//! Code mode (RFC 0009, experimental): `mcp --experimental-code-mode` (or
+//! `RUECA_EXPERIMENTAL_CODE_MODE=1`) also serves the `execute` and
+//! `describe_api` tools, and `query --experimental-code-mode` (or the same
+//! variable) runs them (`--code-file` reads `execute`'s `code` from a file
+//! or stdin). Without it both behave as before: the tools do not exist.
+//! Starlark scripts need the `code-mode-starlark` feature.
 //!
 //! `query` and `mcp` default to the indexed root that contains the current
 //! directory when `--root` is not given. `mcp` indexes `--root` (in the
@@ -164,7 +172,7 @@ enum Command {
     /// Run one tool and print its JSON result. Same semantics as MCP.
     #[command(
         after_help = "Tools: search_symbols, search_code, get_symbol, get_snippet, trace, get_file_outline, list_repositories, \
-list_contracts\n\
+list_contracts (experimental, with --experimental-code-mode: execute, describe_api)\n\
 Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"direction\": \"callers\"}'"
     )]
     Query {
@@ -175,12 +183,23 @@ Example: rueca query trace '{\"qualified_name\": \"InvoiceService.issue\", \"dir
         /// Print the compact text rendering (the MCP text content) instead of JSON.
         #[arg(long)]
         text: bool,
+        /// Experimental code mode (RFC 0009): enables the `execute` and
+        /// `describe_api` tools (also `RUECA_EXPERIMENTAL_CODE_MODE=1`).
+        #[arg(long)]
+        experimental_code_mode: bool,
+        /// `execute`: read the script (`code`) from this file (`-`: stdin).
+        #[arg(long, value_name = "FILE|-")]
+        code_file: Option<PathBuf>,
     },
     /// Serve MCP on stdio. Indexes --root first if it has no segment.
     Mcp {
         /// Do not index --root automatically.
         #[arg(long)]
         no_auto_index: bool,
+        /// Experimental code mode (RFC 0009): also serve the `execute` and
+        /// `describe_api` tools (also `RUECA_EXPERIMENTAL_CODE_MODE=1`).
+        #[arg(long)]
+        experimental_code_mode: bool,
     },
     /// List indexed roots with repo, commit, node/edge/file counts and age,
     /// and the organizations of the store; with --store-url, what a service
@@ -316,10 +335,15 @@ fn main() -> ExitCode {
                     .and_then(|embed| cmd_index(&store, IndexCmd { path, repo, threads, embed }, out)),
             }
         }
-        Command::Query { tool, args, text } => {
-            return cmd_query(&store, cli.root, cli.org.as_deref(), &tool, args, cli.pretty, text);
+        Command::Query { tool, args, text, experimental_code_mode, code_file } => {
+            let code_mode = experimental_code_mode || rueca_mcp::codemode::enabled_by_env();
+            let q = QueryCmd { tool, args, code_file, code_mode };
+            return cmd_query(&store, cli.root, cli.org.as_deref(), q, cli.pretty, text);
         }
-        Command::Mcp { no_auto_index } => cmd_mcp(&store, cli.root, cli.org.as_deref(), !no_auto_index),
+        Command::Mcp { no_auto_index, experimental_code_mode } => {
+            let code_mode = experimental_code_mode || rueca_mcp::codemode::enabled_by_env();
+            cmd_mcp(&store, cli.root, cli.org.as_deref(), !no_auto_index, code_mode)
+        }
         Command::Status { remote } if remote.store_url.is_some() => {
             service::cmd_status(&remote, &store, Output { json: cli.json, pretty: cli.pretty })
         }
@@ -759,16 +783,25 @@ fn default_root(store: &Path, root: Option<PathBuf>) -> Option<PathBuf> {
     Some(PathBuf::from(entry.root))
 }
 
+/// `rueca query`'s tool, arguments and code-mode options.
+struct QueryCmd {
+    tool: String,
+    args: Option<String>,
+    /// `execute`'s `code` from a file (`-`: stdin).
+    code_file: Option<PathBuf>,
+    /// The experimental code-mode tools exist (`--experimental-code-mode`).
+    code_mode: bool,
+}
+
 fn cmd_query(
     store: &Path,
     root: Option<PathBuf>,
     org: Option<&str>,
-    tool: &str,
-    args: Option<String>,
+    q: QueryCmd,
     pretty: bool,
     text: bool,
 ) -> ExitCode {
-    match run_query(store, root, org, tool, args) {
+    match run_query(store, root, org, q) {
         Ok(response) if text => {
             print!("{}", response.text);
             if !response.text.ends_with('\n') {
@@ -791,24 +824,58 @@ fn run_query(
     store: &Path,
     root: Option<PathBuf>,
     org: Option<&str>,
-    tool: &str,
-    args: Option<String>,
+    q: QueryCmd,
 ) -> anyhow::Result<rueca_query::Response> {
-    let raw = match args.as_deref() {
+    let tool = q.tool.as_str();
+    let raw = match q.args.as_deref() {
         None => "{}".to_string(),
-        Some("-") => {
-            let mut s = String::new();
-            std::io::stdin().read_to_string(&mut s)?;
-            s
-        }
+        Some("-") => read_stdin()?,
         Some(s) => s.to_string(),
     };
-    let args: Value = serde_json::from_str(if raw.trim().is_empty() { "{}" } else { &raw })
+    let mut args: Value = serde_json::from_str(if raw.trim().is_empty() { "{}" } else { &raw })
         .map_err(|e| anyhow::anyhow!("arguments are not valid JSON: {e}"))?;
-    if !rueca_query::TOOL_NAMES.contains(&tool) {
+    let code_tool = q.code_mode && rueca_mcp::codemode::handles(tool);
+    if !rueca_query::TOOL_NAMES.contains(&tool) && !code_tool {
         anyhow::bail!("unknown tool `{tool}` (available: {})", rueca_query::TOOL_NAMES.join(", "));
     }
-    query_engine(store, root, org)?.respond(tool, args)
+    if let Some(file) = &q.code_file {
+        add_code(&mut args, tool, file, q.args.as_deref() == Some("-"))?;
+    }
+    let engine = query_engine(store, root, org)?;
+    if code_tool {
+        let opts = rueca_query::RespondOptions::default();
+        return rueca_mcp::codemode::CodeMode::new().respond(&engine, tool, args, &opts);
+    }
+    engine.respond(tool, args)
+}
+
+fn read_stdin() -> anyhow::Result<String> {
+    let mut s = String::new();
+    std::io::stdin().read_to_string(&mut s)?;
+    Ok(s)
+}
+
+/// `--code-file`: `execute`'s `code` from `file` (`-`: stdin, unless the
+/// arguments were read from it).
+fn add_code(args: &mut Value, tool: &str, file: &Path, args_from_stdin: bool) -> anyhow::Result<()> {
+    if tool != rueca_mcp::codemode::EXECUTE {
+        anyhow::bail!("--code-file applies to `execute` only");
+    }
+    let code = if file.as_os_str() == "-" {
+        if args_from_stdin {
+            anyhow::bail!("--code-file - and arguments `-` cannot both read stdin");
+        }
+        read_stdin()?
+    } else {
+        std::fs::read_to_string(file).map_err(|e| anyhow::anyhow!("cannot read `{}`: {e}", file.display()))?
+    };
+    match args {
+        Value::Object(m) => {
+            m.insert("code".into(), Value::String(code));
+            Ok(())
+        }
+        _ => anyhow::bail!("arguments of `execute` must be a JSON object"),
+    }
 }
 
 /// The engine of `query` and `contracts`: the organization `org` (a file or
@@ -824,7 +891,13 @@ fn render(v: &Value, pretty: bool) -> String {
     if pretty { serde_json::to_string_pretty(v) } else { serde_json::to_string(v) }.unwrap_or_else(|_| v.to_string())
 }
 
-fn cmd_mcp(store: &Path, root: Option<PathBuf>, org: Option<&str>, auto_index: bool) -> anyhow::Result<()> {
+fn cmd_mcp(
+    store: &Path,
+    root: Option<PathBuf>,
+    org: Option<&str>,
+    auto_index: bool,
+    code_mode: bool,
+) -> anyhow::Result<()> {
     if let Some(o) = org {
         let (name, config) = org_arg(o)?;
         return rueca_mcp::serve_stdio(rueca_mcp::ServerOptions {
@@ -833,6 +906,7 @@ fn cmd_mcp(store: &Path, root: Option<PathBuf>, org: Option<&str>, auto_index: b
             auto_index,
             org: Some(name),
             org_config: config,
+            code_mode,
         });
     }
     let explicit = root.is_some();
@@ -842,6 +916,7 @@ fn cmd_mcp(store: &Path, root: Option<PathBuf>, org: Option<&str>, auto_index: b
         root,
         // Only an explicit --root is indexed automatically.
         auto_index: auto_index && explicit,
+        code_mode,
         ..rueca_mcp::ServerOptions::default()
     })
 }

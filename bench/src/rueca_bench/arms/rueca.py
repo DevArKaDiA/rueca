@@ -120,6 +120,7 @@ def norm_symbol(d: dict, path: str | None = None, snap: dict | None = None) -> d
         "end_line": end,
         "id": sid,
         "qualified_name": qn,
+        "local": d.get("local") or pid["qn"],
         "repo": (snap or {}).get("repo") or pid["repo"],
         "depth": d.get("depth", d.get("d")),
         "direction": direction,

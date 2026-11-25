@@ -146,6 +146,11 @@ repository:
 - symbols that differ appear once per distinct version, each with its own
   `in` list; a `changed: true` flag marks items whose content differs across
   the requested refs;
+  *(amended 2026-11-24: "content" is the symbol's own text, the bytes of
+  its span, compared in every requested ref — absent from one is changed
+  too; a symbol whose file changed elsewhere, moved by lines added above
+  it, is listed once per version but not `changed`. Before, versions were
+  compared by file blob and every symbol of a changed file was flagged.)*
 - `trace` over several refs returns the union graph with each edge's `in`
   list, so "who calls `f` on the PR but not on `main`" is answerable from one
   response.
@@ -160,14 +165,26 @@ once, the difference highlighted.
 ```json
 "results": [
   {"s": 0, "path": "src/invoices/service.py", "symbols": [
-     {"id": "…#InvoiceService.issue", "name": "issue", "qn": "InvoiceService.issue",
-      "label": "Method", "lines": [41, 63], "sig": "def issue(self, invoice_id: str) -> Invoice"},
+     {"id": "…#InvoiceService.issue", "name": "issue", "local": "InvoiceService.issue",
+      "qn": "billing.invoices.service.InvoiceService.issue", "label": "Method", "lines": [41, 63],
+      "sig": "def issue(self, invoice_id: str) -> Invoice", "repo": "github.com/acme/billing", "ref": "main"},
      {"id": "…#InvoiceService.cancel", "…": "…"}]}
 ]
 ```
 
 - Field names shortened in the envelope form (`qn`, `sig`, `lines`); the long
   names stay available with `"format": "verbose"` for one release.
+- *(Amended 2026-11-24.)* A symbol has two names: `qn` is the **global**
+  qualified name (module included: `billing.invoices.service.InvoiceService.issue`,
+  `src/util/index:Session.request`); `local` is the **file-local** qualified
+  name its id is built from (the id's `#` part, `InvoiceService.issue`; a
+  file's path), the name the text rendering prints. Every object with an
+  `id` (search items, outline symbols, `get_symbol`'s symbol and lists,
+  `trace` nodes, a match's or snippet's `symbol`, contract rows) carries
+  `local`, and the `repo` and `ref` of the snapshot it was read from, so a
+  consumer that does not see the envelope (a code-mode script, RFC 0009)
+  never parses ids. Structured JSON only: the text rendering does not
+  change, so single-repository answers cost the agent no more tokens.
 - Inside a group the item's path and snapshot are implied; `id` keeps the
   full pinned form.
 - `score` is rounded to 3 significant digits and omitted unless
@@ -176,7 +193,8 @@ once, the difference highlighted.
 **`trace`.** Nodes are a list; edges refer to node indexes:
 
 ```json
-"nodes": [{"id": "…", "qn": "…", "label": "Method", "path": "…", "lines": [7, 8], "d": 1, "dir": "in"}],
+"nodes": [{"id": "…", "local": "…", "qn": "…", "label": "Method", "path": "…", "lines": [7, 8],
+           "repo": "…", "ref": "main", "d": 1, "dir": "in"}],
 "edges": [[0, 3, "CALLS", 0.9, "type_resolved", 12]]
 ```
 
@@ -257,7 +275,8 @@ RFC only requires the tool contract to be ready for it.
 - **Grouping**: groups are ordered by their best-ranked item, so
   `search_symbols` order inside the response is by file, not strictly by
   rank (`"scores": true` shows the ranking).
-- **`trace`**: node 0 is the root (`d` 0); a node reachable both ways is one
+- **`trace`**: node 0 is the root (`d` 0, `dir: "root"` since 2026-11-24,
+  not printed in the text); a node reachable both ways is one
   node with `dir: "both"`. The call-site path is a *seventh* element (§7's
   "eighth" counted one too many).
 - **Text rendering** prints the local name (the id's `#` part) and the

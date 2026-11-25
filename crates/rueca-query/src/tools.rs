@@ -695,19 +695,20 @@ impl Engine {
         let views = self.scope(&a.common, None)?;
         let hits = resolve_path(&views, &a.path)?;
         let (vi, file) = hits[0];
-        let result = outline_result(&views[vi], file, &self.deadline)?;
         if a.common.verbose() {
-            return verbose(&result);
+            return verbose(&outline_result(&views, vi, file, false, &self.deadline)?);
         }
         // Several refs of its repository: one outline per distinct version
-        // of the file (RFC 0005 §6, per-ref groups).
-        let mut versions =
-            if refset::peers(&views, vi).len() > 1 { refset::file_versions(&views, &hits) } else { vec![] };
+        // of the file (RFC 0005 §6, per-ref groups), each symbol marked
+        // `changed` when its text differs between the refs.
+        let multi = refset::peers(&views, vi).len() > 1;
+        let result = outline_result(&views, vi, file, multi, &self.deadline)?;
+        let mut versions = if multi { refset::file_versions(&views, &hits) } else { vec![] };
         let mark = (!versions.is_empty()).then(|| versions.remove(0).2);
         let others: Vec<OutlineVersion> = versions
             .into_iter()
             .map(|(vj, f, mark)| {
-                Ok(OutlineVersion { view: vj, outline: outline_result(&views[vj], f, &self.deadline)?, mark })
+                Ok(OutlineVersion { view: vj, outline: outline_result(&views, vj, f, true, &self.deadline)?, mark })
             })
             .collect::<anyhow::Result<_>>()?;
         let snaps: Vec<_> = views.iter().map(|v| &v.snap).collect();
@@ -716,16 +717,26 @@ impl Engine {
     }
 }
 
-/// The outline of `file` in `view`.
-fn outline_result(view: &View, file: FileId, deadline: &Deadline) -> anyhow::Result<FileOutlineResult> {
+/// The outline of `file` in view `vi`; with `marks`, each symbol is
+/// `changed` when its text is not the same in every snapshot of its
+/// repository ([`refset::symbol_changed`]).
+fn outline_result(
+    views: &[View],
+    vi: usize,
+    file: FileId,
+    marks: bool,
+    deadline: &Deadline,
+) -> anyhow::Result<FileOutlineResult> {
     deadline.check()?;
+    let view = &views[vi];
     let entry = view.seg.file(file);
     let symbols = view.file_symbols(file);
+    let changed = |n: NodeId| marks && refset::symbol_changed(views, vi, n);
     Ok(FileOutlineResult {
         path: entry.path.clone(),
         language: entry.language.map(|l| l.as_str().to_string()),
         line_count: entry.line_count,
-        symbols: outline_tree(view, &symbols, deadline)?,
+        symbols: outline_tree(view, &symbols, &changed, deadline)?,
     })
 }
 
@@ -1086,6 +1097,7 @@ impl NeighbourFilter<'_> {
 fn outline_tree(
     view: &View,
     symbols: &[(NodeId, rueca_model::Span)],
+    changed: &dyn Fn(NodeId) -> bool,
     deadline: &Deadline,
 ) -> anyhow::Result<Vec<OutlineSymbol>> {
     let ids: HashSet<NodeId> = symbols.iter().map(|(n, _)| *n).collect();
@@ -1133,6 +1145,7 @@ fn outline_tree(
     fn build(
         view: &View,
         children: &HashMap<Option<NodeId>, Vec<(u32, u32, NodeId)>>,
+        changed: &dyn Fn(NodeId) -> bool,
         parent: Option<NodeId>,
     ) -> Vec<OutlineSymbol> {
         children
@@ -1142,11 +1155,12 @@ fn outline_tree(
                     .map(|&(_, _, n)| OutlineSymbol {
                         brief: view.brief(n),
                         signature: view.node(n).signature.clone(),
-                        children: build(view, children, Some(n)),
+                        children: build(view, children, changed, Some(n)),
+                        changed: changed(n),
                     })
                     .collect()
             })
             .unwrap_or_default()
     }
-    Ok(build(view, &children, None))
+    Ok(build(view, &children, changed, None))
 }

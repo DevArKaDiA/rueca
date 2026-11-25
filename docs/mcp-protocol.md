@@ -373,7 +373,12 @@ pub fn serve(server: RuecaServer, input: impl Read, output: impl Write + Send + 
 `ToolCall` holds `{id, name, args, modern}`. Tool-name validation happens
 inside `handle`, so an unknown tool becomes `Step::Reply` with -32602. The
 tool list comes from `rueca_query::tool_definitions()`: a tool added there
-needs no change here.
+needs no change here. With the experimental code mode
+(`RuecaServer::with_code_mode(true)`, `rueca mcp
+--experimental-code-mode`; `docs/tools.md`), `execute` and `describe_api`
+follow the eight tools in `tools/list` and are dispatched to
+`rueca_mcp::codemode`; off (the default, and always in service mode) the
+list and every answer are unchanged.
 
 stdio loop (`serve`):
 

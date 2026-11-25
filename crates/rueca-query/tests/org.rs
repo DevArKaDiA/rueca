@@ -390,6 +390,17 @@ fn trace_follows_link_edges_across_repositories() {
     assert_eq!(v["results"]["s"], 1, "the root's snapshot: {v}");
     let names = trace_names(&v);
     assert!(names.contains(&(BILLING.to_string(), "pkg.service.InvoiceService.issue".to_string())), "{v}");
+    // Every node also names its repository and ref, and its file-local name,
+    // without the envelope: what a code-mode script sees.
+    let own: Vec<(String, String)> = v["results"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| (n["repo"].as_str().unwrap().to_string(), n["qn"].as_str().unwrap().to_string()))
+        .collect();
+    assert_eq!(own, names, "{v}");
+    let issue = v["results"]["nodes"].as_array().unwrap().iter().find(|n| n["repo"] == BILLING).unwrap();
+    assert_eq!((issue["local"].as_str(), issue["ref"].as_str()), (Some("InvoiceService.issue"), Some("main")), "{v}");
     let edge = &v["results"]["edges"][0];
     assert_eq!(
         (edge[2].as_str(), edge[4].as_str(), edge[5].as_u64()),

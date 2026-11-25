@@ -674,8 +674,8 @@ Choices and deviations:
   repository the caller cannot read is never named, nor are its refs.
 - **Collapse per tool.** A symbol is matched across the snapshots of one
   repository by (label, qualified name, path), by position in source order
-  among nodes sharing that key, and its versions compared by
-  file blob. `search_symbols` fetches `limit` per snapshot, collapses, then
+  among nodes sharing that key, and its versions (the items, with their
+  `in`) collapsed by file blob. `search_symbols` fetches `limit` per snapshot, collapses, then
   cuts at `limit` (the cursor counts collapsed items); `get_symbol` answers
   the best match's version and lists the others in `versions` (`{s, in,
   changed, symbol, callers, callees}`), not as candidates;
@@ -685,12 +685,19 @@ Choices and deviations:
   trailing `{in, changed}` object on the edges of that repository.
   `search_code`, `get_snippet` and `format: "verbose"` do not collapse;
   single-snapshot responses are unchanged.
-- **`changed` is per file blob.** Facts are extracted per blob, so the
-  same blob is the same symbol for certain and costs no comparison; the
-  price is that a symbol in a changed file is `changed` even when its own
-  text is identical (`click.types.ParamType.split_envvar_value`, lines
-  205–213 in both `main` and `8.5.1`, comes back twice). Comparing a
-  per-symbol content hash is open (§12).
+- **`changed` is per symbol** *(2026-11-24; it was per file blob)*. A
+  symbol is `changed` when its own text — the bytes of its span — is not
+  the same in every requested snapshot of its repository, or it is absent
+  from one; equal blobs are equal without reading, and a changed file is
+  read once per call. A symbol whose file changed elsewhere (moved by lines
+  added above it) still comes back once per version — its lines differ —
+  but not `changed` (`click.types.ParamType.split_envvar_value`, lines
+  205–213 in both `main` and `8.5.1`, used to be flagged). `trace` nodes
+  are `changed` by the same rule (where the walk reached them is their
+  `in`; edges keep `changed` = not found in every ref); `get_file_outline`
+  marks each symbol of each version the same way, and its own `changed`
+  stays the file's. The file-level signal is still there: an item's `in`
+  is the snapshots whose file blob it shares.
 - **`rueca index --org <file>` refreshes every ref** of each member it
   indexes: the file's `refs`, then the refs indexed earlier from the
   command line (the store's ref entries of that repository id); a ref
@@ -1019,8 +1026,9 @@ gated; RFC 0004 §5):
 6. Lifecycle of `pr/<n>` refs: they are fetched again on every `rueca index
    --org` and kept until `--remove`. Drop merged or closed pull requests,
    or refs not read for a while, by a policy?
-7. `changed` per symbol rather than per file blob (a content hash of the
-   symbol's span), so that only symbols that differ are listed twice.
+7. ~~`changed` per symbol rather than per file blob~~ — done (2026-11-24,
+   span text compared directly; §9.3 *Collapse per tool*). Symbols that
+   only moved are still listed once per version (their lines differ).
 8. Unchanged re-indexing: skip writing a new segment when a working tree
    has the commit, blobs and Rueca version of its current one, or key link
    sets by content, so that consumers and their refs are not re-linked

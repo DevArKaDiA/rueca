@@ -155,16 +155,38 @@ fn marked<'a>(marks: impl IntoIterator<Item = Option<&'a RefMark>>) -> impl Iter
     marks.into_iter().flatten().flat_map(|m| m.in_.iter().chain(&m.peers).copied()).collect::<Vec<_>>().into_iter()
 }
 
-/// `{id, qn, label, lines}`; `path` too when `with_path`.
+/// The file-local name of a symbol id: its `#` part (`Class.method`), or
+/// for a file or folder (no `#` part) its path.
+fn local_of_id(id: &str) -> Option<String> {
+    match id.split_once('#') {
+        Some((_, local)) if !local.is_empty() => Some(local.to_string()),
+        _ => rueca_model::parse_symbol_id(id).map(|p| p.path),
+    }
+}
+
+/// `local`: the name the id is built from ([`local_of_id`]).
+fn put_local(m: &mut Map<String, Value>, b: &Brief) {
+    put(m, "local", local_of_id(&b.id).unwrap_or_else(|| b.name.clone()));
+}
+
+/// `repo` and `ref` of the snapshot an object was read from.
+fn put_origin(m: &mut Map<String, Value>, b: &Brief) {
+    put(m, "repo", b.repo.clone());
+    put(m, "ref", b.ref_name.clone());
+}
+
+/// `{id, local, qn, label, lines, repo, ref}`; `path` too when `with_path`.
 fn brief(b: &Brief, with_path: bool) -> Map<String, Value> {
     let mut m = Map::new();
     put(&mut m, "id", b.id.clone());
+    put_local(&mut m, b);
     put(&mut m, "qn", b.qualified_name.clone());
     put(&mut m, "label", b.label.clone());
     if with_path {
         put_opt(&mut m, "path", b.path.clone());
     }
     put_opt(&mut m, "lines", lines_of(b.start_line, b.end_line));
+    put_origin(&mut m, b);
     m
 }
 
@@ -172,15 +194,18 @@ fn briefs(v: &[Brief]) -> Value {
     Value::Array(v.iter().map(|b| Value::Object(brief(b, false))).collect())
 }
 
-/// `{id, name, qn, label, lines, sig}`: a symbol inside a file group.
+/// `{id, name, local, qn, label, lines, sig, repo, ref}`: a symbol inside a
+/// file group.
 fn symbol_item(b: &Brief, sig: Option<&String>) -> Map<String, Value> {
     let mut m = Map::new();
     put(&mut m, "id", b.id.clone());
     put(&mut m, "name", b.name.clone());
+    put_local(&mut m, b);
     put(&mut m, "qn", b.qualified_name.clone());
     put(&mut m, "label", b.label.clone());
     put_opt(&mut m, "lines", lines_of(b.start_line, b.end_line));
     put_opt(&mut m, "sig", sig.cloned());
+    put_origin(&mut m, b);
     m
 }
 
@@ -260,11 +285,13 @@ pub(crate) struct SymbolAnswer<'a> {
     pub versions: &'a [SymbolVersion],
 }
 
-/// `{id, name, qn, label, path, lines, lang, sig, doc, exported, test}`.
+/// `{id, name, local, qn, label, path, lines, lang, sig, doc, exported, test,
+/// repo, ref}`.
 fn symbol_json(s: &SymbolDetail) -> Value {
     let mut sym = Map::new();
     put(&mut sym, "id", s.brief.id.clone());
     put(&mut sym, "name", s.brief.name.clone());
+    put_local(&mut sym, &s.brief);
     put(&mut sym, "qn", s.brief.qualified_name.clone());
     put(&mut sym, "label", s.brief.label.clone());
     put_opt(&mut sym, "path", s.brief.path.clone());
@@ -274,6 +301,7 @@ fn symbol_json(s: &SymbolDetail) -> Value {
     put_opt(&mut sym, "doc", s.doc.clone());
     put(&mut sym, "exported", s.exported);
     put(&mut sym, "test", s.is_test);
+    put_origin(&mut sym, &s.brief);
     Value::Object(sym)
 }
 
@@ -448,6 +476,7 @@ impl TracePage<'_> {
         }
         root.extend(brief(&self.r.root, true));
         put(&mut root, "d", 0);
+        put(&mut root, "dir", "root");
         put_mark(&mut root, self.r.root_mark.as_ref(), self.remap);
         Value::Object(root)
     }
@@ -546,6 +575,9 @@ fn outline_page(flat: &Flat<'_>, start: usize, k: usize) -> Vec<Value> {
     fn build(j: usize, start: usize, flat: &Flat<'_>, children: &[Vec<usize>]) -> Value {
         let s = flat[start + j].1;
         let mut m = symbol_item(&s.brief, s.signature.as_ref());
+        if s.changed {
+            put(&mut m, "changed", true);
+        }
         if !children[j].is_empty() {
             let kids = children[j].iter().map(|&c| build(c, start, flat, children)).collect();
             put(&mut m, "children", Value::Array(kids));
@@ -670,8 +702,9 @@ pub(crate) fn list_repositories(
     })
 }
 
-/// `list_contracts`: one flat item per contract row, `{s, repo, path, line,
-/// symbol, id, label, kind, side, key, framework, raw, matches}`, in the
+/// `list_contracts`: one flat item per contract row, `{s, repo, ref, path,
+/// line, symbol, id, local, label, kind, side, key, framework, raw,
+/// matches}`, in the
 /// tool's order (the listing is sorted by key, not grouped by file).
 pub(crate) fn list_contracts(
     snaps: &[&SnapshotDesc],
@@ -693,10 +726,12 @@ fn contract_item(s: usize, e: &ContractEntry) -> Value {
     let mut m = Map::new();
     put(&mut m, "s", s);
     put(&mut m, "repo", e.repo.clone());
+    put(&mut m, "ref", e.ref_name.clone());
     put(&mut m, "path", e.path.clone());
     put(&mut m, "line", e.line);
     put(&mut m, "symbol", e.symbol.clone());
     put(&mut m, "id", e.id.clone());
+    put(&mut m, "local", local_of_id(&e.id).unwrap_or_else(|| e.symbol.clone()));
     put(&mut m, "label", e.label.clone());
     put(&mut m, "kind", e.kind.clone());
     put(&mut m, "side", e.side.clone());
@@ -784,14 +819,7 @@ fn span(v: &Value) -> String {
 
 /// Local name of an item (the `#` part of its id), else its path / name.
 fn local_name(v: &Value) -> String {
-    let id = str_of(v, "id");
-    match id.split_once('#') {
-        Some((_, local)) if !local.is_empty() => local.to_string(),
-        _ => match rueca_model::parse_symbol_id(id) {
-            Some(p) => p.path,
-            None => str_of(v, "name").to_string(),
-        },
-    }
+    local_of_id(str_of(v, "id")).unwrap_or_else(|| str_of(v, "name").to_string())
 }
 
 fn id_path(v: &Value) -> Option<String> {
@@ -1014,7 +1042,7 @@ fn text_trace_node(out: &mut String, i: usize, n: &Value) {
     if let Some(s) = n.get("s") {
         let _ = write!(out, " [{s}]");
     }
-    if let Some(dir) = n.get("dir").and_then(Value::as_str) {
+    if let Some(dir) = n.get("dir").and_then(Value::as_str).filter(|&d| d != "root") {
         let _ = write!(out, " {dir} d{}", n["d"]);
     }
     let _ = write!(out, " {} {}", str_of(n, "label"), local_name(n));
@@ -1172,6 +1200,9 @@ fn text_outline_symbols(out: &mut String, syms: &Value, depth: usize) {
             }
             if let Some(sig) = s.get("sig").and_then(Value::as_str) {
                 let _ = write!(out, "  {}", one_line(sig));
+            }
+            if s["changed"] == true {
+                out.push_str(" changed");
             }
             out.push('\n');
             if let Some(c) = s.get("children") {

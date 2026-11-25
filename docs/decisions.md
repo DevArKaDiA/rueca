@@ -1,5 +1,162 @@
 # Decisions log
 
+## 2026-11-24 — Code mode: Starlark stays as built; the API friction is fixed before merge (RFC 0009)
+
+The owner's decisions on RFC 0009 phase 3 (§14.6). Starlark stays the
+optional `code-mode-starlark` build feature exactly as built, with its own
+CI job; `deny.toml` is untouched. The four API friction items of §14.4 (5)
+are fixed at the source before merge, for every tool:
+
+- **Two names.** Every object with an `id` carries `local`, the file-local
+  qualified name the id is built from (the id's `#` part; a file's path),
+  next to `qn`, the global one (contract rows keep `symbol`). Scripts build
+  `path#Qualname` from fields instead of slicing ids.
+- **Origin, one rule.** The same objects carry the `repo` and `ref` of
+  their snapshot in every answer, and `trace`'s root has `dir: "root"`.
+  Weighed: adding them only to multi-snapshot answers would bring back the
+  `.get(…)` workarounds; adding them only in code mode would leave JSON
+  clients parsing ids. The text rendering is unchanged, so the cost is
+  JSON bytes only; a single-repository answer reads the same.
+- **`changed` per symbol.** A multi-ref symbol is `changed` when its span's
+  bytes differ between the requested refs, or it is absent from one; equal
+  blobs short-circuit and a changed file is read once per call. A symbol
+  moved by lines added above it is listed per version (its lines differ)
+  but not `changed`. `get_file_outline` marks each symbol of each version.
+  This settles the price named in *Collapse across refs by file blob*
+  (2026-11-16); collapsing stays by blob.
+- **Tests nested in tests.** The resolver marks a definition nested under a
+  test function, method or test block as a test (no new facts, so no
+  extractor bump for it); a test class does not pass the flag on
+  (`TestClient` is a library name too). The TypeScript pack marks
+  definitions inside `beforeEach`-style hook callbacks (extractor version
+  7). Checked with fixtures: TypeScript `describe` / hooks, Python nested
+  functions in `test_*`, Rust nested functions in `#[test]` (fixed); Go
+  `t.Run` closures (not definitions; their calls already belong to
+  `Test…`). Java local classes in test code were already tests; C++ local
+  classes and lambdas are not definitions. Indexes need a re-index.
+
+Measured with the reference tool-call plans (every answer unchanged): ms25
+reads 1,614 tokens instead of 11,625 (one outline at both refs instead of
+the file twice); `trace` text shrinks where test code was nested (ms17
+7,826 → 2,502, ms19 3,795 → 3,385, ms16 1,042 → 686, ms05 1,626 → 1,602).
+`describe_api` grows to 4,260 (JavaScript) and 4,338 (Starlark) tokens.
+
+Re-measured with the fixed engine (stores re-indexed):
+
+- **Multi-step suite**: 18/25 correct in every Rueca arm, as before (no
+  task changed correctness in any arm); tokens read per correct answer:
+  plans 3,639 → 2,743, JavaScript 444 → 429, Starlark 448 → 434 (with
+  `describe_api` amortised 671 → 666 / 680 → 675). The gate still passes:
+  −84.4% / −84.2% against the plans (−87.8% / −87.7% before), −75.7% /
+  −75.4% amortised; median overhead 0.63 / 0.33 ms. The cut shrank because
+  the plans got cheaper.
+- **Multi-ref scenario** (organization suite, first scored run): unchanged
+  symbols of the changed file flagged `changed`: 6 with the engine before
+  the fixes, 0 after; every changed symbol flagged, every unchanged file's
+  symbol collapsed (168 / 168).
+- **Structure (S3)**, Rueca arm re-measured on 21 of 30 sets (every set
+  whose gold builds without Docker, except C++: its gold rebuilt here
+  differs from the published one by two questions, so C++ stays the
+  published run; its answers did not change either), compared with the
+  engine just before the fixes on the same sets: `trace` drops the
+  test-file callers nested in tests on four sets (hono callers returned
+  1,068 → 767, click 575 → 422, flask 302 → 242, jinja 800 → 779; every
+  dropped node is in a test file); every other set answers identically.
+  Scored precision / recall do not move (the scorer already left test
+  files out); the published C row moves by 0.1 point (Lua callers recall
+  96.5 → 96.6), which predates the fixes (the engine before them gives the
+  same answers). Java, PHP and C++ sets and every cbm / BM25 row are
+  carried from the published results.
+- **Tokens per true edge** (`trace`, Rueca vs cbm's published rows):
+  TS/JS 64 → 57 (cbm 54), Python 57 → 55 (cbm 48); the engine before the
+  fixes gives 64.1 and 56.8 on the same sets, so this is the fix. Other
+  languages unchanged. The JSON diagnostic grows (`local`, `repo`, `ref`
+  on every symbol: median trace JSON 373 → 440 tokens for Python); the
+  text an agent reads only shrinks.
+- **Localization (S1)** confirmed unmoved: the Rueca arm on all 169
+  Python, TS/JS and Rust instances with both engines gives the same File
+  Acc@k and Function Acc@k on every instance (six rankings differ below
+  the top 10); S1 stays the published run.
+
+## 2026-11-24 — Code mode phase 3: verdict and recommendation; the owner decides (RFC 0009)
+
+Phase 3 of RFC 0009 is done: the multi-step suite (phase 2) and a fluency
+probe give a per-language verdict (RFC 0009 §14). Nothing changes in the
+code's defaults: code mode stays off unless `--experimental-code-mode` is
+given, and Starlark stays the non-default `code-mode-starlark` feature.
+
+- **Gate**: both languages pass. Tokens read per correct answer −87.8%
+  (JavaScript) and −87.7% (Starlark) against the tool-call plans (−81.6% /
+  −81.3% with `describe_api` amortised), no task regressed (18/25 in all
+  three Rueca arms), median `execute` overhead 0.56 / 0.32 ms. Five
+  listing-heavy tasks dominate the pooled ratio; without them the cut is
+  76%. (Numbers before the API fixes; re-measured in the entry above.)
+- **Fluency probe** (10 tasks × 2 languages, one fresh model per cell with
+  only the statement and `describe_api`, n = 1): 9/10 correct on the first
+  try in each language, no script error of any kind. The one failure
+  (ms19, both languages) is a silent wrong answer from an ambiguous answer
+  shape, which one repair did not fix. Model-written scripts were 2.5–3.2×
+  longer than the reference scripts, so the suite's cut is an upper bound
+  (76% / 81% on the probe's tasks).
+- **Recommendation** (the owner decides): keep code mode opt-in and
+  experimental with **JavaScript only**; remove Starlark (advisory policy
+  failure, memory limit not enforceable in-process, +5.7 MB) unless the
+  owner wants it kept as the non-default feature it is now; do not make
+  code mode default-on before the API friction of RFC 0009 §14.4 is fixed,
+  agents have a cheap way to surface evidence, and an agentic evaluation
+  has run. No helpers were added.
+
+## 2026-11-24 — Code mode phase 1: `execute` and `describe_api` behind a flag; Starlark opt-in (RFC 0009)
+
+`rueca mcp --experimental-code-mode` (or `RUECA_EXPERIMENTAL_CODE_MODE=1`)
+lists and answers `execute` and `describe_api` after the eight tools; off,
+the tool list, schemas and answers are byte-identical to before (tested
+against the golden transcripts). Service mode never enables it.
+
+- **Starlark is a non-default cargo feature** (`code-mode-starlark` on the
+  `rueca` binary and `rueca-mcp`, `starlark` on `rueca-codemode`, whose
+  default is `["js"]`). The owner rejected ignoring the three
+  "unmaintained" advisories of `starlark` 0.14.3's dependencies and
+  loosening `deny.toml`; with the feature off, `cargo deny check` passes
+  as CI runs it. A CI job keeps the feature building and tested; a build
+  without it answers `language: "starlark"` with an error saying how to
+  rebuild. This supersedes "both default-on" in the entry below.
+- **The API is generated, results included.** `rueca_query::ToolDef` gains
+  `output_shape` (a JSON Schema of each tool's `results`, never sent to MCP
+  clients); `describe_api` builds the TypeScript declarations and the
+  Starlark reference from the input schemas and these shapes, and a test
+  checks real answers against the shapes both ways.
+- **Scripts read `results`, renumbered.** A call resolves to its
+  envelope's `results`; the snapshots of every call are merged into
+  `execute`'s `snapshots` and each `s` / `in` is renumbered to them; a call
+  the tool cut is reported in `partial`. Inside scripts a call's
+  `budget_tokens` defaults to the maximum (its answer reaches the script,
+  not the agent); `execute`'s `budget_tokens` cuts `result` (largest array
+  first, then strings, then `null`); `timeout_ms` is clamped to 10 s.
+- **`rueca-codemode` is published** with the other crates: `rueca-mcp`
+  depends on it.
+
+## 2026-11-24 — Code mode: both languages ship behind one `Sandbox` for the experiment (RFC 0009)
+
+RFC 0009's experimental `execute` tool runs scripts in **both** JavaScript
+(QuickJS via `rquickjs`) and Starlark (`starlark`) during the whole
+experiment, behind one `Sandbox` trait in the new crate `rueca-codemode`
+(cargo features `js` and `starlark`, both default-on while it runs).
+`execute` and `describe_api` take `language` (`"js"` by default). The
+language is not picked up front: phase 3 writes a per-language verdict
+from the multi-step suite and a fluency probe, and recommends keeping
+both, one, or neither (RFC 0009 §14); making code mode on-by-default is
+the owner's decision.
+
+Phase 0 (RFC 0009 §13): both engines start and call the host well within
+the overhead budget (JS ~0.1 ms start, 2.5 µs per call; Starlark ~1.5 µs
+start, 0.4 µs per call); JavaScript's time and memory limits are
+enforceable in-process; Starlark's memory limit is not (a one-line
+script can abort the process), and `starlark` 0.14.3 fails `cargo deny`
+on three "unmaintained" advisories (`derivative`, `paste`, `fxhash`).
+Both must be resolved before Starlark can reach `main`; the options are
+listed in RFC 0009 §13.
+
 ## 2026-11-24 — Hybrid search, opt-in: the owner's defaults (RFC 0007 phase 1)
 
 `rueca index --embed` (or `RUECA_EMBED=1`) embeds every callable, type and

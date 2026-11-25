@@ -25,6 +25,14 @@ pub struct RefMark {
 pub struct Brief {
     /// Stable symbol id: `<repo>@<commit>:<path>#<local-qualified-name>`.
     pub id: String,
+    /// Repository of the snapshot the symbol was read from (compact only).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub repo: String,
+    /// Ref of that snapshot (compact only).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub ref_name: String,
     pub name: String,
     /// Global qualified name (`pkg.mod.Class.method`, `src/util/index:Class.method`).
     pub qualified_name: String,
@@ -184,6 +192,11 @@ pub struct OutlineSymbol {
     pub brief: Brief,
     pub signature: Option<String>,
     pub children: Vec<OutlineSymbol>,
+    /// Several refs of the file's repository were read and the symbol's text
+    /// is not the same in all of them (compact only).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub changed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]

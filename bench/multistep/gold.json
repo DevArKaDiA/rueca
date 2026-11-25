@@ -1,0 +1,197 @@
+{
+ "ms01": [
+  "src/flask/app.py#Flask.dispatch_request",
+  "src/flask/app.py#Flask.do_teardown_appcontext",
+  "src/flask/app.py#Flask.do_teardown_request",
+  "src/flask/app.py#Flask.finalize_request",
+  "src/flask/app.py#Flask.full_dispatch_request",
+  "src/flask/app.py#Flask.handle_exception",
+  "src/flask/app.py#Flask.handle_http_exception",
+  "src/flask/app.py#Flask.handle_user_exception",
+  "src/flask/app.py#Flask.preprocess_request",
+  "src/flask/app.py#Flask.process_response",
+  "src/flask/app.py#Flask.update_template_context",
+  "src/flask/app.py#Flask.wsgi_app",
+  "src/flask/ctx.py#AppContext.pop",
+  "src/flask/ctx.py#RequestContext.pop",
+  "src/flask/ctx.py#copy_current_request_context.wrapper",
+  "src/flask/templating.py#_render",
+  "src/flask/templating.py#_stream",
+  "src/flask/views.py#MethodView.dispatch_request",
+  "src/flask/views.py#View.as_view.view"
+ ],
+ "ms02": [
+  "src/flask/app.py#Flask.handle_exception",
+  "src/flask/app.py#Flask.handle_http_exception",
+  "src/flask/app.py#Flask.handle_user_exception"
+ ],
+ "ms03": [
+  "src/flask/app.py#Flask.ensure_sync",
+  "src/flask/sansio/app.py#App._find_error_handler"
+ ],
+ "ms04": [
+  "src/flask/app.py#Flask.wsgi_app"
+ ],
+ "ms05": {
+  "src/flask/ctx.py#RequestContext.__enter__": 0,
+  "src/flask/ctx.py#RequestContext.__exit__": 0,
+  "src/flask/ctx.py#RequestContext.__init__": 0,
+  "src/flask/ctx.py#RequestContext.__repr__": 0,
+  "src/flask/ctx.py#RequestContext.copy": 1,
+  "src/flask/ctx.py#RequestContext.match_request": 1,
+  "src/flask/ctx.py#RequestContext.pop": 2,
+  "src/flask/ctx.py#RequestContext.push": 2,
+  "src/flask/ctx.py#RequestContext.session": 0
+ },
+ "ms06": [
+  "src/flask/app.py#Flask.request_context",
+  "src/flask/sansio/app.py#App.should_ignore_error"
+ ],
+ "ms07": [
+  [
+   "src/requests/cookies.py#cookiejar_from_dict",
+   6
+  ],
+  [
+   "src/requests/cookies.py#extract_cookies_to_jar",
+   4
+  ],
+  [
+   "src/requests/cookies.py#RequestsCookieJar.set_cookie",
+   3
+  ]
+ ],
+ "ms08": [
+  "src/requests/auth.py#AuthBase.__call__",
+  "src/requests/auth.py#HTTPBasicAuth.__call__",
+  "src/requests/auth.py#HTTPBasicAuth.__eq__",
+  "src/requests/auth.py#HTTPBasicAuth.__init__",
+  "src/requests/auth.py#HTTPBasicAuth.__ne__",
+  "src/requests/auth.py#HTTPDigestAuth.__call__",
+  "src/requests/auth.py#HTTPDigestAuth.__eq__",
+  "src/requests/auth.py#HTTPDigestAuth.__init__",
+  "src/requests/auth.py#HTTPDigestAuth.__ne__",
+  "src/requests/auth.py#HTTPDigestAuth.build_digest_header.md5_utf8",
+  "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha256_utf8",
+  "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha512_utf8",
+  "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha_utf8",
+  "src/requests/auth.py#HTTPDigestAuth.handle_401",
+  "src/requests/auth.py#HTTPDigestAuth.handle_redirect",
+  "src/requests/auth.py#HTTPProxyAuth.__call__"
+ ],
+ "ms09": 7,
+ "ms10": [
+  "src/requests/auth.py#_basic_auth_str",
+  "src/requests/cookies.py#MockRequest.get_full_url",
+  "src/requests/models.py#PreparedRequest.prepare_headers",
+  "src/requests/models.py#PreparedRequest.prepare_method",
+  "src/requests/models.py#PreparedRequest.prepare_url",
+  "src/requests/sessions.py#SessionRedirectMixin.get_redirect_target",
+  "src/requests/sessions.py#SessionRedirectMixin.resolve_redirects"
+ ],
+ "ms11": [
+  "src/requests/cookies.py#extract_cookies_to_jar",
+  "src/requests/models.py#PreparedRequest.copy",
+  "src/requests/models.py#PreparedRequest.prepare_cookies",
+  "src/requests/models.py#Response.close"
+ ],
+ "ms12": {
+  "src/requests/utils.py#proxy_bypass": 0,
+  "src/requests/utils.py#proxy_bypass_registry": 0,
+  "src/requests/utils.py#select_proxy": 3,
+  "src/requests/utils.py#should_bypass_proxies.get_proxy": 1
+ },
+ "ms13": [
+  "src/jsx/components.ts#ErrorBoundary.resolveFallbackStr",
+  "src/jsx/components.ts#resolveChildEarly",
+  "src/jsx/context.ts#createContext",
+  "src/jsx/streaming.ts#Suspense",
+  "src/jsx/streaming.ts#serializeBoundaryChild"
+ ],
+ "ms14": [
+  "src/utils/jwt/jwt.ts#isTokenHeader",
+  "src/utils/jwt/types.ts#JwtAlgorithmMismatch.constructor",
+  "src/utils/jwt/types.ts#JwtHeaderInvalid.constructor",
+  "src/utils/jwt/types.ts#JwtTokenInvalid.constructor"
+ ],
+ "ms15": [
+  "src/utils/jwt/types.ts#JwtTokenInvalid.constructor",
+  4
+ ],
+ "ms16": [
+  "src/jsx/base.ts#JSXNode.toString.render",
+  "src/jsx/base.ts#JSXNode.toStringToBuffer",
+  "src/jsx/base.ts#renderChildren",
+  "src/jsx/base.ts#resolveFunctionComponentResult.render",
+  "src/jsx/components.ts#ErrorBoundary",
+  "src/jsx/components.ts#ErrorBoundary.catchCallback",
+  "src/jsx/components.ts#ErrorBoundary.renderFallback",
+  "src/jsx/components.ts#ErrorBoundary.resolveFallbackStr",
+  "src/jsx/components.ts#resolveChildEarly",
+  "src/jsx/context.ts#createContext",
+  "src/jsx/intrinsic-element/components.ts#documentMetadataTag",
+  "src/jsx/jsx-runtime.ts#jsxAttr",
+  "src/jsx/streaming.ts#Suspense"
+ ],
+ "ms17": [
+  "src/flask/cli.py"
+ ],
+ "ms18": {
+  "werkzeug.http.http_date": [
+   "src/flask/json/provider.py",
+   "src/flask/json/tag.py"
+  ],
+  "werkzeug.utils.import_string": [
+   "src/flask/cli.py",
+   "src/flask/config.py"
+  ],
+  "werkzeug.serving.is_running_from_reloader": [
+   "src/flask/app.py",
+   "src/flask/cli.py"
+  ]
+ },
+ "ms19": {
+  "werkzeug.exceptions.HTTPException": [
+   "src/flask/app.py",
+   "src/flask/ctx.py",
+   "src/flask/sansio/scaffold.py",
+   "src/flask/wrappers.py"
+  ],
+  "werkzeug.exceptions.NotFound": [],
+  "werkzeug.exceptions.BadRequest": [
+   "src/flask/sansio/app.py",
+   "src/flask/wrappers.py"
+  ]
+ },
+ "ms20": [
+  "github.com/pallets/click",
+  "github.com/pallets/jinja",
+  "github.com/pallets/werkzeug"
+ ],
+ "ms21": [
+  "DELETE /api/delete",
+  "GET /api/ps",
+  "GET /api/tags",
+  "POST /api/chat",
+  "POST /api/copy",
+  "POST /api/create",
+  "POST /api/embed",
+  "POST /api/embeddings",
+  "POST /api/generate",
+  "POST /api/pull",
+  "POST /api/push",
+  "POST /api/show",
+  "POST /v1/systemone"
+ ],
+ "ms22": [
+  "POST /api/blobs/{}"
+ ],
+ "ms23": 13,
+ "ms24": [
+  "app/ui/ui.go#Server.ollamaProxy",
+  "server/routes.go#Server.ListHandler"
+ ],
+ "ms25": [
+  "requests/sessions.py#Session.request"
+ ]
+}

@@ -405,6 +405,23 @@ fn test_blocks() {
 }
 
 #[test]
+fn definitions_in_setup_hooks_are_tests() {
+    let src = "function render() {}\n\
+beforeEach(() => {\n  function seed() {}\n  render();\n});\n\
+afterAll(async () => {\n  const drop = () => 1;\n  drop();\n});\n\
+describe('suite', () => {\n  const Component = () => 1;\n  it('works', () => { Component(); });\n});\n";
+    let f = facts("src/a.test.ts", src);
+    assert!(!def(&f, "render").is_test, "a module-level helper is not a test");
+    assert!(def(&f, "seed").is_test && def(&f, "drop").is_test, "{:?}", f.definitions);
+    // Nested in a `describe`: the pack keeps the flag of the definition
+    // itself; the resolver marks it as test code (`rueca-resolve`).
+    assert!(def(&f, "suite.Component").parent.is_some_and(|p| f.definitions[p as usize].is_test));
+    // A local `beforeEach` is not a hook.
+    let shadowed = facts("src/b.ts", "function beforeEach(f) { f(); }\nbeforeEach(() => { function x() {} });\n");
+    assert!(!def(&shadowed, "x").is_test, "{:?}", shadowed.definitions);
+}
+
+#[test]
 fn barrel_reexports() {
     let f = facts("src/index.ts", BARREL);
     assert!(f.definitions.is_empty());
@@ -792,7 +809,7 @@ fn local_exports_are_self_reexports() {
 #[test]
 fn pack_metadata() {
     let p = TypeScriptPack;
-    assert_eq!(p.extractor_version(), 6);
+    assert_eq!(p.extractor_version(), 7);
     assert_eq!(p.self_receivers(), &["this"]);
     assert!(p.is_builtin("console") && p.is_builtin("Promise") && p.is_builtin("Record"));
     assert!(!p.is_builtin("UserService"));

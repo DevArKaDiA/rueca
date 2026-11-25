@@ -7,7 +7,8 @@
 //! dispatch through [`Engine::respond`] (or [`Engine::call`] for the JSON
 //! alone; [`Engine::respond_with`] with a deadline and a visibility per
 //! call), so their behavior is identical; [`tool_definitions`] provides
-//! names, descriptions and JSON input schemas for the MCP layer.
+//! names, descriptions and JSON input schemas for the MCP layer, and the
+//! shape of each tool's results for code mode's generated API (RFC 0009).
 //!
 //! ```no_run
 //! # fn main() -> anyhow::Result<()> {
@@ -27,7 +28,9 @@
 //! snapshot read: `s`, `repo`, `ref`, full `commit`, `overlay`, and a host
 //! `url` template for GitHub / GitLab / Bitbucket repositories), `results`
 //! (grouped by snapshot and file, short field names `qn`, `sig`, `lines`;
-//! `trace` nodes as a list with edges `[src, dst, kind, confidence, strategy,
+//! every symbol object also carries `local` — the file-local name its id is
+//! built from — and the `repo` and `ref` of its snapshot; `trace` nodes as a
+//! list with edges `[src, dst, kind, confidence, strategy,
 //! call_site_line(, path)]` by node index), `truncated`, `next_cursor` and
 //! `budget`. [`compact`] builds it from the alpha results and renders the
 //! text form ([`render_text`]); the budget (`budget_tokens`, default 2,000)
@@ -87,8 +90,10 @@
 //! `search_symbols`, `get_symbol`, `trace` and `get_file_outline` find the
 //! same symbol in each (same label, qualified name and path) and collapse
 //! identical versions — same file blob — with [`multiref`]: one item with the
-//! snapshots it is `in`, `changed` when it is not identical in every
-//! requested snapshot of its repository; search collapses before cutting at
+//! snapshots it is `in`, `changed` when the symbol's own text (its span) is
+//! not the same in every requested snapshot of its repository, or it is
+//! absent from one (a symbol moved by lines added above it is not); outline
+//! symbols are marked the same way; search collapses before cutting at
 //! `limit`; `trace` walks from every version of the root and returns the
 //! union graph. Repositories read at one snapshot are answered exactly as
 //! before; `format: "verbose"` never collapses.
@@ -170,14 +175,16 @@
 //!   one per (src, dst, kind). `limit` counts nodes over both directions; a
 //!   node reachable both ways appears once per direction. The compact form
 //!   lists each node once (`dir` `in` / `out` / `both`, `d` its smallest
-//!   depth), the root first.
+//!   depth), the root first (`dir` `root`).
 //! - Compact pages: `next_cursor` is an item offset (search results, matches,
 //!   `trace` nodes after the root, outline symbols in pre-order) or, for
 //!   `get_snippet`, the next line. A `trace` edge is listed on the page of its
 //!   later endpoint, repeating an endpoint from an earlier page when needed.
 //!   `get_symbol` cuts its lists (children, bases, subtypes, candidates, in
 //!   that order) and reports what it left out in `omitted`, without a cursor.
-//! - `trace` neighbour filter: tests (`is_test` or label `Test`) are skipped
+//! - `trace` neighbour filter: tests (`is_test` or label `Test`; the
+//!   resolver also marks code nested in a test function or test block, such
+//!   as a closure of a `describe` callback) are skipped
 //!   unless `include_tests` is true or `edge_types` contains `TESTS`; with
 //!   `labels`, only neighbours with those labels are kept. Skipped nodes are
 //!   neither reported nor expanded and their edges are dropped; the root is
@@ -200,6 +207,7 @@ mod hybrid;
 pub mod multiref;
 mod orgsel;
 mod refset;
+mod shapes;
 pub mod snapshot;
 mod text;
 mod tools;
@@ -260,13 +268,17 @@ pub const TOOL_NAMES: &[&str] = &[
     "list_contracts",
 ];
 
-/// A tool as advertised to MCP clients.
+/// A tool as advertised to MCP clients, plus the shape of its results.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolDef {
     pub name: &'static str,
     pub description: &'static str,
     /// JSON Schema (`type: object`) of the arguments.
     pub input_schema: Value,
+    /// JSON Schema of the envelope's `results` (format `compact`). Not sent
+    /// to MCP clients: code mode (RFC 0009) generates its script API from it
+    /// (see `shapes.rs` for the subset of JSON Schema it uses).
+    pub output_shape: Value,
 }
 
 /// Every tool, in [`TOOL_NAMES`] order.
@@ -278,44 +290,20 @@ fn definitions() -> &'static [ToolDef] {
     static DEFS: OnceLock<Vec<ToolDef>> = OnceLock::new();
     DEFS.get_or_init(|| {
         vec![
-            ToolDef {
-                name: "search_symbols",
-                description: DESC_SEARCH_SYMBOLS,
-                input_schema: args::input_schema::<SearchSymbolsArgs>(),
-            },
-            ToolDef {
-                name: "search_code",
-                description: DESC_SEARCH_CODE,
-                input_schema: args::input_schema::<SearchCodeArgs>(),
-            },
-            ToolDef {
-                name: "get_symbol",
-                description: DESC_GET_SYMBOL,
-                input_schema: args::input_schema::<GetSymbolArgs>(),
-            },
-            ToolDef {
-                name: "get_snippet",
-                description: DESC_GET_SNIPPET,
-                input_schema: args::input_schema::<GetSnippetArgs>(),
-            },
-            ToolDef { name: "trace", description: DESC_TRACE, input_schema: args::input_schema::<TraceArgs>() },
-            ToolDef {
-                name: "get_file_outline",
-                description: DESC_GET_FILE_OUTLINE,
-                input_schema: args::input_schema::<GetFileOutlineArgs>(),
-            },
-            ToolDef {
-                name: "list_repositories",
-                description: DESC_LIST_REPOSITORIES,
-                input_schema: args::input_schema::<ListRepositoriesArgs>(),
-            },
-            ToolDef {
-                name: "list_contracts",
-                description: DESC_LIST_CONTRACTS,
-                input_schema: args::input_schema::<ListContractsArgs>(),
-            },
+            def::<SearchSymbolsArgs>("search_symbols", DESC_SEARCH_SYMBOLS),
+            def::<SearchCodeArgs>("search_code", DESC_SEARCH_CODE),
+            def::<GetSymbolArgs>("get_symbol", DESC_GET_SYMBOL),
+            def::<GetSnippetArgs>("get_snippet", DESC_GET_SNIPPET),
+            def::<TraceArgs>("trace", DESC_TRACE),
+            def::<GetFileOutlineArgs>("get_file_outline", DESC_GET_FILE_OUTLINE),
+            def::<ListRepositoriesArgs>("list_repositories", DESC_LIST_REPOSITORIES),
+            def::<ListContractsArgs>("list_contracts", DESC_LIST_CONTRACTS),
         ]
     })
+}
+
+fn def<T: schemars::JsonSchema>(name: &'static str, description: &'static str) -> ToolDef {
+    ToolDef { name, description, input_schema: args::input_schema::<T>(), output_shape: shapes::output_shape(name) }
 }
 
 fn schema_for_tool(name: &str) -> Option<&'static Value> {
@@ -1072,6 +1060,7 @@ mod tests {
         for d in &defs {
             assert_eq!(d.input_schema["type"], "object", "{}", d.name);
             assert!(!d.description.is_empty());
+            assert!(d.output_shape.is_object(), "{}", d.name);
         }
     }
 

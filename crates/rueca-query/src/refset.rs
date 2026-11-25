@@ -3,10 +3,13 @@
 //! repository. The tools find the same symbol in every snapshot of its
 //! repository — same label, qualified name and file path
 //! ([`View::same_symbol`]) — and collapse identical versions (same file
-//! blob) with [`crate::multiref`]: one item with the snapshots it is `in`,
-//! `changed` when it is not identical in every requested snapshot of its
-//! repository. Repositories read at one snapshot get no mark, so their items
-//! are exactly the single-snapshot ones.
+//! blob) with [`crate::multiref`]: one item with the snapshots it is `in`.
+//! A symbol is `changed` when its own source text (the bytes of its span,
+//! [`View::same_text`]) is not the same in every requested snapshot of its
+//! repository, or it is absent from one: a symbol of a changed file whose
+//! text did not change (moved by lines added above it) is not. Repositories
+//! read at one snapshot get no mark, so their items are exactly the
+//! single-snapshot ones.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -102,8 +105,17 @@ pub(crate) fn mark_of(views: &[View], vi: usize, n: NodeId) -> Option<RefMark> {
             same.is_some_and(|m| views[p].blob_of(m) == blob)
         })
         .collect();
-    let changed = in_.len() != peers.len();
+    let changed = in_.len() != peers.len() && symbol_changed(views, vi, n);
     Some(RefMark { in_, changed, peers })
+}
+
+/// Whether node `n` of view `vi` is absent from another snapshot of its
+/// repository or has another source text there ([`View::same_text`]).
+pub(crate) fn symbol_changed(views: &[View], vi: usize, n: NodeId) -> bool {
+    peers(views, vi).into_iter().filter(|&p| p != vi).any(|p| match views[p].same_symbol(&views[vi], n) {
+        Some(m) => !views[vi].same_text(n, &views[p], m),
+        None => true,
+    })
 }
 
 /// Search hits `(view, node, score)` in rank order with identical versions
@@ -144,7 +156,9 @@ pub(crate) fn symbol_versions(views: &[View], vi: usize, n: NodeId) -> Vec<(Key,
             items.push(ref_item(views, p, m, (p, m)));
         }
     }
-    collapse(&repos_of(views), items).into_iter().map(|c| (c.item, Some(mark(views, &c)))).collect()
+    let changed = symbol_changed(views, vi, n);
+    let collapsed = collapse(&repos_of(views), items);
+    collapsed.into_iter().map(|c| (c.item, Some(RefMark { changed, ..mark(views, &c) }))).collect()
 }
 
 /// The distinct versions of a file found at `hits` (view, file) in
@@ -177,8 +191,8 @@ fn mark<T>(views: &[View], c: &Collapsed<T>) -> RefMark {
 /// one representative (the root for the root's versions, else the
 /// occurrence in the lowest view), and each representative of a repository
 /// read at several snapshots has a mark: the snapshots it was reached in,
-/// `changed` when that is not every snapshot of its repository or its
-/// versions differ.
+/// `changed` when the symbol's text is not the same in every snapshot of its
+/// repository ([`symbol_changed`]; where it was reached is `in`).
 pub(crate) struct NodeMerge {
     pub rep: HashMap<Key, Key>,
     pub marks: HashMap<Key, RefMark>,
@@ -197,7 +211,6 @@ impl NodeMerge {
         for k in roots.iter().copied().chain(keys) {
             groups.entry(ident(views, k)).or_default().insert(k);
         }
-        let repos = repos_of(views);
         let mut out = NodeMerge { rep: HashMap::new(), marks: HashMap::new() };
         for (i, keys) in groups.values().enumerate() {
             deadline.tick(i)?;
@@ -207,10 +220,8 @@ impl NodeMerge {
             if peers(views, rep.0).len() < 2 {
                 continue;
             }
-            let items: Vec<RefItem<()>> = keys.iter().map(|&(vi, n)| ref_item(views, vi, n, ())).collect();
-            let versions = collapse(&repos, items);
-            let in_: BTreeSet<usize> = versions.iter().flat_map(|c| c.in_.iter().copied()).collect();
-            let changed = versions.iter().any(|c| c.changed);
+            let in_: BTreeSet<usize> = keys.iter().map(|&(vi, _)| vi).collect();
+            let changed = symbol_changed(views, rep.0, rep.1);
             out.marks.insert(rep, RefMark { in_: in_.into_iter().collect(), changed, peers: peers(views, rep.0) });
         }
         Ok(out)

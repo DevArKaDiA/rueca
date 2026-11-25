@@ -25,6 +25,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Org scenarios** | "Does it still find the code in a store of many repositories, and of one repository at two commits?" (RFC 0005 §5–§6) | reported; paired vs BM25 with MDE (not a language gate) |
 | **Configuration** (RFC 0003 §3.3) | "Which keys exist, who reads this env var, who sets it?" | key recall, span accuracy, bridge precision / recall |
 | **Service** (RFC 0008 §8.2–§8.3) | "Does `rueca serve` answer the organization suite over HTTP exactly as `rueca query` does, and how fast?" | reported (differential n/n, time to ready, p50 / p95) |
+| **Multi-step** (RFC 0009 §8, experimental code mode) | "How many tokens does a multi-step question cost as tool calls, as one code-mode script, and with cbm?" | reported; RFC 0009's per-language graduation gate |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
 the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust}/` and the
@@ -523,12 +524,17 @@ checkout that only adds a language, or the CI regression check that runs
 only the Rueca arm, reproduces every other number without re-running it,
 and the report lists what was carried, from which run (date, machine).
 Local outputs always win over carried ones. Tokens per correct answer
-(efficiency) is the exception in one direction: a language whose Rueca rows
-were carried keeps its published entry whole, because the compact carried
-rows cannot reproduce it and a partial local recomputation (say, only the
-baseline arms re-run) would misreport it. Delete stale local runs of
-languages you did not mean to re-measure (`rueca-bench clean --runs <arm>`,
-or the files under `bench/.cache/runs/{s1,s3}/<arm>/`) before `report`.
+(efficiency) pairs Rueca and cbm on the same queries and is recomputed from
+the rows at hand, local or carried: carried S1 rows keep their efficiency
+record (`e`) and carried S3 rows the tokens an agent reads (`ta`, `lta`),
+so re-running one arm of one suite (say, only the Rueca arm of S3) rescores
+it against the published rows of the other arm. A part of a language's
+entry (`search` from S1, `trace` / `lookup` / `raw` from the gated S3 sets)
+keeps its published value only when some carried row behind it lacks those
+counts (a publication older than them); the entry then lists it under
+`carried` and the report says so. Delete stale local runs of languages you
+did not mean to re-measure (`rueca-bench clean --runs <arm>`, or the files
+under `bench/.cache/runs/{s1,s3}/<arm>/`) before `report`.
 
 ## Scorecard (RFC 0004 §5–§9)
 
@@ -1108,6 +1114,119 @@ of the language's gated S1 instances and S3 repository sets (`search_symbols`,
 included, so this overstates an MCP session). **Index throughput**: files
 per second of the health index, reported.
 
+### Code mode (RFC 0009, experimental) and the multi-step suite (`multistep/`)
+
+Code mode is off unless asked for, so the arms above are unaffected.
+`execute` runs through the same interface as the other tools:
+
+```sh
+RUECA_EXPERIMENTAL_CODE_MODE=1 $RUECA_BIN query execute '{"code": "<script>"}' --root <root> --store <dir> [--text]
+RUECA_EXPERIMENTAL_CODE_MODE=1 $RUECA_BIN query execute '{"language": "starlark"}' --code-file task.star --root <root> --store <dir>
+```
+
+(`--code-file FILE|-` reads `code` from a file or stdin; `--text` prints
+what a model reads.) Starlark needs a binary built with `--features
+code-mode-starlark`; the default build answers `language: "starlark"`
+with an error. With `RUECA_CODE_MODE_TIMING=1` the JSON result gains
+`timing: {"total_us", "engine_us"}` (the whole `execute` and the sum of its
+engine calls, both measured inside the process). Without the variable the
+answer is deterministic. `docs/tools.md` ("Experimental: code mode") has
+the response and the limits.
+
+**Multi-step efficiency** (RFC 0009 §8, `rueca_bench/multistep/`). 25
+multi-step questions over pinned inputs the bench already has, each
+answered four ways: its reference **tool-call plan** (`plans.py`: the
+calls a competent agent makes, later calls built from what the earlier
+compact text answers said, with sensible `limit`s, `labels` and one depth-2
+`trace` where that answers the question), its reference **JavaScript** and
+**Starlark** scripts run once through `execute` (`multistep/scripts/<id>.js`,
+`.star`), and a reference **cbm** plan (`cbm_plans.py`: one `query_graph`
+Cypher query when cbm's subset can express the join) where cbm can express
+the task at all.
+
+- **Corpora** (`corpora.py`): the S3 repositories `flask`, `requests` and
+  `hono` at their `[[s3.repos]]` commits; the Flask cross-repository group
+  of `crossrepo.GROUPS` (Flask with Click, Jinja and Werkzeug) as one
+  organization; the S2 group `ollama` of `contracts.GROUPS` (the Go server
+  and its Python and JavaScript clients) as one organization; the
+  multi-ref scenario (`[multiref] instance`: base commit plus the fix
+  commit as a ref). Checkouts go to `.cache/work/ms-*`, stores to
+  `.cache/multistep/<corpus>/store` (re-indexed only when the members or
+  the binary change).
+- **Gold** is derived mechanically (`derive.py`) from existing gold, copied
+  into `multistep/inputs.json` by `rueca-bench multistep gold --extract`:
+  the S3 call graphs, the cross-repository labeler's *uses*
+  (`crossrepo.label_python`), the S2 gold pairs and the multi-ref
+  `collapse_gold` classes. `multistep/gold.json` holds every answer;
+  `tests/test_multistep.py` re-derives it from `inputs.json` (no corpora
+  needed) and, when the bench cache holds the S3 gold, re-extracts the S3
+  inputs and compares.
+- **Tasks** (`tasks.py`): 2-hop callers and an exactly-2-hop count,
+  callers ∩ callers and callees ∩ callees, file outline → per-symbol caller
+  counts (all methods of a class, the three most called functions of a
+  file, the uncalled ones), callees that call nothing, search → filter by
+  name → caller counts, the callee with the most callers, callers in a
+  directory, callers of a library function / class from another
+  repository, routes called by both clients, by one and not the other, the
+  OpenAPI operations a client calls, the functions that differ between two
+  refs; and five where code mode is not expected to win (one call answers
+  them: direct callers, callers outside a file, a depth-2 trace, the
+  organization's dependencies, a route's handlers). Each has an
+  agent-facing statement (repository ids, files, refs, the exact answer
+  shape, no solution steps) that the fluency probe reuses. Answers are
+  compared exactly (sets, ordered lists, integers, objects).
+- **Measured per arm**: tokens **read** (cl100k_base) — plans and cbm: every
+  tool answer's text as the agent receives it; code mode: the script source
+  plus `execute`'s text result (or its error line) — with `describe_api`'s
+  text (read once per session) reported apart and amortised over the suite;
+  tokens **written** (tool-call arguments as JSON; `execute`'s arguments with
+  the script); round trips (code mode: one `execute`; its engine calls
+  apart); correctness; wall time (each `rueca query` process opens the
+  store, so a plan pays that per call: the wall column favours code mode);
+  `execute` overhead (`total_us − engine_us`, median and p95); limits hit
+  (truncated, partial, timeouts, errors). Headline: **tokens read per
+  correct answer**, per arm, by expectation, by task kind and per task, plus
+  the tasks every arm answered correctly (paired).
+- **Gate** (RFC 0009 §8, per language): at least 40% fewer tokens read per
+  correct answer than the tool-call plans, no task correct under the plans
+  incorrect in that language, median `execute` overhead under 20 ms (also
+  shown with `describe_api` amortised).
+
+```sh
+cargo build --release -p rueca --no-default-features --features code-mode-starlark   # lexical only (no llama.cpp); enough for this suite
+export RUECA_BIN=$CARGO_TARGET_DIR/release/rueca           # or target/release/rueca
+uv run --project bench rueca-bench multistep run [--arm plan,js,starlark,cbm] [--only ms01 ...]
+uv run --project bench rueca-bench multistep report         # docs/bench/multistep-results.md from bench/results/multistep.json
+uv run --project bench rueca-bench multistep gold [--extract]   # print (and with --extract re-derive) the gold answers
+```
+
+`run` needs the S3 gold of `flask`, `requests` and `hono` (`rueca-bench
+setup`) only for `gold --extract`; the run itself reads the committed
+`inputs.json`. It clones the ollama group on first use (network, three
+small shallow clones). Results: `bench/results/multistep.json` (one record
+per task and arm) and `docs/bench/multistep-results.md`.
+
+**Probe runner** (for RFC 0009 phase 3's fluency probe):
+
+```sh
+uv run --project bench rueca-bench multistep tasks                       # JSON: id, kind, corpus, expect, answer shape, statement
+uv run --project bench rueca-bench multistep describe-api --language js --out api-js.txt
+uv run --project bench rueca-bench multistep probe --task ms17 --language starlark --script attempt.star
+```
+
+`probe` runs the script unchanged (`execute` with its defaults; `language`
+only for Starlark) against the task's corpus and prints one JSON line:
+`{task, language, correct, error (the execute error line, else null),
+result_preview, script_tokens, result_tokens, calls (engine calls),
+truncated}`.
+
+The phase 3 probe itself (10 tasks × 2 languages, one fresh model per
+cell given only the statement and `describe_api`) is committed in
+`multistep/probe/`: its protocol (`README.md`), the prompt template, the
+model-written scripts unchanged and the runner's output lines.
+`multistep report` adds them to `docs/bench/multistep-results.md`
+(*Fluency probe*); the reading is in RFC 0009 §14.
+
 ### Efficiency — tokens per correct answer (RFC 0005 §8)
 
 Measured with tiktoken `cl100k_base` on **what an agent reads**: Rueca's
@@ -1361,11 +1480,12 @@ snapshots). Queries: every changed / added / removed function name and a
 fixed sample of unchanged ones, each a `search_symbols` with `ref: [base,
 fix]` against the two single-ref answers (`ref: base`, `ref: fix`: the
 uncollapsed baseline, in tokens); `score_collapse` counts collapsed
-identical symbols, `in` lists and `changed` flags. Rueca compares versions
-by file blob, so an unchanged callable of a changed file comes back once
-per ref and flagged: it is counted apart (`changed_same_file`), not as a
-false positive. Trace collapse needs per-commit call-graph gold and is not
-scored yet.
+identical symbols, `in` lists and `changed` flags, matching items to gold
+by path and file-local name (`local`). Rueca compared versions by file
+blob until RFC 0009 §14.6, so an unchanged callable of a changed file came
+back flagged; it is counted apart (`changed_same_file`, 0 since `changed`
+compares each symbol's own text), not as a false positive. Trace collapse
+needs per-commit call-graph gold and is not scored yet.
 
 ### Cross-service edges (S2, RFC 0004 §4, `contracts.py`)
 

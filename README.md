@@ -299,6 +299,8 @@ claude mcp add --transport http rueca https://rueca.acme.internal/mcp --header "
   "headers": { "Authorization": "Bearer ${input:rueca-token}" } } } }
 ```
 
+**Code mode (experimental)**: `rueca mcp --experimental-code-mode` (or `RUECA_EXPERIMENTAL_CODE_MODE=1`) adds `execute` and `describe_api`, which run a short JavaScript script (Starlark only in a build with `--features code-mode-starlark`, off by default) against the tools and return only its answer ([details](docs/tools.md#experimental-code-mode)).
+
 (VS Code, `.vscode/mcp.json`; Cursor: `{"mcpServers": {"rueca": {"url":
 "https://rueca.acme.internal/mcp", "headers": {"Authorization": "Bearer
 …"}}}}`.)
@@ -423,8 +425,8 @@ scorecard (`stable` = every floor met; full tables in
 measured on what an agent reads, same queries as codebase-memory-mcp;
 target ≤ 50% of cbm): with the RFC 0005 responses, `search_symbols` costs
 0.33–0.89× cbm's tokens until the first gold hit (target met for Python,
-TS/JS, PHP and Java) and `trace` 0.88–1.74× cbm's tokens per true call
-edge (target not met; Rueca also returns more true edges). In an
+TS/JS, PHP and Java) and `trace` 0.48–1.74× cbm's tokens per true call
+edge (target met for Rust only; Rueca also returns more true edges). In an
 organization of 42 pinned repositories (120 gated issues), one ranking
 over the organization index weighed by repository routing keeps the right
 repository's file in the top 5 for 56.7% of the issues vs 66.7% when
@@ -485,6 +487,7 @@ More languages (Kotlin, Swift, Ruby, C#, …) follow the same gate.
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |
 | [`rueca-query`](crates/rueca-query) | the tools, organization scope |
 | [`rueca-mcp`](crates/rueca-mcp) | MCP server: its own protocol layer ([reference](docs/mcp-protocol.md)), stdio |
+| [`rueca-codemode`](crates/rueca-codemode) | experimental code mode: sandboxed script engines (QuickJS; Starlark opt-in) behind one trait ([RFC 0009](docs/rfcs/0009-code-mode.md)) |
 | [`rueca-embed`](crates/rueca-embed) | embedding presets, weights cache, llama.cpp runtime |
 | [`rueca-storage`](crates/rueca-storage) | object storage behind a `Storage` trait: `memory://`, `file://`, `s3://`, `gs://`, conditional writes |
 | [`rueca-service`](crates/rueca-service) | service store: publish, pull, organization generations, garbage collection |

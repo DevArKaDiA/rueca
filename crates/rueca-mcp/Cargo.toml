@@ -9,9 +9,16 @@ authors.workspace = true
 rust-version.workspace = true
 # The golden transcripts and their fixture are test data (about 1.4 MB): keep
 # them out of the published crate, with the test that replays them.
-exclude = ["tests/golden.rs", "tests/golden/*.json", "tests/fixtures/**"]
+exclude = ["tests/golden.rs", "tests/golden/*.json", "tests/fixtures/**", "tests/code_mode.rs", "tests/code_mode/**"]
+
+[features]
+# Starlark scripts in code mode (RFC 0009, experimental). Off by default:
+# `starlark` depends on crates with "unmaintained" RUSTSEC advisories that
+# the repository's `cargo deny` policy rejects. JavaScript is always built.
+code-mode-starlark = ["rueca-codemode/starlark"]
 
 [dependencies]
+rueca-codemode = { workspace = true, features = ["js"] }
 rueca-query.workspace = true
 rueca-index.workspace = true
 rueca-extract.workspace = true

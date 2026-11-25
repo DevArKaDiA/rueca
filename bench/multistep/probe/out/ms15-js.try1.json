@@ -1,0 +1,1 @@
+{"task": "ms15", "language": "js", "correct": true, "error": null, "result_preview": "[\"src/utils/jwt/types.ts#JwtTokenInvalid.constructor\", 4]", "script_tokens": 1029, "result_tokens": 33, "calls": 50, "truncated": false}

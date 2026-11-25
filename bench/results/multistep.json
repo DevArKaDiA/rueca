@@ -1,0 +1,2077 @@
+{
+ "summary": {
+  "plan": {
+   "tasks": 25,
+   "correct": 18,
+   "read": 49377,
+   "written": 4565,
+   "calls": 143,
+   "read_per_correct": 2743.1666666666665,
+   "read_per_correct_amortised": null,
+   "written_per_correct": 253.61111111111111,
+   "median_seconds": 0.046847540070302784,
+   "overhead_ms_median": null,
+   "overhead_ms_p95": null,
+   "truncated": [],
+   "partial": [],
+   "timeouts": [],
+   "errors": [],
+   "describe_api_tokens": null,
+   "suite_tasks": 25
+  },
+  "js": {
+   "tasks": 25,
+   "correct": 18,
+   "read": 7720,
+   "written": 6333,
+   "calls": 25,
+   "read_per_correct": 428.8888888888889,
+   "read_per_correct_amortised": 665.5555555555555,
+   "written_per_correct": 351.8333333333333,
+   "median_seconds": 0.017741583986207843,
+   "overhead_ms_median": 0.629,
+   "overhead_ms_p95": 1.204,
+   "truncated": [],
+   "partial": [],
+   "timeouts": [],
+   "errors": [],
+   "describe_api_tokens": 4260,
+   "suite_tasks": 25
+  },
+  "starlark": {
+   "tasks": 25,
+   "correct": 18,
+   "read": 7812,
+   "written": 6969,
+   "calls": 25,
+   "read_per_correct": 434.0,
+   "read_per_correct_amortised": 675.0,
+   "written_per_correct": 387.1666666666667,
+   "median_seconds": 0.017760249960701913,
+   "overhead_ms_median": 0.334,
+   "overhead_ms_p95": 0.646,
+   "truncated": [],
+   "partial": [],
+   "timeouts": [],
+   "errors": [],
+   "describe_api_tokens": 4338,
+   "suite_tasks": 25
+  },
+  "cbm": {
+   "tasks": 16,
+   "correct": 4,
+   "read": 8685,
+   "written": 1376,
+   "calls": 18,
+   "read_per_correct": 2171.25,
+   "read_per_correct_amortised": null,
+   "written_per_correct": 344.0,
+   "median_seconds": 0.4271491249965038,
+   "overhead_ms_median": null,
+   "overhead_ms_p95": null,
+   "truncated": [],
+   "partial": [],
+   "timeouts": [],
+   "errors": [],
+   "describe_api_tokens": null,
+   "suite_tasks": 25
+  }
+ },
+ "paired": {
+  "tasks": [
+   "ms02",
+   "ms03",
+   "ms04",
+   "ms10"
+  ],
+  "read": {
+   "plan": 1307,
+   "js": 1116,
+   "starlark": 1161,
+   "cbm": 446
+  },
+  "calls": {
+   "plan": 6,
+   "js": 4,
+   "starlark": 4,
+   "cbm": 4
+  }
+ },
+ "by_expect": {
+  "single": {
+   "plan": {
+    "tasks": 5,
+    "correct": 5,
+    "read": 1653,
+    "written": 95,
+    "calls": 5,
+    "read_per_correct": 330.6,
+    "read_per_correct_amortised": null,
+    "written_per_correct": 19.0,
+    "median_seconds": 0.019118416996207088,
+    "overhead_ms_median": null,
+    "overhead_ms_p95": null,
+    "truncated": [],
+    "partial": [],
+    "timeouts": [],
+    "errors": [],
+    "describe_api_tokens": null,
+    "suite_tasks": 0
+   },
+   "js": {
+    "tasks": 5,
+    "correct": 5,
+    "read": 1316,
+    "written": 901,
+    "calls": 5,
+    "read_per_correct": 263.2,
+    "read_per_correct_amortised": null,
+    "written_per_correct": 180.2,
+    "median_seconds": 0.015119792020414025,
+    "overhead_ms_median": 0.465,
+    "overhead_ms_p95": 1.032,
+    "truncated": [],
+    "partial": [],
+    "timeouts": [],
+    "errors": [],
+    "describe_api_tokens": null,
+    "suite_tasks": 0
+   },
+   "starlark": {
+    "tasks": 5,
+    "correct": 5,
+    "read": 1354,
+    "written": 1034,
+    "calls": 5,
+    "read_per_correct": 270.8,
+    "read_per_correct_amortised": null,
+    "written_per_correct": 206.8,
+    "median_seconds": 0.012469207984395325,
+    "overhead_ms_median": 0.272,
+    "overhead_ms_p95": 0.791,
+    "truncated": [],
+    "partial": [],
+    "timeouts": [],
+    "errors": [],
+    "describe_api_tokens": null,
+    "suite_tasks": 0
+   },
+   "cbm": {
+    "tasks": 3,
+    "correct": 2,
+    "read": 657,
+    "written": 252,
+    "calls": 4,
+    "read_per_correct": 328.5,
+    "read_per_correct_amortised": null,
+    "written_per_correct": 126.0,
+    "median_seconds": 0.427919874957297,
+    "overhead_ms_median": null,
+    "overhead_ms_p95": null,
+    "truncated": [],
+    "partial": [],
+    "timeouts": [],
+    "errors": [],
+    "describe_api_tokens": null,
+    "suite_tasks": 0
+   }
+  },
+  "win": {
+   "plan": {
+    "tasks": 20,
+    "correct": 13,
+    "read": 47724,
+    "written": 4470,
+    "calls": 138,
+    "read_per_correct": 3671.076923076923,
+    "read_per_correct_amortised": null,
+    "written_per_correct": 343.84615384615387,
+    "median_seconds": 0.05588547952356748,
+    "overhead_ms_median": null,
+    "overhead_ms_p95": null,
+    "truncated": [],
+    "partial": [],
+    "timeouts": [],
+    "errors": [],
+    "describe_api_tokens": null,
+    "suite_tasks": 0
+   },
+   "js": {
+    "tasks": 20,
+    "correct": 13,
+    "read": 6404,
+    "written": 5432,
+    "calls": 20,
+    "read_per_correct": 492.61538461538464,
+    "read_per_correct_amortised": null,
+    "written_per_correct": 417.84615384615387,
+    "median_seconds": 0.017970208486076444,
+    "overhead_ms_median": 0.653,
+    "overhead_ms_p95": 1.204,
+    "truncated": [],
+    "partial": [],
+    "timeouts": [],
+    "errors": [],
+    "describe_api_tokens": null,
+    "suite_tasks": 0
+   },
+   "starlark": {
+    "tasks": 20,
+    "correct": 13,
+    "read": 6458,
+    "written": 5935,
+    "calls": 20,
+    "read_per_correct": 496.7692307692308,
+    "read_per_correct_amortised": null,
+    "written_per_correct": 456.53846153846155,
+    "median_seconds": 0.017796770989662036,
+    "overhead_ms_median": 0.34199999999999997,
+    "overhead_ms_p95": 0.471,
+    "truncated": [],
+    "partial": [],
+    "timeouts": [],
+    "errors": [],
+    "describe_api_tokens": null,
+    "suite_tasks": 0
+   },
+   "cbm": {
+    "tasks": 13,
+    "correct": 2,
+    "read": 8028,
+    "written": 1124,
+    "calls": 14,
+    "read_per_correct": 4014.0,
+    "read_per_correct_amortised": null,
+    "written_per_correct": 562.0,
+    "median_seconds": 0.42711841699201614,
+    "overhead_ms_median": null,
+    "overhead_ms_p95": null,
+    "truncated": [],
+    "partial": [],
+    "timeouts": [],
+    "errors": [],
+    "describe_api_tokens": null,
+    "suite_tasks": 0
+   }
+  }
+ },
+ "gates": {
+  "js": {
+   "reduction": 0.8436519027077384,
+   "reduction_amortised": 0.7573769163780708,
+   "regressed": [],
+   "overhead_ms_median": 0.629,
+   "checks": {
+    "tokens": true,
+    "tokens_amortised": true,
+    "no_regression": true,
+    "overhead": true
+   },
+   "pass": true
+  },
+  "starlark": {
+   "reduction": 0.8417886870405249,
+   "reduction_amortised": 0.7539340178625675,
+   "regressed": [],
+   "overhead_ms_median": 0.334,
+   "checks": {
+    "tokens": true,
+    "tokens_amortised": true,
+    "no_regression": true,
+    "overhead": true
+   },
+   "pass": true
+  }
+ },
+ "describe_api_tokens": {
+  "js": 4260,
+  "starlark": 4338
+ },
+ "cbm_skipped": {
+  "ms17": "cbm indexes one project per repository and has no cross-project edges, queries or dependency view",
+  "ms18": "cbm indexes one project per repository and has no cross-project edges, queries or dependency view",
+  "ms19": "cbm indexes one project per repository and has no cross-project edges, queries or dependency view",
+  "ms20": "cbm indexes one project per repository and has no cross-project edges, queries or dependency view",
+  "ms21": "cbm has no service-contract model across projects (routes matched to the clients of other repositories)",
+  "ms22": "cbm has no service-contract model across projects (routes matched to the clients of other repositories)",
+  "ms23": "cbm has no service-contract model across projects (routes matched to the clients of other repositories)",
+  "ms24": "cbm has no service-contract model across projects (routes matched to the clients of other repositories)",
+  "ms25": "cbm indexes one working tree per project: no refs, no comparison of two commits"
+ },
+ "meta": {
+  "binary": "rueca 0.1.0-alpha.2",
+  "cbm": "codebase-memory-mcp 0.12.0",
+  "tasks": 25,
+  "arms": [
+   "plan",
+   "js",
+   "starlark",
+   "cbm"
+  ]
+ },
+ "records": [
+  {
+   "task": "ms01",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.dispatch_request",
+    "src/flask/app.py#Flask.do_teardown_appcontext",
+    "src/flask/app.py#Flask.do_teardown_request",
+    "src/flask/app.py#Flask.finalize_request",
+    "src/flask/app.py#Flask.full_dispatch_request",
+    "src/flask/app.py#Flask.handle_exception",
+    "src/flask/app.py#Flask.handle_http_exception",
+    "src/flask/app.py#Flask.handle_user_exception",
+    "src/flask/app.py#Flask.preprocess_request",
+    "src/flask/app.py#Flask.process_response",
+    "src/flask/app.py#Flask.update_template_context",
+    "src/flask/app.py#Flask.wsgi_app",
+    "src/flask/ctx.py#AppContext.pop",
+    "src/flask/ctx.py#RequestContext.pop",
+    "src/flask/ctx.py#copy_current_request_context.wrapper",
+    "src/flask/templating.py#_render",
+    "src/flask/templating.py#_stream",
+    "src/flask/views.py#MethodView.dispatch_request",
+    "src/flask/views.py#View.as_view.view"
+   ],
+   "read": 728,
+   "written": 28,
+   "calls": 1,
+   "seconds": 0.4924413329572417
+  },
+  {
+   "task": "ms01",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.dispatch_request",
+    "src/flask/app.py#Flask.do_teardown_appcontext",
+    "src/flask/app.py#Flask.do_teardown_request",
+    "src/flask/app.py#Flask.finalize_request",
+    "src/flask/app.py#Flask.full_dispatch_request",
+    "src/flask/app.py#Flask.handle_exception",
+    "src/flask/app.py#Flask.handle_http_exception",
+    "src/flask/app.py#Flask.handle_user_exception",
+    "src/flask/app.py#Flask.preprocess_request",
+    "src/flask/app.py#Flask.process_response",
+    "src/flask/app.py#Flask.update_template_context",
+    "src/flask/app.py#Flask.wsgi_app",
+    "src/flask/ctx.py#AppContext.pop",
+    "src/flask/ctx.py#RequestContext.pop",
+    "src/flask/ctx.py#copy_current_request_context.wrapper",
+    "src/flask/templating.py#_render",
+    "src/flask/templating.py#_stream",
+    "src/flask/views.py#MethodView.dispatch_request",
+    "src/flask/views.py#View.as_view.view"
+   ],
+   "read": 495,
+   "written": 286,
+   "calls": 1,
+   "seconds": 0.015119792020414025,
+   "engine_calls": 1,
+   "total_us": 4335,
+   "engine_us": 3303,
+   "script_tokens": 253,
+   "result_tokens": 242
+  },
+  {
+   "task": "ms01",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.dispatch_request",
+    "src/flask/app.py#Flask.do_teardown_appcontext",
+    "src/flask/app.py#Flask.do_teardown_request",
+    "src/flask/app.py#Flask.finalize_request",
+    "src/flask/app.py#Flask.full_dispatch_request",
+    "src/flask/app.py#Flask.handle_exception",
+    "src/flask/app.py#Flask.handle_http_exception",
+    "src/flask/app.py#Flask.handle_user_exception",
+    "src/flask/app.py#Flask.preprocess_request",
+    "src/flask/app.py#Flask.process_response",
+    "src/flask/app.py#Flask.update_template_context",
+    "src/flask/app.py#Flask.wsgi_app",
+    "src/flask/ctx.py#AppContext.pop",
+    "src/flask/ctx.py#RequestContext.pop",
+    "src/flask/ctx.py#copy_current_request_context.wrapper",
+    "src/flask/templating.py#_render",
+    "src/flask/templating.py#_stream",
+    "src/flask/views.py#MethodView.dispatch_request",
+    "src/flask/views.py#View.as_view.view"
+   ],
+   "read": 511,
+   "written": 329,
+   "calls": 1,
+   "seconds": 0.012469207984395325,
+   "engine_calls": 1,
+   "total_us": 4044,
+   "engine_us": 3253,
+   "script_tokens": 269,
+   "result_tokens": 242
+  },
+  {
+   "task": "ms01",
+   "arm": "cbm",
+   "answer": [
+    "src/flask/app.py#Flask.dispatch_request",
+    "src/flask/app.py#Flask.do_teardown_appcontext",
+    "src/flask/app.py#Flask.do_teardown_request",
+    "src/flask/app.py#Flask.finalize_request",
+    "src/flask/app.py#Flask.full_dispatch_request",
+    "src/flask/app.py#Flask.handle_exception",
+    "src/flask/app.py#Flask.handle_http_exception",
+    "src/flask/app.py#Flask.handle_user_exception",
+    "src/flask/app.py#Flask.preprocess_request",
+    "src/flask/app.py#Flask.process_response",
+    "src/flask/app.py#Flask.update_template_context",
+    "src/flask/app.py#Flask.wsgi_app",
+    "src/flask/ctx.py#AppContext.pop",
+    "src/flask/ctx.py#RequestContext.pop",
+    "src/flask/views.py#MethodView.dispatch_request"
+   ],
+   "read": 406,
+   "written": 129,
+   "calls": 2,
+   "seconds": 0.851615458028391,
+   "correct": false
+  },
+  {
+   "task": "ms02",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.handle_exception",
+    "src/flask/app.py#Flask.handle_http_exception",
+    "src/flask/app.py#Flask.handle_user_exception"
+   ],
+   "read": 590,
+   "written": 49,
+   "calls": 2,
+   "seconds": 0.027631001023110002
+  },
+  {
+   "task": "ms02",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.handle_exception",
+    "src/flask/app.py#Flask.handle_http_exception",
+    "src/flask/app.py#Flask.handle_user_exception"
+   ],
+   "read": 284,
+   "written": 265,
+   "calls": 1,
+   "seconds": 0.013717000023461878,
+   "engine_calls": 2,
+   "total_us": 3897,
+   "engine_us": 3338,
+   "script_tokens": 230,
+   "result_tokens": 54
+  },
+  {
+   "task": "ms02",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.handle_exception",
+    "src/flask/app.py#Flask.handle_http_exception",
+    "src/flask/app.py#Flask.handle_user_exception"
+   ],
+   "read": 293,
+   "written": 302,
+   "calls": 1,
+   "seconds": 0.011752999969758093,
+   "engine_calls": 2,
+   "total_us": 3670,
+   "engine_us": 3343,
+   "script_tokens": 239,
+   "result_tokens": 54
+  },
+  {
+   "task": "ms02",
+   "arm": "cbm",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.handle_exception",
+    "src/flask/app.py#Flask.handle_http_exception",
+    "src/flask/app.py#Flask.handle_user_exception"
+   ],
+   "read": 105,
+   "written": 100,
+   "calls": 1,
+   "seconds": 0.42606729199178517
+  },
+  {
+   "task": "ms03",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.ensure_sync",
+    "src/flask/sansio/app.py#App._find_error_handler"
+   ],
+   "read": 350,
+   "written": 51,
+   "calls": 2,
+   "seconds": 0.018651666992809623
+  },
+  {
+   "task": "ms03",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.ensure_sync",
+    "src/flask/sansio/app.py#App._find_error_handler"
+   ],
+   "read": 277,
+   "written": 267,
+   "calls": 1,
+   "seconds": 0.011380457959603518,
+   "engine_calls": 2,
+   "total_us": 3759,
+   "engine_us": 3260,
+   "script_tokens": 232,
+   "result_tokens": 45
+  },
+  {
+   "task": "ms03",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.ensure_sync",
+    "src/flask/sansio/app.py#App._find_error_handler"
+   ],
+   "read": 286,
+   "written": 304,
+   "calls": 1,
+   "seconds": 0.011396625021006912,
+   "engine_calls": 2,
+   "total_us": 3263,
+   "engine_us": 2985,
+   "script_tokens": 241,
+   "result_tokens": 45
+  },
+  {
+   "task": "ms03",
+   "arm": "cbm",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.ensure_sync",
+    "src/flask/sansio/app.py#App._find_error_handler"
+   ],
+   "read": 90,
+   "written": 97,
+   "calls": 1,
+   "seconds": 0.42711841699201614
+  },
+  {
+   "task": "ms04",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.wsgi_app"
+   ],
+   "read": 71,
+   "written": 24,
+   "calls": 1,
+   "seconds": 0.009931708977092057
+  },
+  {
+   "task": "ms04",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.wsgi_app"
+   ],
+   "read": 225,
+   "written": 224,
+   "calls": 1,
+   "seconds": 0.012144541018642485,
+   "engine_calls": 1,
+   "total_us": 3510,
+   "engine_us": 3045,
+   "script_tokens": 194,
+   "result_tokens": 31
+  },
+  {
+   "task": "ms04",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.wsgi_app"
+   ],
+   "read": 238,
+   "written": 265,
+   "calls": 1,
+   "seconds": 0.011189750046469271,
+   "engine_calls": 1,
+   "total_us": 3245,
+   "engine_us": 2966,
+   "script_tokens": 207,
+   "result_tokens": 31
+  },
+  {
+   "task": "ms04",
+   "arm": "cbm",
+   "correct": true,
+   "answer": [
+    "src/flask/app.py#Flask.wsgi_app"
+   ],
+   "read": 64,
+   "written": 61,
+   "calls": 1,
+   "seconds": 0.4237750840256922
+  },
+  {
+   "task": "ms05",
+   "arm": "plan",
+   "answer": {
+    "src/flask/ctx.py#RequestContext.__init__": 1,
+    "src/flask/ctx.py#RequestContext.copy": 0,
+    "src/flask/ctx.py#RequestContext.match_request": 1,
+    "src/flask/ctx.py#RequestContext.session": 0,
+    "src/flask/ctx.py#RequestContext.push": 2,
+    "src/flask/ctx.py#RequestContext.pop": 2,
+    "src/flask/ctx.py#RequestContext.__enter__": 0,
+    "src/flask/ctx.py#RequestContext.__exit__": 0,
+    "src/flask/ctx.py#RequestContext.__repr__": 0
+   },
+   "read": 1602,
+   "written": 313,
+   "calls": 10,
+   "seconds": 0.09951170795829967,
+   "correct": false
+  },
+  {
+   "task": "ms05",
+   "arm": "js",
+   "answer": {
+    "src/flask/ctx.py#RequestContext.__init__": 1,
+    "src/flask/ctx.py#RequestContext.copy": 0,
+    "src/flask/ctx.py#RequestContext.match_request": 1,
+    "src/flask/ctx.py#RequestContext.session": 0,
+    "src/flask/ctx.py#RequestContext.push": 2,
+    "src/flask/ctx.py#RequestContext.pop": 2,
+    "src/flask/ctx.py#RequestContext.__enter__": 0,
+    "src/flask/ctx.py#RequestContext.__exit__": 0,
+    "src/flask/ctx.py#RequestContext.__repr__": 0
+   },
+   "read": 415,
+   "written": 312,
+   "calls": 1,
+   "seconds": 0.01229149999562651,
+   "engine_calls": 10,
+   "total_us": 4252,
+   "engine_us": 3587,
+   "script_tokens": 270,
+   "result_tokens": 145,
+   "correct": false
+  },
+  {
+   "task": "ms05",
+   "arm": "starlark",
+   "answer": {
+    "src/flask/ctx.py#RequestContext.__init__": 1,
+    "src/flask/ctx.py#RequestContext.copy": 0,
+    "src/flask/ctx.py#RequestContext.match_request": 1,
+    "src/flask/ctx.py#RequestContext.session": 0,
+    "src/flask/ctx.py#RequestContext.push": 2,
+    "src/flask/ctx.py#RequestContext.pop": 2,
+    "src/flask/ctx.py#RequestContext.__enter__": 0,
+    "src/flask/ctx.py#RequestContext.__exit__": 0,
+    "src/flask/ctx.py#RequestContext.__repr__": 0
+   },
+   "read": 432,
+   "written": 358,
+   "calls": 1,
+   "seconds": 0.011047750012949109,
+   "engine_calls": 10,
+   "total_us": 3480,
+   "engine_us": 3143,
+   "script_tokens": 287,
+   "result_tokens": 145,
+   "correct": false
+  },
+  {
+   "task": "ms05",
+   "arm": "cbm",
+   "answer": {
+    "src/flask/ctx.py#RequestContext.__enter__": 0,
+    "src/flask/ctx.py#RequestContext.__exit__": 0,
+    "src/flask/ctx.py#RequestContext.__init__": 0,
+    "src/flask/ctx.py#RequestContext.__repr__": 0,
+    "src/flask/ctx.py#RequestContext.copy": 0,
+    "src/flask/ctx.py#RequestContext.match_request": 1,
+    "src/flask/ctx.py#RequestContext.pop": 1,
+    "src/flask/ctx.py#RequestContext.push": 1,
+    "src/flask/ctx.py#RequestContext.session": 0
+   },
+   "read": 240,
+   "written": 83,
+   "calls": 1,
+   "seconds": 0.42649783397791907,
+   "correct": false
+  },
+  {
+   "task": "ms06",
+   "arm": "plan",
+   "answer": [
+    "src/flask/sansio/app.py#App.should_ignore_error"
+   ],
+   "read": 940,
+   "written": 228,
+   "calls": 7,
+   "seconds": 0.06833129201550037,
+   "correct": false
+  },
+  {
+   "task": "ms06",
+   "arm": "js",
+   "answer": [
+    "src/flask/sansio/app.py#App.should_ignore_error"
+   ],
+   "read": 296,
+   "written": 301,
+   "calls": 1,
+   "seconds": 0.012535875022877008,
+   "engine_calls": 7,
+   "total_us": 4160,
+   "engine_us": 3572,
+   "script_tokens": 263,
+   "result_tokens": 33,
+   "correct": false
+  },
+  {
+   "task": "ms06",
+   "arm": "starlark",
+   "answer": [
+    "src/flask/sansio/app.py#App.should_ignore_error"
+   ],
+   "read": 301,
+   "written": 336,
+   "calls": 1,
+   "seconds": 0.011652375047560781,
+   "engine_calls": 7,
+   "total_us": 3857,
+   "engine_us": 3523,
+   "script_tokens": 268,
+   "result_tokens": 33,
+   "correct": false
+  },
+  {
+   "task": "ms06",
+   "arm": "cbm",
+   "answer": [
+    "src/flask/app.py#Flask.request_context",
+    "src/flask/ctx.py#_AppCtxGlobals.get",
+    "src/flask/sansio/app.py#App.should_ignore_error"
+   ],
+   "read": 345,
+   "written": 80,
+   "calls": 1,
+   "seconds": 0.4256743330042809,
+   "correct": false
+  },
+  {
+   "task": "ms07",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    [
+     "src/requests/cookies.py#cookiejar_from_dict",
+     6
+    ],
+    [
+     "src/requests/cookies.py#extract_cookies_to_jar",
+     4
+    ],
+    [
+     "src/requests/cookies.py#RequestsCookieJar.set_cookie",
+     3
+    ]
+   ],
+   "read": 4975,
+   "written": 1699,
+   "calls": 51,
+   "seconds": 0.46272425685310736
+  },
+  {
+   "task": "ms07",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    [
+     "src/requests/cookies.py#cookiejar_from_dict",
+     6
+    ],
+    [
+     "src/requests/cookies.py#extract_cookies_to_jar",
+     4
+    ],
+    [
+     "src/requests/cookies.py#RequestsCookieJar.set_cookie",
+     3
+    ]
+   ],
+   "read": 386,
+   "written": 368,
+   "calls": 1,
+   "seconds": 0.014799750002566725,
+   "engine_calls": 51,
+   "total_us": 6455,
+   "engine_us": 5111,
+   "script_tokens": 320,
+   "result_tokens": 66
+  },
+  {
+   "task": "ms07",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    [
+     "src/requests/cookies.py#cookiejar_from_dict",
+     6
+    ],
+    [
+     "src/requests/cookies.py#extract_cookies_to_jar",
+     4
+    ],
+    [
+     "src/requests/cookies.py#RequestsCookieJar.set_cookie",
+     3
+    ]
+   ],
+   "read": 387,
+   "written": 404,
+   "calls": 1,
+   "seconds": 0.01382195804035291,
+   "engine_calls": 51,
+   "total_us": 5891,
+   "engine_us": 5245,
+   "script_tokens": 321,
+   "result_tokens": 66
+  },
+  {
+   "task": "ms07",
+   "arm": "cbm",
+   "answer": [
+    [
+     "src/requests/cookies.py#cookiejar_from_dict",
+     6
+    ],
+    [
+     "src/requests/cookies.py#extract_cookies_to_jar",
+     4
+    ],
+    [
+     "src/requests/cookies.py#create_cookie",
+     3
+    ]
+   ],
+   "read": 3626,
+   "written": 63,
+   "calls": 1,
+   "seconds": 0.42643883399432525,
+   "correct": false
+  },
+  {
+   "task": "ms08",
+   "arm": "plan",
+   "answer": [
+    "src/requests/auth.py#AuthBase.__call__",
+    "src/requests/auth.py#HTTPBasicAuth.__call__",
+    "src/requests/auth.py#HTTPBasicAuth.__eq__",
+    "src/requests/auth.py#HTTPBasicAuth.__ne__",
+    "src/requests/auth.py#HTTPDigestAuth.__call__",
+    "src/requests/auth.py#HTTPDigestAuth.__eq__",
+    "src/requests/auth.py#HTTPDigestAuth.__init__",
+    "src/requests/auth.py#HTTPDigestAuth.__ne__",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.md5_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha256_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha512_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.handle_401",
+    "src/requests/auth.py#HTTPDigestAuth.handle_redirect",
+    "src/requests/auth.py#HTTPProxyAuth.__call__"
+   ],
+   "read": 1987,
+   "written": 708,
+   "calls": 21,
+   "seconds": 0.19483591098105535,
+   "correct": false
+  },
+  {
+   "task": "ms08",
+   "arm": "js",
+   "answer": [
+    "src/requests/auth.py#AuthBase.__call__",
+    "src/requests/auth.py#HTTPBasicAuth.__call__",
+    "src/requests/auth.py#HTTPBasicAuth.__eq__",
+    "src/requests/auth.py#HTTPBasicAuth.__ne__",
+    "src/requests/auth.py#HTTPDigestAuth.__call__",
+    "src/requests/auth.py#HTTPDigestAuth.__eq__",
+    "src/requests/auth.py#HTTPDigestAuth.__init__",
+    "src/requests/auth.py#HTTPDigestAuth.__ne__",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.md5_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha256_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha512_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.handle_401",
+    "src/requests/auth.py#HTTPDigestAuth.handle_redirect",
+    "src/requests/auth.py#HTTPProxyAuth.__call__"
+   ],
+   "read": 508,
+   "written": 324,
+   "calls": 1,
+   "seconds": 0.013269541959743947,
+   "engine_calls": 21,
+   "total_us": 4577,
+   "engine_us": 3707,
+   "script_tokens": 281,
+   "result_tokens": 227,
+   "correct": false
+  },
+  {
+   "task": "ms08",
+   "arm": "starlark",
+   "answer": [
+    "src/requests/auth.py#AuthBase.__call__",
+    "src/requests/auth.py#HTTPBasicAuth.__call__",
+    "src/requests/auth.py#HTTPBasicAuth.__eq__",
+    "src/requests/auth.py#HTTPBasicAuth.__ne__",
+    "src/requests/auth.py#HTTPDigestAuth.__call__",
+    "src/requests/auth.py#HTTPDigestAuth.__eq__",
+    "src/requests/auth.py#HTTPDigestAuth.__init__",
+    "src/requests/auth.py#HTTPDigestAuth.__ne__",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.md5_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha256_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha512_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.build_digest_header.sha_utf8",
+    "src/requests/auth.py#HTTPDigestAuth.handle_401",
+    "src/requests/auth.py#HTTPDigestAuth.handle_redirect",
+    "src/requests/auth.py#HTTPProxyAuth.__call__"
+   ],
+   "read": 515,
+   "written": 361,
+   "calls": 1,
+   "seconds": 0.011938125011511147,
+   "engine_calls": 21,
+   "total_us": 3978,
+   "engine_us": 3559,
+   "script_tokens": 288,
+   "result_tokens": 227,
+   "correct": false
+  },
+  {
+   "task": "ms08",
+   "arm": "cbm",
+   "answer": [
+    "src/requests/auth.py#AuthBase.__call__",
+    "src/requests/auth.py#HTTPBasicAuth.__call__",
+    "src/requests/auth.py#HTTPBasicAuth.__eq__",
+    "src/requests/auth.py#HTTPBasicAuth.__init__",
+    "src/requests/auth.py#HTTPBasicAuth.__ne__",
+    "src/requests/auth.py#HTTPDigestAuth.__call__",
+    "src/requests/auth.py#HTTPDigestAuth.__eq__",
+    "src/requests/auth.py#HTTPDigestAuth.__init__",
+    "src/requests/auth.py#HTTPDigestAuth.__ne__",
+    "src/requests/auth.py#HTTPDigestAuth.handle_401",
+    "src/requests/auth.py#HTTPDigestAuth.handle_redirect",
+    "src/requests/auth.py#HTTPProxyAuth.__call__"
+   ],
+   "read": 919,
+   "written": 62,
+   "calls": 1,
+   "seconds": 0.4277724170242436,
+   "correct": false
+  },
+  {
+   "task": "ms09",
+   "arm": "plan",
+   "correct": true,
+   "answer": 7,
+   "read": 518,
+   "written": 26,
+   "calls": 1,
+   "seconds": 0.009274665964767337
+  },
+  {
+   "task": "ms09",
+   "arm": "js",
+   "correct": true,
+   "answer": 7,
+   "read": 297,
+   "written": 315,
+   "calls": 1,
+   "seconds": 0.012194874987471849,
+   "engine_calls": 1,
+   "total_us": 3300,
+   "engine_us": 2796,
+   "script_tokens": 277,
+   "result_tokens": 20
+  },
+  {
+   "task": "ms09",
+   "arm": "starlark",
+   "correct": true,
+   "answer": 7,
+   "read": 319,
+   "written": 363,
+   "calls": 1,
+   "seconds": 0.009907208033837378,
+   "engine_calls": 1,
+   "total_us": 2700,
+   "engine_us": 2428,
+   "script_tokens": 299,
+   "result_tokens": 20
+  },
+  {
+   "task": "ms09",
+   "arm": "cbm",
+   "read": 688,
+   "written": 127,
+   "calls": 2,
+   "seconds": 0.8493602079688571,
+   "correct": false
+  },
+  {
+   "task": "ms10",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "src/requests/auth.py#_basic_auth_str",
+    "src/requests/cookies.py#MockRequest.get_full_url",
+    "src/requests/models.py#PreparedRequest.prepare_headers",
+    "src/requests/models.py#PreparedRequest.prepare_method",
+    "src/requests/models.py#PreparedRequest.prepare_url",
+    "src/requests/sessions.py#SessionRedirectMixin.get_redirect_target",
+    "src/requests/sessions.py#SessionRedirectMixin.resolve_redirects"
+   ],
+   "read": 296,
+   "written": 32,
+   "calls": 1,
+   "seconds": 0.011656250047963113
+  },
+  {
+   "task": "ms10",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "src/requests/auth.py#_basic_auth_str",
+    "src/requests/cookies.py#MockRequest.get_full_url",
+    "src/requests/models.py#PreparedRequest.prepare_headers",
+    "src/requests/models.py#PreparedRequest.prepare_method",
+    "src/requests/models.py#PreparedRequest.prepare_url",
+    "src/requests/sessions.py#SessionRedirectMixin.get_redirect_target",
+    "src/requests/sessions.py#SessionRedirectMixin.resolve_redirects"
+   ],
+   "read": 330,
+   "written": 256,
+   "calls": 1,
+   "seconds": 0.011650416010525078,
+   "engine_calls": 1,
+   "total_us": 3474,
+   "engine_us": 2997,
+   "script_tokens": 223,
+   "result_tokens": 107
+  },
+  {
+   "task": "ms10",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "src/requests/auth.py#_basic_auth_str",
+    "src/requests/cookies.py#MockRequest.get_full_url",
+    "src/requests/models.py#PreparedRequest.prepare_headers",
+    "src/requests/models.py#PreparedRequest.prepare_method",
+    "src/requests/models.py#PreparedRequest.prepare_url",
+    "src/requests/sessions.py#SessionRedirectMixin.get_redirect_target",
+    "src/requests/sessions.py#SessionRedirectMixin.resolve_redirects"
+   ],
+   "read": 344,
+   "written": 296,
+   "calls": 1,
+   "seconds": 0.011013249983079731,
+   "engine_calls": 1,
+   "total_us": 2881,
+   "engine_us": 2609,
+   "script_tokens": 237,
+   "result_tokens": 107
+  },
+  {
+   "task": "ms10",
+   "arm": "cbm",
+   "correct": true,
+   "answer": [
+    "src/requests/auth.py#_basic_auth_str",
+    "src/requests/cookies.py#MockRequest.get_full_url",
+    "src/requests/models.py#PreparedRequest.prepare_headers",
+    "src/requests/models.py#PreparedRequest.prepare_method",
+    "src/requests/models.py#PreparedRequest.prepare_url",
+    "src/requests/sessions.py#SessionRedirectMixin.get_redirect_target",
+    "src/requests/sessions.py#SessionRedirectMixin.resolve_redirects"
+   ],
+   "read": 187,
+   "written": 62,
+   "calls": 1,
+   "seconds": 0.427919874957297
+  },
+  {
+   "task": "ms11",
+   "arm": "plan",
+   "answer": [
+    "src/requests/cookies.py#extract_cookies_to_jar",
+    "src/requests/models.py#PreparedRequest.prepare_cookies",
+    "src/requests/models.py#Response.close"
+   ],
+   "read": 698,
+   "written": 54,
+   "calls": 2,
+   "seconds": 0.01958691596519202,
+   "correct": false
+  },
+  {
+   "task": "ms11",
+   "arm": "js",
+   "answer": [
+    "src/requests/cookies.py#extract_cookies_to_jar",
+    "src/requests/models.py#PreparedRequest.prepare_cookies",
+    "src/requests/models.py#Response.close"
+   ],
+   "read": 288,
+   "written": 270,
+   "calls": 1,
+   "seconds": 0.011761374946217984,
+   "engine_calls": 2,
+   "total_us": 3454,
+   "engine_us": 2927,
+   "script_tokens": 235,
+   "result_tokens": 53,
+   "correct": false
+  },
+  {
+   "task": "ms11",
+   "arm": "starlark",
+   "answer": [
+    "src/requests/cookies.py#extract_cookies_to_jar",
+    "src/requests/models.py#PreparedRequest.prepare_cookies",
+    "src/requests/models.py#Response.close"
+   ],
+   "read": 297,
+   "written": 307,
+   "calls": 1,
+   "seconds": 0.010790375003125519,
+   "engine_calls": 2,
+   "total_us": 3097,
+   "engine_us": 2806,
+   "script_tokens": 244,
+   "result_tokens": 53,
+   "correct": false
+  },
+  {
+   "task": "ms11",
+   "arm": "cbm",
+   "answer": [
+    "src/requests/cookies.py#extract_cookies_to_jar"
+   ],
+   "read": 64,
+   "written": 101,
+   "calls": 1,
+   "seconds": 0.4271798330009915,
+   "correct": false
+  },
+  {
+   "task": "ms12",
+   "arm": "plan",
+   "answer": {
+    "src/requests/utils.py#proxy_bypass": 0,
+    "src/requests/utils.py#select_proxy": 3,
+    "src/requests/utils.py#proxy_bypass_registry": 1,
+    "src/requests/utils.py#should_bypass_proxies.get_proxy": 1
+   },
+   "read": 590,
+   "written": 149,
+   "calls": 5,
+   "seconds": 0.046847540070302784,
+   "correct": false
+  },
+  {
+   "task": "ms12",
+   "arm": "js",
+   "answer": {
+    "src/requests/utils.py#proxy_bypass": 0,
+    "src/requests/utils.py#select_proxy": 3,
+    "src/requests/utils.py#proxy_bypass_registry": 1,
+    "src/requests/utils.py#should_bypass_proxies.get_proxy": 1
+   },
+   "read": 340,
+   "written": 310,
+   "calls": 1,
+   "seconds": 0.0121488330187276,
+   "engine_calls": 5,
+   "total_us": 3595,
+   "engine_us": 3060,
+   "script_tokens": 269,
+   "result_tokens": 71,
+   "correct": false
+  },
+  {
+   "task": "ms12",
+   "arm": "starlark",
+   "answer": {
+    "src/requests/utils.py#proxy_bypass": 0,
+    "src/requests/utils.py#select_proxy": 3,
+    "src/requests/utils.py#proxy_bypass_registry": 1,
+    "src/requests/utils.py#should_bypass_proxies.get_proxy": 1
+   },
+   "read": 348,
+   "written": 349,
+   "calls": 1,
+   "seconds": 0.010868792014662176,
+   "engine_calls": 5,
+   "total_us": 3279,
+   "engine_us": 2960,
+   "script_tokens": 277,
+   "result_tokens": 71,
+   "correct": false
+  },
+  {
+   "task": "ms12",
+   "arm": "cbm",
+   "answer": {
+    "src/requests/utils.py#proxy_bypass": 1,
+    "src/requests/utils.py#proxy_bypass_registry": 1,
+    "src/requests/utils.py#select_proxy": 3
+   },
+   "read": 260,
+   "written": 79,
+   "calls": 1,
+   "seconds": 0.4272693330422044,
+   "correct": false
+  },
+  {
+   "task": "ms13",
+   "arm": "plan",
+   "answer": [
+    "src/jsx/components.ts#ErrorBoundary.resolveFallbackStr",
+    "src/jsx/components.ts#resolveChildEarly",
+    "src/jsx/context.ts#createContext.context",
+    "src/jsx/streaming.ts#Suspense",
+    "src/jsx/streaming.ts#serializeBoundaryChild"
+   ],
+   "read": 504,
+   "written": 60,
+   "calls": 2,
+   "seconds": 0.04627241601701826,
+   "correct": false
+  },
+  {
+   "task": "ms13",
+   "arm": "js",
+   "answer": [
+    "src/jsx/components.ts#ErrorBoundary.resolveFallbackStr",
+    "src/jsx/components.ts#resolveChildEarly",
+    "src/jsx/context.ts#createContext.context",
+    "src/jsx/streaming.ts#Suspense",
+    "src/jsx/streaming.ts#serializeBoundaryChild"
+   ],
+   "read": 312,
+   "written": 276,
+   "calls": 1,
+   "seconds": 0.017741583986207843,
+   "engine_calls": 2,
+   "total_us": 9063,
+   "engine_us": 8556,
+   "script_tokens": 241,
+   "result_tokens": 71,
+   "correct": false
+  },
+  {
+   "task": "ms13",
+   "arm": "starlark",
+   "answer": [
+    "src/jsx/components.ts#ErrorBoundary.resolveFallbackStr",
+    "src/jsx/components.ts#resolveChildEarly",
+    "src/jsx/context.ts#createContext.context",
+    "src/jsx/streaming.ts#Suspense",
+    "src/jsx/streaming.ts#serializeBoundaryChild"
+   ],
+   "read": 323,
+   "written": 315,
+   "calls": 1,
+   "seconds": 0.018165624991524965,
+   "engine_calls": 2,
+   "total_us": 9411,
+   "engine_us": 9053,
+   "script_tokens": 252,
+   "result_tokens": 71,
+   "correct": false
+  },
+  {
+   "task": "ms13",
+   "arm": "cbm",
+   "answer": [
+    "src/jsx/components.ts#resolveChildEarly",
+    "src/jsx/components.ts#resolveFallbackStr",
+    "src/jsx/context.ts#createContext",
+    "src/jsx/streaming.ts#Suspense",
+    "src/jsx/streaming.ts#serializeBoundaryChild"
+   ],
+   "read": 134,
+   "written": 94,
+   "calls": 1,
+   "seconds": 0.4250627080327831,
+   "correct": false
+  },
+  {
+   "task": "ms14",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "src/utils/jwt/jwt.ts#isTokenHeader",
+    "src/utils/jwt/types.ts#JwtAlgorithmMismatch.constructor",
+    "src/utils/jwt/types.ts#JwtHeaderInvalid.constructor",
+    "src/utils/jwt/types.ts#JwtTokenInvalid.constructor"
+   ],
+   "read": 1514,
+   "written": 66,
+   "calls": 2,
+   "seconds": 0.03188337496249005
+  },
+  {
+   "task": "ms14",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "src/utils/jwt/jwt.ts#isTokenHeader",
+    "src/utils/jwt/types.ts#JwtAlgorithmMismatch.constructor",
+    "src/utils/jwt/types.ts#JwtHeaderInvalid.constructor",
+    "src/utils/jwt/types.ts#JwtTokenInvalid.constructor"
+   ],
+   "read": 314,
+   "written": 282,
+   "calls": 1,
+   "seconds": 0.018198832985945046,
+   "engine_calls": 2,
+   "total_us": 9581,
+   "engine_us": 8952,
+   "script_tokens": 247,
+   "result_tokens": 67
+  },
+  {
+   "task": "ms14",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "src/utils/jwt/jwt.ts#isTokenHeader",
+    "src/utils/jwt/types.ts#JwtAlgorithmMismatch.constructor",
+    "src/utils/jwt/types.ts#JwtHeaderInvalid.constructor",
+    "src/utils/jwt/types.ts#JwtTokenInvalid.constructor"
+   ],
+   "read": 325,
+   "written": 321,
+   "calls": 1,
+   "seconds": 0.017904791980981827,
+   "engine_calls": 2,
+   "total_us": 9130,
+   "engine_us": 8741,
+   "script_tokens": 258,
+   "result_tokens": 67
+  },
+  {
+   "task": "ms14",
+   "arm": "cbm",
+   "answer": [
+    "src/utils/jwt/jwt.ts#isTokenHeader"
+   ],
+   "read": 127,
+   "written": 98,
+   "calls": 1,
+   "seconds": 0.431072834006045,
+   "correct": false
+  },
+  {
+   "task": "ms15",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "src/utils/jwt/types.ts#JwtTokenInvalid.constructor",
+    4
+   ],
+   "read": 2335,
+   "written": 525,
+   "calls": 16,
+   "seconds": 0.25470341596519575
+  },
+  {
+   "task": "ms15",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "src/utils/jwt/types.ts#JwtTokenInvalid.constructor",
+    4
+   ],
+   "read": 340,
+   "written": 345,
+   "calls": 1,
+   "seconds": 0.01899533299729228,
+   "engine_calls": 16,
+   "total_us": 9822,
+   "engine_us": 8980,
+   "script_tokens": 307,
+   "result_tokens": 33
+  },
+  {
+   "task": "ms15",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "src/utils/jwt/types.ts#JwtTokenInvalid.constructor",
+    4
+   ],
+   "read": 318,
+   "written": 348,
+   "calls": 1,
+   "seconds": 0.01897966698743403,
+   "engine_calls": 16,
+   "total_us": 10176,
+   "engine_us": 9786,
+   "script_tokens": 285,
+   "result_tokens": 33
+  },
+  {
+   "task": "ms15",
+   "arm": "cbm",
+   "answer": [
+    "src/utils/encode.ts#decodeBase64Url",
+    2
+   ],
+   "read": 859,
+   "written": 83,
+   "calls": 1,
+   "seconds": 0.4261902080033906,
+   "correct": false
+  },
+  {
+   "task": "ms16",
+   "arm": "plan",
+   "answer": [
+    "src/jsx/base.ts#JSXNode.toString.render",
+    "src/jsx/base.ts#JSXNode.toStringToBuffer",
+    "src/jsx/base.ts#renderChildren",
+    "src/jsx/base.ts#resolveFunctionComponentResult.render",
+    "src/jsx/components.ts#ErrorBoundary",
+    "src/jsx/components.ts#ErrorBoundary.catchCallback",
+    "src/jsx/components.ts#ErrorBoundary.renderFallback",
+    "src/jsx/components.ts#ErrorBoundary.resolveFallbackStr",
+    "src/jsx/components.ts#resolveChildEarly",
+    "src/jsx/context.ts#createContext.context",
+    "src/jsx/intrinsic-element/components.ts#documentMetadataTag",
+    "src/jsx/jsx-runtime.ts#jsxAttr",
+    "src/jsx/streaming.ts#Suspense"
+   ],
+   "read": 686,
+   "written": 27,
+   "calls": 1,
+   "seconds": 0.016856250003911555,
+   "correct": false
+  },
+  {
+   "task": "ms16",
+   "arm": "js",
+   "answer": [
+    "src/jsx/base.ts#JSXNode.toString.render",
+    "src/jsx/base.ts#JSXNode.toStringToBuffer",
+    "src/jsx/base.ts#renderChildren",
+    "src/jsx/base.ts#resolveFunctionComponentResult.render",
+    "src/jsx/components.ts#ErrorBoundary",
+    "src/jsx/components.ts#ErrorBoundary.catchCallback",
+    "src/jsx/components.ts#ErrorBoundary.renderFallback",
+    "src/jsx/components.ts#ErrorBoundary.resolveFallbackStr",
+    "src/jsx/components.ts#resolveChildEarly",
+    "src/jsx/context.ts#createContext.context",
+    "src/jsx/intrinsic-element/components.ts#documentMetadataTag",
+    "src/jsx/jsx-runtime.ts#jsxAttr",
+    "src/jsx/streaming.ts#Suspense"
+   ],
+   "read": 374,
+   "written": 246,
+   "calls": 1,
+   "seconds": 0.01965512498281896,
+   "engine_calls": 1,
+   "total_us": 9967,
+   "engine_us": 9269,
+   "script_tokens": 213,
+   "result_tokens": 161,
+   "correct": false
+  },
+  {
+   "task": "ms16",
+   "arm": "starlark",
+   "answer": [
+    "src/jsx/base.ts#JSXNode.toString.render",
+    "src/jsx/base.ts#JSXNode.toStringToBuffer",
+    "src/jsx/base.ts#renderChildren",
+    "src/jsx/base.ts#resolveFunctionComponentResult.render",
+    "src/jsx/components.ts#ErrorBoundary",
+    "src/jsx/components.ts#ErrorBoundary.catchCallback",
+    "src/jsx/components.ts#ErrorBoundary.renderFallback",
+    "src/jsx/components.ts#ErrorBoundary.resolveFallbackStr",
+    "src/jsx/components.ts#resolveChildEarly",
+    "src/jsx/context.ts#createContext.context",
+    "src/jsx/intrinsic-element/components.ts#documentMetadataTag",
+    "src/jsx/jsx-runtime.ts#jsxAttr",
+    "src/jsx/streaming.ts#Suspense"
+   ],
+   "read": 387,
+   "written": 286,
+   "calls": 1,
+   "seconds": 0.017760249960701913,
+   "engine_calls": 1,
+   "total_us": 8722,
+   "engine_us": 8365,
+   "script_tokens": 226,
+   "result_tokens": 161,
+   "correct": false
+  },
+  {
+   "task": "ms16",
+   "arm": "cbm",
+   "answer": [
+    "src/jsx/base.ts#JSXNode.toStringToBuffer",
+    "src/jsx/base.ts#render",
+    "src/jsx/base.ts#renderChildren",
+    "src/jsx/components.ts#ErrorBoundary",
+    "src/jsx/components.ts#catchCallback",
+    "src/jsx/components.ts#renderFallback",
+    "src/jsx/components.ts#resolveChildEarly",
+    "src/jsx/components.ts#resolveFallbackStr",
+    "src/jsx/context.ts#createContext",
+    "src/jsx/intrinsic-element/components.ts#documentMetadataTag",
+    "src/jsx/jsx-runtime.ts#jsxAttr",
+    "src/jsx/streaming.ts#Suspense"
+   ],
+   "read": 571,
+   "written": 57,
+   "calls": 1,
+   "seconds": 0.4289428750053048,
+   "correct": false
+  },
+  {
+   "task": "ms17",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "src/flask/cli.py"
+   ],
+   "read": 2502,
+   "written": 23,
+   "calls": 1,
+   "seconds": 0.054538584023248404
+  },
+  {
+   "task": "ms17",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "src/flask/cli.py"
+   ],
+   "read": 223,
+   "written": 170,
+   "calls": 1,
+   "seconds": 0.022200208040885627,
+   "engine_calls": 1,
+   "total_us": 12949,
+   "engine_us": 12305,
+   "script_tokens": 149,
+   "result_tokens": 74
+  },
+  {
+   "task": "ms17",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "src/flask/cli.py"
+   ],
+   "read": 223,
+   "written": 181,
+   "calls": 1,
+   "seconds": 0.022044582990929484,
+   "engine_calls": 1,
+   "total_us": 12837,
+   "engine_us": 12528,
+   "script_tokens": 149,
+   "result_tokens": 74
+  },
+  {
+   "task": "ms18",
+   "arm": "plan",
+   "correct": true,
+   "answer": {
+    "werkzeug.http.http_date": [
+     "src/flask/json/provider.py",
+     "src/flask/json/tag.py"
+    ],
+    "werkzeug.utils.import_string": [
+     "src/flask/cli.py",
+     "src/flask/config.py"
+    ],
+    "werkzeug.serving.is_running_from_reloader": [
+     "src/flask/app.py",
+     "src/flask/cli.py"
+    ]
+   },
+   "read": 841,
+   "written": 79,
+   "calls": 3,
+   "seconds": 0.05723237502388656
+  },
+  {
+   "task": "ms18",
+   "arm": "js",
+   "correct": true,
+   "answer": {
+    "werkzeug.http.http_date": [
+     "src/flask/json/provider.py",
+     "src/flask/json/tag.py"
+    ],
+    "werkzeug.utils.import_string": [
+     "src/flask/cli.py",
+     "src/flask/config.py"
+    ],
+    "werkzeug.serving.is_running_from_reloader": [
+     "src/flask/app.py",
+     "src/flask/cli.py"
+    ]
+   },
+   "read": 300,
+   "written": 218,
+   "calls": 1,
+   "seconds": 0.021843374997843057,
+   "engine_calls": 3,
+   "total_us": 12538,
+   "engine_us": 11999,
+   "script_tokens": 192,
+   "result_tokens": 108
+  },
+  {
+   "task": "ms18",
+   "arm": "starlark",
+   "correct": true,
+   "answer": {
+    "werkzeug.http.http_date": [
+     "src/flask/json/provider.py",
+     "src/flask/json/tag.py"
+    ],
+    "werkzeug.utils.import_string": [
+     "src/flask/cli.py",
+     "src/flask/config.py"
+    ],
+    "werkzeug.serving.is_running_from_reloader": [
+     "src/flask/app.py",
+     "src/flask/cli.py"
+    ]
+   },
+   "read": 291,
+   "written": 218,
+   "calls": 1,
+   "seconds": 0.02114845800679177,
+   "engine_calls": 3,
+   "total_us": 12238,
+   "engine_us": 11947,
+   "script_tokens": 183,
+   "result_tokens": 108
+  },
+  {
+   "task": "ms19",
+   "arm": "plan",
+   "correct": true,
+   "answer": {
+    "werkzeug.exceptions.HTTPException": [
+     "src/flask/app.py",
+     "src/flask/ctx.py",
+     "src/flask/sansio/scaffold.py",
+     "src/flask/wrappers.py"
+    ],
+    "werkzeug.exceptions.NotFound": [],
+    "werkzeug.exceptions.BadRequest": [
+     "src/flask/sansio/app.py",
+     "src/flask/wrappers.py"
+    ]
+   },
+   "read": 3385,
+   "written": 133,
+   "calls": 3,
+   "seconds": 0.058685499941930175
+  },
+  {
+   "task": "ms19",
+   "arm": "js",
+   "correct": true,
+   "answer": {
+    "werkzeug.exceptions.HTTPException": [
+     "src/flask/app.py",
+     "src/flask/ctx.py",
+     "src/flask/sansio/scaffold.py",
+     "src/flask/wrappers.py"
+    ],
+    "werkzeug.exceptions.NotFound": [],
+    "werkzeug.exceptions.BadRequest": [
+     "src/flask/sansio/app.py",
+     "src/flask/wrappers.py"
+    ]
+   },
+   "read": 327,
+   "written": 243,
+   "calls": 1,
+   "seconds": 0.022232041985262185,
+   "engine_calls": 3,
+   "total_us": 13318,
+   "engine_us": 12656,
+   "script_tokens": 214,
+   "result_tokens": 113
+  },
+  {
+   "task": "ms19",
+   "arm": "starlark",
+   "correct": true,
+   "answer": {
+    "werkzeug.exceptions.HTTPException": [
+     "src/flask/app.py",
+     "src/flask/ctx.py",
+     "src/flask/sansio/scaffold.py",
+     "src/flask/wrappers.py"
+    ],
+    "werkzeug.exceptions.NotFound": [],
+    "werkzeug.exceptions.BadRequest": [
+     "src/flask/sansio/app.py",
+     "src/flask/wrappers.py"
+    ]
+   },
+   "read": 316,
+   "written": 241,
+   "calls": 1,
+   "seconds": 0.022130750003270805,
+   "engine_calls": 3,
+   "total_us": 12652,
+   "engine_us": 12305,
+   "script_tokens": 203,
+   "result_tokens": 113
+  },
+  {
+   "task": "ms20",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "github.com/pallets/click",
+    "github.com/pallets/jinja",
+    "github.com/pallets/werkzeug"
+   ],
+   "read": 400,
+   "written": 1,
+   "calls": 1,
+   "seconds": 0.019118416996207088
+  },
+  {
+   "task": "ms20",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "github.com/pallets/click",
+    "github.com/pallets/jinja",
+    "github.com/pallets/werkzeug"
+   ],
+   "read": 155,
+   "written": 54,
+   "calls": 1,
+   "seconds": 0.020119416993111372,
+   "engine_calls": 1,
+   "total_us": 10995,
+   "engine_us": 10542,
+   "script_tokens": 43,
+   "result_tokens": 112
+  },
+  {
+   "task": "ms20",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "github.com/pallets/click",
+    "github.com/pallets/jinja",
+    "github.com/pallets/werkzeug"
+   ],
+   "read": 158,
+   "written": 62,
+   "calls": 1,
+   "seconds": 0.02081562503008172,
+   "engine_calls": 1,
+   "total_us": 11763,
+   "engine_us": 11549,
+   "script_tokens": 46,
+   "result_tokens": 112
+  },
+  {
+   "task": "ms21",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "DELETE /api/delete",
+    "GET /api/ps",
+    "GET /api/tags",
+    "POST /api/chat",
+    "POST /api/copy",
+    "POST /api/create",
+    "POST /api/embed",
+    "POST /api/embeddings",
+    "POST /api/generate",
+    "POST /api/pull",
+    "POST /api/push",
+    "POST /api/show",
+    "POST /v1/systemone"
+   ],
+   "read": 7780,
+   "written": 94,
+   "calls": 3,
+   "seconds": 0.1692957499762997
+  },
+  {
+   "task": "ms21",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "DELETE /api/delete",
+    "GET /api/ps",
+    "GET /api/tags",
+    "POST /api/chat",
+    "POST /api/copy",
+    "POST /api/create",
+    "POST /api/embed",
+    "POST /api/embeddings",
+    "POST /api/generate",
+    "POST /api/pull",
+    "POST /api/push",
+    "POST /api/show",
+    "POST /v1/systemone"
+   ],
+   "read": 369,
+   "written": 259,
+   "calls": 1,
+   "seconds": 0.04327579098753631,
+   "engine_calls": 3,
+   "total_us": 32715,
+   "engine_us": 31525,
+   "script_tokens": 225,
+   "result_tokens": 144
+  },
+  {
+   "task": "ms21",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "DELETE /api/delete",
+    "GET /api/ps",
+    "GET /api/tags",
+    "POST /api/chat",
+    "POST /api/copy",
+    "POST /api/create",
+    "POST /api/embed",
+    "POST /api/embeddings",
+    "POST /api/generate",
+    "POST /api/pull",
+    "POST /api/push",
+    "POST /api/show",
+    "POST /v1/systemone"
+   ],
+   "read": 358,
+   "written": 258,
+   "calls": 1,
+   "seconds": 0.040116583986673504,
+   "engine_calls": 3,
+   "total_us": 30091,
+   "engine_us": 29633,
+   "script_tokens": 214,
+   "result_tokens": 144
+  },
+  {
+   "task": "ms22",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "POST /api/blobs/{}"
+   ],
+   "read": 7780,
+   "written": 94,
+   "calls": 3,
+   "seconds": 0.11512062593828887
+  },
+  {
+   "task": "ms22",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "POST /api/blobs/{}"
+   ],
+   "read": 305,
+   "written": 260,
+   "calls": 1,
+   "seconds": 0.04193562496220693,
+   "engine_calls": 3,
+   "total_us": 31430,
+   "engine_us": 30226,
+   "script_tokens": 226,
+   "result_tokens": 79
+  },
+  {
+   "task": "ms22",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "POST /api/blobs/{}"
+   ],
+   "read": 294,
+   "written": 259,
+   "calls": 1,
+   "seconds": 0.04009420902002603,
+   "engine_calls": 3,
+   "total_us": 30363,
+   "engine_us": 29892,
+   "script_tokens": 215,
+   "result_tokens": 79
+  },
+  {
+   "task": "ms23",
+   "arm": "plan",
+   "correct": true,
+   "answer": 13,
+   "read": 6533,
+   "written": 62,
+   "calls": 2,
+   "seconds": 0.076499207993038
+  },
+  {
+   "task": "ms23",
+   "arm": "js",
+   "correct": true,
+   "answer": 13,
+   "read": 259,
+   "written": 242,
+   "calls": 1,
+   "seconds": 0.04043958295369521,
+   "engine_calls": 2,
+   "total_us": 30705,
+   "engine_us": 29692,
+   "script_tokens": 210,
+   "result_tokens": 49
+  },
+  {
+   "task": "ms23",
+   "arm": "starlark",
+   "correct": true,
+   "answer": 13,
+   "read": 246,
+   "written": 242,
+   "calls": 1,
+   "seconds": 0.04111587500665337,
+   "engine_calls": 2,
+   "total_us": 31106,
+   "engine_us": 30670,
+   "script_tokens": 197,
+   "result_tokens": 49
+  },
+  {
+   "task": "ms24",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "app/ui/ui.go#Server.ollamaProxy",
+    "server/routes.go#Server.ListHandler"
+   ],
+   "read": 158,
+   "written": 10,
+   "calls": 1,
+   "seconds": 0.03632145799929276
+  },
+  {
+   "task": "ms24",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "app/ui/ui.go#Server.ollamaProxy",
+    "server/routes.go#Server.ListHandler"
+   ],
+   "read": 111,
+   "written": 81,
+   "calls": 1,
+   "seconds": 0.03756545903161168,
+   "engine_calls": 1,
+   "total_us": 27426,
+   "engine_us": 26993,
+   "script_tokens": 68,
+   "result_tokens": 43
+  },
+  {
+   "task": "ms24",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "app/ui/ui.go#Server.ollamaProxy",
+    "server/routes.go#Server.ListHandler"
+   ],
+   "read": 103,
+   "written": 82,
+   "calls": 1,
+   "seconds": 0.03856508404714987,
+   "engine_calls": 1,
+   "total_us": 28063,
+   "engine_us": 27846,
+   "script_tokens": 60,
+   "result_tokens": 43
+  },
+  {
+   "task": "ms25",
+   "arm": "plan",
+   "correct": true,
+   "answer": [
+    "requests/sessions.py#Session.request"
+   ],
+   "read": 1614,
+   "written": 30,
+   "calls": 1,
+   "seconds": 0.04252287501003593
+  },
+  {
+   "task": "ms25",
+   "arm": "js",
+   "correct": true,
+   "answer": [
+    "requests/sessions.py#Session.request"
+   ],
+   "read": 190,
+   "written": 159,
+   "calls": 1,
+   "seconds": 0.018674208025913686,
+   "engine_calls": 1,
+   "total_us": 10191,
+   "engine_us": 9481,
+   "script_tokens": 136,
+   "result_tokens": 54
+  },
+  {
+   "task": "ms25",
+   "arm": "starlark",
+   "correct": true,
+   "answer": [
+    "requests/sessions.py#Session.request"
+   ],
+   "read": 199,
+   "written": 182,
+   "calls": 1,
+   "seconds": 0.01783329201862216,
+   "engine_calls": 1,
+   "total_us": 9495,
+   "engine_us": 9167,
+   "script_tokens": 145,
+   "result_tokens": 54
+  }
+ ]
+}

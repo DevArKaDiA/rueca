@@ -1024,46 +1024,58 @@
                         {
                           "id": "local/golden-repo@worktree:billing/invoices.py#total_due",
                           "name": "total_due",
+                          "local": "total_due",
                           "qn": "billing.invoices.total_due",
                           "label": "Function",
                           "lines": [
                             14,
                             17
                           ],
-                          "sig": "def total_due(amount: float, percent: float) -> float"
+                          "sig": "def total_due(amount: float, percent: float) -> float",
+                          "repo": "local/golden-repo",
+                          "ref": "worktree"
                         },
                         {
                           "id": "local/golden-repo@worktree:billing/invoices.py#format_label",
                           "name": "format_label",
+                          "local": "format_label",
                           "qn": "billing.invoices.format_label",
                           "label": "Function",
                           "lines": [
                             32,
                             34
                           ],
-                          "sig": "def format_label(prefix: str, number: int, due: float) -> str"
+                          "sig": "def format_label(prefix: str, number: int, due: float) -> str",
+                          "repo": "local/golden-repo",
+                          "ref": "worktree"
                         },
                         {
                           "id": "local/golden-repo@worktree:billing/invoices.py#InvoiceService.issue",
                           "name": "issue",
+                          "local": "InvoiceService.issue",
                           "qn": "billing.invoices.InvoiceService.issue",
                           "label": "Method",
                           "lines": [
                             26,
                             29
                           ],
-                          "sig": "def issue(self, number: int, amount: float) -> str"
+                          "sig": "def issue(self, number: int, amount: float) -> str",
+                          "repo": "local/golden-repo",
+                          "ref": "worktree"
                         },
                         {
                           "id": "local/golden-repo@worktree:billing/invoices.py#InvoiceService",
                           "name": "InvoiceService",
+                          "local": "InvoiceService",
                           "qn": "billing.invoices.InvoiceService",
                           "label": "Class",
                           "lines": [
                             20,
                             29
                           ],
-                          "sig": "class InvoiceService"
+                          "sig": "class InvoiceService",
+                          "repo": "local/golden-repo",
+                          "ref": "worktree"
                         }
                       ]
                     }
@@ -1083,7 +1095,7 @@
             }
           ],
           "recv_raw": [
-            "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"local/golden-repo@worktree (worktree)\\nbilling/invoices.py\\n  Function total_due L14-17  def total_due(amount: float, percent: float) -> float\\n  Function format_label L32-34  def format_label(prefix: str, number: int, due: float) -> str\\n  Method InvoiceService.issue L26-29  def issue(self, number: int, amount: float) -> str\\n  Class InvoiceService L20-29  class InvoiceService\\n\"}],\"structuredContent\":{\"snapshots\":[{\"s\":0,\"repo\":\"local/golden-repo\",\"ref\":\"worktree\",\"commit\":\"worktree\",\"overlay\":false}],\"results\":[{\"s\":0,\"path\":\"billing/invoices.py\",\"symbols\":[{\"id\":\"local/golden-repo@worktree:billing/invoices.py#total_due\",\"name\":\"total_due\",\"qn\":\"billing.invoices.total_due\",\"label\":\"Function\",\"lines\":[14,17],\"sig\":\"def total_due(amount: float, percent: float) -> float\"},{\"id\":\"local/golden-repo@worktree:billing/invoices.py#format_label\",\"name\":\"format_label\",\"qn\":\"billing.invoices.format_label\",\"label\":\"Function\",\"lines\":[32,34],\"sig\":\"def format_label(prefix: str, number: int, due: float) -> str\"},{\"id\":\"local/golden-repo@worktree:billing/invoices.py#InvoiceService.issue\",\"name\":\"issue\",\"qn\":\"billing.invoices.InvoiceService.issue\",\"label\":\"Method\",\"lines\":[26,29],\"sig\":\"def issue(self, number: int, amount: float) -> str\"},{\"id\":\"local/golden-repo@worktree:billing/invoices.py#InvoiceService\",\"name\":\"InvoiceService\",\"qn\":\"billing.invoices.InvoiceService\",\"label\":\"Class\",\"lines\":[20,29],\"sig\":\"class InvoiceService\"}]}],\"truncated\":false,\"next_cursor\":null,\"retrieval\":{\"mode\":\"lexical\"},\"budget\":{\"limit_tokens\":2000,\"used_tokens\":94}},\"isError\":false}}"
+            "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"local/golden-repo@worktree (worktree)\\nbilling/invoices.py\\n  Function total_due L14-17  def total_due(amount: float, percent: float) -> float\\n  Function format_label L32-34  def format_label(prefix: str, number: int, due: float) -> str\\n  Method InvoiceService.issue L26-29  def issue(self, number: int, amount: float) -> str\\n  Class InvoiceService L20-29  class InvoiceService\\n\"}],\"structuredContent\":{\"snapshots\":[{\"s\":0,\"repo\":\"local/golden-repo\",\"ref\":\"worktree\",\"commit\":\"worktree\",\"overlay\":false}],\"results\":[{\"s\":0,\"path\":\"billing/invoices.py\",\"symbols\":[{\"id\":\"local/golden-repo@worktree:billing/invoices.py#total_due\",\"name\":\"total_due\",\"local\":\"total_due\",\"qn\":\"billing.invoices.total_due\",\"label\":\"Function\",\"lines\":[14,17],\"sig\":\"def total_due(amount: float, percent: float) -> float\",\"repo\":\"local/golden-repo\",\"ref\":\"worktree\"},{\"id\":\"local/golden-repo@worktree:billing/invoices.py#format_label\",\"name\":\"format_label\",\"local\":\"format_label\",\"qn\":\"billing.invoices.format_label\",\"label\":\"Function\",\"lines\":[32,34],\"sig\":\"def format_label(prefix: str, number: int, due: float) -> str\",\"repo\":\"local/golden-repo\",\"ref\":\"worktree\"},{\"id\":\"local/golden-repo@worktree:billing/invoices.py#InvoiceService.issue\",\"name\":\"issue\",\"local\":\"InvoiceService.issue\",\"qn\":\"billing.invoices.InvoiceService.issue\",\"label\":\"Method\",\"lines\":[26,29],\"sig\":\"def issue(self, number: int, amount: float) -> str\",\"repo\":\"local/golden-repo\",\"ref\":\"worktree\"},{\"id\":\"local/golden-repo@worktree:billing/invoices.py#InvoiceService\",\"name\":\"InvoiceService\",\"local\":\"InvoiceService\",\"qn\":\"billing.invoices.InvoiceService\",\"label\":\"Class\",\"lines\":[20,29],\"sig\":\"class InvoiceService\",\"repo\":\"local/golden-repo\",\"ref\":\"worktree\"}]}],\"truncated\":false,\"next_cursor\":null,\"retrieval\":{\"mode\":\"lexical\"},\"budget\":{\"limit_tokens\":2000,\"used_tokens\":94}},\"isError\":false}}"
           ]
         }
       ],

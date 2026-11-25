@@ -1,6 +1,8 @@
 //! `rueca mcp` as a child process speaking newline-delimited JSON-RPC on
 //! stdio: legacy `initialize` handshake, the 2026-07-28 stateless flow,
-//! automatic indexing of `--root`, and a clean exit when stdin closes.
+//! automatic indexing of `--root`, and a clean exit when stdin closes; and
+//! the experimental code mode (`--experimental-code-mode`, the variable,
+//! and `rueca query execute` as the benchmark drives it).
 
 mod common;
 
@@ -32,6 +34,7 @@ impl Server {
             .args(extra)
             .env_remove("RUECA_LOG")
             .env_remove("RUECA_HOME")
+            .env_remove("RUECA_EXPERIMENTAL_CODE_MODE")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -254,4 +257,67 @@ fn no_auto_index_reports_missing_root() {
     assert_eq!(call["result"]["isError"], true, "{call}");
     assert!(call["result"]["content"][0]["text"].as_str().unwrap().contains("no repositories are indexed"), "{call}");
     s.shutdown();
+}
+
+/// `rueca mcp --experimental-code-mode`: ten tools, `execute` runs a script.
+#[test]
+fn code_mode_flag_adds_execute() {
+    let p = python_project();
+    index(&p);
+    let mut s = Server::spawn(&p, &["--experimental-code-mode"]);
+    s.initialize("2025-06-18");
+    let list = s.request(1, "tools/list", json!({}));
+    let names: Vec<&str> =
+        list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), 10, "{names:?}");
+    assert_eq!(names[8..], ["execute", "describe_api"]);
+    let code = "const t = await rueca.trace({qualified_name: 'validate', direction: 'callers'});\nreturn t.nodes.filter(n => n.dir === 'in').map(n => n.qn);";
+    let call = s.request(2, "tools/call", json!({"name": "execute", "arguments": {"code": code}}));
+    let result = &call["result"];
+    assert_eq!(result["isError"], false, "{call}");
+    let want = json!(["pkg.models.Base.save", "pkg.service.InvoiceService.issue"]);
+    assert_eq!(result["structuredContent"]["result"], want);
+    assert_eq!(result["content"][0]["text"], format!("local/proj@worktree (worktree)\n{want}\n"));
+    let call = s.request(3, "tools/call", json!({"name": "execute", "arguments": {"code": "return x(;"}}));
+    assert_eq!(call["result"]["isError"], true, "{call}");
+    assert!(call["result"]["content"][0]["text"].as_str().unwrap().contains("syntax error at line 1"), "{call}");
+    s.shutdown();
+}
+
+/// `rueca query execute`, the benchmark's path: off without the flag or the
+/// variable (the tool does not exist), on with either; `--code-file`.
+#[test]
+fn query_execute() {
+    let p = python_project();
+    index(&p);
+    let query = |extra: &[&str], env: Option<&str>| {
+        let mut c = rueca(&p.store);
+        c.arg("--root").arg(&p.root).arg("query").args(extra);
+        if let Some(v) = env {
+            c.env("RUECA_EXPERIMENTAL_CODE_MODE", v);
+        }
+        c.output().unwrap()
+    };
+    let args = r#"{"code": "return (await rueca.listRepositories()).map(r => r.repo);"}"#;
+    let off = query(&["execute", args], None);
+    assert_eq!(off.status.code(), Some(2));
+    assert!(stdout_json(&off)["error"].as_str().unwrap().contains("unknown tool `execute`"));
+    let off = query(&["execute", args], Some("0"));
+    assert_eq!(off.status.code(), Some(2));
+
+    let on = query(&["execute", args, "--experimental-code-mode"], None);
+    assert!(on.status.success(), "{}", String::from_utf8_lossy(&on.stdout));
+    let v = stdout_json(&on);
+    assert_eq!(v["result"], json!(["local/proj"]));
+    assert_eq!(v["calls"], 1);
+
+    let script = p.dir.path().join("script.js");
+    std::fs::write(&script, "return 6 * 7;").unwrap();
+    let file = script.to_str().unwrap();
+    let on = query(&["execute", r#"{"budget_tokens": 500}"#, "--code-file", file, "--text"], Some("true"));
+    assert!(on.status.success(), "{}", String::from_utf8_lossy(&on.stdout));
+    assert_eq!(String::from_utf8(on.stdout).unwrap(), "42\n");
+
+    let api = query(&["describe_api", "--text"], Some("1"));
+    assert!(String::from_utf8(api.stdout).unwrap().starts_with("// Rueca code mode, JavaScript API"));
 }

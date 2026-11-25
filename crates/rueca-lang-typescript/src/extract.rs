@@ -30,6 +30,8 @@ const MAX_SCAN: usize = 2048;
 const FUNCTION_VALUES: &[&str] = &["arrow_function", "function_expression", "function", "generator_function"];
 const DESCRIBE_FNS: &[&str] = &["context", "describe", "fdescribe", "suite", "xdescribe"];
 const TEST_FNS: &[&str] = &["fit", "it", "specify", "test", "xit", "xtest"];
+/// Setup / teardown hooks: definitions inside their callbacks are test code.
+const HOOK_FNS: &[&str] = &["after", "afterAll", "afterEach", "before", "beforeAll", "beforeEach"];
 /// Higher-order wrappers whose function argument is the real definition
 /// (`const Button = forwardRef((props, ref) => ...)`).
 const FUNCTION_WRAPPERS: &[&str] = &["forwardRef", "memo", "observer"];
@@ -118,6 +120,9 @@ pub(crate) struct Extractor<'s> {
     /// (`handler = () => {}`): the name may hold other values, so they do
     /// not keep calls of that local name.
     assigned: HashSet<u32>,
+    /// Depth of setup / teardown hook calls being walked (`beforeEach(() =>
+    /// …)`): definitions inside them are tests.
+    hook_depth: u32,
 }
 
 /// Owner key that never has bindings (signature-only members).
@@ -199,6 +204,7 @@ pub(crate) fn extract_tree(root: Node<'_>, src: &[u8], path: &str, max_depth: us
         shadowing: module_bindings(root, src),
         local_calls: Vec::new(),
         assigned: HashSet::new(),
+        hook_depth: 0,
     };
     let ctx = Ctx { parent: None, top: true, ambient: false };
     if root.kind() == "ERROR" {
@@ -580,7 +586,7 @@ impl<'s> Extractor<'s> {
             bases: nd.bases,
             implements: nd.implements,
             exported: nd.exported,
-            is_test: nd.is_test,
+            is_test: nd.is_test || self.hook_depth > 0,
             is_declaration: false,
         });
         id
@@ -2431,6 +2437,24 @@ impl<'s> Extractor<'s> {
     // -- references ---------------------------------------------------------------
 
     fn call(&mut self, n: Node<'_>, ctx: Ctx, depth: usize) {
+        let hook = u32::from(self.is_test_hook(n));
+        self.hook_depth += hook;
+        self.call_parts(n, ctx, depth);
+        self.hook_depth -= hook;
+    }
+
+    /// `beforeEach(fn)` and the other [`HOOK_FNS`] with a function argument.
+    fn is_test_hook(&self, call: Node<'_>) -> bool {
+        let Some(callee) = field(call, "function").filter(|c| c.kind() == "identifier") else { return false };
+        let name = self.text(callee);
+        let args = field(call, "arguments").map(named_children).unwrap_or_default();
+        HOOK_FNS.contains(&name.as_str())
+            && !self.is_local(&name)
+            && !self.shadowing.contains(&name)
+            && args.iter().any(|a| is_function_value(unwrap_value(*a)))
+    }
+
+    fn call_parts(&mut self, n: Node<'_>, ctx: Ctx, depth: usize) {
         if let Some(module) = self.import_call_module(n) {
             self.push_import(module, Vec::new(), None, false, false, span_of(n));
             return;

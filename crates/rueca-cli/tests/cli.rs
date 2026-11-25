@@ -6,7 +6,7 @@ use serde_json::Value;
 
 fn rueca(store: &std::path::Path) -> Command {
     let mut c = Command::cargo_bin("rueca").unwrap();
-    c.arg("--store").arg(store).env_remove("RUECA_LOG");
+    c.arg("--store").arg(store).env_remove("RUECA_LOG").env_remove("RUECA_EXPERIMENTAL_CODE_MODE");
     c
 }
 

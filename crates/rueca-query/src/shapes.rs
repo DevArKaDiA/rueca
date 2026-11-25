@@ -1,0 +1,339 @@
+//! Result shapes of the tools: a JSON Schema of the envelope's `results`
+//! (format `compact`) per tool, written once next to the builders in
+//! [`crate::compact`] and served as [`crate::ToolDef::output_shape`].
+//!
+//! MCP clients never see them (the MCP layer lists names, descriptions and
+//! input schemas only). Code mode (RFC 0009) generates its script API from
+//! them: TypeScript result types and the Starlark reference. A test runs
+//! every tool on an indexed fixture and checks each answer against its
+//! shape in both directions (every field the engine writes is documented,
+//! every required field is written), so a change of a builder that is not
+//! reflected here fails.
+//!
+//! Conventions, kept to what the generators understand: `type` (`string`,
+//! `integer`, `number`, `boolean`, `null`, `array`, `object`), `anyOf`,
+//! `enum`, `properties` + `required`, `additionalProperties` (a map),
+//! `items`, `prefixItems` (a tuple, each element may carry a `title`, the
+//! element's label), `description`, and `title` on a reused object (a named
+//! type; `{"$ref": "<title>"}` refers to it, recursion included).
+
+use serde_json::{Map, Value, json};
+
+fn ty(name: &str) -> Value {
+    json!({ "type": name })
+}
+
+fn string() -> Value {
+    ty("string")
+}
+
+fn int() -> Value {
+    ty("integer")
+}
+
+fn number() -> Value {
+    ty("number")
+}
+
+fn boolean() -> Value {
+    ty("boolean")
+}
+
+fn array(items: Value) -> Value {
+    json!({ "type": "array", "items": items })
+}
+
+fn or_null(v: Value) -> Value {
+    json!({ "anyOf": [v, ty("null")] })
+}
+
+fn named(name: &str) -> Value {
+    json!({ "$ref": name })
+}
+
+fn doc(mut v: Value, text: &str) -> Value {
+    v["description"] = Value::String(text.to_string());
+    v
+}
+
+/// An object of `fields`; a name ending in `?` is optional.
+fn object(fields: &[(&str, Value)]) -> Value {
+    let mut props = Map::new();
+    let mut required = Vec::new();
+    for (name, schema) in fields {
+        let key = match name.strip_suffix('?') {
+            Some(k) => k,
+            None => {
+                required.push(Value::String((*name).to_string()));
+                name
+            }
+        };
+        props.insert(key.to_string(), schema.clone());
+    }
+    json!({ "type": "object", "properties": props, "required": required, "additionalProperties": false })
+}
+
+fn titled(name: &str, mut v: Value) -> Value {
+    v["title"] = Value::String(name.to_string());
+    v
+}
+
+fn snapshot() -> Value {
+    doc(int(), "snapshot index")
+}
+
+fn lines() -> Value {
+    doc(json!({ "type": "array", "prefixItems": [int(), int()] }), "[start, end], 1-based, inclusive")
+}
+
+/// `in` / `changed` of a symbol of a repository read at several refs.
+fn marks() -> [(&'static str, Value); 2] {
+    [
+        ("in?", doc(array(int()), "snapshots this version is in (several refs only)")),
+        ("changed?", doc(boolean(), "own text differs between the refs, or absent from one")),
+    ]
+}
+
+/// `in` / `changed` of a whole file (`get_file_outline`) or a `trace` edge.
+fn file_marks(what: &str) -> [(&'static str, Value); 2] {
+    [("in?", doc(array(int()), "snapshots it is in (several refs only)")), ("changed?", doc(boolean(), what))]
+}
+
+/// `local`, `qn`: the two names of a symbol (described once, on `Brief`;
+/// `describe_api`'s preamble says it for every type).
+fn names(described: bool) -> [(&'static str, Value); 2] {
+    if !described {
+        return [("local", string()), ("qn", string())];
+    }
+    [
+        ("local", doc(string(), "file-local qualified name: the id's `#` part (a file: its path)")),
+        ("qn", doc(string(), "global qualified name")),
+    ]
+}
+
+/// `repo`, `ref`: the snapshot an object was read from.
+fn origin() -> [(&'static str, Value); 2] {
+    [("repo", string()), ("ref", string())]
+}
+
+fn with(base: &[(&str, Value)], more: &[(&str, Value)]) -> Vec<(String, Value)> {
+    base.iter().chain(more).map(|(k, v)| ((*k).to_string(), v.clone())).collect()
+}
+
+fn object_of(fields: Vec<(String, Value)>) -> Value {
+    let borrowed: Vec<(&str, Value)> = fields.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    object(&borrowed)
+}
+
+/// `fields` with [`names`] after the first `at` of them, then [`origin`]
+/// and `more`; the names are described when `described`.
+fn symbol_fields(fields: &[(&str, Value)], at: usize, more: &[(&str, Value)], described: bool) -> Value {
+    let (names, origin) = (names(described), origin());
+    let all = fields[..at].iter().chain(&names).chain(&fields[at..]).chain(&origin).chain(more);
+    object_of(all.map(|(k, v)| ((*k).to_string(), v.clone())).collect())
+}
+
+fn brief() -> Value {
+    let fields =
+        [("id", doc(string(), "pinned symbol id")), ("label", string()), ("path?", string()), ("lines?", lines())];
+    titled("Brief", symbol_fields(&fields, 1, &[], true))
+}
+
+fn symbol_item() -> Value {
+    let fields = [
+        ("id", doc(string(), "pinned symbol id")),
+        ("name", string()),
+        ("label", doc(string(), "Function, Method, Class, …")),
+        ("lines?", lines()),
+        ("sig?", doc(string(), "signature")),
+    ];
+    let [in_, changed] = marks();
+    let more = [("score?", doc(number(), "with `scores: true`")), in_, changed];
+    titled("SymbolItem", symbol_fields(&fields, 2, &more, false))
+}
+
+fn outline_symbol() -> Value {
+    let fields = [("id", string()), ("name", string()), ("label", string()), ("lines?", lines()), ("sig?", string())];
+    let more = [
+        ("changed?", doc(boolean(), "several refs: own text differs, or absent from one")),
+        ("children?", array(named("OutlineSymbol"))),
+    ];
+    titled("OutlineSymbol", symbol_fields(&fields, 2, &more, false))
+}
+
+fn symbol_detail() -> Value {
+    let fields = [
+        ("id", string()),
+        ("name", string()),
+        ("label", string()),
+        ("path?", string()),
+        ("lines?", lines()),
+        ("lang?", string()),
+        ("sig?", string()),
+        ("doc?", string()),
+        ("exported", boolean()),
+        ("test", boolean()),
+    ];
+    titled("SymbolDetail", symbol_fields(&fields, 2, &[], false))
+}
+
+fn search_symbols() -> Value {
+    array(object(&[("s", snapshot()), ("path", or_null(string())), ("symbols", array(symbol_item()))]))
+}
+
+fn search_code() -> Value {
+    let hit = titled(
+        "CodeMatch",
+        object(&[
+            ("line", int()),
+            ("text", string()),
+            ("before?", doc(array(string()), "context lines")),
+            ("after?", doc(array(string()), "context lines")),
+            ("symbol?", doc(named("Brief"), "innermost enclosing definition")),
+        ]),
+    );
+    array(object(&[("s", snapshot()), ("path", string()), ("matches", array(hit))]))
+}
+
+fn get_symbol() -> Value {
+    let version = object_of(with(
+        &[("s", snapshot()), ("symbol", symbol_detail()), ("callers", int()), ("callees", int())],
+        &marks(),
+    ));
+    let base = [
+        ("s", snapshot()),
+        ("symbol", symbol_detail()),
+        ("parent", or_null(brief())),
+        ("children", array(named("Brief"))),
+        ("bases", array(named("Brief"))),
+        ("subtypes", array(named("Brief"))),
+        ("callers", doc(int(), "caller count")),
+        ("callees", doc(int(), "callee count")),
+        ("readers?", int()),
+        ("writers?", int()),
+        ("candidates", doc(array(named("Brief")), "other matches of an ambiguous lookup")),
+        ("versions?", array(version)),
+    ];
+    object_of(with(&base, &marks()))
+}
+
+fn get_snippet() -> Value {
+    object(&[
+        ("s", snapshot()),
+        ("path", string()),
+        ("lang?", string()),
+        ("lines", lines()),
+        ("text", string()),
+        ("symbol?", named("Brief")),
+    ])
+}
+
+fn trace() -> Value {
+    let dir = doc(json!({ "enum": ["root", "in", "out", "both"] }), "in = caller, out = callee");
+    let fields = [
+        ("s?", doc(snapshot(), "when the walk crossed repositories")),
+        ("id", string()),
+        ("label", string()),
+        ("path?", string()),
+        ("lines?", lines()),
+    ];
+    let [in_, changed] = marks();
+    let more = [("d", doc(int(), "depth; the root (node 0) is 0")), ("dir", dir), in_, changed];
+    let node = titled("TraceNode", symbol_fields(&fields, 2, &more, false));
+    let tail = json!({ "anyOf": [string(), object(&file_marks("not found in every requested ref"))] });
+    let edge = titled(
+        "TraceEdge",
+        doc(
+            json!({
+                "type": "array",
+                "prefixItems": [
+                    titled("src", int()),
+                    titled("dst", int()),
+                    titled("kind", string()),
+                    titled("confidence", number()),
+                    titled("strategy", string()),
+                    titled("line", or_null(int())),
+                ],
+                "items": tail,
+            }),
+            "src calls dst (node indexes); then the call-site path when not in src's file, then {in, changed} with several refs",
+        ),
+    );
+    object(&[("s", snapshot()), ("nodes", array(node)), ("edges", array(edge)), ("tests_excluded", int())])
+}
+
+fn get_file_outline() -> Value {
+    let marks = file_marks("the file is not identical in every requested ref");
+    let version = object_of(with(
+        &[("s", snapshot()), ("line_count", int()), ("symbols", array(named("OutlineSymbol")))],
+        &marks,
+    ));
+    let base = [
+        ("s", snapshot()),
+        ("path", string()),
+        ("lang?", string()),
+        ("line_count", int()),
+        ("symbols", array(outline_symbol())),
+        ("versions?", array(version)),
+    ];
+    object_of(with(&base, &marks))
+}
+
+fn list_repositories() -> Value {
+    let reference = object(&[("ref", string()), ("commit", doc(string(), "12 hex digits"))]);
+    array(titled(
+        "Repository",
+        object(&[
+            ("s", snapshot()),
+            ("repo", string()),
+            ("default_ref", string()),
+            ("refs", array(reference)),
+            ("languages", doc(json!({ "type": "object", "additionalProperties": int() }), "files per language")),
+            ("files", int()),
+            ("symbols", int()),
+            ("edges", int()),
+            ("packages?", array(string())),
+            ("packages_more?", int()),
+            ("depends_on?", array(string())),
+            ("score?", doc(number(), "relevance to `query`, 0–1")),
+        ]),
+    ))
+}
+
+fn list_contracts() -> Value {
+    array(titled(
+        "Contract",
+        object(&[
+            ("s", snapshot()),
+            ("repo", string()),
+            ("ref", string()),
+            ("path", or_null(string())),
+            ("line", int()),
+            ("symbol", doc(string(), "global qualified name of the declaring / calling symbol")),
+            ("id", string()),
+            ("local", string()),
+            ("label", string()),
+            ("kind", json!({ "enum": ["http", "rpc", "topic"] })),
+            ("side", json!({ "enum": ["provides", "consumes"] })),
+            ("key", doc(string(), "canonical key: `GET /users/{}`, `pkg.Service/Method`")),
+            ("framework", string()),
+            ("raw", string()),
+            ("matches", doc(int(), "counterparts in the visible repositories")),
+        ]),
+    ))
+}
+
+/// The shape of `tool`'s `results` (`null` for an unknown tool).
+pub(crate) fn output_shape(tool: &str) -> Value {
+    match tool {
+        "search_symbols" => search_symbols(),
+        "search_code" => search_code(),
+        "get_symbol" => get_symbol(),
+        "get_snippet" => get_snippet(),
+        "trace" => trace(),
+        "get_file_outline" => get_file_outline(),
+        "list_repositories" => list_repositories(),
+        "list_contracts" => list_contracts(),
+        _ => Value::Null,
+    }
+}

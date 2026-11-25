@@ -133,8 +133,28 @@ Every response (default `format: compact`) is:
 - Fields absent from an item mean `null` / unknown (`lines` of a node
   without a span, `sig`, `doc`, `lang`).
 
-**Brief** (inside results): `{"id", "qn", "label", "lines": [start, end]}`
-(`qn` is the global qualified name; the path is in the id).
+**Brief** (inside results): `{"id", "local", "qn", "label", "lines": [start,
+end], "repo", "ref"}` (the path is in the id).
+
+**Symbol objects.** Every object with an `id` — a brief, a search item, an
+outline symbol, `get_symbol`'s `symbol`, a `trace` node, a contract row —
+carries:
+
+- `local`: the **file-local** qualified name, the one its id is built from
+  (the id's `#` part: `InvoiceService.issue`, `Engine.ServeHTTP`; for a
+  file or folder, its path) and the one the text rendering prints;
+- `qn`: the **global** qualified name (`billing.invoices.service.InvoiceService.issue`,
+  `github.com/gin-gonic/gin.Engine.ServeHTTP`; [above](#common-conventions));
+  contract rows call it `symbol`;
+- `repo` and `ref`: the snapshot it was read from, also when the answer
+  spans several repositories or refs, or the snapshot is not listed in the
+  envelope (a candidate of another repository). Ids stay pinned and are
+  still the way to name a symbol in another call.
+
+These fields are in the JSON (`structuredContent`, the code-mode API) only:
+the text rendering is unchanged by them, so a single-repository answer costs
+the agent no more tokens. `format: "verbose"` keeps the alpha shapes
+without them.
 
 **Text rendering.** MCP results carry the envelope in `structuredContent`
 and a compact text rendering as text content; the CLI prints the JSON, or
@@ -175,25 +195,33 @@ snapshots of one repository.
 side; the envelope lists every requested snapshot of such a repository.
 Extraction is per blob, so a symbol whose file blob is the same in two refs
 has identical facts: a symbol is found in each snapshot by (label,
-qualified name, path), and its versions are compared by file blob.
+qualified name, path), its versions are collapsed by file blob, and it is
+`changed` when its own text differs.
 
 - An item identical in several snapshots is **one item** with `"in": [s, …]`
   (snapshot indexes); its `s` and id are those of the first. A symbol whose
-  file differs appears once per distinct version, each with its own `in`.
-  Every item of such a repository carries `in`; `"changed": true` marks
-  those not identical in every requested ref (another version, or absent:
-  added or deleted on a ref). Repositories read at one snapshot get neither,
-  so their items are exactly the single-ref ones.
+  file differs appears once per distinct version, each with its own `in`
+  (its lines, edges and id differ). Every item of such a repository
+  carries `in`; `"changed": true` marks a symbol whose **own text** (the
+  bytes of its span) is not the same in every requested ref, or that is
+  absent from one (added or deleted on a ref). A symbol of a changed file
+  whose text did not change — moved by lines added above it — is listed per
+  version but not `changed`; `in` still tells the file-level story (the
+  snapshots whose file blob the version shares). Repositories read at one
+  snapshot get neither, so their items are exactly the single-ref ones.
 - `search_symbols` collapses before cutting at `limit` (an identical symbol
   counts once; `next_cursor` counts collapsed items). `get_symbol` answers
   the best match's version with its `in` / `changed` and lists the other
   versions in `"versions": [{"s", "in", "changed", "symbol", "callers",
   "callees"}]` (not as candidates). `get_file_outline` is grouped per ref:
-  the first listed ref's outline with its `in` / `changed`, then each other
-  distinct version of the file in `"versions": [{"s", "in", "changed",
-  "line_count", "symbols"}]`, the cursor counting symbols over all of them.
-  `trace` walks from every version of the root and returns the **union
-  graph**: a node per symbol (its `in`: the snapshots it was reached in) and
+  the first listed ref's outline with its `in` / `changed` (of the **file**),
+  then each other distinct version of the file in `"versions": [{"s", "in",
+  "changed", "line_count", "symbols"}]`, the cursor counting symbols over
+  all of them; each symbol of each version is `"changed": true` by the rule
+  above, so "which functions of this file differ between the refs" is one
+  call. `trace` walks from every version of the root and returns the **union
+  graph**: a node per symbol (its `in`: the snapshots it was reached in;
+  `changed` by the rule above) and
   an edge per (source, destination, kind), whose `in` (the snapshots whose
   walk found it) ends the edge array as `{"in": [s, …], "changed": true}`
   (see [`trace`](#trace)), so "who calls `f` on the PR but not on `main`"
@@ -345,8 +373,9 @@ best result ranks):
 "results": [
   {"s": 0, "path": "src/invoices/service.py", "symbols": [
     {"id": "github.com/acme/billing@7696364aef89+:src/invoices/service.py#InvoiceService.issue",
-     "name": "issue", "qn": "billing.invoices.service.InvoiceService.issue", "label": "Method",
-     "lines": [41, 63], "sig": "def issue(self, invoice_id: str) -> Invoice"}]}
+     "name": "issue", "local": "InvoiceService.issue", "qn": "billing.invoices.service.InvoiceService.issue",
+     "label": "Method", "lines": [41, 63], "sig": "def issue(self, invoice_id: str) -> Invoice",
+     "repo": "github.com/acme/billing", "ref": "main"}]}
 ]
 ```
 
@@ -407,7 +436,7 @@ Results:
 ```json
 {
   "s": 0,
-  "symbol": {"id", "name", "qn", "label", "path", "lines", "lang", "sig", "doc", "exported", "test"},
+  "symbol": {"id", "name", "local", "qn", "label", "path", "lines", "lang", "sig", "doc", "exported", "test", "repo", "ref"},
   "parent": brief | null,
   "children": [brief],
   "bases": [brief],          // INHERITS / IMPLEMENTS targets
@@ -463,7 +492,7 @@ Call graph traversal.
 | `min_confidence` | float 0–1 | 0.0 |
 | `limit` | int (nodes), 1–2000 | 50 |
 | `labels` | array of label names: only neighbours with these labels are reported and traversed | all labels |
-| `include_tests` | bool: report and traverse tests (`is_test` or label `Test`) | false, or true when `edge_types` contains `TESTS` |
+| `include_tests` | bool: report and traverse tests (`is_test` or label `Test`; code nested in a test function or test block — a helper inside a test, a closure of a `describe` / `it` callback or of a `beforeEach`-style hook — is a test too) | false, or true when `edge_types` contains `TESTS` |
 
 Results:
 
@@ -471,8 +500,11 @@ Results:
 {
   "s": 0,
   "nodes": [
-    {"id": "…#InvoiceService.issue", "qn": "…", "label": "Method", "path": "src/invoices/service.py", "lines": [41, 63], "d": 0},
-    {"id": "…#Api.issue", "qn": "…", "label": "Method", "path": "src/api.py", "lines": [7, 8], "d": 1, "dir": "in"}
+    {"id": "…#InvoiceService.issue", "local": "InvoiceService.issue", "qn": "…", "label": "Method",
+     "path": "src/invoices/service.py", "lines": [41, 63], "repo": "github.com/acme/billing", "ref": "main",
+     "d": 0, "dir": "root"},
+    {"id": "…#Api.issue", "local": "Api.issue", "qn": "…", "label": "Method", "path": "src/api.py",
+     "lines": [7, 8], "repo": "github.com/acme/billing", "ref": "main", "d": 1, "dir": "in"}
   ],
   "edges": [[1, 0, "CALLS", 0.9, "type_resolved", 8]],
   "tests_excluded": 2        // distinct tests left out because include_tests is false
@@ -493,8 +525,9 @@ traces the pull request's own calls, linked against the libraries'
 defaults. Contract link edges ([above](#the-envelope), *Contract edges*)
 come back like the others, with strategy `contract` and the call site:
 `1 [1] out d1 Route GET /users/{id}  openapi.yaml L7-11  ←0 CALLS 0.9
-contract @5`. When the answer spans several snapshots, every node
-carries its snapshot `"s"` (the result's `"s"` is the root's), the
+contract @5`. Every node names its `repo` and `ref`; when the answer
+spans several snapshots, every node also carries its snapshot `"s"` (the
+result's `"s"` is the root's), the
 envelope lists the snapshots touched, and the text prefixes such nodes with
 `[s]`:
 
@@ -505,7 +538,7 @@ envelope lists the snapshots touched, and the text prefixes such nodes with
 1 [0] in d1 Method InvoiceService.issue  pkg/service.py L9-11  →0 CALLS 0.95 import_resolved @10
 ```
 
-Node 0 is the root (`d` 0, never filtered); the others are ordered by
+Node 0 is the root (`d` 0, `dir` `root`, never filtered); the others are ordered by
 (depth, direction, qualified_name), each listed once with `dir` `in`
 (caller), `out` (callee) or `both`, and `d` its smallest depth. An edge is
 `[src, dst, kind, confidence, strategy, call_site_line]` with node indexes,
@@ -531,7 +564,7 @@ some requested ref did not find it); text:
 [1] github.com/acme/billing@c0ffee00c0ff (feature/x)
 0 [0] Method InvoiceService.issue  pkg/service.py L9-11 [0,1] changed
 2 [1] out d1 Function audit  pkg/service.py L17-18 changed  ←0 CALLS 0.95 same_module @11 [1] changed
-3 [0] out d1 Function helper  pkg/service.py L13-14 [0,1] changed  ←0 CALLS 0.95 same_module @10
+3 [0] out d1 Function helper  pkg/service.py L13-14 [0,1]  ←0 CALLS 0.95 same_module @10
 ```
 
 `next_cursor` is the number of non-root nodes already returned; a later
@@ -571,13 +604,16 @@ body or initializer, and a `Class` callee is a constructor call (its
 |---|---|---|
 | `path` | string, required (repository-relative) | — |
 
-Results: `{"s", "path", "lang", "line_count", "symbols": [ {"id", "name", "qn", "label", "lines", "sig", "children" (opt): [ … ]} ] }`
+Results: `{"s", "path", "lang", "line_count", "symbols": [ {"id", "name", "local", "qn", "label", "lines", "sig", "repo", "ref", "children" (opt): [ … ]} ] }`
 (nested by containment, ordered by line). `next_cursor` is the number of
 symbols already returned in pre-order; a later page nests what it can and
 lists the rest at the top level. With a `ref` list: `"in"` / `"changed"`
 and `"versions": [{"s", "in", "changed", "line_count", "symbols"}]`, one
 per other distinct version of the file (text: `version [1] changed:
-pkg/service.py (python, 18 lines)` and its symbols).
+pkg/service.py (python, 18 lines)` and its symbols); there `changed` is the
+file's, and each symbol whose own text differs between the refs (or that
+one ref lacks) has `"changed": true` (text: ` changed` at the end of its
+line).
 
 ### `list_repositories`
 
@@ -633,10 +669,11 @@ narrows the listing; locally, the selected roots only).
 | `limit` | int, 1–1000 | 50 |
 
 Results: one flat list sorted by (kind, key, repository, path, line):
-`[{"s", "repo", "path", "line", "symbol", "id", "label", "kind", "side",
-"key", "framework", "raw", "matches"}]` — `symbol` the qualified name of
-the declaring / calling definition (the file for file-level code), `id`
-its symbol id, `side` `provides` / `consumes`, `key` the canonical key,
+`[{"s", "repo", "ref", "path", "line", "symbol", "id", "local", "label",
+"kind", "side", "key", "framework", "raw", "matches"}]` — `symbol` the
+global qualified name of the declaring / calling definition (the file for
+file-level code), `id` its symbol id, `local` its file-local name (the
+id's `#` part; the path for file-level code), `side` `provides` / `consumes`, `key` the canonical key,
 `framework` the framework or spec (`flask`, `requests`, `openapi`,
 `proto`, `grpc-python`, …), `raw` the text as written (≤ 200 characters),
 `matches` the number of counterpart rows: providers matching a consumed key
@@ -656,6 +693,131 @@ snapshots):
 [1] GET /users/{}  consumes  requests  local/client:app/users.py#get_user L5  (1)
 [1] POST /nowhere  consumes  requests  local/client:app/users.py#missing L9  (0)
 ```
+
+## Experimental: code mode
+
+[RFC 0009](rfcs/0009-code-mode.md), phases 0–3. Off by default; nothing
+above changes when it is off (same tool list, schemas and answers). The
+phase 3 verdict (RFC 0009 §14) recommends keeping it experimental with
+JavaScript only; making it a normal tool is the owner's decision.
+
+**Enabling.** `rueca mcp --experimental-code-mode`, or the environment
+variable `RUECA_EXPERIMENTAL_CODE_MODE=1` (or `true`), adds two tools after
+the eight: `execute` and `describe_api`. `rueca query execute` /
+`rueca query describe_api` take the same flag or variable (`--code-file
+FILE|-` reads `execute`'s `code` from a file or stdin). Service mode
+(`rueca serve`) never enables it, whatever its environment: scripts run in
+the server process (RFC 0009 §7.3).
+
+**Languages.** JavaScript (`js`, QuickJS through `rquickjs`) is always
+built. Starlark (`starlark`) needs the cargo feature `code-mode-starlark`
+(`cargo build --release -p rueca --features code-mode-starlark`, or
+`cargo install rueca --features code-mode-starlark`): `starlark` 0.14.3
+depends on crates with "unmaintained" RUSTSEC advisories that the
+repository's `cargo deny` policy rejects, so it is not in the default
+build. Without it, `language: "starlark"` is an error that says how to
+rebuild. Starlark is kept for comparison during the experiment; RFC 0009
+§14 recommends removing it.
+
+**`describe_api`** (`language`, default `js`) returns the script API,
+generated from the tool definitions (one function per tool, the tools'
+argument names, types, descriptions and defaults, and their result shapes),
+with the script contract, the limits and two examples: TypeScript
+declarations for `js` (about 3,900 tokens), a docstring reference for
+`starlark` (about 3,800 tokens). Read it once per session. JavaScript:
+`await rueca.searchSymbols({query: "parse", limit: 5})`; Starlark:
+`rueca.search_symbols(query = "parse", limit = 5)` (keyword arguments
+only). Arguments keep the tools' snake_case names in both.
+
+**`execute`**:
+
+| Arg | Type | Default |
+|---|---|---|
+| `code` | string: the script, at most 16 KB. `js`: the body of an async function, `return` the answer; `starlark`: assign the answer to `result` | — |
+| `language` | `js` or `starlark` | `js` |
+| `repo`, `ref` | as the tools': the default of every call in the script that names neither the argument nor an `id` (an id pins its repository and commit) | — |
+| `budget_tokens` | int, 100–1,000,000: cap on the returned `result` | 2000 |
+| `timeout_ms` | int, 1–10,000 (larger values are clamped, like the tools' ranges) | 2000 |
+
+```json
+{"result": ["billing.invoices.InvoiceService.issue"], "logs": ["root billing.invoices.total_due"],
+ "calls": 2, "snapshots": [{"s": 0, "repo": "local/golden-repo", "ref": "worktree", "commit": "worktree", "overlay": false}],
+ "truncated": false}
+```
+
+- Each `rueca.*` call resolves to its envelope's **`results`** (the shapes
+  of each tool above). `snapshots` lists every snapshot the calls read,
+  once each, numbered in the order they were first read; every `s` and
+  `in` inside a call's results is renumbered to that list before the
+  script sees it. Ids are the pinned ids of the tools, so an id in `result`
+  works in any tool afterwards. The envelope's other fields (`budget`,
+  `retrieval`, `files_scanned`, `org`, `omitted`) are not passed to
+  scripts.
+- A call whose own answer was cut (its `limit` or `max_lines` reached) is
+  listed in **`partial`**: `[{"call": 3, "tool": "search_symbols",
+  "next_cursor": "10"}]` (the script can raise `limit`, or pass the cursor
+  as `cursor`). `partial` is present only when not empty.
+- Inside scripts a call's `budget_tokens` defaults to 1,000,000 (the tools'
+  maximum): its answer reaches the script, not the agent, so only the
+  tool's `limit` bounds it. `format` other than `compact` is refused.
+- **`budget_tokens`** cuts `result`, as compact JSON counted with the tools'
+  estimator (`ceil(bytes / 4)`): the largest array keeps its longest prefix
+  that fits (then the next largest, …), then the longest string is cut
+  (ending in `…`), and a result that still does not fit becomes `null`;
+  `truncated` is then `true`.
+- `logs`: `console.log` / `print` lines, 4 KB in total; `logs_truncated:
+  true` (present only then) when output was dropped.
+- With `RUECA_CODE_MODE_TIMING=1` (for the benchmark's overhead gate, RFC
+  0009 §8) the result also has `timing: {"total_us", "engine_us"}`: the
+  whole `execute` and the sum of its engine calls. Without it the answer is
+  deterministic: the same script on the same index gives the same bytes.
+- **Text content** (what a model reads): the snapshot header lines of the
+  tools (`repo@commit12[+] (ref)`, `[s] ` first when there are several),
+  `result` as compact JSON on one line, a `log: …` line per log line, then
+  `(truncated: the result was cut to budget_tokens N)`, `(partial: call 3
+  search_symbols was cut, next cursor "10")` and `(logs truncated)` when
+  they apply. `structuredContent` carries the JSON above.
+
+**Errors** are tool results with `isError: true` and one line naming the
+language, the kind, the script line when known and the interpreter's
+message, so a script can be fixed in one more turn:
+
+```
+js runtime error at line 2: Error: rueca.getSymbol: no symbol found for name `nope`; try `search_symbols` to find the right name (describe_api lists the API)
+```
+
+Kinds: `syntax` (also an undefined name in Starlark), `runtime` (a thrown
+error, an unknown function, a failed call not caught), `timeout`,
+`memory`, `call_limit`, `script_too_large`, `result` (the answer is not
+JSON), `internal`. A failed `rueca.*` call is an error the script can catch
+in JavaScript (`try`/`catch`, message `rueca.<name>: <the tool's error>`);
+Starlark has no exceptions, so it stops the script at the call's line
+with the same message. Engine argument errors are the tools' own (unknown
+argument, missing required argument, wrong type).
+
+**Limits** (RFC 0009 §7.2): wall time `timeout_ms` (2 s, at most 10 s; the
+engine calls get the script's remaining time as their deadline), 64 MB of
+interpreter memory, 200 `rueca.*` calls, 16 KB of script (refused before
+parsing), 4 KB of logs, 512 KB of JavaScript stack, 200 nested Starlark
+calls. Scripts have no network, files, environment, clock, randomness,
+timers or module loading (JavaScript: no `Date`, `Math.random`,
+`setTimeout`, `import` / `require`, `fetch`, `eval`, `Function`; Starlark:
+no `load`).
+
+**Sandbox caveats.** Scripts run inside the `rueca mcp` process; the
+limits protect a session from runaway scripts, not the machine from a
+hostile user (RFC 0009 §7.3). JavaScript's memory limit is enforced on
+every allocation and its deadline is polled by the interpreter (generic
+`Array.prototype` methods refuse array-likes longer than 2^22 elements,
+the one non-polling case found). **Starlark's memory limit is best-effort
+in-process**: the heap is checked every 1,000 steps, not on allocation, so
+one large operation can use far more than 64 MB before it is stopped
+(`"x" * (1 << 30)` peaked at 3 GiB), memory a value keeps outside the
+Starlark heap (dictionary tables) is not counted, and an impossible
+allocation (`("x" * 131072) * 2147483647`) aborts the process. A single
+long Starlark operation also runs past the deadline (3.1 s for a 2 s
+limit). Containing these needs a child process with OS limits (RFC 0009
+§7.3, §13).
 
 ## Over HTTP
 
@@ -780,9 +942,16 @@ rueca query <TOOL> '<JSON ARGS>' [--root PATH | --org FILE|NAME] [--store DIR] [
     Run one tool and print its JSON result (with --text, the compact text
     rendering MCP clients get as text content). Same semantics as MCP.
 
-rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index]
+rueca query execute|describe_api '<JSON ARGS>' --experimental-code-mode [--code-file FILE|-] [...]
+    The experimental code-mode tools (also with RUECA_EXPERIMENTAL_CODE_MODE=1;
+    see "Experimental: code mode"). --code-file reads execute's `code` from
+    a file (`-`: stdin).
+
+rueca mcp [--root PATH | --org FILE|NAME] [--store DIR] [--no-auto-index] [--experimental-code-mode]
     MCP server on stdio. Indexes --root first if it has no segment; with
     --org FILE, builds the organization first if the store has none.
+    --experimental-code-mode (or RUECA_EXPERIMENTAL_CODE_MODE=1) also serves
+    `execute` and `describe_api`.
 
 rueca status [--store DIR] [--json]
     List indexed roots with repo, commit, node/edge/file counts, age, the
