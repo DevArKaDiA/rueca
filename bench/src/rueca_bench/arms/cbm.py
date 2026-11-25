@@ -262,7 +262,7 @@ class CbmArm(Arm):
             p = hit["path"]
             if p and p not in files and not p.startswith("<"):
                 files.append(p)
-            if is_callable_label(hit["label"]):
+            if is_callable_label(hit["label"], h.language):
                 funcs.append(hit)
         res.extra.update({"files": files, "functions": funcs})
         return res
