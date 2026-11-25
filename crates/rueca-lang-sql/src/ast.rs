@@ -80,18 +80,32 @@ pub fn statement(b: &mut Builder<'_>, pos: &Pos<'_>, stmt: &Statement, ctx: &Ctx
     let def = define(b, pos, stmt, ctx, &mut bodies);
     let enclosing = def.map(|(d, _)| d).or(ctx.enclosing);
     let skip: HashSet<usize> = def.and_then(|(_, s)| s).into_iter().collect();
-    let mut w = Walker {
-        b,
-        pos,
-        enclosing,
-        skip,
-        writes: HashSet::new(),
-        scopes: Vec::new(),
-        ctes: Vec::new(),
-        pushed: Vec::new(),
-    };
+    let mut w = walker(b, pos, enclosing, skip);
     let _ = stmt.visit(&mut w);
     bodies
+}
+
+/// Adds the references of one parsed statement inside `enclosing` (a
+/// statement of a routine body: it defines nothing of its own).
+pub fn references(b: &mut Builder<'_>, pos: &Pos<'_>, stmt: &Statement, enclosing: Option<LocalDefId>) {
+    let mut w = walker(b, pos, enclosing, HashSet::new());
+    let _ = stmt.visit(&mut w);
+}
+
+/// Adds the references of one parsed expression (a condition or a value
+/// of a procedural statement).
+pub fn expression(b: &mut Builder<'_>, pos: &Pos<'_>, expr: &Expr, enclosing: Option<LocalDefId>) {
+    let mut w = walker(b, pos, enclosing, HashSet::new());
+    let _ = expr.visit(&mut w);
+}
+
+fn walker<'a, 'b, 'p>(
+    b: &'a mut Builder<'b>,
+    pos: &'a Pos<'p>,
+    enclosing: Option<LocalDefId>,
+    skip: HashSet<usize>,
+) -> Walker<'a, 'b, 'p> {
+    Walker { b, pos, enclosing, skip, writes: HashSet::new(), scopes: Vec::new(), ctes: Vec::new(), pushed: Vec::new() }
 }
 
 // ---------------------------------------------------------------------------

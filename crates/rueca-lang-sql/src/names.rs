@@ -21,7 +21,7 @@ pub fn fold(dialect: Dialect, part: &Part) -> String {
     if !part.quoted || dialect.quoted_case_insensitive() {
         return part.text.to_lowercase();
     }
-    if dialect == Dialect::Snowflake && part.text == part.text.to_uppercase() {
+    if matches!(dialect, Dialect::Snowflake | Dialect::Oracle | Dialect::Db2) && part.text == part.text.to_uppercase() {
         return part.text.to_lowercase();
     }
     part.text.clone()
@@ -31,6 +31,14 @@ pub fn fold(dialect: Dialect, part: &Part) -> String {
 /// when it leads a name of two or more segments.
 pub fn segments(dialect: Dialect, parts: &[Part]) -> Vec<String> {
     let mut out: Vec<String> = parts.iter().map(|p| fold(dialect, p)).collect();
+    // A schema written through a placeholder (`{{ target.schema }}.t`,
+    // `@extschema@.f`, `$(Schema).t`) is unknown.
+    let last = out.len().saturating_sub(1);
+    let mut at = 0;
+    out.retain(|s| {
+        at += 1;
+        at > last || !s.starts_with("__")
+    });
     if out.len() >= 2
         && let Some(schema) = dialect.default_schema()
         && out[out.len() - 2] == schema

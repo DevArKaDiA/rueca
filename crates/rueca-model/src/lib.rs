@@ -227,6 +227,8 @@ impl Language {
             "kt" | "kts" => Language::Kotlin,
             "rb" | "rake" | "gemspec" | "ru" => Language::Ruby,
             "sql" | "psql" | "pgsql" | "plpgsql" | "mysql" | "tsql" | "bq" => Language::Sql,
+            // Oracle PL/SQL units: package and type specifications and bodies.
+            "pks" | "pkb" | "pck" | "pls" | "plsql" | "tps" | "tpb" => Language::Sql,
             "swift" => Language::Swift,
             _ => return None,
         })

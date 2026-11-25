@@ -3,8 +3,8 @@
 //! give the same dialect.
 
 use sqlparser::dialect::{
-    BigQueryDialect, DuckDbDialect, GenericDialect, MsSqlDialect, MySqlDialect, PostgreSqlDialect, RedshiftSqlDialect,
-    SQLiteDialect, SnowflakeDialect,
+    BigQueryDialect, ClickHouseDialect, DatabricksDialect, DuckDbDialect, GenericDialect, HiveDialect, MsSqlDialect,
+    MySqlDialect, OracleDialect, PostgreSqlDialect, RedshiftSqlDialect, SQLiteDialect, SnowflakeDialect,
 };
 
 /// A SQL dialect the pack reads.
@@ -18,13 +18,23 @@ pub enum Dialect {
     Snowflake,
     Redshift,
     DuckDb,
+    /// Oracle SQL and PL/SQL (sqlparser's Oracle dialect for SQL; PL/SQL
+    /// units are read by the pack).
+    Oracle,
+    /// IBM DB2 SQL and SQL PL: no sqlparser dialect, parsed as ANSI;
+    /// routines and triggers are read by the pack.
+    Db2,
+    ClickHouse,
+    Hive,
+    /// Databricks / Spark SQL.
+    Databricks,
     /// ANSI with the permissive extensions of sqlparser's generic dialect.
     Generic,
 }
 
 /// Order in which the other dialects are tried for a statement the file's
 /// dialect rejects (after the file's own dialect).
-const FALLBACK_ORDER: [Dialect; 7] = [
+const FALLBACK_ORDER: [Dialect; 8] = [
     Dialect::Postgres,
     Dialect::MySql,
     Dialect::MsSql,
@@ -32,6 +42,7 @@ const FALLBACK_ORDER: [Dialect; 7] = [
     Dialect::BigQuery,
     Dialect::Snowflake,
     Dialect::Generic,
+    Dialect::Oracle,
 ];
 
 impl Dialect {
@@ -46,6 +57,11 @@ impl Dialect {
             Dialect::Snowflake => "snowflake",
             Dialect::Redshift => "redshift",
             Dialect::DuckDb => "duckdb",
+            Dialect::Oracle => "oracle",
+            Dialect::Db2 => "db2",
+            Dialect::ClickHouse => "clickhouse",
+            Dialect::Hive => "hive",
+            Dialect::Databricks => "databricks",
             Dialect::Generic => "ansi",
         }
     }
@@ -62,6 +78,12 @@ impl Dialect {
             "snowflake" => Dialect::Snowflake,
             "redshift" => Dialect::Redshift,
             "duckdb" => Dialect::DuckDb,
+            "oracle" | "plsql" | "pl-sql" | "pl_sql" | "pls" | "pks" | "pkb" | "pck" | "tps" | "tpb" | "prc" | "fnc"
+            | "trg" => Dialect::Oracle,
+            "db2" | "db2luw" | "db2zos" => Dialect::Db2,
+            "clickhouse" => Dialect::ClickHouse,
+            "hive" | "hql" => Dialect::Hive,
+            "databricks" | "spark" | "sparksql" => Dialect::Databricks,
             "ansi" | "generic" | "sql" => Dialect::Generic,
             _ => return None,
         })
@@ -78,7 +100,11 @@ impl Dialect {
             Dialect::Snowflake => Box::new(SnowflakeDialect {}),
             Dialect::Redshift => Box::new(RedshiftSqlDialect {}),
             Dialect::DuckDb => Box::new(DuckDbDialect {}),
-            Dialect::Generic => Box::new(GenericDialect {}),
+            Dialect::Oracle => Box::new(OracleDialect {}),
+            Dialect::ClickHouse => Box::new(ClickHouseDialect {}),
+            Dialect::Hive => Box::new(HiveDialect {}),
+            Dialect::Databricks => Box::new(DatabricksDialect {}),
+            Dialect::Db2 | Dialect::Generic => Box::new(GenericDialect {}),
         }
     }
 
@@ -183,6 +209,13 @@ const PATH_WORDS: &[(&str, Dialect)] = &[
     ("snowflake", Dialect::Snowflake),
     ("redshift", Dialect::Redshift),
     ("duckdb", Dialect::DuckDb),
+    ("oracle", Dialect::Oracle),
+    ("plsql", Dialect::Oracle),
+    ("pl-sql", Dialect::Oracle),
+    ("db2", Dialect::Db2),
+    ("clickhouse", Dialect::ClickHouse),
+    ("databricks", Dialect::Databricks),
+    ("sparksql", Dialect::Databricks),
 ];
 
 /// The dialect a path segment names: one of [`PATH_WORDS`] inside it, or
@@ -199,7 +232,27 @@ fn segment_dialect(seg: &str) -> Option<Dialect> {
 
 /// Content signals per dialect: (dialect, case-insensitive needles, weight).
 const SIGNALS: &[(Dialect, &[&str], u32)] = &[
-    (Dialect::MsSql, &["\ngo\n", "\ngo\r\n", "nvarchar", "set nocount", "identity(", "@@", "exec ", "create proc "], 3),
+    (
+        Dialect::MsSql,
+        &[
+            "\ngo\n",
+            "\ngo\r\n",
+            "nvarchar(",
+            "set nocount",
+            "identity(",
+            "@@rowcount",
+            "@@error",
+            "@@trancount",
+            "@@identity",
+            "@@version",
+            "@@spid",
+            "@@fetch_status",
+            "@@procid",
+            "exec ",
+            "create proc ",
+        ],
+        3,
+    ),
     (
         Dialect::MySql,
         &["auto_increment", "engine=", "engine =", "delimiter ", "unsigned", "on update current_timestamp"],
@@ -209,6 +262,52 @@ const SIGNALS: &[(Dialect, &[&str], u32)] = &[
     (Dialect::Sqlite, &["autoincrement", "pragma ", "without rowid"], 3),
     (Dialect::BigQuery, &["struct<", "array<", "int64", "float64", "safe_cast", "safe_divide", "`.`"], 3),
     (Dialect::Snowflake, &["variant", "flatten(", "iff(", "transient", "copy into", "parse_json"], 2),
+    (
+        Dialect::Oracle,
+        &[
+            "varchar2",
+            "nvarchar2",
+            "\n/\n",
+            "\n/\r\n",
+            "create or replace package",
+            "pls_integer",
+            "dbms_",
+            "nvl(",
+            " from dual",
+            "sysdate",
+            "execute immediate",
+            "%rowtype",
+            "%type",
+            "raise_application_error",
+            "whenever sqlerror",
+            "set serveroutput",
+            "\nprompt ",
+            "sys_context(",
+            "systimestamp",
+            "show errors",
+            "\n@@",
+            "end;\n/",
+            "end;\r\n/",
+            "authid ",
+        ],
+        3,
+    ),
+    (
+        Dialect::Db2,
+        &[
+            "--#set terminator",
+            "organize by",
+            "sysibm.",
+            "syscat.",
+            "language sql\n",
+            "mode db2sql",
+            "begin atomic",
+            "fetch first 1 rows only",
+            "current schema",
+            "with ur",
+        ],
+        3,
+    ),
 ];
 
 /// The dialect whose signals weigh most in the first 64 KiB; ties go to
@@ -277,6 +376,18 @@ mod tests {
         assert_eq!(detect("x.sql", "select * from `t`"), (Dialect::MySql, Source::Content));
         assert_eq!(detect("x.sql", "pragma foreign_keys = on;"), (Dialect::Sqlite, Source::Content));
         assert_eq!(detect("x.sql", "select 1"), (Dialect::Generic, Source::Default));
+        assert_eq!(detect("oracle-sakila-db/schema.sql", ""), (Dialect::Oracle, Source::Path));
+        assert_eq!(detect("db2-sakila-db/schema.sql", ""), (Dialect::Db2, Source::Path));
+        assert_eq!(detect("source/core/ut_utils.pkb", ""), (Dialect::Oracle, Source::Path));
+        assert_eq!(detect("x.sql", "-- dialect: plsql\nselect 1"), (Dialect::Oracle, Source::Directive));
+        assert_eq!(
+            detect("x.sql", "create table t (a varchar2(10));\nselect nvl(a, 'x') from dual;"),
+            (Dialect::Oracle, Source::Content)
+        );
+        assert_eq!(
+            detect("x.sql", "--#SET TERMINATOR @\ncreate table t (a int) organize by row@"),
+            (Dialect::Db2, Source::Content)
+        );
     }
 
     #[test]
@@ -284,7 +395,8 @@ mod tests {
         let a = Dialect::Sqlite.attempts();
         assert_eq!(a[0], Dialect::Sqlite);
         assert_eq!(a.iter().filter(|d| **d == Dialect::Sqlite).count(), 1);
-        assert_eq!(a.len(), 7);
-        assert_eq!(Dialect::Redshift.attempts().len(), 8);
+        assert_eq!(a.len(), 8);
+        assert_eq!(Dialect::Redshift.attempts().len(), 9);
+        assert_eq!(Dialect::Oracle.attempts().len(), 8);
     }
 }

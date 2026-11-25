@@ -126,15 +126,20 @@
 //! without a sqlparser dialect are read as ANSI.
 
 mod ast;
+mod block;
 mod builtins;
 mod dialect;
 mod extract;
 mod facts;
 mod names;
 mod prep;
+mod read;
+mod repair;
 mod scan;
 mod split;
 mod text;
+mod tsql;
+mod utility;
 
 use rueca_extract::{Budget, ExtractError, LanguagePack, ProjectFiles};
 use rueca_model::{FileFacts, Import, Language};

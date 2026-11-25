@@ -26,8 +26,9 @@ fn main() {
     let list = std::env::args().any(|a| a == "--files");
     let mut files = Vec::new();
     walk(Path::new(&root), &mut files);
-    // dialect -> (files, files with an unparsed statement, statements, unparsed)
-    let mut by: BTreeMap<&'static str, (u32, u32, u32, u32)> = BTreeMap::new();
+    // dialect -> (files, files with a parse error, statements, statements
+    // with an error, parse errors, statements read by the pack's own readers)
+    let mut by: BTreeMap<&'static str, (u32, u32, u32, u32, u32, u32)> = BTreeMap::new();
     for f in files {
         let Ok(bytes) = std::fs::read(&f) else { continue };
         if bytes.len() > 2 * 1024 * 1024 {
@@ -40,12 +41,16 @@ fn main() {
         e.1 += u32::from(s.unparsed > 0);
         e.2 += s.statements;
         e.3 += s.unparsed;
+        e.4 += s.errors;
+        e.5 += s.own;
         if list && s.unparsed > 0 {
             println!("{} {} {}/{}", s.dialect.as_str(), rel, s.unparsed, s.statements);
         }
     }
-    for (d, (files, ferr, st, un)) in by {
+    for (d, (files, ferr, st, un, errors, own)) in by {
         let pct = if st > 0 { 100.0 * f64::from(un) / f64::from(st) } else { 0.0 };
-        println!("{d}\tfiles {files}\tfiles with unparsed {ferr}\tstatements {st}\tunparsed {un}\t{pct:.1}%");
+        println!(
+            "{d}\tfiles {files}\tfiles with unparsed {ferr}\tstatements {st}\tunparsed {un}\t{pct:.1}%\terrors {errors}\town readers {own}"
+        );
     }
 }

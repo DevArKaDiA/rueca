@@ -28,13 +28,29 @@ use crate::split::{token_range, tokenize};
 use crate::text::Lines;
 
 /// One significant token: the token and its file byte range.
-struct Tok {
-    token: Token,
-    range: (usize, usize),
+pub(crate) struct Tok {
+    pub token: Token,
+    pub range: (usize, usize),
+}
+
+impl Tok {
+    /// The unquoted word, else `""`.
+    pub fn word(&self) -> &str {
+        match &self.token {
+            Token::Word(w) if w.quote_style.is_none() => &w.value,
+            _ => "",
+        }
+    }
+
+    /// Whether the token is the unquoted word `upper` (any case).
+    pub fn is(&self, upper: &str) -> bool {
+        let w = self.word();
+        !w.is_empty() && w.eq_ignore_ascii_case(upper)
+    }
 }
 
 /// Significant tokens of `text[start..end]` (file offsets).
-fn tokens(text: &str, start: usize, end: usize, dialect: Dialect) -> Vec<Tok> {
+pub(crate) fn tokens(text: &str, start: usize, end: usize, dialect: Dialect) -> Vec<Tok> {
     let slice = &text[start..end];
     let Some(raw) = tokenize(slice, dialect) else { return Vec::new() };
     let lines = Lines::new(slice);
@@ -64,6 +80,24 @@ pub fn statement(
     def.map(|(d, _)| d)
 }
 
+/// References of a statement the pack reads itself (no definition).
+pub fn refs(b: &mut Builder<'_>, text: &str, range: (usize, usize), enclosing: Option<LocalDefId>) {
+    let toks = tokens(text, range.0, range.1, b.dialect);
+    Scanner { b, toks: &toks, enclosing }.refs(0);
+}
+
+/// The definition a `CREATE` / `ALTER` head names (routine, trigger,
+/// table, …), without scanning the rest; and the index of the first token
+/// after the head the scanner read.
+pub(crate) fn head(
+    b: &mut Builder<'_>,
+    toks: &[Tok],
+    range: (usize, usize),
+    doc: Option<String>,
+) -> Option<(LocalDefId, usize)> {
+    create(b, toks, range, doc)
+}
+
 /// References in a routine body kept as text (`$$ … $$`).
 pub fn body(b: &mut Builder<'_>, text: &str, range: (usize, usize), enclosing: LocalDefId) {
     let toks = tokens(text, range.0, range.1, b.dialect);
@@ -79,6 +113,7 @@ enum Object {
     Trigger,
     Index,
     Sequence,
+    Type,
 }
 
 /// `CREATE … <object> [IF NOT EXISTS] name`: the definition and the index
@@ -103,6 +138,7 @@ fn create(
         Object::Routine | Object::Trigger => Label::Function,
         Object::Index => Label::Constant,
         Object::Sequence => Label::Variable,
+        Object::Type => Label::TypeAlias,
     };
     let segs = b.segments(&name);
     let short = segs.last()?.clone();
@@ -147,6 +183,7 @@ fn object_keyword(toks: &[Tok]) -> Option<(Object, usize)> {
             Keyword::TRIGGER => Object::Trigger,
             Keyword::INDEX => Object::Index,
             Keyword::SEQUENCE => Object::Sequence,
+            Keyword::TYPE | Keyword::DOMAIN => Object::Type,
             Keyword::AS | Keyword::SELECT => return Some(None),
             _ => return None,
         };
@@ -244,7 +281,7 @@ fn item_end(toks: &[Tok], i: usize) -> usize {
 }
 
 /// Reads `a.b.c` at token `i`: the name and the index after it.
-fn read_name(toks: &[Tok], mut i: usize, _dialect: Dialect) -> Option<(Name, usize)> {
+pub(crate) fn read_name(toks: &[Tok], mut i: usize, _dialect: Dialect) -> Option<(Name, usize)> {
     let mut name = Name { parts: Vec::new(), ranges: Vec::new() };
     loop {
         let t = toks.get(i)?;
