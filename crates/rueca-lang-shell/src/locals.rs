@@ -162,6 +162,9 @@ fn file_var_kind(node: Node<'_>, source: &[u8]) -> FileVarKind {
     }
     let Some(decl) = declaration_of(node) else { return FileVarKind::Variable };
     let flags = declaration_flags(decl, source);
+    if flags.contains(['f', 'F']) {
+        return FileVarKind::Other;
+    }
     match declaration_keyword(decl, source) {
         "export" => FileVarKind::Exported,
         "readonly" => FileVarKind::Constant,

@@ -465,7 +465,12 @@ impl<'s> Extractor<'s> {
     /// `export` / `declare` / `local` / `readonly` / `typeset`.
     fn declaration(&mut self, node: Node<'_>, ctx: Ctx, depth: usize) {
         let keyword = declaration_keyword(node, self.src);
-        let exports = keyword == "export" || declaration_flags(node, self.src).contains('x');
+        let flags = declaration_flags(node, self.src);
+        // `export -f f` / `declare -f f` name functions, not variables.
+        if flags.contains(['f', 'F']) {
+            return;
+        }
+        let exports = keyword == "export" || flags.contains('x');
         let mut cursor = node.walk();
         let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
         for c in children {

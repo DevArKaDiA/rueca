@@ -244,6 +244,9 @@ fn environment_writes() {
     assert_eq!(def(&f, "PATH").signature.as_deref(), Some("export PATH"));
     assert_eq!(def(&f, "setup.API_KEY").parent, Some(3));
     assert!(defs(&f, Label::Variable).is_empty());
+    // `export -f` exports a function, not a variable.
+    let f = facts("helper() { :; }\nexport -f helper\ndeclare -F\n");
+    assert!(defs(&f, Label::EnvVar).is_empty() && defs(&f, Label::Variable).is_empty());
     // The script sets these: no env reads.
     let f = facts("export X=1\nf() { echo $X; }\n");
     assert!(names_of(&f, RefKind::EnvVar).is_empty());

@@ -69,12 +69,21 @@ impl Resolver<'_> {
         }
     }
 
-    /// The file-level definition named `name` of shell file `g`, if it fits.
+    /// The first file-level definition named `name` of shell file `g` that
+    /// fits the reference (a function and a variable may share a name).
     fn shell_def(&self, g: FileId, kind: RefKind, name: &str) -> Option<NodeId> {
         if !self.is_shell(g) {
             return None;
         }
-        self.top_level_def(g, name).filter(|&n| self.shell_compatible(kind, n))
+        if let Some(n) = self.top_level_def(g, name).filter(|&n| self.shell_compatible(kind, n)) {
+            return Some(n);
+        }
+        let defs = self.defs(g);
+        self.top_level[g as usize]
+            .iter()
+            .filter(|&&j| defs[j as usize].name == name)
+            .map(|&j| self.node_of(g, j))
+            .find(|&n| self.shell_compatible(kind, n))
     }
 
     /// A reference written in a shell file (module docs).
