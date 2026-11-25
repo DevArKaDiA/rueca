@@ -136,7 +136,7 @@ such edges disappear. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-shell`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-shell`, `rueca-lang-csharp`, `rueca-lang-kotlin`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -261,6 +261,20 @@ What packs deliberately do and don't do:
   `params object[]` written `object...`), calls carry their arity and
   argument types. A file whose `#if` blocks split a declaration is read in
   its first-branch configuration when that parses better.
+- **Kotlin names follow Java's.** The module name is the `package`; local
+  names join containers with `.` (`Order.Companion.create`,
+  `main.local`), constructors (primary, secondary and the implicit one of
+  a class without parameters) are members named like their class, and
+  overloads get a parameter suffix (`Order(Long,Int)`; `vararg` as
+  `T...`). A top-level extension function is named after its receiver type
+  (`String.shout`), which makes an extension of a project type of the same
+  package one of its members for the resolver; same-named top-level
+  functions of a file get suffixes too. `object`s and companion objects are
+  `Class`es (a companion `Order.Companion` unless named), `val` / `var`
+  constructor parameters are properties (`Field`), anonymous objects are
+  classes named after their base (`Runnable$1`). The primary constructor
+  spans the class header, where the calls of the supertype list and
+  default arguments are written; `init` blocks belong to the class.
 - **Rust names follow the module tree, items join with `.`.** The module
   name of a file is its module path, crate name first
   (`rueca_index::link`, from `Cargo.toml` and the file layout, §4.3); the
@@ -412,7 +426,11 @@ What packs deliberately do and don't do:
   `[TestMethod]` / `[DataTestMethod]` methods, fixture methods of test
   classes, classes with `[TestClass]` / `[TestFixture]` or a test, and
   every definition of a test project (`Foo.Tests/`, `Foo.UnitTests/`, …)
-  or under `test/` / `tests/`.
+  or under `test/` / `tests/`; in Kotlin, `@Test`
+  functions (JUnit 4 / 5, kotlin.test, TestNG), fixtures of test classes,
+  and classes named `*Test` / `*Tests` / `*Spec` / `*IT`, annotated
+  `@Nested` / `@RunWith` / `@ExtendWith`, extending a Kotest spec or
+  declaring tests.
 - **Named function expressions are definitions** in JS/TS wherever they
   appear (`app.use(function handler() {})`, `defineGetter(req, "query",
   function query() {})`, `return function timing() {}`): a `Function` child
@@ -514,7 +532,9 @@ when the file binds `NAME` nowhere (no assignment, `local`, `export`,
 receiver (or a `Configuration` property) `config["A:B"]`,
 `GetValue<T>("A:B")`, `GetSection("A:B")` and `GetConnectionString("Db")`
 (`ConnectionStrings:Db`), namespace `dotnet` (`appsettings*.json`, `:`
-read as `.`). Laravel config files are PHP:
+read as `.`); Kotlin `System.getenv("X")`,
+Spring `@Value("\${a.b}")` and `env.getProperty("a.b")` on an `Environment`,
+as in Java. Laravel config files are PHP:
 the array a `config/<file>.php` returns becomes `Key`s (`name`,
 `providers.cache.driver`), and `env()` calls inside an entry are reads by
 that key.
@@ -596,7 +616,7 @@ name) add a hash of the path to the key. A pack may also decline a file with
 a reason (`skipped:data-shape`): the file stays listed and searchable.
 
 **Detection** is by extension (`.rs` is Rust, `.sh` / `.bash` / `.zsh` /
-`.ksh` / `.bats` shell, `.cs` C#), then by file name (`Dockerfile`,
+`.ksh` / `.bats` shell, `.cs` C#, `.kt` / `.kts` Kotlin), then by file name (`Dockerfile`,
 `Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`,
 `AndroidManifest.xml`, the shell start-up files `.bashrc`, `.profile`,
 `.zshrc`, …; other XML stays text); a C header
@@ -624,7 +644,9 @@ Two per-language hooks, still without guessing symbols:
   one package (`module_scope` = `Package`).
   Java
   reads the `package` clause (`com.acme.core`; the default package is
-  empty), and all files of one package form one module. Rust returns the
+  empty), and all files of one package form one module; Kotlin reads its
+  `package` header the same way, and Kotlin and Java files of one package
+  are one package (the JVM family). Rust returns the
   file's **module path**: every `Cargo.toml` with a `[package]` is a
   package whose targets are crates (the library, `[lib] path` or
   `src/lib.rs`, named by `[lib] name` or the package name with `-` → `_`;
@@ -684,6 +706,12 @@ Two per-language hooks, still without guessing symbols:
   whose module name is `A.B` (its `IMPORTS` edge goes to the directory
   holding most of its files); `using static`, aliases and project-wide
   `global using`s are described with the C# rules (§4.4).
+  Kotlin imports name packages, not paths (a Kotlin file may declare any
+  package wherever it lives): with the `namespace_imports` hook,
+  `import a.b.C` binds the package `a.b` of the JVM family by name, Java
+  files included, and links `IMPORTS` to the directory holding most of its
+  files; a Java import of a class resolves to `C.kt` when no `C.java`
+  matches.
   Rust imports are module paths normalized at their site (`self::` and
   `super::` inside inline modules folded into the file's module, see the
   crate docs, *Imports*): `mod x;` is `<dir>/x.rs` or `<dir>/x/mod.rs` of
@@ -780,7 +808,8 @@ and Markdown resolve exactly as above; Terraform uses directory scope; Go
 uses package scope, directory imports, `$self` and `$type:`; Java uses
 package scope, implicit self, typed receivers, overloads and overrides;
 C and C++ use implicit self, typed receivers, declarations, overloads,
-overrides and includes; Rust uses `$self`, `$type:` and `$member:` with its
+overrides and includes; Kotlin uses Java's rules with imports by package
+name and the additions below; Rust uses `$self`, `$type:` and `$member:` with its
 own module rules, below):
 
 | Rule | Hook | Effect | Confidence |
@@ -860,6 +889,25 @@ overloaded (`type_resolved` 0.90), so `trace` on an interface method with
 `edge_types: ["CALLS", "OVERRIDES"]` reaches the implementations,
 anonymous classes included. JDK and dependency types are external; `java.lang`
 names are builtins.
+
+Kotlin references go through Java's rungs (package scope, implicit
+`this`, typed receivers, overloads, overrides), plus (`rueca-resolve`,
+`src/jvm.rs`): a member missing from a Kotlin class is looked up in its
+companion object (`Order.create()`); a call on a receiver that has no such
+member, or whose type is outside the project (`"x".shout()`), reaches a
+top-level extension function in scope, imported or of the package,
+`type_resolved` 0.85 when its receiver type matches (also a base or a type
+parameter), else a single imported one `import_resolved` 0.80 or a single
+one of the package `heuristic` 0.60, several unmatched candidates no edge;
+`Color.RED.hex()` finds `hex` in the enum; a call written without receiver
+inside `x.apply { … }`, `x.run { … }` or `with(x) { … }` (`$with:T`) is a
+member of `T` first, then resolves as written; a call on a value the file
+cannot type (`Factory.create().build()`, `val b = A.builder()`) uses the
+callee's declared return type (`$ret:`, the Rust pack's form). Kotlin
+callables get their arity range from the signature (defaults optional,
+`vararg` open), and among overloads the argument types the pack knows
+choose (value types rule out others; a spread argument needs a `vararg`;
+a call result takes the callee's declared return type).
 
 Rust references go through the same ladder with Rust's module semantics
 (`rueca-resolve` crate docs, *Rust*): a name in a module is one of its
@@ -964,7 +1012,7 @@ reads; Java emits env var and Spring config key reads; C and C++ emit `getenv("X
 reads; Rust emits `std::env::var("X")`, `env!("X")` and `option_env!("X")`
 reads; shell emits `$NAME` reads of unbound upper-case names and its
 `export` / `declare -x` / `NAME=value cmd` providers; C# emits `Environment.GetEnvironmentVariable("X")` and .NET
-configuration key reads). These
+configuration key reads; Kotlin mirrors Java). These
 references never go through the
 ladder: they match exact names only, so an env var or a key path can never
 be fuzzy-matched to a code symbol.
@@ -1444,7 +1492,7 @@ reads by code and by config that reads env) and `WRITES` from env var
 providers form the code ↔ config bridge; `REFERENCES` also carries data
 pointers (`$ref`, aliases, `depends_on`, Terraform traversals), and
 `INHERITS` YAML merges, compose `extends` and Dockerfile `FROM <stage>`.
-`OVERRIDES` come from Java and C++ overrides, Rust trait impls and Go's
+`OVERRIDES` come from Java, Kotlin and C++ overrides, Rust trait impls and Go's
 implicit interfaces (heuristic). Go embedding (struct fields and
 interfaces) and type aliases are `INHERITS`; Go `IMPLEMENTS` edges are
 inferred (heuristic 0.5).
@@ -1818,11 +1866,12 @@ gaps show up on real repositories.
 | Java extraction, packages, Maven / Gradle source roots | `rueca-lang-java` | crate docs, `src/extract.rs`, `src/project.rs`, `queries/locals.scm` |
 | C/C++ extraction, preprocessing (masking, conditionals, repairs), include directories | `rueca-lang-cpp` | crate docs, `src/extract.rs`, `src/preprocess.rs`, `src/mask.rs`, `src/cond.rs`, `src/repair.rs`, `src/includes.rs` |
 | Rust extraction, receivers, macro arguments, Cargo module model | `rueca-lang-rust` | crate docs, `src/extract.rs`, `src/receivers.rs`, `src/macros.rs`, `src/modules.rs` |
+| Kotlin extraction, receivers, smart casts, scope-function lambdas | `rueca-lang-kotlin` | crate docs, `src/extract.rs`, `src/refs.rs`, `src/locals.rs` |
 | `.proto` services, RPC methods, messages (`protox-parse`) | `rueca-lang-proto` | crate docs, `src/extract.rs` |
 | Shell functions, `source` paths, script runs, bats blocks, env bridge, parser repairs | `rueca-lang-shell` | crate docs, `src/extract.rs`, `src/paths.rs`, `src/repair.rs`, `queries/locals.scm` |
 | C# extraction, namespaces, receivers, `#if` configurations, the .NET bridge | `rueca-lang-csharp` | crate docs, `src/extract.rs`, `src/refs.rs`, `src/bridge.rs`, `src/preproc.rs`, `queries/locals.scm` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
-| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/shell.rs` (sourced functions, script runs), `src/csharp.rs` (C# namespaces and usings, partial types, extension methods, return-type receivers, overload choice), `src/contracts.rs` (contract table and edges) |
+| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/shell.rs` (sourced functions, script runs), `src/csharp.rs` (C# namespaces and usings, partial types, extension methods, return-type receivers, overload choice), `src/jvm.rs` (Kotlin imports by package, companions, extension functions, overloads), `src/contracts.rs` (contract table and edges) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
 | Organization index, generations, visibility | `rueca-segment` | `src/org.rs` (module docs) |
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |

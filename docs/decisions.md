@@ -1,5 +1,88 @@
 # Decisions log
 
+## 2026-11-25 — Kotlin: the JVM family, imports by package, scip-java's Kotlin indexer, `stable`
+
+The Kotlin pack (`rueca-lang-kotlin`, RFC 0003 §10.4e) follows the Java
+model — packages, classes with members, overload suffixes, implicit
+`this`, `OVERRIDES` — with these decisions:
+
+- **Kotlin joins Java's family** (`LanguageFamily::Java`, documented as
+  the JVM family) instead of a family of its own. Packages are keyed by
+  family and module name, so a package of Kotlin and Java files is one
+  module: Kotlin uses a Java class of its package, Java a Kotlin one, the
+  query layer's qualified names and overload lookups apply unchanged, and
+  the organization linker's `java:<package>` keys cover both. Weighed: a
+  `Kotlin` family (interop then needs a cross-family bridge in every
+  lookup). The only Java-side change is that its import resolution also
+  takes `C.kt` when no `C.java` matches (Java-only repositories are
+  unaffected).
+- **Imports bind packages by name** through the `namespace_imports` hook
+  the C# pack introduced (same name and signature): Kotlin does not tie
+  packages to directories (its conventions omit the common root package
+  from paths). The resolver code is a small `jvm` module keyed by (family,
+  module); on a rebase with the C# pack, one implementation of
+  `namespace_import_targets` stays.
+- **Kotlin-specific resolution sits behind `is_kotlin` checks** in
+  `rueca-resolve/src/jvm.rs`: companion members through their class,
+  extension functions (named `Recv.f`, so an extension of a project type
+  of the package is also its member), enum entry members, implicit
+  receivers of `apply` / `run` / `with` lambdas and of extension bodies
+  (`$with:T`), call results through the Rust pack's `$ret:` form, Kotlin
+  arity ranges (defaults, `vararg`) and overload choice by argument types
+  refined by the project's class hierarchy. Shared rules
+  (`overload_by_types`, the Java ladder) are untouched, so no other
+  language's numbers move. Ambiguous overloads keep Java's fan-out (×0.8):
+  on the calibration repository binding none instead gave callers recall
+  71.6 (precision 97.5) against 84.4 / 94.4.
+- **Constructors follow the gold's convention**: the primary constructor,
+  written or implicit, spans the class header (where the supertype call
+  and default arguments are written); `init` blocks belong to the class,
+  like Java initializers; callable references `::f` are reads, not calls.
+
+**Gold.** scip-java 0.14.2's Kotlin indexer (Kotlin Analysis API 2.4.0,
+K2) runs without a build tool from a `scip-java.json` listing sources and
+sha256-pinned classpath jars, in the Temurin image the Java gold already
+pins, with no network; about 5 s per repository, nothing skipped. Two
+repairs in the derivation: a primary constructor written with
+`constructor` on its own line is defined on that keyword and now binds to
+the callable whose extent (the class header) holds it (kotlinpoet's
+builders, 68 edges); and the Rueca arm prefers a callable when a class and
+its constructor start on one line. Blind spots kept and disclosed:
+constructor delegation (`: this(…)`, `: super(…)`) has no occurrence and a
+supertype call references the class, so those true edges count against an
+arm. Repositories: moshi 2.0.0-alpha.1 and clikt 5.2.1 gated, kotlinpoet
+2.4.0 calibration (Kotlin Multiplatform `expect` / `actual` calls do not
+resolve in its gold). S1: SWE-bench Multilingual has no Kotlin;
+Multi-SWE-bench's Kotlin files give 46 gated instances (ktlint, detekt,
+ORT, TeXiFy-IDEA, DataFrame, OkHttp, Shadow) and SWE-rebench V2 15
+calibration ones; the S1 repositories wait in `[org] pending_languages`
+like C#'s.
+
+**Grammar.** `tree-sitter-kotlin-sg` 0.4.1 (fwcd's grammar, ast-grep's
+crates.io release) over `tree-sitter-kotlin-ng` 1.1.0: fewer files with
+parse errors on five of six corpus repositories (30 vs 86 in total), and
+nvim-treesitter's `locals.scm` is written for it; fwcd's own crate pins
+`tree-sitter < 0.23`.
+
+**Tuning** used only kotlinpoet (calibration) and the micro-benchmark.
+One mid-course run of the gated repositories was looked at as a status
+check (callees precision 89.7 then, below the floor); the changes after it
+came from calibration failures only (extension bodies as receivers,
+unknown-receiver extensions only when no method shares the name, overloads
+through the class hierarchy, standard-library result types, call-result
+arguments).
+
+**Result** (binary `feat/lang-kotlin` @ 3265ba4): `stable` — callers /
+callees precision 96.4 / 90.0 (callees at the floor, interval 87.9–92.0),
+recall 86.6 / 85.5, definition found 99.0, micro F1 100.0, 0.15% of files
+with parse errors, p95 26 ms; localization not significantly below BM25
+(File Acc@5 56.5 vs 58.7, paired interval −10.9–6.5; Function Acc@10 45.5
+vs 31.8). cbm on the same questions: callers / callees precision 88.1 /
+76.4, recall 55.1 / 44.6. Not done: HTTP / RPC contracts (Spring and Ktor
+routes), inferred return types of other files' functions without a
+declared type, generic element types, DSL lambdas other than the scope
+functions, `expect` / `actual` pairing.
+
 ## 2026-11-25 — C#: namespaces bound by name, scip-dotnet gold in Docker, `stable`
 
 The C# pack (`rueca-lang-csharp`, RFC 0003 §10.4d) follows the Java model

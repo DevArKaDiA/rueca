@@ -23,7 +23,7 @@ agent can follow.
 > **Status: alpha (`0.1.0-alpha.2`).** Local mode (one repository, or an
 > organization of local repositories with `--org`); Python,
 > TypeScript/JavaScript, PHP, Go, Java, C, C++, Rust, shell scripts
-> (`preview`) and C#, plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
+> (`preview`), C# and Kotlin, plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
 ## Features
@@ -81,7 +81,15 @@ and `export` providers in the env bridge), C#
 extension methods, receivers typed from declarations and from declared
 return types, xUnit / NUnit / MSTest tests, `Environment` and
 `IConfiguration` reads into `appsettings.json`, NuGet projects for
-cross-repository package edges).
+cross-repository package edges),
+Kotlin (packages bound by name wherever their files are and shared with
+Java in both directions, `import` with aliases and on demand, classes,
+objects and companion objects, primary / secondary / implicit constructors
+called without `new`, extension functions, overloads chosen by arity,
+defaults, `vararg` and argument types, receivers typed from declarations,
+constructions, smart casts, scope-function lambdas and declared return
+types, JUnit / kotlin.test / Kotest tests, `System.getenv` and Spring
+`@Value` reads, Gradle `.kts` scripts).
 Documents: Markdown headings become `Section` symbols and file links become
 `IMPORTS` edges, in the same graph as the code.
 Configuration: JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
@@ -381,7 +389,8 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    `go.mod`; Java packages and imports through Maven / Gradle source roots; C/C++
    `#include` through `compile_commands.json` include directories; Rust
    `mod` / `use` through the Cargo workspace model; shell `source` paths; C# `using`s through
-   namespaces, wherever their files are),
+   namespaces, wherever their files are; Kotlin imports through
+   packages, wherever their files are, shared with Java),
    re-export chains, `self`/`this` with base classes and traits,
    receiver types the file declares or constructs (every code language:
    `c: Context`, `const app = new Hono()`, `x = Session()`), declarations to
@@ -434,6 +443,7 @@ scorecard (`stable` = every floor met; full tables in
 - **Rust** `stable` (localization meets the floor but trails BM25 on the point estimate: File Acc@5 62.8 vs 67.4, Function Acc@10 39.0 vs 46.3 over 43 issues, paired intervals cross zero; callers / callees precision 98.5 / 98.0, recall 86.8 / 87.1 against rust-analyzer on serde_json and ripgrep; 0.1% of files with parse errors)
 - **Shell** `preview` (no localization dataset has shell instances, so the localization floors are pending; structure measured against the bench's code-backed labeler, not a compiler-grade oracle: callers / callees precision 100.0 / 100.0, recall 99.9 / 99.9 on nvm, acme.sh and bash-it, micro callee F1 99.1; 1.9% of files with parse errors, interval crossing the 2% floor; zsh best effort)
 - **C#** `stable` (localization meets the floor at BM25's level: File Acc@5 48.7 vs 48.7, Function Acc@10 26.3 vs 28.9 over 39 SWE-rebench V2 issues, paired intervals cross zero; callers / callees precision 96.9 / 95.5, recall 95.2 / 96.6 against scip-dotnet on serilog and eShopOnWeb; 0.0% of files with parse errors)
+- **Kotlin** `stable` (callees precision at the floor: 90.0, interval 87.9–92.0; callers precision 96.4, recall 86.6 / 85.5 against scip-java's Kotlin indexer on moshi and clikt; localization not significantly below BM25: File Acc@5 56.5 vs 58.7, Function Acc@10 45.5 vs 31.8 over 46 Multi-SWE-bench issues; 0.15% of files with parse errors)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 **Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),
@@ -467,7 +477,7 @@ absolute floors and aspirational targets).
 | Stage | What it delivers | Status |
 |---|---|---|
 | **Local mode** | One binary, MCP over stdio, the tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
-| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c) | ✅ done, every language `stable`; shell `preview` (no localization dataset, code-backed structural gold) |
+| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c) | ✅ done, every language `stable`; shell `preview` (no localization dataset, code-backed structural gold) |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
@@ -478,7 +488,7 @@ absolute floors and aspirational targets).
 | **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
 | **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |
 
-More languages (Kotlin, Swift, Ruby, …) follow the same gate.
+More languages (Swift, Ruby, …) follow the same gate.
 
 ## Workspace
 
@@ -497,6 +507,7 @@ More languages (Kotlin, Swift, Ruby, …) follow the same gate.
 | [`rueca-lang-cpp`](crates/rueca-lang-cpp) | C and C++ extraction, macro masking and include resolution |
 | [`rueca-lang-rust`](crates/rueca-lang-rust) | Rust extraction, receivers, macro arguments and the Cargo module model |
 | [`rueca-lang-csharp`](crates/rueca-lang-csharp) | C# extraction, namespaces and usings, receivers, `#if` configurations and the .NET configuration bridge |
+| [`rueca-lang-kotlin`](crates/rueca-lang-kotlin) | Kotlin extraction, packages shared with Java, receivers and extension functions |
 | [`rueca-lang-proto`](crates/rueca-lang-proto) | Protocol Buffers services, RPC methods, messages and enums; RPC contracts |
 | [`rueca-lang-shell`](crates/rueca-lang-shell) | Shell scripts (sh, bash; zsh / ksh best effort): functions, `source` paths, script runs, bats / shunit2 tests, env reads and providers |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |
