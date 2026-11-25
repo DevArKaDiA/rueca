@@ -1,5 +1,86 @@
 # Decisions log
 
+## 2026-11-25 — Ruby: global constant paths, Ruby's own lookup, scip-ruby gold, `stable`
+
+The Ruby pack (`rueca-lang-ruby`, RFC 0003 §10.4f) has no module names:
+constants are global and classes open, so definitions are named by
+constant path (like PHP and C++) and Ruby references are resolved by a
+`ruby` module of `rueca-resolve` (like PHP's own path) rather than the
+generic ladder:
+
+- **Names.** `A::B` for classes and modules (lexical and compact paths
+  joined), `A::B#m` for instance methods and `A::B.m` for singleton ones
+  (`def self.m`, `class << self`, `module_function`) — Ruby's documentation
+  convention; a symbol id splits at its first `#`, so the `#` inside a
+  local name is unambiguous. A class reopened in several files is several
+  nodes sharing one table entry: a method of one reopening is found from a
+  call anywhere, and the node a constant reference points to is the one
+  Zeitwerk would load (`foo/bar.rb` for `Foo::Bar`), else the one with a
+  superclass, else the first.
+- **Constants** follow Ruby: `Module.nesting` innermost first (a compact
+  `class A::B` body does not see `A`'s constants), the ancestors of the
+  innermost class, the top level; superclasses are resolved around the
+  class, mixins inside its body. **Methods** follow the ancestors
+  (`prepend`, the class, `include` last first, the superclass), singleton
+  methods `extend` and the superclass chain; a class with an ancestor
+  outside the project is open, so a method it lacks is external, never a
+  guess. Aliases stand for the method they name (scip-ruby resolves them
+  the same way).
+- **Locals vs calls.** A bare identifier is a call unless the vendored
+  nvim-treesitter `locals.scm` (adapted: hard scopes for `def` / `class` /
+  `module`, soft ones for blocks, assignment order) makes it a local.
+- **Receivers** are typed in the file from `Foo.new`, Sorbet `sig`s, RBS
+  comments (`#: (Foo a) -> Bar`) and `T.let`; declared return types are kept
+  in the signature after ` #: -> ` so the resolver types call results
+  (`$ret:`, the Rust pack's form). Untyped receivers keep the by-name rung
+  at `heuristic` 0.5, the Python policy: on the calibration repositories
+  (mid-tuning) dropping it raised callees precision by 1.9 (packwerk) and
+  3.6 (rack) points and cut packwerk's callees recall by 3.2 (calls on
+  RBS-typed receivers the pack does not type); the confidence ≥ 0.6 row
+  shows the guess-free numbers.
+- **Repair.** tree-sitter-ruby 0.23.1 does not parse an endless method
+  whose body is a command call (`def m = raise E, "x"`, Sorbet-style
+  abstract methods); a same-length rewrite (`def m =raise(E, "x")`)
+  repairs it before parsing (packwerk: 7 of 63 library files parsed with
+  errors before, none after).
+
+**Gold.** scip-ruby 0.5.1 (Sourcegraph, on Sorbet) as a release binary
+pinned by sha256 for macOS arm64 and Linux x86-64, like scip-clang: it is
+static (no Ruby, Bundler or gems on the host), so no Docker image is
+needed. It indexes untyped code (also `# typed: false` files) with Sorbet's
+inference: constants, `self` calls, `Foo.new` and locals resolve; untyped
+receivers, `super` (no occurrence at all), `prepend` dispatch and instance
+variables typed in `initialize` do not. The gold is defined as what Sorbet
+resolves, with the Python pack's scoring conventions: Rueca's by-name and
+`super` edges outside it count as false positives. The micro key (61
+snippets, Ruby semantics) agrees with scip-ruby on 70 of its 76 edges, one
+extra; the six differences are those blind spots. Repositories: jekyll
+4.4.1 (untyped) and ruby-lsp 0.26.11 (Sorbet / RBS typed) gated, rack
+3.2.9 and packwerk 3.3.1 calibration. S1: SWE-bench Multilingual is the
+only dataset with Ruby (SWE-rebench V2, Multi-SWE-bench and SWE-PolyBench
+have none): rubocop, fluentd, fastlane and jekyll gated (40 instances, 33
+change a function), faker and fpm calibration (4). Fastlane was first
+calibration; the first report showed 27 gated function instances, below
+RFC 0004 §7.2's 30, so it moved to the gated split (a population fix: no
+Ruby ranking weight is tuned). The S1 repositories wait in `[org]
+pending_languages`, as C#'s and Kotlin's.
+
+**Tuning** used rack, packwerk and the micro-benchmark only (the include
+nesting, the endless-method repair, the core-method list of the by-name
+rung). The gated sets were scored once, after that, and not tuned on.
+
+**Result** (binary `feat/lang-ruby` @ 2e353ab): `stable` — callers /
+callees precision 98.4 / 95.4 (jekyll's callees 91.1: by-name guesses on
+untyped receivers; ruby-lsp 98.7), recall 96.8 / 96.7, definition found
+100.0, micro F1 96.7, 0.2% of files with parse errors, p95 19 ms;
+localization not significantly below BM25 (File Acc@5 55.0 vs 55.0,
+Function Acc@10 24.2 vs 18.2 over 40 / 33 issues). cbm on the same
+questions: callers / callees precision 88.6 / 61.9, recall 49.6 / 57.0.
+Not done: metaprogramming beyond literal `define_method` / `alias_method`
+(Rails DSLs, `method_missing`, RSpec `let`), ActiveSupport `Concern` class
+methods, union types, `super` inside modules, shebang scripts (after the
+shell pack's detection lands), HTTP contracts (Rails / Sinatra routes).
+
 ## 2026-11-25 — Kotlin: the JVM family, imports by package, scip-java's Kotlin indexer, `stable`
 
 The Kotlin pack (`rueca-lang-kotlin`, RFC 0003 §10.4e) follows the Java
