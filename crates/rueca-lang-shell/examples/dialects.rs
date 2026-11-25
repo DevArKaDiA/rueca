@@ -80,70 +80,93 @@ fn first_error(bytes: &[u8], grammar: Grammar) -> String {
     String::new()
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let list = args.iter().any(|a| a == "--files");
-    let evidence = args.iter().any(|a| a == "--evidence");
-    let tsv = args.iter().any(|a| a == "--tsv");
-    let roots: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    assert!(!roots.is_empty(), "usage: dialects <dir>... [--files] [--evidence]");
-    // dialect -> (files, files with errors, files read with the other grammar)
-    let mut by: BTreeMap<&'static str, (u32, u32, u32)> = BTreeMap::new();
-    let mut rules: BTreeMap<String, u32> = BTreeMap::new();
-    for root in roots {
-        let mut files = Vec::new();
-        walk(Path::new(root), &mut files);
-        for f in files {
-            let Ok(bytes) = std::fs::read(&f) else { continue };
-            if bytes.len() > 2 * 1024 * 1024 {
-                continue;
-            }
-            let rel = f.strip_prefix(root).unwrap_or(&f).to_string_lossy().to_string();
-            let Some(s) = stats(&rel, &bytes) else {
-                println!("SKIP {rel}");
-                continue;
-            };
-            if tsv {
-                let repaired = rueca_lang_shell::repaired_source(&bytes, s.grammar);
-                let hash = repaired
-                    .iter()
-                    .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3));
-                let g = if s.grammar == Grammar::Zsh { "zsh" } else { "bash" };
-                let err = u8::from(s.parse_errors > 0);
-                println!("{root}/{rel}\t{}\t{:?}\t{g}\t{err}\t{hash:016x}", s.dialect.as_str(), s.evidence);
-                continue;
-            }
-            let e = by.entry(s.dialect.as_str()).or_default();
-            e.0 += 1;
-            e.1 += u32::from(s.parse_errors > 0);
-            e.2 += u32::from(s.grammar != s.dialect.grammar());
-            *rules.entry(format!("{} by {:?}", s.dialect.as_str(), s.evidence)).or_default() += 1;
-            if list && s.parse_errors > 0 {
-                let g = if s.grammar == Grammar::Zsh { "zsh-grammar" } else { "bash-grammar" };
-                println!(
-                    "{} {g} {root}/{rel} {}{}",
-                    s.dialect.as_str(),
-                    s.parse_errors,
-                    first_error(&bytes, s.grammar)
-                );
-            }
-        }
-    }
-    if tsv {
+/// What the command line asks for.
+struct Options {
+    list: bool,
+    evidence: bool,
+    tsv: bool,
+}
+
+/// The totals of a run: dialect -> (files, files with errors, files read
+/// with the other grammar), and files per detection rule.
+#[derive(Default)]
+struct Totals {
+    by: BTreeMap<&'static str, (u32, u32, u32)>,
+    rules: BTreeMap<String, u32>,
+}
+
+fn percent(part: u32, whole: u32) -> f64 {
+    if whole > 0 { 100.0 * f64::from(part) / f64::from(whole) } else { 0.0 }
+}
+
+/// The `--tsv` line of a file.
+fn print_tsv(root: &str, rel: &str, bytes: &[u8], s: &rueca_lang_shell::Stats) {
+    let repaired = rueca_lang_shell::repaired_source(bytes, s.grammar);
+    let hash =
+        repaired.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3));
+    let g = if s.grammar == Grammar::Zsh { "zsh" } else { "bash" };
+    let err = u8::from(s.parse_errors > 0);
+    println!("{root}/{rel}\t{}\t{:?}\t{g}\t{err}\t{hash:016x}", s.dialect.as_str(), s.evidence);
+}
+
+/// Reads one file: its `--tsv` line, or its counts (and its `--files` line).
+fn file(root: &str, path: &Path, options: &Options, totals: &mut Totals) {
+    let Ok(bytes) = std::fs::read(path) else { return };
+    if bytes.len() > 2 * 1024 * 1024 {
         return;
     }
+    let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
+    let Some(s) = stats(&rel, &bytes) else {
+        println!("SKIP {rel}");
+        return;
+    };
+    if options.tsv {
+        return print_tsv(root, &rel, &bytes, &s);
+    }
+    let e = totals.by.entry(s.dialect.as_str()).or_default();
+    e.0 += 1;
+    e.1 += u32::from(s.parse_errors > 0);
+    e.2 += u32::from(s.grammar != s.dialect.grammar());
+    *totals.rules.entry(format!("{} by {:?}", s.dialect.as_str(), s.evidence)).or_default() += 1;
+    if options.list && s.parse_errors > 0 {
+        let g = if s.grammar == Grammar::Zsh { "zsh-grammar" } else { "bash-grammar" };
+        println!("{} {g} {root}/{rel} {}{}", s.dialect.as_str(), s.parse_errors, first_error(&bytes, s.grammar));
+    }
+}
+
+/// The table per dialect, the total, and the rules with `--evidence`.
+fn print_totals(totals: Totals, evidence: bool) {
     let (mut files, mut errors) = (0, 0);
-    for (d, (n, e, other)) in &by {
-        let pct = if *n > 0 { 100.0 * f64::from(*e) / f64::from(*n) } else { 0.0 };
+    for (d, (n, e, other)) in &totals.by {
+        let pct = percent(*e, *n);
         println!("{d}\tfiles {n}\twith errors {e}\t{pct:.2}%\tother grammar {other}");
         files += n;
         errors += e;
     }
-    let pct = if files > 0 { 100.0 * f64::from(errors) / f64::from(files) } else { 0.0 };
+    let pct = percent(errors, files);
     println!("all\tfiles {files}\twith errors {errors}\t{pct:.2}%");
     if evidence {
-        for (k, v) in rules {
+        for (k, v) in totals.rules {
             println!("  {k}: {v}");
         }
+    }
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let flag = |name: &str| args.iter().any(|a| a == name);
+    let options = Options { list: flag("--files"), evidence: flag("--evidence"), tsv: flag("--tsv") };
+    let roots: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    assert!(!roots.is_empty(), "usage: dialects <dir>... [--files] [--evidence]");
+    let mut totals = Totals::default();
+    for root in roots {
+        let mut files = Vec::new();
+        walk(Path::new(root), &mut files);
+        for f in files {
+            file(root, &f, &options, &mut totals);
+        }
+    }
+    if !options.tsv {
+        print_totals(totals, options.evidence);
     }
 }

@@ -291,47 +291,63 @@ const KSH_TEXT: &[&str] = &["set -A ", "${.sh.", "print -u", "KSH_VERSION"];
 /// Syntax beyond POSIX sh that the three larger shells share.
 const EXTENDED_TEXT: &[&str] = &["[[ ", "<<<", "=(", "<(", "&>", "$'"];
 
-/// Counts the content signals of `text` (each distinct signal once).
-pub fn signals(text: &str) -> Signals {
-    let mut seen: Vec<&'static str> = Vec::new();
-    let mut s = Signals::default();
-    let mut once = |key: &'static str| {
-        let new = !seen.contains(&key);
+/// The distinct signals already counted in a file.
+#[derive(Default)]
+struct Seen(Vec<&'static str>);
+
+impl Seen {
+    /// Whether `key` is new (and records it).
+    fn once(&mut self, key: &'static str) -> bool {
+        let new = !self.0.contains(&key);
         if new {
-            seen.push(key);
+            self.0.push(key);
         }
         new
-    };
-    for line in text.lines() {
-        let line = line.trim_start();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+    }
+
+    /// The weight of the command word `first` when it is one of `commands`
+    /// and new: 2 for the `light` ones (other shells' scripts use the name
+    /// too), else 3.
+    fn command(&mut self, commands: &[&'static str], light: &[&str], first: &str) -> u32 {
+        match commands.iter().find(|k| **k == first) {
+            Some(k) if self.once(k) => {
+                if light.contains(k) {
+                    2
+                } else {
+                    3
+                }
+            }
+            _ => 0,
         }
-        if line.contains("ZSH_VERSION") || line.contains("BASH_VERSION") {
-            s.portable = true;
-        }
-        let first = line.split(|c: char| c.is_ascii_whitespace() || c == ';').next().unwrap_or("");
-        if let Some(k) = ZSH_COMMANDS.iter().find(|k| **k == first).filter(|k| once(k)) {
-            s.zsh += if *k == "autoload" || *k == "bindkey" { 2 } else { 3 };
-        }
-        if let Some(k) = BASH_COMMANDS.iter().find(|k| **k == first).filter(|k| once(k)) {
-            s.bash += if *k == "complete" { 2 } else { 3 };
-        }
-        if first == "function" && once("function") {
-            s.extended += 1;
-        }
-        for k in ZSH_TEXT.iter().filter(|k| line.contains(**k)) {
-            s.zsh += u32::from(once(k)) * 3;
-        }
-        for k in BASH_TEXT.iter().filter(|k| line.contains(**k)) {
-            s.bash += u32::from(once(k)) * 3;
-        }
-        for k in KSH_TEXT.iter().filter(|k| line.contains(**k)) {
-            s.ksh += u32::from(once(k)) * 3;
-        }
-        for k in EXTENDED_TEXT.iter().filter(|k| line.contains(**k)) {
-            s.extended += u32::from(once(k));
-        }
+    }
+
+    /// `weight` for each of `texts` the line contains and that is new.
+    fn text(&mut self, texts: &[&'static str], line: &str, weight: u32) -> u32 {
+        texts.iter().filter(|k| line.contains(**k)).map(|k| u32::from(self.once(k)) * weight).sum()
+    }
+}
+
+/// Adds the signals of one line of code to `s`.
+fn line_signals(line: &str, s: &mut Signals, seen: &mut Seen) {
+    if line.contains("ZSH_VERSION") || line.contains("BASH_VERSION") {
+        s.portable = true;
+    }
+    let first = line.split(|c: char| c.is_ascii_whitespace() || c == ';').next().unwrap_or("");
+    s.zsh += seen.command(ZSH_COMMANDS, &["autoload", "bindkey"], first);
+    s.bash += seen.command(BASH_COMMANDS, &["complete"], first);
+    s.extended += u32::from(first == "function" && seen.once("function"));
+    s.zsh += seen.text(ZSH_TEXT, line, 3);
+    s.bash += seen.text(BASH_TEXT, line, 3);
+    s.ksh += seen.text(KSH_TEXT, line, 3);
+    s.extended += seen.text(EXTENDED_TEXT, line, 1);
+}
+
+/// Counts the content signals of `text` (each distinct signal once).
+pub fn signals(text: &str) -> Signals {
+    let mut seen = Seen::default();
+    let mut s = Signals::default();
+    for line in text.lines().map(str::trim_start).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        line_signals(line, &mut s, &mut seen);
     }
     s
 }
