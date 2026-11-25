@@ -114,7 +114,7 @@ class Api:
         return 1, "", "retries exhausted"
 
     def get(self, key_parts: list[str], args: list[str], ok_fail: bool = False) -> str | None:
-        key = hashlib.sha1("\x00".join(key_parts).encode()).hexdigest()
+        key = hashlib.sha256("\x00".join(key_parts).encode()).hexdigest()
         f = self.cache / key[:2] / key
         fail = f.with_suffix(".fail")
         if f.exists():
