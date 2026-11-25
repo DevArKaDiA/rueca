@@ -59,7 +59,7 @@ from .treesitter import Func
 logging.getLogger("sqlglot").setLevel(logging.ERROR)
 
 LANGUAGE = "sql"
-EXTENSIONS = (".sql", ".psql", ".pgsql", ".plpgsql", ".mysql", ".tsql", ".bq")
+EXTENSIONS = (".sql", ".psql", ".pgsql", ".plpgsql", ".mysql", ".tsql", ".bq", ".pks", ".pkb", ".pck", ".pls", ".plsql", ".tps", ".tpb")
 
 # Bench dialect names → sqlglot dialects.
 SQLGLOT = {
@@ -70,8 +70,14 @@ SQLGLOT = {
     "bigquery": "bigquery",
     "snowflake": "snowflake",
     "dbt": "snowflake",
+    "oracle": "oracle",
+    # sqlglot has no DB2 dialect: read as ANSI, like the pack's parser.
+    "db2": "",
     "ansi": "",
 }
+# Dialects whose unquoted identifiers fold to upper case: a quoted
+# upper-case name is the unquoted one.
+UPPER_FOLDING = {"snowflake", "dbt", "oracle", "db2"}
 CASE_INSENSITIVE = {"mysql", "sqlite", "tsql", "bigquery"}
 DEFAULT_SCHEMA = {"postgres": "public", "tsql": "dbo", "sqlite": "main"}
 
@@ -110,7 +116,7 @@ def _unquote(part: str) -> tuple[str, bool]:
 def norm_part(text: str, quoted: bool, dialect: str) -> str:
     if not quoted or dialect in CASE_INSENSITIVE:
         return text.lower()
-    if dialect in ("snowflake", "dbt") and text == text.upper():
+    if dialect in UPPER_FOLDING and text == text.upper():
         return text.lower()
     return text
 
@@ -173,14 +179,26 @@ class Stmt:
         self.text, self.start, self.end, self.line, self.end_line, self.leading = text, start, end, line, end_line, leading
 
 
-def _batches(source: str) -> list[tuple[int, int, bool]]:
-    """(start, end, split on `;`) regions between T-SQL `GO` lines and
-    MySQL `DELIMITER` regions (a custom delimiter ends each statement)."""
+_DB2_TERMINATOR = re.compile(r"^\s*--#\s*SET\s+TERMINATOR\s+(\S+)\s*$", re.IGNORECASE)
+# An Oracle buffer that is one PL/SQL unit (it runs to its `/` line).
+_PLSQL_UNIT = re.compile(
+    r"\s*(?:DECLARE\b|BEGIN\b(?!\s*(?:TRANSACTION|WORK|;))|CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:NON)?EDITIONABLE\s+)?"
+    r"(?:PROCEDURE|FUNCTION|PACKAGE|TRIGGER|TYPE\s+BODY)\b)",
+    re.IGNORECASE,
+)
+
+
+def _batches(source: str, dialect: str = "") -> list[tuple[int, int, bool]]:
+    """(start, end, split on `;`) regions between T-SQL `GO` lines, Oracle
+    `/` lines, and MySQL `DELIMITER` / DB2 `--#SET TERMINATOR` regions (a
+    custom delimiter ends each statement)."""
     out: list[tuple[int, int, bool]] = []
     pos, start, delim = 0, 0, None
     for line in source.splitlines(keepends=True):
         new = _delimiter(line)
-        if new or _is_go(line):
+        if not new and dialect == "db2" and (m := _DB2_TERMINATOR.match(line)):
+            new = m.group(1)
+        if new or _is_go(line) or (dialect == "oracle" and line.strip() == "/"):
             out.append((start, pos, delim is None))
             start = pos + len(line)
             if new:
@@ -231,9 +249,16 @@ def _token_chunks(source: str, start: int, end: int, dialect: str) -> list[tuple
 def statements(source: str, dialect: str) -> list[Stmt]:
     out: list[Stmt] = []
     prev_end = 0
-    for b_start, b_end, split in _batches(source):
+    for b_start, b_end, split in _batches(source, dialect):
         whole = not split or (dialect == "tsql" and re.match(r"\s*(CREATE|ALTER)\s+(OR\s+ALTER\s+)?(PROC|PROCEDURE|FUNCTION|TRIGGER|VIEW)\b", source[b_start:b_end], re.I))
+        whole = whole or (dialect == "oracle" and bool(_PLSQL_UNIT.match(source[b_start:b_end])))
         chunks = [(b_start, b_end)] if whole else _token_chunks(source, b_start, b_end, dialect)
+        if dialect == "oracle" and not whole:
+            # A PL/SQL unit after other statements of its buffer runs to
+            # the end of the buffer (its declarations end in `;` too).
+            unit = next((i for i, (s, e) in enumerate(chunks) if _PLSQL_UNIT.match(source[s:e])), None)
+            if unit is not None:
+                chunks = chunks[:unit] + [(chunks[unit][0], b_end)]
         for s, e in chunks:
             text = source[s:e].strip()
             if not text:
@@ -278,6 +303,7 @@ def _header(text: str, dialect: str) -> tuple[str, int] | None:
 
 
 _TRIGGER = re.compile(r"\s*CREATE\s+(?:OR\s+\w+\s+)?(?:\w+\s+)*?TRIGGER\b", re.IGNORECASE)
+_ROUTINE = re.compile(r"\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:NON)?EDITIONABLE\s+)?(?:FUNCTION|PROCEDURE|TRIGGER)\b", re.IGNORECASE)
 _ON = re.compile(r"\bON\s+(" + _PART + r"(?:\s*\.\s*" + _PART + r")*)", re.IGNORECASE)
 
 
@@ -333,6 +359,12 @@ class SqlFile:
         idx = len(self.funcs) - 1
         names = _parsed_refs(e, own, self.dialect) if e is not None else _text_refs(st.text, own, self.dialect)
         names += _body_refs(st.text, self.dialect)
+        if self.dialect in ("oracle", "db2") and _ROUTINE.match(st.text):
+            # PL/SQL and SQL PL bodies: sqlglot keeps them as text.
+            names += [n for n in _text_refs(st.text, own, self.dialect) if n not in names]
+            # `BEFORE UPDATE ON t`: the table after the event list.
+            if _TRIGGER.match(st.text) and (m := _ON.search(st.text)):
+                names.append(("relation", written_name(m.group(1), self.dialect)))
         self.refs += [(idx, k, n) for k, n in names]
 
     def _dbt(self) -> None:

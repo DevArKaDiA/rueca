@@ -25,6 +25,7 @@
 //! | Oracle | collection conditions `a [NOT] MEMBER OF b`, `a MULTISET UNION b`, `a IS [NOT] EMPTY` | `a = b`, `a \|\| b`, `a IS [NOT] NULL` |
 //! | Oracle | physical attributes of tables and indexes, `VARCHAR2(n CHAR)` length units, `ENABLE` / `DISABLE` after a constraint, `FORCE` / `EDITIONABLE` | blanked |
 //! | DB2 / Oracle | `GENERATED … AS IDENTITY (options)` options | blanked |
+//! | DB2 | special registers `CURRENT DATE` / `CURRENT TIMESTAMP` | `CURRENT_DATE` / `CURRENT_TIMESTAMP` |
 //! | MySQL | `DEFINER = user@host`, `ALGORITHM = …`, `SQL SECURITY …`, `VARCHAR(n) BINARY` | blanked |
 //! | SQLite | the words after the first of a type name of several words (`BLOB SUB_TYPE TEXT`) | blanked |
 //! | any (Jinja) | a placeholder between select-list items with no comma of its own (a macro that expands to items and their comma) | blanked |
@@ -498,6 +499,14 @@ impl Repair<'_> {
             if self.is(i, "IDENTITY") && i > 0 && self.is(i - 1, "AS") && self.tok(i + 1) == Some(&Token::LParen) {
                 let close = self.close(i + 1);
                 self.blank(i + 1, close);
+            } else if self.is(i, "CURRENT")
+                && self.any(i + 1, &["DATE", "TIME", "TIMESTAMP", "USER", "SCHEMA"])
+                && self.toks[i].range.1 + 1 == self.toks[i + 1].range.0
+            {
+                // DB2 special registers `CURRENT DATE` → `CURRENT_DATE`
+                let at = self.toks[i].range.1;
+                self.out[at] = b'_';
+                self.changed = true;
             }
         }
     }
@@ -724,5 +733,6 @@ mod tests {
             fix("CREATE DEFINER=`root`@`localhost` VIEW v AS SELECT 1", Dialect::MySql),
             "CREATE VIEW v AS SELECT 1"
         );
+        assert_eq!(fix("INSERT INTO t VALUES (CURRENT DATE)", Dialect::Db2), "INSERT INTO t VALUES (CURRENT_DATE)");
     }
 }

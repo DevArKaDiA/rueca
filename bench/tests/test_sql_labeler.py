@@ -90,3 +90,42 @@ def test_dbt_models_and_macros(tmp_path: Path):
     )
     g = sql_call_graph(tmp_path, [""], dialects={"": "dbt"})
     assert _edges(g) == {("mart", "stg"), ("mart", "money"), ("tax", "money")}
+
+
+def test_oracle_and_db2_units():
+    # Oracle: `/` ends a PL/SQL unit, a unit after other statements of its
+    # buffer runs to the `/`; bodies are read as text; a quoted upper-case
+    # name is the unquoted one.
+    src = (
+        'CREATE TABLE "PAYMENT" (id NUMBER(10), amount NUMBER(8,2));\n'
+        "CREATE OR REPLACE FUNCTION total(p IN NUMBER) RETURN NUMBER IS\n  l NUMBER;\nBEGIN\n"
+        "  SELECT SUM(amount) INTO l FROM payment WHERE id = p;\n  RETURN l;\nEND;\n/\n"
+        "CREATE OR REPLACE TRIGGER payment_bu\nBEFORE UPDATE ON payment\nFOR EACH ROW\nBEGIN\n  :NEW.amount := 0;\nEND;\n/\n"
+        "CREATE VIEW v AS SELECT id FROM payment WHERE total(id) > 1;\n"
+    )
+    assert [t.text.split("\n")[0][:28] for t in statements(src, "oracle")] == [
+        'CREATE TABLE "PAYMENT" (id N',
+        "CREATE OR REPLACE FUNCTION t",
+        "CREATE OR REPLACE TRIGGER pa",
+        "CREATE VIEW v AS SELECT id F",
+    ]
+    assert [n for n, _, _ in _names(src, "oracle")] == ["payment", "total", "payment.payment_bu", "v"]
+    # the same text in another dialect is cut at every `;` outside BEGIN … END, as before
+    assert len(statements(src, "postgres")) > 4
+    # DB2: `--#SET TERMINATOR @`
+    db2 = "--#SET TERMINATOR @\nCREATE TABLE a (id INT)@\nCREATE PROCEDURE p ()\nLANGUAGE SQL\nBEGIN\n  DELETE FROM a;\nEND@\n"
+    assert [n for n, _, _ in _names(db2, "db2")] == ["a", "p"]
+
+
+def test_oracle_gold_edges(tmp_path: Path):
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE payment (id NUMBER(10), amount NUMBER(8,2));\n"
+        "CREATE OR REPLACE FUNCTION total(p IN NUMBER) RETURN NUMBER IS\n  l NUMBER;\nBEGIN\n"
+        "  SELECT SUM(amount) INTO l FROM payment WHERE id = p;\n  RETURN l;\nEND;\n/\n"
+        "CREATE OR REPLACE TRIGGER payment_bu\nBEFORE UPDATE ON payment\nFOR EACH ROW\nBEGIN\n  :NEW.amount := 0;\nEND;\n/\n"
+        "CREATE OR REPLACE PROCEDURE purge(p IN NUMBER) IS\nBEGIN\n  IF total(p) = 0 THEN\n    DELETE FROM payment WHERE id = p;\n  END IF;\nEND;\n/\n"
+    )
+    g = sql_call_graph(tmp_path, [""], dialects={"": "oracle"})
+    name = {k: d["qualname"] for k, d in g["callables"].items()}
+    edges = sorted((name[a], name[b]) for a, bs in g["callees"].items() for b in bs)
+    assert edges == [("payment.payment_bu", "payment"), ("purge", "payment"), ("purge", "total"), ("total", "payment")]
