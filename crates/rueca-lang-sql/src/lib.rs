@@ -241,7 +241,7 @@ impl LanguagePack for SqlPack {
         &[Language::Sql]
     }
     fn extractor_version(&self) -> u32 {
-        1
+        2
     }
     fn extract(
         &self,
