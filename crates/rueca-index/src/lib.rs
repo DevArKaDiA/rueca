@@ -196,6 +196,7 @@ pub fn default_registry() -> Registry {
     r.register(Box::new(rueca_lang_rust::RustPack::default()));
     r.register(Box::new(rueca_lang_proto::ProtoPack));
     r.register(Box::new(rueca_lang_shell::ShellPack));
+    r.register(Box::new(rueca_lang_csharp::CSharpPack));
     r.register(Box::new(rueca_lang_data::DataPack));
     r
 }

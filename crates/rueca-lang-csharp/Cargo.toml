@@ -1,0 +1,19 @@
+[package]
+name = "rueca-lang-csharp"
+description = "C# language pack for Rueca"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rueca-extract.workspace = true
+rueca-model.workspace = true
+tree-sitter.workspace = true
+tree-sitter-c-sharp = "0.24.0"
+
+[dev-dependencies]
+# Path-only so `cargo publish` drops it (it would form a publish cycle).
+rueca-resolve = { path = "../rueca-resolve" }

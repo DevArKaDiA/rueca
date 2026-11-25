@@ -20,6 +20,7 @@
 //! | [`LanguagePack::overrides`] | `false` | the resolver should add `OVERRIDES` edges (Java, C++) |
 //! | [`LanguagePack::facts_depend_on_path`] | `false` | extraction reads the path, not only the bytes (data file kinds chosen by name) |
 //! | [`LanguagePack::resolve_import`] returning a directory | — | the import names a package or folder (Go, Java on-demand, Terraform modules) |
+//! | [`LanguagePack::namespace_imports`] | `false` | imports name a module (a namespace) wherever its files are, not a path (C#) |
 //!
 //! Reserved texts a pack may put in facts:
 //!
@@ -228,7 +229,7 @@ pub struct ProjectFiles {
     /// `package.json`, `pyproject.toml`, `setup.cfg`, `setup.py`,
     /// `composer.json`, `go.mod`, `go.work`, `pom.xml`, `build.gradle(.kts)`,
     /// `settings.gradle(.kts)`, `compile_commands.json`, `compile_flags.txt`,
-    /// `Cargo.toml` (see [`ProjectFiles::is_config_file`], size limits in
+    /// `Cargo.toml`, `*.csproj` (see [`ProjectFiles::is_config_file`], size limits in
     /// [`ProjectFiles::max_config_bytes`]).
     pub configs: BTreeMap<String, String>,
 }
@@ -264,6 +265,8 @@ impl ProjectFiles {
                 // Rust: Cargo packages and workspaces
                 | "Cargo.toml"
         ) || (name.starts_with("tsconfig") && name.ends_with(".json"))
+            // C#: MSBuild projects (project scopes, NuGet identity)
+            || name.ends_with(".csproj")
     }
 
     /// Largest config file the indexer loads for `path`: 8 MiB for
@@ -389,6 +392,16 @@ pub trait LanguagePack: Send + Sync {
     /// packs get the path in the key too; identical files at two paths are
     /// then extracted once per path.
     fn facts_depend_on_path(&self) -> bool {
+        false
+    }
+
+    /// When true, an import names a **module** (a namespace) rather than a
+    /// file or directory: the resolver binds the package of this family
+    /// whose module name is the import's `module`, wherever its files are,
+    /// links `IMPORTS` to the directory holding most of them, and leaves
+    /// [`LanguagePack::resolve_import`] unused for such imports (C# `using
+    /// A.B;`). Requires [`ModuleScope::Package`].
+    fn namespace_imports(&self) -> bool {
         false
     }
 }
@@ -586,7 +599,8 @@ mod tests {
             assert!(ProjectFiles::is_config_file(p), "{p}");
         }
         assert!(!ProjectFiles::is_config_file("go.sum"));
-        assert!(!ProjectFiles::is_config_file("App.csproj"));
+        assert!(ProjectFiles::is_config_file("src/App/App.csproj"));
+        assert!(!ProjectFiles::is_config_file("App.csproj.user"));
         assert_eq!(ProjectFiles::max_config_bytes("build/compile_commands.json"), 8 * 1024 * 1024);
         assert_eq!(ProjectFiles::max_config_bytes("go.mod"), 1024 * 1024);
     }
