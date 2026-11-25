@@ -1,0 +1,8 @@
+{
+  "main.rb:Node#visit": [],
+  "main.rb:Tree#root": [],
+  "main.rb:Tree#walk": [
+    "main.rb:Node#visit",
+    "main.rb:Tree#root"
+  ]
+}

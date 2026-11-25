@@ -1,0 +1,8 @@
+{
+  "main.rb:Report#footer": [],
+  "main.rb:Report#render": [
+    "main.rb:Report#footer",
+    "main.rb:Report#title"
+  ],
+  "main.rb:Report#title": []
+}

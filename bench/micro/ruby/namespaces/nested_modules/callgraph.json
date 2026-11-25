@@ -1,0 +1,6 @@
+{
+  "main.rb:App::Services::Billing#charge": [],
+  "main.rb:run": [
+    "main.rb:App::Services::Billing#charge"
+  ]
+}

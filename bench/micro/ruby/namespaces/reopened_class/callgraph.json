@@ -1,0 +1,6 @@
+{
+  "lib/a.rb:Store#get": [
+    "lib/b.rb:Store#fetch_raw"
+  ],
+  "lib/b.rb:Store#fetch_raw": []
+}

@@ -1,0 +1,9 @@
+{
+  "main.rb:Loud#say": [
+    "main.rb:Speaker#say"
+  ],
+  "main.rb:Speaker#say": [],
+  "main.rb:Speaker#talk": [
+    "main.rb:Loud#say"
+  ]
+}

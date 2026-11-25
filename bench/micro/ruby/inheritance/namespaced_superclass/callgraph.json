@@ -1,0 +1,6 @@
+{
+  "main.rb:Shop::Base#save": [],
+  "main.rb:Shop::Item#store": [
+    "main.rb:Shop::Base#save"
+  ]
+}

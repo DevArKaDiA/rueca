@@ -1,0 +1,6 @@
+{
+  "main.rb:Base#run": [],
+  "main.rb:Child#run": [
+    "main.rb:Base#run"
+  ]
+}

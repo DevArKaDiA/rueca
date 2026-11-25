@@ -1,0 +1,6 @@
+{
+  "main.rb:helper": [],
+  "main.rb:main": [
+    "main.rb:helper"
+  ]
+}

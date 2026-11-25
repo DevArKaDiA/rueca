@@ -1,0 +1,6 @@
+{
+  "main.rb:Widget#options": [
+    "main.rb:Widget.defaults"
+  ],
+  "main.rb:Widget.defaults": []
+}

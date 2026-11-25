@@ -1,0 +1,6 @@
+{
+  "main.rb:Document#parse": [],
+  "main.rb:Indexer#index": [
+    "main.rb:Document#parse"
+  ]
+}

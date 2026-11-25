@@ -1,0 +1,9 @@
+{
+  "main.rb:Version.current": [
+    "main.rb:Version.parse"
+  ],
+  "main.rb:Version.parse": [],
+  "main.rb:show": [
+    "main.rb:Version.current"
+  ]
+}

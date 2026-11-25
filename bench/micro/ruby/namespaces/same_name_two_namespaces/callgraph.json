@@ -1,0 +1,7 @@
+{
+  "main.rb:A::Util.run": [],
+  "main.rb:B::Job#go": [
+    "main.rb:B::Util.run"
+  ],
+  "main.rb:B::Util.run": []
+}

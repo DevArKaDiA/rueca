@@ -1,0 +1,6 @@
+{
+  "lib/cache.rb:Cache#cached": [],
+  "lib/store.rb:Store#get": [
+    "lib/cache.rb:Cache#cached"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "main.rb:Mailer#compose": [],
+  "main.rb:Mailer#deliver": [
+    "main.rb:Mailer#compose",
+    "main.rb:Mailer#send_now"
+  ],
+  "main.rb:Mailer#send_now": []
+}

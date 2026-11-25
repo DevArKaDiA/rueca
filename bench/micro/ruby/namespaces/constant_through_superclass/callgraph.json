@@ -1,0 +1,6 @@
+{
+  "main.rb:Base::Helper.assist": [],
+  "main.rb:Child#go": [
+    "main.rb:Base::Helper.assist"
+  ]
+}

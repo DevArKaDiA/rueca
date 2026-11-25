@@ -1,0 +1,6 @@
+{
+  "main.rb:Job#run": [],
+  "main.rb:Job.perform": [
+    "main.rb:Job#run"
+  ]
+}

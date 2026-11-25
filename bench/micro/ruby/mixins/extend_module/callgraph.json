@@ -1,0 +1,9 @@
+{
+  "main.rb:Finders#find_all": [],
+  "main.rb:Repo.everything": [
+    "main.rb:Finders#find_all"
+  ],
+  "main.rb:list": [
+    "main.rb:Finders#find_all"
+  ]
+}

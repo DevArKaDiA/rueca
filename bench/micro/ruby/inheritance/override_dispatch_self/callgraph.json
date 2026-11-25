@@ -1,0 +1,10 @@
+{
+  "main.rb:Shape#area": [],
+  "main.rb:Shape#describe": [
+    "main.rb:Shape#area"
+  ],
+  "main.rb:Square#area": [],
+  "main.rb:Square#show": [
+    "main.rb:Shape#describe"
+  ]
+}

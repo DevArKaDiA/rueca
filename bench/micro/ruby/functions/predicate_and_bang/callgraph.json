@@ -1,0 +1,8 @@
+{
+  "main.rb:Order#persist": [],
+  "main.rb:Order#save!": [
+    "main.rb:Order#persist",
+    "main.rb:Order#valid?"
+  ],
+  "main.rb:Order#valid?": []
+}

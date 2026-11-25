@@ -1,0 +1,6 @@
+{
+  "lib/app.rb:App#run": [
+    "lib/app/parser.rb:Parser#parse"
+  ],
+  "lib/app/parser.rb:Parser#parse": []
+}

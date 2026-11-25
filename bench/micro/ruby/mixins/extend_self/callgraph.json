@@ -1,0 +1,9 @@
+{
+  "main.rb:Paths#join": [
+    "main.rb:Paths#root"
+  ],
+  "main.rb:Paths#root": [],
+  "main.rb:run": [
+    "main.rb:Paths#join"
+  ]
+}

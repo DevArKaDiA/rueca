@@ -626,7 +626,7 @@ def _phpstan_agreement(dest: Path, snippets: dict[str, dict], name: str) -> dict
 
 def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     """Cross-check hand-written answer keys against a SCIP indexer
-    (manifest `crosscheck = "scip_go" | "scip_clang" | "rust_analyzer" | ...`): each snippet is
+    (manifest `crosscheck = "scip_go" | "scip_clang" | "rust_analyzer" | "scip_ruby" | ...`): each snippet is
     copied to a scratch directory, indexed, and its call edges derived exactly
     like the repository gold (scip.derive_call_graph); edge-level agreement
     with the key is reported, callees compared by the SCIP gold's
@@ -667,6 +667,9 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
             res = run_scip_dotnet(root, out, {"projects": projects}, f"micro-{sname}")
         elif tool == "scip_kotlin":
             res = run_scip_kotlin(root, out, ["."], spec.get("crosscheck_classpath", []), f"micro-{sname}")
+        elif tool == "scip_ruby":
+            args = ["--index-file", str(out), "--gem-metadata", f"{sname}@0", "--no-config", "--quiet", "--suppress-non-critical", "--parser=prism", "--enable-experimental-rbs-comments", "."]
+            res = sh([str(binary), *args], cwd=root, timeout=600)
         else:
             files = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.suffix in (".c", ".cc", ".cpp", ".cxx"))
             cspec = {"repo": f"micro/{sname}", "language": lang, "compdb": {"includes": ["."], "files": files}}
