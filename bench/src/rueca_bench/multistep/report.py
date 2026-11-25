@@ -1,9 +1,18 @@
-"""`docs/bench/multistep-results.md` from `bench/results/multistep.json`."""
+"""`docs/bench/multistep-results.md` from `bench/results/multistep.json` and
+the fluency probe's runner lines (`bench/multistep/probe/out/`)."""
 
 from __future__ import annotations
 
+import json
+import statistics
+from pathlib import Path
+
+from ..common import BENCH_DIR
 from .cbm_plans import CBM_SKIP
 from .tasks import BY_ID
+
+PROBE_OUT = BENCH_DIR / "multistep" / "probe" / "out"
+PROBE_LANGS = {"js": "JavaScript", "starlark": "Starlark"}
 
 ARM_LABEL = {"plan": "tool-call plan", "js": "code mode, JavaScript", "starlark": "code mode, Starlark", "cbm": "cbm 0.12.0"}
 
@@ -115,10 +124,93 @@ def limits(summary: dict) -> list[str]:
     return out
 
 
-def render(doc: dict) -> str:
+def load_probe(directory: Path = PROBE_OUT) -> list[dict]:
+    """The probe runner's output lines, one file per run: `<task>-<lang>.try<N>.json`."""
+    out = []
+    for p in sorted(directory.glob("*.json")):
+        rec = json.loads(p.read_text())
+        rec["try"] = int(p.stem.rsplit(".try", 1)[1])
+        out.append(rec)
+    return out
+
+
+def _probe_cell(runs: list[dict]) -> str:
+    if not runs:
+        return "—"
+    cells = []
+    for r in sorted(runs, key=lambda r: r["try"]):
+        mark = "✓" if r["correct"] else "✗"
+        extra = " E" if r.get("error") else ""
+        cells.append(f"{mark} {r['script_tokens']:,} / {r['calls']}{extra}")
+    return " → ".join(cells)
+
+
+def _probe_summary(lang: str, runs: list[dict]) -> str:
+    first = [r for r in runs if r["try"] == 1]
+    if not first:
+        return f"- {PROBE_LANGS.get(lang, lang)}: not run."
+    tokens = [r["script_tokens"] for r in first]
+    failed = {r["task"] for r in first if not r["correct"]}
+    repairs = [r for r in runs if r["try"] == 2]
+    fixed = sum(r["correct"] for r in repairs)
+    errors = sum(bool(r.get("error")) for r in runs)
+    return (
+        f"- {PROBE_LANGS.get(lang, lang)}: first try {len(first) - len(failed)}/{len(first)}; after one repair "
+        f"{len(first) - len(failed) + fixed}/{len(first)} (repairs run: {len(repairs)} of {len(failed)}); script tokens "
+        f"mean {statistics.mean(tokens):,.0f}, median {statistics.median(tokens):,.1f}; engine calls {sum(r['calls'] for r in first):,} "
+        f"(first tries); script errors {errors}."
+    )
+
+
+def _per_correct(read: int, correct: int) -> str:
+    return _n(read / correct) if correct else "—"
+
+
+def _probe_read(lang: str, runs: list[dict], records: list[dict]) -> str:
+    """Tokens read per correct answer on the probe's tasks: first-try scripts vs the reference arms."""
+    first = [r for r in runs if r["try"] == 1]
+    tasks = {r["task"] for r in first}
+    ref = {a: [r for r in records if r["arm"] == a and r["task"] in tasks] for a in (lang, "plan")}
+    probe_read = sum(r["script_tokens"] + r["result_tokens"] for r in first)
+    cells = [f"first-try scripts {_per_correct(probe_read, sum(r['correct'] for r in first))}"]
+    for arm, label in ((lang, "reference scripts"), ("plan", "tool-call plans")):
+        cells.append(f"{label} {_per_correct(sum(r['read'] for r in ref[arm]), sum(r['correct'] for r in ref[arm]))}")
+    return f"- {PROBE_LANGS.get(lang, lang)}, tokens read per correct answer on these tasks: " + ", ".join(cells) + "."
+
+
+def probe_lines(probe: list[dict], records: list[dict] | None = None) -> list[str]:
+    """Fluency probe (RFC 0009 phase 3): per task and language, every try."""
+    if not probe:
+        return ["Not run."]
+    by: dict[str, dict[str, list[dict]]] = {}
+    for r in probe:
+        by.setdefault(r["task"], {}).setdefault(r["language"], []).append(r)
+    out = [
+        "A fresh model per task and language wrote one script from the task statement and `describe_api` alone",
+        "(protocol and scripts: `bench/multistep/probe/`; reading: RFC 0009 §14). Each cell: correct, script",
+        "tokens, engine calls (`E`: the script errored); `→` a repair attempt given the `execute` output.",
+        "",
+        "| Task | Kind | JavaScript | Starlark |",
+        "|---|---|---|---|",
+    ]
+    for tid, langs in sorted(by.items()):
+        out.append(f"| {tid} | {BY_ID[tid].kind} | {_probe_cell(langs.get('js', []))} | {_probe_cell(langs.get('starlark', []))} |")
+    out.append("")
+    for lang in PROBE_LANGS:
+        out.append(_probe_summary(lang, [r for r in probe if r["language"] == lang]))
+    for lang in PROBE_LANGS:
+        runs = [r for r in probe if r["language"] == lang]
+        if runs and records:
+            out.append(_probe_read(lang, runs, records))
+    return out
+
+
+def render(doc: dict, probe: list[dict] | None = None) -> str:
     meta = doc["meta"]
+    if probe is None:
+        probe = load_probe()
     L = [
-        "# Multi-step suite — code mode (RFC 0009 phase 2)",
+        "# Multi-step suite — code mode (RFC 0009 phases 2–3)",
         "",
         "Generated by `rueca-bench multistep report` from `bench/results/multistep.json`; method in",
         "`bench/README.md` (*Multi-step efficiency*). Tokens: cl100k_base. Read = tool answers as the agent",
@@ -161,6 +253,10 @@ def render(doc: dict) -> str:
         "## cbm: tasks not expressible",
         "",
         *[f"- {t}: {why}." for t, why in sorted(doc.get("cbm_skipped", CBM_SKIP).items())],
+        "",
+        "## Fluency probe",
+        "",
+        *probe_lines(probe, doc["records"]),
         "",
     ]
     return "\n".join(L)

@@ -1,0 +1,1 @@
+{"task": "ms14", "language": "js", "correct": true, "error": null, "result_preview": "[\"src/utils/jwt/jwt.ts#isTokenHeader\", \"src/utils/jwt/types.ts#JwtAlgorithmMismatch.constructor\", \"src/utils/jwt/types.ts#JwtHeaderInvalid.constructor\", \"src/utils/jwt/types.ts#JwtTokenInvalid.constructor\"]", "script_tokens": 768, "result_tokens": 67, "calls": 18, "truncated": false}

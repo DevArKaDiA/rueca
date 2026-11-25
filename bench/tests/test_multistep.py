@@ -191,3 +191,20 @@ def test_gate_and_report():
     }
     md = report.render(doc)
     assert "| js (`describe_api` 400 tokens) |" in md and "**fail**" in md and "ms04" in md
+
+
+def _probe(task, lang, ok, tokens, attempt=1):
+    return {"task": task, "language": lang, "correct": ok, "error": None, "script_tokens": tokens, "result_tokens": 20, "calls": 2, "try": attempt}
+
+
+def test_probe_report():
+    committed = report.load_probe()
+    first = [r for r in committed if r["try"] == 1]
+    assert len(first) == 20 and {r["language"] for r in first} == {"js", "starlark"} and all(r["task"] in BY_ID for r in committed)
+    for r in committed:
+        assert (BENCH_DIR / "multistep" / "probe" / "scripts" / f"{r['task']}-{r['language']}.{'js' if r['language'] == 'js' else 'star'}").is_file()
+    assert report.probe_lines([]) == ["Not run."]
+    md = "\n".join(report.probe_lines([_probe("ms02", "js", False, 300), _probe("ms02", "js", True, 310, 2)], [_rec("ms02", "plan", True, 1000), _rec("ms02", "js", True, 200)]))
+    assert "| ms02 | callers-intersection | ✗ 300 / 2 → ✓ 310 / 2 | — |" in md
+    assert "JavaScript: first try 0/1; after one repair 1/1 (repairs run: 1 of 1)" in md and "Starlark: not run." in md
+    assert "first-try scripts —, reference scripts 200, tool-call plans 1,000." in md
