@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:Money.doubled": [],
+  "Sources/App/main.swift:Money.formatted": [
+    "Sources/App/main.swift:Money.doubled"
+  ]
+}

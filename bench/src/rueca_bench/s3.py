@@ -34,6 +34,7 @@ from .common import BENCH_DIR, CACHE, GOLD_DIR, RUNS_DIR, SCIP_DIR, WORK_DIR, is
 from .common import run as sh
 from .corpus import add_worktree, prune_clone, remove_worktree, worktree
 from .match import class_map, class_members
+from .indexstore import read_indexstore, run_swift_index
 from .phpstan import docker_available, edges_from_calls, phpstan_call_graph, run_phpstan, version_string
 from .scip import derive_call_graph, fid, in_scope, questions, read_index, sample_functions
 from .tools import fetch_tool, tool_available, tool_spec
@@ -391,38 +392,46 @@ def build_shell_gold(spec: dict, force: bool = False) -> dict:
     return gold
 
 
+def _run_repo_indexer(spec: dict, root: Path, scip_out: Path, name: str):
+    """Runs a repository's pinned gold indexer, writing `scip_out`."""
+    if spec["indexer"] == "scip_java":
+        log(f"scip {name}: javac + scip-java plugin over {', '.join(spec['javac']['sources'])}")
+        return run_scip_java(root, scip_out, spec["javac"]["sources"], spec["javac"].get("classpath", []), name)
+    if spec["indexer"] == "scip_dotnet":
+        log(f"scip {name}: scip-dotnet over {', '.join(spec['dotnet']['projects'])}")
+        return run_scip_dotnet(root, scip_out, spec["dotnet"], name)
+    if spec["indexer"] == "scip_kotlin":
+        log(f"scip {name}: scip-java Kotlin indexer over {', '.join(spec['kotlin']['sources'])}")
+        return run_scip_kotlin(root, scip_out, spec["kotlin"]["sources"], spec["kotlin"].get("classpath", []), name)
+    if spec["indexer"] == "swift_indexstore":
+        log(f"index store {name}: swift build in {tool_spec('swift_indexstore')['image']}")
+        return run_swift_index(root, scip_out, tool_spec("swift_indexstore")["image"], name)
+    if "compdb" in spec:
+        write_compdb(spec, root)
+    cmd, cwd, env = _scip_command(spec, root, scip_out)
+    log(f"scip {name}: {' '.join(cmd[1:])}")
+    return sh(cmd, cwd=cwd, env=env, timeout=3600)
+
+
 def build_scip_gold(spec: dict, force: bool = False) -> dict:
     name = repo_name(spec)
     gp = gold_path(name)
     if gp.exists() and not force:
         return read_json(gp)
     man = load_manifest()["s3"]
-    scip_out = SCIP_DIR / f"{name}.scip"
+    swift = spec["indexer"] == "swift_indexstore"
+    scip_out = SCIP_DIR / (f"{name}.indexstore.json" if swift else f"{name}.scip")
     with worktree(spec["repo"], spec["commit"], f"s3-{name}") as root:
         indexer_seconds = None
         indexer_log = None
         if not scip_out.exists() or force:
             SCIP_DIR.mkdir(parents=True, exist_ok=True)
-            if spec["indexer"] == "scip_java":
-                log(f"scip {name}: javac + scip-java plugin over {', '.join(spec['javac']['sources'])}")
-                res = run_scip_java(root, scip_out, spec["javac"]["sources"], spec["javac"].get("classpath", []), name)
-            elif spec["indexer"] == "scip_dotnet":
-                log(f"scip {name}: scip-dotnet over {', '.join(spec['dotnet']['projects'])}")
-                res = run_scip_dotnet(root, scip_out, spec["dotnet"], name)
-            elif spec["indexer"] == "scip_kotlin":
-                log(f"scip {name}: scip-java Kotlin indexer over {', '.join(spec['kotlin']['sources'])}")
-                res = run_scip_kotlin(root, scip_out, spec["kotlin"]["sources"], spec["kotlin"].get("classpath", []), name)
-            else:
-                if "compdb" in spec:
-                    write_compdb(spec, root)
-                cmd, cwd, env = _scip_command(spec, root, scip_out)
-                log(f"scip {name}: {' '.join(cmd[1:])}")
-                res = sh(cmd, cwd=cwd, env=env, timeout=3600)
+            res = _run_repo_indexer(spec, root, scip_out, name)
             indexer_seconds = res.seconds
             indexer_log = _log_summary(res.stderr)
             if res.rc != 0 or not scip_out.exists():
                 raise RuntimeError(f"SCIP indexer failed for {name} rc={res.rc}: {res.stderr[-1500:]} {res.stdout[-500:]}")
-        docs = read_index(scip_out)
+        docs = read_indexstore(scip_out) if swift else read_index(scip_out)
         graph = derive_call_graph(root, docs, spec["include"], spec["language"], spec.get("exclude", []))
     sample = sample_functions(graph, man["sample_per_repo"], man["seed"], man["min_lines"])
     gold = {
@@ -678,6 +687,39 @@ def _phpstan_agreement(dest: Path, snippets: dict[str, dict], name: str) -> dict
     }
 
 
+def _index_snippet(spec: dict, binary: Path | None, root: Path, out: Path, sname: str):
+    """Runs the micro-benchmark's cross-check indexer over one snippet copy."""
+    tool = spec["crosscheck"]
+    if "npm" in tool_spec(tool):
+        ts = tool_spec(tool)
+        args = list(spec.get("crosscheck_args", ["index"]))
+        if tool == "scip_python":
+            args += ["--project-name", sname, "--project-version", "0"]
+        return sh(["npx", "--yes", f"{ts['npm']}@{ts['version']}", *args, "--cwd", str(root), "--output", str(out)], cwd=root.parent, timeout=600)
+    if tool == "scip_go":
+        return sh([str(binary), "--output", str(out)], cwd=root, env=indexer_env(tool), timeout=600)
+    if tool == "rust_analyzer":
+        # every case is a crate of its own (`Cargo.toml` + `src/`)
+        return sh([str(binary), "scip", str(root), "--output", str(out)], cwd=root, env=indexer_env(tool), timeout=600)
+    if tool == "scip_java":
+        return run_scip_java(root, out, ["."], [], f"micro-{sname}")
+    if tool == "scip_dotnet":
+        projects = sorted(str(p.relative_to(root)) for p in root.glob("*.csproj"))
+        return run_scip_dotnet(root, out, {"projects": projects}, f"micro-{sname}")
+    if tool == "scip_kotlin":
+        return run_scip_kotlin(root, out, ["."], spec.get("crosscheck_classpath", []), f"micro-{sname}")
+    if tool == "scip_ruby":
+        args = ["--index-file", str(out), "--gem-metadata", f"{sname}@0", "--no-config", "--quiet", "--suppress-non-critical", "--parser=prism", "--enable-experimental-rbs-comments", "."]
+        return sh([str(binary), *args], cwd=root, timeout=600)
+    if tool == "swift_indexstore":
+        # every case is a SwiftPM package of its own (`Package.swift` + `Sources/`)
+        return run_swift_index(root, out, tool_spec(tool)["image"], f"micro-{sname}")
+    files = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.suffix in (".c", ".cc", ".cpp", ".cxx"))
+    cspec = {"repo": f"micro/{sname}", "language": spec["language"], "compdb": {"includes": ["."], "files": files}}
+    compdb = write_compdb(cspec, root)
+    return sh([str(binary), f"--compdb-path={compdb}", f"--index-output-path={out}"], cwd=root, timeout=600)
+
+
 def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     """Cross-check hand-written answer keys against a SCIP indexer
     (manifest `crosscheck = "scip_go" | "scip_clang" | "rust_analyzer" | "scip_ruby" | ...`): each snippet is
@@ -691,7 +733,7 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     ok, why = (shutil.which("npx") is not None, "npx not on PATH") if npm else tool_available(tool)
     if not ok:
         return {"available": False, "reason": why}
-    binary = None if npm or tool == "scip_dotnet" else fetch_tool(tool)
+    binary = None if npm or tool in ("scip_dotnet", "swift_indexstore") else fetch_tool(tool)
     scratch = CACHE / "scip" / "micro" / spec["name"]
     shutil.rmtree(scratch, ignore_errors=True)
     scratch.mkdir(parents=True)
@@ -703,36 +745,12 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
         root = scratch / sname
         shutil.copytree(dest / sname, root)
         out = scratch / f"{sname}.scip"
-        if "npm" in tool_spec(tool):
-            ts = tool_spec(tool)
-            args = list(spec.get("crosscheck_args", ["index"]))
-            if tool == "scip_python":
-                args += ["--project-name", sname, "--project-version", "0"]
-            res = sh(["npx", "--yes", f"{ts['npm']}@{ts['version']}", *args, "--cwd", str(root), "--output", str(out)], cwd=scratch, timeout=600)
-        elif tool == "scip_go":
-            res = sh([str(binary), "--output", str(out)], cwd=root, env=indexer_env(tool), timeout=600)
-        elif tool == "rust_analyzer":
-            # every case is a crate of its own (`Cargo.toml` + `src/`)
-            res = sh([str(binary), "scip", str(root), "--output", str(out)], cwd=root, env=indexer_env(tool), timeout=600)
-        elif tool == "scip_java":
-            res = run_scip_java(root, out, ["."], [], f"micro-{sname}")
-        elif tool == "scip_dotnet":
-            projects = sorted(str(p.relative_to(root)) for p in root.glob("*.csproj"))
-            res = run_scip_dotnet(root, out, {"projects": projects}, f"micro-{sname}")
-        elif tool == "scip_kotlin":
-            res = run_scip_kotlin(root, out, ["."], spec.get("crosscheck_classpath", []), f"micro-{sname}")
-        elif tool == "scip_ruby":
-            args = ["--index-file", str(out), "--gem-metadata", f"{sname}@0", "--no-config", "--quiet", "--suppress-non-critical", "--parser=prism", "--enable-experimental-rbs-comments", "."]
-            res = sh([str(binary), *args], cwd=root, timeout=600)
-        else:
-            files = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.suffix in (".c", ".cc", ".cpp", ".cxx"))
-            cspec = {"repo": f"micro/{sname}", "language": lang, "compdb": {"includes": ["."], "files": files}}
-            compdb = write_compdb(cspec, root)
-            res = sh([str(binary), f"--compdb-path={compdb}", f"--index-output-path={out}"], cwd=root, timeout=600)
+        res = _index_snippet(spec, binary, root, out, sname)
         if res.rc != 0 or not out.exists():
             failed.append(sname)
             continue
-        graph = derive_call_graph(root, read_index(out), [""], lang)
+        docs = read_indexstore(out) if tool == "swift_indexstore" else read_index(out)
+        graph = derive_call_graph(root, docs, [""], lang)
         # class-aware, like the repository scoring: a callee SCIP cannot tell
         # from another (one symbol, two definitions) is its class
         cls = class_map(graph)

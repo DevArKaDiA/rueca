@@ -1,0 +1,7 @@
+{
+  "Sources/App/main.swift:log@1": [],
+  "Sources/App/main.swift:log@3": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:log@1"
+  ]
+}

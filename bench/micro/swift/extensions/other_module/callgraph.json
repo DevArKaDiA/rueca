@@ -1,0 +1,10 @@
+{
+  "Sources/App/main.swift:Vector.scaled": [
+    "Sources/Lib/Vector.swift:Vector.init"
+  ],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:Vector.scaled",
+    "Sources/Lib/Vector.swift:Vector.init"
+  ],
+  "Sources/Lib/Vector.swift:Vector.init": []
+}

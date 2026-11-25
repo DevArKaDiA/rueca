@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:Dog.bark": [],
+  "Sources/App/main.swift:handle": [
+    "Sources/App/main.swift:Dog.bark"
+  ]
+}

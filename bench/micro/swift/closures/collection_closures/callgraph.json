@@ -1,0 +1,9 @@
+{
+  "Sources/App/main.swift:Item.taxed": [],
+  "Sources/App/main.swift:cheapest": [
+    "Sources/App/main.swift:Item.taxed"
+  ],
+  "Sources/App/main.swift:total": [
+    "Sources/App/main.swift:Item.taxed"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "Sources/App/main.swift:Bank.deposit": [
+    "Sources/App/main.swift:Bank.log"
+  ],
+  "Sources/App/main.swift:Bank.log": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:Bank.deposit"
+  ]
+}

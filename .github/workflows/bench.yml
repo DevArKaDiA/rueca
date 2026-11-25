@@ -81,11 +81,12 @@ jobs:
           restore-keys: |
             rueca-bench-${{ runner.os }}-
 
-      - name: Pull the pinned images (PHPStan, javac, scip-dotnet)
+      - name: Pull the pinned images (PHPStan, javac, scip-dotnet, Swift index store)
         run: |
           docker pull "$(python3 -c "import tomllib;print(tomllib.load(open('bench/manifest.toml','rb'))['tools']['php_image']['image'])")"
           docker pull "$(python3 -c "import tomllib;print(tomllib.load(open('bench/manifest.toml','rb'))['tools']['scip_java']['image'])")"
           docker pull --platform linux/amd64 "$(python3 -c "import tomllib;print(tomllib.load(open('bench/manifest.toml','rb'))['tools']['scip_dotnet']['image'])")"
+          docker pull "$(python3 -c "import tomllib;print(tomllib.load(open('bench/manifest.toml','rb'))['tools']['swift_indexstore']['image'])")"
 
       - name: Setup (datasets, clones, gold; no cbm)
         env:

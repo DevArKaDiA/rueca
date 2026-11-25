@@ -136,7 +136,7 @@ such edges disappear. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-shell`, `rueca-lang-csharp`, `rueca-lang-kotlin`, `rueca-lang-ruby`, `rueca-lang-sql`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-shell`, `rueca-lang-csharp`, `rueca-lang-kotlin`, `rueca-lang-ruby`, `rueca-lang-sql`, `rueca-lang-swift`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -275,6 +275,22 @@ What packs deliberately do and don't do:
   classes named after their base (`Runnable$1`). The primary constructor
   spans the class header, where the calls of the supertype list and
   default arguments are written; `init` blocks belong to the class.
+- **Swift names carry their selector.** The module name is the SwiftPM
+  target (§4.3); local names join types and members with `.` and every
+  callable but `deinit` ends with its argument labels, Swift's own full name
+  (`Point.draw(at:_:)`, `Point.init(x:y:)`, `Point.subscript(_:)`,
+  `parse()`), so `init(x:)` and `init(y:)` are two overloads; callables of
+  one scope that share labels and differ by type add their parameter types
+  after a `|` (`element(named:nodes:|String,[Node])`). Members of
+  `extension T` are top-level definitions named `T.m`, so the resolver
+  makes them members of `T` wherever `T` is declared — another file of the
+  target, or another target of the snapshot. Structs, enums (cases are
+  `Constant`s), classes and actors, protocols (`Interface`, their
+  requirements are its members), `init` / `deinit` / `subscript` /
+  operators (`Method`s named by keyword or operator), properties (`Field`)
+  and `typealias` / `associatedtype` (`TypeAlias`). Property accessors
+  and closures are not definitions: their calls belong to the property or
+  to the function that writes the closure.
 - **Rust names follow the module tree, items join with `.`.** The module
   name of a file is its module path, crate name first
   (`rueca_index::link`, from `Cargo.toml` and the file layout, §4.3); the
@@ -449,7 +465,10 @@ What packs deliberately do and don't do:
   functions (JUnit 4 / 5, kotlin.test, TestNG), fixtures of test classes,
   and classes named `*Test` / `*Tests` / `*Spec` / `*IT`, annotated
   `@Nested` / `@RunWith` / `@ExtendWith`, extending a Kotest spec or
-  declaring tests.
+  declaring tests; in Swift, classes
+  inheriting `XCTestCase` (or Quick's `QuickSpec` / `AsyncSpec`), types
+  annotated `@Suite` and `*Tests` types declaring `@Test` functions, with
+  their members, and `@Test` functions (Swift Testing).
 - **Named function expressions are definitions** in JS/TS wherever they
   appear (`app.use(function handler() {})`, `defineGetter(req, "query",
   function query() {})`, `return function timing() {}`): a `Function` child
@@ -554,7 +573,8 @@ receiver (or a `Configuration` property) `config["A:B"]`,
 read as `.`); Kotlin `System.getenv("X")`,
 Spring `@Value("\${a.b}")` and `env.getProperty("a.b")` on an `Environment`,
 as in Java; Ruby `ENV["X"]`,
-`ENV.fetch("X")` (with or without a default) and `ENV.key?("X")`. Laravel config files are PHP:
+`ENV.fetch("X")` (with or without a default) and `ENV.key?("X")`; Swift
+`ProcessInfo.processInfo.environment["X"]` and `getenv("X")`. Laravel config files are PHP:
 the array a `config/<file>.php` returns becomes `Key`s (`name`,
 `providers.cache.driver`), and `env()` calls inside an entry are reads by
 that key.
@@ -659,7 +679,7 @@ a reason (`skipped:data-shape`): the file stays listed and searchable.
 
 **Detection** is by extension (`.rs` is Rust, `.sh` / `.bash` / `.zsh` /
 `.ksh` / `.bats` shell, `.cs` C#, `.kt` / `.kts` Kotlin, `.rb` / `.rake` / `.gemspec` / `.ru` Ruby;
-`.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq` SQL), then by file name (`Dockerfile`,
+`.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq` SQL; `.swift` Swift), then by file name (`Dockerfile`,
 `Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`, `Rakefile`, `Gemfile`,
 `AndroidManifest.xml`, the shell start-up files `.bashrc`, `.profile`,
 `.zshrc`, …; other XML stays text); a C header
@@ -697,7 +717,16 @@ Two per-language hooks, still without guessing symbols:
   `benches/` crates; `build.rs`), a file belongs to the crate whose root
   it is or whose directory holds it (else the library), and its module path
   is the crate name plus the directories and stem below the crate root
-  (`rueca_index::link`; `mod.rs` names its directory). Every file is its
+  (`rueca_index::link`; `mod.rs` names its directory). Swift returns the
+  file's **target**: a `path:` a target declares in the nearest
+  `Package.swift` (read with the Swift grammar, never evaluated:
+  `.target(name: "Alamofire", path: "Source")`), else the directory after
+  the last `Sources` / `Source` / `src` / `Tests` / `Plugins` segment
+  (`Sources/ArgumentParser/Parsing/Parser.swift` → `ArgumentParser`), else
+  the top-level directory (an Xcode project without `Package.swift`, best
+  effort); every file of a target is one package (`module_scope` =
+  `Package`), and `import Foo` binds the target named `Foo` wherever its
+  files are (`namespace_imports`). Every file is its
   own module. Shell keeps the path with its extension (`bin/deploy`,
   `lib/util.sh`); a shell library has no package identity.
   C# reads the namespace its types share (recorded by the

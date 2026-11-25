@@ -23,6 +23,7 @@ import tree_sitter_php
 import tree_sitter_python
 import tree_sitter_ruby
 import tree_sitter_rust
+import tree_sitter_swift
 import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
 
@@ -44,6 +45,7 @@ _BINDINGS = {
     "tree_sitter_python": tree_sitter_python,
     "tree_sitter_ruby": tree_sitter_ruby,
     "tree_sitter_rust": tree_sitter_rust,
+    "tree_sitter_swift": tree_sitter_swift,
     "tree_sitter_typescript": tree_sitter_typescript,
 }
 
@@ -218,6 +220,8 @@ def extract_functions(path: str, source: bytes, language: str | None = None) -> 
         return _kotlin_functions(tree.root_node)
     if labeler == "ruby":
         return _ruby_functions(tree.root_node)
+    if labeler == "swift":
+        return _swift_functions(tree.root_node)
     return _nesting_functions(tree.root_node, spec)
 
 
@@ -663,6 +667,18 @@ def _csharp_functions(root: Node, spec: dict) -> list[Func]:
     return out
 
 
+# Swift (alex-pinkus grammar): callables, and the scopes that name a
+# definition (types, extensions, protocols, callables).
+_SWIFT_CALLABLES = {
+    "function_declaration": None,
+    "protocol_function_declaration": None,
+    "init_declaration": "init",
+    "deinit_declaration": "deinit",
+    "subscript_declaration": "subscript",
+}
+_SWIFT_TYPES = {"class_declaration", "protocol_declaration"}
+
+
 _CS_CALLABLES = ("method_declaration", "local_function_statement")
 
 
@@ -952,6 +968,73 @@ def _ruby_is_call(node: Node) -> bool:
     if parent.type == "call" and parent.child_by_field_name("method") == node:
         return True
     return node.type == "identifier" and parent.type not in _RUBY_NOT_CALL
+
+
+def _swift_strip_generics(t: str) -> str:
+    """`Point<T>` -> `Point`, `Outer.Inner` kept, whitespace removed."""
+    out: list[str] = []
+    depth = 0
+    for c in t:
+        if c == "<":
+            depth += 1
+        elif c == ">":
+            depth -= 1
+        elif depth == 0 and not c.isspace() and c not in "?!":
+            out.append(c)
+    return "".join(out)
+
+
+def _swift_name(node: Node) -> tuple[str, Node] | None:
+    """(name, name node) of a Swift callable or type: a function's name
+    (an operator's characters), `init` / `deinit` / `subscript` at their
+    keyword, a type's (or an extension's type's) name without generic
+    arguments."""
+    if node.type in _SWIFT_TYPES:
+        n = node.child_by_field_name("name")
+        return (_swift_strip_generics(_text(n)), n) if n is not None else None
+    keyword = _SWIFT_CALLABLES.get(node.type)
+    if keyword is not None:
+        tok = next((c for c in node.children if c.type == keyword), node)
+        return keyword, tok
+    n = node.child_by_field_name("name")
+    return (_text(n).strip("`"), n) if n is not None else None
+
+
+def _swift_scope(node: Node) -> tuple[list[str], str]:
+    """(enclosing scope names outermost first, label): `Method` when the
+    nearest enclosing scope is a type, protocol or extension, else
+    `Function`. An extension contributes the type it extends."""
+    parts: list[str] = []
+    label = ""
+    anc = node.parent
+    while anc is not None:
+        if anc.type in _SWIFT_TYPES or anc.type in _SWIFT_CALLABLES:
+            named = _swift_name(anc)
+            if named is not None:
+                parts.append(named[0])
+            label = label or ("Method" if anc.type in _SWIFT_TYPES else "Function")
+        anc = anc.parent
+    return list(reversed(parts)), label or "Function"
+
+
+def _swift_functions(root: Node) -> list[Func]:
+    """Swift: functions (top-level, member, local, operators), protocol
+    requirements, `init`, `deinit` and `subscript` -> `fn`, `Type.fn`,
+    `Type.init`, `outer.inner`; members of `extension T` are `T.fn`. Name
+    line = the name (the keyword for `init` / `deinit` / `subscript`), where
+    the index store puts the definition. Property accessors and closures are
+    not callables: calls in them have no caller."""
+    out: list[Func] = []
+    for node in _walk(root):
+        if node.type not in _SWIFT_CALLABLES:
+            continue
+        named = _swift_name(node)
+        if named is None or not named[0]:
+            continue
+        name, name_node = named
+        parts, label = _swift_scope(node)
+        out.append(_func(name, ".".join([*parts, name]), label, node, name_node))
+    return out
 
 
 def innermost(funcs: list[Func], line: int) -> Func | None:

@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:Config.init": [],
+  "Sources/App/main.swift:make": [
+    "Sources/App/main.swift:Config.init"
+  ]
+}

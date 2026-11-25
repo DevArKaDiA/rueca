@@ -1,0 +1,9 @@
+{
+  "Sources/App/main.swift:Factory.make": [
+    "Sources/App/main.swift:Factory.seed"
+  ],
+  "Sources/App/main.swift:Factory.seed": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:Factory.make"
+  ]
+}

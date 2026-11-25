@@ -1,0 +1,10 @@
+{
+  "Sources/App/main.swift:Outer.Inner.ping": [],
+  "Sources/App/main.swift:Outer.call": [
+    "Sources/App/main.swift:Outer.Inner.ping"
+  ],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:Outer.Inner.ping",
+    "Sources/App/main.swift:Outer.call"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:Version.init": [],
+  "Sources/App/main.swift:parse": [
+    "Sources/App/main.swift:Version.init"
+  ]
+}

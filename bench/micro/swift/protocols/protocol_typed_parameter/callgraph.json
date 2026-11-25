@@ -1,0 +1,10 @@
+{
+  "Sources/App/main.swift:Shape.area": [],
+  "Sources/App/main.swift:Square.area": [],
+  "Sources/App/main.swift:one": [
+    "Sources/App/main.swift:Shape.area"
+  ],
+  "Sources/App/main.swift:total": [
+    "Sources/App/main.swift:Shape.area"
+  ]
+}

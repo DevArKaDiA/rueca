@@ -29,7 +29,10 @@
 //!   project file's name) with the namespaces of the non-test C# files
 //!   under its directory (`cs:<namespace>`);
 //!   every `*.gemspec` with a `name` publishes the features under its
-//!   `lib/` directory (`rb:<first path segment>`).
+//!   `lib/` directory (`rb:<first path segment>`);
+//!   every `Package.swift` publishes the targets of its library products
+//!   (`swift:<module>`; its non-test targets when it declares no library),
+//!   named by its package name (SwiftPM identity, lower-cased).
 //! - **Imports** the repository's own pack cannot resolve inside it (the
 //!   ones a single-repository index reports as external), as keys:
 //!   `npm:<package name>`, `py:<module>`, `go:<import path>`,
@@ -37,11 +40,12 @@
 //!   `cs:<namespace>` (C# usings of namespaces no file of the repository
 //!   declares), `rb:<feature root>` (Ruby `require "rack/utils"` → `rb:rack`);
 //!   Kotlin imports name packages: `java:<package>` for a
-//!   package no Java or Kotlin file of the repository declares.
+//!   package no Java or Kotlin file of the repository declares; `swift:<module>`.
 //! - **Requires**: dependencies declared by manifests (`package.json`
 //!   dependencies, `composer.json` require, `go.mod` require, PEP 621
 //!   dependencies, Maven dependencies, Cargo dependency tables, `*.csproj`
-//!   `PackageReference`s, gemspec dependencies and `Gemfile` gems), for
+//!   `PackageReference`s, gemspec dependencies and `Gemfile` gems, SwiftPM
+//!   `.package(url:)` / `(path:)` / `(id:)` identities), for
 //!   languages whose code can use a package without an import statement
 //!   (PHP fully qualified names, Rust paths through the extern prelude, C#
 //!   fully qualified names and `global using`s of another project, Ruby
@@ -441,6 +445,7 @@ impl Manifests {
             n if n.ends_with(".csproj") => self.csproj(n, text, &dir, files),
             "Gemfile" => self.gemfile(text),
             n if n.ends_with(".gemspec") => self.gemspec(text, &dir, files),
+            "Package.swift" => self.package_swift(text, dir),
             _ => {}
         }
     }
@@ -563,6 +568,22 @@ impl Manifests {
     fn gemfile(&mut self, text: &str) {
         let Some(m) = rueca_lang_ruby::parse_gem_manifest(text) else { return };
         self.requires.extend(m.dependencies.iter().map(|d| format!("rubygems:{}", d.to_lowercase())));
+    }
+
+    /// A SwiftPM package publishes the targets of its library products
+    /// (`swift:<module>`; every non-test target when it declares no
+    /// library), named by its package name; its package dependencies are
+    /// requirements by SwiftPM identity (`swiftpm:<identity>`).
+    fn package_swift(&mut self, text: &str, dir: String) {
+        let m = rueca_lang_swift::parse_manifest(text);
+        self.requires.extend(m.dependencies.iter().map(|d| format!("swiftpm:{d}")));
+        let Some(name) = m.name.clone() else { return };
+        let mut modules: Vec<&str> = m.libraries.iter().flat_map(|(_, t)| t.iter().map(String::as_str)).collect();
+        if modules.is_empty() {
+            modules = m.targets.iter().filter(|t| !t.test).map(|t| t.name.as_str()).collect();
+        }
+        let keys = modules.into_iter().map(|t| format!("swift:{t}")).collect();
+        self.packages.push(Package { eco: "swiftpm".into(), name, dir, keys });
     }
 
     fn gradle_settings(&mut self, text: &str, dir: &str, files: &[FileModule]) {
@@ -812,6 +833,7 @@ pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String>
         LanguageFamily::Php => Some(format!("php:{}", m.trim_start_matches('\\'))),
         LanguageFamily::C => Some(format!("c:{}", m.trim_start_matches("./"))),
         LanguageFamily::Ruby => ruby_import_key(imp.relative_level, m),
+        LanguageFamily::Swift => Some(format!("swift:{m}")),
         // Shell has no package identity: a sourced file is a path.
         // SQL has no package identity (dbt `packages.yml` is not read).
         LanguageFamily::Markdown
@@ -1261,6 +1283,10 @@ mod tests {
         assert_eq!(import_key(LanguageFamily::Rust, &imp("::anyhow", 0)).as_deref(), Some("rust:anyhow"));
         assert_eq!(import_key(LanguageFamily::Rust, &imp("crate::a", 0)), None);
         assert_eq!(import_key(LanguageFamily::Rust, &imp("std::fmt", 0)), None);
+        assert_eq!(
+            import_key(LanguageFamily::Swift, &imp("ArgumentParser", 0)).as_deref(),
+            Some("swift:ArgumentParser")
+        );
         assert_eq!(import_key(LanguageFamily::Rust, &imp("a", 2)), None);
         assert_eq!(import_key(LanguageFamily::Shell, &imp("*/nvm.sh", 0)), None);
         assert_eq!(import_key(LanguageFamily::Ruby, &imp("rack/utils", 0)).as_deref(), Some("rb:rack"));
@@ -1325,6 +1351,13 @@ mod tests {
             "packages/ui/package.json".to_string(),
             r#"{"name": "@acme/ui", "dependencies": {"React": "1"}}"#.to_string(),
         );
+        configs.insert(
+            "swift/Package.swift".to_string(),
+            "let package = Package(name: \"Kit\", products: [.library(name: \"Kit\", targets: [\"KitCore\"])],\n\
+             dependencies: [.package(url: \"https://github.com/apple/swift-log.git\", from: \"1.0.0\")],\n\
+             targets: [.target(name: \"KitCore\"), .testTarget(name: \"KitTests\")])\n"
+                .to_string(),
+        );
         let project = ProjectFiles { paths: Default::default(), configs };
         let files = vec![
             ("src/click/__init__.py".to_string(), Some(Language::Python), "click".to_string()),
@@ -1349,6 +1382,10 @@ mod tests {
             ("acme-kit", vec!["rust:acme_kit".to_string()])
         );
         assert_eq!(
+            (find("swiftpm").name.as_str(), find("swiftpm").keys.clone()),
+            ("Kit", vec!["swift:KitCore".to_string()])
+        );
+        assert_eq!(
             packages.iter().filter(|p| p.eco == "npm").map(|p| p.name.as_str()).collect::<Vec<_>>(),
             ["@acme/ui"]
         );
@@ -1356,6 +1393,7 @@ mod tests {
             "pypi:colorama",
             "pypi:jinja2",
             "composer:symfony/clock",
+            "swiftpm:swift-log",
             "go:github.com/b/c",
             "go:github.com/d/e",
             "maven:junit:junit",

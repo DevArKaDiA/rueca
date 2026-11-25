@@ -54,7 +54,7 @@ uv run --project bench rueca-bench check                 # regression check vs t
 
 - `setup [--lang FAMILY ...]` and `run ... [--lang FAMILY ...]` restrict work
   to language families (manifest `[languages]` keys: `python`, `ecma`,
-  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`, `csharp`, `kotlin`, `ruby`, `sql`) and/or `data` (the data-format suite);
+  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`, `csharp`, `kotlin`, `ruby`, `sql`, `swift`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
 - `run --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all|a,b} --suite {s1,s3,data,health,org,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--workers N] [--force] [--prune]`.
   `--split` restricts S1 to one split; the `vector`, `rueca-hybrid` and
@@ -474,7 +474,8 @@ Adding a language is data plus, at most, one labeler entry:
 
 1. **Language family** — `[languages.<family>]` in `manifest.toml`: report
    `label`, member instance languages, source `extensions`,
-   `exclude_suffixes`, `test_files` patterns and `test_dirs` (both pooled
+   `exclude_suffixes`, `own_test_dirs` (test directories of the family's
+   own files only: Swift `Tests/`), `test_files` patterns and `test_dirs` (both pooled
    into the shared test-path heuristic, e.g. Go `testdata`), and
    `s1_sources` / `s3_gold` / `notes`. Report columns and the language's
    scorecard (with its computed status) appear automatically.
@@ -626,6 +627,7 @@ stays untuned:
 | kotlin (15) | evant/kotlin-inject (5), square/anvil (5), ajalt/mordant (5); SWE-rebench V2 | square/kotlinpoet 2.4.0 (scip-java) |
 | ruby (4) | faker-ruby/faker (2), jordansissel/fpm (2); SWE-bench Multilingual | rack/rack v3.2.9, Shopify/packwerk v3.3.1 (scip-ruby) |
 | sql (0) | none (no dataset has SQL instances) | sqlc-dev/sqlc v1.31.1 `examples/` (SQL labeler) |
+| swift (15) | apple/swift-markdown (5), CreateAPI/CreateAPI (5), apple/swift-distributed-tracing (5); SWE-rebench V2 | JohnSundell/Plot 0.14.0 (Swift index store) |
 
 Ruby stops at 4: SWE-bench Multilingual is the only dataset with Ruby
 instances (SWE-rebench V2, Multi-SWE-bench and SWE-PolyBench have none),
@@ -1289,6 +1291,34 @@ type has no explicit constructor); an extension method called on a value
 points to the extension method; property and indexer accessors, operators
 used as operators, delegate invocations, method groups (`return Tick;`)
 and `nameof` give none; lambdas and LINQ belong to the enclosing method.
+
+**Swift gold from the compiler's index store** (`indexstore.py`,
+`indexstore_dump.py`): no SCIP indexer exists for Swift that is maintained
+and builds without Xcode, so the gold is the compiler's own index. In the
+official `swift:6.4.3-noble` image pinned by digest (`[tools.swift_indexstore]`),
+a networked container copies the checkout (without `.git`) and runs `swift
+package resolve` (git clones of the dependencies only), then a
+`--network=none` container runs `swift build --build-tests
+--enable-index-store -Xswiftc -index-include-locals` (every target, tests
+included; nested local functions are indexed only with the last flag) and
+`indexstore_dump.py`, a standard-library script that reads the store
+through the image's `libIndexStore.so` with `ctypes` (the image has the
+Python runtime lldb links against; a two-line launcher is compiled with its
+`clang`). The dump becomes SCIP-shaped documents (`read_indexstore`): USR as
+the symbol, DEFINITION / DECLARATION as the definition role (a protocol
+requirement is a definition), every IMPLICIT occurrence dropped (property
+getters and setters, implicit memberwise initializers and witnesses: none
+is a call written in the source), the occurrence range = the token at its
+column (`Foo` for `Foo(x: 1)`, where the store puts the initializer call;
+`init` / `deinit` / `subscript` at their keywords); then the edges are
+derived exactly like every SCIP gold (`scip.derive_call_graph`, tree-sitter
+call sites and callables). Alamofire 5.12.2 (`Source/`) and
+swift-algorithms 1.2.1 (`Sources/Algorithms/`) are gated, Plot 0.14.0
+(`Sources/Plot/`) is the calibration set. The micro-benchmark
+(`bench/micro/swift`, 60 SwiftPM packages) is cross-checked with the same
+pipeline: 88 / 88 key edges, every snippet identical (one key was aligned
+with the store after the check: `Grid() + Grid()` calls the `+` operator
+the snippet declares).
 
 **Gold from PyCG** (Apache-2.0, **diagnostic**): the hand-written
 `callgraph.json` of every snippet of the PyCG micro-benchmark, restricted to
@@ -2011,10 +2041,12 @@ and the summary printed at the end.
 | Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`), four C++, three Rust, two C, two Go, two Java and one JS JSONL file | HF revision + per-file sha256 | CC0 (dataset README; upstream repository licences apply) | S1 C++ issues, patches (fmt, nlohmann/json, Catch2, simdjson); calibration repositories: Rust (bytes, tracing, fd), C (zstd, ponyc), Go (grpc-go, go-zero), Java (jackson-core, mockito), JS (dayjs) |
 | PyCG micro-benchmark (`vitsalis/PyCG`) | commit | Apache-2.0 | S3 Python call-graph gold (diagnostic) |
 | PHP micro-benchmark (`bench/micro/php`) | in repository | Apache-2.0 (Rueca's own labels) | S3 PHP call-graph gold |
-| Python / TS/JS / Go / Java / C / C++ / Rust / shell / C# / Kotlin micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell,csharp,kotlin}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
+| Python / TS/JS / Go / Java / C / C++ / Rust / shell / C# / Kotlin / Swift micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell,csharp,kotlin,swift}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
 | SQL micro-benchmark (`bench/micro/sql`) | in repository | Apache-2.0 (Rueca's own labels) | S3 dependency gold, per dialect |
 | sqlglot (PyPI) | `uv.lock` (30.35.0) | MIT | SQL labeler (S3 gold) |
 | jOOQ/sakila, fivetran/dbt_hubspot, sqlc-dev/sqlc | commit | BSD-2-Clause / Apache-2.0 / MIT | S3 SQL repositories (gold built from the code) |
+| `swift:6.4.3-noble` Docker official image | digest | Apache-2.0 (separate process) | S3 Swift gold: `swift build` with the index store, read through its libIndexStore; Swift micro cross-check |
+| tree-sitter-swift 0.7.4 (PyPI) | `uv.lock` | MIT | bench labeler for Swift |
 | Env bridge labels (`bench/labels/bridge`) | in repository | Apache-2.0 (Rueca's own labels) | data-format suite gold |
 | PHPStan (`phpstan/phpstan`) release PHAR | version + sha256 | MIT | S3 PHP gold (run in Docker, never vendored) |
 | `php:8.3-cli` Docker official image | digest | PHP-3.01 (separate process) | runtime for PHPStan |
@@ -2200,6 +2232,23 @@ file paths and function names of the public corpus repositories.
   - a primary constructor written with `constructor` on a line of its own
     is defined on that keyword: the gold binds it to the callable whose
     extent (the class header) holds that line.
+- **Index-store gold for Swift** (Alamofire, swift-algorithms, Plot,
+  micro):
+  - calls through a protocol, a generic constraint or a non-final class
+    resolve to the requirement or the base method only (the store records
+    the dynamic call there), so implementations get no caller edges from
+    such code;
+  - calls of closure values, function-typed properties and parameters
+    (`handler()`), `callAsFunction`, function references (`map(f)`),
+    subscripts and property accessors give no edge; an operator call
+    (`a + b`) is an edge only where the grammar makes it a call site;
+  - only the Linux build is indexed: `#if os(macOS)` / `#if canImport(UIKit)`
+    branches (Alamofire's Apple-only code) have no definition, and their
+    callables are unbound (no gold edge);
+  - the grammar attaches a call to a whole `+` / `*` / prefix-operator
+    expression (`a + b.f(1)`): the bench's call-site test (`members` in
+    `[grammars.swift]`) takes its right-most operand as the callee, as the
+    pack does.
 - **rust-analyzer gold for Rust** (serde_json, ripgrep, bytes, micro):
   - calls on a generic `T: Trait`, an `impl Trait` parameter or a `dyn
     Trait` receiver resolve to the trait method only, so trait impls get no

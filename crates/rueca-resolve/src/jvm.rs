@@ -60,7 +60,9 @@ pub(crate) struct JvmTables {
 }
 
 impl Resolver<'_> {
-    fn package_index(&self) -> &HashMap<(LanguageFamily, String), u32> {
+    /// (family, module name) → package, for the packs whose imports name
+    /// packages (`LanguagePack::namespace_imports`: Kotlin, Swift).
+    pub(crate) fn package_index(&self) -> &HashMap<(LanguageFamily, String), u32> {
         self.jvm.packages.get_or_init(|| {
             let mut m = HashMap::new();
             for (p, members) in self.packages.iter().enumerate() {
@@ -86,7 +88,7 @@ impl Resolver<'_> {
 
     /// Import targets of a `LanguagePack::namespace_imports` file: the
     /// package each import names, as its first file and its main folder.
-    pub(crate) fn jvm_namespace_import_targets(&self, fid: FileId) -> (Vec<Option<FileId>>, Vec<Option<NodeId>>) {
+    pub(crate) fn package_namespace_import_targets(&self, fid: FileId) -> (Vec<Option<FileId>>, Vec<Option<NodeId>>) {
         let imports = self.imports(fid);
         let (mut t, mut d) = (vec![None; imports.len()], vec![None; imports.len()]);
         let Some(family) = self.families[fid as usize] else { return (t, d) };

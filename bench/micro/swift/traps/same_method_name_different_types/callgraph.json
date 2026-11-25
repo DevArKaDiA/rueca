@@ -1,0 +1,11 @@
+{
+  "Sources/App/main.swift:Cat.run": [],
+  "Sources/App/main.swift:Dog.run": [],
+  "Sources/App/main.swift:cats": [
+    "Sources/App/main.swift:Cat.run"
+  ],
+  "Sources/App/main.swift:race": [
+    "Sources/App/main.swift:Cat.run",
+    "Sources/App/main.swift:Dog.run"
+  ]
+}

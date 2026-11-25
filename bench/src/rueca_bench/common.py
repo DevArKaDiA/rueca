@@ -96,6 +96,9 @@ class LanguageFamily:
     test_files: tuple[str, ...]
     test_dirs: tuple[str, ...] = ()
     test_dir_suffixes: tuple[str, ...] = ()
+    # Test directories of this family's own files only (Swift `Tests/`):
+    # a file of another language under such a directory is unaffected.
+    own_test_dirs: tuple[str, ...] = ()
 
 
 _FAMILIES: dict[str, LanguageFamily] | None = None
@@ -116,6 +119,7 @@ def families() -> dict[str, LanguageFamily]:
                 test_files=tuple(spec.get("test_files", [])),
                 test_dirs=tuple(spec.get("test_dirs", [])),
                 test_dir_suffixes=tuple(spec.get("test_dir_suffixes", [])),
+                own_test_dirs=tuple(spec.get("own_test_dirs", [])),
             )
         _FAMILIES = out
     return _FAMILIES
@@ -216,7 +220,18 @@ def is_test_path(path: str) -> bool:
     suffixes = _test_dir_suffixes()
     if suffixes and any(p.endswith(suffixes) for p in parts[:-1]):
         return True
+    if _in_own_test_dir(path, parts):
+        return True
     return bool(_test_file_re().match(parts[-1]))
+
+
+def _in_own_test_dir(path: str, parts: list[str]) -> bool:
+    """Whether `path` is a file of a family under one of that family's
+    `own_test_dirs` (Swift `Tests/<Target>/…`)."""
+    for fam in families().values():
+        if fam.own_test_dirs and path.endswith(fam.extensions) and any(p in fam.own_test_dirs for p in parts[:-1]):
+            return True
+    return False
 
 
 def candidate_path(path: str, language: str) -> bool:

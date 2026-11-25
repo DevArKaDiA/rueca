@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:Counter.add": [],
+  "Sources/App/main.swift:Counter.bump": [
+    "Sources/App/main.swift:Counter.add"
+  ]
+}

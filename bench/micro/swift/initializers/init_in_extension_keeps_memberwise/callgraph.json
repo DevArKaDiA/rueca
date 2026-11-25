@@ -1,0 +1,6 @@
+{
+  "Sources/App/Point+Polar.swift:Point.init": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/Point+Polar.swift:Point.init"
+  ]
+}

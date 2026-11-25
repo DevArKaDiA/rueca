@@ -1,0 +1,8 @@
+{
+  "Sources/App/main.swift:helper": [],
+  "Sources/App/main.swift:perform": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:helper",
+    "Sources/App/main.swift:perform"
+  ]
+}

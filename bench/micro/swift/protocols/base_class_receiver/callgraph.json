@@ -1,0 +1,7 @@
+{
+  "Sources/App/main.swift:Animal.speak": [],
+  "Sources/App/main.swift:Cat.speak": [],
+  "Sources/App/main.swift:talk": [
+    "Sources/App/main.swift:Animal.speak"
+  ]
+}

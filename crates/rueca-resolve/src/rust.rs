@@ -980,6 +980,9 @@ impl Resolver<'_> {
         if node.language == Some(Language::Kotlin) {
             return self.kotlin_return_lookup(callee);
         }
+        if node.language == Some(Language::Swift) {
+            return self.swift_return_lookup(callee);
+        }
         if node.language.map(Language::family) != Some(LanguageFamily::Rust) {
             return TypeLookup::Unknown;
         }

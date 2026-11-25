@@ -34,6 +34,12 @@ pub(crate) fn overload_suffix(qn: &str) -> Option<(&str, &str)> {
     Some((base, params))
 }
 
+/// A qualified name without its overload suffix (Swift selectors:
+/// `Point.draw(at:)` → `Point.draw`).
+pub(crate) fn unsuffixed(qn: &str) -> &str {
+    overload_suffix_raw(qn).map_or(qn, |(base, _)| base)
+}
+
 fn overload_suffix_raw(qn: &str) -> Option<(&str, &str)> {
     if !qn.ends_with(')') {
         return None;
@@ -594,6 +600,7 @@ impl<'a> Resolver<'a> {
     /// Tables for the hooks, built once after the per-file tables.
     pub(crate) fn build_hook_tables(&mut self) {
         self.build_package_members();
+        self.build_swift_extension_members();
         self.link_declarations();
         self.build_overload_sets();
         self.build_data_tables();
@@ -611,7 +618,7 @@ impl<'a> Resolver<'a> {
             let defs = self.defs(fid);
             for &j in &self.top_level[i] {
                 let d = &defs[j as usize];
-                let Some((owner, member)) = d.qualified_name.rsplit_once('.') else { continue };
+                let Some((owner, member)) = unsuffixed(&d.qualified_name).rsplit_once('.') else { continue };
                 if member != d.name || owner.contains('.') {
                     continue;
                 }
@@ -788,6 +795,7 @@ impl<'a> Resolver<'a> {
             _ if node.language == Some(Language::Kotlin) => {
                 node.signature.as_deref().and_then(|s| crate::jvm::kotlin_signature_arity(s, &node.name))
             }
+            Some(LanguageFamily::Swift) => node.signature.as_deref().and_then(crate::swift::swift_signature_arity),
             _ => None,
         };
         from_signature.or_else(|| overload_suffix(&node.qualified_name).map(|(_, p)| params_arity(p)))
@@ -844,6 +852,9 @@ impl<'a> Resolver<'a> {
         strategy: Strategy,
         confidence: f32,
     ) -> Vec<(NodeId, Strategy, f32)> {
+        if self.is_swift(from) {
+            return self.swift_expand(target, caller, item, strategy, confidence);
+        }
         let Some(&set) = self.overload_of.get(&target) else { return vec![(target, strategy, confidence)] };
         let arity = item.arity;
         let all = self.overload_sets[set].as_slice();
@@ -972,7 +983,7 @@ impl<'a> Resolver<'a> {
             let package_scoped = self.package_of[m as usize].is_some();
             for &j in &self.top_level[m as usize] {
                 let d = &defs[j as usize];
-                if !d.exported || (package_scoped && d.qualified_name != d.name) {
+                if !d.exported || (package_scoped && unsuffixed(&d.qualified_name) != d.name) {
                     continue;
                 }
                 if seen.insert(d.name.as_str()) {

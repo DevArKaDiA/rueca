@@ -20,7 +20,7 @@
 //! | [`LanguagePack::overrides`] | `false` | the resolver should add `OVERRIDES` edges (Java, C++) |
 //! | [`LanguagePack::facts_depend_on_path`] | `false` | extraction reads the path, not only the bytes (data file kinds chosen by name) |
 //! | [`LanguagePack::resolve_import`] returning a directory | — | the import names a package or folder (Go, Java on-demand, Terraform modules) |
-//! | [`LanguagePack::namespace_imports`] | `false` | imports name a module (a namespace) wherever its files are, not a path (C#, Kotlin) |
+//! | [`LanguagePack::namespace_imports`] | `false` | imports name a module (a namespace) wherever its files are, not a path (C#, Kotlin, Swift) |
 //!
 //! Reserved texts a pack may put in facts:
 //!
@@ -229,7 +229,8 @@ pub struct ProjectFiles {
     /// `package.json`, `pyproject.toml`, `setup.cfg`, `setup.py`,
     /// `composer.json`, `go.mod`, `go.work`, `pom.xml`, `build.gradle(.kts)`,
     /// `settings.gradle(.kts)`, `compile_commands.json`, `compile_flags.txt`,
-    /// `Cargo.toml`, `*.csproj`, `Gemfile`, `*.gemspec` (see [`ProjectFiles::is_config_file`], size limits in
+    /// `Cargo.toml`, `*.csproj`, `Gemfile`, `*.gemspec`, `Package.swift` (see
+    /// [`ProjectFiles::is_config_file`], size limits in
     /// [`ProjectFiles::max_config_bytes`]).
     pub configs: BTreeMap<String, String>,
 }
@@ -266,6 +267,8 @@ impl ProjectFiles {
                 | "Cargo.toml"
                 // Ruby: RubyGems packages
                 | "Gemfile"
+                // Swift: SwiftPM manifests
+                | "Package.swift"
         ) || (name.starts_with("tsconfig") && name.ends_with(".json"))
             // C#: MSBuild projects (project scopes, NuGet identity)
             || name.ends_with(".csproj")
@@ -403,7 +406,8 @@ pub trait LanguagePack: Send + Sync {
     /// whose module name is the import's `module`, wherever its files are,
     /// links `IMPORTS` to the directory holding most of them, and leaves
     /// [`LanguagePack::resolve_import`] unused for such imports (C# `using
-    /// A.B;`, Kotlin `import a.b.C`). Requires [`ModuleScope::Package`].
+    /// A.B;`, Kotlin `import a.b.C`, Swift `import Module`). Requires
+    /// [`ModuleScope::Package`].
     fn namespace_imports(&self) -> bool {
         false
     }

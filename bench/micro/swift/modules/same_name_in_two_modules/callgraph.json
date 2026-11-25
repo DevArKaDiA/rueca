@@ -1,0 +1,8 @@
+{
+  "Sources/App/main.swift:now": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:now",
+    "Sources/Lib/Clock.swift:now"
+  ],
+  "Sources/Lib/Clock.swift:now": []
+}

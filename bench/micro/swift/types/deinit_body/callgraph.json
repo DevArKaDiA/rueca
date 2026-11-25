@@ -1,0 +1,7 @@
+{
+  "Sources/App/main.swift:Handle.close": [],
+  "Sources/App/main.swift:Handle.deinit": [
+    "Sources/App/main.swift:Handle.close"
+  ],
+  "Sources/App/main.swift:run": []
+}

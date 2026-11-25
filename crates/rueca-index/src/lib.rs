@@ -200,6 +200,7 @@ pub fn default_registry() -> Registry {
     r.register(Box::new(rueca_lang_kotlin::KotlinPack));
     r.register(Box::new(rueca_lang_ruby::RubyPack));
     r.register(Box::new(rueca_lang_sql::SqlPack));
+    r.register(Box::new(rueca_lang_swift::SwiftPack));
     r.register(Box::new(rueca_lang_data::DataPack));
     r
 }
