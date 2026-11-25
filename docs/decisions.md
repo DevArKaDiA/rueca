@@ -1,5 +1,94 @@
 # Decisions log
 
+## 2026-11-25 — SQL pack: sqlparser per statement over a tree-sitter grammar, one dialect per file, a code-backed gold; `preview`
+
+SQL landed as `rueca-lang-sql` (RFC 0003 §10.4g) with a `sql` module in
+`rueca-resolve`. Choices worth recording:
+
+- **Parser: `sqlparser` 0.64 (Apache-2.0), one statement at a time, plus a
+  token scanner; not a tree-sitter SQL grammar.** RFC 0002 §3.3 already
+  named sqlparser for SQL DDL; the choice was re-checked with evidence.
+  Candidates: DerekStride's grammar (`tree-sitter-sequel` 0.3.13, MIT; the
+  T-SQL and SQLite forks on crates.io are single-dialect) and sqlparser
+  (dialects: PostgreSQL, MySQL, SQLite, MsSql, BigQuery, Snowflake,
+  Redshift, DuckDB, generic, …). Files with at least one error, per
+  dialect (directory of the file), same files — sakila `e089a5b`, sqlc
+  v1.31.1, dbt_hubspot v1.11.0, jaffle-shop-classic `fd7bfac`,
+  bigquery-utils `d5bde4f`, sql-server-maintenance-solution `4161757`:
+
+  | Dialect | Files | tree-sitter-sequel (whole file) | the pack: sqlparser per statement, dialect fallback | Statements unparsed |
+  |---|---|---|---|---|
+  | PostgreSQL | 1,073 | 117 (10.9%) | 23 (2.1%) | 33 / 2,315 |
+  | MySQL | 278 | 27 (9.7%) | 10 (3.6%) | 20 / 643 |
+  | SQLite | 199 | 27 (13.6%) | 4 (2.0%) | 7 / 619 |
+  | T-SQL | 12 | 11 | 11 | 50 / 183 |
+  | BigQuery | 66 | 47 (71%) | 11 (16.7%) | 19 / 143 |
+  | dbt Jinja | 340 | 334 (98%) | 22 (6.5%) | 22 / 170 |
+
+  Positions: sqlparser 0.64 carries a span on every identifier token
+  (line and character column, converted to bytes per statement chunk), which
+  is all definitions and references need. Recovery: tree-sitter recovers
+  inside one file, sqlparser does not, so the pack cuts statements itself
+  (`GO`, `DELIMITER`, `BEGIN … END` aware), parses each in the file's
+  dialect then in the others, and reads the rest with a token scanner;
+  one bad statement loses nothing else. Default features off (no
+  `recursive` stack growth); cargo-deny clean; `cargo +1.90 check` passes.
+  The pack is the second one, after proto, that does not use tree-sitter;
+  it plugs into the same `LanguagePack` contract.
+- **One dialect per file, deterministic, no setting.** A directive comment
+  (`-- dialect: x`, sqlfluff's `-- sqlfluff:dialect:x`), else the path
+  (extension, then a dialect word in the file or directory names), else
+  weighted content signals, else ANSI. A per-path setting in
+  `<store>/rueca.toml` was weighed and left out: extraction is a pure
+  function of path and bytes (the facts cache key) and the store
+  configuration never reaches packs; the directive covers the cases the
+  path and content miss. The dialect is shown in every top-level
+  signature, the only place the model has for it.
+- **A database namespace is global.** The module name is empty; names are
+  normalized (unquoted fold to lower case, quoted kept where the dialect is
+  case-sensitive, default schemas `public` / `dbo` / `main` dropped). The
+  resolver picks among same-named definitions by place: earlier in the
+  file, migration order, later in the file, nearest directory; a name that
+  matches only by its last segments (`users` ↔ `app.users`) is a
+  `unique_name` guess at 0.6; anything still ambiguous resolves to nothing
+  (Sakila's copies of one table in six dialects are the test).
+- **Migrations: one node per `CREATE`, the effective one by order.** The
+  model has no place to delete a definition another file drops, so each
+  `CREATE` stays a node and references go to the definition effective at
+  their point: the latest at or before the referencing migration (Flyway
+  `V1_2__`, timestamps, numeric prefixes, `…/up.sql`), the latest overall
+  from outside the migrations; down / undo migrations only for themselves.
+  `ALTER TABLE … ADD COLUMN` adds a column member in its migration;
+  `ALTER` / `DROP` are `WRITES` from the migration file.
+- **Edges are dependencies.** Relations read are `REFERENCES`, written
+  (`INSERT` … `DROP`) `WRITES`, routines `CALLS`; columns only when the
+  table is certain (a qualifier through aliases, or one table in scope).
+  The bench's structural questions for SQL therefore trace `CALLS`,
+  `REFERENCES` and `WRITES` (manifest `trace_edges`) and count tables,
+  views and dbt models (`Struct`) as callables (`callable_labels`): the
+  callgraph format is unchanged, an SQL edge is any dependency.
+- **dbt is masked, not rendered.** `ref` / `source` become identifiers in
+  place, other expressions placeholders, macro blocks are definitions;
+  dependencies are also read from the Jinja itself, so a model whose SQL
+  does not parse keeps its `ref` edges. Rendering would need dbt, its
+  adapters and the project's packages.
+- **Gold: a code-backed labeler on sqlglot**, independent of the pack's
+  parser (`bench/src/rueca_bench/sqlgold.py`, sqlglot 30.35.0, MIT): the
+  dialect of each tree comes from the manifest, not from the pack's
+  detection; it does not model migration order (the micro-benchmark's
+  hand labels do, and the cross-check shows the two edges it misses).
+  Gated: Sakila in six dialects, dbt_hubspot; calibration: sqlc's
+  examples. Tuned on calibration and micro only: a table-valued function
+  in `FROM` is a call (sqlc `say_hello`), pg_dump's `-- Name: x; Type:`
+  headers are not query names.
+- **Status `preview`**: no localization dataset has SQL instances
+  (missing = failing, RFC 0004 §6.2), files with parse errors are above
+  the 2% floor on the gated corpus (Sakila's Oracle / DB2 copies,
+  MySQL routines, T-SQL procedural code, fivetran Jinja), the callees
+  population is below 300, and the structural gold is code-backed. Floors
+  unchanged. SQL in other languages' string literals (code → table
+  bridge) is a follow-up.
+
 ## 2026-11-25 — Ruby: global constant paths, Ruby's own lookup, scip-ruby gold, `stable`
 
 The Ruby pack (`rueca-lang-ruby`, RFC 0003 §10.4f) has no module names:

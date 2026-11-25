@@ -136,7 +136,7 @@ such edges disappear. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-shell`, `rueca-lang-csharp`, `rueca-lang-kotlin`, `rueca-lang-ruby`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-shell`, `rueca-lang-csharp`, `rueca-lang-kotlin`, `rueca-lang-ruby`, `rueca-lang-sql`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -626,6 +626,28 @@ names bound to a `PointsClient` consume it.
 **C#**: no contract hints yet (ASP.NET routes and `HttpClient` calls are
 future work).
 
+**SQL** (`rueca-lang-sql`) is read with sqlparser, not tree-sitter: one
+dialect per file (a `-- dialect:` comment, else the path — extension,
+dialect words in file or directory names — else content signals such as
+`AUTO_INCREMENT`, `SERIAL` / `$$`, `GO` / `NVARCHAR`, `PRAGMA`,
+`` `project.dataset.table` ``), the text cut into statements (`GO`
+batches, `DELIMITER` regions, `;` outside `BEGIN … END`), each statement
+parsed in the file's dialect, then in the others, and what none parses
+read by a token scanner (its `CREATE`, the names after `FROM` / `JOIN` /
+`INTO` / `UPDATE`, calls) and counted as a parse error. Tables, views and
+dbt models are `Struct`s with `Field` columns; functions, procedures,
+triggers (`table.trigger`), dbt macros and `-- name:` queries are
+`Function`s; names are normalized (unquoted lower case, default schema
+dropped: `public.users` is `users`) and the module name is empty, since
+a database namespace is global. Relations read become `Read` references
+(`REFERENCES`), DML / `ALTER` / `DROP` targets `Write`s (`WRITES`),
+columns `Read` / `Write` with a `$type:<table>` receiver when the table
+is certain, routines `Call`s. dbt Jinja is masked in place (`{{ ref('m')
+}}` becomes the identifier `m`), and `ref` / `source` / macro calls are
+also read from the Jinja itself. PostgreSQL `$$` bodies are scanned for
+relations and calls; the dialect ends every top-level signature
+(`CREATE TABLE users ( -- postgres`).
+
 Facts are cached at
 `<store>/facts/<sha>-<lang>-v<extractor version>-f<facts format>.bin`.
 Re-indexing an unchanged file is a cache hit; bumping a pack's
@@ -636,7 +658,8 @@ name) add a hash of the path to the key. A pack may also decline a file with
 a reason (`skipped:data-shape`): the file stays listed and searchable.
 
 **Detection** is by extension (`.rs` is Rust, `.sh` / `.bash` / `.zsh` /
-`.ksh` / `.bats` shell, `.cs` C#, `.kt` / `.kts` Kotlin, `.rb` / `.rake` / `.gemspec` / `.ru` Ruby), then by file name (`Dockerfile`,
+`.ksh` / `.bats` shell, `.cs` C#, `.kt` / `.kts` Kotlin, `.rb` / `.rake` / `.gemspec` / `.ru` Ruby;
+`.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq` SQL), then by file name (`Dockerfile`,
 `Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`, `Rakefile`, `Gemfile`,
 `AndroidManifest.xml`, the shell start-up files `.bashrc`, `.profile`,
 `.zshrc`, …; other XML stays text); a C header
@@ -1041,6 +1064,20 @@ calling a sibling library its entry script sources). A `$script` call
 (`import_resolved`, 0.90), so `trace` on `bin/deploy` lists who runs it;
 an env read of a variable a sourced file assigns is a `REFERENCES` edge
 to that variable instead of a `READS` of `$env:NAME`.
+
+SQL references are resolved by the `sql` module (`rueca-resolve` crate
+docs, *SQL*): a name matches every SQL definition with that normalized
+qualified name, and the candidates are narrowed by place — one earlier in
+the same file (`same_module`, 0.95), else the effective definition by
+migration order (Flyway `V1_2__`, timestamps, numeric prefixes: the latest
+at or before the referencing migration, 0.90, or the latest overall from
+outside the set, 0.85), else one later in the file, else the nearest
+directory when it holds one file of candidates (0.85; Sakila's six
+dialect copies of `actor` each resolve to their own directory). A name
+written with fewer or more qualifiers (`users` ↔ `app.users`) is a
+`unique_name` guess at 0.60; anything still ambiguous resolves to
+nothing. A name without receiver first matches the CTEs of the enclosing
+definitions; `$type:T` receivers are columns of `T`.
 
 **From reference kind to edge kind.**
 
@@ -1527,6 +1564,7 @@ lists every ref with its kind, commit, age and `closed_at`.
 | `Key`, `Document` | structured-data keys at any depth (key path = local name), Laravel `config/*.php` keys, and documents of multi-document YAML streams |
 | `Resource`, `Image` | deployable / infrastructure objects (Kubernetes objects, compose services, Terraform resources, data sources and modules) and container images (Dockerfile stages, compose `build`) |
 | `Route`, `Variable` (data) | OpenAPI operations (`GET /users/{id}`); Terraform `var.x` / `local.x` and Dockerfile `ARG` |
+| `Struct`, `Field`, `Function`, `Constant`, `Variable`, `Enum`, `TypeAlias` (SQL) | tables, views, dbt models and snapshots with their columns; functions, procedures, triggers, dbt macros, named queries; indexes; sequences and CTEs; enum and other types |
 | `Interface`, `RpcMethod`, `Struct`, `Field`, `Enum`, `Constant` (proto) | `.proto` services (`helloworld.Greeter`), their `rpc`s (`helloworld.Greeter.SayHello`), messages and fields, enums and values |
 
 Every symbol node carries: name, qualified name, file, span, language,
@@ -1919,8 +1957,9 @@ gaps show up on real repositories.
 | `.proto` services, RPC methods, messages (`protox-parse`) | `rueca-lang-proto` | crate docs, `src/extract.rs` |
 | Shell functions, `source` paths, script runs, bats blocks, env bridge, parser repairs | `rueca-lang-shell` | crate docs, `src/extract.rs`, `src/paths.rs`, `src/repair.rs`, `queries/locals.scm` |
 | C# extraction, namespaces, receivers, `#if` configurations, the .NET bridge | `rueca-lang-csharp` | crate docs, `src/extract.rs`, `src/refs.rs`, `src/bridge.rs`, `src/preproc.rs`, `queries/locals.scm` |
+| SQL dialects, statements, definitions, references, dbt Jinja (`sqlparser`) | `rueca-lang-sql` | crate docs and README (dialect coverage), `src/dialect.rs`, `src/split.rs`, `src/ast.rs`, `src/scan.rs`, `src/prep.rs` |
 | Walk, cache, snapshot identity | `rueca-index` | `index_worktree` |
-| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/shell.rs` (sourced functions, script runs), `src/csharp.rs` (C# namespaces and usings, partial types, extension methods, return-type receivers, overload choice), `src/jvm.rs` (Kotlin imports by package, companions, extension functions, overloads), `src/contracts.rs` (contract table and edges) |
+| Resolution | `rueca-resolve` | crate docs (strategy table); `src/hooks.rs` (RFC 0003 hooks), `src/bridge.rs` (env vars, config keys, data pointers), `src/go.rs` (implicit interfaces), `src/rust.rs` (Rust modules, `impl` blocks, trait methods), `src/shell.rs` (sourced functions, script runs), `src/csharp.rs` (C# namespaces and usings, partial types, extension methods, return-type receivers, overload choice), `src/jvm.rs` (Kotlin imports by package, companions, extension functions, overloads), `src/sql.rs` (SQL names, migration order), `src/contracts.rs` (contract table and edges) |
 | Segment, search, packs, catalog | `rueca-segment` | crate docs (format spec) |
 | Organization index, generations, visibility | `rueca-segment` | `src/org.rs` (module docs) |
 | Organization file, `index --org` | `rueca-index` | `src/org.rs` |
