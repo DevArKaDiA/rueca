@@ -196,6 +196,26 @@ def test_gate_and_report():
     assert "| js (`describe_api` 400 tokens) |" in md and "**fail**" in md and "ms04" in md
 
 
+def test_before_after_report():
+    assert report.before_after_lines(None, {}) == ["No baseline recorded."]
+    committed = report.load_before()
+    assert committed["commit"] == "3efa2af" and committed["summary"]["plan"]["correct"] == 18 and len(committed["correct"]) == 25 * 3 + 16
+    recs = [_rec("ms02", "plan", True, 800, 2), _rec("ms02", "js", False, 200)]
+    arm = {"tasks": 1, "correct": 1, "read_per_correct": 800.0, "read_per_correct_amortised": None, "written_per_correct": 10.0, "calls": 2, "overhead_ms_median": None, "overhead_ms_p95": None}
+    gate = {"reduction": 0.5, "reduction_amortised": 0.25, "regressed": ["ms02"], "overhead_ms_median": 1.0, "pass": False}
+    before = {
+        "commit": "abc1234",
+        "describe_api_tokens": {"js": 100},
+        "summary": {"plan": dict(arm, read_per_correct=1000.0)},
+        "gates": {"js": dict(gate, reduction=0.6, regressed=[], **{"pass": True})},
+        "correct": {"ms02:plan": True, "ms02:js": True},
+    }
+    md = "\n".join(report.before_after_lines(before, {"summary": {"plan": arm}, "gates": {"js": gate}, "records": recs}))
+    assert "| tool-call plan | 1/1 | 1,000 → 800 | — | 10 | 2 | — |" in md
+    assert "| js | 60.0% → 50.0% | 25.0% | none → ms02 | 1.00 ms | pass → fail |" in md
+    assert "Tasks whose correctness changed: ms02 code mode, JavaScript (now wrong)." in md
+
+
 def _probe(task, lang, ok, tokens, attempt=1):
     return {"task": task, "language": lang, "correct": ok, "error": None, "script_tokens": tokens, "result_tokens": 20, "calls": 2, "try": attempt}
 

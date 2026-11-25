@@ -12,6 +12,7 @@ from .cbm_plans import CBM_SKIP
 from .tasks import BY_ID
 
 PROBE_OUT = BENCH_DIR / "multistep" / "probe" / "out"
+BEFORE_FIXES = BENCH_DIR / "multistep" / "before-api-fixes.json"
 PROBE_LANGS = {"js": "JavaScript", "starlark": "Starlark"}
 
 ARM_LABEL = {"plan": "tool-call plan", "js": "code mode, JavaScript", "starlark": "code mode, Starlark", "cbm": "cbm 0.12.0"}
@@ -124,6 +125,58 @@ def limits(summary: dict) -> list[str]:
     return out
 
 
+def load_before(path: Path = BEFORE_FIXES) -> dict | None:
+    """The suite's results before the API fixes of RFC 0009 §14.6 (trimmed copy of the committed results)."""
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def _arrow(a: str, b: str) -> str:
+    return b if a == b else f"{a} → {b}"
+
+
+def before_after_lines(before: dict | None, doc: dict) -> list[str]:
+    """Before / after the API fixes: per arm and per language gate, plus the tasks whose correctness changed."""
+    if not before:
+        return ["No baseline recorded."]
+    out = [
+        f"Before: the committed results of {before['commit']} (`describe_api` js {before['describe_api_tokens'].get('js', 0):,} / "
+        f"starlark {before['describe_api_tokens'].get('starlark', 0):,} tokens); after: this run. Cells: before → after.",
+        "",
+        "| Arm | Correct | Tokens read / correct | … with `describe_api` amortised | Tokens written / correct | Round trips | `execute` overhead median / p95 (ms) |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for arm, s in doc["summary"].items():
+        b = before["summary"].get(arm)
+        if not b:
+            continue
+        over = [f"{_n(x['overhead_ms_median'], 2)} / {_n(x['overhead_ms_p95'], 2)}" if x["overhead_ms_median"] is not None else "—" for x in (b, s)]
+        cells = [
+            _arrow(f"{b['correct']}/{b['tasks']}", f"{s['correct']}/{s['tasks']}"),
+            _arrow(_n(b["read_per_correct"]), _n(s["read_per_correct"])),
+            _arrow(_n(b["read_per_correct_amortised"]), _n(s["read_per_correct_amortised"])),
+            _arrow(_n(b["written_per_correct"]), _n(s["written_per_correct"])),
+            _arrow(str(b["calls"]), str(s["calls"])),
+            _arrow(*over),
+        ]
+        out.append(f"| {ARM_LABEL.get(arm, arm)} | " + " | ".join(cells) + " |")
+    out += ["", "| Language | Fewer tokens / correct vs plans | … amortised | Tasks regressed | Median overhead | Gate |", "|---|---|---|---|---|---|"]
+    for lang, g in doc["gates"].items():
+        b = before["gates"].get(lang)
+        if not b:
+            continue
+        cells = [
+            _arrow(_pct(b["reduction"]), _pct(g["reduction"])),
+            _arrow(_pct(b["reduction_amortised"]), _pct(g["reduction_amortised"])),
+            _arrow(", ".join(b["regressed"]) or "none", ", ".join(g["regressed"]) or "none"),
+            _arrow(f"{_n(b['overhead_ms_median'], 2)} ms", f"{_n(g['overhead_ms_median'], 2)} ms"),
+            _arrow("pass" if b["pass"] else "fail", "pass" if g["pass"] else "fail"),
+        ]
+        out.append(f"| {lang} | " + " | ".join(cells) + " |")
+    moved = [f"{r['task']} {ARM_LABEL.get(r['arm'], r['arm'])} ({'now correct' if r['correct'] else 'now wrong'})" for r in doc["records"] if before["correct"].get(f"{r['task']}:{r['arm']}", r["correct"]) != r["correct"]]
+    out += ["", f"Tasks whose correctness changed: {', '.join(moved) or 'none'}."]
+    return out
+
+
 def load_probe(directory: Path = PROBE_OUT) -> list[dict]:
     """The probe runner's output lines, one file per run: `<task>-<lang>.try<N>.json`."""
     out = []
@@ -188,7 +241,9 @@ def probe_lines(probe: list[dict], records: list[dict] | None = None) -> list[st
     out = [
         "A fresh model per task and language wrote one script from the task statement and `describe_api` alone",
         "(protocol and scripts: `bench/multistep/probe/`; reading: RFC 0009 §14). Each cell: correct, script",
-        "tokens, engine calls (`E`: the script errored); `→` a repair attempt given the `execute` output.",
+        "tokens, engine calls (`E`: the script errored); `→` a repair attempt given the `execute` output. The probe ran",
+        "against the API before the fixes of RFC 0009 §14.6 and is kept as run; the reference scripts and plans it is",
+        "compared with below are this run's.",
         "",
         "| Task | Kind | JavaScript | Starlark |",
         "|---|---|---|---|",
@@ -229,6 +284,10 @@ def render(doc: dict, probe: list[dict] | None = None) -> str:
         "## Graduation gate (per language)",
         "",
         *gate_lines(doc["gates"], doc["describe_api_tokens"]),
+        "",
+        "## Before / after the API fixes (RFC 0009 §14.6)",
+        "",
+        *before_after_lines(load_before(), doc),
         "",
         "## By expectation",
         "",
