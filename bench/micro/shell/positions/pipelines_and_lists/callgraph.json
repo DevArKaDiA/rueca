@@ -1,0 +1,12 @@
+{
+  "main.sh:consume": [],
+  "main.sh:fail": [],
+  "main.sh:main": [
+    "main.sh:consume",
+    "main.sh:fail",
+    "main.sh:ok",
+    "main.sh:produce"
+  ],
+  "main.sh:ok": [],
+  "main.sh:produce": []
+}

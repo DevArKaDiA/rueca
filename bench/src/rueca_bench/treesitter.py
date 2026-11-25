@@ -11,6 +11,7 @@ import re
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 
+import tree_sitter_bash
 import tree_sitter_c
 import tree_sitter_cpp
 import tree_sitter_go
@@ -28,6 +29,7 @@ from .common import load_manifest
 # "<module>:<function>"`. Adding a grammar = a pinned dependency in
 # pyproject.toml, one import above, one entry here and the manifest data.
 _BINDINGS = {
+    "tree_sitter_bash": tree_sitter_bash,
     "tree_sitter_c": tree_sitter_c,
     "tree_sitter_cpp": tree_sitter_cpp,
     "tree_sitter_go": tree_sitter_go,
@@ -83,7 +85,57 @@ def parse(path: str, source: bytes, language: str | None = None):
     if kind is None:
         return None
     parser = Parser(_language(kind))
+    if _grammars()[kind].get("labeler") == "shell":
+        source = shell_repair(source)
     return parser.parse(source)
+
+
+def _zsh_flags_end(source: bytes, open_: int) -> int | None:
+    """The `)` closing zsh parameter flags opened at `open_` (`(j:,:)`)."""
+    rest = source[open_ + 1 : open_ + 33]
+    close = rest.find(b")")
+    if close < 0 or any(c in b"\n(${}" for c in rest[:close]):
+        return None
+    return open_ + 1 + close
+
+
+def shell_repair(source: bytes) -> bytes:
+    """The same-length repairs the shell pack applies before parsing
+    (`rueca-lang-shell` `repair.rs`): constructs tree-sitter-bash 0.25
+    rejects although the shell accepts them — a line-start backslash before
+    a command name (`\\. "$NVM_DIR/nvm.sh"`) becomes a space; inside
+    `${…}`, `:$name` (a substring offset) loses its `$`, `&` `<` `>` become
+    `_`; zsh parameter flags `${(j:,:)xs}` become `_`."""
+    out = bytearray(source)
+    line_start, depth, i, n = True, 0, 0, len(source)
+    while i < n:
+        b = source[i]
+        nxt = source[i + 1] if i + 1 < n else 32
+        if b == 0x5C:  # backslash
+            if line_start and (chr(nxt).isalpha() and nxt < 128 or nxt in b"._"):
+                out[i] = 32
+            else:
+                if depth and nxt in b"&<>":
+                    out[i + 1] = 0x5F
+                i += 1
+        elif b == 0x24 and nxt == 0x7B:  # ${
+            depth += 1
+            if i + 2 < n and source[i + 2] == 0x28:
+                close = _zsh_flags_end(source, i + 2)
+                if close is not None:
+                    out[i + 2 : close + 1] = b"_" * (close - i - 1)
+                    i = close
+            else:
+                i += 1
+        elif b == 0x7D and depth:
+            depth -= 1
+        elif b == 0x3A and depth and nxt == 0x24 and i + 2 < n and (chr(source[i + 2]).isalpha() and source[i + 2] < 128 or source[i + 2] == 0x5F):
+            out[i + 1] = 32
+        elif depth and b in b"&<>":
+            out[i] = 0x5F
+        line_start = b == 0x0A or (line_start and b in b" \t")
+        i += 1
+    return bytes(out)
 
 
 @dataclass(frozen=True)
@@ -126,6 +178,8 @@ def extract_functions(path: str, source: bytes, language: str | None = None) -> 
         return _c_functions(tree.root_node, spec)
     if labeler == "rust":
         return _rust_functions(tree.root_node, spec)
+    if labeler == "shell":
+        return _shell_functions(tree.root_node)
     return _nesting_functions(tree.root_node, spec)
 
 
@@ -492,6 +546,21 @@ def _rust_functions(root: Node, spec: dict) -> list[Func]:
             if f is not None:
                 out.append(f)
         stack.extend(reversed(node.children))
+    return out
+
+
+def _shell_functions(root: Node) -> list[Func]:
+    """Shell (the shell pack's names): every `f() { … }` / `function f { … }`
+    is a `Function` named `f` — shell functions are global once defined, so
+    a function nested in another (or in an `if`) is not qualified by it."""
+    out: list[Func] = []
+    for node in _walk(root):
+        if node.type != "function_definition":
+            continue
+        nn = node.child_by_field_name("name")
+        name = _text(nn)
+        if name:
+            out.append(_func(name, name, "Function", node, nn))
     return out
 
 

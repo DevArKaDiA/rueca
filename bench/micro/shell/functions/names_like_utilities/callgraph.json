@@ -1,0 +1,8 @@
+{
+  "main.sh:log": [],
+  "main.sh:realpath": [],
+  "main.sh:resolve": [
+    "main.sh:log",
+    "main.sh:realpath"
+  ]
+}

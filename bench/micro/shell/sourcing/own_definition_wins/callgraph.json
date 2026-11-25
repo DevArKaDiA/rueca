@@ -1,0 +1,7 @@
+{
+  "lib/common.sh:log": [],
+  "main.sh:log": [],
+  "main.sh:run": [
+    "main.sh:log"
+  ]
+}

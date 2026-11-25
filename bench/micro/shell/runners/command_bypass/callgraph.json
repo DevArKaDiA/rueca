@@ -1,0 +1,6 @@
+{
+  "main.sh:listing": [
+    "main.sh:ls"
+  ],
+  "main.sh:ls": []
+}

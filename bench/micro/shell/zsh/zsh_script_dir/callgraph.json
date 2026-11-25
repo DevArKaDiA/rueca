@@ -1,0 +1,6 @@
+{
+  "lib/core.zsh:core_setup": [],
+  "plugin.zsh:plugin_init": [
+    "lib/core.zsh:core_setup"
+  ]
+}

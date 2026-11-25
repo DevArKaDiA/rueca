@@ -1,0 +1,6 @@
+{
+  "lib/util.sh:fmt_line": [],
+  "main.sh:main": [
+    "lib/util.sh:fmt_line"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "lib/version.sh:current_version": [],
+  "scripts/release.sh:release": [
+    "lib/version.sh:current_version"
+  ]
+}

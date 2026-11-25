@@ -1,0 +1,5 @@
+{
+  "main.sh:cleanup": [],
+  "main.sh:on_interrupt": [],
+  "main.sh:work": []
+}

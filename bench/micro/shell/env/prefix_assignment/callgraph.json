@@ -1,0 +1,8 @@
+{
+  "main.sh:compute": [],
+  "main.sh:main": [
+    "main.sh:compute",
+    "main.sh:run_job"
+  ],
+  "main.sh:run_job": []
+}

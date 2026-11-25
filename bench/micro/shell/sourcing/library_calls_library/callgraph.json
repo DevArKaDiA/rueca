@@ -1,0 +1,9 @@
+{
+  "lib/net.sh:http_get": [],
+  "lib/retry.sh:with_retry": [
+    "lib/net.sh:http_get"
+  ],
+  "main.sh:main": [
+    "lib/retry.sh:with_retry"
+  ]
+}

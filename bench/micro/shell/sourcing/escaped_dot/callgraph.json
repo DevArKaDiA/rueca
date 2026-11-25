@@ -1,0 +1,6 @@
+{
+  "lib.sh:lib_func": [],
+  "main.sh:main": [
+    "lib.sh:lib_func"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "main.sh:build": [],
+  "main.sh:run": [
+    "main.sh:build"
+  ]
+}

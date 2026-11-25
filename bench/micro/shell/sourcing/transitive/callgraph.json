@@ -1,0 +1,9 @@
+{
+  "lib/a.sh:from_a": [
+    "lib/b.sh:from_b"
+  ],
+  "lib/b.sh:from_b": [],
+  "main.sh:main": [
+    "lib/b.sh:from_b"
+  ]
+}

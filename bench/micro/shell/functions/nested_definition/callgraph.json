@@ -1,0 +1,9 @@
+{
+  "main.sh:helper": [],
+  "main.sh:inner": [
+    "main.sh:helper"
+  ],
+  "main.sh:outer": [
+    "main.sh:inner"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "main.sh:helper": [],
+  "main.sh:main": [
+    "main.sh:helper"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "main.sh:first": [
+    "main.sh:second"
+  ],
+  "main.sh:second": [
+    "main.sh:third"
+  ],
+  "main.sh:third": []
+}

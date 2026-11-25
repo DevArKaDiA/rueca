@@ -1,0 +1,6 @@
+{
+  "main.sh:deploy": [],
+  "main.sh:run": [
+    "main.sh:deploy"
+  ]
+}

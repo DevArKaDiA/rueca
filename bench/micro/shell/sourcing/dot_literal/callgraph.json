@@ -1,0 +1,6 @@
+{
+  "lib/log.sh:log_info": [],
+  "main.sh:main": [
+    "lib/log.sh:log_info"
+  ]
+}

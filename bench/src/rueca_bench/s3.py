@@ -5,6 +5,8 @@ Gold sources (manifest `[[s3.repos]]` / `[[s3.micro]]`):
   call edges derived per RFC 0002 §4.2 (see scip.py);
 - `gold = "phpstan"`: the bench's PHPStan collector (PHP has no viable SCIP
   indexer; see phpstan.py), same edge derivation;
+- `gold = "shell"`: the bench's code-backed shell labeler (no compiler-grade
+  tool exists for shell; see shellgold.py);
   both with ~50 functions per repo stratified by fan-in / fan-out;
 - micro-benchmarks: hand-written call graphs of small programs, every
   function of every snippet is a question — PyCG (Python, Apache-2.0,
@@ -184,6 +186,8 @@ def build_repo_gold(spec: dict, force: bool = False) -> dict:
         return build_scip_gold(spec, force)
     if method == "phpstan":
         return build_phpstan_gold(spec, force)
+    if method == "shell":
+        return build_shell_gold(spec, force)
     raise ValueError(f"unknown S3 gold method {method!r} for {spec['repo']}")
 
 
@@ -206,6 +210,45 @@ def build_phpstan_gold(spec: dict, force: bool = False) -> dict:
         "include": spec["include"],
         "exclude": spec.get("exclude", []),
         "indexer": version_string(),
+        "indexer_seconds": None,
+        "stats": graph["stats"],
+        "callables": graph["callables"],
+        "callers": graph["callers"],
+        "callees": graph["callees"],
+        "classes": graph.get("classes", []),
+        "sample": sample,
+    }
+    write_json(gp, gold)
+    qs = questions(graph, man["min_lines"])
+    log(f"s3 gold {name}: {graph['stats'].get('edges')} edges, {len(graph['callables'])} callables, questions callers {len(qs['callers'])} / callees {len(qs['callees'])}")
+    return gold
+
+
+def build_shell_gold(spec: dict, force: bool = False) -> dict:
+    """Gold from the code-backed shell labeler (shellgold.py) over the
+    repository's tracked files at the pinned commit."""
+    from .corpus import list_files
+    from .shellgold import shell_call_graph
+    from .shellgold import version_string as shell_version
+
+    name = repo_name(spec)
+    gp = gold_path(name)
+    if gp.exists() and not force:
+        return read_json(gp)
+    man = load_manifest()["s3"]
+    with worktree(spec["repo"], spec["commit"], f"s3-{name}") as root:
+        log(f"shell labeler {name}: {', '.join(spec['include'])}")
+        graph = shell_call_graph(root, spec["include"], spec.get("exclude", []), list_files(root))
+    sample = sample_functions(graph, man["sample_per_repo"], man["seed"], man["min_lines"])
+    gold = {
+        "suite": "shell",
+        "name": name,
+        "repo": spec["repo"],
+        "language": spec["language"],
+        "commit": spec["commit"],
+        "include": spec["include"],
+        "exclude": spec.get("exclude", []),
+        "indexer": shell_version(),
         "indexer_seconds": None,
         "stats": graph["stats"],
         "callables": graph["callables"],
@@ -563,6 +606,38 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     }
 
 
+def _shell_agreement(dest: Path, snippets: dict[str, dict]) -> dict:
+    """Cross-check the hand-written shell answer keys against the
+    code-backed labeler (shellgold.py), edge by edge, per snippet."""
+    from .shellgold import shell_call_graph
+
+    tp = fp = fn = 0
+    per: dict[str, dict] = {}
+    for sname, g in sorted(snippets.items()):
+        graph = shell_call_graph(dest / sname, [""])
+        want = {(a, b) for a, bs in g["callees"].items() for b in bs}
+        got = {(a, b) for a, bs in graph["callees"].items() for b in bs}
+        tp += len(want & got)
+        fp += len(got - want)
+        fn += len(want - got)
+        per[sname] = {"scip_only": sorted(f"{a} -> {b}" for a, b in got - want), "key_only": sorted(f"{a} -> {b}" for a, b in want - got)}
+    from .shellgold import version_string
+
+    # Same shape as `_scip_agreement` (`scip_only` = edges only the labeler has).
+    return {
+        "available": True,
+        "tool": version_string(),
+        "edges_key": tp + fn,
+        "edges_scip": tp + fp,
+        "agree": tp,
+        "precision": tp / (tp + fp) if tp + fp else None,
+        "recall": tp / (tp + fn) if tp + fn else None,
+        "snippets_identical": sum(1 for v in per.values() if not v["scip_only"] and not v["key_only"]),
+        "snippets_failed": [],
+        "per_snippet": {k: v for k, v in per.items() if v["scip_only"] or v["key_only"]},
+    }
+
+
 def build_rueca_micro_gold(spec: dict, force: bool = False) -> dict:
     name = spec["name"]
     gp = gold_path(name)
@@ -588,7 +663,9 @@ def build_rueca_micro_gold(spec: dict, force: bool = False) -> dict:
         (snip / "callgraph.json").unlink()
     if lang_family(spec["language"]) == "php":
         gold["phpstan_agreement"] = _phpstan_agreement(dest, gold["snippets"], name)
-    if spec.get("crosscheck"):
+    if spec.get("crosscheck") == "shell_labeler":
+        gold["crosscheck"] = _shell_agreement(dest, gold["snippets"])
+    elif spec.get("crosscheck"):
         gold["crosscheck"] = _scip_agreement(spec, dest, gold["snippets"])
     for sname in sorted(keys):
         _git_snapshot(dest / sname)

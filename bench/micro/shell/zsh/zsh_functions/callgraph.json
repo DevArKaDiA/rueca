@@ -1,0 +1,6 @@
+{
+  "main.zsh:greet": [],
+  "main.zsh:main": [
+    "main.zsh:greet"
+  ]
+}

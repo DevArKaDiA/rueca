@@ -1,0 +1,6 @@
+{
+  "main.zsh:after": [
+    "main.zsh:helper"
+  ],
+  "main.zsh:helper": []
+}
