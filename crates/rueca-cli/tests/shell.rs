@@ -46,7 +46,8 @@ fn shell_index_then_every_tool() {
     let r = query(&p, "get_symbol", json!({"qualified_name": "bin/deploy:deploy"}));
     assert_eq!(r["symbol"]["id"], deploy, "{r}");
     assert_eq!(r["symbol"]["language"], "shell");
-    assert_eq!(r["symbol"]["signature"], "deploy()");
+    // The dialect ends the signature (`bin/deploy` starts with `#!/usr/bin/env bash`).
+    assert_eq!(r["symbol"]["signature"], "deploy() # bash");
 
     // Callees: its own functions, sourced ones (transitively) and the
     // script it runs; not the ambiguous `pick`.

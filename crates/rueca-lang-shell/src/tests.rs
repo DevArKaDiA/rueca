@@ -335,8 +335,8 @@ fn zsh_files_are_read_with_the_zsh_grammar() {
     assert_eq!(calls(&f, None), ["src", "one", "two", "three", "four", "five", "six", "eight", "nine"]);
     assert_eq!(calls(&f, Some("later")), ["seven", "print"]);
     // precommand modifiers run their operand in the same shell
-    let f = facts_at("lib/z.zsh", "f() { noglob helper *; nocorrect other; }\n");
-    assert_eq!(calls(&f, Some("f")), ["helper", "other"]);
+    let g = facts_at("lib/z.zsh", "f() { noglob helper *; nocorrect other; }\n");
+    assert_eq!(calls(&g, Some("f")), ["helper", "other"]);
     // loop variables and `local` / `integer` names are bound: only OUTER is an environment read
     assert_eq!(names_of(&f, RefKind::EnvVar), [("OUTER".to_string(), Some("later".to_string()))]);
     assert!(defs(&f, Label::Variable).is_empty());
