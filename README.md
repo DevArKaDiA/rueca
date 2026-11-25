@@ -391,6 +391,7 @@ Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
 [the organization graph (RFC 0006)](docs/rfcs/0006-org-graph.md),
 [semantic search (RFC 0007)](docs/rfcs/0007-semantic-search.md),
 [service mode (RFC 0008)](docs/rfcs/0008-service-mode.md),
+[code mode, experimental (RFC 0009)](docs/rfcs/0009-code-mode.md),
 [decisions log](docs/decisions.md).
 
 ## Benchmark
