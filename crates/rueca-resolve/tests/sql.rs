@@ -122,3 +122,52 @@ fn qualification_ctes_and_routines() {
     assert!(has(&g, "recent@views.sql", EdgeKind::Calls, "billing.total@schema.sql"));
     assert!(has(&g, "billing.total@schema.sql", EdgeKind::References, "billing.invoices@schema.sql"));
 }
+
+#[test]
+fn oracle_packages_tsql_routines_and_procedural_bodies() {
+    let g = build(&[
+        (
+            "oracle/tables.sql",
+            "create table invoice (id number(10), total number(12,2));\ncreate table invoice_line (invoice_id number(10));\n",
+        ),
+        (
+            "oracle/billing.pks",
+            "create or replace package billing as\n  function total_for(p_id in number) return number;\n  procedure close_invoice(p_id in number);\nend billing;\n/\n",
+        ),
+        (
+            "oracle/billing.pkb",
+            "create or replace package body billing as\n  function total_for(p_id in number) return number is\n    l_total number;\n  begin\n    select sum(total) into l_total from invoice where id = p_id;\n    return l_total;\n  end;\n  procedure close_invoice(p_id in number) is\n  begin\n    if total_for(p_id) > 0 then\n      delete from invoice_line where invoice_id = p_id;\n    end if;\n  end;\nend billing;\n/\n",
+        ),
+        ("oracle/run.sql", "begin\n  billing.close_invoice(1);\nend;\n/\n"),
+        (
+            "mssql/procs.sql",
+            "CREATE TABLE dbo.Orders (Id INT, Amount MONEY)\nGO\nCREATE PROCEDURE dbo.Audit @Id INT AS\n  PRINT 'x'\nGO\nALTER PROCEDURE dbo.Close @Id INT\nAS\nBEGIN\n  SET NOCOUNT ON\n  IF EXISTS (SELECT 1 FROM dbo.Orders WHERE Id = @Id)\n  BEGIN\n    UPDATE dbo.Orders SET Amount = 0 WHERE Id = @Id\n    EXEC dbo.Audit @Id\n  END\nEND\nGO\n",
+        ),
+    ]);
+    let e = edges(&g);
+    // A call from another file goes to the body, not to the specification.
+    let from_script = |(s, k, d, _, _): &(String, EdgeKind, String, Strategy, f32)| {
+        s.ends_with("run.sql") && *k == EdgeKind::Calls && d == "billing.close_invoice@oracle/billing.pkb"
+    };
+    assert!(e.iter().any(from_script), "{e:#?}");
+    assert!(
+        has(&g, "billing.close_invoice@oracle/billing.pkb", EdgeKind::Calls, "billing.total_for@oracle/billing.pkb"),
+        "{e:#?}"
+    );
+    assert!(
+        has(&g, "billing.total_for@oracle/billing.pkb", EdgeKind::References, "invoice@oracle/tables.sql"),
+        "{e:#?}"
+    );
+    assert!(
+        has(&g, "billing.close_invoice@oracle/billing.pkb", EdgeKind::Writes, "invoice_line@oracle/tables.sql"),
+        "{e:#?}"
+    );
+    assert!(
+        !e.iter().any(|(_, _, d, _, _)| d.ends_with("billing.pks") && d.starts_with("billing.")),
+        "no edge to a declaration: {e:#?}"
+    );
+    // T-SQL: a body read statement by statement.
+    assert!(has(&g, "close@mssql/procs.sql", EdgeKind::Writes, "orders@mssql/procs.sql"), "{e:#?}");
+    assert!(has(&g, "close@mssql/procs.sql", EdgeKind::References, "orders@mssql/procs.sql"), "{e:#?}");
+    assert!(has(&g, "close@mssql/procs.sql", EdgeKind::Calls, "audit@mssql/procs.sql"), "{e:#?}");
+}
