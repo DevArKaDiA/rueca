@@ -806,7 +806,6 @@ impl<'s> Extractor<'s> {
     /// `x.f` (a typed local or field) and `Type.Member` paths.
     fn visit_path_access(&mut self, obj: Node<'_>, field: Node<'_>, depth: usize) {
         let Some(path) = self.identifier_path(obj) else { return self.visit(obj, depth + 1) };
-        let name = self.text(field);
         let head = path[0];
         let head_local = self.locals.is_local(head, obj.start_byte() as u32);
         let head_field = !head_local && self.field_class(head).is_some();
@@ -814,21 +813,32 @@ impl<'s> Extractor<'s> {
             self.push_ref(RefKind::Read, head, None, span_of(obj), None);
         }
         if path.len() == 1 && (head_local || head_field) {
-            let receiver = self.receiver(obj);
-            if receiver.starts_with("$type:") {
-                self.push_ref(RefKind::Read, name, Some(receiver), span_of(field), None);
-            }
-            if head_field {
-                self.push_ref(RefKind::Read, head, None, span_of(obj), None);
-            }
+            self.read_on_value(obj, field, head_field);
         } else if head_local || head_field {
             self.visit(obj, depth + 1);
         } else if path.last().is_some_and(|s| s.starts_with(|c: char| c.is_ascii_uppercase())) {
-            // `Type.Member`, `A.B.Type.Member`, `Outer.Inner.Member`.
-            let q = path.join(".");
-            let receiver = if self.visible_type(head).is_some() { self.typed(Some(q.clone())).unwrap_or(q) } else { q };
-            self.push_ref(RefKind::Read, name, Some(receiver), span_of(field), None);
+            self.read_on_type_path(&path, field);
         }
+    }
+
+    /// `x.f` on a local or a field `x`: the `Read` of `f` on a typed
+    /// receiver, and of the field `x`.
+    fn read_on_value(&mut self, obj: Node<'_>, field: Node<'_>, head_field: bool) {
+        let receiver = self.receiver(obj);
+        if receiver.starts_with("$type:") {
+            self.push_ref(RefKind::Read, self.text(field), Some(receiver), span_of(field), None);
+        }
+        if head_field {
+            self.push_ref(RefKind::Read, self.text(obj), None, span_of(obj), None);
+        }
+    }
+
+    /// `Type.Member`, `A.B.Type.Member`, `Outer.Inner.Member`: the `Read` of
+    /// the member on the path (typed when its head is a type of the file).
+    fn read_on_type_path(&mut self, path: &[&str], field: Node<'_>) {
+        let q = path.join(".");
+        let receiver = if self.visible_type(path[0]).is_some() { self.typed(Some(q.clone())).unwrap_or(q) } else { q };
+        self.push_ref(RefKind::Read, self.text(field), Some(receiver), span_of(field), None);
     }
 
     /// `x?.f` (not a call): the receiver, and the member on a typed receiver.
