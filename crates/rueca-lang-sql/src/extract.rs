@@ -142,19 +142,54 @@ pub fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<FileFacts, 
     let mut b = Builder::new(&text, pass.dialect, rueca_model::is_test_path(path));
     let model = pass.definitions(&mut b, path);
     let mut r = Reader::new(&mut b, &pass.masked, &pass.prepared.alone);
+    let mut read = 0u32;
     for st in &pass.stmts {
         if Instant::now() > deadline {
             return Err(ExtractError::Timeout);
         }
-        statement(&mut r, st, model, &pass.prepared.relations);
+        read += u32::from(statement(&mut r, st, model, &pass.prepared.relations));
     }
     // strict: a statement accepted by its head alone was not parsed
     let errors = r.errors + r.head_only;
     jinja_refs(&mut b, &pass.prepared);
+    if read > 0 {
+        script(&mut b, path);
+    }
     let mut facts = b.facts;
     facts.parse_errors = errors + invalid_utf8;
     facts.line_count = rueca_extract::line_count(source);
     Ok(facts)
+}
+
+/// A script that defines nothing — a report query, an analysis, a
+/// maintenance or data script — is the unit people name and search: one
+/// `Function` named after the file, spanning it, that encloses the
+/// references its statements make (as a `-- name:` query does for one
+/// statement). Its qualified name keeps the extension (`report.sql`), so
+/// no call written in SQL resolves to it by name.
+fn script(b: &mut Builder<'_>, path: &str) {
+    if !b.facts.definitions.is_empty() {
+        return;
+    }
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
+    if stem.is_empty() {
+        return;
+    }
+    let def = NewDef {
+        label: Label::Function,
+        name: stem.to_string(),
+        qualified_name: file.to_string(),
+        parent: None,
+        range: (0, b.source.len()),
+        name_range: (0, 0),
+        signature: Some(format!("script {stem} -- {}", b.dialect.as_str())),
+        doc: None,
+    };
+    let id = b.add_def(def);
+    for r in &mut b.facts.references {
+        r.enclosing.get_or_insert(id);
+    }
 }
 
 /// A dbt model (or analysis, singular test): a file with `ref` / `source`

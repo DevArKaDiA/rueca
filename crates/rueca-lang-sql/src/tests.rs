@@ -143,7 +143,7 @@ fn bigquery_and_snowflake_names() {
         "bq/report.sql",
         "SELECT o.id FROM `proj.sales.orders` AS o QUALIFY ROW_NUMBER() OVER (PARTITION BY o.id) = 1",
     );
-    assert!(has_ref(&f, RefKind::Read, "proj.sales", "orders", "-"), "{:?}", refs(&f));
+    assert!(has_ref(&f, RefKind::Read, "proj.sales", "orders", "report.sql"), "{:?}", refs(&f));
     let f = facts("snowflake/x.sql", "CREATE TABLE \"ORDERS\" (ID INT);\nSELECT id FROM orders;");
     assert!(defs(&f).contains(&(Label::Struct, "orders".into())));
 }
@@ -564,10 +564,29 @@ fn head_only_statements_are_strict_parse_errors() {
     let src = "ALTER DATABASE db SET RECOVERY FULL\nGO\nEXEC dbo.Audit @Id = 1, @Note = N'x'\nGO\n";
     let f = facts("mssql/y.sql", src);
     assert_eq!(f.parse_errors, 0);
-    assert!(has_ref(&f, RefKind::Call, "", "audit", "-"), "{:?}", refs(&f));
+    assert!(has_ref(&f, RefKind::Call, "", "audit", "y.sql"), "{:?}", refs(&f));
     let s = stats("mssql/y.sql", src.as_bytes());
     assert_eq!((s.unparsed_strict, s.head_only), (0, 0));
     assert!(s.productions >= 1, "{s:?}");
     // A malformed statement of a production's form is not rescued.
     assert_eq!(facts("mssql/z.sql", "ALTER DATABASE db SET\nGO\n").parse_errors, 1);
+}
+
+#[test]
+fn a_script_that_defines_nothing_is_a_function_named_after_its_file() {
+    // a report query: the file is the unit, named after it, and encloses its references
+    let f = facts(
+        "pg/b4_btree_bloat.sql",
+        "-- B-tree bloat\nselect relname from pg_class c join pg_index i on i.indexrelid = c.oid;\n",
+    );
+    assert_eq!(defs(&f), [(Label::Function, "b4_btree_bloat.sql".to_string())]);
+    assert_eq!(f.definitions[0].name, "b4_btree_bloat");
+    assert_eq!(f.definitions[0].signature.as_deref(), Some("script b4_btree_bloat -- postgres"));
+    assert!(has_ref(&f, RefKind::Read, "", "pg_class", "b4_btree_bloat.sql"), "{:?}", refs(&f));
+    // a file with a definition has no script function, and its loose statements stay unenclosed
+    let f = facts("pg/schema.sql", "CREATE TABLE t (id int);\nINSERT INTO t VALUES (1);\n");
+    assert!(defs(&f).iter().all(|(l, _)| *l != Label::Function), "{:?}", defs(&f));
+    assert!(has_ref(&f, RefKind::Write, "", "t", "-"), "{:?}", refs(&f));
+    // nothing read (comments only): no definition
+    assert!(defs(&facts("pg/empty.sql", "-- nothing here\n")).is_empty());
 }

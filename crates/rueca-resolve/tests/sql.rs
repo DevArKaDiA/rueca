@@ -98,7 +98,8 @@ fn dialect_copies_resolve_to_the_nearest_directory() {
         ("shared/report.sql", "CREATE VIEW everyone AS SELECT id FROM actor;"),
     ]);
     assert!(has(&g, "actor_info@postgres/schema.sql", EdgeKind::References, "actor@postgres/schema.sql"));
-    assert!(has(&g, "postgres/data.sql@postgres/data.sql", EdgeKind::Writes, "actor@postgres/schema.sql"));
+    // a script that defines nothing is a function named after its file
+    assert!(has(&g, "data.sql@postgres/data.sql", EdgeKind::Writes, "actor@postgres/schema.sql"));
     assert!(has(&g, "names@mysql/procs.sql", EdgeKind::References, "actor@mysql/schema.sql"));
     // Two copies at the same distance: no edge.
     assert!(!edges(&g).iter().any(|(s, _, _, _, _)| s.starts_with("everyone@")), "{:#?}", edges(&g));
