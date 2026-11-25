@@ -463,108 +463,133 @@ impl Block<'_, '_, '_, '_> {
         if i >= n {
             return n;
         }
+        if let Some(next) = self.compound(i) {
+            return next;
+        }
+        let s = self.semi(i);
+        if s > i {
+            self.leaf(i, s);
+        }
+        s + 1
+    }
+
+    /// Declarations, blocks and control flow at `i`: the index after
+    /// them; `None` for a plain statement.
+    fn compound(&mut self, i: usize) -> Option<usize> {
         match self.up(i) {
-            "DECLARE" => {
-                if let Some(k) = self.handler(i) {
-                    return self.statement(k);
-                }
-                let s = self.semi(i);
-                let begin = self.find(i + 1, &["BEGIN"]);
-                if begin < n && s < begin && !matches!(self.r.b.dialect, Dialect::MySql | Dialect::BigQuery) {
-                    // PL/SQL `DECLARE declarations BEGIN … END;`
-                    let b = self.declarations(i + 1);
-                    return if self.up(b) == "BEGIN" { self.statement(b) } else { b.max(i + 1) };
-                }
-            }
-            "BEGIN" if !self.transaction(i) => {
-                let mut j = i + 1;
-                if self.up(j) == "NOT" {
-                    j += 1;
-                }
-                if self.up(j) == "ATOMIC" {
-                    j += 1;
-                }
-                j = self.statements(j, &["END", "EXCEPTION"]);
-                if self.up(j) == "EXCEPTION" {
-                    j += 1;
-                    while self.up(j) == "WHEN" {
-                        let then = self.find(j + 1, &["THEN"]);
-                        j = self.statements(then + 1, &["WHEN", "END"]);
-                    }
-                }
-                return self.end(j, &[]);
-            }
-            "IF" => {
-                let mut j = i;
-                loop {
-                    let then = self.find(j + 1, &["THEN"]);
-                    self.condition(j + 1, then);
-                    j = self.statements(then + 1, &["ELSIF", "ELSEIF", "ELSE", "END"]);
-                    match self.up(j) {
-                        "ELSIF" | "ELSEIF" => {}
-                        "ELSE" => {
-                            j = self.statements(j + 1, &["END"]);
-                            break;
-                        }
-                        _ => break,
-                    }
-                }
-                return self.end(j, &["IF"]);
-            }
-            "CASE" => {
-                let mut j = i + 1;
-                if self.up(j) != "WHEN" {
-                    let when = self.find(j, &["WHEN"]);
-                    self.condition(j, when);
-                    j = when;
-                }
-                while self.up(j) == "WHEN" {
-                    let then = self.find(j + 1, &["THEN"]);
-                    self.condition(j + 1, then);
-                    j = self.statements(then + 1, &["WHEN", "ELSE", "END"]);
-                }
-                if self.up(j) == "ELSE" {
-                    j = self.statements(j + 1, &["END"]);
-                }
-                return self.end(j, &["CASE"]);
-            }
+            "DECLARE" => self.declare(i),
+            "BEGIN" if !self.transaction(i) => Some(self.begin(i)),
+            "IF" => Some(self.if_statement(i)),
+            "CASE" => Some(self.case_statement(i)),
             "LOOP" => {
                 let j = self.statements(i + 1, &["END"]);
-                return self.end(j, &["LOOP"]);
+                Some(self.end(j, &["LOOP"]))
             }
             "WHILE" => {
                 let d = self.find(i + 1, &["LOOP", "DO"]);
                 self.condition(i + 1, d);
                 let j = self.statements(d + 1, &["END"]);
-                return self.end(j, &["LOOP", "WHILE"]);
+                Some(self.end(j, &["LOOP", "WHILE"]))
             }
             "FOR" => {
                 let d = self.find(i + 1, &["LOOP", "DO"]);
                 self.for_head(i + 1, d);
                 let j = self.statements(d + 1, &["END"]);
-                return self.end(j, &["LOOP", "FOR"]);
+                Some(self.end(j, &["LOOP", "FOR"]))
             }
             "REPEAT" => {
                 let j = self.statements(i + 1, &["UNTIL"]);
                 let e = self.find(j + 1, &["END"]);
                 self.condition(j + 1, e);
-                return self.end(e, &["REPEAT"]);
+                Some(self.end(e, &["REPEAT"]))
             }
-            "FORALL" => {
-                let s = self.semi(i);
-                let dml = self.find(i + 1, &["INSERT", "UPDATE", "DELETE", "MERGE"]);
-                if dml < s {
-                    self.dml(dml, s);
-                } else {
-                    self.r.fail(self.span(i, s.max(i + 1)), self.enclosing, Mode::Refs, None);
-                }
-                return s + 1;
-            }
-            _ => {}
+            "FORALL" => Some(self.forall(i)),
+            _ => None,
         }
+    }
+
+    /// `DECLARE` at `i`: a handler and its statement, or a PL/SQL
+    /// `DECLARE declarations BEGIN … END;`; `None` for a declaration that
+    /// is one statement.
+    fn declare(&mut self, i: usize) -> Option<usize> {
+        if let Some(k) = self.handler(i) {
+            return Some(self.statement(k));
+        }
+        let n = self.len();
         let s = self.semi(i);
-        if s > i {
-            self.leaf(i, s);
+        let begin = self.find(i + 1, &["BEGIN"]);
+        let block = begin < n && s < begin && !matches!(self.r.b.dialect, Dialect::MySql | Dialect::BigQuery);
+        if !block {
+            return None;
+        }
+        let b = self.declarations(i + 1);
+        Some(if self.up(b) == "BEGIN" { self.statement(b) } else { b.max(i + 1) })
+    }
+
+    /// `BEGIN [[NOT] ATOMIC] … [EXCEPTION WHEN … THEN …] END [name];`
+    fn begin(&mut self, i: usize) -> usize {
+        let mut j = i + 1;
+        if self.up(j) == "NOT" {
+            j += 1;
+        }
+        if self.up(j) == "ATOMIC" {
+            j += 1;
+        }
+        j = self.statements(j, &["END", "EXCEPTION"]);
+        if self.up(j) == "EXCEPTION" {
+            j += 1;
+            while self.up(j) == "WHEN" {
+                let then = self.find(j + 1, &["THEN"]);
+                j = self.statements(then + 1, &["WHEN", "END"]);
+            }
+        }
+        self.end(j, &[])
+    }
+
+    /// `IF … THEN … [ELSIF | ELSEIF … THEN …] [ELSE …] END IF;`
+    fn if_statement(&mut self, i: usize) -> usize {
+        let mut j = i;
+        loop {
+            let then = self.find(j + 1, &["THEN"]);
+            self.condition(j + 1, then);
+            j = self.statements(then + 1, &["ELSIF", "ELSEIF", "ELSE", "END"]);
+            if !matches!(self.up(j), "ELSIF" | "ELSEIF") {
+                break;
+            }
+        }
+        if self.up(j) == "ELSE" {
+            j = self.statements(j + 1, &["END"]);
+        }
+        self.end(j, &["IF"])
+    }
+
+    /// `CASE [expr] WHEN … THEN … [ELSE …] END CASE;`
+    fn case_statement(&mut self, i: usize) -> usize {
+        let mut j = i + 1;
+        if self.up(j) != "WHEN" {
+            let when = self.find(j, &["WHEN"]);
+            self.condition(j, when);
+            j = when;
+        }
+        while self.up(j) == "WHEN" {
+            let then = self.find(j + 1, &["THEN"]);
+            self.condition(j + 1, then);
+            j = self.statements(then + 1, &["WHEN", "ELSE", "END"]);
+        }
+        if self.up(j) == "ELSE" {
+            j = self.statements(j + 1, &["END"]);
+        }
+        self.end(j, &["CASE"])
+    }
+
+    /// `FORALL i IN a..b dml;`
+    fn forall(&mut self, i: usize) -> usize {
+        let s = self.semi(i);
+        let dml = self.find(i + 1, &["INSERT", "UPDATE", "DELETE", "MERGE"]);
+        if dml < s {
+            self.dml(dml, s);
+        } else {
+            self.r.fail(self.span(i, s.max(i + 1)), self.enclosing, Mode::Refs, None);
         }
         s + 1
     }
@@ -668,72 +693,111 @@ impl Block<'_, '_, '_, '_> {
 
     /// One statement at tokens `[i, s)` that is not control flow.
     fn leaf(&mut self, i: usize, s: usize) {
-        let range = self.span(i, s);
         let head = self.up(i);
         if DML.contains(&head) && !(head == "REPLACE" && self.tok(i + 1) == Some(&Token::LParen)) {
             return self.dml(i, s);
         }
-        match head {
-            "NULL" if s == i + 1 => {}
+        if self.own_statement(i, s) {
+            self.r.own += 1;
+        }
+    }
+
+    /// A statement at tokens `[i, s)` that is neither control flow nor a
+    /// query: `true` when it is read here (it counts as read by the pack),
+    /// `false` when it was handed to the other readers.
+    fn own_statement(&mut self, i: usize, s: usize) -> bool {
+        let range = self.span(i, s);
+        match self.up(i) {
+            "NULL" if s == i + 1 => true,
             "EXIT" | "CONTINUE" => {
                 if let Some(w) = (i + 1..s).find(|&k| self.up(k) == "WHEN") {
                     self.condition(w + 1, s);
                 }
+                true
             }
-            "RETURN" => self.condition(i + 1, s),
+            "RETURN" => {
+                self.condition(i + 1, s);
+                true
+            }
             "OPEN" => {
                 let f = self.find(i + 1, &["FOR"]);
                 if f < s && matches!(self.up(f + 1), "SELECT" | "WITH") {
                     self.query(f + 1, s);
                 }
+                true
             }
-            "DECLARE" => {
-                // `DECLARE a, b INT`: the names before the type
-                let mut k = i + 1;
-                while k < s && matches!(self.tok(k), Some(Token::Word(_))) {
-                    self.local(k);
-                    if self.tok(k + 1) != Some(&Token::Comma) {
-                        break;
-                    }
-                    k += 2;
-                }
-                let f = self.find(i + 1, &["FOR", "IS"]);
-                if f < s && (i + 1..f).any(|k| self.up(k) == "CURSOR") {
-                    return self.query(f + 1, s);
-                }
-                let value = self.find(i + 1, &["DEFAULT"]);
-                if value < s {
-                    self.value(value + 1, s);
-                }
-            }
+            "DECLARE" => self.declare_statement(i, s),
             "SET" => {
-                if !self.r.sql(range, self.enclosing, Mode::Refs, None) {
-                    let eq = self.scan(i + 1, |b, j| b.tok(j) == Some(&Token::Eq));
-                    let more = (eq + 1..s).any(|k| self.tok(k) == Some(&Token::Eq));
-                    if eq < s && !more {
-                        self.value(eq + 1, s);
-                    } else {
-                        return self.r.leaf_own(range, self.enclosing, Mode::Refs, None);
-                    }
-                }
-                return;
+                self.set_statement(i, s);
+                false
             }
-            "CALL" => return self.r.leaf(range, self.enclosing, Mode::Refs, None),
-            _ if CONTROL.contains(&head) => {
-                if !self.control(i, s) {
-                    return self.r.leaf(range, self.enclosing, Mode::Refs, None);
-                }
+            "CALL" => {
+                self.r.leaf(range, self.enclosing, Mode::Refs, None);
+                false
             }
-            _ => {
-                let assign = self.scan(i, |b, j| b.tok(j) == Some(&Token::Assignment));
-                if assign < s {
-                    self.value(assign + 1, s);
-                } else if !self.call(i, s) {
-                    return self.r.leaf(range, self.enclosing, Mode::Refs, None);
+            head if CONTROL.contains(&head) => {
+                let read = self.control(i, s);
+                if !read {
+                    self.r.leaf(range, self.enclosing, Mode::Refs, None);
                 }
+                read
             }
+            _ => self.assignment_or_call(i, s),
         }
-        self.r.own += 1;
+    }
+
+    /// `DECLARE a, b INT [DEFAULT expr]` (the names are locals), `DECLARE c
+    /// CURSOR FOR query` (handed to the query reader: `false`).
+    fn declare_statement(&mut self, i: usize, s: usize) -> bool {
+        let mut k = i + 1;
+        while k < s && matches!(self.tok(k), Some(Token::Word(_))) {
+            self.local(k);
+            if self.tok(k + 1) != Some(&Token::Comma) {
+                break;
+            }
+            k += 2;
+        }
+        let f = self.find(i + 1, &["FOR", "IS"]);
+        if f < s && (i + 1..f).any(|k| self.up(k) == "CURSOR") {
+            self.query(f + 1, s);
+            return false;
+        }
+        let value = self.find(i + 1, &["DEFAULT"]);
+        if value < s {
+            self.value(value + 1, s);
+        }
+        true
+    }
+
+    /// `SET a = expr`: sqlparser; else the value as an expression; else
+    /// the other readers.
+    fn set_statement(&mut self, i: usize, s: usize) {
+        let range = self.span(i, s);
+        if self.r.sql(range, self.enclosing, Mode::Refs, None) {
+            return;
+        }
+        let eq = self.scan(i + 1, |b, j| b.tok(j) == Some(&Token::Eq));
+        let more = (eq + 1..s).any(|k| self.tok(k) == Some(&Token::Eq));
+        if eq < s && !more {
+            self.value(eq + 1, s);
+        } else {
+            self.r.leaf_own(range, self.enclosing, Mode::Refs, None);
+        }
+    }
+
+    /// `target := expr` or a procedure call; else the other readers
+    /// (`false`).
+    fn assignment_or_call(&mut self, i: usize, s: usize) -> bool {
+        let assign = self.scan(i, |b, j| b.tok(j) == Some(&Token::Assignment));
+        if assign < s {
+            self.value(assign + 1, s);
+            return true;
+        }
+        let call = self.call(i, s);
+        if !call {
+            self.r.leaf(self.span(i, s), self.enclosing, Mode::Refs, None);
+        }
+        call
     }
 
     /// Control statements with a closed grammar, at tokens `[i, s)`:
@@ -743,99 +807,116 @@ impl Block<'_, '_, '_, '_> {
     /// ROW (expr)`, `EXECUTE IMMEDIATE expr [INTO name, …] [USING [IN | OUT]
     /// expr, …]`. Anything else is left to the other readers.
     fn control(&mut self, i: usize, s: usize) -> bool {
-        let word = |b: &Self, k: usize| k < s && matches!(b.tok(k), Some(Token::Word(_)));
-        // `a, b.c, d` from `k` to `end`
-        let names = |b: &Self, mut k: usize, end: usize| {
-            loop {
-                if !word(b, k) {
-                    return false;
-                }
-                k += 1;
-                while k + 1 < end && b.tok(k) == Some(&Token::Period) && word(b, k + 1) {
-                    k += 2;
-                }
-                if k == end {
-                    return true;
-                }
-                if b.tok(k) != Some(&Token::Comma) {
-                    return false;
-                }
-                k += 1;
-            }
-        };
+        let one_name = s == i + 2 && self.is_word(i + 1, s);
         match self.up(i) {
-            "RAISE" => s == i + 1 || (s == i + 2 && word(self, i + 1)) || names(self, i + 1, s),
-            "GOTO" | "LEAVE" | "ITERATE" | "SAVEPOINT" | "CLOSE" => s == i + 2 && word(self, i + 1),
+            "RAISE" => s == i + 1 || one_name || self.names(i + 1, s, s),
+            "GOTO" | "LEAVE" | "ITERATE" | "SAVEPOINT" | "CLOSE" => one_name,
             "COMMIT" => s == i + 1 || (s == i + 2 && self.up(i + 1) == "WORK"),
-            "ROLLBACK" => {
-                let mut k = i + 1;
-                k += usize::from(self.up(k) == "WORK");
-                if k == s {
-                    return true;
-                }
-                if self.up(k) != "TO" {
-                    return false;
-                }
-                k += 1;
-                k += usize::from(self.up(k) == "SAVEPOINT");
-                k + 1 == s && word(self, k)
-            }
-            "FETCH" => {
-                let Some(into) = (i + 2..s).find(|&k| self.up(k) == "INTO") else { return false };
-                let head = into == i + 2 || (into == i + 4 && self.up(i + 2) == "BULK" && self.up(i + 3) == "COLLECT");
-                let limit = (into + 1..s).find(|&k| self.up(k) == "LIMIT").unwrap_or(s);
-                let limit_ok = limit == s
-                    || (limit + 2 == s && matches!(self.tok(limit + 1), Some(Token::Number(..) | Token::Word(_))));
-                word(self, i + 1) && head && limit_ok && names(self, into + 1, limit)
-            }
-            "PIPE" => {
-                self.up(i + 1) == "ROW"
-                    && self.tok(i + 2) == Some(&Token::LParen)
-                    && self.close(i + 2) == s
-                    && s > i + 4
-                    && self.r.expr_parses(self.span(i + 3, s - 1))
-            }
-            "EXECUTE" => {
-                if self.up(i + 1) != "IMMEDIATE" {
-                    return false;
-                }
-                let stop = self
-                    .scan(i + 2, |b, k| {
-                        matches!(b.up(k), "INTO" | "USING" | "RETURNING") || b.tok(k) == Some(&Token::SemiColon)
-                    })
-                    .min(s);
-                if stop <= i + 2 || !self.r.expr_parses(self.span(i + 2, stop)) {
-                    return false;
-                }
-                // `INTO a, b` and `USING [IN | OUT] expr, …`: names and expressions
-                let mut k = stop;
-                if self.up(k) == "INTO" {
-                    let end = (k + 1..s).find(|&j| self.up(j) == "USING").unwrap_or(s);
-                    if !names(self, k + 1, end) {
-                        return false;
-                    }
-                    k = end;
-                }
-                if k < s {
-                    if self.up(k) != "USING" {
-                        return false;
-                    }
-                    k += 1;
-                    while k < s {
-                        while matches!(self.up(k), "IN" | "OUT") {
-                            k += 1;
-                        }
-                        let end = self.scan(k, |b, j| b.tok(j) == Some(&Token::Comma)).min(s);
-                        if end <= k || !self.r.expr_parses(self.span(k, end)) {
-                            return false;
-                        }
-                        k = end + 1;
-                    }
-                }
-                true
-            }
+            "ROLLBACK" => self.rollback(i, s),
+            "FETCH" => self.fetch(i, s),
+            "PIPE" => self.pipe_row(i, s),
+            "EXECUTE" => self.execute_immediate(i, s),
             _ => false,
         }
+    }
+
+    /// A word at `k`, before `s`.
+    fn is_word(&self, k: usize, s: usize) -> bool {
+        k < s && matches!(self.tok(k), Some(Token::Word(_)))
+    }
+
+    /// `a, b.c, d` at tokens `[k, end)` (words tested against the
+    /// statement end `s`).
+    fn names(&self, mut k: usize, end: usize, s: usize) -> bool {
+        loop {
+            if !self.is_word(k, s) {
+                return false;
+            }
+            k += 1;
+            while k + 1 < end && self.tok(k) == Some(&Token::Period) && self.is_word(k + 1, s) {
+                k += 2;
+            }
+            if k == end {
+                return true;
+            }
+            if self.tok(k) != Some(&Token::Comma) {
+                return false;
+            }
+            k += 1;
+        }
+    }
+
+    /// `ROLLBACK [WORK] [TO [SAVEPOINT] name]`.
+    fn rollback(&self, i: usize, s: usize) -> bool {
+        let mut k = i + 1;
+        k += usize::from(self.up(k) == "WORK");
+        if k == s {
+            return true;
+        }
+        if self.up(k) != "TO" {
+            return false;
+        }
+        k += 1;
+        k += usize::from(self.up(k) == "SAVEPOINT");
+        k + 1 == s && self.is_word(k, s)
+    }
+
+    /// `FETCH cursor [BULK COLLECT] INTO name, … [LIMIT n]`.
+    fn fetch(&self, i: usize, s: usize) -> bool {
+        let Some(into) = (i + 2..s).find(|&k| self.up(k) == "INTO") else { return false };
+        let head = into == i + 2 || (into == i + 4 && self.up(i + 2) == "BULK" && self.up(i + 3) == "COLLECT");
+        let limit = (into + 1..s).find(|&k| self.up(k) == "LIMIT").unwrap_or(s);
+        let limit_ok =
+            limit == s || (limit + 2 == s && matches!(self.tok(limit + 1), Some(Token::Number(..) | Token::Word(_))));
+        self.is_word(i + 1, s) && head && limit_ok && self.names(into + 1, limit, s)
+    }
+
+    /// `PIPE ROW (expr)`.
+    fn pipe_row(&self, i: usize, s: usize) -> bool {
+        self.up(i + 1) == "ROW"
+            && self.tok(i + 2) == Some(&Token::LParen)
+            && self.close(i + 2) == s
+            && s > i + 4
+            && self.r.expr_parses(self.span(i + 3, s - 1))
+    }
+
+    /// `EXECUTE IMMEDIATE expr [INTO name, …] [USING [IN | OUT] expr, …]`.
+    fn execute_immediate(&self, i: usize, s: usize) -> bool {
+        if self.up(i + 1) != "IMMEDIATE" {
+            return false;
+        }
+        let stop = self
+            .scan(i + 2, |b, k| {
+                matches!(b.up(k), "INTO" | "USING" | "RETURNING") || b.tok(k) == Some(&Token::SemiColon)
+            })
+            .min(s);
+        if stop <= i + 2 || !self.r.expr_parses(self.span(i + 2, stop)) {
+            return false;
+        }
+        let mut k = stop;
+        if self.up(k) == "INTO" {
+            let end = (k + 1..s).find(|&j| self.up(j) == "USING").unwrap_or(s);
+            if !self.names(k + 1, end, s) {
+                return false;
+            }
+            k = end;
+        }
+        k >= s || (self.up(k) == "USING" && self.using_arguments(k + 1, s))
+    }
+
+    /// `[IN | OUT] expr, …` at tokens `[k, s)`.
+    fn using_arguments(&self, mut k: usize, s: usize) -> bool {
+        while k < s {
+            while matches!(self.up(k), "IN" | "OUT") {
+                k += 1;
+            }
+            let end = self.scan(k, |b, j| b.tok(j) == Some(&Token::Comma)).min(s);
+            if end <= k || !self.r.expr_parses(self.span(k, end)) {
+                return false;
+            }
+            k = end + 1;
+        }
+        true
     }
 
     /// A procedure call statement at tokens `[i, s)`: `name[(arguments)]`

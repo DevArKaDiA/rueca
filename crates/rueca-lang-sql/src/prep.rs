@@ -200,67 +200,99 @@ pub(crate) fn blank(bytes: &mut [u8], start: usize, end: usize) {
 // ---------------------------------------------------------------------------
 
 fn client_commands(source: &str, bytes: &mut [u8], p: &mut Prepared, dialect: Dialect) {
-    let mut pos = 0;
-    let mut copy_data = false;
-    // SQL*Plus commands are lines of their own between statements; inside
-    // a statement or a PL/SQL unit (which runs to its `/` line) the same
-    // words are code.
-    let (mut unit, mut stmt, mut comment) = (false, false, false);
+    let mut c = Client { bytes, p, pos: 0, copy_data: false, unit: false, stmt: false, comment: false };
     for line in source.split_inclusive('\n') {
         let body = line.trim_end_matches(['\n', '\r']);
         let trimmed = body.trim_start();
-        if dialect == Dialect::Oracle && (comment || trimmed.starts_with("/*")) {
+        if !(dialect == Dialect::Oracle && c.oracle_line(body, trimmed)) {
+            c.line(body, trimmed);
+        }
+        c.pos += line.len();
+    }
+}
+
+/// Line-by-line state of [`client_commands`].
+struct Client<'a> {
+    bytes: &'a mut [u8],
+    p: &'a mut Prepared,
+    /// Byte offset of the current line.
+    pos: usize,
+    /// Inside the rows of a psql `COPY … FROM stdin`.
+    copy_data: bool,
+    // SQL*Plus commands are lines of their own between statements; inside
+    // a statement or a PL/SQL unit (which runs to its `/` line) the same
+    // words are code.
+    unit: bool,
+    stmt: bool,
+    comment: bool,
+}
+
+impl Client<'_> {
+    /// Blanks a command line; a file it includes is an import.
+    fn command(&mut self, body: &str, trimmed: &str, path: Option<(String, usize)>) {
+        if let Some((path, off)) = path {
+            let start = self.pos + (body.len() - trimmed.len()) + off;
+            self.p.includes.push(Include { path, start, end: self.pos + body.len() });
+        }
+        blank(self.bytes, self.pos, self.pos + body.len());
+    }
+
+    /// An Oracle script line: `true` when it is consumed here (a block
+    /// comment between statements, a SQL*Plus command).
+    fn oracle_line(&mut self, body: &str, trimmed: &str) -> bool {
+        let between = !self.unit && !self.stmt;
+        if self.comment || trimmed.starts_with("/*") {
             // A block comment between statements is not code.
-            let from = if comment { 0 } else { 2 };
-            comment = !trimmed[from.min(trimmed.len())..].contains("*/");
-            if !unit && !stmt {
-                pos += line.len();
-                continue;
+            let from = if self.comment { 0 } else { 2 };
+            self.comment = !trimmed[from.min(trimmed.len())..].contains("*/");
+            if between {
+                return true;
             }
         }
-        if dialect == Dialect::Oracle {
-            if !unit
-                && !stmt
-                && let Some(path) = sqlplus_line(trimmed)
-            {
-                if let Some((path, off)) = path {
-                    let start = pos + (body.len() - trimmed.len()) + off;
-                    p.includes.push(Include { path, start, end: pos + body.len() });
-                }
-                blank(bytes, pos, pos + body.len());
-                pos += line.len();
-                continue;
-            }
-            let code = trimmed.split("--").next().unwrap_or("").trim_end();
-            if code == "/" {
-                (unit, stmt) = (false, false);
-            } else if !code.is_empty() && !unit {
-                if !stmt && plsql_unit(code) {
-                    unit = true;
-                } else {
-                    stmt = !code.ends_with(';');
-                }
-            }
+        if between && let Some(path) = sqlplus_line(trimmed) {
+            self.command(body, trimmed, path);
+            return true;
         }
-        if copy_data {
-            // psql `COPY … FROM stdin;` rows, up to the `\.` line.
-            copy_data = trimmed != "\\.";
-            blank(bytes, pos, pos + body.len());
-        } else if let Some(path) = command_line(trimmed) {
-            if let Some((path, off)) = path {
-                let start = pos + (body.len() - trimmed.len()) + off;
-                p.includes.push(Include { path, start, end: pos + body.len() });
-            }
-            blank(bytes, pos, pos + body.len());
-            // psql `\gset` / `\gexec` / `\g` / `\crosstabview` / `\watch`
-            // run the statement before them: they end it.
-            if ["\\g", "\\crosstabview", "\\watch"].iter().any(|c| trimmed.starts_with(c)) {
-                bytes[pos + (body.len() - trimmed.len())] = b';';
-            }
+        self.track(trimmed);
+        false
+    }
+
+    /// Whether the lines after this one are inside a statement or a
+    /// PL/SQL unit.
+    fn track(&mut self, trimmed: &str) {
+        let code = trimmed.split("--").next().unwrap_or("").trim_end();
+        if code == "/" {
+            (self.unit, self.stmt) = (false, false);
+            return;
+        }
+        if code.is_empty() || self.unit {
+            return;
+        }
+        if !self.stmt && plsql_unit(code) {
+            self.unit = true;
         } else {
-            copy_data = copies_from_stdin(trimmed);
+            self.stmt = !code.ends_with(';');
         }
-        pos += line.len();
+    }
+
+    /// A line of any dialect: `COPY` data, a client command, or code.
+    fn line(&mut self, body: &str, trimmed: &str) {
+        if self.copy_data {
+            // psql `COPY … FROM stdin;` rows, up to the `\.` line.
+            self.copy_data = trimmed != "\\.";
+            blank(self.bytes, self.pos, self.pos + body.len());
+            return;
+        }
+        let Some(path) = command_line(trimmed) else {
+            self.copy_data = copies_from_stdin(trimmed);
+            return;
+        };
+        self.command(body, trimmed, path);
+        // psql `\gset` / `\gexec` / `\g` / `\crosstabview` / `\watch`
+        // run the statement before them: they end it.
+        if ["\\g", "\\crosstabview", "\\watch"].iter().any(|c| trimmed.starts_with(c)) {
+            self.bytes[self.pos + (body.len() - trimmed.len())] = b';';
+        }
     }
 }
 
@@ -355,100 +387,126 @@ fn sqlplus_line(line: &str) -> Option<Option<(String, usize)>> {
 ///   a statement ended by `\gset` / `\gexec` / `\g` → `;`;
 /// - Oracle trigger rows `:new.` / `:old.` → `new.` / `old.`.
 fn substitutions(bytes: &mut [u8], dialect: Dialect) {
-    let n = bytes.len();
     let mut i = 0;
-    while i < n {
-        match bytes[i] {
-            b'$' if bytes.get(i + 1) == Some(&b'(') => {
-                let end = (i + 2..n).find(|&j| !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_')).unwrap_or(n);
-                if end > i + 2 && bytes.get(end) == Some(&b')') {
-                    bytes[i] = b'_';
-                    bytes[i + 1] = b'_';
-                    bytes[end] = b'_';
-                    i = end;
-                }
-            }
-            b'@' if bytes[i..].starts_with(b"@extschema@") => {
-                bytes[i] = b'_';
-                bytes[i + 1..i + 11].copy_from_slice(b"_extschema");
-                i += 10;
-            }
-            b':' if matches!(dialect, Dialect::Postgres | Dialect::Generic | Dialect::Redshift)
-                && matches!(bytes.get(i + 1), Some(b'\'' | b'"'))
-                && i > 0
-                // not `::`, and not a path into semi-structured data
-                // (Snowflake `value:"key"`)
-                && !matches!(bytes[i - 1], b':' | b'_' | b')' | b']' | b'"')
-                && !bytes[i - 1].is_ascii_alphanumeric()
-                && psql_variable(bytes, i + 1) =>
-            {
-                bytes[i] = b' ';
-            }
-            b':' if dialect == Dialect::Oracle
-                && i > 0
-                && !bytes[i - 1].is_ascii_alphanumeric()
-                && bytes.get(i + 4) == Some(&b'.')
-                && (bytes[i + 1..i + 4].eq_ignore_ascii_case(b"new")
-                    || bytes[i + 1..i + 4].eq_ignore_ascii_case(b"old")) =>
-            {
-                bytes[i] = b' ';
-            }
-            b'&' if dialect == Dialect::Oracle => {
-                // SQL*Plus substitution variable `&name` / `&&name.`
-                let from = if bytes.get(i + 1) == Some(&b'&') { i + 2 } else { i + 1 };
-                let end = (from..n).find(|&j| !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_')).unwrap_or(n);
-                if end > from {
-                    blank_with(bytes, i, from, b'_');
-                    if bytes.get(end) == Some(&b'.') {
-                        bytes[end] = b'_';
-                    }
-                    i = end;
-                }
-            }
-            b'$' if dialect == Dialect::Oracle => {
-                // conditional compilation: `$if … $then`, `$elsif … $then`,
-                // `$else`, `$end` are blanked (every branch is read);
-                // `$$name` inquiry directives become identifiers
-                let end = (i + 1..n)
-                    .find(|&j| {
-                        !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || (j == i + 1 && bytes[j] == b'$'))
-                    })
-                    .unwrap_or(n);
-                let word = bytes[i + 1..end].to_ascii_lowercase();
-                match word.as_slice() {
-                    b"if" | b"elsif" => {
-                        let then = (end..n.saturating_sub(4))
-                            .find(|&j| bytes[j..j + 5].eq_ignore_ascii_case(b"$then"))
-                            .map_or(end, |j| j + 5);
-                        blank(bytes, i, then);
-                        i = then.max(i + 1) - 1;
-                    }
-                    b"else" | b"end" | b"then" => blank(bytes, i, end),
-                    b"error" => {
-                        let stop = (end..n.saturating_sub(3))
-                            .find(|&j| bytes[j..j + 4].eq_ignore_ascii_case(b"$end"))
-                            .map_or(end, |j| j + 4);
-                        blank(bytes, i, stop);
-                        i = stop.max(i + 1) - 1;
-                    }
-                    w if w.first() == Some(&b'$') && w.len() > 1 => blank_with(bytes, i, i + 2, b'_'),
-                    _ => {}
-                }
-            }
-            b'\\'
-                if matches!(dialect, Dialect::Postgres | Dialect::Generic)
-                    && bytes.get(i + 1) == Some(&b'g')
-                    && i > 0
-                    && bytes[i - 1].is_ascii_whitespace() =>
-            {
-                let end = (i..n).find(|&j| bytes[j] == b'\n').unwrap_or(n);
-                blank(bytes, i, end);
-                bytes[i] = b';';
-                i = end;
-            }
-            _ => {}
+    while i < bytes.len() {
+        i = substitute(bytes, i, dialect) + 1;
+    }
+}
+
+/// The substitution at byte `i`, if any; the index of its last byte (`i`
+/// when there is none).
+fn substitute(bytes: &mut [u8], i: usize, dialect: Dialect) -> usize {
+    let oracle = dialect == Dialect::Oracle;
+    match bytes[i] {
+        b'$' if bytes.get(i + 1) == Some(&b'(') => sqlcmd_variable(bytes, i),
+        b'$' if oracle => conditional_compilation(bytes, i),
+        b'@' if bytes[i..].starts_with(b"@extschema@") => {
+            bytes[i] = b'_';
+            bytes[i + 1..i + 11].copy_from_slice(b"_extschema");
+            i + 10
         }
-        i += 1;
+        b':' if psql_interpolation(bytes, i, dialect) || (oracle && trigger_row(bytes, i)) => {
+            bytes[i] = b' ';
+            i
+        }
+        b'&' if oracle => substitution_variable(bytes, i),
+        b'\\' if psql_terminator(bytes, i, dialect) => {
+            let end = (i..bytes.len()).find(|&j| bytes[j] == b'\n').unwrap_or(bytes.len());
+            blank(bytes, i, end);
+            bytes[i] = b';';
+            end
+        }
+        _ => i,
+    }
+}
+
+fn is_name_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// sqlcmd `$(Name)` → `__Name_`.
+fn sqlcmd_variable(bytes: &mut [u8], i: usize) -> usize {
+    let n = bytes.len();
+    let end = (i + 2..n).find(|&j| !is_name_char(bytes[j])).unwrap_or(n);
+    if end <= i + 2 || bytes.get(end) != Some(&b')') {
+        return i;
+    }
+    bytes[i] = b'_';
+    bytes[i + 1] = b'_';
+    bytes[end] = b'_';
+    end
+}
+
+/// psql `:'name'` / `:"name"` at the colon `i`: not `::`, and not a path
+/// into semi-structured data (Snowflake `value:"key"`).
+fn psql_interpolation(bytes: &[u8], i: usize, dialect: Dialect) -> bool {
+    matches!(dialect, Dialect::Postgres | Dialect::Generic | Dialect::Redshift)
+        && matches!(bytes.get(i + 1), Some(b'\'' | b'"'))
+        && i > 0
+        && !matches!(bytes[i - 1], b':' | b'_' | b')' | b']' | b'"')
+        && !bytes[i - 1].is_ascii_alphanumeric()
+        && psql_variable(bytes, i + 1)
+}
+
+/// Oracle trigger rows `:new.` / `:old.` at the colon `i`.
+fn trigger_row(bytes: &[u8], i: usize) -> bool {
+    i > 0
+        && !bytes[i - 1].is_ascii_alphanumeric()
+        && bytes.get(i + 4) == Some(&b'.')
+        && (bytes[i + 1..i + 4].eq_ignore_ascii_case(b"new") || bytes[i + 1..i + 4].eq_ignore_ascii_case(b"old"))
+}
+
+/// psql `\gset` / `\gexec` / `\g` after a statement on its line.
+fn psql_terminator(bytes: &[u8], i: usize, dialect: Dialect) -> bool {
+    matches!(dialect, Dialect::Postgres | Dialect::Generic)
+        && bytes.get(i + 1) == Some(&b'g')
+        && i > 0
+        && bytes[i - 1].is_ascii_whitespace()
+}
+
+/// SQL*Plus substitution variable `&name` / `&&name.` → an identifier.
+fn substitution_variable(bytes: &mut [u8], i: usize) -> usize {
+    let n = bytes.len();
+    let from = if bytes.get(i + 1) == Some(&b'&') { i + 2 } else { i + 1 };
+    let end = (from..n).find(|&j| !is_name_char(bytes[j])).unwrap_or(n);
+    if end <= from {
+        return i;
+    }
+    blank_with(bytes, i, from, b'_');
+    if bytes.get(end) == Some(&b'.') {
+        bytes[end] = b'_';
+    }
+    end
+}
+
+/// Oracle conditional compilation: `$if … $then`, `$elsif … $then`,
+/// `$else`, `$end` are blanked (every branch is read); `$$name` inquiry
+/// directives become identifiers.
+fn conditional_compilation(bytes: &mut [u8], i: usize) -> usize {
+    let n = bytes.len();
+    let end = (i + 1..n).find(|&j| !(is_name_char(bytes[j]) || (j == i + 1 && bytes[j] == b'$'))).unwrap_or(n);
+    let word = bytes[i + 1..end].to_ascii_lowercase();
+    // Blanks through the directive `closer` that ends this one.
+    let through = |bytes: &mut [u8], closer: &[u8]| {
+        let len = closer.len();
+        let stop = (end..n.saturating_sub(len - 1))
+            .find(|&j| bytes[j..j + len].eq_ignore_ascii_case(closer))
+            .map_or(end, |j| j + len);
+        blank(bytes, i, stop);
+        stop.max(i + 1) - 1
+    };
+    match word.as_slice() {
+        b"if" | b"elsif" => through(bytes, b"$then"),
+        b"error" => through(bytes, b"$end"),
+        b"else" | b"end" | b"then" => {
+            blank(bytes, i, end);
+            i
+        }
+        w if w.first() == Some(&b'$') && w.len() > 1 => {
+            blank_with(bytes, i, i + 2, b'_');
+            i
+        }
+        _ => i,
     }
 }
 

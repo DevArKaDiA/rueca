@@ -442,110 +442,121 @@ impl Cursor<'_> {
 
     // -----------------------------------------------------------------
 
-    fn statement(&mut self) -> Option<()> {
-        match self.up(0) {
-            "BREAK" | "CONTINUE" | "REVERT" | "CHECKPOINT" => {
-                self.i = 1;
-                Some(())
+    /// `item {, item}`.
+    fn list(&mut self, mut item: impl FnMut(&mut Self) -> Option<()>) -> Option<()> {
+        loop {
+            item(self)?;
+            if !self.eat(&Token::Comma) {
+                return Some(());
             }
+        }
+    }
+
+    fn on_off(&mut self) -> Option<()> {
+        self.any(&["ON", "OFF"]).map(|_| ())
+    }
+
+    fn statement(&mut self) -> Option<()> {
+        self.i = 1;
+        match self.up(0) {
+            "BREAK" | "CONTINUE" | "REVERT" | "CHECKPOINT" => Some(()),
             "RECONFIGURE" => {
-                self.i = 1;
                 self.seq(&["WITH", "OVERRIDE"]);
                 Some(())
             }
-            "GOTO" | "USE" => {
-                self.i = 1;
-                need(self.word())
-            }
-            "KILL" => {
-                self.i = 1;
-                need(self.number() || self.var())
-            }
+            "GOTO" | "USE" => need(self.word()),
+            "KILL" => need(self.number() || self.var()),
             "WAITFOR" => {
-                self.i = 1;
                 self.any(&["DELAY", "TIME"])?;
                 self.expr_until(|_, _| false)
             }
+            "PRINT" => self.expr_until(|_, _| false),
+            "THROW" => self.throw(),
+            "OPEN" | "CLOSE" | "DEALLOCATE" => self.cursor_or_key(),
+            "UPDATE" => self.update_statistics(),
+            "EXPORT" | "IMPORT" => self.duck_database(),
+            _ => self.statement_family(),
+        }
+    }
+
+    /// The statements with a production function of their own.
+    fn statement_family(&mut self) -> Option<()> {
+        match self.up(0) {
             "BEGIN" | "COMMIT" | "ROLLBACK" | "SAVE" => self.transaction(),
-            "PRINT" => {
-                self.i = 1;
-                self.expr_until(|_, _| false)
-            }
             "RAISERROR" => self.raiserror(),
-            "THROW" => {
-                self.i = 1;
-                if self.end() || self.tok(self.i) == Some(&Token::SemiColon) {
-                    return Some(());
-                }
-                self.expr_list(|_, _| false)
-            }
             "SET" => self.set(),
-            "OPEN" | "CLOSE" if self.up(1) == "MASTER" => {
-                // `OPEN MASTER KEY DECRYPTION BY PASSWORD = 's'`, `CLOSE MASTER KEY`
-                self.i = 1;
-                need(self.seq(&["MASTER", "KEY"]))?;
-                if self.seq(&["DECRYPTION", "BY", "PASSWORD"]) {
-                    need(self.eat(&Token::Eq))?;
-                    need(self.string())?;
-                }
-                Some(())
-            }
-            "OPEN" | "CLOSE" | "DEALLOCATE" => {
-                self.i = 1;
-                self.kw("GLOBAL");
-                need(self.var() || self.word())
-            }
             "FETCH" => self.fetch(),
             "EXEC" | "EXECUTE" => self.exec(),
             "DBCC" => self.dbcc(),
             "BACKUP" | "RESTORE" => self.backup(),
             "GRANT" | "DENY" | "REVOKE" => self.grant(),
             "DROP" => self.drop(),
-            "UPDATE" => {
-                self.i = 1;
-                need(self.kw("STATISTICS"))?;
-                let n = self.name()?;
-                self.out.reads.push(n);
-                if self.up(self.i) != "WITH" {
-                    self.word();
-                }
-                if self.kw("WITH") {
-                    loop {
-                        need(self.word())?;
-                        if self.eat(&Token::Eq) {
-                            need(self.number())?;
-                        }
-                        if !self.eat(&Token::Comma) {
-                            break;
-                        }
-                    }
-                }
-                Some(())
-            }
             "DO" => self.do_block(),
             "LOAD" => self.load_data(),
-            "EXPORT" | "IMPORT" => {
-                // DuckDB `EXPORT DATABASE 'dir' [(option value, …)]`, `IMPORT DATABASE 'dir'`
-                self.i = 1;
-                need(self.kw("DATABASE"))?;
-                need(self.string())?;
-                if self.eat(&Token::LParen) {
-                    loop {
-                        need(self.word())?;
-                        self.scalar();
-                        if !self.eat(&Token::Comma) {
-                            break;
-                        }
-                    }
-                    need(self.eat(&Token::RParen))?;
-                }
-                Some(())
-            }
             "COPY" => self.monet_copy(),
             "CREATE" => self.create(),
             "ALTER" => self.alter(),
             _ => None,
         }
+    }
+
+    /// `THROW [expr, expr, expr]`.
+    fn throw(&mut self) -> Option<()> {
+        if self.end() || self.tok(self.i) == Some(&Token::SemiColon) {
+            return Some(());
+        }
+        self.expr_list(|_, _| false)
+    }
+
+    /// `OPEN MASTER KEY DECRYPTION BY PASSWORD = 's'`, `CLOSE MASTER KEY`;
+    /// `OPEN | CLOSE | DEALLOCATE [GLOBAL] cursor`.
+    fn cursor_or_key(&mut self) -> Option<()> {
+        if self.up(0) == "DEALLOCATE" || self.up(1) != "MASTER" {
+            self.kw("GLOBAL");
+            return need(self.var() || self.word());
+        }
+        need(self.seq(&["MASTER", "KEY"]))?;
+        if self.seq(&["DECRYPTION", "BY", "PASSWORD"]) {
+            need(self.eat(&Token::Eq))?;
+            need(self.string())?;
+        }
+        Some(())
+    }
+
+    /// `UPDATE STATISTICS name [name] [WITH option [= n], …]`.
+    fn update_statistics(&mut self) -> Option<()> {
+        need(self.kw("STATISTICS"))?;
+        let n = self.name()?;
+        self.out.reads.push(n);
+        if self.up(self.i) != "WITH" {
+            self.word();
+        }
+        if self.kw("WITH") {
+            self.list(|c| {
+                need(c.word())?;
+                if c.eat(&Token::Eq) {
+                    need(c.number())?;
+                }
+                Some(())
+            })?;
+        }
+        Some(())
+    }
+
+    /// DuckDB `EXPORT DATABASE 'dir' [(option value, …)]`, `IMPORT DATABASE
+    /// 'dir'`.
+    fn duck_database(&mut self) -> Option<()> {
+        need(self.kw("DATABASE"))?;
+        need(self.string())?;
+        if self.eat(&Token::LParen) {
+            self.list(|c| {
+                need(c.word())?;
+                c.scalar();
+                Some(())
+            })?;
+            need(self.eat(&Token::RParen))?;
+        }
+        Some(())
     }
 
     fn transaction(&mut self) -> Option<()> {
@@ -592,46 +603,42 @@ impl Cursor<'_> {
     fn set(&mut self) -> Option<()> {
         self.i = 1;
         if self.var() {
-            // `SET @v = expr`, `SET @v += expr`
-            if !self.eat(&Token::Eq) {
-                need(matches!(self.tok(self.i), Some(Token::Plus | Token::Minus | Token::Mul | Token::Div)))?;
-                self.i += 1;
-                need(self.eat(&Token::Eq))?;
-            }
-            return self.expr_until(|_, _| false);
+            return self.set_variable();
         }
         if self.kw("STATISTICS") {
-            loop {
-                self.any(&["IO", "TIME", "XML", "PROFILE"])?;
-                if !self.eat(&Token::Comma) {
-                    break;
-                }
-            }
-            return self.any(&["ON", "OFF"]).map(|_| ());
+            self.list(|c| c.any(&["IO", "TIME", "XML", "PROFILE"]).map(|_| ()))?;
+            return self.on_off();
         }
         if self.kw("IDENTITY_INSERT") {
             let n = self.name()?;
             self.out.writes.push(n);
-            return self.any(&["ON", "OFF"]).map(|_| ());
+            return self.on_off();
         }
         if self.seq(&["TRANSACTION", "ISOLATION", "LEVEL"]) {
-            let ok = self.seq(&["READ", "UNCOMMITTED"])
-                || self.seq(&["READ", "COMMITTED"])
-                || self.seq(&["REPEATABLE", "READ"])
-                || self.kw("SNAPSHOT")
-                || self.kw("SERIALIZABLE");
-            return need(ok);
+            let levels: &[&[&str]] = &[
+                &["READ", "UNCOMMITTED"],
+                &["READ", "COMMITTED"],
+                &["REPEATABLE", "READ"],
+                &["SNAPSHOT"],
+                &["SERIALIZABLE"],
+            ];
+            return need(self.one_of(levels));
         }
         if self.any(SET_VALUES).is_some() {
             return need(self.scalar());
         }
-        loop {
-            self.any(SET_FLAGS)?;
-            if !self.eat(&Token::Comma) {
-                break;
-            }
+        self.list(|c| c.any(SET_FLAGS).map(|_| ()))?;
+        self.on_off()
+    }
+
+    /// `SET @v = expr`, `SET @v += expr` (after the variable).
+    fn set_variable(&mut self) -> Option<()> {
+        if !self.eat(&Token::Eq) {
+            need(matches!(self.tok(self.i), Some(Token::Plus | Token::Minus | Token::Mul | Token::Div)))?;
+            self.i += 1;
+            need(self.eat(&Token::Eq))?;
         }
-        self.any(&["ON", "OFF"]).map(|_| ())
+        self.expr_until(|_, _| false)
     }
 
     fn fetch(&mut self) -> Option<()> {
@@ -658,55 +665,66 @@ impl Cursor<'_> {
     fn exec(&mut self) -> Option<()> {
         self.i = 1;
         if self.kw("AS") {
-            // `EXECUTE AS CALLER | SELF | OWNER | LOGIN = 's' | USER = 's'`
-            if self.any(&["CALLER", "SELF", "OWNER"]).is_some() {
-                return Some(());
-            }
-            self.any(&["LOGIN", "USER"])?;
-            need(self.eat(&Token::Eq))?;
-            return need(self.string() || self.var());
+            return self.execute_as();
         }
         if self.eat(&Token::LParen) {
-            // dynamic SQL: `EXEC (@sql + N'…')`
-            self.expr_until(|_, _| false)?;
-            need(self.eat(&Token::RParen))?;
-            if self.kw("AS") {
-                self.any(&["LOGIN", "USER"])?;
-                need(self.eat(&Token::Eq))?;
-                need(self.string())?;
-            }
-            if self.kw("AT") {
-                need(self.word())?;
-            }
-            return Some(());
+            return self.exec_dynamic();
         }
-        if self.is_var(self.i) && self.tok(self.i + 1) == Some(&Token::Eq) {
-            self.i += 2;
-        }
+        self.parameter_name();
         if !self.var() {
             let n = self.name()?;
             self.out.calls.push(n);
         }
-        let stop = |c: &Self, k: usize| c.up(k) == "WITH";
-        if !self.end() && self.tok(self.i) != Some(&Token::SemiColon) && self.up(self.i) != "WITH" {
-            loop {
-                if self.is_var(self.i) && self.tok(self.i + 1) == Some(&Token::Eq) {
-                    self.i += 2;
-                }
-                if !self.kw("DEFAULT") {
-                    self.expr_until(|c, k| {
-                        c.tok(k) == Some(&Token::Comma) || matches!(c.up(k), "OUTPUT" | "OUT") || stop(c, k)
-                    })?;
-                }
-                self.any(&["OUTPUT", "OUT"]);
-                if !self.eat(&Token::Comma) {
-                    break;
-                }
-            }
+        let arguments = !self.end() && self.tok(self.i) != Some(&Token::SemiColon) && self.up(self.i) != "WITH";
+        if arguments {
+            self.list(Self::exec_argument)?;
         }
         if self.kw("WITH") {
             need(self.kw("RECOMPILE"))?;
         }
+        Some(())
+    }
+
+    /// `EXECUTE AS CALLER | SELF | OWNER | LOGIN = 's' | USER = 's'`.
+    fn execute_as(&mut self) -> Option<()> {
+        if self.any(&["CALLER", "SELF", "OWNER"]).is_some() {
+            return Some(());
+        }
+        self.any(&["LOGIN", "USER"])?;
+        need(self.eat(&Token::Eq))?;
+        need(self.string() || self.var())
+    }
+
+    /// Dynamic SQL: `EXEC (@sql + N'…') [AS LOGIN | USER = 's'] [AT name]`
+    /// (after the `(`).
+    fn exec_dynamic(&mut self) -> Option<()> {
+        self.expr_until(|_, _| false)?;
+        need(self.eat(&Token::RParen))?;
+        if self.kw("AS") {
+            self.any(&["LOGIN", "USER"])?;
+            need(self.eat(&Token::Eq))?;
+            need(self.string())?;
+        }
+        if self.kw("AT") {
+            need(self.word())?;
+        }
+        Some(())
+    }
+
+    /// Consumes `@name =` (a result variable, a named argument).
+    fn parameter_name(&mut self) {
+        if self.is_var(self.i) && self.tok(self.i + 1) == Some(&Token::Eq) {
+            self.i += 2;
+        }
+    }
+
+    /// `[@p =] expr | DEFAULT [OUTPUT | OUT]`.
+    fn exec_argument(&mut self) -> Option<()> {
+        self.parameter_name();
+        if !self.kw("DEFAULT") {
+            self.expr_until(|c, k| c.tok(k) == Some(&Token::Comma) || matches!(c.up(k), "OUTPUT" | "OUT" | "WITH"))?;
+        }
+        self.any(&["OUTPUT", "OUT"]);
         Some(())
     }
 
@@ -719,12 +737,7 @@ impl Cursor<'_> {
             need(self.eat(&Token::RParen))?;
         }
         if self.kw("WITH") {
-            loop {
-                need(self.word())?;
-                if !self.eat(&Token::Comma) {
-                    break;
-                }
-            }
+            self.list(|c| need(c.word()))?;
         }
         Some(())
     }
@@ -733,7 +746,8 @@ impl Cursor<'_> {
     fn backup(&mut self) -> Option<()> {
         let restore = self.up(0) == "RESTORE";
         self.i = 1;
-        if !(restore && self.any(&["VERIFYONLY", "HEADERONLY", "FILELISTONLY", "LABELONLY"]).is_some()) {
+        let listing = restore && self.any(&["VERIFYONLY", "HEADERONLY", "FILELISTONLY", "LABELONLY"]).is_some();
+        if !listing {
             self.any(&["DATABASE", "LOG"])?;
             need(self.var() || self.word())?;
         }
@@ -747,19 +761,19 @@ impl Cursor<'_> {
             need(restore)?;
         }
         if self.kw("WITH") {
-            loop {
-                need(self.word())?;
-                if self.eat(&Token::Eq) {
-                    need(self.scalar())?;
-                }
-                if self.kw("TO") {
-                    // `MOVE 'logical' TO 'physical'`
-                    need(self.string() || self.var())?;
-                }
-                if !self.eat(&Token::Comma) {
-                    break;
-                }
-            }
+            self.list(Self::backup_option)?;
+        }
+        Some(())
+    }
+
+    /// `option [= value]`, `MOVE 'logical' TO 'physical'`.
+    fn backup_option(&mut self) -> Option<()> {
+        need(self.word())?;
+        if self.eat(&Token::Eq) {
+            need(self.scalar())?;
+        }
+        if self.kw("TO") {
+            need(self.string() || self.var())?;
         }
         Some(())
     }
@@ -797,51 +811,47 @@ impl Cursor<'_> {
         if self.seq(&["CHARACTER", "SET"]) {
             need(self.word())?;
         }
-        if self.any(&["FIELDS", "COLUMNS"]).is_some() {
-            let from = self.i;
-            loop {
-                let ok = self.seq(&["TERMINATED", "BY"])
-                    || self.seq(&["OPTIONALLY", "ENCLOSED", "BY"])
-                    || self.seq(&["ENCLOSED", "BY"])
-                    || self.seq(&["ESCAPED", "BY"]);
-                if !ok {
-                    break;
-                }
-                need(self.string())?;
-            }
-            need(self.i > from)?;
-        }
-        if self.kw("LINES") {
-            let from = self.i;
-            while self.seq(&["STARTING", "BY"]) || self.seq(&["TERMINATED", "BY"]) {
-                need(self.string())?;
-            }
-            need(self.i > from)?;
-        }
+        self.load_format()?;
         if self.kw("IGNORE") {
             need(self.number())?;
             self.any(&["LINES", "ROWS"])?;
         }
         if self.eat(&Token::LParen) {
-            loop {
-                need(self.var() || self.word())?;
-                if !self.eat(&Token::Comma) {
-                    break;
-                }
-            }
+            self.list(|c| need(c.var() || c.word()))?;
             need(self.eat(&Token::RParen))?;
         }
         if self.kw("SET") {
-            loop {
-                need(self.word())?;
-                need(self.eat(&Token::Eq))?;
-                self.expr_until(|c, k| c.tok(k) == Some(&Token::Comma))?;
-                if !self.eat(&Token::Comma) {
-                    break;
-                }
-            }
+            self.list(|c| {
+                need(c.word())?;
+                need(c.eat(&Token::Eq))?;
+                c.expr_until(|c, k| c.tok(k) == Some(&Token::Comma))
+            })?;
         }
         Some(())
+    }
+
+    /// `[FIELDS | COLUMNS clause…] [LINES clause…]` of `LOAD DATA`: each
+    /// clause is keywords and a string, and each group has one or more.
+    fn load_format(&mut self) -> Option<()> {
+        const FIELDS: &[&[&str]] =
+            &[&["TERMINATED", "BY"], &["OPTIONALLY", "ENCLOSED", "BY"], &["ENCLOSED", "BY"], &["ESCAPED", "BY"]];
+        const LINES: &[&[&str]] = &[&["STARTING", "BY"], &["TERMINATED", "BY"]];
+        if self.any(&["FIELDS", "COLUMNS"]).is_some() {
+            self.string_clauses(FIELDS)?;
+        }
+        if self.kw("LINES") {
+            self.string_clauses(LINES)?;
+        }
+        Some(())
+    }
+
+    /// One or more of `clauses`, each followed by a string.
+    fn string_clauses(&mut self, clauses: &[&[&str]]) -> Option<()> {
+        let from = self.i;
+        while self.one_of(clauses) {
+            need(self.string())?;
+        }
+        need(self.i > from)
     }
 
     /// MonetDB `COPY [n [OFFSET n] RECORDS] INTO t FROM 'file' [USING
@@ -966,126 +976,152 @@ impl Cursor<'_> {
         let replace = self.seq(&["OR", "REPLACE"]);
         match self.up(self.i) {
             "FUNCTION" | "PROCEDURE" => self.routine(),
-            "PUBLIC" | "SYNONYM" => {
-                self.kw("PUBLIC");
-                need(self.kw("SYNONYM"))?;
-                self.name()?;
-                need(self.kw("FOR"))?;
-                let target = self.name()?;
-                self.out.reads.push(target);
-                Some(())
-            }
-            "TRUSTED" | "PROCEDURAL" | "LANGUAGE" => {
-                // `CREATE [OR REPLACE] [TRUSTED] [PROCEDURAL] LANGUAGE name [HANDLER f] [INLINE f] [VALIDATOR f]`
-                self.kw("TRUSTED");
-                self.kw("PROCEDURAL");
-                need(self.kw("LANGUAGE"))?;
-                need(self.word())?;
-                while self.any(&["HANDLER", "INLINE", "VALIDATOR"]).is_some() {
-                    let f = self.name()?;
-                    self.out.calls.push(f);
-                }
-                Some(())
-            }
+            "PUBLIC" | "SYNONYM" => self.create_synonym(),
+            "TRUSTED" | "PROCEDURAL" | "LANGUAGE" => self.create_language(),
             _ if replace => None,
-            "ASSEMBLY" => {
-                // `CREATE ASSEMBLY name [AUTHORIZATION owner] FROM 'file' | 0x… WITH PERMISSION_SET = set`
-                self.i += 1;
-                need(self.word())?;
-                if self.kw("AUTHORIZATION") {
-                    need(self.word())?;
-                }
-                need(self.kw("FROM"))?;
-                let bits = matches!(self.tok(self.i), Some(Token::HexStringLiteral(_) | Token::Number(..)));
-                self.i += usize::from(bits);
-                need(bits || self.string() || self.var())?;
-                need(self.seq(&["WITH", "PERMISSION_SET"]))?;
-                need(self.eat(&Token::Eq))?;
-                self.any(&["SAFE", "EXTERNAL_ACCESS", "UNSAFE"]).map(|_| ())
-            }
+            "DATABASE" if self.up(self.i + 1) == "SCOPED" => self.create_credential(),
+            "TYPE" => self.create_type(),
+            _ => self.create_object(),
+        }
+    }
+
+    /// `CREATE` of an administration object (the cursor is on its kind).
+    fn create_object(&mut self) -> Option<()> {
+        self.i += 1;
+        match self.up(self.i - 1) {
+            "ASSEMBLY" => self.create_assembly(),
             "XML" => {
                 // `CREATE XML SCHEMA COLLECTION name AS expr`
-                self.i += 1;
                 need(self.seq(&["SCHEMA", "COLLECTION"]))?;
                 self.name()?;
                 need(self.kw("AS"))?;
                 self.expr_until(|_, _| false)
             }
             "MASTER" => {
-                self.i += 1;
                 need(self.seq(&["KEY", "ENCRYPTION", "BY", "PASSWORD"]))?;
                 need(self.eat(&Token::Eq))?;
                 need(self.string())
             }
-            "DATABASE" if self.up(self.i + 1) == "SCOPED" => {
-                self.i += 1;
-                need(self.seq(&["SCOPED", "CREDENTIAL"]))?;
-                need(self.word())?;
-                need(self.kw("WITH"))?;
-                self.options()
-            }
-            "TYPE" => self.create_type(),
-            "PUBLICATION" => {
-                self.i += 1;
-                need(self.word())?;
-                if self.kw("FOR") {
-                    if self.seq(&["ALL", "TABLES"]) {
-                        return Some(());
-                    }
-                    need(self.kw("TABLE"))?;
-                    loop {
-                        self.kw("ONLY");
-                        let n = self.name()?;
-                        self.out.reads.push(n);
-                        if !self.eat(&Token::Comma) {
-                            break;
-                        }
-                    }
-                }
-                Some(())
-            }
-            "USER" => {
-                self.i += 1;
-                need(self.word())?;
-                if self.seq(&["WITHOUT", "LOGIN"]) {
-                    return Some(());
-                }
-                if self.any(&["FOR", "FROM"]).is_some() {
-                    need(self.kw("LOGIN"))?;
-                    need(self.word())?;
-                }
-                Some(())
-            }
-            "LOGIN" => {
-                self.i += 1;
-                need(self.word())?;
-                if self.kw("FROM") {
-                    let ok = self.kw("CERTIFICATE") || self.seq(&["ASYMMETRIC", "KEY"]);
-                    need(ok)?;
-                    return need(self.word());
-                }
-                need(self.kw("WITH"))?;
-                self.options()
-            }
-            "DATABASE" => {
-                self.i += 1;
-                need(self.word())?;
-                if self.kw("COLLATE") {
-                    need(self.word())?;
-                }
-                if self.kw("WITH") {
-                    loop {
-                        need(self.word())?;
-                        self.any(&["ON", "OFF"])?;
-                        if !self.eat(&Token::Comma) {
-                            break;
-                        }
-                    }
-                }
-                Some(())
-            }
+            "PUBLICATION" => self.create_publication(),
+            "USER" => self.create_user(),
+            "LOGIN" => self.create_login(),
+            "DATABASE" => self.create_database(),
             _ => None,
         }
+    }
+
+    /// `CREATE [OR REPLACE] [PUBLIC] SYNONYM name FOR name`.
+    fn create_synonym(&mut self) -> Option<()> {
+        self.kw("PUBLIC");
+        need(self.kw("SYNONYM"))?;
+        self.name()?;
+        need(self.kw("FOR"))?;
+        let target = self.name()?;
+        self.out.reads.push(target);
+        Some(())
+    }
+
+    /// `CREATE [OR REPLACE] [TRUSTED] [PROCEDURAL] LANGUAGE name [HANDLER f]
+    /// [INLINE f] [VALIDATOR f]`.
+    fn create_language(&mut self) -> Option<()> {
+        self.kw("TRUSTED");
+        self.kw("PROCEDURAL");
+        need(self.kw("LANGUAGE"))?;
+        need(self.word())?;
+        while self.any(&["HANDLER", "INLINE", "VALIDATOR"]).is_some() {
+            let f = self.name()?;
+            self.out.calls.push(f);
+        }
+        Some(())
+    }
+
+    /// `CREATE DATABASE SCOPED CREDENTIAL name WITH option = value, …`.
+    fn create_credential(&mut self) -> Option<()> {
+        self.i += 1;
+        need(self.seq(&["SCOPED", "CREDENTIAL"]))?;
+        need(self.word())?;
+        need(self.kw("WITH"))?;
+        self.options()
+    }
+
+    /// `CREATE ASSEMBLY name [AUTHORIZATION owner] FROM 'file' | 0x… WITH
+    /// PERMISSION_SET = set` (after `ASSEMBLY`).
+    fn create_assembly(&mut self) -> Option<()> {
+        need(self.word())?;
+        if self.kw("AUTHORIZATION") {
+            need(self.word())?;
+        }
+        need(self.kw("FROM"))?;
+        let bits = matches!(self.tok(self.i), Some(Token::HexStringLiteral(_) | Token::Number(..)));
+        self.i += usize::from(bits);
+        need(bits || self.string() || self.var())?;
+        self.permission_set()
+    }
+
+    /// `WITH PERMISSION_SET = SAFE | EXTERNAL_ACCESS | UNSAFE`.
+    fn permission_set(&mut self) -> Option<()> {
+        need(self.seq(&["WITH", "PERMISSION_SET"]))?;
+        need(self.eat(&Token::Eq))?;
+        self.any(&["SAFE", "EXTERNAL_ACCESS", "UNSAFE"]).map(|_| ())
+    }
+
+    /// `CREATE PUBLICATION name [FOR ALL TABLES | FOR TABLE [ONLY] name, …]`
+    /// (after `PUBLICATION`).
+    fn create_publication(&mut self) -> Option<()> {
+        need(self.word())?;
+        if !self.kw("FOR") || self.seq(&["ALL", "TABLES"]) {
+            return Some(());
+        }
+        need(self.kw("TABLE"))?;
+        self.list(|c| {
+            c.kw("ONLY");
+            let n = c.name()?;
+            c.out.reads.push(n);
+            Some(())
+        })
+    }
+
+    /// `CREATE USER name [FOR | FROM LOGIN name | WITHOUT LOGIN]` (after
+    /// `USER`).
+    fn create_user(&mut self) -> Option<()> {
+        need(self.word())?;
+        if self.seq(&["WITHOUT", "LOGIN"]) {
+            return Some(());
+        }
+        if self.any(&["FOR", "FROM"]).is_some() {
+            need(self.kw("LOGIN"))?;
+            need(self.word())?;
+        }
+        Some(())
+    }
+
+    /// `CREATE LOGIN name FROM CERTIFICATE | ASYMMETRIC KEY name`, `CREATE
+    /// LOGIN name WITH option = value, …` (after `LOGIN`).
+    fn create_login(&mut self) -> Option<()> {
+        need(self.word())?;
+        if self.kw("FROM") {
+            let ok = self.kw("CERTIFICATE") || self.seq(&["ASYMMETRIC", "KEY"]);
+            need(ok)?;
+            return need(self.word());
+        }
+        need(self.kw("WITH"))?;
+        self.options()
+    }
+
+    /// `CREATE DATABASE name [COLLATE c] [WITH option ON | OFF, …]` (after
+    /// `DATABASE`).
+    fn create_database(&mut self) -> Option<()> {
+        need(self.word())?;
+        if self.kw("COLLATE") {
+            need(self.word())?;
+        }
+        if self.kw("WITH") {
+            self.list(|c| {
+                need(c.word())?;
+                c.on_off()
+            })?;
+        }
+        Some(())
     }
 
     /// `option = value [HASHED], …`.
@@ -1147,144 +1183,98 @@ impl Cursor<'_> {
         self.out.define = true;
         need(self.eat(&Token::LParen))?;
         if !self.eat(&Token::RParen) {
-            loop {
-                self.any(&["IN", "OUT", "INOUT", "VARIADIC"]);
-                self.named_type(&["DEFAULT"])?;
-                if self.kw("DEFAULT") || self.eat(&Token::Eq) {
-                    self.expr_until(|c, k| c.tok(k) == Some(&Token::Comma))?;
-                }
-                if !self.eat(&Token::Comma) {
-                    break;
-                }
-            }
+            self.list(Self::parameter)?;
             need(self.eat(&Token::RParen))?;
         }
         if function && self.kw("RETURNS") {
-            if self.kw("TABLE") {
-                need(self.eat(&Token::LParen))?;
-                loop {
-                    self.named_type(&[])?;
-                    if !self.eat(&Token::Comma) {
-                        break;
-                    }
-                }
-                need(self.eat(&Token::RParen))?;
-            } else {
-                self.kw("SETOF");
-                self.data_type(&[
-                    "LANGUAGE",
-                    "AS",
-                    "IMMUTABLE",
-                    "STABLE",
-                    "VOLATILE",
-                    "STRICT",
-                    "SECURITY",
-                    "PARALLEL",
-                    "COST",
-                    "ROWS",
-                    "SET",
-                    "CALLED",
-                    "LEAKPROOF",
-                    "WINDOW",
-                    "NOT",
-                    "RETURNS",
-                    "EXTERNAL",
-                ])?;
-            }
+            self.returns()?;
         }
         let mut body = None;
         while !self.end() && self.tok(self.i) != Some(&Token::SemiColon) {
-            if self.kw("AS") {
-                need(body.is_none())?;
-                body = Some(self.text_body()?);
-                if self.eat(&Token::Comma) {
-                    // C functions: `AS 'object file', 'link symbol'`
-                    need(self.string())?;
-                }
-            } else if self.any(&["LANGUAGE", "PARALLEL", "SUPPORT"]).is_some() {
-                need(self.word() || self.string())?;
-            } else if self.any(&["COST", "ROWS"]).is_some() {
-                need(self.number())?;
-            } else if self.kw("SET") {
-                self.name()?;
-                if self.seq(&["FROM", "CURRENT"]) {
-                    continue;
-                }
-                need(self.kw("TO") || self.eat(&Token::Eq))?;
-                loop {
-                    need(self.scalar())?;
-                    if !self.eat(&Token::Comma) {
-                        break;
-                    }
-                }
-            } else {
-                need(self.one_of(ROUTINE_FLAGS))?;
-            }
+            self.routine_attribute(&mut body)?;
         }
         self.out.body = Some(body?);
         Some(())
     }
 
+    /// `[IN | OUT | INOUT | VARIADIC] [name] type [DEFAULT | = expr]`.
+    fn parameter(&mut self) -> Option<()> {
+        self.any(&["IN", "OUT", "INOUT", "VARIADIC"]);
+        self.named_type(&["DEFAULT"])?;
+        if self.kw("DEFAULT") || self.eat(&Token::Eq) {
+            self.expr_until(|c, k| c.tok(k) == Some(&Token::Comma))?;
+        }
+        Some(())
+    }
+
+    /// `RETURNS TABLE (columns)`, `RETURNS [SETOF] type` (after `RETURNS`).
+    fn returns(&mut self) -> Option<()> {
+        const AFTER: &[&str] = &[
+            "LANGUAGE",
+            "AS",
+            "IMMUTABLE",
+            "STABLE",
+            "VOLATILE",
+            "STRICT",
+            "SECURITY",
+            "PARALLEL",
+            "COST",
+            "ROWS",
+            "SET",
+            "CALLED",
+            "LEAKPROOF",
+            "WINDOW",
+            "NOT",
+            "RETURNS",
+            "EXTERNAL",
+        ];
+        if !self.kw("TABLE") {
+            self.kw("SETOF");
+            return self.data_type(AFTER);
+        }
+        need(self.eat(&Token::LParen))?;
+        self.list(|c| c.named_type(&[]))?;
+        need(self.eat(&Token::RParen))
+    }
+
+    /// One attribute of a routine; `AS 'body'` sets `body` (once).
+    fn routine_attribute(&mut self, body: &mut Option<(usize, usize)>) -> Option<()> {
+        if self.kw("AS") {
+            need(body.is_none())?;
+            *body = Some(self.text_body()?);
+            // C functions: `AS 'object file', 'link symbol'`
+            return need(!self.eat(&Token::Comma) || self.string());
+        }
+        if self.any(&["LANGUAGE", "PARALLEL", "SUPPORT"]).is_some() {
+            return need(self.word() || self.string());
+        }
+        if self.any(&["COST", "ROWS"]).is_some() {
+            return need(self.number());
+        }
+        if !self.kw("SET") {
+            return need(self.one_of(ROUTINE_FLAGS));
+        }
+        self.name()?;
+        if self.seq(&["FROM", "CURRENT"]) {
+            return Some(());
+        }
+        need(self.kw("TO") || self.eat(&Token::Eq))?;
+        self.list(|c| need(c.scalar()))
+    }
+
     fn alter(&mut self) -> Option<()> {
-        self.i = 1;
+        self.i = 2;
         match self.up(1) {
-            "EXTENSION" => {
-                self.i = 2;
-                need(self.word())?;
-                if self.kw("UPDATE") {
-                    if self.kw("TO") {
-                        need(self.string() || self.word())?;
-                    }
-                    return Some(());
-                }
-                self.any(&["ADD", "DROP"])?;
-                need(self.one_of(EXTENSION_KINDS))?;
-                self.name()?;
-                if self.tok(self.i) == Some(&Token::LParen) {
-                    self.type_list()?;
-                }
-                Some(())
-            }
-            "TYPE" => {
-                self.i = 2;
-                self.name()?;
-                if self.seq(&["OWNER", "TO"]) || self.seq(&["SET", "SCHEMA"]) || self.seq(&["RENAME", "TO"]) {
-                    return need(self.word());
-                }
-                if self.seq(&["ADD", "ATTRIBUTE"]) {
-                    need(self.word())?;
-                    self.data_type(&["CASCADE", "RESTRICT"])?;
-                } else if self.seq(&["DROP", "ATTRIBUTE"]) {
-                    self.seq(&["IF", "EXISTS"]);
-                    need(self.word())?;
-                } else if self.seq(&["RENAME", "ATTRIBUTE"]) {
-                    need(self.word())?;
-                    need(self.kw("TO"))?;
-                    need(self.word())?;
-                } else {
-                    return None;
-                }
-                self.any(&["CASCADE", "RESTRICT"]);
-                Some(())
-            }
+            "EXTENSION" => self.alter_extension(),
+            "TYPE" => self.alter_type(),
             "DOMAIN" | "SEQUENCE" | "VIEW" | "SCHEMA" => {
-                self.i = 2;
                 self.name()?;
                 let ok = self.seq(&["OWNER", "TO"]) || self.seq(&["SET", "SCHEMA"]) || self.seq(&["RENAME", "TO"]);
                 need(ok)?;
                 need(self.word())
             }
-            "PROCEDURAL" | "LANGUAGE" => {
-                self.i = 1;
-                self.kw("PROCEDURAL");
-                need(self.kw("LANGUAGE"))?;
-                need(self.word())?;
-                let ok = self.seq(&["OWNER", "TO"]) || self.seq(&["RENAME", "TO"]);
-                need(ok)?;
-                need(self.word())
-            }
+            "PROCEDURAL" | "LANGUAGE" => self.alter_language(),
             "LOGIN" => {
-                self.i = 2;
                 need(self.word())?;
                 if self.any(&["ENABLE", "DISABLE"]).is_some() {
                     return Some(());
@@ -1292,21 +1282,9 @@ impl Cursor<'_> {
                 need(self.kw("WITH"))?;
                 self.options()
             }
-            "AUTHORIZATION" => {
-                // `ALTER AUTHORIZATION ON [class ::] name TO name`
-                self.i = 2;
-                need(self.kw("ON"))?;
-                if self.tok(self.i + 1) == Some(&Token::DoubleColon) {
-                    need(self.word())?;
-                    self.i += 1;
-                }
-                self.name()?;
-                need(self.kw("TO"))?;
-                need(self.word())
-            }
+            "AUTHORIZATION" => self.alter_authorization(),
             "SERVER" => {
                 // `ALTER SERVER ROLE role ADD | DROP MEMBER name`
-                self.i = 2;
                 need(self.kw("ROLE"))?;
                 need(self.word())?;
                 self.any(&["ADD", "DROP"])?;
@@ -1314,42 +1292,108 @@ impl Cursor<'_> {
                 need(self.word())
             }
             "ASSEMBLY" => {
-                self.i = 2;
                 need(self.word())?;
-                need(self.seq(&["WITH", "PERMISSION_SET"]))?;
-                need(self.eat(&Token::Eq))?;
-                self.any(&["SAFE", "EXTERNAL_ACCESS", "UNSAFE"]).map(|_| ())
+                self.permission_set()
             }
-            "DATABASE" => {
-                self.i = 2;
-                need(self.word())?;
-                need(self.kw("SET"))?;
-                need(self.word())?;
-                if self.eat(&Token::Eq) || (!self.end() && self.up(self.i) != "WITH") {
-                    need(self.scalar())?;
-                }
-                if self.kw("WITH") {
-                    let ok = self.seq(&["ROLLBACK", "IMMEDIATE"]) || self.kw("NO_WAIT");
-                    need(ok)?;
-                }
-                Some(())
-            }
-            "INDEX" => {
-                self.i = 2;
-                if !self.kw("ALL") {
-                    self.name()?;
-                }
-                if self.seq(&["SET", "TABLESPACE"]) {
-                    return need(self.word());
-                }
-                need(self.kw("ON"))?;
-                let t = self.name()?;
-                self.out.writes.push(t);
-                self.any(&["DISABLE", "REBUILD", "REORGANIZE"]).map(|_| ())
-            }
+            "DATABASE" => self.alter_database(),
+            "INDEX" => self.alter_index(),
             "TABLE" => self.alter_table(),
             _ => None,
         }
+    }
+
+    /// `ALTER EXTENSION name UPDATE [TO version]`, `ALTER EXTENSION name
+    /// ADD | DROP kind name [(types)]` (after `EXTENSION`).
+    fn alter_extension(&mut self) -> Option<()> {
+        need(self.word())?;
+        if self.kw("UPDATE") {
+            return need(!self.kw("TO") || self.string() || self.word());
+        }
+        self.any(&["ADD", "DROP"])?;
+        need(self.one_of(EXTENSION_KINDS))?;
+        self.name()?;
+        if self.tok(self.i) == Some(&Token::LParen) {
+            self.type_list()?;
+        }
+        Some(())
+    }
+
+    /// `ALTER TYPE name …` (after `TYPE`; module docs).
+    fn alter_type(&mut self) -> Option<()> {
+        self.name()?;
+        if self.seq(&["OWNER", "TO"]) || self.seq(&["SET", "SCHEMA"]) || self.seq(&["RENAME", "TO"]) {
+            return need(self.word());
+        }
+        if self.seq(&["ADD", "ATTRIBUTE"]) {
+            need(self.word())?;
+            self.data_type(&["CASCADE", "RESTRICT"])?;
+        } else if self.seq(&["DROP", "ATTRIBUTE"]) {
+            self.seq(&["IF", "EXISTS"]);
+            need(self.word())?;
+        } else if self.seq(&["RENAME", "ATTRIBUTE"]) {
+            need(self.word())?;
+            need(self.kw("TO"))?;
+            need(self.word())?;
+        } else {
+            return None;
+        }
+        self.any(&["CASCADE", "RESTRICT"]);
+        Some(())
+    }
+
+    /// `ALTER [PROCEDURAL] LANGUAGE name OWNER TO | RENAME TO name`.
+    fn alter_language(&mut self) -> Option<()> {
+        self.i = 1;
+        self.kw("PROCEDURAL");
+        need(self.kw("LANGUAGE"))?;
+        need(self.word())?;
+        let ok = self.seq(&["OWNER", "TO"]) || self.seq(&["RENAME", "TO"]);
+        need(ok)?;
+        need(self.word())
+    }
+
+    /// `ALTER AUTHORIZATION ON [class ::] name TO name` (after
+    /// `AUTHORIZATION`).
+    fn alter_authorization(&mut self) -> Option<()> {
+        need(self.kw("ON"))?;
+        if self.tok(self.i + 1) == Some(&Token::DoubleColon) {
+            need(self.word())?;
+            self.i += 1;
+        }
+        self.name()?;
+        need(self.kw("TO"))?;
+        need(self.word())
+    }
+
+    /// `ALTER DATABASE name SET option [[=] value] [WITH ROLLBACK IMMEDIATE
+    /// | NO_WAIT]` (after `DATABASE`).
+    fn alter_database(&mut self) -> Option<()> {
+        need(self.word())?;
+        need(self.kw("SET"))?;
+        need(self.word())?;
+        if self.eat(&Token::Eq) || (!self.end() && self.up(self.i) != "WITH") {
+            need(self.scalar())?;
+        }
+        if self.kw("WITH") {
+            let ok = self.seq(&["ROLLBACK", "IMMEDIATE"]) || self.kw("NO_WAIT");
+            need(ok)?;
+        }
+        Some(())
+    }
+
+    /// `ALTER INDEX name SET TABLESPACE n`, `ALTER INDEX name | ALL ON table
+    /// DISABLE | REBUILD | REORGANIZE` (after `INDEX`).
+    fn alter_index(&mut self) -> Option<()> {
+        if !self.kw("ALL") {
+            self.name()?;
+        }
+        if self.seq(&["SET", "TABLESPACE"]) {
+            return need(self.word());
+        }
+        need(self.kw("ON"))?;
+        let t = self.name()?;
+        self.out.writes.push(t);
+        self.any(&["DISABLE", "REBUILD", "REORGANIZE"]).map(|_| ())
     }
 
     fn alter_table(&mut self) -> Option<()> {
@@ -1383,29 +1427,44 @@ impl Cursor<'_> {
             return need(self.word());
         }
         if self.kw("ALTER") {
-            if self.kw("CONSTRAINT") {
-                need(self.word())?;
-                self.kw("NOT");
-                self.kw("DEFERRABLE");
-                if self.kw("INITIALLY") {
-                    self.any(&["DEFERRED", "IMMEDIATE"])?;
-                }
-                return Some(());
-            }
-            self.kw("COLUMN");
+            return self.alter_column();
+        }
+        self.add_constraint()
+    }
+
+    /// `ALTER CONSTRAINT n [NOT] DEFERRABLE [INITIALLY DEFERRED |
+    /// IMMEDIATE]`, `ALTER [COLUMN] c SET STATISTICS n`, T-SQL `ALTER COLUMN
+    /// c type [COLLATE x] [[NOT] NULL]` (after `ALTER`).
+    fn alter_column(&mut self) -> Option<()> {
+        if self.kw("CONSTRAINT") {
             need(self.word())?;
-            if self.seq(&["SET", "STATISTICS"]) {
-                return need(self.number());
-            }
-            // T-SQL: a new type and nullability
-            self.data_type(&["NULL", "NOT", "COLLATE"])?;
-            if self.kw("COLLATE") {
-                need(self.word())?;
-            }
             self.kw("NOT");
-            self.kw("NULL");
+            self.kw("DEFERRABLE");
+            if self.kw("INITIALLY") {
+                self.any(&["DEFERRED", "IMMEDIATE"])?;
+            }
             return Some(());
         }
+        self.kw("COLUMN");
+        need(self.word())?;
+        if self.seq(&["SET", "STATISTICS"]) {
+            return need(self.number());
+        }
+        self.data_type(&["NULL", "NOT", "COLLATE"])?;
+        if self.kw("COLLATE") {
+            need(self.word())?;
+        }
+        self.kw("NOT");
+        self.kw("NULL");
+        Some(())
+    }
+
+    /// `[WITH CHECK | NOCHECK] ADD CONSTRAINT n DEFAULT expr FOR c`, `… ADD
+    /// CONSTRAINT n FOREIGN KEY (c, …) REFERENCES t [(c, …)] [ON DELETE |
+    /// UPDATE action]…`.
+    fn add_constraint(&mut self) -> Option<()> {
+        const ACTIONS: &[&[&str]] =
+            &[&["CASCADE"], &["NO", "ACTION"], &["SET", "NULL"], &["SET", "DEFAULT"], &["RESTRICT"]];
         if self.kw("WITH") {
             self.any(&["CHECK", "NOCHECK"])?;
         }
@@ -1426,12 +1485,7 @@ impl Cursor<'_> {
         }
         while self.kw("ON") {
             self.any(&["DELETE", "UPDATE"])?;
-            let ok = self.kw("CASCADE")
-                || self.seq(&["NO", "ACTION"])
-                || self.seq(&["SET", "NULL"])
-                || self.seq(&["SET", "DEFAULT"])
-                || self.kw("RESTRICT");
-            need(ok)?;
+            need(self.one_of(ACTIONS))?;
         }
         Some(())
     }

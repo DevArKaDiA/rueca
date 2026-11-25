@@ -69,6 +69,53 @@ struct State {
     at: usize,
 }
 
+impl State {
+    /// The source of an `INSERT` (`SELECT`, `EXEC`), when it has none
+    /// yet: taken.
+    fn takes_source(&mut self) -> bool {
+        let takes = self.head == "INSERT" && !self.seen_source;
+        self.seen_source |= takes;
+        takes
+    }
+
+    /// The `SET` of an `UPDATE`, when it has none yet: taken.
+    fn takes_set(&mut self) -> bool {
+        let takes = self.head == "UPDATE" && !self.seen_set;
+        self.seen_set |= takes;
+        takes
+    }
+
+    /// The action of an `ALTER` (`SET`, `DROP`, `ALTER`), when it has none
+    /// yet: taken.
+    fn takes_action(&mut self) -> bool {
+        let takes = self.head == "ALTER" && !self.seen_action;
+        self.seen_action |= takes;
+        takes
+    }
+
+    /// The statement of a CTE list (`WITH … SELECT`), when it has none
+    /// yet: taken, and the statement goes on as that kind.
+    fn takes_dml(&mut self, word: &str) -> bool {
+        let takes = self.head == "WITH" && !self.seen_dml;
+        if takes {
+            self.seen_dml = true;
+            self.head = word.to_string();
+        }
+        takes
+    }
+
+    /// A word that starts no statement: an action of `ALTER`, the source
+    /// of an `INSERT`.
+    fn note(&mut self, word: &str) {
+        if self.head == "ALTER" && ALTER_ACTIONS.contains(&word) {
+            self.seen_action = true;
+        }
+        if self.head == "INSERT" && matches!(word, "VALUES" | "DEFAULT") {
+            self.seen_source = true;
+        }
+    }
+}
+
 /// Words that always start a statement (at depth 0, after the guards of
 /// [`Tsql::starts`]).
 const STARTERS: &[&str] = &[
@@ -215,37 +262,49 @@ impl Tsql<'_, '_, '_, '_> {
     /// One statement at `i`; the index after it (`i` itself only at an
     /// `END`, which belongs to the caller's block).
     fn statement(&mut self, i: usize) -> usize {
-        let n = self.toks.len();
         if self.toks[i].token == Token::SemiColon {
             return i + 1;
         }
-        match self.up(i) {
-            "END" => return i,
-            "BEGIN" if matches!(self.up(i + 1), "TRY" | "CATCH") => {
-                let j = self.block(i + 2);
-                return if matches!(self.up(j), "TRY" | "CATCH") { j + 1 } else { j };
-            }
-            "BEGIN" if !TRANSACTION.contains(&self.up(i + 1)) => return self.block(i + 1),
-            "IF" | "WHILE" => return self.conditional(i),
-            "ELSE" => return if i + 1 < n { self.statement(i + 1).max(i + 1) } else { n },
-            "CREATE" | "ALTER" => {
-                if let Some(kind) = self.routine_kind(i) {
-                    return self.routine(i, kind);
-                }
-            }
-            "RETURN" if self.returns_query(i) => {
-                let e = self.boundary(i + 1, "RETURN").max(i + 2);
-                let range = self.range(i + 1, e);
-                if !self.r.sql(range, self.enclosing, Mode::Refs, None) {
-                    self.r.fail(range, self.enclosing, Mode::Refs, None);
-                }
-                return e;
-            }
-            _ => {}
+        if let Some(next) = self.compound(i) {
+            return next;
         }
         if self.tok(i + 1) == Some(&Token::Colon) && matches!(self.tok(i), Some(Token::Word(_))) {
             return i + 2;
         }
+        self.plain(i)
+    }
+
+    /// Control flow, routines and returned queries at `i`: the index
+    /// after them; `None` for a plain statement.
+    fn compound(&mut self, i: usize) -> Option<usize> {
+        let n = self.toks.len();
+        match self.up(i) {
+            "END" => Some(i),
+            "BEGIN" if matches!(self.up(i + 1), "TRY" | "CATCH") => {
+                let j = self.block(i + 2);
+                Some(if matches!(self.up(j), "TRY" | "CATCH") { j + 1 } else { j })
+            }
+            "BEGIN" if !TRANSACTION.contains(&self.up(i + 1)) => Some(self.block(i + 1)),
+            "IF" | "WHILE" => Some(self.conditional(i)),
+            "ELSE" => Some(if i + 1 < n { self.statement(i + 1).max(i + 1) } else { n }),
+            "CREATE" | "ALTER" => self.routine_kind(i).map(|kind| self.routine(i, kind)),
+            "RETURN" if self.returns_query(i) => Some(self.returned_query(i)),
+            _ => None,
+        }
+    }
+
+    /// `RETURN query` at `i`: the query; the index after it.
+    fn returned_query(&mut self, i: usize) -> usize {
+        let e = self.boundary(i + 1, "RETURN").max(i + 2);
+        let range = self.range(i + 1, e);
+        if !self.r.sql(range, self.enclosing, Mode::Refs, None) {
+            self.r.fail(range, self.enclosing, Mode::Refs, None);
+        }
+        e
+    }
+
+    /// A statement that is not control flow, at `i`: the index after it.
+    fn plain(&mut self, i: usize) -> usize {
         let e = self.boundary(i + 1, self.up(i));
         let range = self.range(i, e);
         let doc = if self.mode == Mode::Define { self.doc.take() } else { None };
@@ -464,21 +523,49 @@ impl Tsql<'_, '_, '_, '_> {
     /// given what the current one has shown (`st`, updated).
     fn starts(&self, j: usize, st: &mut State) -> bool {
         let w = self.up(j);
-        let head = st.head.as_str();
+        let prev = if j > 0 { self.up(j - 1) } else { "" };
+        if let Some(decided) = self.continues(j, st, w, prev) {
+            return decided;
+        }
+        let head = st.head.clone();
+        if let Some(decided) = self.dml_starts(j, st, w, prev, &head) {
+            return decided;
+        }
+        self.other_starts(j, st, w, prev, &head)
+    }
+
+    /// Positions decided before looking at the word: a token that is no
+    /// word, a label, `END` / `ELSE`, an operand or a name, the
+    /// privileges of `GRANT`.
+    fn continues(&self, j: usize, st: &mut State, w: &str, prev: &str) -> Option<bool> {
         if w.is_empty() {
-            if self.tok(j) == Some(&Token::LParen) && head == "INSERT" && self.up(j + 1) == "SELECT" {
+            if self.tok(j) == Some(&Token::LParen) && st.head == "INSERT" && self.up(j + 1) == "SELECT" {
                 st.seen_source = true;
             }
-            return false;
+            return Some(false);
         }
         if self.tok(j + 1) == Some(&Token::Colon) && !w.starts_with('@') {
-            return true;
+            return Some(true);
         }
         if matches!(w, "END" | "ELSE") {
-            return true;
+            return Some(true);
         }
-        let prev = if j > 0 { self.up(j - 1) } else { "" };
-        let operand = j > 0
+        if self.is_operand(j) || self.tok(j + 1) == Some(&Token::Period) {
+            return Some(false);
+        }
+        if matches!(st.head.as_str(), "GRANT" | "DENY" | "REVOKE") && !st.seen_to {
+            st.seen_to = matches!(w, "TO" | "FROM");
+            return Some(false);
+        }
+        // `SET NOCOUNT ON` ends at its `ON`: the next word is a statement.
+        let after_set_on = st.head == "SET" && prev == "ON";
+        (NAME_AFTER.contains(&prev) && !after_set_on).then_some(false)
+    }
+
+    /// Whether the token before `j` leaves an expression open (an
+    /// operator, a comma, `(`): `j` is an operand.
+    fn is_operand(&self, j: usize) -> bool {
+        j > 0
             && !matches!(
                 self.toks[j - 1].token,
                 Token::Word(_)
@@ -486,97 +573,58 @@ impl Tsql<'_, '_, '_, '_> {
                     | Token::Number(..)
                     | Token::SingleQuotedString(_)
                     | Token::NationalStringLiteral(_)
-            );
-        if operand || self.tok(j + 1) == Some(&Token::Period) {
-            return false;
-        }
-        if matches!(head, "GRANT" | "DENY" | "REVOKE") && !st.seen_to {
-            st.seen_to = matches!(w, "TO" | "FROM");
-            return false;
-        }
-        // `SET NOCOUNT ON` ends at its `ON`: the next word is a statement.
-        if NAME_AFTER.contains(&prev) && !(head == "SET" && prev == "ON") {
-            return false;
-        }
-        let dml = |st: &mut State| {
-            if st.head == "WITH" && !st.seen_dml {
-                st.seen_dml = true;
-                st.head = w.to_string();
-                return false;
+            )
+    }
+
+    /// Words that start a statement or continue the current one depending
+    /// on what it has shown: DML, `EXEC`, `SET`, `DROP`, `ALTER`, `WITH`.
+    fn dml_starts(&self, j: usize, st: &mut State, w: &str, prev: &str, head: &str) -> Option<bool> {
+        let merge = head == "MERGE";
+        Some(match w {
+            "SELECT" => !(st.takes_source() || (head == "RETURN" && j == st.at) || st.takes_dml(w)),
+            "EXEC" | "EXECUTE" => !st.takes_source(),
+            "INSERT" | "DELETE" => !merge && !st.takes_dml(w),
+            "UPDATE" => !merge && self.tok(j + 1) != Some(&Token::LParen) && !st.takes_dml(w),
+            "MERGE" => {
+                self.up(j + 1) != "JOIN"
+                    && !matches!(prev, "INNER" | "LEFT" | "RIGHT" | "FULL" | "OUTER")
+                    && !st.takes_dml(w)
             }
-            true
-        };
+            "SET" => !(st.takes_set() || st.takes_action()) && !merge && !matches!(self.up(j + 1), "NULL" | "DEFAULT"),
+            "DROP" | "ALTER" => !st.takes_action(),
+            "WITH" => self.with_starts(j, st, head),
+            _ => return None,
+        })
+    }
+
+    /// `WITH` at `j`: the CTE list of a returned query continues it; else
+    /// a statement when it opens a CTE list.
+    fn with_starts(&self, j: usize, st: &mut State, head: &str) -> bool {
+        if head == "RETURN" && j == st.at {
+            st.head = "WITH".to_string();
+            return false;
+        }
+        self.is_cte(j)
+    }
+
+    /// The other words: starters by their next or previous word, the
+    /// words that always start a statement, and what a word that starts
+    /// none tells about the current statement.
+    fn other_starts(&self, j: usize, st: &mut State, w: &str, prev: &str, head: &str) -> bool {
         match w {
             "IF" => !(matches!(head, "DROP" | "CREATE" | "ALTER") && matches!(self.up(j + 1), "EXISTS" | "NOT")),
-            "SELECT" => {
-                if head == "INSERT" && !st.seen_source {
-                    st.seen_source = true;
-                    false
-                } else if head == "RETURN" && j == st.at {
-                    false
-                } else {
-                    dml(st)
-                }
-            }
-            "EXEC" | "EXECUTE" => {
-                if head == "INSERT" && !st.seen_source {
-                    st.seen_source = true;
-                    false
-                } else {
-                    true
-                }
-            }
-            "INSERT" | "DELETE" => head != "MERGE" && dml(st),
-            "UPDATE" => head != "MERGE" && self.tok(j + 1) != Some(&Token::LParen) && dml(st),
-            "MERGE" => {
-                self.up(j + 1) != "JOIN" && !matches!(prev, "INNER" | "LEFT" | "RIGHT" | "FULL" | "OUTER") && dml(st)
-            }
-            "SET" => {
-                if head == "UPDATE" && !st.seen_set {
-                    st.seen_set = true;
-                    false
-                } else if head == "ALTER" && !st.seen_action {
-                    st.seen_action = true;
-                    false
-                } else {
-                    head != "MERGE" && !matches!(self.up(j + 1), "NULL" | "DEFAULT")
-                }
-            }
-            "DROP" | "ALTER" => {
-                if head == "ALTER" && !st.seen_action {
-                    st.seen_action = true;
-                    false
-                } else {
-                    true
-                }
-            }
-            "WITH" if head == "RETURN" && j == st.at => {
-                // the CTE list of a returned query
-                st.head = "WITH".to_string();
+            "USE" | "OPEN" | "CLOSE" => matches!(self.tok(j + 1), Some(Token::Word(_))),
+            "SAVE" => matches!(self.up(j + 1), "TRAN" | "TRANSACTION"),
+            "FETCH" => !matches!(prev, "ROWS" | "ROW" | "ONLY"),
+            "ENABLE" | "DISABLE" if head == "ALTER" => {
+                st.seen_action = true;
                 false
             }
-            "WITH" => self.is_cte(j),
-            "USE" => matches!(self.tok(j + 1), Some(Token::Word(_))),
-            "SAVE" => matches!(self.up(j + 1), "TRAN" | "TRANSACTION"),
-            "OPEN" | "CLOSE" => matches!(self.tok(j + 1), Some(Token::Word(_))),
-            "FETCH" => !matches!(prev, "ROWS" | "ROW" | "ONLY"),
-            "ENABLE" | "DISABLE" => {
-                if head == "ALTER" {
-                    st.seen_action = true;
-                    false
-                } else {
-                    self.up(j + 1) == "TRIGGER"
-                }
-            }
+            "ENABLE" | "DISABLE" => self.up(j + 1) == "TRIGGER",
             "BULK" => self.up(j + 1) == "INSERT",
             _ if STARTERS.contains(&w) => true,
             _ => {
-                if head == "ALTER" && ALTER_ACTIONS.contains(&w) {
-                    st.seen_action = true;
-                }
-                if head == "INSERT" && matches!(w, "VALUES" | "DEFAULT") {
-                    st.seen_source = true;
-                }
+                st.note(w);
                 false
             }
         }
