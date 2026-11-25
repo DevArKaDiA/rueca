@@ -305,7 +305,8 @@
    "duration_ms": 1201,
    "raw_files_extracted": 72,
    "raw_files_partial": 1,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-ripgrep",
@@ -320,7 +321,8 @@
    "duration_ms": 458,
    "raw_files_extracted": 100,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-bytes",
@@ -335,7 +337,8 @@
    "duration_ms": 241,
    "raw_files_extracted": 34,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-psf__requests",
@@ -1047,7 +1050,8 @@
    "duration_ms": 1686,
    "raw_files_extracted": 712,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-sharkdp__bat",
@@ -1062,7 +1066,8 @@
    "duration_ms": 343,
    "raw_files_extracted": 61,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-tokio-rs__axum",
@@ -1077,7 +1082,8 @@
    "duration_ms": 790,
    "raw_files_extracted": 270,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-astral-sh__ruff",
@@ -1094,7 +1100,8 @@
    "raw_files_partial": 2,
    "excluded": {
     "vendored": 1
-   }
+   },
+   "carried": true
   },
   {
    "name": "s1-uutils__coreutils",
@@ -1109,7 +1116,8 @@
    "duration_ms": 2470,
    "raw_files_extracted": 503,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-nushell__nushell",
@@ -1124,7 +1132,8 @@
    "duration_ms": 2023,
    "raw_files_extracted": 1446,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-burntsushi__ripgrep",
@@ -1139,7 +1148,8 @@
    "duration_ms": 391,
    "raw_files_extracted": 83,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-tokio-rs__bytes",
@@ -1154,8 +1164,9 @@
    "duration_ms": 228,
    "raw_files_extracted": 33,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   }
  ],
- "carried": 60
+ "carried": 71
 }

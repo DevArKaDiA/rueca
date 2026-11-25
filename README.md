@@ -425,8 +425,8 @@ scorecard (`stable` = every floor met; full tables in
 measured on what an agent reads, same queries as codebase-memory-mcp;
 target ≤ 50% of cbm): with the RFC 0005 responses, `search_symbols` costs
 0.33–0.89× cbm's tokens until the first gold hit (target met for Python,
-TS/JS, PHP and Java) and `trace` 0.88–1.74× cbm's tokens per true call
-edge (target not met; Rueca also returns more true edges). In an
+TS/JS, PHP and Java) and `trace` 0.48–1.74× cbm's tokens per true call
+edge (target met for Rust only; Rueca also returns more true edges). In an
 organization of 42 pinned repositories (120 gated issues), one ranking
 over the organization index weighed by repository routing keeps the right
 repository's file in the top 5 for 56.7% of the issues vs 66.7% when

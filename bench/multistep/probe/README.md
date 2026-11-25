@@ -36,7 +36,9 @@ The `describe_api` texts the writers read had SHA-256
 `ef64f53a2b462fe975d41520b5e27975456f2b3e92d9820b8e3db956e1cd78fc` (`js`,
 15,444 bytes) and
 `0cb321afcaf74f1208229a78597678ea4903ef8302826b6d4a90a0587c9d772b`
-(`starlark`, 15,176 bytes); the binary of this commit regenerates them.
+(`starlark`, 15,176 bytes); a binary built before the fixes of RFC 0009
+§14.6 (e.g. at the commit that added this directory) regenerates them.
+Today's `describe_api` is longer (4,260 / 4,338 tokens with the new fields).
 
 ## Files
 

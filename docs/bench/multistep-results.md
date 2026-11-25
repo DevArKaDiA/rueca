@@ -10,63 +10,81 @@ receives them (plans, cbm) or script source plus `execute`'s text result (code m
 
 | Arm | Correct | Tokens read / correct | … with `describe_api` amortised | Tokens written / correct | Round trips | Median wall (s) | `execute` overhead median / p95 (ms) |
 |---|---|---|---|---|---|---|---|
-| tool-call plan | 18/25 | 3,639 | — | 257 | 145 | 0.046 | — |
-| code mode, JavaScript | 18/25 | 444 | 671 | 367 | 25 | 0.017 | 0.56 / 1.13 |
-| code mode, Starlark | 18/25 | 448 | 680 | 402 | 25 | 0.017 | 0.32 / 0.58 |
-| cbm 0.12.0 | 4/16 | 2,171 | — | 344 | 18 | 0.425 | — |
+| tool-call plan | 18/25 | 2,743 | — | 254 | 143 | 0.047 | — |
+| code mode, JavaScript | 18/25 | 429 | 666 | 352 | 25 | 0.018 | 0.63 / 1.20 |
+| code mode, Starlark | 18/25 | 434 | 675 | 387 | 25 | 0.018 | 0.33 / 0.65 |
+| cbm 0.12.0 | 4/16 | 2,171 | — | 344 | 18 | 0.427 | — |
 
 ## Paired
 
 Tasks every arm answered correctly (ms02, ms03, ms04, ms10): tokens read (round trips), summed.
 
-- tool-call plan: 1,307 (6) | code mode, JavaScript: 1,132 (4) | code mode, Starlark: 1,185 (4) | cbm 0.12.0: 446 (4)
+- tool-call plan: 1,307 (6) | code mode, JavaScript: 1,116 (4) | code mode, Starlark: 1,161 (4) | cbm 0.12.0: 446 (4)
 
 ## Graduation gate (per language)
 
 | Language | Fewer tokens / correct vs plans (gate ≥ 40%) | … amortised | Tasks regressed (gate: none) | Median overhead (gate < 20 ms) | Gate |
 |---|---|---|---|---|---|
-| js (`describe_api` 4,086 tokens) | 87.8% | 81.6% | none | 0.56 ms | **pass** |
-| starlark (`describe_api` 4,166 tokens) | 87.7% | 81.3% | none | 0.32 ms | **pass** |
+| js (`describe_api` 4,260 tokens) | 84.4% | 75.7% | none | 0.63 ms | **pass** |
+| starlark (`describe_api` 4,338 tokens) | 84.2% | 75.4% | none | 0.33 ms | **pass** |
+
+## Before / after the API fixes (RFC 0009 §14.6)
+
+Before: the committed results of 3efa2af (`describe_api` js 4,086 / starlark 4,166 tokens); after: this run. Cells: before → after.
+
+| Arm | Correct | Tokens read / correct | … with `describe_api` amortised | Tokens written / correct | Round trips | `execute` overhead median / p95 (ms) |
+|---|---|---|---|---|---|---|
+| tool-call plan | 18/25 | 3,639 → 2,743 | — | 257 → 254 | 145 → 143 | — |
+| code mode, JavaScript | 18/25 | 444 → 429 | 671 → 666 | 367 → 352 | 25 | 0.56 / 1.13 → 0.63 / 1.20 |
+| code mode, Starlark | 18/25 | 448 → 434 | 680 → 675 | 402 → 387 | 25 | 0.32 / 0.58 → 0.33 / 0.65 |
+| cbm 0.12.0 | 4/16 | 2,171 | — | 344 | 18 | — |
+
+| Language | Fewer tokens / correct vs plans | … amortised | Tasks regressed | Median overhead | Gate |
+|---|---|---|---|---|---|
+| js | 87.8% → 84.4% | 81.6% → 75.7% | none | 0.56 ms → 0.63 ms | pass |
+| starlark | 87.7% → 84.2% | 81.3% → 75.4% | none | 0.32 ms → 0.33 ms | pass |
+
+Tasks whose correctness changed: none.
 
 ## By expectation
 
 | Tasks | Arm | Correct | Tokens read / correct | Round trips |
 |---|---|---|---|---|
 | single | tool-call plan | 5/5 | 331 | 5 |
-| single | code mode, JavaScript | 5/5 | 266 | 5 |
-| single | code mode, Starlark | 5/5 | 274 | 5 |
+| single | code mode, JavaScript | 5/5 | 263 | 5 |
+| single | code mode, Starlark | 5/5 | 271 | 5 |
 | single | cbm 0.12.0 | 2/3 | 328 | 4 |
-| win | tool-call plan | 13/20 | 4,911 | 140 |
-| win | code mode, JavaScript | 13/20 | 512 | 20 |
-| win | code mode, Starlark | 13/20 | 516 | 20 |
+| win | tool-call plan | 13/20 | 3,671 | 138 |
+| win | code mode, JavaScript | 13/20 | 493 | 20 |
+| win | code mode, Starlark | 13/20 | 497 | 20 |
 | win | cbm 0.12.0 | 2/13 | 4,014 | 14 |
 
 ## By task kind
 
 | Kind | Plan read (correct/n) | JavaScript | Starlark | cbm |
 |---|---|---|---|---|
-| callee-leaves | 940 (0/1) | 300 (0/1) | 308 (0/1) | 345 (0/1) |
-| callees-intersection | 2,562 (2/3) | 891 (2/3) | 926 (2/3) | 281 (1/3) |
-| callers-2hop | 728 (1/1) | 499 (1/1) | 517 (1/1) | 406 (0/1) |
-| callers-filter | 296 (1/1) | 334 (1/1) | 350 (1/1) | 187 (1/1) |
-| callers-in-dir | 1,042 (0/1) | 378 (0/1) | 393 (0/1) | 571 (0/1) |
-| callers-intersection | 1,094 (1/2) | 604 (1/2) | 628 (1/2) | 239 (1/2) |
-| count-2hop | 518 (1/1) | 301 (1/1) | 325 (1/1) | 688 (0/1) |
-| cross-repo-callers | 7,826 (1/1) | 241 (1/1) | 242 (1/1) | — |
-| cross-repo-classes | 3,795 (1/1) | 345 (1/1) | 335 (1/1) | — |
-| cross-repo-fanout | 841 (1/1) | 318 (1/1) | 310 (1/1) | — |
-| max-fanin-callee | 2,335 (1/1) | 344 (1/1) | 325 (1/1) | 859 (0/1) |
+| callee-leaves | 940 (0/1) | 296 (0/1) | 301 (0/1) | 345 (0/1) |
+| callees-intersection | 2,562 (2/3) | 879 (2/3) | 908 (2/3) | 281 (1/3) |
+| callers-2hop | 728 (1/1) | 495 (1/1) | 511 (1/1) | 406 (0/1) |
+| callers-filter | 296 (1/1) | 330 (1/1) | 344 (1/1) | 187 (1/1) |
+| callers-in-dir | 686 (0/1) | 374 (0/1) | 387 (0/1) | 571 (0/1) |
+| callers-intersection | 1,094 (1/2) | 596 (1/2) | 616 (1/2) | 239 (1/2) |
+| count-2hop | 518 (1/1) | 297 (1/1) | 319 (1/1) | 688 (0/1) |
+| cross-repo-callers | 2,502 (1/1) | 223 (1/1) | 223 (1/1) | — |
+| cross-repo-classes | 3,385 (1/1) | 327 (1/1) | 316 (1/1) | — |
+| cross-repo-fanout | 841 (1/1) | 300 (1/1) | 291 (1/1) | — |
+| max-fanin-callee | 2,335 (1/1) | 340 (1/1) | 318 (1/1) | 859 (0/1) |
 | org-deps | 400 (1/1) | 155 (1/1) | 158 (1/1) | — |
-| outline-fanout | 1,626 (0/1) | 414 (0/1) | 433 (0/1) | 240 (0/1) |
-| ref-diff | 11,625 (1/1) | 360 (1/1) | 324 (1/1) | — |
-| route-providers | 158 (1/1) | 115 (1/1) | 101 (1/1) | — |
+| outline-fanout | 1,602 (0/1) | 415 (0/1) | 432 (0/1) | 240 (0/1) |
+| ref-diff | 1,614 (1/1) | 190 (1/1) | 199 (1/1) | — |
+| route-providers | 158 (1/1) | 111 (1/1) | 103 (1/1) | — |
 | routes-both-clients | 7,780 (1/1) | 369 (1/1) | 358 (1/1) | — |
 | routes-difference | 7,780 (1/1) | 305 (1/1) | 294 (1/1) | — |
-| search-filter-details | 590 (0/1) | 340 (0/1) | 349 (0/1) | 260 (0/1) |
-| single-step | 71 (1/1) | 229 (1/1) | 244 (1/1) | 64 (1/1) |
+| search-filter-details | 590 (0/1) | 340 (0/1) | 348 (0/1) | 260 (0/1) |
+| single-step | 71 (1/1) | 225 (1/1) | 238 (1/1) | 64 (1/1) |
 | spec-ops-count | 6,533 (1/1) | 259 (1/1) | 246 (1/1) | — |
-| top-fanin-file | 4,975 (1/1) | 386 (1/1) | 389 (1/1) | 3,626 (0/1) |
-| uncalled-in-file | 1,987 (0/1) | 506 (0/1) | 517 (0/1) | 919 (0/1) |
+| top-fanin-file | 4,975 (1/1) | 386 (1/1) | 387 (1/1) | 3,626 (0/1) |
+| uncalled-in-file | 1,987 (0/1) | 508 (0/1) | 515 (0/1) | 919 (0/1) |
 
 ## Per task
 
@@ -74,31 +92,31 @@ Each cell: correct, tokens read, round trips (`E`: the arm errored). cbm `—`: 
 
 | Task | Kind | Corpus | Expect | Plan | JavaScript | Starlark | cbm |
 |---|---|---|---|---|---|---|---|
-| ms01 | callers-2hop | flask | single | ✓ 728 / 1 | ✓ 499 / 1 | ✓ 517 / 1 | ✗ 406 / 2 |
-| ms02 | callers-intersection | flask | win | ✓ 590 / 2 | ✓ 288 / 1 | ✓ 299 / 1 | ✓ 105 / 1 |
-| ms03 | callees-intersection | flask | win | ✓ 350 / 2 | ✓ 281 / 1 | ✓ 292 / 1 | ✓ 90 / 1 |
-| ms04 | single-step | flask | single | ✓ 71 / 1 | ✓ 229 / 1 | ✓ 244 / 1 | ✓ 64 / 1 |
-| ms05 | outline-fanout | flask | win | ✗ 1,626 / 10 | ✗ 414 / 1 | ✗ 433 / 1 | ✗ 240 / 1 |
-| ms06 | callee-leaves | flask | win | ✗ 940 / 7 | ✗ 300 / 1 | ✗ 308 / 1 | ✗ 345 / 1 |
-| ms07 | top-fanin-file | requests | win | ✓ 4,975 / 51 | ✓ 386 / 1 | ✓ 389 / 1 | ✗ 3,626 / 1 |
-| ms08 | uncalled-in-file | requests | win | ✗ 1,987 / 21 | ✗ 506 / 1 | ✗ 517 / 1 | ✗ 919 / 1 |
-| ms09 | count-2hop | requests | win | ✓ 518 / 1 | ✓ 301 / 1 | ✓ 325 / 1 | ✗ 688 / 2 |
-| ms10 | callers-filter | requests | single | ✓ 296 / 1 | ✓ 334 / 1 | ✓ 350 / 1 | ✓ 187 / 1 |
-| ms11 | callees-intersection | requests | win | ✗ 698 / 2 | ✗ 292 / 1 | ✗ 303 / 1 | ✗ 64 / 1 |
-| ms12 | search-filter-details | requests | win | ✗ 590 / 5 | ✗ 340 / 1 | ✗ 349 / 1 | ✗ 260 / 1 |
-| ms13 | callers-intersection | hono | win | ✗ 504 / 2 | ✗ 316 / 1 | ✗ 329 / 1 | ✗ 134 / 1 |
-| ms14 | callees-intersection | hono | win | ✓ 1,514 / 2 | ✓ 318 / 1 | ✓ 331 / 1 | ✗ 127 / 1 |
-| ms15 | max-fanin-callee | hono | win | ✓ 2,335 / 16 | ✓ 344 / 1 | ✓ 325 / 1 | ✗ 859 / 1 |
-| ms16 | callers-in-dir | hono | win | ✗ 1,042 / 1 | ✗ 378 / 1 | ✗ 393 / 1 | ✗ 571 / 1 |
-| ms17 | cross-repo-callers | xr-flask | win | ✓ 7,826 / 1 | ✓ 241 / 1 | ✓ 242 / 1 | — |
-| ms18 | cross-repo-fanout | xr-flask | win | ✓ 841 / 3 | ✓ 318 / 1 | ✓ 310 / 1 | — |
-| ms19 | cross-repo-classes | xr-flask | win | ✓ 3,795 / 3 | ✓ 345 / 1 | ✓ 335 / 1 | — |
+| ms01 | callers-2hop | flask | single | ✓ 728 / 1 | ✓ 495 / 1 | ✓ 511 / 1 | ✗ 406 / 2 |
+| ms02 | callers-intersection | flask | win | ✓ 590 / 2 | ✓ 284 / 1 | ✓ 293 / 1 | ✓ 105 / 1 |
+| ms03 | callees-intersection | flask | win | ✓ 350 / 2 | ✓ 277 / 1 | ✓ 286 / 1 | ✓ 90 / 1 |
+| ms04 | single-step | flask | single | ✓ 71 / 1 | ✓ 225 / 1 | ✓ 238 / 1 | ✓ 64 / 1 |
+| ms05 | outline-fanout | flask | win | ✗ 1,602 / 10 | ✗ 415 / 1 | ✗ 432 / 1 | ✗ 240 / 1 |
+| ms06 | callee-leaves | flask | win | ✗ 940 / 7 | ✗ 296 / 1 | ✗ 301 / 1 | ✗ 345 / 1 |
+| ms07 | top-fanin-file | requests | win | ✓ 4,975 / 51 | ✓ 386 / 1 | ✓ 387 / 1 | ✗ 3,626 / 1 |
+| ms08 | uncalled-in-file | requests | win | ✗ 1,987 / 21 | ✗ 508 / 1 | ✗ 515 / 1 | ✗ 919 / 1 |
+| ms09 | count-2hop | requests | win | ✓ 518 / 1 | ✓ 297 / 1 | ✓ 319 / 1 | ✗ 688 / 2 |
+| ms10 | callers-filter | requests | single | ✓ 296 / 1 | ✓ 330 / 1 | ✓ 344 / 1 | ✓ 187 / 1 |
+| ms11 | callees-intersection | requests | win | ✗ 698 / 2 | ✗ 288 / 1 | ✗ 297 / 1 | ✗ 64 / 1 |
+| ms12 | search-filter-details | requests | win | ✗ 590 / 5 | ✗ 340 / 1 | ✗ 348 / 1 | ✗ 260 / 1 |
+| ms13 | callers-intersection | hono | win | ✗ 504 / 2 | ✗ 312 / 1 | ✗ 323 / 1 | ✗ 134 / 1 |
+| ms14 | callees-intersection | hono | win | ✓ 1,514 / 2 | ✓ 314 / 1 | ✓ 325 / 1 | ✗ 127 / 1 |
+| ms15 | max-fanin-callee | hono | win | ✓ 2,335 / 16 | ✓ 340 / 1 | ✓ 318 / 1 | ✗ 859 / 1 |
+| ms16 | callers-in-dir | hono | win | ✗ 686 / 1 | ✗ 374 / 1 | ✗ 387 / 1 | ✗ 571 / 1 |
+| ms17 | cross-repo-callers | xr-flask | win | ✓ 2,502 / 1 | ✓ 223 / 1 | ✓ 223 / 1 | — |
+| ms18 | cross-repo-fanout | xr-flask | win | ✓ 841 / 3 | ✓ 300 / 1 | ✓ 291 / 1 | — |
+| ms19 | cross-repo-classes | xr-flask | win | ✓ 3,385 / 3 | ✓ 327 / 1 | ✓ 316 / 1 | — |
 | ms20 | org-deps | xr-flask | single | ✓ 400 / 1 | ✓ 155 / 1 | ✓ 158 / 1 | — |
 | ms21 | routes-both-clients | s2-ollama | win | ✓ 7,780 / 3 | ✓ 369 / 1 | ✓ 358 / 1 | — |
 | ms22 | routes-difference | s2-ollama | win | ✓ 7,780 / 3 | ✓ 305 / 1 | ✓ 294 / 1 | — |
 | ms23 | spec-ops-count | s2-ollama | win | ✓ 6,533 / 2 | ✓ 259 / 1 | ✓ 246 / 1 | — |
-| ms24 | route-providers | s2-ollama | single | ✓ 158 / 1 | ✓ 115 / 1 | ✓ 101 / 1 | — |
-| ms25 | ref-diff | mr-requests | win | ✓ 11,625 / 3 | ✓ 360 / 1 | ✓ 324 / 1 | — |
+| ms24 | route-providers | s2-ollama | single | ✓ 158 / 1 | ✓ 111 / 1 | ✓ 103 / 1 | — |
+| ms25 | ref-diff | mr-requests | win | ✓ 1,614 / 1 | ✓ 190 / 1 | ✓ 199 / 1 | — |
 
 ## Limits hit
 
@@ -128,7 +146,9 @@ Each cell: correct, tokens read, round trips (`E`: the arm errored). cbm `—`: 
 
 A fresh model per task and language wrote one script from the task statement and `describe_api` alone
 (protocol and scripts: `bench/multistep/probe/`; reading: RFC 0009 §14). Each cell: correct, script
-tokens, engine calls (`E`: the script errored); `→` a repair attempt given the `execute` output.
+tokens, engine calls (`E`: the script errored); `→` a repair attempt given the `execute` output. The probe ran
+against the API before the fixes of RFC 0009 §14.6 and is kept as run; the reference scripts and plans it is
+compared with below are this run's.
 
 | Task | Kind | JavaScript | Starlark |
 |---|---|---|---|
@@ -145,5 +165,5 @@ tokens, engine calls (`E`: the script errored); `→` a repair attempt given the
 
 - JavaScript: first try 9/10; after one repair 9/10 (repairs run: 1 of 1); script tokens mean 830, median 771.0; engine calls 166 (first tries); script errors 0.
 - Starlark: first try 9/10; after one repair 9/10 (repairs run: 0 of 1); script tokens mean 640, median 622.5; engine calls 167 (first tries); script errors 0.
-- JavaScript, tokens read per correct answer on these tasks: first-try scripts 1,007, reference scripts 339, tool-call plans 4,169.
-- Starlark, tokens read per correct answer on these tasks: first-try scripts 796, reference scripts 338, tool-call plans 4,169.
+- JavaScript, tokens read per correct answer on these tasks: first-try scripts 1,007, reference scripts 316, tool-call plans 2,594.
+- Starlark, tokens read per correct answer on these tasks: first-try scripts 796, reference scripts 318, tool-call plans 2,594.

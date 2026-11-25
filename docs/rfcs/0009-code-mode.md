@@ -55,11 +55,14 @@ one script that does the chain, filters, and hands back the final rows.
 
 ## 2. Motivation
 
-The published benchmark (`docs/bench/alpha-results.md`) shows where Rueca
-still loses to codebase-memory-mcp 0.12.0: **tokens per true edge from
-`trace`** — Python 57 vs 48, TS/JS 64 vs 54, PHP 72 vs 56, C 52 vs 30,
-C++ 63 vs 61; Rueca wins in Java (67 vs 76) and Rust (51 vs 106). cbm also
-offers `query_graph`, a free-form graph query, which Rueca does not have.
+The published benchmark (`docs/bench/alpha-results.md`) showed, at the time
+of writing, where Rueca still loses to codebase-memory-mcp 0.12.0: **tokens
+per true edge from `trace`** — Python 57 vs 48, TS/JS 64 vs 54, PHP 72 vs
+56, C 52 vs 30, C++ 63 vs 61; Rueca wins in Java (67 vs 76) and Rust (51
+vs 106). (Re-measured after §14.6, which drops code nested in tests from
+`trace`: Python 55 vs 48, TS/JS 57 vs 54; the others did not move.) cbm
+also offers `query_graph`, a free-form graph query, which Rueca does not
+have.
 
 The per-answer gap is formatting and can be closed in the tools themselves.
 The larger cost is structural: a multi-step question costs the sum of every
@@ -527,44 +530,72 @@ What the rows mean for the experiment:
 
 ### 13.1 Phase 2 results
 
-`rueca-bench multistep run`, 2026-11-24, Apple M1 Pro; `rueca` release
+`rueca-bench multistep run`, 2026-11-24, Apple M4 Pro; `rueca` release
 build `--no-default-features --features code-mode-starlark` (lexical only,
 no embedding runtime: nothing in the suite embeds), cbm 0.12.0 (the bench's
 pinned binary). Tokens: cl100k_base. All 25 tasks and all four arms ran;
 full tables in `docs/bench/multistep-results.md`, records in
-`bench/results/multistep.json`.
+`bench/results/multistep.json`. The numbers below are re-measured after the
+API fixes of §14.6 (stores re-indexed with that binary; reference scripts
+and the ms25 plan without their workarounds); the first run's numbers,
+before the fixes, are in the second table.
 
 | Arm | Correct | Read / correct | … `describe_api` amortised | Written / correct | Round trips | `execute` overhead median / p95 |
 |---|---|---|---|---|---|---|
-| Tool-call plans | 18/25 | 3,639 | — | 257 | 145 | — |
-| JavaScript | 18/25 | 444 | 671 | 367 | 25 | 0.56 / 1.13 ms |
-| Starlark | 18/25 | 448 | 680 | 402 | 25 | 0.32 / 0.58 ms |
+| Tool-call plans | 18/25 | 2,743 | — | 254 | 143 | — |
+| JavaScript | 18/25 | 429 | 666 | 352 | 25 | 0.63 / 1.20 ms |
+| Starlark | 18/25 | 434 | 675 | 387 | 25 | 0.33 / 0.65 ms |
 | cbm | 4/16 | 2,171 | — | 344 | 18 | — |
 
-- **Gate: both languages pass.** Tokens read per correct answer −87.8%
-  (JavaScript) and −87.7% (Starlark) against the plans; −81.6% / −81.3%
-  with `describe_api` (4,086 / 4,166 tokens) read once and amortised over
+Before / after the API fixes (§14.6):
+
+| | Plans | JavaScript | Starlark |
+|---|---|---|---|
+| Correct | 18/25 → 18/25 | 18/25 → 18/25 | 18/25 → 18/25 |
+| Read / correct | 3,639 → 2,743 | 444 → 429 | 448 → 434 |
+| … `describe_api` amortised | — | 671 → 666 (4,086 → 4,260 tokens) | 680 → 675 (4,166 → 4,338 tokens) |
+| Written / correct | 257 → 254 | 367 → 352 | 402 → 387 |
+| Round trips | 145 → 143 | 25 → 25 | 25 → 25 |
+| Overhead median / p95 | — | 0.56 / 1.13 → 0.63 / 1.20 ms | 0.32 / 0.58 → 0.33 / 0.65 ms |
+| Cut vs plans (gate ≥ 40%), plain / amortised | — | 87.8% / 81.6% → 84.4% / 75.7% | 87.7% / 81.3% → 84.2% / 75.4% |
+
+The plans got cheaper (ms25 reads one outline at both refs, 11,625 →
+1,614 tokens; `trace` no longer returns code nested in tests, ms17 7,826
+→ 2,502, ms19 3,795 → 3,385, ms16 1,042 → 686), so the cut shrank; the
+scripts got slightly shorter (no id slicing). No task changed correctness
+in any arm (cbm did not change: same binary, same answers).
+
+- **Gate: both languages pass.** Tokens read per correct answer −84.4%
+  (JavaScript) and −84.2% (Starlark) against the plans; −75.7% / −75.4%
+  with `describe_api` (4,260 / 4,338 tokens) read once and amortised over
   the 25 tasks; no task the plans answer correctly is wrong in either
   language; median overhead under 1 ms (gate 20 ms).
 - **Where it comes from.** The pooled ratio is dominated by the plans that
-  must read whole listings: callers of a library function across the
-  organization (7,826 tokens for one `trace`), the three contract tasks
-  (6,533–7,780), the ref diff (11,625: the file at both refs). Without
-  those five tasks the reduction is 76%; the median per-task ratio of
-  code mode to plan is 0.36 (0.26 over the 20 tasks expected to win).
+  must read whole listings: the three contract tasks (6,533–7,780 tokens),
+  the classes of a library used across the organization (ms19, 3,385),
+  callers of a library function across the organization (ms17, 2,502 for
+  one `trace`) and the ref diff (ms25, 1,614: one outline at both refs;
+  11,625 before the fixes, when it read the file at both refs). Without
+  the five tasks that dominated the first run (ms17, ms21–ms23, ms25) the
+  reduction is 76% (as before the fixes); the median per-task ratio of
+  code mode to plan is 0.36 (0.26 over the 20 tasks expected to win),
+  also unchanged.
 - **Where code mode does not help.** A one-call question with a short
-  answer: direct callers (ms04: 71 tokens as a call, 229 as a script) and
-  callers outside a file (ms10: 296 vs 334) — the script source costs more
+  answer: direct callers (ms04: 71 tokens as a call, 225 as a script) and
+  callers outside a file (ms10: 296 vs 330) — the script source costs more
   than the answer. The other three single-step tasks still read less
   (a depth-2 trace, `list_repositories`, a route's handlers), and on the
   four tasks every arm answers correctly cbm's one Cypher query reads the
-  least (446 tokens in total vs 1,307 plans, 1,132 JavaScript, 1,185
+  least (446 tokens in total vs 1,307 plans, 1,116 JavaScript, 1,161
   Starlark): code mode's cost there is the script itself.
 - **Correctness is the engine's, not the arm's.** The seven tasks no
   Rueca arm gets right (ms05, ms06, ms08, ms11, ms12, ms13, ms16) differ
   from the SCIP gold by one element each (a caller Rueca resolves that SCIP
   does not, a nested-function name); plans and both languages give the same
-  answer on every task. cbm's 12 misses are its own call graph (no
+  answer on every task. The fixes of §14.6 moved none of them: the test
+  code `trace` now leaves out was never in their answers (ms16 asks for
+  callers under `src/`, and its plan only stopped reading the test-file
+  callers it had to filter out). cbm's 12 misses are its own call graph (no
   constructor calls, class-less names for TypeScript object-literal
   methods, a missing `api.py` hop) — and its `[:CALLS*1..2]` / `[:CALLS*2]`
   return the direct callers only, so its plans spell the second hop out.
@@ -632,7 +663,11 @@ failure, exactly one repair attempt, given the `execute` output. n = 1
 per cell and one model: an indication, not a measurement of model fluency
 in general. Scripts, runner output and prompt template are committed in
 `bench/multistep/probe/`; per-task table in
-`docs/bench/multistep-results.md` (*Fluency probe*).
+`docs/bench/multistep-results.md` (*Fluency probe*). The probe ran against
+the API *before* the fixes of §14.6, and its scripts and runner output are
+kept as they were (they are not re-run as first tries); the reference
+scripts and plans it is compared with below are the re-measured ones of
+§13.1, after the fixes (before them: 339 / 338 and 4,169 tokens).
 
 | | JavaScript | Starlark |
 |---|---|---|
@@ -641,7 +676,7 @@ in general. Scripts, runner output and prompt template are committed in
 | Script tokens, mean / median | 830 / 771 | 640 / 622.5 |
 | Engine calls, all first tries | 166 | 167 |
 | Script errors (syntax, runtime, timeout, limits) | none | none |
-| Tokens read per correct answer on these 10 tasks: first-try scripts / reference scripts / plans | 1,007 / 339 / 4,169 | 796 / 338 / 4,169 |
+| Tokens read per correct answer on these 10 tasks: first-try scripts / reference scripts / plans | 1,007 / 316 / 2,594 | 796 / 318 / 2,594 |
 
 - **No failure came from the language or the API's shape.** All 20
   first-try scripts ran without an error and no limit was hit. All 10
@@ -660,29 +695,35 @@ in general. Scripts, runner output and prompt template are committed in
   obtained: the repair subagent's file write was blocked by the harness's
   permission system, a tooling failure unrelated to the language.
 - **Model-written scripts are longer than the reference ones.** On these
-  tasks the first-try scripts have 3.2× (JavaScript) and 2.5× (Starlark)
+  tasks the first-try scripts have 3.5× (JavaScript) and 2.7× (Starlark)
   the source tokens of the reference scripts (defensive checks,
   `try`/`catch` in 9 of 10 JavaScript scripts, helper functions) and make
-  twice the engine calls (166 and 167 vs 83). Tokens read per correct
-  answer still fall 76% (JavaScript) and 81% (Starlark) against the plans
-  on the same tasks — above the 40% gate, but short of the 92% the
+  twice the engine calls (166 and 167 vs 81). Tokens read per correct
+  answer still fall 61% (JavaScript) and 69% (Starlark) against the plans
+  on the same tasks — above the 40% gate, but short of the 88% the
   reference scripts show there; on ms01, ms02 and ms09 the JavaScript
-  script reads as much as the plan or more (Starlark about the same).
-  Starlark scripts were about 23% shorter than JavaScript ones.
+  script reads as much as the plan or more (Starlark on ms01). Starlark
+  scripts were about 23% shorter than JavaScript ones. (Against the plans
+  and reference scripts before the fixes: 3.2× / 2.5×, 83 calls, 76% /
+  81% vs 92%; the plans of ms17, ms19 and ms25 got much cheaper.)
 
 ### 14.2 Gate (§8)
 
 | Language | Read / correct vs plans (≥ 40%) | … `describe_api` amortised | Tasks regressed (none) | Median overhead (< 20 ms) | Gate |
 |---|---|---|---|---|---|
-| JavaScript | −87.8% (444 vs 3,639) | −81.6% (671) | none | 0.56 ms | pass |
-| Starlark | −87.7% (448 vs 3,639) | −81.3% (680) | none | 0.32 ms | pass |
+| JavaScript | −84.4% (429 vs 2,743) | −75.7% (666) | none | 0.63 ms | pass |
+| Starlark | −84.2% (434 vs 2,743) | −75.4% (675) | none | 0.33 ms | pass |
 
-The same 18 of 25 tasks are correct in all three Rueca arms. The pooled
-ratio is dominated by five listing-heavy tasks (ms17, ms21–ms23, ms25:
-6,533–11,625 tokens as plans); without them the cut is 76%, and the
-median per-task ratio of code mode to plan is 0.36. Both numbers come
-from the reference scripts; the probe's model-written scripts read more
-(§14.1).
+Re-measured after the API fixes of §14.6; before them −87.8% / −87.7%
+(444 / 448 vs 3,639), −81.6% / −81.3% amortised, overhead 0.56 / 0.32 ms
+(§13.1). The cut shrank because the plans got cheaper, not because the
+scripts got dearer. The same 18 of 25 tasks are correct in all three Rueca
+arms, before and after. The pooled ratio is dominated by the three
+contract tasks (6,533–7,780 tokens as plans) and the cross-repository
+listings; without the five tasks that dominated the first run (ms17,
+ms21–ms23, ms25) the cut is 76%, and the median per-task ratio of code
+mode to plan is 0.36, both as before the fixes. Both numbers come from the
+reference scripts; the probe's model-written scripts read more (§14.1).
 
 ### 14.3 Per-language verdict
 
@@ -700,7 +741,7 @@ gate with numbers indistinguishable from JavaScript's, and starts faster
 (about 1.5 µs against about 0.1 ms; irrelevant next to engine calls that
 take milliseconds). In the probe its scripts were about 23% shorter (796
 vs 1,007 tokens read per correct answer on those tasks, n = 1 per cell;
-the reference scripts show no such gap: 448 vs 444 suite-wide) and it
+the reference scripts show no such gap: 434 vs 429 suite-wide) and it
 scored 9/10 on the first try: the hypothesis that models would trip over
 the dialect was not confirmed at this sample size. Against it: its
 dependency tree fails the repository's `cargo deny` advisory policy (three
@@ -713,13 +754,14 @@ counted, a long built-in overruns the deadline: §13); and it adds
 ### 14.4 Where code mode falls short
 
 1. **Single-step and near-single-step questions**: the script costs more
-   than the answer (ms04: 71 tokens as a tool call, 229 as a script; ms10:
-   296 vs 334).
-2. **`describe_api` costs about 4.1k tokens (cl100k_base; 4,086 for
-   JavaScript, 4,166 for Starlark) once per session.** The suite
-   saves about 2,300 tokens per task on average, so it pays back after
-   roughly two multi-step questions and is a net loss in a session with
-   one small question.
+   than the answer (ms04: 71 tokens as a tool call, 225 as a script; ms10:
+   296 vs 330).
+2. **`describe_api` costs about 4.3k tokens (cl100k_base; 4,260 for
+   JavaScript, 4,338 for Starlark) once per session.** The suite
+   saves about 1,670 tokens per task on average (about 2,300 before the
+   fixes made the plans cheaper), so it pays back after roughly three
+   multi-step questions and is a net loss in a session with one small
+   question.
 3. **It does not improve correctness, and it can hide evidence.** The 7
    tasks the tool-call plans get wrong are wrong identically in both
    languages (engine precision against the SCIP gold, §13.1). A script
@@ -727,7 +769,7 @@ counted, a long built-in overruns the deadline: §13); and it adds
    no signal to repair, and the intermediate answers that might have let
    it notice never reach it (probe ms19).
 4. **cbm's single Cypher query reads less where it can express a task and
-   gets it right**: 446 vs 1,132 tokens (JavaScript) on the 4 tasks every
+   gets it right**: 446 vs 1,116 tokens (JavaScript) on the 4 tasks every
    arm answers correctly. But cbm was correct on only 4 of the 16 tasks it
    can express and cannot express the cross-repository, contract and ref
    tasks (9 of 25).
@@ -736,10 +778,10 @@ counted, a long built-in overruns the deadline: §13); and it adds
    cross-repository node's repository was recoverable only from its id; the
    multi-ref `changed` flag was per file, not per symbol; `include_tests:
    false` leaked functions nested in `describe` blocks of test files.
-   **Fixed before merge** (§14.6); the suite's numbers above predate the
-   fixes.
+   **Fixed before merge** (§14.6); the suite's numbers above are
+   re-measured after the fixes.
 6. **Model-written scripts cost more than the reference ones** (§14.1):
-   3.2× / 2.5× the source tokens, so the suite's −87.8% is an upper bound
+   3.5× / 2.7× the source tokens, so the suite's −84.4% is an upper bound
    on what an agent would see.
 7. **Measurement limits**: reference scripts stand in for an agent; the
    probe is n = 1 per cell with one model; a plan's wall time is inflated
@@ -804,4 +846,9 @@ counted, a long built-in overruns the deadline: §13); and it adds
   workarounds (every reference answer is unchanged; the ms25 plan reads
   one outline instead of the file at both refs). `describe_api` grows to
   4,260 (JavaScript) and 4,338 (Starlark) tokens. The suite numbers of
-  §13.1 and §14 predate the fixes and are refreshed separately.
+  §13.1 and §14 are re-measured after the fixes (before / after in §13.1
+  and `docs/bench/multistep-results.md`): the gate still passes in both
+  languages (−84.4% / −84.2%, −75.7% / −75.4% amortised; −87.8% / −87.7%
+  before), no task changed correctness, and the multi-ref scenario of the
+  organization suite now scores: no unchanged symbol of the changed file
+  is flagged `changed` (6 before the fixes, 0 after; `docs/bench/alpha-results.md`).

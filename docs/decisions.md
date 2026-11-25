@@ -40,7 +40,43 @@ reads 1,614 tokens instead of 11,625 (one outline at both refs instead of
 the file twice); `trace` text shrinks where test code was nested (ms17
 7,826 → 2,502, ms19 3,795 → 3,385, ms16 1,042 → 686, ms05 1,626 → 1,602).
 `describe_api` grows to 4,260 (JavaScript) and 4,338 (Starlark) tokens.
-The suite is refreshed separately.
+
+Re-measured with the fixed engine (stores re-indexed):
+
+- **Multi-step suite**: 18/25 correct in every Rueca arm, as before (no
+  task changed correctness in any arm); tokens read per correct answer:
+  plans 3,639 → 2,743, JavaScript 444 → 429, Starlark 448 → 434 (with
+  `describe_api` amortised 671 → 666 / 680 → 675). The gate still passes:
+  −84.4% / −84.2% against the plans (−87.8% / −87.7% before), −75.7% /
+  −75.4% amortised; median overhead 0.63 / 0.33 ms. The cut shrank because
+  the plans got cheaper.
+- **Multi-ref scenario** (organization suite, first scored run): unchanged
+  symbols of the changed file flagged `changed`: 6 with the engine before
+  the fixes, 0 after; every changed symbol flagged, every unchanged file's
+  symbol collapsed (168 / 168).
+- **Structure (S3)**, Rueca arm re-measured on 21 of 30 sets (every set
+  whose gold builds without Docker, except C++: its gold rebuilt here
+  differs from the published one by two questions, so C++ stays the
+  published run; its answers did not change either), compared with the
+  engine just before the fixes on the same sets: `trace` drops the
+  test-file callers nested in tests on four sets (hono callers returned
+  1,068 → 767, click 575 → 422, flask 302 → 242, jinja 800 → 779; every
+  dropped node is in a test file); every other set answers identically.
+  Scored precision / recall do not move (the scorer already left test
+  files out); the published C row moves by 0.1 point (Lua callers recall
+  96.5 → 96.6), which predates the fixes (the engine before them gives the
+  same answers). Java, PHP and C++ sets and every cbm / BM25 row are
+  carried from the published results.
+- **Tokens per true edge** (`trace`, Rueca vs cbm's published rows):
+  TS/JS 64 → 57 (cbm 54), Python 57 → 55 (cbm 48); the engine before the
+  fixes gives 64.1 and 56.8 on the same sets, so this is the fix. Other
+  languages unchanged. The JSON diagnostic grows (`local`, `repo`, `ref`
+  on every symbol: median trace JSON 373 → 440 tokens for Python); the
+  text an agent reads only shrinks.
+- **Localization (S1)** confirmed unmoved: the Rueca arm on all 169
+  Python, TS/JS and Rust instances with both engines gives the same File
+  Acc@k and Function Acc@k on every instance (six rankings differ below
+  the top 10); S1 stays the published run.
 
 ## 2026-11-24 — Code mode phase 3: verdict and recommendation; the owner decides (RFC 0009)
 
@@ -54,7 +90,7 @@ given, and Starlark stays the non-default `code-mode-starlark` feature.
   −81.3% with `describe_api` amortised), no task regressed (18/25 in all
   three Rueca arms), median `execute` overhead 0.56 / 0.32 ms. Five
   listing-heavy tasks dominate the pooled ratio; without them the cut is
-  76%.
+  76%. (Numbers before the API fixes; re-measured in the entry above.)
 - **Fluency probe** (10 tasks × 2 languages, one fresh model per cell with
   only the statement and `describe_api`, n = 1): 9/10 correct on the first
   try in each language, no script error of any kind. The one failure
