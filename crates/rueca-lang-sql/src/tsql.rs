@@ -72,22 +72,90 @@ struct State {
 /// Words that always start a statement (at depth 0, after the guards of
 /// [`Tsql::starts`]).
 const STARTERS: &[&str] = &[
-    "DECLARE", "PRINT", "RAISERROR", "THROW", "GOTO", "BREAK", "CONTINUE", "WAITFOR", "TRUNCATE", "RETURN", "COMMIT",
-    "ROLLBACK", "DBCC", "CHECKPOINT", "RECONFIGURE", "BACKUP", "RESTORE", "KILL", "DEALLOCATE", "GRANT", "DENY",
-    "REVOKE", "REVERT", "WHILE", "SHUTDOWN", "CREATE", "BEGIN", "SEND", "RECEIVE",
+    "DECLARE",
+    "PRINT",
+    "RAISERROR",
+    "THROW",
+    "GOTO",
+    "BREAK",
+    "CONTINUE",
+    "WAITFOR",
+    "TRUNCATE",
+    "RETURN",
+    "COMMIT",
+    "ROLLBACK",
+    "DBCC",
+    "CHECKPOINT",
+    "RECONFIGURE",
+    "BACKUP",
+    "RESTORE",
+    "KILL",
+    "DEALLOCATE",
+    "GRANT",
+    "DENY",
+    "REVOKE",
+    "REVERT",
+    "WHILE",
+    "SHUTDOWN",
+    "CREATE",
+    "BEGIN",
+    "SEND",
+    "RECEIVE",
 ];
 
 /// Words after which the next word is an operand or a name, never the
 /// start of a statement.
 const NAME_AFTER: &[&str] = &[
-    "AS", "TABLE", "PROCEDURE", "PROC", "FUNCTION", "VIEW", "TRIGGER", "INDEX", "DATABASE", "BY", "AND", "OR", "WHERE",
-    "JOIN", "INTO", "NOT", "IN", "LIKE", "IS", "BETWEEN", "WHEN", "UNION", "ALL", "EXCEPT", "INTERSECT", "EXISTS",
-    "TOP", "DISTINCT", "SELECT", "ON", "FOR", "WITH", "FROM", "APPLY", "HAVING",
+    "AS",
+    "TABLE",
+    "PROCEDURE",
+    "PROC",
+    "FUNCTION",
+    "VIEW",
+    "TRIGGER",
+    "INDEX",
+    "DATABASE",
+    "BY",
+    "AND",
+    "OR",
+    "WHERE",
+    "JOIN",
+    "INTO",
+    "NOT",
+    "IN",
+    "LIKE",
+    "IS",
+    "BETWEEN",
+    "WHEN",
+    "UNION",
+    "ALL",
+    "EXCEPT",
+    "INTERSECT",
+    "EXISTS",
+    "TOP",
+    "DISTINCT",
+    "SELECT",
+    "ON",
+    "FOR",
+    "WITH",
+    "FROM",
+    "APPLY",
+    "HAVING",
 ];
 
 /// Action words of `ALTER object name …`.
 const ALTER_ACTIONS: &[&str] = &[
-    "ADD", "REBUILD", "DISABLE", "ENABLE", "REORGANIZE", "CHECK", "NOCHECK", "SWITCH", "RENAME", "MODIFY", "COLLATE",
+    "ADD",
+    "REBUILD",
+    "DISABLE",
+    "ENABLE",
+    "REORGANIZE",
+    "CHECK",
+    "NOCHECK",
+    "SWITCH",
+    "RENAME",
+    "MODIFY",
+    "COLLATE",
     "WITH",
 ];
 
@@ -117,9 +185,16 @@ impl Tsql<'_, '_, '_, '_> {
     fn sequence(&mut self, mut i: usize) {
         while i < self.toks.len() {
             if self.up(i) == "END" {
-                let e = self.boundary(i + 1, "END");
-                self.r.leaf_own(self.range(i, e.max(i + 1)), self.enclosing, Mode::Refs, None);
-                i = e.max(i + 1);
+                // `END CONVERSATION @handle` is a statement; any other
+                // `END` here closes nothing.
+                let e = self.boundary(i + 1, "END").max(i + 1);
+                let range = self.range(i, e);
+                if self.up(i + 1) == "CONVERSATION" {
+                    self.r.own += 1;
+                } else {
+                    self.r.fail(range, self.enclosing, Mode::Refs, None);
+                }
+                i = e;
             } else {
                 i = self.statement(i);
             }
@@ -216,7 +291,9 @@ impl Tsql<'_, '_, '_, '_> {
                     return false;
                 }
                 // `FOR query [FOR UPDATE [OF …]]`
-                let end = (f + 2..e).find(|&k| self.up(k) == "FOR" && matches!(self.up(k + 1), "UPDATE" | "READ")).unwrap_or(e);
+                let end = (f + 2..e)
+                    .find(|&k| self.up(k) == "FOR" && matches!(self.up(k + 1), "UPDATE" | "READ"))
+                    .unwrap_or(e);
                 let query = self.range(f + 1, end);
                 if !self.r.sql(query, self.enclosing, Mode::Refs, None) {
                     self.r.fail(query, self.enclosing, Mode::Refs, None);
@@ -325,9 +402,27 @@ impl Tsql<'_, '_, '_, '_> {
             || (self.tok(i + 1) == Some(&Token::LParen) && matches!(self.up(i + 2), "SELECT" | "WITH"))
     }
 
-    /// A word that is no keyword at the start of a batch, not a label.
+    /// A procedure call without `EXEC`, first in its piece of the batch:
+    /// a name that is no keyword, then only arguments — literals,
+    /// variables, `@name = value`, `DEFAULT`, `OUTPUT`.
     fn implicit_exec(&self, i: usize) -> bool {
-        matches!(&self.toks[i].token, Token::Word(w) if (w.keyword == Keyword::NoKeyword || w.quote_style.is_some()) && !w.value.starts_with('@'))
+        let named = matches!(&self.toks[i].token, Token::Word(w) if (w.keyword == Keyword::NoKeyword || w.quote_style.is_some()) && !w.value.starts_with('@'));
+        let Some((_, after)) = scan::read_name(self.toks, i, Dialect::MsSql) else { return false };
+        let e = self.boundary(i + 1, self.up(i));
+        named
+            && (after..e).all(|k| match &self.toks[k].token {
+                Token::Word(w) => {
+                    w.value.starts_with('@') || matches!(self.up(k), "DEFAULT" | "OUTPUT" | "OUT" | "NULL")
+                }
+                Token::Comma
+                | Token::Eq
+                | Token::Minus
+                | Token::Number(..)
+                | Token::SingleQuotedString(_)
+                | Token::NationalStringLiteral(_)
+                | Token::HexStringLiteral(_) => true,
+                _ => false,
+            })
     }
 
     /// The index of the token that ends the statement (or condition)
@@ -386,7 +481,11 @@ impl Tsql<'_, '_, '_, '_> {
         let operand = j > 0
             && !matches!(
                 self.toks[j - 1].token,
-                Token::Word(_) | Token::RParen | Token::Number(..) | Token::SingleQuotedString(_) | Token::NationalStringLiteral(_)
+                Token::Word(_)
+                    | Token::RParen
+                    | Token::Number(..)
+                    | Token::SingleQuotedString(_)
+                    | Token::NationalStringLiteral(_)
             );
         if operand || self.tok(j + 1) == Some(&Token::Period) {
             return false;

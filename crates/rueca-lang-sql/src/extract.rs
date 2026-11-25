@@ -9,7 +9,8 @@ use rueca_model::{FileFacts, Import, Label, LocalDefId, RefKind};
 
 use crate::ast::Ctx;
 use crate::dialect::{self, Dialect};
-use crate::facts::{Builder, NewDef};
+use crate::facts::{Builder, Name, NewDef};
+use crate::names::Part;
 use crate::prep::{self, JinjaKind, Prepared};
 use crate::read::Reader;
 use crate::split::{self, Stmt};
@@ -214,6 +215,7 @@ fn jinja_refs(b: &mut Builder<'_>, p: &Prepared) {
 /// [`crate::read`]. `false` for a statement that is only template output.
 fn statement(r: &mut Reader<'_, '_>, st: &Stmt, model: Option<LocalDefId>, relations: &[(usize, usize)]) -> bool {
     if is_template_output(r, st, relations) {
+        template_relations(r, st, relations, model);
         return false;
     }
     let doc = r.b.doc(st.leading);
@@ -222,6 +224,23 @@ fn statement(r: &mut Reader<'_, '_>, st: &Stmt, model: Option<LocalDefId>, relat
     let ctx = Ctx { enclosing, range: (st.start, st.end), doc: if named.is_some() { None } else { doc } };
     r.statement(&ctx);
     true
+}
+
+/// The relations a template-only statement names (`{{ ref('a') }}` alone):
+/// read by the model.
+fn template_relations(r: &mut Reader<'_, '_>, st: &Stmt, relations: &[(usize, usize)], model: Option<LocalDefId>) {
+    for &(s, _) in relations.iter().filter(|(s, _)| *s >= st.start && *s < st.end) {
+        let word = r.masked[s..st.end].split_whitespace().next().unwrap_or("");
+        let mut name = Name { parts: Vec::new(), ranges: Vec::new() };
+        let mut at = s;
+        for part in word.split('.') {
+            name.parts.push(Part { text: part.to_string(), quoted: false });
+            name.ranges.push((at, at + part.len()));
+            at += part.len() + 1;
+        }
+        let enclosing = r.b.enclosing_of((st.start, st.end)).or(model);
+        r.b.relation_ref(RefKind::Read, &name, enclosing);
+    }
 }
 
 /// A statement that is only Jinja output — placeholders, or one `ref` /

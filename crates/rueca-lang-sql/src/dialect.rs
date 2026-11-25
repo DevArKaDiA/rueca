@@ -78,8 +78,8 @@ impl Dialect {
             "snowflake" => Dialect::Snowflake,
             "redshift" => Dialect::Redshift,
             "duckdb" => Dialect::DuckDb,
-            "oracle" | "plsql" | "pl-sql" | "pl_sql" | "pls" | "pks" | "pkb" | "pck" | "tps" | "tpb" | "prc" | "fnc"
-            | "trg" => Dialect::Oracle,
+            "oracle" | "plsql" | "pl-sql" | "pl_sql" | "pls" | "pks" | "pkb" | "pck" | "tps" | "tpb" | "prc"
+            | "fnc" | "trg" => Dialect::Oracle,
             "db2" | "db2luw" | "db2zos" => Dialect::Db2,
             "clickhouse" => Dialect::ClickHouse,
             "hive" | "hql" => Dialect::Hive,

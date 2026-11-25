@@ -297,11 +297,8 @@ impl Cutter<'_> {
             self.control = self.control.saturating_sub(1);
             return;
         }
-        let at_start = if self.control == 0 {
-            self.cur.is_none()
-        } else {
-            matches!(prev, ";" | "THEN" | "ELSE" | "DO" | "LOOP")
-        };
+        let at_start =
+            if self.control == 0 { self.cur.is_none() } else { matches!(prev, ";" | "THEN" | "ELSE" | "DO" | "LOOP") };
         if !at_start {
             return;
         }
@@ -410,7 +407,19 @@ fn starts_plsql_unit(tokens: &[TokenWithSpan]) -> bool {
         Some("DECLARE" | "BEGIN") => words.get(1).is_none_or(|w| !matches!(w.as_str(), "TRANSACTION" | "WORK" | "")),
         Some("CREATE") => {
             let object = words.iter().skip(1).position(|w| {
-                matches!(w.as_str(), "PROCEDURE" | "FUNCTION" | "PACKAGE" | "TRIGGER" | "TYPE" | "TABLE" | "VIEW" | "INDEX" | "SEQUENCE" | "SYNONYM")
+                matches!(
+                    w.as_str(),
+                    "PROCEDURE"
+                        | "FUNCTION"
+                        | "PACKAGE"
+                        | "TRIGGER"
+                        | "TYPE"
+                        | "TABLE"
+                        | "VIEW"
+                        | "INDEX"
+                        | "SEQUENCE"
+                        | "SYNONYM"
+                )
             });
             match object.map(|i| (words[i + 1].as_str(), words.get(i + 2).map(String::as_str))) {
                 Some(("PROCEDURE" | "FUNCTION" | "PACKAGE" | "TRIGGER", _)) => true,

@@ -201,12 +201,10 @@ impl Repair<'_> {
                 self.out[s] = b'=';
                 self.out[s + 1] = b'>';
                 self.changed = true;
-            } else if self.any(i, &["INCLUDING", "EXCLUDING"]) && self.toks.get(i + 1).is_some_and(|t| !t.word().is_empty())
+            } else if ((self.any(i, &["INCLUDING", "EXCLUDING"]) || (create && self.is(i, "TABLESPACE")))
+                && self.toks.get(i + 1).is_some_and(|t| !t.word().is_empty()))
+                || (create && i == 1 && self.is(i, "OR") && self.is(i + 1, "REPLACE") && self.is(i + 2, "PROCEDURE"))
             {
-                self.blank(i, i + 2);
-            } else if create && self.is(i, "TABLESPACE") && self.toks.get(i + 1).is_some_and(|t| !t.word().is_empty()) {
-                self.blank(i, i + 2);
-            } else if create && i == 1 && self.is(i, "OR") && self.is(i + 1, "REPLACE") && self.is(i + 2, "PROCEDURE") {
                 self.blank(i, i + 2);
             } else if create
                 && self.is(i, "EXECUTE")
@@ -279,7 +277,11 @@ impl Repair<'_> {
                     i = close;
                     continue;
                 }
-            } else if self.is(i, "XMLNAMESPACES") && self.tok(i + 1) == Some(&Token::LParen) && i > 0 && self.is(i - 1, "WITH") {
+            } else if self.is(i, "XMLNAMESPACES")
+                && self.tok(i + 1) == Some(&Token::LParen)
+                && i > 0
+                && self.is(i - 1, "WITH")
+            {
                 // `WITH XMLNAMESPACES (…) SELECT`, `WITH XMLNAMESPACES (…), cte AS`
                 let close = self.close(i + 1);
                 if self.tok(close) == Some(&Token::Comma) {
@@ -351,7 +353,9 @@ impl Repair<'_> {
                 && i > 1
                 && matches!(self.tok(i - 1), Some(Token::Word(_)))
                 && ((depth == 1 && matches!(self.tok(i - 2), Some(Token::Comma | Token::LParen)))
-                    || (depth == 0 && (self.is(i - 2, "ADD") || self.tok(i - 2) == Some(&Token::Comma)) && self.is(0, "ALTER")))
+                    || (depth == 0
+                        && (self.is(i - 2, "ADD") || self.tok(i - 2) == Some(&Token::Comma))
+                        && self.is(0, "ALTER")))
                 && !self.is(i + 1, "TABLE")
             {
                 // computed column `c AS expr [PERSISTED]`: typed as INT
@@ -393,7 +397,8 @@ impl Repair<'_> {
         let ddl = self.any(0, &["CREATE", "ALTER"]);
         let mut i = 0;
         while i < self.toks.len() {
-            if ddl && self.any(i, ORACLE_VALUED) && matches!(self.tok(i + 1), Some(Token::Number(..) | Token::Word(_))) {
+            if ddl && self.any(i, ORACLE_VALUED) && matches!(self.tok(i + 1), Some(Token::Number(..) | Token::Word(_)))
+            {
                 self.blank(i, i + 2);
                 i += 2;
                 continue;
@@ -415,16 +420,15 @@ impl Repair<'_> {
                 self.blank(i, close);
                 i = close;
                 continue;
-            } else if self.any(i, &["CHAR", "BYTE"])
+            } else if (self.any(i, &["CHAR", "BYTE"])
                 && i > 0
                 && matches!(self.tok(i - 1), Some(Token::Number(..)))
-                && self.tok(i + 1) == Some(&Token::RParen)
+                && self.tok(i + 1) == Some(&Token::RParen))
+                || (ddl
+                    && self.any(i, &["ENABLE", "DISABLE"])
+                    && matches!(self.tok(i + 1), None | Some(Token::Comma | Token::RParen | Token::SemiColon)))
             {
-                self.blank(i, i + 1);
-            } else if ddl
-                && self.any(i, &["ENABLE", "DISABLE"])
-                && matches!(self.tok(i + 1), None | Some(Token::Comma | Token::RParen | Token::SemiColon))
-            {
+                // `VARCHAR2(10 CHAR)`; `CONSTRAINT c CHECK (…) ENABLE`
                 self.blank(i, i + 1);
             } else if ddl && self.is(i, "USING") && self.is(i + 1, "INDEX") {
                 let mut end = i + 2;
@@ -466,12 +470,18 @@ impl Repair<'_> {
                 self.blank(i, end);
                 self.out[s] = b'|';
                 self.out[s + 1] = b'|';
-            } else if self.is(i, "EMPTY") && i > 0 && (self.is(i - 1, "IS") || (self.is(i - 1, "NOT") && i > 1 && self.is(i - 2, "IS"))) {
+            } else if self.is(i, "EMPTY")
+                && i > 0
+                && (self.is(i - 1, "IS") || (self.is(i - 1, "NOT") && i > 1 && self.is(i - 2, "IS")))
+            {
                 let s = self.toks[i].range.0;
                 self.out[s..s + 5].copy_from_slice(b"NULL ");
                 self.changed = true;
             } else if self.tok(i) == Some(&Token::Mod)
-                && self.any(i + 1, &["TYPE", "ROWTYPE", "FOUND", "NOTFOUND", "ISOPEN", "ROWCOUNT", "BULK_ROWCOUNT", "BULK_EXCEPTIONS"])
+                && self.any(
+                    i + 1,
+                    &["TYPE", "ROWTYPE", "FOUND", "NOTFOUND", "ISOPEN", "ROWCOUNT", "BULK_ROWCOUNT", "BULK_EXCEPTIONS"],
+                )
                 && self.toks[i].range.1 == self.toks[i + 1].range.0
             {
                 // PL/SQL attributes `c%NOTFOUND`, `t.c%TYPE`
@@ -496,8 +506,24 @@ impl Repair<'_> {
     /// identifiers are a type): the words after the first are blanked.
     fn sqlite(&mut self) {
         const AFTER_TYPE: &[&str] = &[
-            "CONSTRAINT", "PRIMARY", "NOT", "NULL", "UNIQUE", "CHECK", "DEFAULT", "COLLATE", "REFERENCES", "GENERATED",
-            "AS", "AUTOINCREMENT", "ON", "KEY", "FOREIGN", "PRECISION", "VARYING", "UNSIGNED",
+            "CONSTRAINT",
+            "PRIMARY",
+            "NOT",
+            "NULL",
+            "UNIQUE",
+            "CHECK",
+            "DEFAULT",
+            "COLLATE",
+            "REFERENCES",
+            "GENERATED",
+            "AS",
+            "AUTOINCREMENT",
+            "ON",
+            "KEY",
+            "FOREIGN",
+            "PRECISION",
+            "VARYING",
+            "UNSIGNED",
         ];
         if !self.is(0, "CREATE") {
             return;
@@ -517,7 +543,7 @@ impl Repair<'_> {
                         words = usize::MAX / 2;
                     } else {
                         words += 1;
-                        if words >= 3 && words < usize::MAX / 2 {
+                        if (3..usize::MAX / 2).contains(&words) {
                             self.blank(i, i + 1);
                         }
                     }
@@ -553,10 +579,9 @@ impl Repair<'_> {
                 }
                 self.blank(i, end);
                 i = end;
-            } else if self.is(i, "ALGORITHM") && self.tok(i + 1) == Some(&Token::Eq) {
-                self.blank(i, i + 3);
-                i += 3;
-            } else if self.is(i, "SQL") && self.is(i + 1, "SECURITY") {
+            } else if (self.is(i, "ALGORITHM") && self.tok(i + 1) == Some(&Token::Eq))
+                || (self.is(i, "SQL") && self.is(i + 1, "SECURITY"))
+            {
                 self.blank(i, i + 3);
                 i += 3;
             } else {
@@ -569,11 +594,67 @@ impl Repair<'_> {
 /// Words after which a Jinja placeholder is an operand, not a clause.
 fn is_clause_word(word: &str) -> bool {
     const WORDS: &[&str] = &[
-        "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "ON", "BY", "JOIN", "AS", "WHEN", "THEN", "ELSE", "IN", "LIKE",
-        "BETWEEN", "HAVING", "LIMIT", "OFFSET", "UNION", "ALL", "DISTINCT", "INTO", "VALUES", "SET", "UPDATE",
-        "TABLE", "VIEW", "CASE", "IS", "WITH", "USING", "OVER", "PARTITION", "INSERT", "DELETE", "MERGE", "EXCEPT",
-        "INTERSECT", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "LATERAL", "QUALIFY", "END", "RETURNING",
-        "TOP", "INTERVAL", "CAST", "IF", "EXISTS", "REPLACE", "CREATE", "ALTER", "DROP", "TO", "FOR", "GRANT",
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "AND",
+        "OR",
+        "NOT",
+        "ON",
+        "BY",
+        "JOIN",
+        "AS",
+        "WHEN",
+        "THEN",
+        "ELSE",
+        "IN",
+        "LIKE",
+        "BETWEEN",
+        "HAVING",
+        "LIMIT",
+        "OFFSET",
+        "UNION",
+        "ALL",
+        "DISTINCT",
+        "INTO",
+        "VALUES",
+        "SET",
+        "UPDATE",
+        "TABLE",
+        "VIEW",
+        "CASE",
+        "IS",
+        "WITH",
+        "USING",
+        "OVER",
+        "PARTITION",
+        "INSERT",
+        "DELETE",
+        "MERGE",
+        "EXCEPT",
+        "INTERSECT",
+        "INNER",
+        "LEFT",
+        "RIGHT",
+        "FULL",
+        "OUTER",
+        "CROSS",
+        "LATERAL",
+        "QUALIFY",
+        "END",
+        "RETURNING",
+        "TOP",
+        "INTERVAL",
+        "CAST",
+        "IF",
+        "EXISTS",
+        "REPLACE",
+        "CREATE",
+        "ALTER",
+        "DROP",
+        "TO",
+        "FOR",
+        "GRANT",
     ];
     WORDS.iter().any(|w| w.eq_ignore_ascii_case(word))
 }
@@ -590,7 +671,10 @@ mod tests {
 
     #[test]
     fn jinja_placeholders() {
-        assert_eq!(fix("select a over (partition by b _____ order by c)", Dialect::Generic), "select a over (partition by b order by c)");
+        assert_eq!(
+            fix("select a over (partition by b _____ order by c)", Dialect::Generic),
+            "select a over (partition by b order by c)"
+        );
         assert_eq!(fix("select _______ over (order by c)", Dialect::Generic), "select _____() over (order by c)");
         assert_eq!(repaired("select ____ from ____", Dialect::Generic), None);
     }
@@ -615,7 +699,10 @@ mod tests {
         assert_eq!(fix("SET @a += 1", Dialect::MsSql), "SET @a = 1");
         assert_eq!(fix("SELECT 1 FROM t (NOLOCK) OPTION (RECOMPILE)", Dialect::MsSql), "SELECT 1 FROM t");
         assert_eq!(
-            fix("CREATE TABLE t (id INT, CONSTRAINT pk PRIMARY KEY (id) WITH (PAD_INDEX = OFF) ON [PRIMARY])", Dialect::MsSql),
+            fix(
+                "CREATE TABLE t (id INT, CONSTRAINT pk PRIMARY KEY (id) WITH (PAD_INDEX = OFF) ON [PRIMARY])",
+                Dialect::MsSql
+            ),
             "CREATE TABLE t (id INT, CONSTRAINT pk PRIMARY KEY (id) )"
         );
     }
@@ -623,13 +710,19 @@ mod tests {
     #[test]
     fn oracle_db2_mysql() {
         assert_eq!(
-            fix("CREATE TABLE t (a VARCHAR2(10 CHAR), CONSTRAINT c CHECK (a > 1) ENABLE) PCTFREE 10 TABLESPACE users", Dialect::Oracle),
+            fix(
+                "CREATE TABLE t (a VARCHAR2(10 CHAR), CONSTRAINT c CHECK (a > 1) ENABLE) PCTFREE 10 TABLESPACE users",
+                Dialect::Oracle
+            ),
             "CREATE TABLE t (a VARCHAR2(10 ), CONSTRAINT c CHECK (a > 1) )"
         );
         assert_eq!(
             fix("CREATE TABLE t (id INT GENERATED ALWAYS AS IDENTITY (START WITH 1))", Dialect::Db2),
             "CREATE TABLE t (id INT GENERATED ALWAYS AS IDENTITY )"
         );
-        assert_eq!(fix("CREATE DEFINER=`root`@`localhost` VIEW v AS SELECT 1", Dialect::MySql), "CREATE VIEW v AS SELECT 1");
+        assert_eq!(
+            fix("CREATE DEFINER=`root`@`localhost` VIEW v AS SELECT 1", Dialect::MySql),
+            "CREATE VIEW v AS SELECT 1"
+        );
     }
 }

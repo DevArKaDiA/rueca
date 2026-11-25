@@ -77,8 +77,25 @@ const DML: &[&str] = &["SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "MERGE", 
 
 /// Statements read by their first word, without references.
 const CONTROL: &[&str] = &[
-    "RAISE", "GOTO", "LEAVE", "ITERATE", "COMMIT", "ROLLBACK", "SAVEPOINT", "CLOSE", "PIPE", "PRAGMA", "SIGNAL",
-    "RESIGNAL", "GET", "FETCH", "EXECUTE", "PREPARE", "DEALLOCATE", "RELEASE", "LOCK",
+    "RAISE",
+    "GOTO",
+    "LEAVE",
+    "ITERATE",
+    "COMMIT",
+    "ROLLBACK",
+    "SAVEPOINT",
+    "CLOSE",
+    "PIPE",
+    "PRAGMA",
+    "SIGNAL",
+    "RESIGNAL",
+    "GET",
+    "FETCH",
+    "EXECUTE",
+    "PREPARE",
+    "DEALLOCATE",
+    "RELEASE",
+    "LOCK",
 ];
 
 impl Block<'_, '_, '_, '_> {
@@ -150,7 +167,18 @@ impl Block<'_, '_, '_, '_> {
     /// `BEGIN [TRANSACTION | WORK | …];`: not a block.
     fn transaction(&self, i: usize) -> bool {
         matches!(self.tok(i + 1), None | Some(Token::SemiColon))
-            || matches!(self.up(i + 1), "TRANSACTION" | "WORK" | "TRAN" | "DEFERRED" | "IMMEDIATE" | "EXCLUSIVE")
+            || matches!(
+                self.up(i + 1),
+                "TRANSACTION"
+                    | "WORK"
+                    | "TRAN"
+                    | "DEFERRED"
+                    | "IMMEDIATE"
+                    | "EXCLUSIVE"
+                    | "ISOLATION"
+                    | "READ"
+                    | "DEFERRABLE"
+            )
     }
 
     /// An anonymous block or a script: statements to the end.
@@ -276,8 +304,10 @@ impl Block<'_, '_, '_, '_> {
     fn declarations(&mut self, mut i: usize) -> usize {
         let n = self.len();
         while i < n {
-            while matches!(self.up(i), "MEMBER" | "STATIC" | "CONSTRUCTOR" | "MAP" | "ORDER" | "OVERRIDING" | "FINAL" | "INSTANTIABLE")
-                || (self.up(i) == "NOT" && matches!(self.up(i + 1), "OVERRIDING" | "FINAL" | "INSTANTIABLE"))
+            while matches!(
+                self.up(i),
+                "MEMBER" | "STATIC" | "CONSTRUCTOR" | "MAP" | "ORDER" | "OVERRIDING" | "FINAL" | "INSTANTIABLE"
+            ) || (self.up(i) == "NOT" && matches!(self.up(i + 1), "OVERRIDING" | "FINAL" | "INSTANTIABLE"))
             {
                 i += 1;
             }
@@ -384,7 +414,9 @@ impl Block<'_, '_, '_, '_> {
         if self.tok(i) == Some(&Token::ShiftLeft) && self.tok(i + 2) == Some(&Token::ShiftRight) {
             return i + 3;
         }
-        if self.tok(i + 1) == Some(&Token::Colon) && matches!(self.up(i + 2), "LOOP" | "WHILE" | "REPEAT" | "BEGIN" | "FOR") {
+        if self.tok(i + 1) == Some(&Token::Colon)
+            && matches!(self.up(i + 2), "LOOP" | "WHILE" | "REPEAT" | "BEGIN" | "FOR")
+        {
             return i + 2;
         }
         i
@@ -513,7 +545,9 @@ impl Block<'_, '_, '_, '_> {
         while k < self.len() {
             match self.up(k) {
                 "SQLSTATE" | "VALUE" | "NOT" | "FOUND" | "SQLEXCEPTION" | "SQLWARNING" => k += 1,
-                _ if matches!(self.tok(k), Some(Token::Comma | Token::SingleQuotedString(_) | Token::Number(..))) => k += 1,
+                _ if matches!(self.tok(k), Some(Token::Comma | Token::SingleQuotedString(_) | Token::Number(..))) => {
+                    k += 1
+                }
                 _ if matches!(self.tok(k + 1), Some(Token::Comma)) => k += 1,
                 _ => break,
             }

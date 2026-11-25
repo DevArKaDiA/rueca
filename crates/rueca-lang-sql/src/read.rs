@@ -121,7 +121,13 @@ impl<'a, 's> Reader<'a, 's> {
 
     /// Parses `range` with sqlparser (as written, then repaired; in the
     /// file's dialect, then the others) and adds its facts.
-    pub fn sql(&mut self, range: (usize, usize), enclosing: Option<LocalDefId>, mode: Mode, doc: Option<&String>) -> bool {
+    pub fn sql(
+        &mut self,
+        range: (usize, usize),
+        enclosing: Option<LocalDefId>,
+        mode: Mode,
+        doc: Option<&String>,
+    ) -> bool {
         self.sql_edit(range, enclosing, mode, doc, &[])
     }
 
@@ -138,7 +144,7 @@ impl<'a, 's> Reader<'a, 's> {
     ) -> bool {
         let (text, base) = chunk(self.masked, range);
         let text = blanked(text, base, blanks);
-        let Some((parsed, text)) = self.parse_variants(text, base, |c, d| parse(c, d)) else { return false };
+        let Some((parsed, text)) = self.parse_variants(text, base, parse) else { return false };
         let pos = Pos { lines: Lines::new(&text), base };
         let ctx = Ctx { enclosing, range, doc: doc.cloned() };
         for s in &parsed {
@@ -161,7 +167,12 @@ impl<'a, 's> Reader<'a, 's> {
     }
 
     /// [`Reader::expr`] with the file ranges `blanks` blanked first.
-    pub fn expr_edit(&mut self, range: (usize, usize), enclosing: Option<LocalDefId>, blanks: &[(usize, usize)]) -> bool {
+    pub fn expr_edit(
+        &mut self,
+        range: (usize, usize),
+        enclosing: Option<LocalDefId>,
+        blanks: &[(usize, usize)],
+    ) -> bool {
         if range.1 <= range.0 {
             return false;
         }
@@ -175,7 +186,12 @@ impl<'a, 's> Reader<'a, 's> {
 
     /// The first variant of `text` (as written, alone placeholders as
     /// queries, repaired) some dialect parses, with its result.
-    fn parse_variants<T>(&self, text: String, base: usize, f: impl Fn(&str, Dialect) -> Option<T>) -> Option<(T, String)> {
+    fn parse_variants<T>(
+        &self,
+        text: String,
+        base: usize,
+        f: impl Fn(&str, Dialect) -> Option<T>,
+    ) -> Option<(T, String)> {
         let alt = with_queries(&text, base, self.alone);
         let dialects = self.b.dialect.attempts();
         for c in std::iter::once(text).chain(alt) {

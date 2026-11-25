@@ -219,7 +219,10 @@ fn client_commands(source: &str, bytes: &mut [u8], p: &mut Prepared, dialect: Di
             }
         }
         if dialect == Dialect::Oracle {
-            if !unit && !stmt && let Some(path) = sqlplus_line(trimmed) {
+            if !unit
+                && !stmt
+                && let Some(path) = sqlplus_line(trimmed)
+            {
                 if let Some((path, off)) = path {
                     let start = pos + (body.len() - trimmed.len()) + off;
                     p.includes.push(Include { path, start, end: pos + body.len() });
@@ -267,16 +270,47 @@ fn plsql_unit(code: &str) -> bool {
     let first = lower.split_whitespace().next().unwrap_or("");
     matches!(first, "declare" | "begin")
         || (first == "create"
-            && ["procedure", "function", "package", "trigger", "type"].iter().any(|w| lower.split_whitespace().take(6).any(|x| x == *w)))
+            && ["procedure", "function", "package", "trigger", "type"]
+                .iter()
+                .any(|w| lower.split_whitespace().take(6).any(|x| x == *w)))
 }
 
 /// SQL*Plus commands (Oracle scripts): `Some` when the line is one,
 /// `Some(Some((path, offset)))` for `@file` / `@@file` / `START file`.
 fn sqlplus_line(line: &str) -> Option<Option<(String, usize)>> {
     const COMMANDS: &[&str] = &[
-        "prompt", "pro", "spool", "whenever", "define", "undefine", "accept", "column", "col", "show", "exit", "quit",
-        "set", "variable", "var", "print", "rem", "remark", "pause", "clear", "ttitle", "btitle", "break", "compute",
-        "host", "timing", "conn", "connect", "disconnect", "exec", "execute", "start",
+        "prompt",
+        "pro",
+        "spool",
+        "whenever",
+        "define",
+        "undefine",
+        "accept",
+        "column",
+        "col",
+        "show",
+        "exit",
+        "quit",
+        "set",
+        "variable",
+        "var",
+        "print",
+        "rem",
+        "remark",
+        "pause",
+        "clear",
+        "ttitle",
+        "btitle",
+        "break",
+        "compute",
+        "host",
+        "timing",
+        "conn",
+        "connect",
+        "disconnect",
+        "exec",
+        "execute",
+        "start",
     ];
     if line.starts_with("$ ") || line.starts_with("! ") {
         return Some(None);
@@ -351,7 +385,8 @@ fn substitutions(bytes: &mut [u8], dialect: Dialect) {
                 && i > 0
                 && !bytes[i - 1].is_ascii_alphanumeric()
                 && bytes.get(i + 4) == Some(&b'.')
-                && (bytes[i + 1..i + 4].eq_ignore_ascii_case(b"new") || bytes[i + 1..i + 4].eq_ignore_ascii_case(b"old")) =>
+                && (bytes[i + 1..i + 4].eq_ignore_ascii_case(b"new")
+                    || bytes[i + 1..i + 4].eq_ignore_ascii_case(b"old")) =>
             {
                 bytes[i] = b' ';
             }
@@ -371,17 +406,25 @@ fn substitutions(bytes: &mut [u8], dialect: Dialect) {
                 // conditional compilation: `$if … $then`, `$elsif … $then`,
                 // `$else`, `$end` are blanked (every branch is read);
                 // `$$name` inquiry directives become identifiers
-                let end = (i + 1..n).find(|&j| !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || (j == i + 1 && bytes[j] == b'$'))).unwrap_or(n);
+                let end = (i + 1..n)
+                    .find(|&j| {
+                        !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || (j == i + 1 && bytes[j] == b'$'))
+                    })
+                    .unwrap_or(n);
                 let word = bytes[i + 1..end].to_ascii_lowercase();
                 match word.as_slice() {
                     b"if" | b"elsif" => {
-                        let then = (end..n.saturating_sub(4)).find(|&j| bytes[j..j + 5].eq_ignore_ascii_case(b"$then")).map_or(end, |j| j + 5);
+                        let then = (end..n.saturating_sub(4))
+                            .find(|&j| bytes[j..j + 5].eq_ignore_ascii_case(b"$then"))
+                            .map_or(end, |j| j + 5);
                         blank(bytes, i, then);
                         i = then.max(i + 1) - 1;
                     }
                     b"else" | b"end" | b"then" => blank(bytes, i, end),
                     b"error" => {
-                        let stop = (end..n.saturating_sub(3)).find(|&j| bytes[j..j + 4].eq_ignore_ascii_case(b"$end")).map_or(end, |j| j + 4);
+                        let stop = (end..n.saturating_sub(3))
+                            .find(|&j| bytes[j..j + 4].eq_ignore_ascii_case(b"$end"))
+                            .map_or(end, |j| j + 4);
                         blank(bytes, i, stop);
                         i = stop.max(i + 1) - 1;
                     }
@@ -389,10 +432,11 @@ fn substitutions(bytes: &mut [u8], dialect: Dialect) {
                     _ => {}
                 }
             }
-            b'\\' if matches!(dialect, Dialect::Postgres | Dialect::Generic)
-                && bytes.get(i + 1) == Some(&b'g')
-                && i > 0
-                && bytes[i - 1].is_ascii_whitespace() =>
+            b'\\'
+                if matches!(dialect, Dialect::Postgres | Dialect::Generic)
+                    && bytes.get(i + 1) == Some(&b'g')
+                    && i > 0
+                    && bytes[i - 1].is_ascii_whitespace() =>
             {
                 let end = (i..n).find(|&j| bytes[j] == b'\n').unwrap_or(n);
                 blank(bytes, i, end);
@@ -414,7 +458,8 @@ fn blank_with(bytes: &mut [u8], from: usize, to: usize, byte: u8) {
 /// `'name'` / `"name"` at `i` with a variable-like name inside.
 fn psql_variable(bytes: &[u8], i: usize) -> bool {
     let q = bytes[i];
-    let end = (i + 1..bytes.len()).find(|&j| !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_')).unwrap_or(bytes.len());
+    let end =
+        (i + 1..bytes.len()).find(|&j| !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_')).unwrap_or(bytes.len());
     end > i + 1 && bytes.get(end) == Some(&q)
 }
 
@@ -816,7 +861,12 @@ fn find_close(hay: &[u8], close: &[u8], strings: bool) -> Option<usize> {
             b'\'' | b'"' => {
                 let q = hay[i];
                 match (i + 1..hay.len()).find(|&j| hay[j] == q && hay[j - 1] != b'\\') {
-                    Some(j) if !hay[i..j].contains(&b'\n') || hay[i + 1..j].windows(2).any(|w| w == b"{{" || w == b"{%") => i = j,
+                    Some(j)
+                        if !hay[i..j].contains(&b'\n')
+                            || hay[i + 1..j].windows(2).any(|w| w == b"{{" || w == b"{%") =>
+                    {
+                        i = j
+                    }
                     _ => {}
                 }
             }
