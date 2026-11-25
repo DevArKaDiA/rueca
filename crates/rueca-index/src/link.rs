@@ -813,11 +813,13 @@ pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String>
         LanguageFamily::C => Some(format!("c:{}", m.trim_start_matches("./"))),
         LanguageFamily::Ruby => ruby_import_key(imp.relative_level, m),
         // Shell has no package identity: a sourced file is a path.
+        // SQL has no package identity (dbt `packages.yml` is not read).
         LanguageFamily::Markdown
         | LanguageFamily::Data
         | LanguageFamily::Rust
         | LanguageFamily::Proto
-        | LanguageFamily::Shell => None,
+        | LanguageFamily::Shell
+        | LanguageFamily::Sql => None,
     }
 }
 

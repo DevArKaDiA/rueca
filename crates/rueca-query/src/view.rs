@@ -162,7 +162,8 @@ impl View {
             | LanguageFamily::Rust
             | LanguageFamily::Proto
             | LanguageFamily::Shell
-            | LanguageFamily::CSharp),
+            | LanguageFamily::CSharp
+            | LanguageFamily::Sql),
         ) = family
             && let Some(local) = self.module_local_name(node, family)
         {
@@ -205,7 +206,7 @@ impl View {
             Some(m) => m.to_string(),
             None => match family {
                 LanguageFamily::Data | LanguageFamily::Shell => self.seg.file(file).path.clone(),
-                LanguageFamily::C | LanguageFamily::Proto => String::new(),
+                LanguageFamily::C | LanguageFamily::Proto | LanguageFamily::Sql => String::new(),
                 _ => return None,
             },
         };

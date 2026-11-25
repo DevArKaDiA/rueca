@@ -85,6 +85,9 @@ pub enum Language {
     Kotlin,
     /// Ruby (`.rb`, `.rake`, `.gemspec`, `.ru`, `Rakefile`, `Gemfile`).
     Ruby,
+    /// SQL (`.sql`, `.psql`, `.pgsql`, `.mysql`, `.tsql`, `.bq`): DDL,
+    /// routines and queries of several dialects, dbt Jinja templates.
+    Sql,
 }
 
 /// Shell start-up files detected by name (no extension of their own).
@@ -132,6 +135,7 @@ impl Language {
         Language::CSharp,
         Language::Kotlin,
         Language::Ruby,
+        Language::Sql,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -161,6 +165,7 @@ impl Language {
             Language::CSharp => "csharp",
             Language::Kotlin => "kotlin",
             Language::Ruby => "ruby",
+            Language::Sql => "sql",
         }
     }
 
@@ -213,6 +218,7 @@ impl Language {
             "cs" => Language::CSharp,
             "kt" | "kts" => Language::Kotlin,
             "rb" | "rake" | "gemspec" | "ru" => Language::Ruby,
+            "sql" | "psql" | "pgsql" | "plpgsql" | "mysql" | "tsql" | "bq" => Language::Sql,
             _ => return None,
         })
     }
@@ -289,6 +295,7 @@ impl Language {
             Language::Shell => LanguageFamily::Shell,
             Language::CSharp => LanguageFamily::CSharp,
             Language::Ruby => LanguageFamily::Ruby,
+            Language::Sql => LanguageFamily::Sql,
         }
     }
 }
@@ -336,6 +343,9 @@ pub enum LanguageFamily {
     /// after `#` (instance) or `.` (singleton): `Rack::Utils.escape`,
     /// `Rack::Request#params`.
     Ruby,
+    /// SQL: no module names; local names are the normalized object names
+    /// (`users`, `billing.invoices`, `users.email`), global like a database.
+    Sql,
 }
 
 impl LanguageFamily {
@@ -356,7 +366,8 @@ impl LanguageFamily {
             | LanguageFamily::Go
             | LanguageFamily::Java
             | LanguageFamily::Proto
-            | LanguageFamily::CSharp => ".",
+            | LanguageFamily::CSharp
+            | LanguageFamily::Sql => ".",
             LanguageFamily::EcmaScript | LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Shell => ":",
             LanguageFamily::Php => "\\",
             LanguageFamily::C | LanguageFamily::Rust | LanguageFamily::Ruby => "::",
@@ -1154,6 +1165,10 @@ mod tests {
             ("Rakefile", Some(Ruby)),
             ("Gemfile", Some(Ruby)),
             ("Gemfile.lock", None),
+            ("db/migrations/V1__init.sql", Some(Sql)),
+            ("schema/app.pgsql", Some(Sql)),
+            ("procs/report.tsql", Some(Sql)),
+            ("data.sqlite", None),
         ];
         for (path, want) in cases {
             assert_eq!(Language::from_path(path), *want, "{path}");
@@ -1217,12 +1232,13 @@ mod tests {
             b[0]
         }
         let langs: Vec<u8> = Language::ALL.iter().map(idx).collect();
-        assert_eq!(langs, (0..25).collect::<Vec<u8>>());
+        assert_eq!(langs, (0..26).collect::<Vec<u8>>());
         assert_eq!(idx(&Language::Proto), 20);
         assert_eq!(idx(&Language::Shell), 21);
         assert_eq!(idx(&Language::CSharp), 22);
         assert_eq!(idx(&Language::Kotlin), 23);
         assert_eq!(idx(&Language::Ruby), 24);
+        assert_eq!(idx(&Language::Sql), 25);
         assert_eq!(idx(&ContractSide::Provides), 0);
         assert_eq!(idx(&ContractSide::Consumes), 1);
         assert_eq!(idx(&ContractKind::Http), 0);

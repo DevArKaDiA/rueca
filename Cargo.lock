@@ -4188,6 +4188,7 @@ dependencies = [
  "rueca-lang-ruby",
  "rueca-lang-rust",
  "rueca-lang-shell",
+ "rueca-lang-sql",
  "rueca-lang-typescript",
  "rueca-model",
  "rueca-resolve",
@@ -4346,6 +4347,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rueca-lang-sql"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "rueca-extract",
+ "rueca-model",
+ "sqlparser",
+]
+
+[[package]]
 name = "rueca-lang-typescript"
 version = "0.1.0-alpha.2"
 dependencies = [
@@ -4412,6 +4422,7 @@ dependencies = [
  "rueca-lang-ruby",
  "rueca-lang-rust",
  "rueca-lang-shell",
+ "rueca-lang-sql",
  "rueca-lang-typescript",
  "rueca-model",
  "serde_json",
@@ -5142,6 +5153,27 @@ checksum = "7ef958a98b9d5da290cfc78946e9f3e61e1e62a18db0d92cac0b83cc161491a9"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "sqlparser"
+version = "0.64.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92e0d273b4f8ddd14a35ed36862acbc9cc96cec578e36ee1881a9d42e0e0f2c8"
+dependencies = [
+ "log",
+ "sqlparser_derive",
+]
+
+[[package]]
+name = "sqlparser_derive"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fa4939c717eaef717f244768d35a5f93c62e1d440865097d2edef7d86ddb7e0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
 ]
 
 [[package]]

@@ -1,0 +1,12 @@
+CREATE TABLE `legacy_users` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `login` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB;
+
+DELIMITER //
+CREATE PROCEDURE purge_legacy()
+BEGIN
+  DELETE FROM legacy_users WHERE login = '';
+END //
+DELIMITER ;

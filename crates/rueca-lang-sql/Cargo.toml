@@ -1,0 +1,18 @@
+[package]
+name = "rueca-lang-sql"
+description = "SQL language pack for Rueca: tables, columns, views, routines, triggers and the queries that use them, across PostgreSQL, MySQL, SQLite, T-SQL, BigQuery and Snowflake, plus dbt Jinja models"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rueca-extract.workspace = true
+rueca-model.workspace = true
+# Pure-Rust multi-dialect SQL tokenizer and parser (Apache-2.0), with source
+# spans on identifiers; `visitor` walks relations and expressions. Default
+# features off: no `recursive` stack growth (the parser's own depth limit
+# stays on).
+sqlparser = { version = "0.64", default-features = false, features = ["std", "visitor"] }

@@ -41,6 +41,7 @@ pub enum LanguageArg {
     Csharp,
     Kotlin,
     Ruby,
+    Sql,
 }
 
 impl LanguageArg {
@@ -72,6 +73,7 @@ impl LanguageArg {
             LanguageArg::Csharp => L::CSharp,
             LanguageArg::Kotlin => L::Kotlin,
             LanguageArg::Ruby => L::Ruby,
+            LanguageArg::Sql => L::Sql,
         }
     }
 }

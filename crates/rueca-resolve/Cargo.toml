@@ -29,3 +29,4 @@ rueca-lang-rust = { path = "../rueca-lang-rust" }
 rueca-lang-shell = { path = "../rueca-lang-shell" }
 rueca-lang-csharp = { path = "../rueca-lang-csharp" }
 rueca-lang-ruby = { path = "../rueca-lang-ruby" }
+rueca-lang-sql = { path = "../rueca-lang-sql" }
