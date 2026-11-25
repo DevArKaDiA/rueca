@@ -425,6 +425,7 @@ scorecard (`stable` = every floor met; full tables in
 - **C** `stable` (1.1% of files with parse errors, vendored code excluded)
 - **C++** `stable` (callees precision 92.5 with SCIP-ambiguous definitions scored as one class; 0.5% of files with parse errors, vendored code excluded)
 - **Rust** `stable` (localization meets the floor but trails BM25 on the point estimate: File Acc@5 62.8 vs 67.4, Function Acc@10 39.0 vs 46.3 over 43 issues, paired intervals cross zero; callers / callees precision 98.5 / 98.0, recall 86.8 / 87.1 against rust-analyzer on serde_json and ripgrep; 0.1% of files with parse errors)
+- **Shell** `preview` (no localization dataset has shell instances, so the localization floors are pending; structure measured against the bench's code-backed labeler, not a compiler-grade oracle: callers / callees precision 100.0 / 100.0, recall 99.9 / 99.9 on nvm, acme.sh and bash-it, micro callee F1 99.1; 1.9% of files with parse errors, interval crossing the 2% floor; zsh best effort)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 **Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),

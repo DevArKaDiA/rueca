@@ -1,5 +1,81 @@
 # Decisions log
 
+## 2026-11-25 — Shell pack: bash's lookup by name, scripts as files, a code-backed gold; `preview`
+
+Shell landed as `rueca-lang-shell` (RFC 0003 §10.4c) with a `shell`
+module in `rueca-resolve`. Choices worth recording:
+
+- **Functions are file-level, whatever their nesting.** A shell function
+  is global once its definition runs; a function defined inside another
+  (or in an `if`) is named by its name alone and visible to the whole
+  file. Two definitions of one name in a file (zsh / bash variants) are
+  one node, the first.
+- **Resolution follows bash's lookup at run time**: the file's own
+  definition (`same_module` 0.90), else the only definition among the
+  files it sources, transitively (`import_resolved` 0.95), else the only
+  non-test shell function of that name (`unique_name` 0.60). The own file
+  wins over a sourced library (scripts source first, define after). A name
+  two sourced files define resolves to nothing: which one runs depends on
+  the order the script sources them, which the resolver does not model
+  (the micro-benchmark keeps the run-order answer and counts the miss).
+- **`source` paths are evaluated, not guessed.** The pack evaluates the
+  script's directory (`$(dirname "$0")`, `${BASH_SOURCE%/*}`, `cd … &&
+  pwd`, zsh `${0:A:h}`) and directory variables the file assigns; an
+  unknown prefix (`"$NVM_DIR/nvm.sh"`) keeps its literal tail, which
+  resolves only when one file of the snapshot ends with it. A dynamic path
+  (`source "$f"`) imports nothing; its functions are then reached, if at
+  all, by unique name.
+- **A script run by path is a call of the script's `File` node**
+  (`$script` receiver, a reserved text of `rueca-extract`): `trace` on
+  `bin/deploy` lists who runs it, and the script's own top-level calls
+  were already `File` → function edges. No per-script pseudo-definition:
+  it would compete with real functions in search and collide with the
+  common `main`.
+- **`trap` handlers are references, not calls** (a callback, like a
+  function passed as a value in the other languages); `eval 'literal'`
+  is a call. `command f`, `exec f`, `xargs f`, `sudo f` never run a shell
+  function and give nothing.
+- **Env reads by convention and binding.** `$NAME` is an environment read
+  when the file binds `NAME` nowhere and the name is upper case and not a
+  shell variable; a read of a variable a sourced file assigns becomes a
+  reference to it. Shell scoping is dynamic, so lower-case names (a
+  caller's `local`s) are never env reads. Providers (`export`, `declare
+  -x`, `NAME=value cmd`) are `EnvVar` definitions like the data pack's;
+  the bridge has no slot for `${NAME:-default}`'s default.
+- **Extension-less scripts by their `#!` line.** The indexer reads the
+  first line from the bytes it already loaded, only for names without an
+  extension (`Language::from_shebang`): no extra I/O, no content sniffing
+  for named files. The bench's file sets stay extension-based, so these
+  scripts are indexed but outside the S3 populations.
+- **Same-length repairs before parsing** (`repair.rs`), as the C/C++ pack
+  does: `${s:$i:1}`, `&` / `<` / `>` in an expansion's pattern, a
+  line-start `\.` (nvm's alias bypass, which tree-sitter-bash 0.25 joins to
+  the previous line), zsh parameter flags. Found on the calibration
+  repository and ohmyzsh; the bench labeler applies the same rules so the
+  gold reads the same text. Remaining errors are counted: on ohmyzsh (not
+  a bench repository) 545 of 586 files are zsh and 52.8% of those
+  have an ERROR left (glob qualifiers, `for x (…)`, nested `${${…}}`, subscript
+  flags), against 1.4% of bats-core's files (smoke test, extension-less
+  scripts included) and 1.95% of the gated sets' (health suite).
+- **Gold.** No compiler-grade call graph exists for shell. The structural
+  gold is the bench's code-backed labeler (`shellgold.py`): bash's lookup
+  over files, `source` paths matched by their literal tail (independent of
+  the pack's evaluation), on nvm, acme.sh and bash-it (bats-core
+  calibration), plus 43 hand-labelled micro snippets cross-checked against
+  the labeler (51 / 54 key edges, no extra). Its agreement with the pack
+  shows the pack follows bash's rules on real code; it is not an
+  independent oracle.
+- **Status `preview`.** RFC 0004 §6.2 makes a language `stable` only when every
+  gated floor is met; no localization dataset has shell instances
+  (SWE-bench Multilingual, Verified, Lite, SWE-PolyBench, Multi-SWE-bench,
+  SWE-rebench V2's 20 languages), so the localization floors stay
+  *pending*, which counts as failing. The structure, micro and health
+  floors are met (callers / callees precision 100.0 / 100.0, recall 99.9 /
+  99.9 over 1,738 / 2,170 questions, definitions 100.0, micro callee F1
+  99.1, 1.95% of files with parse errors — ⚠, the interval crosses 2% —,
+  p95 14 ms), but against a code-backed gold; floors are not lowered and
+  no exception is made for a language without a dataset.
+
 ## 2026-11-24 — Code mode: Starlark stays as built; the API friction is fixed before merge (RFC 0009)
 
 The owner's decisions on RFC 0009 phase 3 (§14.6). Starlark stays the

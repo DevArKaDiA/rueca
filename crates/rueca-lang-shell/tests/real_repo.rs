@@ -16,11 +16,12 @@
 //! timing. Cross-file resolution is tested (not ignored) in
 //! `rueca-resolve/tests/shell.rs`.
 //!
-//! Recorded on 2026-11-25 (extractor version 1): nvm v0.41.0 — 9 files, 0
-//! with parse errors; acme.sh v3.1.7 — 304 files, 0 with parse errors;
-//! bats-core v1.13.0 — 293 files, 1 with parse errors (a fixture written to
-//! fail); ohmyzsh at `799f9a8` — 497 files, see `docs/how-it-works.md`
-//! (*Shell*) for the zsh share.
+//! Recorded on 2026-11-25 (extractor version 1; files with parse errors /
+//! files, extension-less scripts and tests included): nvm v0.41.0 2 / 400,
+//! acme.sh v3.1.7 8 / 304, bash-it v3.2.0 4 / 358, bats-core v1.13.0 4 / 293
+//! (two fixtures written to fail), ohmyzsh at `799f9a8` 303 / 586 (288 of its
+//! 545 zsh files: glob qualifiers, `for x (…)` loops, nested `${${…}}`,
+//! subscript flags).
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
