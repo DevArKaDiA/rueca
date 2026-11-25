@@ -94,6 +94,23 @@ fn marks() -> [(&'static str, Value); 2] {
     ]
 }
 
+/// `local`, `qn`: the two names of a symbol (described once, on `Brief`;
+/// `describe_api`'s preamble says it for every type).
+fn names(described: bool) -> [(&'static str, Value); 2] {
+    if !described {
+        return [("local", string()), ("qn", string())];
+    }
+    [
+        ("local", doc(string(), "file-local qualified name: the id's `#` part (a file: its path)")),
+        ("qn", doc(string(), "global qualified name")),
+    ]
+}
+
+/// `repo`, `ref`: the snapshot an object was read from.
+fn origin() -> [(&'static str, Value); 2] {
+    [("repo", string()), ("ref", string())]
+}
+
 fn with(base: &[(&str, Value)], more: &[(&str, Value)]) -> Vec<(String, Value)> {
     base.iter().chain(more).map(|(k, v)| ((*k).to_string(), v.clone())).collect()
 }
@@ -103,62 +120,53 @@ fn object_of(fields: Vec<(String, Value)>) -> Value {
     object(&borrowed)
 }
 
+/// `fields` with [`names`] after the first `at` of them, then [`origin`]
+/// and `more`; the names are described when `described`.
+fn symbol_fields(fields: &[(&str, Value)], at: usize, more: &[(&str, Value)], described: bool) -> Value {
+    let (names, origin) = (names(described), origin());
+    let all = fields[..at].iter().chain(&names).chain(&fields[at..]).chain(&origin).chain(more);
+    object_of(all.map(|(k, v)| ((*k).to_string(), v.clone())).collect())
+}
+
 fn brief() -> Value {
-    titled(
-        "Brief",
-        object(&[
-            ("id", doc(string(), "pinned symbol id")),
-            ("qn", doc(string(), "qualified name")),
-            ("label", string()),
-            ("path?", string()),
-            ("lines?", lines()),
-        ]),
-    )
+    let fields =
+        [("id", doc(string(), "pinned symbol id")), ("label", string()), ("path?", string()), ("lines?", lines())];
+    titled("Brief", symbol_fields(&fields, 1, &[], true))
 }
 
 fn symbol_item() -> Value {
-    let base = [
+    let fields = [
         ("id", doc(string(), "pinned symbol id")),
         ("name", string()),
-        ("qn", doc(string(), "qualified name")),
         ("label", doc(string(), "Function, Method, Class, …")),
         ("lines?", lines()),
         ("sig?", doc(string(), "signature")),
-        ("score?", doc(number(), "with `scores: true`")),
     ];
-    titled("SymbolItem", object_of(with(&base, &marks())))
+    let [in_, changed] = marks();
+    let more = [("score?", doc(number(), "with `scores: true`")), in_, changed];
+    titled("SymbolItem", symbol_fields(&fields, 2, &more, false))
 }
 
 fn outline_symbol() -> Value {
-    let base = [
-        ("id", string()),
-        ("name", string()),
-        ("qn", string()),
-        ("label", string()),
-        ("lines?", lines()),
-        ("sig?", string()),
-        ("children?", array(named("OutlineSymbol"))),
-    ];
-    titled("OutlineSymbol", object(&base))
+    let fields = [("id", string()), ("name", string()), ("label", string()), ("lines?", lines()), ("sig?", string())];
+    let more = [("children?", array(named("OutlineSymbol")))];
+    titled("OutlineSymbol", symbol_fields(&fields, 2, &more, false))
 }
 
 fn symbol_detail() -> Value {
-    titled(
-        "SymbolDetail",
-        object(&[
-            ("id", string()),
-            ("name", string()),
-            ("qn", string()),
-            ("label", string()),
-            ("path?", string()),
-            ("lines?", lines()),
-            ("lang?", string()),
-            ("sig?", string()),
-            ("doc?", string()),
-            ("exported", boolean()),
-            ("test", boolean()),
-        ]),
-    )
+    let fields = [
+        ("id", string()),
+        ("name", string()),
+        ("label", string()),
+        ("path?", string()),
+        ("lines?", lines()),
+        ("lang?", string()),
+        ("sig?", string()),
+        ("doc?", string()),
+        ("exported", boolean()),
+        ("test", boolean()),
+    ];
+    titled("SymbolDetail", symbol_fields(&fields, 2, &[], false))
 }
 
 fn search_symbols() -> Value {
@@ -213,23 +221,17 @@ fn get_snippet() -> Value {
 }
 
 fn trace() -> Value {
-    let dir = doc(json!({ "enum": ["in", "out", "both"] }), "in = caller, out = callee");
-    let node = titled(
-        "TraceNode",
-        object_of(with(
-            &[
-                ("s?", doc(snapshot(), "when the walk crossed repositories")),
-                ("id", string()),
-                ("qn", string()),
-                ("label", string()),
-                ("path?", string()),
-                ("lines?", lines()),
-                ("d", doc(int(), "depth; the root (node 0) is 0")),
-                ("dir?", dir),
-            ],
-            &marks(),
-        )),
-    );
+    let dir = doc(json!({ "enum": ["root", "in", "out", "both"] }), "in = caller, out = callee");
+    let fields = [
+        ("s?", doc(snapshot(), "when the walk crossed repositories")),
+        ("id", string()),
+        ("label", string()),
+        ("path?", string()),
+        ("lines?", lines()),
+    ];
+    let [in_, changed] = marks();
+    let more = [("d", doc(int(), "depth; the root (node 0) is 0")), ("dir", dir), in_, changed];
+    let node = titled("TraceNode", symbol_fields(&fields, 2, &more, false));
     let tail = json!({ "anyOf": [string(), object(&marks())] });
     let edge = titled(
         "TraceEdge",
@@ -295,10 +297,12 @@ fn list_contracts() -> Value {
         object(&[
             ("s", snapshot()),
             ("repo", string()),
+            ("ref", string()),
             ("path", or_null(string())),
             ("line", int()),
-            ("symbol", doc(string(), "qualified name of the declaring / calling symbol")),
+            ("symbol", doc(string(), "global qualified name of the declaring / calling symbol")),
             ("id", string()),
+            ("local", string()),
             ("label", string()),
             ("kind", json!({ "enum": ["http", "rpc", "topic"] })),
             ("side", json!({ "enum": ["provides", "consumes"] })),

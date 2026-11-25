@@ -172,7 +172,7 @@ fn transcript_requests() -> Vec<String> {
         r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#.to_string(),
         r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#.to_string(),
         r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"describe_api","arguments":{}}}"#.to_string(),
-        ex(4, json!({"code": "const g = await rueca.searchSymbols({query: 'total_due'});\nconst t = await rueca.trace({id: g[0].symbols[0].id});\nconsole.log(t.nodes.length);\nreturn t.nodes.map(n => [n.qn, n.dir ?? 'root']);"})),
+        ex(4, json!({"code": "const g = await rueca.searchSymbols({query: 'total_due'});\nconst t = await rueca.trace({id: g[0].symbols[0].id});\nconsole.log(t.nodes.length);\nreturn t.nodes.map(n => [n.local, n.repo, n.dir]);"})),
         ex(5, json!({"code": "const g = await rueca.searchSymbols({query: 'invoice', limit: 1});\nreturn g;", "budget_tokens": 100})),
         ex(6, json!({"code": "return [...Array(300).keys()];", "budget_tokens": 100})),
         ex(7, json!({"code": "const x = 1;\nreturn x(;"})),

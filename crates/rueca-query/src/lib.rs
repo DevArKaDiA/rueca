@@ -28,7 +28,9 @@
 //! snapshot read: `s`, `repo`, `ref`, full `commit`, `overlay`, and a host
 //! `url` template for GitHub / GitLab / Bitbucket repositories), `results`
 //! (grouped by snapshot and file, short field names `qn`, `sig`, `lines`;
-//! `trace` nodes as a list with edges `[src, dst, kind, confidence, strategy,
+//! every symbol object also carries `local` — the file-local name its id is
+//! built from — and the `repo` and `ref` of its snapshot; `trace` nodes as a
+//! list with edges `[src, dst, kind, confidence, strategy,
 //! call_site_line(, path)]` by node index), `truncated`, `next_cursor` and
 //! `budget`. [`compact`] builds it from the alpha results and renders the
 //! text form ([`render_text`]); the budget (`budget_tokens`, default 2,000)
@@ -171,7 +173,7 @@
 //!   one per (src, dst, kind). `limit` counts nodes over both directions; a
 //!   node reachable both ways appears once per direction. The compact form
 //!   lists each node once (`dir` `in` / `out` / `both`, `d` its smallest
-//!   depth), the root first.
+//!   depth), the root first (`dir` `root`).
 //! - Compact pages: `next_cursor` is an item offset (search results, matches,
 //!   `trace` nodes after the root, outline symbols in pre-order) or, for
 //!   `get_snippet`, the next line. A `trace` edge is listed on the page of its

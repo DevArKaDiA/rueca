@@ -225,6 +225,8 @@ impl View {
         };
         Brief {
             id: self.symbol_id(id),
+            repo: self.snap.repo.clone(),
+            ref_name: self.snap.ref_name.clone(),
             name: node.name.clone(),
             qualified_name: node.qualified_name.clone(),
             label: node.label.as_str().to_string(),

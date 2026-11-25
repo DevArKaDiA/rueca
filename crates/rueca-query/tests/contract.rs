@@ -81,10 +81,13 @@ fn envelope_pinned_ids_and_grouping() {
         json!({
             "id": billing_id("pkg/service.py#InvoiceService.issue"),
             "name": "issue",
+            "local": "InvoiceService.issue",
             "qn": "pkg.service.InvoiceService.issue",
             "label": "Method",
             "lines": [9, 11],
-            "sig": "def issue(self, invoice)"
+            "sig": "def issue(self, invoice)",
+            "repo": BILLING,
+            "ref": "main"
         })
     );
     // Every item of a group is in that group's file.
@@ -183,6 +186,10 @@ fn several_repositories_in_one_ranking() {
     assert_eq!(r["snapshots"].as_array().unwrap().len(), 1);
     assert_eq!(r["results"]["symbol"]["id"], billing_id("pkg/service.py#InvoiceService.issue"));
     assert_eq!(r["results"]["candidates"][0]["id"], format!("{WEB}@a1b2c3d4e5f6:pkg/service.py#InvoiceService.issue"));
+    // The candidate's snapshot is not listed: the object names its own.
+    let cand = &r["results"]["candidates"][0];
+    assert_eq!((cand["repo"].as_str(), cand["local"].as_str()), (Some(WEB), Some("InvoiceService.issue")), "{r}");
+    assert!(cand["ref"].is_string(), "{r}");
     // A path present in both is ambiguous.
     let e = err(&t.engine, "get_file_outline", json!({"path": "pkg/service.py", "repo": "*"}));
     assert!(e.contains("indexed in several repositories"), "{e}");
@@ -201,8 +208,9 @@ fn trace_nodes_and_edges_by_index() {
     let nodes = res["nodes"].as_array().unwrap();
     assert_eq!(
         nodes[0],
-        json!({"id": billing_id("pkg/service.py#InvoiceService.issue"), "qn": "pkg.service.InvoiceService.issue",
-               "label": "Method", "path": "pkg/service.py", "lines": [9, 11], "d": 0})
+        json!({"id": billing_id("pkg/service.py#InvoiceService.issue"), "local": "InvoiceService.issue",
+               "qn": "pkg.service.InvoiceService.issue", "label": "Method", "path": "pkg/service.py", "lines": [9, 11],
+               "repo": BILLING, "ref": "main", "d": 0, "dir": "root"})
     );
     let qns: Vec<&str> = nodes.iter().map(|n| n["qn"].as_str().unwrap()).collect();
     assert_eq!(qns, ["pkg.service.InvoiceService.issue", "pkg.service.Base.run", "pkg.service.helper"]);
@@ -215,6 +223,8 @@ fn trace_nodes_and_edges_by_index() {
         txt.contains("\n2 out d1 Function helper  pkg/service.py L13-14  ←0 CALLS 0.95 same_module @10\n"),
         "{txt}"
     );
+    // The root's `dir` is not printed: `0 Method …`.
+    assert!(txt.contains("\n0 Method InvoiceService.issue  pkg/service.py L9-11\n"), "{txt}");
     assert!(txt.contains("(1 tests excluded"), "{txt}");
 
     // A node reachable both ways is listed once.
@@ -233,15 +243,18 @@ fn get_symbol_snippet_outline_and_code_shapes() {
     assert_eq!(
         res["symbol"],
         json!({"id": billing_id("pkg/service.py#InvoiceService"), "name": "InvoiceService",
-               "qn": "pkg.service.InvoiceService", "label": "Class", "path": "pkg/service.py", "lines": [7, 11],
-               "lang": "python", "sig": "class InvoiceService(Base):", "doc": "Issues invoices.",
-               "exported": true, "test": false})
+               "local": "InvoiceService", "qn": "pkg.service.InvoiceService", "label": "Class",
+               "path": "pkg/service.py", "lines": [7, 11], "lang": "python", "sig": "class InvoiceService(Base):",
+               "doc": "Issues invoices.", "exported": true, "test": false, "repo": BILLING, "ref": "main"})
     );
     assert_eq!(res["parent"]["id"], format!("{BILLING}@7696364aef89+:pkg/service.py"));
+    // A file has no `#` part: its `local` is its path.
+    assert_eq!(res["parent"]["local"], "pkg/service.py");
     assert_eq!(res["children"][0]["qn"], "pkg.service.InvoiceService.issue");
     assert_eq!(
         res["bases"][0],
-        json!({"id": billing_id("pkg/service.py#Base"), "qn": "pkg.service.Base", "label": "Class", "lines": [3, 5]})
+        json!({"id": billing_id("pkg/service.py#Base"), "local": "Base", "qn": "pkg.service.Base", "label": "Class",
+               "lines": [3, 5], "repo": BILLING, "ref": "main"})
     );
     assert_eq!((res["callers"].as_u64(), res["callees"].as_u64()), (Some(1), Some(0)));
     let txt = text(&t.engine, "get_symbol", json!({"qualified_name": "InvoiceService"}));

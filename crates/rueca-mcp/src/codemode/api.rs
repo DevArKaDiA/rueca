@@ -52,7 +52,7 @@ out = []
 for g in groups:
     for s in g["symbols"]:
         t = rueca.trace(id = s["id"], direction = "callers")
-        out.append({"symbol": s["qn"], "callers": [n["qn"] for n in t["nodes"] if n.get("dir") == "in"]})
+        out.append({"symbol": s["qn"], "callers": [n["qn"] for n in t["nodes"] if n["dir"] == "in"]})
 result = out"#,
     ),
     (
@@ -73,7 +73,8 @@ fn js_preamble() -> String {
 // message names the call (try/catch works); an uncaught error, a syntax error or a limit fails the
 // script with its line. Promise.all works (calls run one after another).
 // Each function resolves to the tool's `results` (the types below). Ids are pinned
-// (`repo@commit:path#name`) and valid in any tool; `s` and `in` index execute's `snapshots`. A call
+// (`repo@commit:path#name`) and valid in any tool; a symbol also has that `name` as `local`, its
+// global `qn`, and its `repo` and `ref`; `s` and `in` index execute's `snapshots`. A call
 // cut by its `limit` (or `max_lines`) is listed in execute's `partial` with its `next_cursor` (pass
 // it as `cursor`). execute's `repo` / `ref` apply to every call that names neither them nor an `id`.
 // Argument names are the tools' own (snake_case): rueca.getSymbol({{ qualified_name: \"A.b\" }}).
@@ -98,8 +99,9 @@ to execute's `budget_tokens` (lists from the end). print(...) goes to `logs`. A 
 stops the script with an error naming the call and the line (there are no exceptions to catch), as
 do a syntax error, an undefined name and a limit.
 Each function returns the tool's `results` (shapes below) as dicts and lists: read fields with
-d[\"key\"] or d.get(\"key\"). Ids are pinned (`repo@commit:path#name`) and valid in any tool; `s` and
-`in` index execute's `snapshots`. A call cut by its `limit` (or `max_lines`) is listed in execute's
+d[\"key\"] or d.get(\"key\"). Ids are pinned (`repo@commit:path#name`) and valid in any tool; a
+symbol also has that `name` as `local`, its global `qn`, and its `repo` and `ref`; `s` and `in` index
+execute's `snapshots`. A call cut by its `limit` (or `max_lines`) is listed in execute's
 `partial` with its `next_cursor` (pass it as `cursor`). execute's `repo` / `ref` apply to every call
 that names neither them nor an `id`. rueca.* functions take keyword arguments only (a dict spreads
 with **args). In scripts a call's `budget_tokens` defaults to {SCRIPT_CALL_BUDGET_TOKENS}; `format` is not

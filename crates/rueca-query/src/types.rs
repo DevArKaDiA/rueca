@@ -25,6 +25,14 @@ pub struct RefMark {
 pub struct Brief {
     /// Stable symbol id: `<repo>@<commit>:<path>#<local-qualified-name>`.
     pub id: String,
+    /// Repository of the snapshot the symbol was read from (compact only).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub repo: String,
+    /// Ref of that snapshot (compact only).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub ref_name: String,
     pub name: String,
     /// Global qualified name (`pkg.mod.Class.method`, `src/util/index:Class.method`).
     pub qualified_name: String,

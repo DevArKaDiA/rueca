@@ -133,8 +133,28 @@ Every response (default `format: compact`) is:
 - Fields absent from an item mean `null` / unknown (`lines` of a node
   without a span, `sig`, `doc`, `lang`).
 
-**Brief** (inside results): `{"id", "qn", "label", "lines": [start, end]}`
-(`qn` is the global qualified name; the path is in the id).
+**Brief** (inside results): `{"id", "local", "qn", "label", "lines": [start,
+end], "repo", "ref"}` (the path is in the id).
+
+**Symbol objects.** Every object with an `id` — a brief, a search item, an
+outline symbol, `get_symbol`'s `symbol`, a `trace` node, a contract row —
+carries:
+
+- `local`: the **file-local** qualified name, the one its id is built from
+  (the id's `#` part: `InvoiceService.issue`, `Engine.ServeHTTP`; for a
+  file or folder, its path) and the one the text rendering prints;
+- `qn`: the **global** qualified name (`billing.invoices.service.InvoiceService.issue`,
+  `github.com/gin-gonic/gin.Engine.ServeHTTP`; [above](#common-conventions));
+  contract rows call it `symbol`;
+- `repo` and `ref`: the snapshot it was read from, also when the answer
+  spans several repositories or refs, or the snapshot is not listed in the
+  envelope (a candidate of another repository). Ids stay pinned and are
+  still the way to name a symbol in another call.
+
+These fields are in the JSON (`structuredContent`, the code-mode API) only:
+the text rendering is unchanged by them, so a single-repository answer costs
+the agent no more tokens. `format: "verbose"` keeps the alpha shapes
+without them.
 
 **Text rendering.** MCP results carry the envelope in `structuredContent`
 and a compact text rendering as text content; the CLI prints the JSON, or
@@ -345,8 +365,9 @@ best result ranks):
 "results": [
   {"s": 0, "path": "src/invoices/service.py", "symbols": [
     {"id": "github.com/acme/billing@7696364aef89+:src/invoices/service.py#InvoiceService.issue",
-     "name": "issue", "qn": "billing.invoices.service.InvoiceService.issue", "label": "Method",
-     "lines": [41, 63], "sig": "def issue(self, invoice_id: str) -> Invoice"}]}
+     "name": "issue", "local": "InvoiceService.issue", "qn": "billing.invoices.service.InvoiceService.issue",
+     "label": "Method", "lines": [41, 63], "sig": "def issue(self, invoice_id: str) -> Invoice",
+     "repo": "github.com/acme/billing", "ref": "main"}]}
 ]
 ```
 
@@ -407,7 +428,7 @@ Results:
 ```json
 {
   "s": 0,
-  "symbol": {"id", "name", "qn", "label", "path", "lines", "lang", "sig", "doc", "exported", "test"},
+  "symbol": {"id", "name", "local", "qn", "label", "path", "lines", "lang", "sig", "doc", "exported", "test", "repo", "ref"},
   "parent": brief | null,
   "children": [brief],
   "bases": [brief],          // INHERITS / IMPLEMENTS targets
@@ -471,8 +492,11 @@ Results:
 {
   "s": 0,
   "nodes": [
-    {"id": "…#InvoiceService.issue", "qn": "…", "label": "Method", "path": "src/invoices/service.py", "lines": [41, 63], "d": 0},
-    {"id": "…#Api.issue", "qn": "…", "label": "Method", "path": "src/api.py", "lines": [7, 8], "d": 1, "dir": "in"}
+    {"id": "…#InvoiceService.issue", "local": "InvoiceService.issue", "qn": "…", "label": "Method",
+     "path": "src/invoices/service.py", "lines": [41, 63], "repo": "github.com/acme/billing", "ref": "main",
+     "d": 0, "dir": "root"},
+    {"id": "…#Api.issue", "local": "Api.issue", "qn": "…", "label": "Method", "path": "src/api.py",
+     "lines": [7, 8], "repo": "github.com/acme/billing", "ref": "main", "d": 1, "dir": "in"}
   ],
   "edges": [[1, 0, "CALLS", 0.9, "type_resolved", 8]],
   "tests_excluded": 2        // distinct tests left out because include_tests is false
@@ -493,8 +517,9 @@ traces the pull request's own calls, linked against the libraries'
 defaults. Contract link edges ([above](#the-envelope), *Contract edges*)
 come back like the others, with strategy `contract` and the call site:
 `1 [1] out d1 Route GET /users/{id}  openapi.yaml L7-11  ←0 CALLS 0.9
-contract @5`. When the answer spans several snapshots, every node
-carries its snapshot `"s"` (the result's `"s"` is the root's), the
+contract @5`. Every node names its `repo` and `ref`; when the answer
+spans several snapshots, every node also carries its snapshot `"s"` (the
+result's `"s"` is the root's), the
 envelope lists the snapshots touched, and the text prefixes such nodes with
 `[s]`:
 
@@ -505,7 +530,7 @@ envelope lists the snapshots touched, and the text prefixes such nodes with
 1 [0] in d1 Method InvoiceService.issue  pkg/service.py L9-11  →0 CALLS 0.95 import_resolved @10
 ```
 
-Node 0 is the root (`d` 0, never filtered); the others are ordered by
+Node 0 is the root (`d` 0, `dir` `root`, never filtered); the others are ordered by
 (depth, direction, qualified_name), each listed once with `dir` `in`
 (caller), `out` (callee) or `both`, and `d` its smallest depth. An edge is
 `[src, dst, kind, confidence, strategy, call_site_line]` with node indexes,
@@ -571,7 +596,7 @@ body or initializer, and a `Class` callee is a constructor call (its
 |---|---|---|
 | `path` | string, required (repository-relative) | — |
 
-Results: `{"s", "path", "lang", "line_count", "symbols": [ {"id", "name", "qn", "label", "lines", "sig", "children" (opt): [ … ]} ] }`
+Results: `{"s", "path", "lang", "line_count", "symbols": [ {"id", "name", "local", "qn", "label", "lines", "sig", "repo", "ref", "children" (opt): [ … ]} ] }`
 (nested by containment, ordered by line). `next_cursor` is the number of
 symbols already returned in pre-order; a later page nests what it can and
 lists the rest at the top level. With a `ref` list: `"in"` / `"changed"`
@@ -633,10 +658,11 @@ narrows the listing; locally, the selected roots only).
 | `limit` | int, 1–1000 | 50 |
 
 Results: one flat list sorted by (kind, key, repository, path, line):
-`[{"s", "repo", "path", "line", "symbol", "id", "label", "kind", "side",
-"key", "framework", "raw", "matches"}]` — `symbol` the qualified name of
-the declaring / calling definition (the file for file-level code), `id`
-its symbol id, `side` `provides` / `consumes`, `key` the canonical key,
+`[{"s", "repo", "ref", "path", "line", "symbol", "id", "local", "label",
+"kind", "side", "key", "framework", "raw", "matches"}]` — `symbol` the
+global qualified name of the declaring / calling definition (the file for
+file-level code), `id` its symbol id, `local` its file-local name (the
+id's `#` part; the path for file-level code), `side` `provides` / `consumes`, `key` the canonical key,
 `framework` the framework or spec (`flask`, `requests`, `openapi`,
 `proto`, `grpc-python`, …), `raw` the text as written (≤ 200 characters),
 `matches` the number of counterpart rows: providers matching a consumed key
