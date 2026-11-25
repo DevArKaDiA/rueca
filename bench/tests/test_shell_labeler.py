@@ -8,7 +8,8 @@ from pathlib import Path
 from rueca_bench.common import is_code_file, is_test_path, lang_family
 from rueca_bench.scip import questions
 from rueca_bench.shellgold import resolve_tail, shell_call_graph, source_tail
-from rueca_bench.treesitter import extract_functions, grammar_for, shell_repair
+from rueca_bench.shelldialect import detect, repair, shebang_interpreter
+from rueca_bench.treesitter import error_nodes, extract_functions, grammar_for, parse_shell, shell_repair
 
 
 def _names(src: str, path: str = "lib/x.sh") -> list[tuple[str, str, int, int, int]]:
@@ -42,7 +43,7 @@ def test_repairs_keep_lengths():
     cases = {
         b'x\n\\. "$D/a.sh"\n': b'x\n . "$D/a.sh"\n',
         b"c=${name:$i:1}": b"c=${name: i:1}",
-        b"o=${1//&/\\&amp;}": b"o=${1//_/\\_amp;}",
+        b"o=${1//&/\\&amp;}": b"o=${1//_/\\_amp_}",
         b"j=${(j:,:)parts}": b"j=${______parts}",
         b"echo \\$HOME && x": b"echo \\$HOME && x",
     }
@@ -52,6 +53,110 @@ def test_repairs_keep_lengths():
     # nvm's alias bypass after a word: the function after it is still seen.
     src = 'source x/c.sh\n\\. "$NVM_DIR/nvm.sh"\nafter() {\n  :\n}\n'
     assert [n[0] for n in _names(src)] == ["after"]
+
+
+def test_dialects_like_the_pack():
+    """The cases of `rueca-lang-shell` `dialect.rs` (its unit tests)."""
+    cases = [
+        ("test/x.bats", "#!/usr/bin/env zsh\n", ("bats", "Extension")),
+        ("x.sh", "#!/bin/sh\n# shellcheck shell=bash\n", ("bash", "Directive")),
+        ("x.sh", "# shellcheck shell=ksh disable=SC2034\nx=1\n", ("ksh", "Directive")),
+        ("x.sh", "x=1\n# shellcheck shell=zsh\n", ("sh", "Default")),
+        ("bin/tool", "#!/bin/dash\necho\n", ("sh", "Shebang")),
+        ("bin/tool", "#!/bin/busybox sh\necho\n", ("sh", "Shebang")),
+        ("bin/tool", "#!/usr/bin/env -S bash -eu\necho\n", ("bash", "Shebang")),
+        ("bin/tool.zsh", "#!/bin/ksh93\necho\n", ("ksh", "Shebang")),
+        ("x.zsh", "#!/usr/bin/env python3\n", ("zsh", "FileName")),
+        ("completions/_git", "#compdef git\n_git() { :; }\n", ("zsh", "ZshHeader")),
+        ("functions/x.sh", "#autoload\n", ("zsh", "ZshHeader")),
+        ("themes/robbyrussell.zsh-theme", "x=1\n", ("zsh", "FileName")),
+        ("home/.zlogout", "x=1\n", ("zsh", "FileName")),
+        ("home/.bash_profile", "x=1\n", ("bash", "FileName")),
+        ("home/.mkshrc", "x=1\n", ("ksh", "FileName")),
+        ("home/.profile", "x=1\n", ("sh", "FileName")),
+        ("x.sh", "x=1\n# vim: set ft=zsh sw=2:\n", ("zsh", "Modeline")),
+        ("x.sh", "# -*- mode: sh; sh-shell: bash -*-\nx=1\n", ("bash", "Modeline")),
+        ("x.sh", "echo 'vim: ft=zsh'\n", ("sh", "Default")),
+        ("shell/zsh/init.sh", "x=1\n", ("zsh", "Directory")),
+        ("etc/bash_completion.d/tool.sh", "x=1\n", ("bash", "Directory")),
+        ("contrib/ksh93/x.sh", "x=1\n", ("ksh", "Directory")),
+        ("bash-zsh/x.sh", "x=1\n", ("sh", "Default")),
+        ("zsh/bash/x.sh", "x=1\n", ("bash", "Directory")),
+        ("bashful/x.sh", "x=1\n", ("sh", "Default")),
+        ("x.sh", "f() { echo hi; }\nf\n", ("sh", "Default")),
+        ("x.sh", "if [[ -n $x ]]; then y=(a b); fi\n", ("bash", "Content")),
+        ("x.sh", "dir=${BASH_SOURCE[0]%/*}\n", ("bash", "Content")),
+        ("x.sh", "setopt extendedglob\nprint ${(j:,:)xs}\n", ("zsh", "Content")),
+        ("x.sh", "autoload -U compinit\ncompinit\n", ("zsh", "Content")),
+        ("x.sh", "bindkey -e\n", ("bash", "Content")),
+        ("x.sh", "set -A xs a b\nprint -u2 x\n", ("ksh", "Content")),
+        ("x.sh", "# setopt extendedglob\necho\n", ("sh", "Default")),
+        ("nvm.sh", 'if [ -n "$ZSH_VERSION" ]; then\n  setopt local_options\n  autoload -U x\nfi\n', ("bash", "Content")),
+        ("x.sh", '[ -n "$BASH_VERSION" ] && echo bash\n', ("sh", "Default")),
+        ("x.sh", "", ("sh", "Default")),
+    ]
+    for path, src, want in cases:
+        assert detect(path, src.encode()) == want, (path, src)
+    assert detect("x.sh", b"\xff\xfe\n") == ("sh", "Default")
+    assert shebang_interpreter(b"#!/usr/bin/env -S LC_ALL=C bash -e\nx") == "bash"
+    assert shebang_interpreter(b"#!/usr/bin/python3.12") == "python"
+    assert shebang_interpreter(b"echo") is None
+
+
+def test_repairs_per_grammar_like_the_pack():
+    """The cases of `repair.rs` (its unit tests), both rule sets."""
+    bash = {
+        'cat > f <<<"x"\n': 'cat > f   <"x"\n',
+        'cat <<<"x" > f\nread a <<<"$b"': 'cat <<<"x" > f\nread a <<<"$b"',
+        "a > f; b <<<x\na > f | b <<<x": "a > f; b <<<x\na > f | b <<<x",
+        "t=$f.tmp.$$.zwc": "t=$f.tmp.$$.zwc",
+        '} "$1"': '} "$1"',
+        "#FOO=1": "#FOO=1",
+        "C=%{$fg[red]%}": "C=%{$fg[red]%}",
+    }
+    zsh = {
+        'cat > f <<<"x"': 'cat > f <<<"x"',
+        't=$f.tmp.$$.zwc; pid=$$; echo $$ "$$" $$': 't=$f.tmp.$!.zwc; pid=$!; echo $$ "$$" $$',
+        '() {\n  a\n} "$1" &|\n} $x\n': '() {\n  a\n};"$1" &|\n};$x\n',
+        'f() {\n  a\n} > f\n  } "$1"': 'f() {\n  a\n} > f\n  };"$1"',
+        '#FOO="x" bar\n  #B+=1\n#foo\n# A=1\nA=1 #B=2': '#FOO "x" bar\n  #B =1\n#foo\n# A=1\nA=1 #B=2',
+        'C=%{$fg[red]%}"::%{$x%}" ${x%{*}': 'C=%_$fg[red]%}"::%_$x%}" ${x%{*}',
+        "\\. x\nc=${s:$i:1} o=${1//&/x} j=${(j:,:)parts}": "\\. x\nc=${s:$i:1} o=${1//&/x} j=${(j:,:)parts}",
+    }
+    both = {
+        "for arg do echo; done": "for arg;do echo; done",
+        "  for a do\n": "  for a;do\n",
+        "for a in x; do :; done; for a\ndo :; done": "for a in x; do :; done; for a\ndo :; done",
+        "for a dog": "for a dog",
+        "wait_for x do": "wait_for x do",
+        "n=$((0x${h} * 2)) m=$(( 0x$a ))": "n=$((  ${h} * 2)) m=$((   $a ))",
+        "echo 0x$a; n=$((0x10)); (( n = a0x$b ))": "echo 0x$a; n=$((0x10)); (( n = a0x$b ))",
+        "{ a; } 0</dev/null": "{ a; }  </dev/null",
+        "}\n} 0<&3\n": "}\n}  <&3\n",
+        "{ a; } 0<<EOF": "{ a; } 0<<EOF",
+    }
+    for grammar, cases in (("bash", bash | both), ("zsh", zsh | both)):
+        for src, want in cases.items():
+            assert repair(src.encode(), grammar) == want.encode(), (grammar, src)
+    for s in (b"", b"${", b"${(", b"x=${(a", b"\\", b"for ", b"for x", b"0x$", b"} 0<", b"$$", b"<<<", b"}", b"#", b"#a", b"#a+", b"%"):
+        assert len(repair(s, "bash")) == len(s) and len(repair(s, "zsh")) == len(s)
+
+
+def test_grammar_per_dialect():
+    zsh = "for f ($ZSH/lib/*.zsh(N)) { source $f }\nzfn() {\n  print ${(j:,:)parts}\n}\n() { anon }\n"
+    tree, dialect, grammar = parse_shell("lib/x.zsh", zsh.encode())
+    assert (dialect, grammar, error_nodes(tree)) == ("zsh", "zsh", 0)
+    assert [n[0] for n in _names(zsh, "lib/x.zsh")] == ["zfn"]
+    # the dialect's grammar leaves errors, the other one none: the other tree
+    src = "#!/bin/bash\nfor x (a b) { helper $x }\nhelper() { :; }\n"
+    tree, dialect, grammar = parse_shell("x.sh", src.encode())
+    assert (dialect, grammar, error_nodes(tree)) == ("bash", "zsh", 0)
+    assert [n[0] for n in _names(src, "x.sh")] == ["helper"]
+    # both leave errors: the dialect's tree; bats files are only read as bash
+    tree, dialect, grammar = parse_shell("z.sh", b"#!/bin/sh\nf() {\n  if then fi\n")
+    assert (dialect, grammar, error_nodes(tree) > 0) == ("sh", "bash", True)
+    tree, dialect, grammar = parse_shell("t.bats", b"for x (a b) { helper $x }\n")
+    assert (dialect, grammar, error_nodes(tree) > 0) == ("bats", "bash", True)
 
 
 def test_source_tails():

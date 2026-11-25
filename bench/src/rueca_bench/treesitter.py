@@ -25,8 +25,10 @@ import tree_sitter_ruby
 import tree_sitter_rust
 import tree_sitter_swift
 import tree_sitter_typescript
+import tree_sitter_zsh
 from tree_sitter import Language, Node, Parser
 
+from . import shelldialect
 from .common import load_manifest
 
 # Python grammar bindings the manifest may name in `[grammars.<name>] binding =
@@ -47,6 +49,7 @@ _BINDINGS = {
     "tree_sitter_rust": tree_sitter_rust,
     "tree_sitter_swift": tree_sitter_swift,
     "tree_sitter_typescript": tree_sitter_typescript,
+    "tree_sitter_zsh": tree_sitter_zsh,
 }
 
 
@@ -113,58 +116,58 @@ def parse(path: str, source: bytes, language: str | None = None):
     kind = grammar_for(path, language)
     if kind is None or "binding" not in _grammars()[kind]:
         return None
-    parser = Parser(_language(kind))
     if _grammars()[kind].get("labeler") == "shell":
-        source = shell_repair(source)
+        return parse_shell(path, source)[0]
+    parser = Parser(_language(kind))
     return parser.parse(source)
 
 
-def _zsh_flags_end(source: bytes, open_: int) -> int | None:
-    """The `)` closing zsh parameter flags opened at `open_` (`(j:,:)`)."""
-    rest = source[open_ + 1 : open_ + 33]
-    close = rest.find(b")")
-    if close < 0 or any(c in b"\n(${}" for c in rest[:close]):
-        return None
-    return open_ + 1 + close
+@lru_cache(maxsize=None)
+def _shell_language(grammar: str) -> Language:
+    """tree-sitter-bash, or tree-sitter-zsh (`[grammars.bash] zsh_binding`)."""
+    spec = _grammars()["bash"]
+    mod, _, fn = spec["zsh_binding" if grammar == "zsh" else "binding"].partition(":")
+    return Language(getattr(_BINDINGS[mod], fn)())
 
 
-def shell_repair(source: bytes) -> bytes:
-    """The same-length repairs the shell pack applies before parsing
-    (`rueca-lang-shell` `repair.rs`): constructs tree-sitter-bash 0.25
-    rejects although the shell accepts them — a line-start backslash before
-    a command name (`\\. "$NVM_DIR/nvm.sh"`) becomes a space; inside
-    `${…}`, `:$name` (a substring offset) loses its `$`, `&` `<` `>` become
-    `_`; zsh parameter flags `${(j:,:)xs}` become `_`."""
-    out = bytearray(source)
-    line_start, depth, i, n = True, 0, 0, len(source)
-    while i < n:
-        b = source[i]
-        nxt = source[i + 1] if i + 1 < n else 32
-        if b == 0x5C:  # backslash
-            if line_start and (chr(nxt).isalpha() and nxt < 128 or nxt in b"._"):
-                out[i] = 32
-            else:
-                if depth and nxt in b"&<>":
-                    out[i + 1] = 0x5F
-                i += 1
-        elif b == 0x24 and nxt == 0x7B:  # ${
-            depth += 1
-            if i + 2 < n and source[i + 2] == 0x28:
-                close = _zsh_flags_end(source, i + 2)
-                if close is not None:
-                    out[i + 2 : close + 1] = b"_" * (close - i - 1)
-                    i = close
-            else:
-                i += 1
-        elif b == 0x7D and depth:
-            depth -= 1
-        elif b == 0x3A and depth and nxt == 0x24 and i + 2 < n and (chr(source[i + 2]).isalpha() and source[i + 2] < 128 or source[i + 2] == 0x5F):
-            out[i + 1] = 32
-        elif depth and b in b"&<>":
-            out[i] = 0x5F
-        line_start = b == 0x0A or (line_start and b in b" \t")
-        i += 1
-    return bytes(out)
+def error_nodes(tree) -> int:
+    """ERROR and MISSING nodes of a tree, counted like the packs do
+    (`rueca-extract` `count_errors`): descending only through nodes flagged
+    `has_error`. A tree can carry the flag without such a node; it then
+    counts as read without errors, as in the health metric."""
+    count = 0
+    stack = [tree.root_node] if tree.root_node.has_error else []
+    while stack:
+        n = stack.pop()
+        if n.is_error or n.is_missing:
+            count += 1
+        if n.has_error:
+            stack.extend(n.children)
+    return count
+
+
+def parse_shell(path: str, source: bytes):
+    """A shell file as the shell pack reads it (`rueca-lang-shell`
+    `extract.rs: parse_file`): the grammar of its dialect (zsh files:
+    tree-sitter-zsh, the others tree-sitter-bash) over the repaired text;
+    when that leaves errors and the other grammar reads the whole file
+    without any, the other tree (never for bats files). Returns (tree,
+    dialect, grammar)."""
+    dialect, _ = shelldialect.detect(path, source)
+    grammar = shelldialect.grammar_of(dialect)
+    tree = Parser(_shell_language(grammar)).parse(shelldialect.repair(source, grammar))
+    if dialect != "bats" and error_nodes(tree):
+        other = "bash" if grammar == "zsh" else "zsh"
+        second = Parser(_shell_language(other)).parse(shelldialect.repair(source, other))
+        if not error_nodes(second):
+            return second, dialect, other
+    return tree, dialect, grammar
+
+
+def shell_repair(source: bytes, grammar: str = "bash") -> bytes:
+    """The same-length repairs the shell pack applies before parsing with
+    `grammar` (`rueca-lang-shell` `repair.rs`; ported in `shelldialect.py`)."""
+    return shelldialect.repair(source, grammar)
 
 
 @dataclass(frozen=True)

@@ -1057,12 +1057,15 @@ calls = { call_expression = "function", macro_invocation = "macro" }
 members = { field_expression = "field", scoped_identifier = "name", generic_function = "function" }
 token_calls = "token_tree"
 
-# Shell (sh / bash; zsh and ksh best effort): code-backed labeler — every
-# `function_definition` is a callable named by its name (shell functions are
-# global, nesting does not qualify them; treesitter.py: _shell_functions).
+# Shell (sh, bash, ksh, bats: tree-sitter-bash; zsh: tree-sitter-zsh, chosen
+# per file by the shell pack's dialect rules, shelldialect.py): code-backed
+# labeler — every `function_definition` is a callable named by its name
+# (shell functions are global, nesting does not qualify them;
+# treesitter.py: _shell_functions).
 [grammars.bash]
 binding = "tree_sitter_bash:language"
-package = "tree-sitter-bash 0.25.1 (MIT)"
+zsh_binding = "tree_sitter_zsh:language"
+package = "tree-sitter-bash 0.25.1 (MIT), tree-sitter-zsh 0.64.3 (MIT)"
 extensions = [".sh", ".bash", ".zsh", ".ksh", ".bats"]
 labeler = "shell"
 separator = "."
