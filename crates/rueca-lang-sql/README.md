@@ -73,7 +73,9 @@ statement only recognized by its first words is an error. **Lenient**
 leaves those head-only statements out. On the health corpus (every SQL
 file of the gated repositories at their pinned commits, 3,419 files): 26
 files with a strict error (0.76%), 23 lenient (0.67%); what is left is
-listed in `docs/decisions.md`. By detected dialect:
+listed in `docs/decisions.md`. The parser was repaired against these
+files, so this is not the rate on SQL it has not seen: that one is 25.0%
+(*Status*). By detected dialect:
 
 | Dialect | Files | With a parse error (strict, the gated count) | Lenient |
 |---|---|---|---|
@@ -133,10 +135,36 @@ if not loop.last %} union all {% endif %}`) is blanked; in a file under
 
 ## Status
 
-`stable` under RFC 0004 since 2026-11-25: the status is computed by
-`rueca-bench report` from the gated suites (localization, structure,
-files with parse errors, latency) and written to
-`docs/bench/alpha-results.md`; floors are unchanged. Two things the word
-does not cover: the structural gold is the bench's code-backed labeler
-(sqlglot), not a compiler-grade oracle, and the localization set is mined
-by the bench from GitHub, not validated by people.
+`preview` under RFC 0004: held-out parse errors 25.0%. The status is
+computed by `rueca-bench report` from the gated suites (localization,
+structure, files with parse errors, latency) and written to
+`docs/bench/alpha-results.md`; floors are unchanged. Every floor but one is
+met. The parse-error floor (≤ 2% of files, strict) was met only on the
+corpus the parser was repaired against (0.76% of 3,419 files, above). On
+25 repositories chosen before any measurement and added to the bench as
+gated health targets on 2026-11-25, with the same parser, 1,624 of 6,496
+files keep a strict error (25.0%, 24.0–26.1):
+
+| Dialect (given to the file before measuring) | Files | With a strict parse error | 95% interval |
+|---|---:|---:|---|
+| PostgreSQL | 1,204 | 114 (9.5%) | 7.9–11.3 |
+| MySQL / MariaDB | 1,020 | 311 (30.5%) | 27.7–33.4 |
+| SQLite | 279 | 14 (5.0%) | 3.0–8.2 |
+| T-SQL | 1,517 | 635 (41.9%) | 39.4–44.4 |
+| Oracle | 248 | 101 (40.7%) | 34.8–46.9 |
+| DB2 | 94 | 3 (3.2%) | 1.1–9.0 |
+| H2 | 89 | 7 (7.9%) | 3.9–15.4 |
+| BigQuery | 681 | 130 (19.1%) | 16.3–22.2 |
+| Snowflake | 647 | 287 (44.4%) | 40.6–48.2 |
+| dbt Jinja | 706 | 22 (3.1%) | 2.1–4.7 |
+| unlabelled | 11 | 0 | 0.0–25.9 |
+| **All** | **6,496** | **1,624 (25.0%)** | **24.0–26.1** |
+
+Most of it is statements read by their head only (T-SQL and Snowflake
+administration and DDL, MySQL scheduled events, PostgreSQL `CREATE CAST` /
+`OPERATOR`), SSMS template parameters, `#` comments, SQL*Plus
+continuation lines and commands; repositories, causes and the files are
+in `docs/decisions.md` and `bench/datasets/heldout/`. Two more things the
+status does not cover: the structural gold is the bench's code-backed
+labeler (sqlglot), not a compiler-grade oracle, and the localization set
+is mined by the bench from GitHub, not validated by people.

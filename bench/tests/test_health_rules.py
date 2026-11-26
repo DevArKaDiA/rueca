@@ -38,3 +38,12 @@ def test_not_the_language(tmp_path):
     assert exclusion_reason("TestObj.h", "cpp", "catchorg/Catch2", tmp_path) == "not the language (Objective-C)"
     assert exclusion_reason("plain.h", "c", "x/y", tmp_path) is None
     assert exclusion_reason("TestObj.h", "python", "x/y", tmp_path) is None
+
+
+def test_held_out_repositories_are_gated_health_targets():
+    from rueca_bench.health import targets
+
+    held = [t for t in targets({"sql"}) if t["source"] == "held-out"]
+    assert len(held) == 25
+    assert all(t["split"] == "gated" and t["language"] == "sql" and len(t["commit"]) == 40 for t in held)
+    assert len({t["name"] for t in targets()}) == len(targets())

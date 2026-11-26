@@ -1,5 +1,117 @@
 # Decisions log
 
+## 2026-11-25 — SQL: held-out parse errors 25.0%; back to `preview`
+
+The measurement fixed in the next entry, run as written there. **1,624 of
+6,496 files of the 25 held-out repositories keep a strict parse error:
+25.0% (Wilson 95% 24.0–26.1), against a floor of ≤ 2%.** The 0.76% of the
+entry after it was the rate on the files the parser was repaired against.
+SQL is `preview`.
+
+- **What ran.** `rueca-bench run --arm rueca --suite health --lang sql`
+  on the 25 repositories as `[[health.repos]]` of the manifest (source
+  `held-out`, gated; `health.py` learns that one list, nothing else in the
+  harness changed), with `rueca` built from `git archive 05ff770` (sha256
+  `460fa3c27315…`; the published `678465c5b359…` was built in another
+  directory and is not bit-reproducible). The rebuilt binary gives the
+  published rows on six repositories of the first corpus (tSQLt 14 of 281,
+  mimic-code 8 of 469, Sakila 0 of 25, pgmq 0 of 101, bigquery-utils 1 of
+  105, First Responder Kit 1 of 23). No file of `rueca-lang-sql` changed.
+  No health rule excludes any of the 6,496 files, so the raw rate is the
+  same number. The index does not extract 14 more files (13 in UTF-16, one
+  over 2 MiB; `files_skipped`); with them, as the crate's `dialects`
+  example counts, 1,637 of 6,510 (25.1%, 24.1–26.2); lenient (head-only
+  statements not counted) 835 of 6,510 (12.8%, 12.0–13.7).
+- **By the dialect given to each file before measuring** (the files the
+  index extracted):
+
+  | Dialect (a priori) | Files | Strict errors | % | Wilson 95% |
+  |---|---:|---:|---:|---|
+  | PostgreSQL | 1,204 | 114 | 9.5 | 7.9–11.3 |
+  | MySQL / MariaDB | 1,020 | 311 | 30.5 | 27.7–33.4 |
+  | SQLite | 279 | 14 | 5.0 | 3.0–8.2 |
+  | T-SQL | 1,517 | 635 | 41.9 | 39.4–44.4 |
+  | Oracle | 248 | 101 | 40.7 | 34.8–46.9 |
+  | DB2 | 94 | 3 | 3.2 | 1.1–9.0 |
+  | H2 | 89 | 7 | 7.9 | 3.9–15.4 |
+  | BigQuery | 681 | 130 | 19.1 | 16.3–22.2 |
+  | Snowflake | 647 | 287 | 44.4 | 40.6–48.2 |
+  | dbt Jinja | 706 | 22 | 3.1 | 2.1–4.7 |
+  | unlabelled | 11 | 0 | 0.0 | 0.0–25.9 |
+  | **All** | **6,496** | **1,624** | **25.0** | **24.0–26.1** |
+
+  No dialect meets 2% with its interval, and no single repository decides
+  it: leaving any one out, the pooled rate stays between 19.0% (without
+  sql-server-samples) and 26.9%. By what the pack detected instead, 1,548
+  files were read as ANSI (397 with an error), 1,415 as T-SQL, 997 as
+  PostgreSQL, 931 as MySQL, 796 as BigQuery, 270 as Oracle, 227 as
+  Snowflake (of 647 Snowflake files), 188 as SQLite.
+- **By repository** (files extracted, with a strict error): supabase/postgres
+  264 / 36 (13.6%), synapse 301 / 1 (0.3%), supabase/auth 79 / 2 (2.5%),
+  pgvector 56 / 17 (30.4%), age 69 / 50 (72.5%), cloudstack 225 / 61
+  (27.1%), vitess 274 / 136 (49.6%), gh-ost 104 / 94 (90.4%),
+  dolphinscheduler 74 / 16 (21.6%), temporal 111 / 9 (8.1%), diesel 465 /
+  2 (0.4%), authelia 174 / 13 (7.5%), camunda-bpm-platform 546 / 24
+  (4.4%), actual 59 / 1 (1.7%), atuin 78 / 1 (1.3%), sql-server-samples
+  1,087 / 595 (54.7%), sqlwatch 337 / 39 (11.6%), cortex-data-foundation
+  595 / 127 (21.3%), ethereum-etl-airflow 86 / 3 (3.5%), dbt-ga4 72 / 1
+  (1.4%), sf-samples 647 / 287 (44.4%), dbt-adapters 409 / 10 (2.4%),
+  ra_data_warehouse 225 / 11 (4.9%), db-sample-schemas 89 / 76 (85.4%),
+  pljson 70 / 12 (17.1%). Five repositories are at or under 2%: the
+  migrations of applications (synapse, diesel, actual, atuin) and one dbt
+  package.
+- **Causes, by file** (a file with several is counted in each; categories
+  written after the fact from the parser errors and the first words of
+  head-only statements, `bench/datasets/heldout/sql_causes.py`;
+  descriptive, nothing was changed for them):
+
+  | Files | Construct |
+  |---:|---|
+  | 420 | T-SQL statements read by their head only: `ALTER DATABASE`, `CREATE STATISTICS`, `CREATE EXTERNAL …`, `RESTORE`, partition functions and schemes, event sessions, variants of `ALTER TABLE` / `DROP TABLE` (sql-server-samples 395) |
+  | 207 | MySQL scheduled events, `CREATE / DROP EVENT`, head only (vitess 124, gh-ost 83) |
+  | 192 | SSMS template parameters `<name, type, value>` in place of names (sql-server-samples; text a client fills in, as the two tSQLt templates of the first corpus) |
+  | 187 | T-SQL statements no dialect parses: `INSERT t FROM '<file>' WITH (…)` of the AdventureWorks install scripts, graph tables (`AS NODE` / `AS EDGE`), natively compiled `BEGIN ATOMIC WITH`, `ROWGUIDCOL`, `OPENJSON … WITH` |
+  | 128 | Snowflake statements with no grammar: dynamic tables, `CREATE COMPUTE POOL` / `IMAGE REPOSITORY` / `STREAMLIT`, procedure parameters with `DEFAULT`, `$` and `&{…}` variables |
+  | 121 | `#` line comments (120 files of cortex-data-foundation start with a `#--` licence header that its Jinja step removes) |
+  | 117 | Snowflake account and object statements, head only: `GRANT`, `CREATE DATABASE / SCHEMA / ROLE / STAGE / STREAM`, `ALTER WAREHOUSE`, `CREATE OR REPLACE` of objects without a production |
+  | 103 | Snowflake `USE ROLE / DATABASE / SCHEMA / WAREHOUSE`, head only |
+  | 57 | Oracle DDL and PL/SQL without a grammar: object types (`CREATE TYPE … OID`), identity columns, `CREATE USER`, `NUMBER(*, n)` |
+  | 56 | PostgreSQL statements, head only: `CREATE CAST`, `CREATE OPERATOR`, `CREATE EVENT TRIGGER`, `ALTER ROLE`, `CREATE PUBLICATION`, `DO LANGUAGE` |
+  | 51 | MySQL statements no dialect parses: a column's `charset`, multi-table `UPDATE a, b SET` |
+  | 48 | SQL*Plus commands: `SET DEFINE`, `rem` |
+  | 47 | a `--` comment with no space after it, in MySQL files (cloudstack 45) |
+  | 45 | MySQL statements, head only: variants of `ALTER TABLE`, `CREATE USER`, `GRANT`, `SIGNAL` |
+  | 39 | a column definition list after a set-returning function, `… AS (v agtype)` (Apache AGE's `cypher()`) |
+  | 30 | SQL*Plus line continuation `-` inside an `INSERT` (db-sample-schemas) |
+  | 22 + 22 | other PostgreSQL statements (operators, `CREATE TABLE … USING`); dbt and Python-format placeholders (`{schema}`) in fixtures |
+  | 13 + 13 | MySQL `delimiter d//`; UTF-16 files |
+
+  Half of the failing files (802 of 1,637) fail only by the strict rule:
+  statements the pack recognizes by their first words and does not parse.
+  The productions of `forms.rs` cover the utility statements that occurred
+  in the first corpus; the held-out one has others.
+- **Decisions.** (1) The held-out repositories stay in the manifest as
+  gated health targets ("held-out, added 2026-11-25 after the tuning of
+  PR #87"), so the scorecard pools them: 1,650 of 9,915 files, 16.6%
+  (15.9–17.4), `preview`, failing floor "files with parse errors". The
+  two populations are reported apart wherever the number is quoted, since
+  the pooled one mixes a tuned corpus with an untuned one. (2) `rueca-bench
+  check` reports the row as a regression against the last publication
+  (0.76% → 16.6%); it is the population that changed, not the pack. No
+  other language's row moves. (3) Once the parser is repaired against
+  these 25 repositories they are a tuning corpus too: the next claim of
+  `stable` for SQL needs a third set chosen the same way, and the repairs
+  should be argued by construct (above), not by this list of files. (4)
+  Every other pack's parse-error rate is also measured on the repositories
+  the pack was developed against; only SQL has a held-out number today.
+- **Limits of this number.** One person's selection from metadata, not a
+  random sample of SQL; test schemas (gh-ost, vitess) and vendor samples
+  (sql-server-samples, sf-samples, db-sample-schemas) weigh more than they
+  would in an application's repository, and they are where the rate is
+  highest; application migrations are where it is lowest. A file counts
+  the same with one unparsed statement or fifty. The a-priori dialect of a
+  file is its repository's or a path word, not verified per file.
+
 ## 2026-11-25 — SQL: a held-out health corpus, chosen before measuring
 
 The 0.76% of files with a strict parse error behind SQL's `stable` (next
@@ -92,6 +204,11 @@ alone, and the measurement follows in a later commit.
   wide interval.
 
 ## 2026-11-25 — SQL: mined localization set, three more structural sets, the strict parse-error count; `stable`
+
+*Superseded the same day on one point: the parse-error rate below is the
+rate on the corpus the parser was repaired against; on a held-out corpus
+it is 25.0% and SQL is `preview` (first entry of this log). The rest
+stands.*
 
 SQL was `preview` on four counts: no localization instances, 8.9% of files
 with parse errors, a callees population of 281, and a code-backed gold.

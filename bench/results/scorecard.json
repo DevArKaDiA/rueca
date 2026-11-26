@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-26 01:16 UTC",
+ "generated": "2026-11-26 03:14 UTC",
  "languages": {
   "python": {
    "label": "python",
@@ -5223,8 +5223,10 @@
   },
   "sql": {
    "label": "sql",
-   "status": "stable",
-   "failing": [],
+   "status": "preview",
+   "failing": [
+    "parse_error_rate"
+   ],
    "metrics": {
     "file_acc@5": {
      "value": 0.7692307692307693,
@@ -5539,40 +5541,40 @@
      "min_n": null
     },
     "parse_error_rate": {
-     "value": 0.0076045627376425855,
+     "value": 0.1664145234493192,
      "ci": [
-      0.005194900557957814,
-      0.011119456823915706
+      0.15921284352105872,
+      0.17387459139127484
      ],
-     "n": 3419,
-     "repos": 17,
-     "partial": 26,
+     "n": 9915,
+     "repos": 42,
+     "partial": 1650,
      "label": "Files with parse errors",
      "family": "Health",
      "floor": 0.02,
      "target": 0.005,
      "better": "lower",
      "gated": true,
-     "status": "\u2705",
+     "status": "\u274c",
      "target_met": false,
      "min_n": null
     },
     "parse_error_rate_raw": {
-     "value": 0.0075912408759124085,
+     "value": 0.16631387964922892,
      "ci": [
-      0.005185791062285784,
-      0.011100018442566646
+      0.15911615044477403,
+      0.17376991856990107
      ],
-     "n": 3425,
-     "repos": 17,
-     "partial": 26,
+     "n": 9921,
+     "repos": 42,
+     "partial": 1650,
      "label": "Files with parse errors, raw (vendored and misdetected files included)",
      "family": "Health",
      "floor": 0.02,
      "target": 0.005,
      "better": "lower",
      "gated": false,
-     "status": "\u2705",
+     "status": "\u274c",
      "target_met": false,
      "min_n": null
     },
@@ -6409,7 +6411,7 @@
    }
   }
  },
- "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 0f16f3062a3f, rfc0005 contract, feat/lang-csharp@wip); rueca 0.1.0-alpha.2 (binary sha256 10388ab51475, rfc0005 contract, feat/lang-sql@9c6fb5d); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830); rueca 0.1.0-alpha.2 (binary sha256 678465c5b359, rfc0005 contract, fix/sql-stable@05ff770); rueca 0.1.0-alpha.2 (binary sha256 7cdcd19e9d33, rfc0005 contract, fix/shell-stable@62caa40); rueca 0.1.0-alpha.2 (binary sha256 9b91d453ad46, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 aeca53b7707c, rfc0005 contract, feat/lang-kotlin@3265ba4); rueca 0.1.0-alpha.2 (binary sha256 c5a6a874ed6b, rfc0005 contract, feat/lang-shell@1b25092); rueca 0.1.0-alpha.2 (binary sha256 c624a58896e5, rfc0005 contract, feat/lang-csharp@1532771); rueca 0.1.0-alpha.2 (binary sha256 e1918daa111e, rfc0005 contract, fix/rust-tokio-gaps@ebc4224); rueca 0.1.0-alpha.2 (binary sha256 eaaabeedec9c, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 f4228890b708, rfc0005 contract, feat/lang-ruby@2e353ab)",
+ "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 0f16f3062a3f, rfc0005 contract, feat/lang-csharp@wip); rueca 0.1.0-alpha.2 (binary sha256 10388ab51475, rfc0005 contract, feat/lang-sql@9c6fb5d); rueca 0.1.0-alpha.2 (binary sha256 460fa3c27315, rfc0005 contract, fix/sql-stable@05ff770); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830); rueca 0.1.0-alpha.2 (binary sha256 678465c5b359, rfc0005 contract, fix/sql-stable@05ff770); rueca 0.1.0-alpha.2 (binary sha256 7cdcd19e9d33, rfc0005 contract, fix/shell-stable@62caa40); rueca 0.1.0-alpha.2 (binary sha256 9b91d453ad46, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 aeca53b7707c, rfc0005 contract, feat/lang-kotlin@3265ba4); rueca 0.1.0-alpha.2 (binary sha256 c5a6a874ed6b, rfc0005 contract, feat/lang-shell@1b25092); rueca 0.1.0-alpha.2 (binary sha256 c624a58896e5, rfc0005 contract, feat/lang-csharp@1532771); rueca 0.1.0-alpha.2 (binary sha256 e1918daa111e, rfc0005 contract, fix/rust-tokio-gaps@ebc4224); rueca 0.1.0-alpha.2 (binary sha256 eaaabeedec9c, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 f4228890b708, rfc0005 contract, feat/lang-ruby@2e353ab)",
  "org": {
   "status": "ok",
   "split": "gated",

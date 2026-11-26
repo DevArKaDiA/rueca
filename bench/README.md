@@ -1416,8 +1416,10 @@ calls, so restricted to functions it is small and scores every tool at
 
 **Files with parse errors**: Rueca's own `IndexReport` (`files_partial /
 files_extracted`) per language, over every corpus repository — each S3 gold
-repository at its tag and each S1 repository at the base commit of its
-first instance — indexed once per (repository, language) on a hard-linked
+repository at its tag, each S1 repository at the base commit of its
+first instance, and the health-only repositories of manifest
+`[[health.repos]]` at their pinned commits (source `held-out` in the
+report; below) — indexed once per (repository, language) on a hard-linked
 scratch tree that holds only that language's files (tests included, the
 walk's excludes as in the repository); gated repositories pooled, Wilson
 interval over files (`health.py`). Two rates:
@@ -1448,6 +1450,20 @@ interval over files (`health.py`). Two rates:
 - **raw**: every file of the language, shown next to the gated rate (not
   gated). The report lists, per repository, how many files each rule
   excluded.
+
+**Held-out repositories** (`[[health.repos]]`: `repo`, `commit`, `tag`,
+`language`, `license`, optional `split`): repositories that only count for
+the parse-error rate, pooled with the others of their language. They exist
+because a pack's parser is repaired against the files of its S1 / S3
+repositories, so the rate on those alone is optimistic. SQL has 25, added
+on 2026-11-25 after the tuning of PR #87 and chosen from metadata before
+any measurement (`docs/decisions.md`): 1,624 of 6,496 files with a strict
+parse error (25.0%) against 26 of 3,419 (0.76%) on the S1 / S3
+repositories; pooled 16.6%, so SQL is `preview`. Which files and which
+statements: `bench/datasets/heldout/` (`sql_by_dialect.py`,
+`sql_heldout_files.json`, `sql_causes.py`). No other language has
+held-out repositories yet; their rates are on the repositories their packs
+were developed against.
 
 Generated code (jq's bison `parser.c`), test files and code fragments
 (MicroPython's `*_globals.h` initializer lists) stay in: they are the
@@ -2153,6 +2169,7 @@ and the summary printed at the end.
 | `error_prone_annotations` 2.50.0 (Maven Central) | sha256 | Apache-2.0 | compile-only classpath for the gson gold |
 | codebase-memory-mcp v0.12.0 | release URL + archive and binary sha256 (darwin-arm64, linux-amd64) | MIT | `cbm` arm |
 | Corpus repositories | commit SHAs | their own (requests Apache-2.0, flask BSD-3, jinja BSD-3, click BSD-3, pytest MIT, pylint GPL-2.0, sphinx BSD-2, tailwindcss MIT, code-server MIT, vue MIT, preact MIT, axios MIT, hono MIT, zod MIT, express MIT, yargs MIT, carbon MIT, php-cs-fixer MIT, laravel/framework MIT, phpspreadsheet MIT, Twig BSD-3, monolog MIT, commonmark BSD-3, JsonMapper MIT; caddy Apache-2.0, gin MIT, prometheus Apache-2.0, hugo Apache-2.0, terraform BUSL-1.1 (source-available), urfave/cli MIT, goawk MIT; gson Apache-2.0, javapoet Apache-2.0, eo-yaml BSD-3, lombok MIT, dubbo Apache-2.0, rocketmq Apache-2.0, apollo Apache-2.0; redis BSD-3 before 7.4, RSALv2 / SSPLv1 (and AGPLv3 from 8.0) after (source-available at most pinned commits), jq MIT, micropython MIT, valkey BSD-3, cJSON MIT, Lua MIT (text in `lua.h`), nng MIT; fmt MIT, yaml-cpp MIT, Botan BSD-2, nlohmann/json MIT, Catch2 BSL-1.0, simdjson Apache-2.0; tokio MIT, bat MIT OR Apache-2.0, axum MIT, ruff MIT, coreutils MIT, nushell MIT, ripgrep Unlicense OR MIT, bytes MIT, serde_json MIT OR Apache-2.0; nvm MIT, acme.sh GPL-3.0, bash-it MIT, bats-core MIT; microservices-demo Apache-2.0, awesome-compose CC0-1.0, terraform-aws-vpc Apache-2.0) | cloned at runtime as benchmark input only; nothing vendored or copied (RFC 0002 §2 governs what enters the repository) |
+| Held-out health repositories (SQL, `[[health.repos]]`) | commit SHAs | their own, per entry in the manifest (PostgreSQL: supabase/postgres, pgvector; Apache-2.0: synapse v1.98.0, age, cloudstack, vitess, dolphinscheduler, diesel, authelia, camunda-bpm-platform, cortex-data-foundation, sf-samples, dbt-adapters, ra_data_warehouse; MIT: supabase/auth, gh-ost, temporal, actual, atuin, sql-server-samples, sqlwatch, ethereum-etl-airflow, dbt-ga4, db-sample-schemas, pljson) | cloned at runtime as benchmark input only; `bench/datasets/heldout/sql_heldout_files.json` names files and keeps the first words of failing statements |
 
 Citations: Jimenez et al., *SWE-bench* (ICLR 2024); OpenAI, *SWE-bench
 Verified* (2024); Rashid et al., *SWE-PolyBench* (2025); Chen et al.,
@@ -2418,8 +2435,11 @@ file paths and function names of the public corpus repositories.
   sqlparser), and procedural code is walked by the pack with each inner
   statement parsed: "parsed" therefore means "accepted by sqlparser or by
   one of these productions", not "accepted by an independent grammar of
-  the dialect". T-SQL alone stays above 2% on the corpus; the floor is on
-  the pooled files.
+  the dialect". On the S1 / S3 repositories, which the productions were
+  written against, 0.76% of files keep an error; on the 25 held-out
+  repositories 25.0% do (T-SQL 41.9%, Snowflake 44.4%, Oracle 40.7%, MySQL
+  30.5%, BigQuery 19.1%, PostgreSQL 9.5%, SQLite 5.0%, dbt Jinja 3.1%),
+  which is why SQL is `preview`. The floor is on the pooled files (16.6%).
 - **scip-ruby gold for Ruby** (jekyll, ruby-lsp, rack, packwerk, micro) is
   Sorbet's view of the code:
   - untyped code is inferred (as `# typed: true`, also in `# typed: false`
