@@ -1,0 +1,13 @@
+{
+  "app/Main.kt:Outer.Inner.Inner": [],
+  "app/Main.kt:Outer.Inner.hi": [],
+  "app/Main.kt:Outer.Outer": [],
+  "app/Main.kt:Outer.a": [
+    "app/Main.kt:Outer.Inner.Inner",
+    "app/Main.kt:Outer.Inner.hi"
+  ],
+  "app/Main.kt:b": [
+    "app/Main.kt:Outer.Inner.Inner",
+    "app/Main.kt:Outer.Inner.hi"
+  ]
+}

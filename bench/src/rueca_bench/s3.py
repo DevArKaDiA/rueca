@@ -197,6 +197,34 @@ def run_scip_dotnet(root: Path, out: Path, dotnet: dict, name: str):
     return res
 
 
+def run_scip_kotlin(root: Path, out: Path, sources: list[str], classpath: list[str], name: str):
+    """scip-java's Kotlin indexer (the Kotlin Analysis API, bundled in the
+    pinned launcher) without a build tool: a `scip-java.json` build listing
+    the source directories and the sha256-pinned classpath jars, run in the
+    pinned JDK image with no network and read-only sources. The indexer
+    analyses the sources as one JVM module and compiles nothing; Java files
+    in the listed directories go through javac with scip-java's plugin."""
+    from .tools import fetch_artifact
+
+    spec = tool_spec("scip_kotlin")
+    launcher = fetch_tool("scip_kotlin")
+    jars = [fetch_artifact(k) for k in classpath]
+    work = SCIP_DIR / f"{name}-kotlin"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    mounts = ["-v", f"{root}:/src:ro", "-v", f"{work}:/out", "-v", f"{launcher}:/tools/scip-java:ro"]
+    for j in jars:
+        mounts += ["-v", f"{j}:/tools/{j.name}:ro"]
+    config = {"sourceFiles": sources, "classpath": [f"/tools/{j.name}" for j in jars]}
+    (work / "scip-java.json").write_text(json.dumps(config, indent=1))
+    script = "cd /src && sh /tools/scip-java index --build-tool SCIP --scip-config /out/scip-java.json --targetroot /out/t --output /out/index.scip"
+    res = sh(["docker", "run", "--rm", "--network=none", *mounts, spec["image"], "sh", "-c", script], timeout=3600)
+    if (work / "index.scip").exists():
+        shutil.move(str(work / "index.scip"), out)
+    shutil.rmtree(work, ignore_errors=True)
+    return res
+
+
 def write_compdb(spec: dict, root: Path) -> Path:
     """compile_commands.json for scip-clang, synthesized from the manifest
     (`compdb = { std, includes, files, defines, all_headers }`): one entry
@@ -337,6 +365,9 @@ def build_scip_gold(spec: dict, force: bool = False) -> dict:
             elif spec["indexer"] == "scip_dotnet":
                 log(f"scip {name}: scip-dotnet over {', '.join(spec['dotnet']['projects'])}")
                 res = run_scip_dotnet(root, scip_out, spec["dotnet"], name)
+            elif spec["indexer"] == "scip_kotlin":
+                log(f"scip {name}: scip-java Kotlin indexer over {', '.join(spec['kotlin']['sources'])}")
+                res = run_scip_kotlin(root, scip_out, spec["kotlin"]["sources"], spec["kotlin"].get("classpath", []), name)
             else:
                 if "compdb" in spec:
                     write_compdb(spec, root)
@@ -634,6 +665,8 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
         elif tool == "scip_dotnet":
             projects = sorted(str(p.relative_to(root)) for p in root.glob("*.csproj"))
             res = run_scip_dotnet(root, out, {"projects": projects}, f"micro-{sname}")
+        elif tool == "scip_kotlin":
+            res = run_scip_kotlin(root, out, ["."], spec.get("crosscheck_classpath", []), f"micro-{sname}")
         else:
             files = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.suffix in (".c", ".cc", ".cpp", ".cxx"))
             cspec = {"repo": f"micro/{sname}", "language": lang, "compdb": {"includes": ["."], "files": files}}

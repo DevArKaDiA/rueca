@@ -1,0 +1,7 @@
+{
+  "app/Main.kt:Engine.Engine": [],
+  "app/Main.kt:Engine.start": [],
+  "app/Main.kt:startAll": [
+    "app/Main.kt:Engine.start"
+  ]
+}

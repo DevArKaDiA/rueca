@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:identity": [],
+  "app/Main.kt:one": [
+    "app/Main.kt:identity"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "app/Main.kt:Order.Companion.create": [
+    "app/Main.kt:Order.Order"
+  ],
+  "app/Main.kt:Order.Order": [],
+  "app/Main.kt:newOrder": [
+    "app/Main.kt:Order.Companion.create"
+  ]
+}

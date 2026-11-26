@@ -568,7 +568,9 @@ class RuecaArm(Arm):
             cands = [data.get("symbol") or {}] + list(data.get("candidates") or [])
             ok = [n for n in (norm_symbol(c, func["path"]) for c in cands if c) if n.get("path") == func["path"] and n.get("name") == func["name"] and line_match(n.get("start_line"), func)]
             if ok:
-                c = min(ok, key=lambda n: line_distance(n.get("start_line"), func))
+                # nearest line; on a tie the callable (a Kotlin primary
+                # constructor starts on its class's line)
+                c = min(ok, key=lambda n: (line_distance(n.get("start_line"), func), not is_callable_label(n.get("label"))))
                 return CallResult(True, secs, hits=[_brief(c)], extra={"ref": c.get("id")})
         outlines = h.state.setdefault("outlines", {})
         if func["path"] not in outlines:

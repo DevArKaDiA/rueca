@@ -1,0 +1,11 @@
+{
+  "app/Main.kt:fact": [
+    "app/Main.kt:fact"
+  ],
+  "app/Main.kt:isEven": [
+    "app/Main.kt:isOdd"
+  ],
+  "app/Main.kt:isOdd": [
+    "app/Main.kt:isEven"
+  ]
+}

@@ -20,7 +20,7 @@
 //! | [`LanguagePack::overrides`] | `false` | the resolver should add `OVERRIDES` edges (Java, C++) |
 //! | [`LanguagePack::facts_depend_on_path`] | `false` | extraction reads the path, not only the bytes (data file kinds chosen by name) |
 //! | [`LanguagePack::resolve_import`] returning a directory | — | the import names a package or folder (Go, Java on-demand, Terraform modules) |
-//! | [`LanguagePack::namespace_imports`] | `false` | imports name a module (a namespace) wherever its files are, not a path (C#) |
+//! | [`LanguagePack::namespace_imports`] | `false` | imports name a module (a namespace) wherever its files are, not a path (C#, Kotlin) |
 //!
 //! Reserved texts a pack may put in facts:
 //!
@@ -400,7 +400,7 @@ pub trait LanguagePack: Send + Sync {
     /// whose module name is the import's `module`, wherever its files are,
     /// links `IMPORTS` to the directory holding most of them, and leaves
     /// [`LanguagePack::resolve_import`] unused for such imports (C# `using
-    /// A.B;`). Requires [`ModuleScope::Package`].
+    /// A.B;`, Kotlin `import a.b.C`). Requires [`ModuleScope::Package`].
     fn namespace_imports(&self) -> bool {
         false
     }

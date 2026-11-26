@@ -1,0 +1,7 @@
+{
+  "app/Main.kt:Parser.Companion.normalize": [],
+  "app/Main.kt:Parser.Parser": [],
+  "app/Main.kt:Parser.parse": [
+    "app/Main.kt:Parser.Companion.normalize"
+  ]
+}

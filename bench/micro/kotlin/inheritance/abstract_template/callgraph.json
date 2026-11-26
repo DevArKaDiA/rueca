@@ -1,0 +1,7 @@
+{
+  "app/Main.kt:Task.Task": [],
+  "app/Main.kt:Task.exec": [],
+  "app/Main.kt:Task.run": [
+    "app/Main.kt:Task.exec"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "app/Main.kt:Color.Color": [],
+  "app/Main.kt:Color.hex": [],
+  "app/Main.kt:red": [
+    "app/Main.kt:Color.hex"
+  ]
+}

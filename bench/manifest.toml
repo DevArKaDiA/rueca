@@ -315,8 +315,8 @@ reason = "not the language (Objective-C)"
 # S1 languages whose repositories are not members yet: the organization
 # numbers above were measured without them, so they join (and the pin rule
 # covers them) at the next full run of the organization scenario, which
-# re-measures every arm. C# was added after the last run.
-pending_languages = ["csharp"]
+# re-measures every arm. C# and Kotlin were added after the last run.
+pending_languages = ["csharp", "kotlin"]
 max_instances_per_repo = 3
 calibration_max_instances_per_repo = 5
 
@@ -900,6 +900,19 @@ s1_sources = "SWE-rebench V2 (C# rows its LLM screen rated A: microsoft/kiota, d
 s3_gold = "scip-dotnet 0.2.16 in its pinned Docker image (serilog 4.4.0, eShopOnWeb; YamlDotNet 18.1.0 = calibration) and the rueca-bench C# micro-benchmark"
 notes = "C# methods are named `Type.member` (constructors `Type.Type`, local functions `Type.method.local`), namespaces left out. scip-dotnet resolves interface calls to the interface method only and records `new T(…)` as a reference to the type: the gold maps it to `T`'s constructors (one equivalence class when overloaded); `: base(…)` / `: this(…)` initializers and target-typed `new(…)` have no occurrence in its index."
 
+[languages.kotlin]
+label = "kotlin"
+members = ["kotlin"]
+extensions = [".kt", ".kts"]
+# Kotlin Multiplatform source sets name their test directories after the
+# target (`commonTest`, `jvmTest`); Android keeps instrumented tests in
+# `androidTest`. JVM layouts use `src/test` (a built-in test directory).
+test_files = ['.*Tests?\.kts?$', '.*TestCase\.kt$', '^Test[A-Z].*\.kt$']
+test_dirs = ["commonTest", "jvmTest", "androidTest", "androidUnitTest"]
+s1_sources = "Multi-SWE-bench Kotlin (ktlint, detekt, ORT, TeXiFy-IDEA, Kotlin DataFrame, OkHttp, Shadow; SWE-bench Multilingual carries no Kotlin) + SWE-rebench V2 calibration (kotlin-inject, anvil, mordant; LLM screen code A); function gold from the tree-sitter labeler"
+s3_gold = "scip-java 0.14.2 Kotlin Analysis API indexer via a scip-java.json build in Docker (moshi 2.0.0-alpha.1, clikt 5.2.1; kotlinpoet 2.4.0 = calibration)"
+notes = "Constructors are named like their class (`Foo.Foo`): the primary one (explicit or implicit) on the class name's line, secondary ones on their first line. Property accessors, lambdas and `init` blocks are not callables. scip-java resolves interface calls to the interface method only."
+
 # Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
 # callables). `binding` = Python package (pinned in pyproject.toml) and
 # function returning the language. `labeler = "nesting"` (default) is the
@@ -1036,6 +1049,22 @@ members = { member_access_expression = "name", member_binding_expression = "name
 local_callables = true
 type_constructions = true
 generic_overloads = true
+
+# Kotlin: code-backed labeler (treesitter.py: _kotlin_functions) over
+# fwcd/tree-sitter-kotlin at the commit ast-grep released on crates.io as
+# tree-sitter-kotlin-sg 0.4.1 (the Rust pack's grammar; pyproject.toml pins
+# the git source). A call's callee is the first child of `call_expression`
+# (`f()`, `a.f()`, `a?.f()`, `F<T>()`, trailing lambdas) or the type of a
+# supertype constructor call (`: Base(x)`); callable references (`::f`) and
+# infix calls are not call sites.
+[grammars.kotlin]
+binding = "tree_sitter_kotlin:language"
+package = "tree-sitter-kotlin 0.4.0 (fwcd, MIT; ast-grep/tree-sitter-kotlin@1a6f9b1, = crates.io tree-sitter-kotlin-sg 0.4.1)"
+extensions = [".kt", ".kts"]
+labeler = "kotlin"
+separator = "."
+calls = { call_expression = "@0", constructor_invocation = "@0" }
+members = { navigation_expression = "@-1", navigation_suffix = "@-1", user_type = "@last:type_identifier" }
 
 # ---------------------------------------------------------------- tools
 
@@ -1178,6 +1207,48 @@ sha256 = "4667724877f1d37a689202da191e23efa7657c62eef93ccdac406eccfe5cdd0a"
 license = "Apache-2.0"
 role = "compile-only dependency of gson (annotations), for the scip-java gold"
 
+# Kotlin S3 gold: scip-java's Kotlin indexer (built on the Kotlin Analysis
+# API 2.4.0, K2; scip-java >= 0.14.0) run through a `scip-java.json` build
+# in the same pinned JDK image as the Java gold (`--network=none`, read-only
+# sources). It analyses sources without compiling them; the classpath jars
+# below are sha256-pinned. Java keeps its own pinned 0.13.2 launcher.
+[tools.scip_kotlin]
+name = "scip-java"
+bin_name = "scip-java-kotlin"
+version = "0.14.2"
+license = "Apache-2.0"
+release = "https://github.com/scip-code/scip-java/releases/tag/v0.14.2"
+image = "eclipse-temurin@sha256:23cc5734ff46e776f51ce66eb9ee08444fd47caabec0a95b7eb6e94be2d3696d"
+image_name = "eclipse-temurin:21-jdk (Docker official image; GPL-2.0 with Classpath Exception, run as a separate process)"
+
+[tools.scip_kotlin.binaries.any]
+url = "https://github.com/scip-code/scip-java/releases/download/v0.14.2/scip-java-v0.14.2"
+binary_sha256 = "6620a8f2af822ccfa23fbf8a852560edd05c3834dc8cf779ca507abce71586dc"
+
+[artifacts.kotlin_stdlib]
+url = "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.3.21/kotlin-stdlib-2.3.21.jar"
+sha256 = "6f64eac736db9434dd6925b4a518b9d1d17177652320c37916cf9ba3ce7d7d7a"
+license = "Apache-2.0"
+role = "Kotlin standard library on the classpath of the scip-java Kotlin gold"
+
+[artifacts.kotlin_reflect]
+url = "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-reflect/2.3.21/kotlin-reflect-2.3.21.jar"
+sha256 = "33e37d9dfa86c7a29ab34e975b5f4a1287b458878611051f3485652220c1a2cb"
+license = "Apache-2.0"
+role = "dependency of kotlinpoet, for the scip-java Kotlin gold"
+
+[artifacts.okio_jvm]
+url = "https://repo1.maven.org/maven2/com/squareup/okio/okio-jvm/3.16.4/okio-jvm-3.16.4.jar"
+sha256 = "2196b993cd34dbbd919e7e01f57a4781b58bee80f86106163e287c20343a96a7"
+license = "Apache-2.0"
+role = "dependency of moshi, for the scip-java Kotlin gold"
+
+[artifacts.jsr305]
+url = "https://repo1.maven.org/maven2/com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.jar"
+sha256 = "766ad2a0783f2687962c8ad74ceecc38a28b9f72a2d085ee438b7813e928d0c7"
+license = "Apache-2.0"
+role = "compile-only dependency of moshi (annotations), for the scip-java Kotlin gold"
+
 [tools.rueca]
 name = "rueca"
 binary = "$RUECA_BIN (e.g. target/release/rueca after `cargo build --release -p rueca`)"
@@ -1187,7 +1258,7 @@ contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arm
 # 1ff5e82. Every other suite (carried): the RFC 0005 contract branch, main
 # 2c5a384 plus the response contract, whose quality metrics are identical
 # to main's binary on the same run (only tokens and latency differ).
-results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4)"
+results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4); Kotlin (every suite): feat/lang-kotlin @ 3265ba4 (binary sha256 aeca53b7707c6eb6d37890b90a72cb9dce8caad38741c0e2462f742f371f7624)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -1321,6 +1392,25 @@ role = "S1 TS/JS calibration issues and patches (iamkun/dayjs)"
 
 [datasets.multi_swe_bench_js.files]
 "js/iamkun__dayjs_dataset.jsonl" = "2385ad31059b7448d35aa2dba38c03c2cae9ed09f6e794d299649a22bef71c71"
+
+# Multi-SWE-bench Kotlin (same dataset and revision as the C++ files; the
+# revision includes its Kotlin release): the Kotlin gated S1 split.
+[datasets.multi_swe_bench_kotlin]
+hf = "ByteDance-Seed/Multi-SWE-bench"
+revision = "56ff018c04a38e27ada1e9d0a6d5839a51f88f0d"
+format = "multi_swe_bench"
+card_license = "CC0 (dataset README; upstream repository licenses apply)"
+citation = "Zan et al., Multi-SWE-bench: A Multilingual Benchmark for Issue Resolving (2025)"
+role = "S1 Kotlin issues and patches (ktlint, detekt, ORT, TeXiFy-IDEA, Kotlin DataFrame, OkHttp, Shadow)"
+
+[datasets.multi_swe_bench_kotlin.files]
+"kotlin/pinterest__ktlint_dataset.jsonl" = "d7e755c123188078cc414bd8afcff360698558fb84564ffb5d5e6b5b53567ab5"
+"kotlin/detekt__detekt_dataset.jsonl" = "053a79656e6483c982acd427ffca95321bc81512a8149eda364464c76eaf3c6e"
+"kotlin/oss-review-toolkit__ort_dataset.jsonl" = "68ec384a0dc72b119dc92bcd30ea5dc302c3680060a5205b633d3fe28970da36"
+"kotlin/Hannah-Sten__TeXiFy-IDEA_dataset.jsonl" = "e79608344483a7a806a5039e3a54ae76c4578c96b23aa12b6b774244f11b4380"
+"kotlin/Kotlin__dataframe_dataset.jsonl" = "e4a6f80e16bc65b6ea55c28729228f8631007f9b549dc1ff2671ea5c8874a8ca"
+"kotlin/square__okhttp_dataset.jsonl" = "068cdcf7946a147098518383cb9c97557e35e63a8bdd9330d0196bdb97ddc01d"
+"kotlin/GradleUp__shadow_dataset.jsonl" = "0b4401c7d5b86a05538085b910ce862dfad978363af34fb09be901df5d6f0c3e"
 
 # Assembled localization gold (RFC 0002 §8/§9). Used for gold labels only;
 # issue text / patches still come from the source dataset of each instance.
@@ -1882,6 +1972,75 @@ quota = 3
 sources = ["swe_rebench_v2"]
 split = "calibration"
 
+# Kotlin: SWE-bench Multilingual carries no Kotlin; Multi-SWE-bench (its
+# Kotlin release, at the pinned revision) is the gated source, every
+# repository except ankidroid/Anki-Android (an Android application, GPL-3.0),
+# at most 16 instances per repository; calibration on three repositories of
+# SWE-rebench V2 (rows its LLM screen rated `A`, as for PHP and C#) disjoint
+# from them and from the S3 sets.
+[[s1.repos]]
+repo = "pinterest/ktlint"
+language = "kotlin"
+quota = 16
+sources = ["multi_swe_bench_kotlin"]
+
+[[s1.repos]]
+repo = "detekt/detekt"
+language = "kotlin"
+quota = 12
+sources = ["multi_swe_bench_kotlin"]
+
+[[s1.repos]]
+repo = "oss-review-toolkit/ort"
+language = "kotlin"
+quota = 6
+sources = ["multi_swe_bench_kotlin"]
+
+[[s1.repos]]
+repo = "Hannah-Sten/TeXiFy-IDEA"
+language = "kotlin"
+quota = 5
+sources = ["multi_swe_bench_kotlin"]
+
+[[s1.repos]]
+repo = "Kotlin/dataframe"
+language = "kotlin"
+quota = 4
+sources = ["multi_swe_bench_kotlin"]
+
+[[s1.repos]]
+repo = "square/okhttp"
+language = "kotlin"
+quota = 2
+sources = ["multi_swe_bench_kotlin"]
+
+[[s1.repos]]
+repo = "GradleUp/shadow"
+language = "kotlin"
+quota = 1
+sources = ["multi_swe_bench_kotlin"]
+
+[[s1.repos]]
+repo = "evant/kotlin-inject"
+language = "kotlin"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "square/anvil"
+language = "kotlin"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "ajalt/mordant"
+language = "kotlin"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
 # ---------------------------------------------------------------- S3 structural
 # Gold call edges from SCIP indexes (`gold = "scip"`, default) or, for PHP,
 # the bench's PHPStan collector (`gold = "phpstan"`) at pinned commits
@@ -2193,6 +2352,43 @@ indexer = "scip_dotnet"
 dotnet = { projects = ["YamlDotNet/YamlDotNet.csproj"], framework = "net8.0" }
 split = "calibration"
 
+# Kotlin: scip-java's Kotlin Analysis API indexer over a scip-java.json build
+# (no Gradle; classpath = sha256-pinned jars from `[artifacts]`): a
+# serialization library (moshi core) and a command-line parser (clikt, the
+# common + JVM source sets of the multiplatform module); kotlinpoet (common +
+# JVM source sets) = calibration: analysed as one JVM module, its
+# `expect` / `actual` pairs leave ~2% of its call sites unresolved.
+[[s3.repos]]
+repo = "square/moshi"
+language = "kotlin"
+tag = "2.0.0-alpha.1"
+commit = "e721d8a4807e989696bc577091900e35d739987b"
+license = "Apache-2.0"
+include = ["moshi/src/main/java/"]
+indexer = "scip_kotlin"
+kotlin = { sources = ["moshi/src/main/java"], classpath = ["kotlin_stdlib", "okio_jvm", "jsr305"] }
+
+[[s3.repos]]
+repo = "square/kotlinpoet"
+language = "kotlin"
+tag = "2.4.0"
+commit = "97e504bbcece8100b653c5d7d7cd1bba0a55b0b3"
+license = "Apache-2.0"
+include = ["kotlinpoet/src/commonMain/", "kotlinpoet/src/jvmMain/"]
+indexer = "scip_kotlin"
+kotlin = { sources = ["kotlinpoet/src/commonMain", "kotlinpoet/src/jvmMain"], classpath = ["kotlin_stdlib", "kotlin_reflect"] }
+split = "calibration"
+
+[[s3.repos]]
+repo = "ajalt/clikt"
+language = "kotlin"
+tag = "5.2.1"
+commit = "2abee8970c351100a07a7ea5f627fda56088b115"
+license = "Apache-2.0"
+include = ["clikt/src/commonMain/", "clikt/src/jvmMain/"]
+indexer = "scip_kotlin"
+kotlin = { sources = ["clikt/src/commonMain", "clikt/src/jvmMain"], classpath = ["kotlin_stdlib"] }
+
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
 [[s3.micro]]
 name = "pycg"
@@ -2310,6 +2506,19 @@ format = "rueca"
 local = "micro/csharp"
 license = "Apache-2.0"
 crosscheck = "scip_dotnet"
+
+# Kotlin micro-benchmark: Rueca's own hand-labelled snippets (Apache-2.0),
+# cross-checked against scip-java's Kotlin indexer (the S3 gold tool) with
+# the Kotlin standard library on the classpath.
+[[s3.micro]]
+name = "kotlin-micro"
+title = "Kotlin micro-benchmark (rueca-bench)"
+language = "kotlin"
+format = "rueca"
+local = "micro/kotlin"
+license = "Apache-2.0"
+crosscheck = "scip_kotlin"
+crosscheck_classpath = ["kotlin_stdlib"]
 
 # ---------------------------------------------------------------- data formats
 # RFC 0003 §3.3 (bench/README.md, "Data formats"): key recall and span line
@@ -6194,5 +6403,493 @@ id = "spectreconsole__spectre.console-1942"
 repo = "spectreconsole/spectre.console"
 language = "csharp"
 base_commit = "010beffae042a039daa273c3bae41643ad3c04ef"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2365"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "7c565012ebd712470dd30af48f108bc7ede2db90"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2617"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "41ae540f2146fd6e1678f925197ffd9e9c245865"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2432"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "0cd940a3fa4b970b7af5336836165cb27f791008"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2273"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "b135fe848ba11ad4e2c4f230e69c7bf84cc3882a"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2395"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "80e02bf5398c44de2f2dd3e497a5664fb0b931b1"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2873"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "bb14930ea7e89286024cc1b4239c79f936edcf56"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2823"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "7655731bdea470d4bc1b400a660af7dd90955808"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2127"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "76016af2de149fc61b125ced2451e9d3b4659853"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2983"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "eab1e9dfd37386c417dad06ca9386efb84878c61"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2300"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "8f952f6a701d00629854e779c98b51a5bddf9f1d"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2895"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "6a766f72bec04592bb9217a68448111f7db36685"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2362"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "44e7354c48549b76b5aa61b32acf1aefe83f54f4"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2134"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "5c17a629234f324f9930d96629789a7201d1c2b7"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2442"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "00b9a61b4ba69be7dd5c42fa8d435fea502c2ea1"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2774"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "c10637342741504690498f545cf141405cbd7244"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "pinterest__ktlint-2263"
+repo = "pinterest/ktlint"
+language = "kotlin"
+base_commit = "a38fb6f2c1b3a55976783b81838245ed7539153f"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-4994"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "4441bc403e3f08122a24c5be0eeee06813916df4"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-7667"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "7f5799dd496e63648212550b5a3d3c7cac9b77ff"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-5252"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "2866976a40c7802a2ae4670703e8373e66603dee"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-5577"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "6985de34428b49eece65737977872710a8ff5510"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-5352"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "e39010d06763597fea35f551896b0683b232c703"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-5459"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "0a3da653d770affa229eaa4f275027ffd4a2f22b"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-7635"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "d53028caa506a25443e9ea9c1498329daf94b001"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-6352"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "432121310b409f45eab04bd91096dac830b728ba"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-7718"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "a4ec32a2a496439a2580951f4c340146a0e3d610"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-5684"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "0123c85b1698ffb78fc6151e7317f55449bb5171"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-4733"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "146a13e22940bee5562c3a5c6f94e3627ab859c5"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "detekt__detekt-7625"
+repo = "detekt/detekt"
+language = "kotlin"
+base_commit = "82ab4c5ac06f006a0906920687dc016af37642a6"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "oss-review-toolkit__ort-11101"
+repo = "oss-review-toolkit/ort"
+language = "kotlin"
+base_commit = "64d27bccec8defdfec225010b44a57e28e613002"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "oss-review-toolkit__ort-10719"
+repo = "oss-review-toolkit/ort"
+language = "kotlin"
+base_commit = "6569d7a105b0b08a5d14b7f7293687e8931d6b6e"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "oss-review-toolkit__ort-5706"
+repo = "oss-review-toolkit/ort"
+language = "kotlin"
+base_commit = "dd3441eaa10729a7be4792d187c25756a2409c0d"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "oss-review-toolkit__ort-8168"
+repo = "oss-review-toolkit/ort"
+language = "kotlin"
+base_commit = "360dbe199fd15b74cebea94014d8bd6aa6296356"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "oss-review-toolkit__ort-10691"
+repo = "oss-review-toolkit/ort"
+language = "kotlin"
+base_commit = "9a87295f45eea936900517006be519c2bd68d158"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "oss-review-toolkit__ort-8106"
+repo = "oss-review-toolkit/ort"
+language = "kotlin"
+base_commit = "920fd0ccb5667526003ec17fe40d9117e83e990f"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "Hannah-Sten__TeXiFy-IDEA-2935"
+repo = "Hannah-Sten/TeXiFy-IDEA"
+language = "kotlin"
+base_commit = "fbbcad2588a0c2582352722aaced65d8ec37f7c7"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "Hannah-Sten__TeXiFy-IDEA-3530"
+repo = "Hannah-Sten/TeXiFy-IDEA"
+language = "kotlin"
+base_commit = "b084823d6b5a9f7b6c7472842f619c4449d74c77"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "Hannah-Sten__TeXiFy-IDEA-3810"
+repo = "Hannah-Sten/TeXiFy-IDEA"
+language = "kotlin"
+base_commit = "ad00409f9ff6841e131d4d41a391a20a0c2b3e52"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "Hannah-Sten__TeXiFy-IDEA-3920"
+repo = "Hannah-Sten/TeXiFy-IDEA"
+language = "kotlin"
+base_commit = "12ee94f9f0a3ced10886b4449895414a453809ee"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "Hannah-Sten__TeXiFy-IDEA-2624"
+repo = "Hannah-Sten/TeXiFy-IDEA"
+language = "kotlin"
+base_commit = "73563f0c6548d52493991da31d073aa6018afe5d"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "Kotlin__dataframe-641"
+repo = "Kotlin/dataframe"
+language = "kotlin"
+base_commit = "9de12a32af25942caccc2f52a2b8ae98802212fb"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "Kotlin__dataframe-953"
+repo = "Kotlin/dataframe"
+language = "kotlin"
+base_commit = "7695fb290f6588d00ce3d5033c542141aaec4b3d"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "Kotlin__dataframe-1517"
+repo = "Kotlin/dataframe"
+language = "kotlin"
+base_commit = "a34302f0926110b1b0bd6fd3541f4d7edec95bca"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "Kotlin__dataframe-967"
+repo = "Kotlin/dataframe"
+language = "kotlin"
+base_commit = "1d2eb2ef79b451664dfc731a2f5cb78117e16e4b"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "square__okhttp-8968"
+repo = "square/okhttp"
+language = "kotlin"
+base_commit = "07fe953b40543dd2be05b785e67577f49211f485"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "square__okhttp-6887"
+repo = "square/okhttp"
+language = "kotlin"
+base_commit = "1ff16232f86d2b302840a3bb2f9d386e94374753"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "GradleUp__shadow-1313"
+repo = "GradleUp/shadow"
+language = "kotlin"
+base_commit = "b9d4a93656f1ba66929195e2e244bbd1edcc589c"
+dataset = "multi_swe_bench_kotlin"
+assets = []
+
+[[s1.instances]]
+id = "evant__kotlin-inject-358"
+repo = "evant/kotlin-inject"
+language = "kotlin"
+base_commit = "68049c29f925761a3fb662e5d8ed3391ad3149dc"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "evant__kotlin-inject-168"
+repo = "evant/kotlin-inject"
+language = "kotlin"
+base_commit = "adf42e4649d60e464ca5a053c6130942d01d38e0"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "evant__kotlin-inject-357"
+repo = "evant/kotlin-inject"
+language = "kotlin"
+base_commit = "1e7be9158a85537b262ddad562aa29049231af87"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "evant__kotlin-inject-46"
+repo = "evant/kotlin-inject"
+language = "kotlin"
+base_commit = "894a66d92e9cdee48b4b66a7a22f287f8f939997"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "evant__kotlin-inject-297"
+repo = "evant/kotlin-inject"
+language = "kotlin"
+base_commit = "d10eba097590233860a600f5e8f3b69db84725e9"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "square__anvil-591"
+repo = "square/anvil"
+language = "kotlin"
+base_commit = "0afcfc5e7bc75a50d49dff7d2e4c93fe655882c0"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "square__anvil-200"
+repo = "square/anvil"
+language = "kotlin"
+base_commit = "7785d0c94a2bc900e0f8b257ec368636df38273f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "square__anvil-571"
+repo = "square/anvil"
+language = "kotlin"
+base_commit = "2372ea8836053a8a3afffd9d8e57fa82ad93f463"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "square__anvil-112"
+repo = "square/anvil"
+language = "kotlin"
+base_commit = "b2de83dedcdfba8053e3abc1b1d277fbb70a5916"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "square__anvil-312"
+repo = "square/anvil"
+language = "kotlin"
+base_commit = "d18bf4af7de26e8f5a6c56ec165fce49eff2b6a9"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ajalt__mordant-32"
+repo = "ajalt/mordant"
+language = "kotlin"
+base_commit = "b26a37fbb29258b82836c9be81cf043a68ed407a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ajalt__mordant-92"
+repo = "ajalt/mordant"
+language = "kotlin"
+base_commit = "5ca88e68a60fdba54cc7dec28ff32882801bdcf9"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ajalt__mordant-28"
+repo = "ajalt/mordant"
+language = "kotlin"
+base_commit = "af2de19bd84964c8449cbbbe87a88f10839df02a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ajalt__mordant-83"
+repo = "ajalt/mordant"
+language = "kotlin"
+base_commit = "4ee6adc3200b20d64148b504f347fcc284e2c9ca"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ajalt__mordant-42"
+repo = "ajalt/mordant"
+language = "kotlin"
+base_commit = "ec7d1a517dc0a8971f3f21ae83b99eb4825abf8e"
 dataset = "swe_rebench_v2"
 assets = []

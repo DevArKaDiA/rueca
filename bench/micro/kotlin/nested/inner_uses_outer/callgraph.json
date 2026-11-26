@@ -1,0 +1,8 @@
+{
+  "app/Main.kt:Outer.In.In": [],
+  "app/Main.kt:Outer.In.x": [
+    "app/Main.kt:Outer.base"
+  ],
+  "app/Main.kt:Outer.Outer": [],
+  "app/Main.kt:Outer.base": []
+}

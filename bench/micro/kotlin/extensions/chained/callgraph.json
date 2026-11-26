@@ -1,0 +1,8 @@
+{
+  "app/Main.kt:clean": [],
+  "app/Main.kt:tidy": [
+    "app/Main.kt:clean",
+    "app/Main.kt:wrap"
+  ],
+  "app/Main.kt:wrap": []
+}

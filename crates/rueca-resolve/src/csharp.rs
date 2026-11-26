@@ -317,7 +317,7 @@ impl<'a> Resolver<'a> {
             let mut m = HashMap::new();
             for (p, members) in self.packages.iter().enumerate() {
                 let first = members[0];
-                if self.packs[first as usize].is_some_and(|k| k.namespace_imports()) {
+                if self.is_csharp(first) && self.packs[first as usize].is_some_and(|k| k.namespace_imports()) {
                     m.insert(self.module_names[first as usize].clone(), p as u32);
                 }
             }
@@ -358,7 +358,7 @@ impl<'a> Resolver<'a> {
 
     /// Import targets of a [`LanguagePack::namespace_imports`] file: the
     /// namespace each using names, as its first file and its main folder.
-    pub(crate) fn namespace_import_targets(&self, fid: FileId) -> (Vec<Option<FileId>>, Vec<Option<NodeId>>) {
+    pub(crate) fn csharp_namespace_import_targets(&self, fid: FileId) -> (Vec<Option<FileId>>, Vec<Option<NodeId>>) {
         let imports = self.imports(fid);
         let (mut t, mut d) = (vec![None; imports.len()], vec![None; imports.len()]);
         for (k, imp) in imports.iter().enumerate() {

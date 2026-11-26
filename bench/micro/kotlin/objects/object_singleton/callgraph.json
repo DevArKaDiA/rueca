@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:Registry.register": [],
+  "app/Main.kt:setup": [
+    "app/Main.kt:Registry.register"
+  ]
+}

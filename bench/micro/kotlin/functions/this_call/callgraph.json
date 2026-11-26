@@ -1,0 +1,7 @@
+{
+  "app/Main.kt:Job.Job": [],
+  "app/Main.kt:Job.a": [
+    "app/Main.kt:Job.b"
+  ],
+  "app/Main.kt:Job.b": []
+}

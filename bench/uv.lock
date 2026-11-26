@@ -679,6 +679,7 @@ dependencies = [
     { name = "tree-sitter-go" },
     { name = "tree-sitter-java" },
     { name = "tree-sitter-javascript" },
+    { name = "tree-sitter-kotlin" },
     { name = "tree-sitter-php" },
     { name = "tree-sitter-python" },
     { name = "tree-sitter-rust" },
@@ -706,6 +707,7 @@ requires-dist = [
     { name = "tree-sitter-go", specifier = ">=0.25.0,<0.26" },
     { name = "tree-sitter-java", specifier = ">=0.23.5,<0.24" },
     { name = "tree-sitter-javascript", specifier = ">=0.25,<0.26" },
+    { name = "tree-sitter-kotlin", git = "https://github.com/ast-grep/tree-sitter-kotlin?rev=1a6f9b1ee1125a7357493eeb95da48d16ac302b4" },
     { name = "tree-sitter-php", specifier = ">=0.25.1,<0.26" },
     { name = "tree-sitter-python", specifier = ">=0.25,<0.26" },
     { name = "tree-sitter-rust", specifier = ">=0.24.2,<0.25" },
@@ -927,6 +929,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/dc/d90cb1790f8cec9b4878d278ad9faf7c8f893189ce0f855304fd704fc274/tree_sitter_javascript-0.25.0-cp310-abi3-win_amd64.whl", hash = "sha256:e5ed840f5bd4a3f0272e441d19429b26eedc257abe5574c8546da6b556865e3c", size = 62975, upload-time = "2025-09-01T07:13:42.828Z" },
     { url = "https://files.pythonhosted.org/packages/2e/1f/f9eba1038b7d4394410f3c0a6ec2122b590cd7acb03f196e52fa57ebbe72/tree_sitter_javascript-0.25.0-cp310-abi3-win_arm64.whl", hash = "sha256:622a69d677aa7f6ee2931d8c77c981a33f0ebb6d275aa9d43d3397c879a9bb0b", size = 61668, upload-time = "2025-09-01T07:13:43.803Z" },
 ]
+
+[[package]]
+name = "tree-sitter-kotlin"
+version = "0.4.0"
+source = { git = "https://github.com/ast-grep/tree-sitter-kotlin?rev=1a6f9b1ee1125a7357493eeb95da48d16ac302b4#1a6f9b1ee1125a7357493eeb95da48d16ac302b4" }
 
 [[package]]
 name = "tree-sitter-php"

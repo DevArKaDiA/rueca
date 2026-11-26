@@ -1,0 +1,7 @@
+{
+  "app/Main.kt:Money.Money": [],
+  "app/Main.kt:format": [],
+  "app/Main.kt:show": [
+    "app/Main.kt:format"
+  ]
+}

@@ -18,6 +18,7 @@ import tree_sitter_cpp
 import tree_sitter_go
 import tree_sitter_java
 import tree_sitter_javascript
+import tree_sitter_kotlin
 import tree_sitter_php
 import tree_sitter_python
 import tree_sitter_rust
@@ -37,6 +38,7 @@ _BINDINGS = {
     "tree_sitter_go": tree_sitter_go,
     "tree_sitter_java": tree_sitter_java,
     "tree_sitter_javascript": tree_sitter_javascript,
+    "tree_sitter_kotlin": tree_sitter_kotlin,
     "tree_sitter_php": tree_sitter_php,
     "tree_sitter_python": tree_sitter_python,
     "tree_sitter_rust": tree_sitter_rust,
@@ -205,6 +207,8 @@ def extract_functions(path: str, source: bytes, language: str | None = None) -> 
         return _shell_functions(tree.root_node)
     if labeler == "csharp":
         return _csharp_functions(tree.root_node, spec)
+    if labeler == "kotlin":
+        return _kotlin_functions(tree.root_node)
     return _nesting_functions(tree.root_node, spec)
 
 
@@ -700,6 +704,134 @@ def call_arity_at(tree, line0: int, byte_col: int, end_byte_col: int) -> int | N
     return None
 
 
+# Kotlin (fwcd grammar): the scopes that name a definition and the class
+# header children that end before the body.
+_KT_SCOPES = {"class_declaration", "object_declaration", "companion_object", "object_literal", "function_declaration"}
+_KT_BODIES = {"class_body", "enum_class_body"}
+
+
+def _kt_child(node: Node, kind: str) -> Node | None:
+    """First direct child of a type (fwcd names few fields)."""
+    return next((c for c in node.named_children if c.type == kind), None)
+
+
+def _kt_name(node: Node | None) -> str:
+    """An identifier's name (backquotes removed: `` `-Foo` `` -> `-Foo`)."""
+    return _text(node).strip("`")
+
+
+def _kt_scope_name(node: Node) -> str:
+    """Name a Kotlin scope contributes to a qualified name: the class /
+    object name, `Companion` for an unnamed companion object, the function
+    name; an object expression is `object@anonymous`."""
+    if node.type == "function_declaration":
+        return _kt_name(_kt_child(node, "simple_identifier"))
+    if node.type == "object_literal":
+        return "object@anonymous"
+    name = _kt_name(_kt_child(node, "type_identifier"))
+    return name or ("Companion" if node.type == "companion_object" else "")
+
+
+def _kt_scope(node: Node) -> tuple[list[str], str]:
+    """(enclosing scope names outermost first, label): `Method` when the
+    nearest enclosing scope is a class or object, else `Function`."""
+    parts: list[str] = []
+    label = ""
+    anc = node.parent
+    while anc is not None:
+        if anc.type in _KT_SCOPES:
+            parts.append(_kt_scope_name(anc))
+            label = label or ("Function" if anc.type == "function_declaration" else "Method")
+        anc = anc.parent
+    return list(reversed(parts)), label or "Function"
+
+
+def _kt_is_interface(node: Node) -> bool:
+    return any(c.type == "interface" for c in node.children)
+
+
+def _kt_header_end(node: Node) -> Node:
+    """Last child of a class declaration before its body (the primary
+    constructor, supertypes, type constraints), else the class name."""
+    last = _kt_child(node, "type_identifier") or node
+    for c in node.named_children:
+        if c.type in _KT_BODIES:
+            break
+        last = c
+    return last
+
+
+def _kt_function(node: Node) -> Func | None:
+    nn = _kt_child(node, "simple_identifier")
+    if nn is None:
+        return None
+    parts, label = _kt_scope(node)
+    name = _kt_name(nn)
+    return _func(name, ".".join([*parts, name]), label, node, nn)
+
+
+def _kt_has_primary(node: Node) -> bool:
+    """Whether a class has a primary constructor: written, or implicit (a
+    class that declares only secondary constructors has none)."""
+    if _kt_child(node, "primary_constructor") is not None:
+        return True
+    body = next((c for c in node.named_children if c.type in _KT_BODIES), None)
+    return body is None or _kt_child(body, "secondary_constructor") is None
+
+
+def _kt_primary_constructor(node: Node) -> Func | None:
+    """The (explicit or implicit) primary constructor of a class that is not
+    an interface: named like the class (`Foo.Foo`), on the class name's
+    line, extent = the class header (where the supertype constructor call
+    `: Base(x)` is written)."""
+    nn = _kt_child(node, "type_identifier")
+    if nn is None or _kt_is_interface(node) or not _kt_has_primary(node):
+        return None
+    parts, _ = _kt_scope(node)
+    name = _kt_name(nn)
+    end = _kt_header_end(node)
+    return Func(name, ".".join([*parts, name, name]), "Method", node.start_point[0] + 1, end.end_point[0] + 1, nn.start_point[0] + 1, node.start_point[0] + 1, node.start_point[1])
+
+
+def _kt_secondary_constructor(node: Node) -> Func | None:
+    """`constructor(...)` in a class body: named like the class, its name
+    line is the declaration's first line (SCIP's definition range covers
+    the whole declaration)."""
+    cls = node.parent.parent if node.parent is not None else None
+    if cls is None or cls.type != "class_declaration":
+        return None
+    parts, _ = _kt_scope(node)
+    name = parts[-1] if parts else ""
+    if not name:
+        return None
+    return _func(name, ".".join([*parts, name]), "Method", node, node)
+
+
+_KT_CALLABLES = {
+    "function_declaration": _kt_function,
+    "class_declaration": _kt_primary_constructor,
+    "secondary_constructor": _kt_secondary_constructor,
+}
+
+
+def _kotlin_functions(root: Node) -> list[Func]:
+    """Kotlin: named functions (top-level, member, extension, local) ->
+    `fn`, `Foo.fn`, `Foo.Companion.fn`, `Obj.fn`, `outer.inner` (an extension
+    function's receiver type is not part of the name); constructors ->
+    `Foo.Foo`, the primary one (explicit or implicit, every class that is
+    not an interface) on the class name's line, each secondary one on its
+    first line. Property accessors, lambdas, anonymous functions and `init`
+    blocks are not callables: calls in them have no caller, like Java field
+    initializers."""
+    out: list[Func] = []
+    for node in _walk(root):
+        make = _KT_CALLABLES.get(node.type)
+        f = make(node) if make is not None else None
+        if f is not None:
+            out.append(f)
+    return out
+
+
 def innermost(funcs: list[Func], line: int) -> Func | None:
     best: Func | None = None
     for f in funcs:
@@ -734,10 +866,16 @@ def utf16_col_to_byte(line_text: str, col: int) -> int:
 def _field_child(node: Node, field: str) -> Node | None:
     """`field` child of a node; `@0` / `@-1` = first / last named child
     (children the grammar leaves unnamed: Java `generic_type`,
-    `scoped_type_identifier`)."""
+    `scoped_type_identifier`); `@last:<type>` = last named child of that
+    type."""
     if field in ("@0", "@-1"):
         kids = node.named_children
         return (kids[0] if field == "@0" else kids[-1]) if kids else None
+    if field.startswith("@last:"):
+        # last named child of a type (Kotlin `user_type`: `a.Base<T>` ends
+        # with its type arguments, the callee is the last `type_identifier`)
+        kind = field[len("@last:") :]
+        return next((c for c in reversed(node.named_children) if c.type == kind), None)
     return node.child_by_field_name(field)
 
 

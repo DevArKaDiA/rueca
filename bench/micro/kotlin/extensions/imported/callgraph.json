@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:six": [
+    "util/Ints.kt:double"
+  ],
+  "util/Ints.kt:double": []
+}

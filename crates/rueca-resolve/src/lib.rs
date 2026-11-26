@@ -393,6 +393,7 @@ mod contracts;
 mod csharp;
 mod go;
 mod hooks;
+mod jvm;
 mod rust;
 mod shell;
 
@@ -739,6 +740,8 @@ struct Resolver<'a> {
     rust_test_files: HashSet<FileId>,
     /// C# tables, built on first use (see the `csharp` module).
     csharp: csharp::CSharpTables,
+    /// JVM (Kotlin) tables, built on first use (see the `jvm` module).
+    jvm: jvm::JvmTables,
 
     /// Key: (module, name, reached through `export *`, namespace).
     lookup_memo: RefCell<HashMap<LookupKey, Option<Target>>>,
@@ -1201,6 +1204,7 @@ impl<'a> Resolver<'a> {
             shell_memo: RefCell::new(HashMap::new()),
             rust_test_files: HashSet::new(),
             csharp: csharp::CSharpTables::default(),
+            jvm: jvm::JvmTables::default(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
@@ -1401,10 +1405,12 @@ impl<'a> Resolver<'a> {
 
     /// Top-level definitions of file `i` by name: the first exported one,
     /// else the first. Package scope: `T.m` declared outside `T` (Go
-    /// methods) is a member of `T`, not a module-level name.
+    /// methods) is a member of `T`, not a module-level name; a Kotlin
+    /// top-level function (`Recv.f` for an extension, `f(Int)` for an
+    /// overload) is both.
     fn top_names(&self, i: usize, defs: &'a [Definition], top: &[LocalDefId]) -> HashMap<&'a str, NodeId> {
         let mut by_name: HashMap<&'a str, (bool, NodeId)> = HashMap::new();
-        let package_scoped = self.package_of[i].is_some();
+        let package_scoped = self.package_of[i].is_some() && !self.is_kotlin(i as FileId);
         for &j in top {
             let d = &defs[j as usize];
             if (package_scoped && d.qualified_name != d.name) || self.is_rust_impl_item(i as FileId, d) {
@@ -1442,7 +1448,12 @@ impl<'a> Resolver<'a> {
         let (mut t, mut d) = (vec![None; imports.len()], vec![None; imports.len()]);
         let Some(pack) = self.packs[fid as usize] else { return (t, d) };
         if pack.namespace_imports() {
-            return self.namespace_import_targets(fid);
+            // C# usings name namespaces, Kotlin imports JVM packages.
+            return if self.is_csharp(fid) {
+                self.csharp_namespace_import_targets(fid)
+            } else {
+                self.jvm_namespace_import_targets(fid)
+            };
         }
         let path = &self.files[fid as usize].path;
         for (k, imp) in imports.iter().enumerate() {
@@ -2226,6 +2237,7 @@ impl<'a> Resolver<'a> {
                     .flatten()
                     .map(|n| (n, false))
             })
+            .or_else(|| self.companion_member(class, name, want))
     }
 
     fn find_member_rec(
@@ -2457,7 +2469,13 @@ impl<'a> Resolver<'a> {
         }
         match item.receiver.map(str::trim) {
             None => self.resolve_bare(f, item, scope),
-            Some(receiver) => self.resolve_with_receiver(f, item, scope, receiver),
+            Some(receiver) => {
+                if let Some(out) = self.kotlin_implicit_receiver(f, item, scope, receiver) {
+                    return out;
+                }
+                let out = self.resolve_with_receiver(f, item, scope, receiver);
+                self.kotlin_extension(f, item, scope, receiver, out)
+            }
         }
     }
 

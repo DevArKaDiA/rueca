@@ -15,6 +15,12 @@
 //! directories of every build file plus the `<module>`s of a `pom.xml` and
 //! the `include`s of a `settings.gradle(.kts)`.
 //!
+//! **Kotlin interop.** Kotlin files (`.kt`) count as JVM sources too: a
+//! `C.kt` is a candidate for class `C` when no `C.java` matches, their
+//! directories are package directories, and `src/<set>/kotlin` directories
+//! are source roots. The Kotlin pack shares the resolver's JVM package
+//! namespace, so the class found in the file's package binds.
+//!
 //! **Import targets.** A class import `a.b.C` (or `a.b.C.m`, `a.b.C.Inner`)
 //! resolves to the file `C.java` of package directory `a/b` under a source
 //! root, else under any directory whose path ends with `a/b` (non-standard
@@ -119,9 +125,9 @@ pub(crate) struct Layout {
     pub(crate) roots: BTreeSet<String>,
     /// Module directories (`""` = the repository root), sorted.
     pub(crate) modules: BTreeSet<String>,
-    /// Java files by file name (`Foo.java` → paths).
+    /// Java and Kotlin files by file name (`Foo.java`, `Foo.kt` → paths).
     by_file_name: HashMap<String, Vec<String>>,
-    /// Directories that directly contain Java files, by last segment.
+    /// Directories that directly contain Java or Kotlin files, by last segment.
     dirs_by_name: HashMap<String, Vec<String>>,
 }
 
@@ -139,7 +145,7 @@ impl Layout {
     /// conventional `src/<set>/java` source roots.
     fn index_java_files(&mut self, project: &ProjectFiles) {
         let mut java_dirs = BTreeSet::new();
-        for p in project.paths.iter().filter(|p| p.ends_with(".java")) {
+        for p in project.paths.iter().filter(|p| p.ends_with(".java") || p.ends_with(".kt")) {
             let name = p.rsplit('/').next().unwrap_or(p);
             self.by_file_name.entry(name.to_string()).or_default().push(p.clone());
             java_dirs.insert(parent_dir(p).to_string());
@@ -147,9 +153,11 @@ impl Layout {
         for d in &java_dirs {
             let last = d.rsplit('/').next().unwrap_or(d);
             self.dirs_by_name.entry(last.to_string()).or_default().push(d.clone());
-            // Convention: the leftmost `src/<set>/java`.
+            // Convention: the leftmost `src/<set>/java` (or `kotlin`).
             let segs: Vec<&str> = d.split('/').collect();
-            if let Some(i) = (0..segs.len().saturating_sub(2)).find(|&i| segs[i] == "src" && segs[i + 2] == "java") {
+            if let Some(i) = (0..segs.len().saturating_sub(2))
+                .find(|&i| segs[i] == "src" && (segs[i + 2] == "java" || segs[i + 2] == "kotlin"))
+            {
                 self.roots.insert(segs[..=i + 2].join("/"));
             }
         }
@@ -248,9 +256,15 @@ impl Layout {
         cands.map(|(c, prefix)| (self.rank(c, prefix, from), c)).min().map(|(_, c)| c.to_string())
     }
 
-    /// File of class `head` in package directory `pkg_path`.
+    /// File of class `head` in package directory `pkg_path`: `head.java`,
+    /// else a Kotlin `head.kt`.
     fn class_file(&self, pkg_path: &str, head: &str, from: &str) -> Option<String> {
-        let file = format!("{head}.java");
+        self.class_file_with(pkg_path, &format!("{head}.java"), from)
+            .or_else(|| self.class_file_with(pkg_path, &format!("{head}.kt"), from))
+    }
+
+    fn class_file_with(&self, pkg_path: &str, file: &str, from: &str) -> Option<String> {
+        let file = file.to_string();
         let tail = if pkg_path.is_empty() { file.clone() } else { format!("{pkg_path}/{file}") };
         let cands = self.by_file_name.get(&file)?;
         self.best(
@@ -265,7 +279,7 @@ impl Layout {
         )
     }
 
-    /// Directory of package `pkg_path` (directly holding Java files).
+    /// Directory of package `pkg_path` (directly holding Java or Kotlin files).
     fn package_dir(&self, pkg_path: &str, from: &str) -> Option<String> {
         let last = pkg_path.rsplit('/').next().unwrap_or(pkg_path);
         let cands = self.dirs_by_name.get(last)?;
@@ -464,6 +478,27 @@ mod tests {
         let l = Layout::build(&p);
         assert!(l.modules.contains("lib") && l.modules.contains("tools/cli"));
         assert!(l.roots.contains("tools/cli/src/main/java"));
+    }
+
+    #[test]
+    fn kotlin_files_are_class_candidates() {
+        let p = project(
+            &[
+                "src/main/kotlin/com/acme/Repo.kt",
+                "src/main/kotlin/com/acme/Util.kt",
+                "src/main/java/com/acme/App.java",
+            ],
+            &[],
+        );
+        let l = Layout::build(&p);
+        assert!(l.roots.contains("src/main/kotlin"));
+        let from = "src/main/java/com/acme/App.java";
+        assert_eq!(
+            l.resolve_import(from, &import("com.acme", "Repo")).as_deref(),
+            Some("src/main/kotlin/com/acme/Repo.kt")
+        );
+        // The importer's root wins; the package is shared by both directories.
+        assert_eq!(l.resolve_import(from, &import("com.acme", "*")).as_deref(), Some("src/main/java/com/acme"));
     }
 
     #[test]

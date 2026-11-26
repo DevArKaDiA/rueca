@@ -785,6 +785,9 @@ impl<'a> Resolver<'a> {
             Some(LanguageFamily::CSharp) => {
                 node.signature.as_deref().and_then(|s| crate::csharp::signature_arity(s, &node.name))
             }
+            _ if node.language == Some(Language::Kotlin) => {
+                node.signature.as_deref().and_then(|s| crate::jvm::kotlin_signature_arity(s, &node.name))
+            }
             _ => None,
         };
         from_signature.or_else(|| overload_suffix(&node.qualified_name).map(|(_, p)| params_arity(p)))
@@ -842,7 +845,7 @@ impl<'a> Resolver<'a> {
         confidence: f32,
     ) -> Vec<(NodeId, Strategy, f32)> {
         let Some(&set) = self.overload_of.get(&target) else { return vec![(target, strategy, confidence)] };
-        let (arity, args) = (item.arity, item.arg_types.as_deref());
+        let arity = item.arity;
         let all = self.overload_sets[set].as_slice();
         let visible_only: Vec<NodeId>;
         let set: &[NodeId] = if self.families[from as usize] == Some(LanguageFamily::C) {
@@ -865,7 +868,7 @@ impl<'a> Resolver<'a> {
             None => Vec::new(),
         };
         if chosen.len() > 1 {
-            chosen = self.narrow_overloads(from, chosen, arity, args);
+            chosen = self.narrow_by_args(from, item, chosen);
         }
         let fan_out = |cands: &[NodeId]| {
             without_caller(cands, caller).into_iter().map(|n| (n, strategy, confidence * OVERLOAD_FANOUT)).collect()
@@ -875,6 +878,17 @@ impl<'a> Resolver<'a> {
             0 => fan_out(set),
             _ => fan_out(&chosen),
         }
+    }
+
+    /// Overloads that fit a call's arity, narrowed by its argument types
+    /// (Kotlin: `jvm::kotlin_narrow`; every other language:
+    /// [`Self::narrow_overloads`]).
+    fn narrow_by_args(&self, from: FileId, item: &RefItem<'_>, chosen: Vec<NodeId>) -> Vec<NodeId> {
+        let args = item.arg_types.as_deref();
+        if self.is_kotlin(from) {
+            return self.kotlin_narrow(from, item.enclosing, chosen, args);
+        }
+        self.narrow_overloads(from, chosen, item.arity, args)
     }
 
     /// Overloads that fit a call's arity, narrowed by the static argument

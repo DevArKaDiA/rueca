@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:Counter.bump": [],
+  "app/Main.kt:Counter.inc": [
+    "app/Main.kt:Counter.bump"
+  ]
+}

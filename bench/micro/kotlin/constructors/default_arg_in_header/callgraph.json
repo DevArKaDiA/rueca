@@ -1,0 +1,9 @@
+{
+  "app/Main.kt:Buffer.Buffer": [
+    "app/Main.kt:defaultSize"
+  ],
+  "app/Main.kt:buffer": [
+    "app/Main.kt:Buffer.Buffer"
+  ],
+  "app/Main.kt:defaultSize": []
+}

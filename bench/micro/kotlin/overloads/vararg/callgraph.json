@@ -1,0 +1,7 @@
+{
+  "app/Main.kt:three": [
+    "app/Main.kt:total@3"
+  ],
+  "app/Main.kt:total@3": [],
+  "app/Main.kt:total@5": []
+}

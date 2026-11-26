@@ -1,0 +1,9 @@
+{
+  "app/Main.kt:Animal.Animal": [],
+  "app/Main.kt:Dog.Dog": [
+    "app/Main.kt:Animal.Animal"
+  ],
+  "app/Main.kt:adopt": [
+    "app/Main.kt:Dog.Dog"
+  ]
+}

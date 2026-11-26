@@ -1,0 +1,8 @@
+{
+  "app/Main.kt:Query.Query": [],
+  "app/Main.kt:Query.find@4": [],
+  "app/Main.kt:Query.find@6": [],
+  "app/Main.kt:lookup": [
+    "app/Main.kt:Query.find@4"
+  ]
+}

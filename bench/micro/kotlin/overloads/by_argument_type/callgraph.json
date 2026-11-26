@@ -1,0 +1,8 @@
+{
+  "app/Main.kt:Printer.Printer": [],
+  "app/Main.kt:Printer.print@4": [],
+  "app/Main.kt:Printer.print@6": [],
+  "app/Main.kt:number": [
+    "app/Main.kt:Printer.print@6"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "app/Main.kt:outer": [
+    "app/Main.kt:outer.inner"
+  ],
+  "app/Main.kt:outer.inner": []
+}
