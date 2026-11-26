@@ -69,10 +69,11 @@ crates/rueca-lang-rust/queries/locals.scm
   Modified for Rueca (see the file header for the list of changes).
 
 crates/rueca-lang-shell/queries/locals.scm
+crates/rueca-lang-shell/queries/locals-zsh.scm
   Adapted from nvim-treesitter, runtime/queries/bash/locals.scm,
   https://github.com/nvim-treesitter/nvim-treesitter (commit 29212d826054bb2948fa9d3a99eca9bf6a050eb2).
   Copyright nvim-treesitter contributors. Licensed under the Apache License, Version 2.0.
-  Modified for Rueca (see the file header for the list of changes).
+  Modified for Rueca (see each file header for the list of changes).
 
 crates/rueca-lang-csharp/queries/locals.scm
   Adapted from nvim-treesitter, runtime/queries/c_sharp/locals.scm,

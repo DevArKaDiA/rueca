@@ -104,10 +104,14 @@ const SHELL_DOTFILES: &[&str] = &[
     ".zprofile",
     ".zlogin",
     ".kshrc",
+    ".zlogout",
+    ".mkshrc",
+    ".bash_aliases",
 ];
 
 /// Interpreters of a `#!` line that make a file a shell script.
-const SHELL_INTERPRETERS: &[&str] = &["sh", "bash", "dash", "ash", "ksh", "mksh", "zsh", "bats"];
+const SHELL_INTERPRETERS: &[&str] =
+    &["sh", "bash", "dash", "ash", "ksh", "mksh", "zsh", "bats", "pdksh", "oksh", "posh", "yash"];
 
 impl Language {
     /// Every variant, in declaration (on-disk) order.
@@ -249,21 +253,31 @@ impl Language {
     }
 
     /// Language of a file the path does not name, from its first line: a
-    /// `#!` line whose interpreter (or `env`'s program, options skipped) is
-    /// a shell — `sh`, `bash`, `dash`, `ash`, `ksh`, `mksh`, `zsh`, `bats`
-    /// (RFC 0003 §10.4c). The indexer asks only for paths
-    /// [`Language::from_path`] does not recognize.
+    /// `#!` line whose interpreter ([`Language::shebang_interpreter`]) is a
+    /// shell — `sh`, `bash`, `dash`, `ash`, `ksh`, `mksh`, `pdksh`, `oksh`,
+    /// `zsh`, `posh`, `yash`, `bats` (RFC 0003 §10.4c). The indexer asks
+    /// only for paths [`Language::from_path`] does not recognize.
     pub fn from_shebang(head: &[u8]) -> Option<Language> {
+        let prog = Language::shebang_interpreter(head)?;
+        SHELL_INTERPRETERS.contains(&prog).then_some(Language::Shell)
+    }
+
+    /// The interpreter a `#!` first line names: the program's base name, or
+    /// the program `env` runs (options such as `-S` and `NAME=value` words
+    /// skipped), or the applet of `busybox`; a trailing version is dropped
+    /// (`ksh93` → `ksh`, `bash5.2` → `bash`). `None` without a `#!` line.
+    pub fn shebang_interpreter(head: &[u8]) -> Option<&str> {
         let line = head.split(|b| *b == b'\n').next()?;
         let rest = line.strip_prefix(b"#!")?;
         let rest = std::str::from_utf8(rest).ok()?;
         let mut words = rest.split_ascii_whitespace();
         let mut prog = words.next()?.rsplit('/').next()?;
-        if prog == "env" {
+        if prog == "env" || prog == "busybox" {
             prog = words.find(|w| !w.starts_with('-') && !w.contains('='))?;
+            prog = prog.rsplit('/').next()?;
         }
-        let prog = prog.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
-        SHELL_INTERPRETERS.contains(&prog).then_some(Language::Shell)
+        let trimmed = prog.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+        Some(if trimmed.is_empty() { prog } else { trimmed })
     }
 
     /// Language of a C/C++ header (`.h`) in a snapshot: C++ when the snapshot
@@ -1217,6 +1231,8 @@ mod tests {
             b"#!/usr/bin/env bats",
             b"#!/bin/ksh93",
             b"#!/usr/bin/dash",
+            b"#!/bin/busybox sh",
+            b"#!/bin/pdksh",
         ] {
             assert_eq!(Language::from_shebang(head), sh, "{}", String::from_utf8_lossy(head));
         }
@@ -1231,6 +1247,10 @@ mod tests {
         ] {
             assert_eq!(Language::from_shebang(head), None, "{}", String::from_utf8_lossy(head));
         }
+        assert_eq!(Language::shebang_interpreter(b"#!/usr/bin/env -S LC_ALL=C bash -e\nx"), Some("bash"));
+        assert_eq!(Language::shebang_interpreter(b"#!/bin/ksh93"), Some("ksh"));
+        assert_eq!(Language::shebang_interpreter(b"#!/usr/bin/python3.12"), Some("python"));
+        assert_eq!(Language::shebang_interpreter(b"echo"), None);
     }
 
     /// Segments and facts store enum variants by index (postcard). These

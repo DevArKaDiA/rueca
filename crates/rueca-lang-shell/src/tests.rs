@@ -60,9 +60,10 @@ fn imports(f: &FileFacts) -> Vec<&str> {
 fn function_forms() {
     let f = facts("f() { :; }\nfunction g { :; }\nfunction h() {\n  :\n}\nk() ( echo sub )\n");
     assert_eq!(defs(&f, Label::Function), ["f", "g", "h", "k"]);
-    assert_eq!(def(&f, "f").signature.as_deref(), Some("f()"));
-    assert_eq!(def(&f, "g").signature.as_deref(), Some("function g"));
-    assert_eq!(def(&f, "h").signature.as_deref(), Some("function h()"));
+    // the signature ends with the file's dialect (`function` is not POSIX: bash)
+    assert_eq!(def(&f, "f").signature.as_deref(), Some("f() # bash"));
+    assert_eq!(def(&f, "g").signature.as_deref(), Some("function g # bash"));
+    assert_eq!(def(&f, "h").signature.as_deref(), Some("function h() # bash"));
     assert_eq!((def(&f, "h").span.start_line, def(&f, "h").span.end_line), (2, 4));
     assert!(f.definitions.iter().all(|d| d.exported && d.parent.is_none() && !d.is_test));
     assert_eq!(f.parse_errors, 0);
@@ -298,19 +299,100 @@ fn test_files_by_path() {
 }
 
 #[test]
-fn zsh_best_effort() {
-    // The bash-compatible part of a zsh file is extracted; parameter flags
-    // are repaired (`repair.rs`).
+fn dialects_in_signatures() {
+    let sig = |path: &str, src: &str| def(&facts_at(path, src), "f").signature.clone().unwrap();
+    assert_eq!(sig("x.sh", "f() { :; }\n"), "f() # sh");
+    assert_eq!(sig("x.sh", "#!/bin/bash\nf() { :; }\n"), "f() # bash");
+    assert_eq!(sig("x.sh", "#!/bin/ksh\nfunction f { :; }\n"), "function f # ksh");
+    assert_eq!(sig("x.zsh", "f() { :; }\n"), "f() # zsh");
+    assert_eq!(sig("t.bats", "f() { :; }\n"), "f() # bats");
+    // variables, providers and tests keep their own signatures
+    let f = facts_at("t.bats", "X=1\n@test \"a\" {\n  f\n}\n");
+    assert_eq!(def(&f, "X").signature.as_deref(), Some("X=1"));
+    assert_eq!(def(&f, "a").signature.as_deref(), Some("@test \"a\""));
+    // an extension-less bats script is a test file too
+    let f = facts_at("test/suite", "#!/usr/bin/env bats\n@test \"b\" {\n  run f\n}\n");
+    assert_eq!(defs(&f, Label::Test), ["b"]);
+}
+
+#[test]
+fn zsh_files_are_read_with_the_zsh_grammar() {
     let src = "autoload -Uz compinit\nzfn() {\n  print -P '%F{red}x%f'\n  [[ $a == b ]] && helper\n}\nhelper() { echo ok; }\nx=${(j:,:)parts}\nafter() { helper; }\n";
     let f = facts_at("lib/x.zsh", src);
     assert_eq!(defs(&f, Label::Function), ["zfn", "helper", "after"]);
     assert!(calls(&f, Some("zfn")).contains(&"helper".to_string()));
     assert_eq!(calls(&f, Some("after")), ["helper"]);
+    // signatures and previews quote the file as written, not the repaired text
+    assert_eq!(def(&f, "x").signature.as_deref(), Some("x=${(j:,:)parts}"));
     assert_eq!(f.parse_errors, 0);
-    // zsh-only syntax the grammar cannot read is an ERROR node, counted,
-    // and the walk goes on (glob qualifiers, `for x (…)` loops).
-    let f = facts_at("lib/y.zsh", "for f in *(.); do :; done\nfor x (a b c) { print $x }\nlater() { helper; }\n");
-    assert!(f.parse_errors > 0);
+    // zsh-only syntax: glob qualifiers, `for x (…)`, `foreach`, `repeat`,
+    // anonymous functions, `always`, nested expansions, `&|`
+    let src = "for f in *(.N); do src $f; done\nfor x (a b c) { one $x }\nforeach y (a b) two $y; end\nrepeat 3 three\n\
+               () { four } \n{ five } always { six }\nlater() {\n  local dir=${${(%):-%x}:A:h} n\n  integer count=0\n  seven &|\n  print $dir $count $n $OUTER $x\n}\nif [[ -n $a ]] { eight } else { nine }\n";
+    let f = facts_at("lib/y.zsh", src);
+    assert_eq!(f.parse_errors, 0, "{f:?}");
+    assert_eq!(defs(&f, Label::Function), ["later"]);
+    assert_eq!(calls(&f, None), ["src", "one", "two", "three", "four", "five", "six", "eight", "nine"]);
+    assert_eq!(calls(&f, Some("later")), ["seven", "print"]);
+    // precommand modifiers run their operand in the same shell
+    let g = facts_at("lib/z.zsh", "f() { noglob helper *; nocorrect other; }\n");
+    assert_eq!(calls(&g, Some("f")), ["helper", "other"]);
+    // loop variables and `local` / `integer` names are bound: only OUTER is an environment read
+    assert_eq!(names_of(&f, RefKind::EnvVar), [("OUTER".to_string(), Some("later".to_string()))]);
+    assert!(defs(&f, Label::Variable).is_empty());
+}
+
+#[test]
+fn zsh_bindings_imports_and_paths() {
+    let src = "typeset -g ROOT=${0:A:h}\nsource $ROOT/lib/a.zsh\nsource \"${0:h}/b.zsh\"\nexport EDITOR=vi\nreadonly LIMIT=3\nlocal scratch\ntypeset -A table\n\
+               f() {\n  local a; typeset b=1; integer c\n  print $a $b $c $ROOT $LIMIT $table $HOME\n  \"$ROOT/bin/run.zsh\" x\n}\n";
+    let f = facts_at("plugins/p/p.plugin.zsh", src);
+    assert_eq!(f.parse_errors, 0);
+    assert_eq!(imports(&f), ["$dir/lib/a.zsh", "$dir/b.zsh"]);
+    assert_eq!(defs(&f, Label::Variable), ["ROOT", "scratch", "table"]);
+    assert_eq!(defs(&f, Label::Constant), ["LIMIT"]);
+    assert_eq!(defs(&f, Label::EnvVar), ["EDITOR"]);
+    let reads: Vec<String> = names_of(&f, RefKind::Read).into_iter().map(|(n, _)| n).collect();
+    assert_eq!(reads, ["ROOT", "LIMIT", "table"]);
+    assert_eq!(names_of(&f, RefKind::EnvVar), [("HOME".to_string(), Some("f".to_string()))]);
+    assert_eq!(scripts(&f), [("$dir/bin/run.zsh".to_string(), Some("f".to_string()))]);
+}
+
+#[test]
+fn zsh_repairs_and_grammar_quirks() {
+    // a commented-out assignment is a comment (not a variable, not a call);
+    // an unquoted prompt escape is part of the value
+    let src = "#OLD=\"x\" stale_call\nCOLOR=%{$fg[red]%}\ntmp=$f.$$.zwc\n() {\n  inner\n} \"$1\" &|\n";
+    let f = facts_at("themes/t.zsh-theme", src);
+    assert_eq!(f.parse_errors, 0);
+    assert_eq!(defs(&f, Label::Variable), ["COLOR", "tmp"]);
+    assert!(defs(&f, Label::EnvVar).is_empty());
+    assert_eq!(calls(&f, None), ["inner"]);
+    assert_eq!(def(&f, "COLOR").signature.as_deref(), Some("COLOR=%{$fg[red]%}"));
+}
+
+#[test]
+fn the_other_grammar_when_it_reads_the_whole_file() {
+    // a zsh construct in a file named `.sh` with a bash `#!` line: the
+    // bash grammar leaves errors, the zsh grammar none
+    let src = "#!/bin/bash\nfor x (a b) { helper $x }\nhelper() { :; }\n";
+    let f = facts_at("x.sh", src);
+    assert_eq!(f.parse_errors, 0);
+    assert_eq!(calls(&f, None), ["helper"]);
+    assert_eq!(def(&f, "helper").signature.as_deref(), Some("helper() # bash"));
+    let s = stats("x.sh", src.as_bytes()).unwrap();
+    assert_eq!((s.dialect, s.evidence, s.grammar), (Dialect::Bash, Evidence::Shebang, Grammar::Zsh));
+    // a case pattern tree-sitter-bash rejects (`*"a"*"b"`): bash read by its fork
+    let s = stats("y.sh", b"#!/bin/sh\ncase $x in *\"a\"*\"b\") y;; esac\n").unwrap();
+    assert_eq!((s.dialect, s.grammar, s.parse_errors), (Dialect::Sh, Grammar::Zsh, 0));
+    // both grammars reject the file: the dialect's tree, errors counted
+    let s = stats("z.sh", b"#!/bin/sh\nf() {\n  if then fi\n").unwrap();
+    assert_eq!(s.grammar, Grammar::Bash);
+    assert!(s.parse_errors > 0);
+    // bats files are only read as bash
+    let s = stats("t.bats", b"for x (a b) { helper $x }\n").unwrap();
+    assert_eq!(s.grammar, Grammar::Bash);
+    assert!(s.parse_errors > 0);
 }
 
 #[test]

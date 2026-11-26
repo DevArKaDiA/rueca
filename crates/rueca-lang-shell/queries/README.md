@@ -1,7 +1,8 @@
 # Vendored tree-sitter queries — `rueca-lang-shell`
 
 Queries in this directory are compiled at runtime against
-`tree-sitter-bash` 0.25.1 (`LANGUAGE`, tree-sitter runtime 0.27). Each file
+`tree-sitter-bash` 0.25.1 (`locals.scm`) and `tree-sitter-zsh` 0.64.3
+(`locals-zsh.scm`; `LANGUAGE` of each, tree-sitter runtime 0.27). Each file
 starts with an SPDX header, its upstream URL and commit, and the list of
 Rueca adaptations. `NOTICE` at the repository root carries the
 attributions.
@@ -9,11 +10,16 @@ attributions.
 | File | Upstream | Commit | License | Use |
 |---|---|---|---|---|
 | `locals.scm` | [nvim-treesitter `runtime/queries/bash/locals.scm`](https://github.com/nvim-treesitter/nvim-treesitter/blob/29212d826054bb2948fa9d3a99eca9bf6a050eb2/runtime/queries/bash/locals.scm) | `29212d826054bb2948fa9d3a99eca9bf6a050eb2` | Apache-2.0 | Variable bindings and function scopes |
+| `locals-zsh.scm` | the same file, its patterns rewritten for tree-sitter-zsh's node names (loop variables are `simple_variable_name`; `foreach` and the short `for x (…)` loop added; names declared without a value are `word` arguments, read in `src/locals.rs`) | `29212d826054bb2948fa9d3a99eca9bf6a050eb2` | Apache-2.0 | The same, for files read with the zsh grammar |
 
 Sources considered and not used:
 
 - Upstream `tree-sitter-bash` (MIT) ships only `queries/highlights.scm`:
   no locals, no tags.
+- `tree-sitter-zsh` (MIT) ships `highlights.scm`, `injections.scm`,
+  `folds.scm` and a `locals.scm` written for editors (it scopes every
+  block and captures references); the bindings the extractor needs are the
+  bash query's, so that one is adapted instead.
 - bloop has no shell scope query. Zed (GPL-3.0) and Helix (MPL-2.0)
   queries: excluded by RFC 0002 §2.
 

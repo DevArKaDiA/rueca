@@ -360,6 +360,9 @@ def score_s1(published: dict | None = None) -> dict:
                     "function": score_functions(funcs, gold["functions"]) if gold["functions"] else None,
                     "context": _ctx_recall(files, gold.get("context_files") or []),
                 }
+                if gold.get("issue_names_file") is not None:
+                    # diagnostic (the "issue does not name a gold file" rows); absent from gold built before it existed
+                    row["named"] = bool(gold["issue_names_file"])
                 eff = rec.get("eff") or {}
                 if variant == EFF_VARIANT and rec.get("status") == "ok" and eff.get("ok"):
                     row["e"] = _eff_row(eff, gold)
@@ -383,6 +386,9 @@ def score_s1(published: dict | None = None) -> dict:
                 gr = [r for r in g_rows if r["group"] == g]
                 if gr:
                     t[g] = agg_s1(gr, f"{arm}/{variant}/{g}")
+                ur = [r for r in gr if r.get("named") is False]
+                if ur and all("named" in r for r in gr):
+                    t[f"unnamed:{g}"] = agg_s1(ur, f"{arm}/{variant}/unnamed/{g}")
                 cr = [r for r in rows if r["group"] == g and r["split"] == "calibration"]
                 if cr:
                     t[f"calibration:{g}"] = agg_s1(cr, f"{arm}/{variant}/cal/{g}")
@@ -1235,6 +1241,26 @@ def _gold_line(fam_key: str, s3: dict) -> str:
     return "; ".join(parts)
 
 
+def _unnamed_line(L: list[str], s1: dict, group: str) -> None:
+    """Diagnostic, not gated: the gated instances whose issue text names no
+    gold file (gold.py: issue_names_gold_file), every arm on the same ones."""
+    tabs = {arm: ((s1["table"].get(arm) or {}).get("kw") or {}).get(f"unnamed:{group}") for arm in ("rueca", "grep", "cbm")}
+    t = tabs["rueca"]
+    if not t or not t.get("n"):
+        return
+    total = (((s1["table"].get("rueca") or {}).get("kw") or {}).get(group) or {}).get("n")
+
+    def cell(arm: str, key: str) -> str:
+        x = tabs.get(arm)
+        return _ci(x[key], x["ci"].get(key)) if x and x.get(key) is not None else "—"
+
+    L.append(
+        f"- Localization where the issue names no gold file (diagnostic, not gated; {t['n']} of {total} gated instances, {t['n_func']} with function gold): "
+        f"File Acc@5 Rueca {cell('rueca', 'file_acc@5')} · BM25 {cell('grep', 'file_acc@5')} · cbm {cell('cbm', 'file_acc@5')}; "
+        f"Function Acc@10 Rueca {cell('rueca', 'func_acc@10')} · BM25 {cell('grep', 'func_acc@10')} · cbm {cell('cbm', 'func_acc@10')}."
+    )
+
+
 def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | None = None) -> None:
     sc = _sc()
     L.append("## Scorecard (RFC 0004 §9)")
@@ -1300,6 +1326,7 @@ def render_scorecard(L: list[str], card: dict, s3: dict, meta: dict, s1: dict | 
             repos_n = {r["repo"] for r in s1["per_instance"] if r["group"] == c["label"] and r["split"] == "gated"}
             n_inst = (s1["gold"].get("per_group", {}).get(c["label"]) or {}).get("instances", 0)
             L.append(f"- Localization: {n_inst} gated instances over {len(repos_n)} repositories; {spec.get('s1_sources', 'see bench/README.md')}.")
+            _unnamed_line(L, s1, c["label"])
         L.append(f"- Structural gold: {_gold_line(key, s3) or '—'}.")
         if spec.get("notes"):
             L.append(f"- Notes: {spec['notes']}")

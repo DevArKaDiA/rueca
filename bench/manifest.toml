@@ -316,8 +316,8 @@ reason = "not the language (Objective-C)"
 # numbers above were measured without them, so they join (and the pin rule
 # covers them) at the next full run of the organization scenario, which
 # re-measures every arm. C#, Kotlin, Ruby and Swift were added after the last
-# run.
-pending_languages = ["csharp", "kotlin", "ruby", "swift"]
+# run, and so were the mined shell instances.
+pending_languages = ["csharp", "kotlin", "ruby", "swift", "shell"]
 max_instances_per_repo = 3
 calibration_max_instances_per_repo = 5
 
@@ -884,8 +884,8 @@ extensions = [".sh", ".bash", ".zsh", ".ksh", ".bats"]
 # bats files are tests; shunit2 / plain test scripts by name (`test_x.sh`,
 # `x_test.sh`, shellspec `x_spec.sh`).
 test_files = ['.*\.bats$', '^test_.*\.(sh|bash|zsh|ksh)$', '.*_test\.(sh|bash|zsh|ksh)$', '.*_spec\.sh$']
-s1_sources = "none: no localization dataset has shell instances (SWE-bench Multilingual, SWE-bench Verified / Lite, SWE-PolyBench, Multi-SWE-bench, SWE-rebench V2)"
-s3_gold = "rueca-bench shell labeler (code-backed, tree-sitter-bash; nvm v0.41.0, acme.sh v3.1.7, bash-it v3.2.0; bats-core = calibration) and the rueca-bench shell micro-benchmark"
+s1_sources = "rueca-bench mined set (no localization dataset has shell instances): merged GitHub pull requests that close an issue, screened by rule, on ohmyzsh, spaceship-prompt, prezto (zsh), bash-it, docker-mailserver, asdf, sdkman-cli (bash), linutil, shellspec (POSIX sh); function gold from the shell labeler"
+s3_gold = "rueca-bench shell labeler (code-backed, tree-sitter-bash and tree-sitter-zsh by dialect; nvm v0.41.0, acme.sh v3.1.7, bash-it v3.2.0; bats-core = calibration) and the rueca-bench shell micro-benchmark"
 notes = "No compiler-grade call graph exists for shell: the structural gold is the bench's own labeler (shellgold.py), written from bash's run-time name lookup, independent of the pack's path evaluation. Extension-less scripts are outside the bench's file set."
 
 [languages.csharp]
@@ -1057,12 +1057,15 @@ calls = { call_expression = "function", macro_invocation = "macro" }
 members = { field_expression = "field", scoped_identifier = "name", generic_function = "function" }
 token_calls = "token_tree"
 
-# Shell (sh / bash; zsh and ksh best effort): code-backed labeler — every
-# `function_definition` is a callable named by its name (shell functions are
-# global, nesting does not qualify them; treesitter.py: _shell_functions).
+# Shell (sh, bash, ksh, bats: tree-sitter-bash; zsh: tree-sitter-zsh, chosen
+# per file by the shell pack's dialect rules, shelldialect.py): code-backed
+# labeler — every `function_definition` is a callable named by its name
+# (shell functions are global, nesting does not qualify them;
+# treesitter.py: _shell_functions).
 [grammars.bash]
 binding = "tree_sitter_bash:language"
-package = "tree-sitter-bash 0.25.1 (MIT)"
+zsh_binding = "tree_sitter_zsh:language"
+package = "tree-sitter-bash 0.25.1 (MIT), tree-sitter-zsh 0.64.3 (MIT)"
 extensions = [".sh", ".bash", ".zsh", ".ksh", ".bats"]
 labeler = "shell"
 separator = "."
@@ -1371,7 +1374,7 @@ contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arm
 # 1ff5e82. Every other suite (carried): the RFC 0005 contract branch, main
 # 2c5a384 plus the response contract, whose quality metrics are identical
 # to main's binary on the same run (only tokens and latency differ).
-results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4); Kotlin (every suite): feat/lang-kotlin @ 3265ba4 (binary sha256 aeca53b7707c6eb6d37890b90a72cb9dce8caad38741c0e2462f742f371f7624); Ruby (every suite): feat/lang-ruby @ 2e353ab (binary sha256 f4228890b7084a9c246a554e7f6b2bef8dd2c7e9b551dc06761bf2a89db149be); SQL (every suite): feat/lang-sql @ 9c6fb5d (binary sha256 10388ab51475399c7234c70836fb0a64243af5edd662dd3a65309884465ca9a6); Swift (every suite): feat/lang-swift @ 36d1077 (binary sha256 9b91d453ad464231001453dea42f3d4926d38274ebb31402c7cd191a1a6b0604)"
+results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): fix/shell-stable @ 62caa40 (binary sha256 7cdcd19e9d332b9342df689c036c30161f441dc581d3e48c8423dbec358fcf77); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4); Kotlin (every suite): feat/lang-kotlin @ 3265ba4 (binary sha256 aeca53b7707c6eb6d37890b90a72cb9dce8caad38741c0e2462f742f371f7624); Ruby (every suite): feat/lang-ruby @ 2e353ab (binary sha256 f4228890b7084a9c246a554e7f6b2bef8dd2c7e9b551dc06761bf2a89db149be); SQL (every suite): feat/lang-sql @ 9c6fb5d (binary sha256 10388ab51475399c7234c70836fb0a64243af5edd662dd3a65309884465ca9a6); Swift (every suite): feat/lang-swift @ 36d1077 (binary sha256 9b91d453ad464231001453dea42f3d4926d38274ebb31402c7cd191a1a6b0604)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -1524,6 +1527,20 @@ role = "S1 Kotlin issues and patches (ktlint, detekt, ORT, TeXiFy-IDEA, Kotlin D
 "kotlin/Kotlin__dataframe_dataset.jsonl" = "e4a6f80e16bc65b6ea55c28729228f8631007f9b549dc1ff2671ea5c8874a8ca"
 "kotlin/square__okhttp_dataset.jsonl" = "068cdcf7946a147098518383cb9c97557e35e63a8bdd9330d0196bdb97ddc01d"
 "kotlin/GradleUp__shadow_dataset.jsonl" = "0b4401c7d5b86a05538085b910ce862dfad978363af34fb09be901df5d6f0c3e"
+
+# Mined by the bench itself (bench/datasets/mined/mine_s1.py, GitHub API,
+# 2026-11-25): merged pull requests that close an issue and change mostly
+# shell files, screened by rule (no LLM, no human): issue older than the PR,
+# >= 100 characters of prose, no diff in the issue, <= 10 shell files,
+# patch <= 100 KB. `base_commit` is the merge base, `patch` the three-dot
+# diff, `problem_statement` title + body of each closed issue. The file
+# holds the rows the repository quotas select (87 of 796 eligible pairs).
+[datasets.rueca_mined_shell]
+local = "datasets/rueca_mined_shell.jsonl"
+sha256 = "e7fca8b0301da19c143725bacff64ae0ff8ce92c56a77a119a34a6daab8b0f04"
+card_license = "issue and pull-request text from GitHub; patches under each repository's licence (MIT; sdkman-cli Apache-2.0), recorded per row"
+citation = "rueca-bench mined set (this repository), 2026-11-25"
+role = "S1 shell issues and patches, gated and calibration"
 
 # Assembled localization gold (RFC 0002 §8/§9). Used for gold labels only;
 # issue text / patches still come from the source dataset of each instance.
@@ -2272,6 +2289,88 @@ repo = "apple/swift-distributed-tracing"
 language = "swift"
 quota = 5
 sources = ["swe_rebench_v2"]
+split = "calibration"
+
+# Shell: no localization dataset has shell instances, so the set is mined
+# from GitHub (`[datasets.rueca_mined_shell]`: merged pull requests that
+# close an issue; rules, counts and biases in bench/datasets/mined/PROVENANCE.md).
+# Repositories, quotas and the split were fixed from the mining counts alone,
+# before any arm ran on them. zsh: ohmyzsh, spaceship-prompt, prezto; bash:
+# bash-it, docker-mailserver, asdf (its bash years), sdkman-cli; POSIX sh:
+# linutil, shellspec. Calibration: zinit (zsh), oh-my-bash, bats-core.
+[[s1.repos]]
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+quota = 12
+sources = ["rueca_mined_shell"]
+
+[[s1.repos]]
+repo = "spaceship-prompt/spaceship-prompt"
+language = "shell"
+quota = 6
+sources = ["rueca_mined_shell"]
+
+[[s1.repos]]
+repo = "sorin-ionescu/prezto"
+language = "shell"
+quota = 5
+sources = ["rueca_mined_shell"]
+
+[[s1.repos]]
+repo = "Bash-it/bash-it"
+language = "shell"
+quota = 10
+sources = ["rueca_mined_shell"]
+
+[[s1.repos]]
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+quota = 10
+sources = ["rueca_mined_shell"]
+
+[[s1.repos]]
+repo = "asdf-vm/asdf"
+language = "shell"
+quota = 8
+sources = ["rueca_mined_shell"]
+
+[[s1.repos]]
+repo = "sdkman/sdkman-cli"
+language = "shell"
+quota = 5
+sources = ["rueca_mined_shell"]
+
+[[s1.repos]]
+repo = "ChrisTitusTech/linutil"
+language = "shell"
+quota = 8
+sources = ["rueca_mined_shell"]
+
+[[s1.repos]]
+repo = "shellspec/shellspec"
+language = "shell"
+quota = 8
+sources = ["rueca_mined_shell"]
+
+[[s1.repos]]
+repo = "zdharma-continuum/zinit"
+language = "shell"
+quota = 5
+sources = ["rueca_mined_shell"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "ohmybash/oh-my-bash"
+language = "shell"
+quota = 5
+sources = ["rueca_mined_shell"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "bats-core/bats-core"
+language = "shell"
+quota = 5
+sources = ["rueca_mined_shell"]
 split = "calibration"
 
 
@@ -8190,4 +8289,700 @@ repo = "apple/swift-distributed-tracing"
 language = "swift"
 base_commit = "e9c732463750b48f5c60f972e1faaf67a0937c11"
 dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-10992"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "50550c70eaa36e79fdf380bdc4ddad4a1ad581a0"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-3412"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "1978a0923c864cacdc520adff83ed63f62c91073"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-11928"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "b75b01a3092e59cd10ff01084d4a5e3ac0be3e3a"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-13814"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "5181447da820331ba48ca976d1885501aa8a573b"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-11661"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "693e3dcc447b5d6fa611eea43166ea2b4e0ed877"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-12257"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "fd01fd66ce27c669e5ffaea94460a37423d1e134"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-14092"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "be8da5c77192eb3da3699ea7c5e47bdfaa5eea4e"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-8129"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "15dd77055e2b4a931d50ad3e05f823893aac66af"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-11547"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "d342b353e32091ef7384b86fd86b1a88dbd44609"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-4106"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "599831b85a5fd4564ab820530e2bb45f37ca3f99"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-11883"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "079dbff2c4f22935a71101c511e2285327d8ab68"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmyzsh__ohmyzsh-10357"
+repo = "ohmyzsh/ohmyzsh"
+language = "shell"
+base_commit = "2e46b2a2dcb96cadd94283bdce95eca75bef1433"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "spaceship-prompt__spaceship-prompt-1314"
+repo = "spaceship-prompt/spaceship-prompt"
+language = "shell"
+base_commit = "cc269214ce0943dacf0cc401c6ed225c11f807dd"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "spaceship-prompt__spaceship-prompt-1283"
+repo = "spaceship-prompt/spaceship-prompt"
+language = "shell"
+base_commit = "1ab9162f84ad54e109047ed14f900d53db8432bd"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "spaceship-prompt__spaceship-prompt-1246"
+repo = "spaceship-prompt/spaceship-prompt"
+language = "shell"
+base_commit = "dcfd690f7b7607d05d160b084eb193460e9edf81"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "spaceship-prompt__spaceship-prompt-746"
+repo = "spaceship-prompt/spaceship-prompt"
+language = "shell"
+base_commit = "e32261c8d0fb25b2bcba466ea08a661d6dad4a64"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "spaceship-prompt__spaceship-prompt-1292"
+repo = "spaceship-prompt/spaceship-prompt"
+language = "shell"
+base_commit = "af2b85ab26322149a2ae943b6c723c773b9fd14b"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "spaceship-prompt__spaceship-prompt-1538"
+repo = "spaceship-prompt/spaceship-prompt"
+language = "shell"
+base_commit = "528b197c466aab0c3de20fe9b926b5b7349b06fb"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sorin-ionescu__prezto-1193"
+repo = "sorin-ionescu/prezto"
+language = "shell"
+base_commit = "4f19700919c8ebbaf75755fc0d03716d13183f49"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sorin-ionescu__prezto-1937"
+repo = "sorin-ionescu/prezto"
+language = "shell"
+base_commit = "53033bc5d9b279cc04e6c80eb5aa3070f9db7471"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sorin-ionescu__prezto-2059"
+repo = "sorin-ionescu/prezto"
+language = "shell"
+base_commit = "64d46c407a57ead7e2c0e442b9e1815c6d54d9b5"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sorin-ionescu__prezto-1816"
+repo = "sorin-ionescu/prezto"
+language = "shell"
+base_commit = "5b03d7fa32cae51cee7903d3338f87c2d7d89657"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sorin-ionescu__prezto-1480"
+repo = "sorin-ionescu/prezto"
+language = "shell"
+base_commit = "1d0bee60989602c921251ab259327a2cf11b90d3"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-1526"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "52123d50722b68db93927d5d981f595a5eb257a8"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-1723"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "d9364ced7a5e2e36556b72a2646615459823f2cf"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-1584"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "941cf71a77546c9904e834a65baf150d357980eb"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-1571"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "70e0aa0dcd5f6658083c587243969a52a0ad38f6"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-1764"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "5e667ed47615414139a7f85b7e705455254e33cc"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-1280"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "e3a89c8ef1a707b8fb6c361cd9632d5d8bb64429"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-1865"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "7fb7bb9cb8972b866c310f79a023d56ab0a2484a"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-1404"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "93b24434105fecdc94898b301bbf7cf33156f369"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-1856"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "6f02b8d1941acac5115581db51c498aeb9af781f"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "Bash-it__bash-it-2353"
+repo = "Bash-it/bash-it"
+language = "shell"
+base_commit = "6cc3ef777e0dadb0ce5b2f766b1905f4fd1f4f97"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-4860"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "de5e1c8e691512cca2fb4e98a405a5918a6a7213"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-4450"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "b653d9a586ca951711f05a7d35266b6db5108afb"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-2831"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "032ed00a17a1114465bec2b88639ac7222f2a5d0"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-4399"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "d0629f4cb6cd336e222195c0881ed1b3613b7dc8"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-2851"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "edb3fb188008a807c5cdf4a742e8f7e940577695"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-3484"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "758fd9c913cee012dd25b8215b8b0b16f12743ca"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-935"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "31c40ce271f6268e4daac36b6aa3f8ff44843e2a"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-2248"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "0c8c936c742ca6dcd6cdde420c13129e2019f7f0"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-2127"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "776bfe9f7f3a6b1b4529b0913760a6b09543c50d"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "docker-mailserver__docker-mailserver-3332"
+repo = "docker-mailserver/docker-mailserver"
+language = "shell"
+base_commit = "3340b809724194f895f7d6ce852b5d1c707fba1a"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "asdf-vm__asdf-589"
+repo = "asdf-vm/asdf"
+language = "shell"
+base_commit = "8594f7ab3faf5de499d3b5acae2bd005ee710802"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "asdf-vm__asdf-1886"
+repo = "asdf-vm/asdf"
+language = "shell"
+base_commit = "98ffa861e9b64a2e029a0ed26205bfcc81838180"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "asdf-vm__asdf-1238"
+repo = "asdf-vm/asdf"
+language = "shell"
+base_commit = "788ccab5971cb828cf25364b0df5ed6f5e9e713d"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "asdf-vm__asdf-271"
+repo = "asdf-vm/asdf"
+language = "shell"
+base_commit = "c838b99298a1a149a293e425c802e0365f5f4a58"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "asdf-vm__asdf-1011"
+repo = "asdf-vm/asdf"
+language = "shell"
+base_commit = "b3626324db5138acd401e46da24effd1ecec7ffb"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "asdf-vm__asdf-938"
+repo = "asdf-vm/asdf"
+language = "shell"
+base_commit = "5cf8f8962fbd5fe2bc86856bc4676f88e1aa8885"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "asdf-vm__asdf-1113"
+repo = "asdf-vm/asdf"
+language = "shell"
+base_commit = "f85fef533f249df5a9f58307d288f2f069351e88"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "asdf-vm__asdf-1602"
+repo = "asdf-vm/asdf"
+language = "shell"
+base_commit = "e83d71e43f525453994eb4cfda8ad66f8b914529"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sdkman__sdkman-cli-897"
+repo = "sdkman/sdkman-cli"
+language = "shell"
+base_commit = "b2fb3d76e175a4b7ac837dc05283c23ebb7017d7"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sdkman__sdkman-cli-825"
+repo = "sdkman/sdkman-cli"
+language = "shell"
+base_commit = "ec96fe835c2029cbe401ba751e0b725ec8c5137c"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sdkman__sdkman-cli-1524"
+repo = "sdkman/sdkman-cli"
+language = "shell"
+base_commit = "532356b8e8a498971b18f81f4c3348d69ac4d479"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sdkman__sdkman-cli-913"
+repo = "sdkman/sdkman-cli"
+language = "shell"
+base_commit = "c04c8bf86c73c9ea3a8a24dd10cc32a0c8ccf0ce"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "sdkman__sdkman-cli-833"
+repo = "sdkman/sdkman-cli"
+language = "shell"
+base_commit = "08b2211eba8174ffa5eff5c7e420f5dbbf9c348c"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ChrisTitusTech__linutil-313"
+repo = "ChrisTitusTech/linutil"
+language = "shell"
+base_commit = "412806a853c9370129bbc89418a4bbd83f778fe1"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ChrisTitusTech__linutil-985"
+repo = "ChrisTitusTech/linutil"
+language = "shell"
+base_commit = "d2d584192ab9b6c870cddb2788943d095df97ed5"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ChrisTitusTech__linutil-681"
+repo = "ChrisTitusTech/linutil"
+language = "shell"
+base_commit = "cd90bc0507a767c871c4eb2f3452311366067a46"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ChrisTitusTech__linutil-763"
+repo = "ChrisTitusTech/linutil"
+language = "shell"
+base_commit = "26d0adc829ac59893666559f1c126d05b7fddc6b"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ChrisTitusTech__linutil-771"
+repo = "ChrisTitusTech/linutil"
+language = "shell"
+base_commit = "26d0adc829ac59893666559f1c126d05b7fddc6b"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ChrisTitusTech__linutil-1008"
+repo = "ChrisTitusTech/linutil"
+language = "shell"
+base_commit = "a6ccaf4a4ee664835f476c8ac4742b5077e4a03a"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ChrisTitusTech__linutil-421"
+repo = "ChrisTitusTech/linutil"
+language = "shell"
+base_commit = "6838811e746a8f983fcdf590b6a6bfceb9e3f82d"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ChrisTitusTech__linutil-1081"
+repo = "ChrisTitusTech/linutil"
+language = "shell"
+base_commit = "963ec33db27eb93f1113f76bd44f8acbc720d589"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "shellspec__shellspec-18"
+repo = "shellspec/shellspec"
+language = "shell"
+base_commit = "81fa64b4f4706d48a11c2c95ccdce49040cbaa18"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "shellspec__shellspec-182"
+repo = "shellspec/shellspec"
+language = "shell"
+base_commit = "04a563ebf0df372ff1afd6867a1e462ef7fb3e25"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "shellspec__shellspec-151"
+repo = "shellspec/shellspec"
+language = "shell"
+base_commit = "32c26babbc1da3a34a1ee3e5685d126b4303f8b2"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "shellspec__shellspec-189"
+repo = "shellspec/shellspec"
+language = "shell"
+base_commit = "d44b512a64676951dd6188d549478b42c02197f6"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "shellspec__shellspec-75"
+repo = "shellspec/shellspec"
+language = "shell"
+base_commit = "2af886ce473e51a43911975e4279b52b79ad238e"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "shellspec__shellspec-53"
+repo = "shellspec/shellspec"
+language = "shell"
+base_commit = "96b75660968de78a1a2339dc1829b0c48091b049"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "shellspec__shellspec-41"
+repo = "shellspec/shellspec"
+language = "shell"
+base_commit = "dccb2a2b1734780bcf6e29a2b5d8883a5de3c27e"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "shellspec__shellspec-37"
+repo = "shellspec/shellspec"
+language = "shell"
+base_commit = "5be791a7edda89cc9a26866cd42c4b0ae6d0a00b"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "zdharma-continuum__zinit-12"
+repo = "zdharma-continuum/zinit"
+language = "shell"
+base_commit = "789eb023b10764392739831061d0b4b336aa227c"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "zdharma-continuum__zinit-815"
+repo = "zdharma-continuum/zinit"
+language = "shell"
+base_commit = "9a2898ba2a3a4549035c164c9c835bfd15317189"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "zdharma-continuum__zinit-307"
+repo = "zdharma-continuum/zinit"
+language = "shell"
+base_commit = "fb3c082551ee9f48676c3183d5a4e9e842d3d874"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "zdharma-continuum__zinit-54"
+repo = "zdharma-continuum/zinit"
+language = "shell"
+base_commit = "208bb3e69fb324862c56835561da70f8072e7d6a"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "zdharma-continuum__zinit-564"
+repo = "zdharma-continuum/zinit"
+language = "shell"
+base_commit = "b456a2dba65673f4cf5a9a8c2bc16d7d0dcb3ace"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmybash__oh-my-bash-506"
+repo = "ohmybash/oh-my-bash"
+language = "shell"
+base_commit = "00f28e4a5ff3f4a5217a3b43ba5072d653bcf443"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmybash__oh-my-bash-400"
+repo = "ohmybash/oh-my-bash"
+language = "shell"
+base_commit = "58ca1824222148e1cadff590752684975c556878"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmybash__oh-my-bash-5"
+repo = "ohmybash/oh-my-bash"
+language = "shell"
+base_commit = "6f854593e2c60a49a4b3386f6e9f76b773657109"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmybash__oh-my-bash-480"
+repo = "ohmybash/oh-my-bash"
+language = "shell"
+base_commit = "24bd7e71ad7a8c51eaeff001439a266daf992e3a"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "ohmybash__oh-my-bash-127"
+repo = "ohmybash/oh-my-bash"
+language = "shell"
+base_commit = "ec1921490fa9b063c1aed986340d282f4c4e279e"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "bats-core__bats-core-1031"
+repo = "bats-core/bats-core"
+language = "shell"
+base_commit = "b640ec3cf2c7c9cfc9e6351479261186f76eeec8"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "bats-core__bats-core-865"
+repo = "bats-core/bats-core"
+language = "shell"
+base_commit = "cca66b3af1167f660c838b87ab3ff9a36f65658c"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "bats-core__bats-core-434"
+repo = "bats-core/bats-core"
+language = "shell"
+base_commit = "b81de286448ae3a11e3342783dcdc1b08765a421"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "bats-core__bats-core-734"
+repo = "bats-core/bats-core"
+language = "shell"
+base_commit = "60907a023926e136ab583e6c6d0c58862174068d"
+dataset = "rueca_mined_shell"
+assets = []
+
+[[s1.instances]]
+id = "bats-core__bats-core-586"
+repo = "bats-core/bats-core"
+language = "shell"
+base_commit = "2c32061e80431aa44399cb0f99f6c317c0cd77d8"
+dataset = "rueca_mined_shell"
 assets = []

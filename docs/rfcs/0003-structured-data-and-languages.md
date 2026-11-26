@@ -935,18 +935,21 @@ needs them in the graph. Designed in the form of §10.2–§10.4b.
 | Tests | bats `@test` blocks (`Test`), test files (test directories, `*.bats`, `test_*.sh`, `*_test.sh`, `*_spec.sh`), shunit2 `test*` functions and hooks |
 | Env bridge | §7.2 table; reads of a variable a sourced file assigns are references to it, not env reads; default values have no slot in the bridge |
 | Precision | none: no SCIP indexer or type checker exists for shell |
-| Bench | S1: none (no localization dataset has shell instances); S3: the bench's code-backed labeler (written from bash's lookup rules, independent of the pack's path evaluation) on nvm, acme.sh and bash-it (bats-core calibration), and the `bench/micro/shell` micro-benchmark |
+| Bench | S1: no localization dataset has shell instances, so the bench mines its own (merged GitHub pull requests that close an issue, screened by rule; 72 gated on nine repositories, 15 calibration; `bench/README.md`); S3: the bench's code-backed labeler (written from bash's lookup rules, independent of the pack's path evaluation) on nvm, acme.sh and bash-it (bats-core calibration), and the `bench/micro/shell` micro-benchmark |
 
 *Implemented* (`rueca-lang-shell` plus the `shell` module of
 `rueca-resolve`; crate docs and [how-it-works](../how-it-works.md)):
-everything in the table. Status **`preview`** under RFC 0004: the
-localization floors cannot be evaluated without S1 instances (missing
-results count as failing, RFC 0004 §6.2), and the structural gold is a
+everything in the table. Status **`stable`** under RFC 0004 (2026-11-25,
+after the dialects and the mined localization set; it shipped as
+`preview` while the localization floors had no instances and 1.95% of the
+files kept a parse error): every gated floor is met, localization on a
+set the bench mined itself (not human-validated) and structure against a
 code-backed labeler rather than a compiler-grade oracle, so its agreement
 with the pack measures the pack against bash's lookup rules, not against
 an independent tool. Not done: aliases, functions defined by `eval` or
-zsh `autoload` files, variable command words (`$cmd args`), zsh-only
-syntax beyond parameter flags (parse errors, counted).
+zsh `autoload` files, variable command words (`$cmd args`), a ksh
+grammar (ksh files are read as bash; ksh93's own forms are parse errors,
+counted).
 
 ### 10.4d C# (addendum, 2026-11-25)
 

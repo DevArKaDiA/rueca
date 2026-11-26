@@ -232,13 +232,25 @@ What packs deliberately do and don't do:
   `trap` handler names a callback (a `Read`, so a `REFERENCES` edge, not
   `CALLS`); a command word that is a path or a script name (`./deploy.sh`,
   `bash scripts/x.sh`, `"$DIR/x.sh"`) is a `Call` with the `$script`
-  receiver, which the resolver links to the script's `File` node. A few
-  constructs tree-sitter-bash 0.25 rejects although the shell accepts them
-  are rewritten before parsing with same-length text (spans stay exact):
-  `${s:$i:1}`, `&` / `<` / `>` in an expansion's pattern, a line-start
-  `\.` (nvm's alias bypass), zsh parameter flags `${(j:,:)xs}`. Other zsh
-  syntax (glob qualifiers `*(.)`, `for x (…)` loops, nested `${${…}}`)
-  stays an ERROR node, counted as a parse error.
+  receiver, which the resolver links to the script's `File` node.
+- **One shell dialect per file, a grammar per dialect.** The pack decides
+  `sh`, `bash`, `zsh`, `ksh` or `bats` from the path and the bytes alone
+  (the `.bats` extension, a ShellCheck `shell=` directive, the `#!` line,
+  zsh's `#compdef` / `#autoload`, the file name, an editor modeline, a
+  directory named after a shell, content signals, else `sh`) and writes it
+  at the end of every function signature (`deploy() # bash`). zsh files
+  are parsed with tree-sitter-zsh, the others with tree-sitter-bash; when
+  the dialect's grammar leaves errors and the other one reads the whole
+  file without any, that tree is extracted. A few constructs a grammar
+  rejects although the shell accepts them are rewritten before parsing
+  with same-length text (spans stay exact; signatures and docs quote the
+  file as written): for the bash grammar `${s:$i:1}`, `&` / `<` / `>` / `;`
+  in an expansion's pattern, a line-start `\.` (nvm's alias bypass), zsh
+  parameter flags, a here-string after an output redirection; for the zsh
+  grammar `$$` before more text, the arguments of an anonymous function,
+  commented-out assignments and unquoted `%{` prompt escapes; for both
+  `for x do`, `0x$h` in arithmetic and `} 0<file`. What a grammar still
+  cannot read stays an ERROR node, counted as a parse error.
 - **C# names follow the namespace.** The module name of a file is the
   namespace its types share (block `namespace A.B { … }`, nested blocks or
   file-scoped `namespace A.B;`), so the global name of a method is

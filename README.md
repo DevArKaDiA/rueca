@@ -22,8 +22,8 @@ agent can follow.
 
 > **Status: alpha (`0.1.0-alpha.2`).** Local mode (one repository, or an
 > organization of local repositories with `--org`); Python,
-> TypeScript/JavaScript, PHP, Go, Java, C, C++, Rust, shell scripts
-> (`preview`), C#, Kotlin, Ruby, SQL (`preview`) and Swift, plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
+> TypeScript/JavaScript, PHP, Go, Java, C, C++, Rust, shell scripts,
+> C#, Kotlin, Ruby, SQL (`preview`) and Swift, plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
 ## Features
@@ -70,7 +70,8 @@ trait items named `Type.method` / `Trait.method`, receivers from `self` /
 `macro_rules!` as callables and calls recovered inside macro arguments,
 `#[test]` / `#[cfg(test)]` / `tests/` tests, `env!` / `option_env!` /
 `env::var` reads, Cargo dependencies for cross-repository package edges),
-shell — `preview` (sh and bash, zsh and ksh best effort; extension-less
+shell (POSIX sh, bash, zsh, ksh and bats, one dialect per
+file, zsh read with its own grammar; extension-less
 scripts by their `#!` line; functions in both forms, `source` / `.` paths
 through `$(dirname "$0")` / `${BASH_SOURCE%/*}` / directory variables,
 sourced functions resolved transitively, scripts run by path as calls of
@@ -470,7 +471,7 @@ scorecard (`stable` = every floor met; full tables in
 - **C** `stable` (1.1% of files with parse errors, vendored code excluded)
 - **C++** `stable` (callees precision 92.5 with SCIP-ambiguous definitions scored as one class; 0.5% of files with parse errors, vendored code excluded)
 - **Rust** `stable` (localization meets the floor but trails BM25 on the point estimate: File Acc@5 62.8 vs 67.4, Function Acc@10 39.0 vs 46.3 over 43 issues, paired intervals cross zero; callers / callees precision 98.5 / 98.0, recall 86.8 / 87.1 against rust-analyzer on serde_json and ripgrep; 0.1% of files with parse errors)
-- **Shell** `preview` (no localization dataset has shell instances, so the localization floors are pending; structure measured against the bench's code-backed labeler, not a compiler-grade oracle: callers / callees precision 100.0 / 100.0, recall 99.9 / 99.9 on nvm, acme.sh and bash-it, micro callee F1 99.1; 1.9% of files with parse errors, interval crossing the 2% floor; zsh best effort)
+- **Shell** `stable` (localization meets the floor but trails BM25 on the point estimate, the function interval ending at zero: File Acc@5 72.2 vs 77.8, Function Acc@10 64.2 vs 73.6 over 72 issues mined from GitHub by the bench — no dataset has shell instances — on nine zsh, bash and POSIX sh repositories; structure measured against the bench's code-backed labeler, not a compiler-grade oracle: callers / callees precision 100.0 / 100.0, recall 99.9 / 99.9 on nvm, acme.sh and bash-it, micro callee F1 99.1; 0.8% of files with parse errors, zsh read with its own grammar: sh 0.8%, bash 0.8%, zsh 1.1%, bats 0%; ksh read as bash, not measured)
 - **C#** `stable` (localization meets the floor at BM25's level: File Acc@5 48.7 vs 48.7, Function Acc@10 26.3 vs 28.9 over 39 SWE-rebench V2 issues, paired intervals cross zero; callers / callees precision 96.9 / 95.5, recall 95.2 / 96.6 against scip-dotnet on serilog and eShopOnWeb; 0.0% of files with parse errors)
 - **Kotlin** `stable` (callees precision at the floor: 90.0, interval 87.9–92.0; callers precision 96.4, recall 86.6 / 85.5 against scip-java's Kotlin indexer on moshi and clikt; localization not significantly below BM25: File Acc@5 56.5 vs 58.7, Function Acc@10 45.5 vs 31.8 over 46 Multi-SWE-bench issues; 0.15% of files with parse errors)
 - **Ruby** `stable` (callers / callees precision 98.4 / 95.4, recall 96.8 / 96.7 against scip-ruby on jekyll and ruby-lsp; localization not significantly below BM25: File Acc@5 55.0 vs 55.0, Function Acc@10 24.2 vs 18.2 over 40 SWE-bench Multilingual issues; 0.2% of files with parse errors)
@@ -509,7 +510,7 @@ absolute floors and aspirational targets).
 | Stage | What it delivers | Status |
 |---|---|---|
 | **Local mode** | One binary, MCP over stdio, the tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
-| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Ruby, Swift, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c), SQL (§10.4g) | ✅ done, every language `stable`; shell `preview` (no localization dataset, code-backed structural gold); SQL `preview` (no localization dataset, parse-error floor, code-backed structural gold) |
+| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Ruby, Swift, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c), SQL (§10.4g) | ✅ done, every language `stable` (shell on a localization set mined by the bench and a code-backed structural gold); SQL `preview` (no localization dataset, parse-error floor, code-backed structural gold) |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
@@ -542,7 +543,7 @@ More languages follow the same gate.
 | [`rueca-lang-kotlin`](crates/rueca-lang-kotlin) | Kotlin extraction, packages shared with Java, receivers and extension functions |
 | [`rueca-lang-swift`](crates/rueca-lang-swift) | Swift extraction, SwiftPM targets as modules, extensions, selectors and labels |
 | [`rueca-lang-proto`](crates/rueca-lang-proto) | Protocol Buffers services, RPC methods, messages and enums; RPC contracts |
-| [`rueca-lang-shell`](crates/rueca-lang-shell) | Shell scripts (sh, bash; zsh / ksh best effort): functions, `source` paths, script runs, bats / shunit2 tests, env reads and providers |
+| [`rueca-lang-shell`](crates/rueca-lang-shell) | Shell scripts (sh, bash, zsh, ksh, bats; one dialect per file): functions, `source` paths, script runs, bats / shunit2 tests, env reads and providers |
 | [`rueca-lang-ruby`](crates/rueca-lang-ruby) | Ruby extraction, constant paths, receivers, `require` paths and gem manifests |
 | [`rueca-lang-sql`](crates/rueca-lang-sql) | SQL in several dialects (sqlparser): tables, columns, views, routines, triggers, migrations, dbt models and macros |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |

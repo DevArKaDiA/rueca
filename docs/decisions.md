@@ -1,5 +1,193 @@
 # Decisions log
 
+## 2026-11-25 — Shell: a localization set mined by the bench; `stable`
+
+Shell was `preview` for two reasons: no localization dataset has shell
+instances (missing results count as failing, RFC 0004 §6.2) and 1.95% of
+its files kept a parse error, the interval crossing the floor. The second
+is the dialect work below. For the first:
+
+- **The bench mines its own S1 set** (`[datasets.rueca_mined_shell]`,
+  `bench/datasets/`, loader `datasets.py: _local_jsonl_rows`): merged
+  GitHub pull requests that close an issue, in SWE-bench's columns, with
+  the merge base as `base_commit` and the three-dot diff as the patch.
+  Screening is mechanical (issue older than the pull request, ≥ 100
+  characters of prose, no diff in the issue, an existing non-test shell
+  file changed, shell the majority of the change, ≤ 10 shell files, patch
+  ≤ 100 KB, one pull request per issue); no LLM and no person rated the
+  issues, which is weaker than SWE-bench Multilingual's validation and
+  than SWE-rebench V2's LLM screen, and is said so wherever the row is
+  shown. Rejected: waiting for a dataset (none of the six checked has
+  shell), and an LLM screen (not reproducible from the manifest).
+- **Repositories and quotas were fixed from the mining counts alone**,
+  before any arm ran on them (`bench/datasets/mined/PROVENANCE.md` has
+  every candidate and the count each rule dropped): shell is the
+  repository's content, permissive licence, ≥ 5 eligible pairs, more than
+  one script. Gated (72): ohmyzsh 12, spaceship-prompt 6, prezto 5 (zsh);
+  bash-it 10, docker-mailserver 10, asdf 8, sdkman-cli 5 (bash); linutil
+  8, shellspec 8 (POSIX sh). Calibration (15): zinit, oh-my-bash,
+  bats-core. Left out: single-script repositories (nvm, openvpn-install,
+  Homebrew/install), copyleft ones (pi-hole, RetroPie-Setup, acme.sh),
+  and those whose code is in extension-less scripts, outside the bench's
+  file set (pyenv, rbenv, dokku, git-extras). No ksh repository with
+  linked issue → fix pairs was found.
+- **Issues that name the file are reported apart.** 34 of the 72 gated
+  issues contain a gold file's name (or the name without its extension).
+  That helps every lexical arm alike, so the gate stays on all 72, and the
+  scorecard prints the same two metrics for every arm on the other 38
+  (`gold.py: issue_names_gold_file`; a diagnostic line, not a floor).
+- **Nothing was tuned for it.** The calibration split ran first (15
+  instances: File Acc@5 73.3 for Rueca and BM25, Function Acc@10 45.5 vs
+  54.5 over 11; bats-core structure 100 / 100; micro F1 99.1) and no
+  ranking weight, heuristic or repair was changed afterwards. The gated
+  sets ran once, with the binary built from the dialect commits
+  (`fix/shell-stable@62caa40`), and nothing in the pack changed after it.
+- **Result** (gated, lexical mode): File Acc@5 72.2 (61.0–81.2) vs BM25
+  77.8, paired Δ −5.6 (−15.3 to +4.2); Function Acc@10 64.2 (50.7–75.7)
+  over 53 vs BM25 73.6, paired Δ −9.4 (−18.9 to +0.0); cbm 50.0 / 45.3.
+  Both floors are met by the rule of §6.1 (the whole interval is not below
+  zero) and both trail BM25 on the point estimate; the function interval
+  ends at zero, so this is the narrowest pass on the scorecard and is
+  written that way in the README. Where the issue names no gold file (38;
+  28 with function gold): File Acc@5 68.4 vs BM25 71.1 vs cbm 44.7,
+  Function Acc@10 64.3 vs 71.4 vs 42.9. Structure after the dialect work:
+  callers / callees precision 100.0 / 100.0, recall 99.9 / 99.9 (n =
+  1,740 / 2,182; the labeler now reads each file as the pack does, which
+  moved the population by 2 and 12 questions), definition found 100.0,
+  micro F1 99.1. Files with parse errors over the 12 gated corpus
+  repositories (the three S3 ones and the nine S1 ones at the base commit
+  of their first instance): 15 of 1,851, 0.8% (0.5–1.3); by dialect, on
+  the same files with the pack's `dialects` example: sh 4 / 532, bash 6 /
+  762, zsh 5 / 446, bats 0 / 112, ksh none in the corpus.
+- **What `stable` does not say.** The structural gold is still the
+  bench's code-backed labeler (it shares bash's lookup rules with the
+  pack, and since the dialect work the pack's dialect rules and repairs
+  too), and the localization set is unvalidated by people. Both are
+  disclosed next to the scorecard; neither is a floor of RFC 0004.
+
+## 2026-11-25 — Shell: one dialect per file, tree-sitter-zsh for zsh files
+
+The shell pack read every file with tree-sitter-bash; zsh and ksh were
+"best effort" and 52.8% of ohmyzsh's zsh files kept a parse error. Shell
+now has dialects the way SQL has (`rueca-lang-shell` `dialect.rs`):
+
+- **Dialects: `sh`, `bash`, `zsh`, `ksh`, `bats`**, one per file, a pure
+  function of the path and the bytes; the first rule that answers wins:
+  the `.bats` extension; a ShellCheck `shell=` directive in the leading
+  comments (ShellCheck itself puts it above the `#!` line); the `#!` line
+  (`dash` / `ash` / busybox → `sh`, `ksh93` / `mksh` / `pdksh` → `ksh`);
+  zsh's `#compdef` / `#autoload`; the file name (`.zsh`, `.zsh-theme`,
+  `.zshrc`, `.bash`, `.bashrc`, `.ksh`, `.kshrc`, `.profile`, …); an editor
+  modeline; a directory named after one shell; content signals; else `sh`.
+  The `#!` line wins over the extension (a `.sh` file that starts with
+  `#!/bin/zsh` is zsh). The dialect ends every function signature as a
+  comment (`deploy() # bash`), SQL's `-- postgres` for shell; there is no
+  store setting and no new field in the model.
+- **Content signals never make a multi-shell script zsh.** Each distinct
+  signal counts once (zsh: `setopt`, `autoload`, `zstyle`, `${(f)x}`, …;
+  bash: `shopt`, `BASH_SOURCE`, `mapfile`, …; ksh: `set -A`, `${.sh.…}`;
+  shared non-POSIX syntax: `[[ … ]]`, arrays, `<<<`), one shell's own must
+  outweigh the others', and a file that tests `$ZSH_VERSION` /
+  `$BASH_VERSION` (nvm.sh, completion scripts) is `bash` when it uses
+  anything beyond POSIX, else `sh`. On the 3,471 files measured below the
+  rules that decided were: `#!` line 1,753, file name 852, extension
+  (`.bats`) 520, directive 330, content 10, default 3, zsh header 3.
+- **A grammar per dialect, adopted on measurement.** Candidates for zsh:
+  `tree-sitter-zsh` 0.64.3 (georgeharker, MIT, on crates.io and PyPI,
+  released 2026-11-17, a fork of tree-sitter-bash that adds zsh's syntax;
+  it depends only on `tree-sitter-language`, like the bash grammar),
+  against tree-sitter-bash 0.25.1 with the pack's repairs. The other
+  crates and repositories found (`konomanoasa-tree-sitter-zsh` 0.8.0, 119
+  downloads; tree-sitter-grammars/tree-sitter-zsh, no licence file; small
+  personal forks) were not measured. Files with at least one ERROR /
+  MISSING node, same files (by extension, before the dialect rules):
+
+  | Files | tree-sitter-bash raw | + the pack's repairs (what shipped) | tree-sitter-zsh raw |
+  |---|---|---|---|
+  | ohmyzsh `.zsh` / `.zsh-theme` (545) | 298 | 288 (52.8%) | 17 (3.1%) |
+  | prezto `.zsh` (41) | 33 | 32 | 1 |
+  | spaceship-prompt (122) | 53 | 43 | 3 |
+  | zsh-syntax-highlighting (301) | 20 | 13 | 6 |
+  | zsh-autosuggestions (13) | 10 | 10 | 0 |
+  | powerlevel10k (16) | 16 | 16 | 5 |
+  | bash-it `.bash` (328) | 5 | 4 | 13 |
+  | bats-core `.bats` (224) | 2 | 2 | 16 |
+  | dokku `.bats` (154) | 0 | 0 | 24 |
+  | acme.sh `.sh` (304) | 8 | 8 | 12 |
+
+  So: `zsh` files → tree-sitter-zsh; `sh`, `bash`, `ksh`, `bats` files →
+  tree-sitter-bash (the zsh grammar is worse on bash code, bats files
+  above all). No ksh grammar exists on crates.io and no permissively
+  licensed ksh corpus of any size was found: ksh files are read as bash
+  (the Bourne subset both share) and ksh93's own forms are errors.
+- **The other grammar only when it reads the whole file.** When the
+  dialect's grammar leaves errors and the other one leaves none, the
+  other tree is extracted (15 of the 3,471 files: bash the fork accepts
+  and its parent rejects — `*"a"*"b")` case patterns, `"${x:-$(f)}"` —
+  and a zsh file with a bash `#!` line). When both leave errors the
+  dialect's tree is kept: comparing error counts of two broken trees
+  moved nvm.sh (23 errors as bash, 8 as zsh) to a grammar that was not
+  written for it. Bats files are only read as bash.
+- **Extraction is the same code for both trees.** The zsh grammar names
+  some nodes differently (`variable_ref` for `$x`, `simple_variable_name`,
+  operator nodes under `expansion`, names declared without a value as
+  `word` arguments, `foreach` / short `for` loops, `integer` / `float`
+  declarations); the walker and the locals table accept both, and the
+  bindings query has a zsh twin (`queries/locals-zsh.scm`). Checked by
+  extracting every file both grammars read without errors through each
+  (`examples/grammars.rs --facts`): ohmyzsh 6 of 266 files differ, prezto
+  0 of 9, spaceship-prompt 1 of 79, zsh-syntax-highlighting 1 of 288; in
+  the differing files the zsh tree is the better one (`integer x` is a
+  declaration, not a call; `${(P)NAME}` reads `NAME`) except two themes
+  whose multi-line prompt assignments the zsh grammar splits differently.
+- **Repairs per grammar** (`repair.rs`; same length, so spans stay exact;
+  signatures, value previews and docs now quote the file as written, not
+  the repaired text). New for the bash grammar: `;` in an expansion's
+  pattern, a here-string after an output redirection (`cat > f <<<"x"`,
+  12 bats files of pyenv, rbenv and asdf). For the zsh grammar: `$$` before more
+  text, the arguments of an anonymous function (`} "$1" &|`), commented-out
+  assignments (`#NAME=value words`: the grammar read an assignment and a
+  command), unquoted `%{` prompt escapes (`C=%{$fg[red]%}`: the grammar
+  ended the value at `%`). For both: `for x do`, `0x$h` in arithmetic,
+  `} 0<file`. Every rule is a construct, none names a file. The bench
+  labeler ports the dialect rules and the repairs (`shelldialect.py`) and
+  parses with the same grammar: on the 3,471 files its dialect, rule,
+  grammar, repaired text (hash) and error flag equal the pack's.
+- **Result** (files with a parse error / files, extension-less scripts
+  and tests included, `examples/dialects.rs`; checkouts: acme.sh
+  `5567d7f`, asdf v0.14.1, bash-it v3.2.0, bats-core v1.13.0, dokku
+  `a31ba25`, git-extras `02938b5`, nvm v0.41.0, ohmyzsh `1eebae3`,
+  pi-hole `f7c0220`, powerlevel10k `50a35cc`, prezto `a7c6167`, pyenv
+  `f5bc939`, rbenv `07e9b1e`, spaceship-prompt `ef7f71d`,
+  zsh-autosuggestions `85919cd`, zsh-completions `989b232`,
+  zsh-syntax-highlighting `e6683f2`):
+
+  | Dialect | Grammar | Files | With errors | Before (one grammar, by extension) |
+  |---|---|---|---|---|
+  | sh | tree-sitter-bash | 720 | 4 (0.56%) | |
+  | bash | tree-sitter-bash | 1,155 | 10 (0.87%) | `.sh` / `.bash` / `.ksh`: 28 / 812 (3.4%) |
+  | zsh | tree-sitter-zsh | 1,075 | 24 (2.23%) | `.zsh` / `.zsh-theme`: 403 / 1,041 (38.7%) |
+  | ksh | tree-sitter-bash | 0 | — | |
+  | bats | tree-sitter-bash | 521 | 4 (0.77%) | `.bats`: 16 / 528 (3.0%) |
+  | all | | 3,471 | 42 (1.21%) | 447 / 2,381 (18.8%) |
+
+  ohmyzsh alone: 9 / 572 (1.6%; zsh 8 / 556), from 303 / 586. zsh stays
+  above 2% on this pool because of powerlevel10k (5 of 17: `p10k.zsh` is
+  9,000 lines of nested expansions and glob flags) and
+  zsh-syntax-highlighting's parser tests. What is still unparsed, by
+  construct: short loops without `do` (`for x in a b` then one command),
+  `function {a,b}_x()`, dynamic function names (`f_$x() {…}`), `(#b)` /
+  `(#s)` glob flags in `[[ … ]]`, `$x:h/…`, `${x: : -1}` (zsh); `[ a '('
+  b ')' ]`, `[ "$a" "$@" ]`, case patterns such as `--*' '*)`, arithmetic
+  over several lines with subscripts, `${.sh.file}`, nvm.sh (bash; the
+  grammar's here-document scanner). A tree can carry tree-sitter's
+  `has_error` flag without any ERROR / MISSING node (an empty `word` the
+  zsh scanner emits: 7 of the 3,471 files); it counts as read, as in every
+  other pack (`rueca-extract` `count_errors`) and in the health metric.
+- **Cost.** tree-sitter-zsh's generated parser is 43 MB of C (the bash
+  grammar's is 9.5 MB); ohmyzsh's 572 files are read in 0.37 s and
+  acme.sh's 304 in 0.30 s (dialect, repairs, both grammars when needed).
+
 ## 2026-11-25 — SQL pack: sqlparser per statement over a tree-sitter grammar, one dialect per file, a code-backed gold; `preview`
 
 SQL landed as `rueca-lang-sql` (RFC 0003 §10.4g) with a `sql` module in

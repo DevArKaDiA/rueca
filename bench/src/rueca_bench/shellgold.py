@@ -1,7 +1,8 @@
 """S3 gold for shell scripts: a code-backed call-graph labeler.
 
 No compiler-grade indexer exists for shell (no SCIP indexer, no type
-checker), so the bench derives the gold itself from tree-sitter-bash, with
+checker), so the bench derives the gold itself from tree-sitter-bash (and
+tree-sitter-zsh for zsh files, `shelldialect.py`), with
 rules written from bash's own semantics and independently of the shell
 pack (`rueca-lang-shell`, `rueca-resolve` `shell`): the pack evaluates
 `source` paths (the script's directory through `$(dirname "$0")`,
@@ -236,4 +237,4 @@ def shell_call_graph(root: Path, include: list[str], exclude: list[str] | None =
 def version_string() -> str:
     import importlib.metadata as md
 
-    return f"rueca-bench shell labeler (tree-sitter-bash {md.version('tree-sitter-bash')})"
+    return f"rueca-bench shell labeler (tree-sitter-bash {md.version('tree-sitter-bash')}, tree-sitter-zsh {md.version('tree-sitter-zsh')})"

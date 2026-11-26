@@ -1,0 +1,8 @@
+MIT-LCP/mimic-code
+tuva-health/tuva
+awslabs/amazon-redshift-utils
+NikolayS/postgres_dba
+OHDSI/Achilles
+pgq/pgq
+dbt-labs/metrics
+get-select/dbt-snowflake-monitoring

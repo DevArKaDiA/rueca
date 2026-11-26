@@ -24,6 +24,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use rueca_extract::ExtractError;
+
+use crate::dialect::Grammar;
 use rueca_extract::tree_sitter::{
     Node, Query, QueryCursor, QueryCursorOptions, QueryCursorState, StreamingIterator, Tree,
 };
@@ -55,18 +57,28 @@ pub(crate) struct LocalsQuery {
     roles: Vec<Role>,
 }
 
-/// Compiles `queries/locals.scm` against tree-sitter-bash (once per process).
-pub(crate) fn locals_query() -> Result<&'static LocalsQuery, ExtractError> {
-    static QUERY: OnceLock<Result<LocalsQuery, String>> = OnceLock::new();
-    QUERY
-        .get_or_init(|| {
-            let language = tree_sitter_bash::LANGUAGE.into();
-            let query = Query::new(&language, LOCALS_SCM).map_err(|e| format!("locals.scm: {e}"))?;
-            let roles = query.capture_names().iter().map(|n| role_of(n)).collect();
-            Ok(LocalsQuery { query, roles })
-        })
-        .as_ref()
-        .map_err(|e| ExtractError::Query(e.clone()))
+/// The same query for tree-sitter-zsh trees (`queries/locals-zsh.scm`).
+pub(crate) const LOCALS_ZSH_SCM: &str = include_str!("../queries/locals-zsh.scm");
+
+fn compile(grammar: Grammar) -> Result<LocalsQuery, String> {
+    let (scm, file) = match grammar {
+        Grammar::Bash => (LOCALS_SCM, "locals.scm"),
+        Grammar::Zsh => (LOCALS_ZSH_SCM, "locals-zsh.scm"),
+    };
+    let query = Query::new(&crate::extract::language(grammar), scm).map_err(|e| format!("{file}: {e}"))?;
+    let roles = query.capture_names().iter().map(|n| role_of(n)).collect();
+    Ok(LocalsQuery { query, roles })
+}
+
+/// Compiles the locals query of `grammar` (once per process each).
+pub(crate) fn locals_query(grammar: Grammar) -> Result<&'static LocalsQuery, ExtractError> {
+    static BASH: OnceLock<Result<LocalsQuery, String>> = OnceLock::new();
+    static ZSH: OnceLock<Result<LocalsQuery, String>> = OnceLock::new();
+    let cell = match grammar {
+        Grammar::Bash => &BASH,
+        Grammar::Zsh => &ZSH,
+    };
+    cell.get_or_init(|| compile(grammar)).as_ref().map_err(|e| ExtractError::Query(e.clone()))
 }
 
 /// How a file-level name is bound (its first binding).
@@ -149,7 +161,8 @@ fn declaration_of(node: Node<'_>) -> Option<Node<'_>> {
 fn is_local_declaration(decl: Node<'_>, source: &[u8]) -> bool {
     match declaration_keyword(decl, source) {
         "local" => true,
-        "declare" | "typeset" => !declaration_flags(decl, source).contains('g'),
+        // zsh: `integer` / `float` are `typeset -i` / `typeset -F`
+        "declare" | "typeset" | "integer" | "float" => !declaration_flags(decl, source).contains('g'),
         _ => false,
     }
 }
@@ -157,7 +170,7 @@ fn is_local_declaration(decl: Node<'_>, source: &[u8]) -> bool {
 /// The file-level kind of a binding.
 fn file_var_kind(node: Node<'_>, source: &[u8]) -> FileVarKind {
     let parent_kind = node.parent().map(|p| p.kind());
-    if parent_kind == Some("for_statement") {
+    if matches!(parent_kind, Some("for_statement" | "foreach_statement" | "terse_for_statement")) {
         return FileVarKind::Other;
     }
     let Some(decl) = declaration_of(node) else { return FileVarKind::Variable };
@@ -267,12 +280,22 @@ fn run_query<'t>(lq: &LocalsQuery, tree: &'t Tree, source: &[u8], time_budget: D
     ((scopes, vars), incomplete)
 }
 
-/// Every `command` node of the tree (for the binding commands).
+/// The names a declaration command declares without a value, where the
+/// grammar reads them as plain `word` arguments (tree-sitter-zsh: `local
+/// x`, `typeset -a xs`, `export X`; tree-sitter-bash gives `variable_name`
+/// nodes, which the query captures).
+fn declaration_words<'t>(decl: Node<'t>, source: &[u8]) -> Vec<Node<'t>> {
+    let mut cursor = decl.walk();
+    decl.named_children(&mut cursor).filter(|c| c.kind() == "word" && is_name(text(*c, source))).collect()
+}
+
+/// Every `command` and `declaration_command` node of the tree (for the
+/// binding commands and the names declared as words).
 fn commands<'t>(tree: &'t Tree) -> Vec<Node<'t>> {
     let mut out = Vec::new();
     let mut stack = vec![tree.root_node()];
     while let Some(n) = stack.pop() {
-        if n.kind() == "command" {
+        if matches!(n.kind(), "command" | "declaration_command") {
             out.push(n);
         }
         let mut cursor = n.walk();
@@ -305,14 +328,23 @@ impl Locals {
 }
 
 /// Builds the binding table of `tree`.
-pub(crate) fn build(tree: &Tree, source: &[u8], time_budget: Duration) -> Result<Locals, ExtractError> {
-    let lq = locals_query()?;
+pub(crate) fn build(
+    tree: &Tree,
+    source: &[u8],
+    grammar: Grammar,
+    time_budget: Duration,
+) -> Result<Locals, ExtractError> {
+    let lq = locals_query(grammar)?;
     let ((scopes, vars), _incomplete) = run_query(lq, tree, source, time_budget);
     let mut locals =
         Locals { scopes: scopes.into_iter().map(|(s, e)| (s, e, HashSet::new())).collect(), ..Default::default() };
     let mut ordered: Vec<(Node<'_>, FileVarKind)> = vars.into_iter().map(|v| (v, file_var_kind(v, source))).collect();
     for cmd in commands(tree) {
-        ordered.extend(command_bindings(cmd, source).into_iter().map(|n| (n, FileVarKind::Other)));
+        if cmd.kind() == "declaration_command" {
+            ordered.extend(declaration_words(cmd, source).into_iter().map(|n| (n, file_var_kind(n, source))));
+        } else {
+            ordered.extend(command_bindings(cmd, source).into_iter().map(|n| (n, FileVarKind::Other)));
+        }
     }
     ordered.sort_by_key(|(n, _)| n.start_byte());
     for (node, kind) in ordered {
@@ -342,7 +374,7 @@ f() { local x=1; arr[0]=a; declare y; for i in 1 2; do :; done; }
 
     #[test]
     fn locals_query_compiles_against_grammar() {
-        let lq = locals_query().expect("locals.scm must compile against tree-sitter-bash");
+        let lq = locals_query(Grammar::Bash).expect("locals.scm must compile against tree-sitter-bash");
         let names = lq.query.capture_names();
         for required in REQUIRED_CAPTURES {
             assert!(names.contains(required), "capture @{required} missing from locals.scm");
@@ -354,7 +386,7 @@ f() { local x=1; arr[0]=a; declare y; for i in 1 2; do :; done; }
 
     #[test]
     fn every_locals_pattern_matches_the_golden_corpus() {
-        let lq = locals_query().unwrap();
+        let lq = locals_query(Grammar::Bash).unwrap();
         let tree = parse(GOLDEN);
         let mut cursor = QueryCursor::new();
         let mut hit = vec![false; lq.query.pattern_count()];
@@ -366,6 +398,60 @@ f() { local x=1; arr[0]=a; declare y; for i in 1 2; do :; done; }
         assert!(missing.is_empty(), "patterns never matched: {missing:?}");
     }
 
+    /// Exercises every pattern of `locals-zsh.scm` at least once.
+    const GOLDEN_ZSH: &str =
+        "f() { local x=1; arr[1]=a; for i in 1 2; do :; done; foreach j (a b) :; end; for k (a b) :; }\n";
+
+    fn parse_zsh(src: &str) -> Tree {
+        let mut parser = rueca_extract::tree_sitter::Parser::new();
+        parser.set_language(&crate::extract::language(Grammar::Zsh)).unwrap();
+        parser.parse(src, None).unwrap()
+    }
+
+    #[test]
+    fn zsh_locals_query_compiles_and_every_pattern_matches() {
+        let lq = locals_query(Grammar::Zsh).expect("locals-zsh.scm must compile against tree-sitter-zsh");
+        for required in REQUIRED_CAPTURES {
+            assert!(lq.query.capture_names().contains(required), "capture @{required} missing");
+        }
+        let tree = parse_zsh(GOLDEN_ZSH);
+        assert!(!tree.root_node().has_error());
+        let mut cursor = QueryCursor::new();
+        let mut hit = vec![false; lq.query.pattern_count()];
+        let mut matches = cursor.matches(&lq.query, tree.root_node(), GOLDEN_ZSH.as_bytes());
+        while let Some(m) = matches.next() {
+            hit[m.pattern_index] = true;
+        }
+        let missing: Vec<usize> = hit.iter().enumerate().filter(|(_, h)| !**h).map(|(i, _)| i).collect();
+        assert!(missing.is_empty(), "patterns never matched: {missing:?}");
+        assert!(LOCALS_ZSH_SCM.starts_with("; SPDX-License-Identifier: Apache-2.0"));
+    }
+
+    #[test]
+    fn zsh_bindings_and_scopes() {
+        let src = "A=1\nreadonly B\nexport C\ntypeset -x D\nfor E in x; do :; done\nforeach F (a b) :; end\nlocal top\n\
+                   f() { local l; typeset d e=1; typeset -g G; integer n; float q=1.5; g=2; read -r r1; }\n";
+        let tree = parse_zsh(src);
+        let t = build(&tree, src.as_bytes(), Grammar::Zsh, Duration::from_secs(5)).unwrap();
+        assert_eq!(t.file_level("A"), Some(FileVarKind::Variable));
+        assert_eq!(t.file_level("B"), Some(FileVarKind::Constant));
+        assert_eq!(t.file_level("C"), Some(FileVarKind::Exported));
+        assert_eq!(t.file_level("D"), Some(FileVarKind::Exported));
+        assert_eq!(t.file_level("E"), Some(FileVarKind::Other));
+        assert_eq!(t.file_level("F"), Some(FileVarKind::Other));
+        assert_eq!(t.file_level("top"), Some(FileVarKind::Variable));
+        let inside = src.find("g=2").unwrap() as u32;
+        for n in ["l", "d", "e", "n", "q"] {
+            assert!(t.is_bound(n) && t.is_local_at(n, inside), "{n}");
+            assert_eq!(t.file_level(n), None, "{n}");
+        }
+        for n in ["G", "g", "r1"] {
+            assert!(t.is_bound(n) && !t.is_local_at(n, inside), "{n}");
+        }
+        // option words are not names
+        assert!(!t.is_bound("-g") && !t.is_bound("x"));
+    }
+
     #[test]
     fn query_header_records_provenance() {
         assert!(LOCALS_SCM.starts_with("; SPDX-License-Identifier: Apache-2.0"));
@@ -373,7 +459,7 @@ f() { local x=1; arr[0]=a; declare y; for i in 1 2; do :; done; }
     }
 
     fn table(src: &str) -> Locals {
-        build(&parse(src), src.as_bytes(), Duration::from_secs(5)).unwrap()
+        build(&parse(src), src.as_bytes(), Grammar::Bash, Duration::from_secs(5)).unwrap()
     }
 
     #[test]
