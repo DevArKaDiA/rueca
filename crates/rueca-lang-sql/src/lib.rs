@@ -80,9 +80,15 @@
 //! `REPEAT`; a T-SQL batch that creates a procedure, function, trigger or
 //! view is one statement, and so is an Oracle PL/SQL unit up to its `/`.
 //!
+//! `DELIMITER` is a command only with a symbol delimiter (`$$`, `//`),
+//! never a word or a quoted string.
+//!
 //! Each statement is then read (`read` module), in order:
 //!
-//! 1. **sqlparser**, in the file's dialect, then the others;
+//! 1. **sqlparser**, in the file's dialect, then the others (a statement
+//!    over 64 KiB — a routine, a data load — in the file's dialect only:
+//!    the readers of step 3 take it apart and try every dialect on each
+//!    statement inside);
 //! 2. the same after the **same-length repairs** of the `repair` module:
 //!    constructs sqlparser rejects inside otherwise plain SQL (physical
 //!    attributes, hints, `CLUSTERED`, `INCLUDING ALL`, Jinja placeholders

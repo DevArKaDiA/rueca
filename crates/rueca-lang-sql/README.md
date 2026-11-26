@@ -71,9 +71,9 @@ the health metric use): a statement is parsed when sqlparser accepts it
 reads every token of it (`forms` productions, the procedural readers); a
 statement only recognized by its first words is an error. **Lenient**
 leaves those head-only statements out. On the health corpus (every SQL
-file of the gated repositories, 2,671 files): 32 files with a strict
-error (1.20%), 28 lenient (1.05%); 799 of 21,745 statements are read by
-the pack's productions rather than sqlparser. The table below is the
+file of the gated repositories at their pinned commits, 3,419 files): 26
+files with a strict error (0.76%), 23 lenient (0.67%); what is left is
+listed in `docs/decisions.md`. The table below is the
 lenient rate on the wider evaluation corpus of the first round.
 
 Bench corpus at its pinned commits — jOOQ/sakila `e089a5b` (seven dialect

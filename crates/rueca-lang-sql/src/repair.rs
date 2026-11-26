@@ -16,6 +16,11 @@
 //! | PostgreSQL | `LIKE t INCLUDING ALL` / `EXCLUDING …` options | blanked |
 //! | PostgreSQL | `TABLESPACE name`, `CREATE OR REPLACE PROCEDURE`'s `OR REPLACE`, YugabyteDB `CREATE INDEX NONCONCURRENTLY` | blanked |
 //! | MySQL, Oracle | the partitioning clause of `CREATE TABLE` (`PARTITION BY … (PARTITION p …)`) | blanked |
+//! | T-SQL | a comma after the last column (`(a INT, )`) | blanked |
+//! | T-SQL | a static method of a CLR type `[Type]::Method(…)` | `[Type]._Method(…)` |
+//! | BigQuery | bit shifts `a << b`, `a >> b` | `a +  b` |
+//! | ANSI (SAP HANA) | `CREATE COLUMN TABLE`'s `COLUMN`, column-store hints `INTEGER CS_INT`, `NCLOB ST_MEMORY_LOB` | blanked |
+//! | any (Jinja) | a placeholder first in the statement, before `select` (a macro that expands to the `WITH` list) | `with _ as (select 1)` |
 //! | PostgreSQL | arguments of `EXECUTE PROCEDURE f('a', 'b')` in `CREATE TRIGGER` | blanked |
 //! | T-SQL | `CLUSTERED` / `NONCLUSTERED`, index and table options `WITH (PAD_INDEX = …)`, filegroups `ON [PRIMARY]` / `TEXTIMAGE_ON […]` | blanked |
 //! | T-SQL | compound assignment `+=`, `-=`, `*=`, `/=` | `=` |
@@ -55,10 +60,12 @@ pub fn repaired(chunk: &str, dialect: Dialect) -> Option<String> {
         Dialect::Db2 => r.db2(),
         Dialect::MySql => r.mysql(),
         Dialect::Sqlite => r.sqlite(),
+        Dialect::BigQuery => r.bit_shifts(),
         _ => {}
     }
     if dialect == Dialect::Generic {
         r.db2();
+        r.hana();
     }
     r.changed.then(|| String::from_utf8(r.out).unwrap_or_default())
 }
@@ -222,9 +229,24 @@ impl Repair<'_> {
         for i in 0..self.toks.len() {
             let w = self.toks[i].word();
             if is_placeholder(w) && w.len() >= 2 {
-                let _ = self.cte_list(i) || self.set_operator(i) || self.window_call(i) || self.clause(i);
+                let _ = self.leading_ctes(i)
+                    || self.cte_list(i)
+                    || self.set_operator(i)
+                    || self.window_call(i)
+                    || self.clause(i);
             }
         }
+    }
+
+    /// `{{ ctes() }} select …`: a macro first in the statement that
+    /// expands to the whole `WITH` list.
+    fn leading_ctes(&mut self, i: usize) -> bool {
+        let (ps, pe) = self.toks[i].range;
+        let hit = i == 0 && self.is(1, "SELECT") && pe - ps >= 20;
+        if hit {
+            self.overwrite(ps, b"with _ as (select 1)", pe);
+        }
+        hit
     }
 
     /// `with {{ ctes() }} select …`: a macro that expands to the CTE list.
@@ -371,6 +393,8 @@ impl Repair<'_> {
             .or_else(|| self.column_foreign_key(i))
             .or_else(|| self.computed_column(i, c))
             .or_else(|| self.default_values(i))
+            .or_else(|| self.trailing_comma(i, c))
+            .or_else(|| self.static_method(i))
             .unwrap_or(i + 1)
     }
 
@@ -561,6 +585,33 @@ impl Repair<'_> {
         self.blank(i, end);
         self.out[s..s + 3].copy_from_slice(b"INT");
         Some(end)
+    }
+
+    /// `(a INT, b INT, )`: SQL Server accepts a comma after the last column.
+    fn trailing_comma(&mut self, i: usize, c: &Tsql) -> Option<usize> {
+        if !(c.ddl && self.tok(i) == Some(&Token::Comma) && self.tok(i + 1) == Some(&Token::RParen)) {
+            return None;
+        }
+        self.blank(i, i + 1);
+        Some(i + 1)
+    }
+
+    /// A static method of a CLR type, `schema.[Type]::Method(…)`: written
+    /// as the member `schema.[Type]._Method(…)`.
+    fn static_method(&mut self, i: usize) -> Option<usize> {
+        let hit = self.tok(i) == Some(&Token::DoubleColon)
+            && i > 0
+            && matches!(self.tok(i - 1), Some(Token::Word(_)))
+            && matches!(self.tok(i + 1), Some(Token::Word(_)))
+            && self.tok(i + 2) == Some(&Token::LParen);
+        if !hit {
+            return None;
+        }
+        let s = self.toks[i].range.0;
+        self.out[s] = b'.';
+        self.out[s + 1] = b'_';
+        self.changed = true;
+        Some(i + 1)
     }
 
     /// `INSERT INTO t (a) DEFAULT VALUES`: the column list.
@@ -765,6 +816,42 @@ impl Repair<'_> {
         Some(i + 1)
     }
 
+    /// BigQuery bit shifts `a << b` / `a >> b`, which sqlparser's BigQuery
+    /// dialect has no operator for: written as `a +  b` (another binary
+    /// operator; the operands keep their place).
+    fn bit_shifts(&mut self) {
+        // `ARRAY<STRUCT<a INT64>>` closes two type parameter lists: not a shift
+        let mut generics = 0u32;
+        for i in 0..self.toks.len() {
+            match self.tok(i) {
+                Some(Token::Lt) if i > 0 && self.any(i - 1, &["ARRAY", "STRUCT", "RANGE"]) => generics += 1,
+                Some(Token::Gt) => generics = generics.saturating_sub(1),
+                Some(Token::ShiftRight) if generics >= 2 => generics -= 2,
+                Some(Token::ShiftLeft | Token::ShiftRight) => {
+                    let (s, e) = self.toks[i].range;
+                    self.overwrite(s, b"+", e);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// SAP HANA `CREATE COLUMN TABLE` and the column-store type hints
+    /// after a type (`INTEGER CS_INT`): blanked.
+    fn hana(&mut self) {
+        if !(self.is(0, "CREATE") && self.is(1, "COLUMN") && self.is(2, "TABLE")) {
+            return;
+        }
+        self.blank(1, 2);
+        for i in 3..self.toks.len() {
+            let hint = self.toks[i].word().get(..3).is_some_and(|p| p.eq_ignore_ascii_case("CS_"))
+                || self.is(i, "ST_MEMORY_LOB");
+            if hint && matches!(self.tok(i - 1), Some(Token::Word(_) | Token::RParen)) {
+                self.blank(i, i + 1);
+            }
+        }
+    }
+
     /// `GENERATED {ALWAYS | BY DEFAULT} AS IDENTITY (START WITH 1 …)`.
     fn db2(&mut self) {
         for i in 0..self.toks.len() {
@@ -841,18 +928,19 @@ impl Repair<'_> {
             return;
         }
         let mut depth = 0i32;
+        // the column list is closed: table options may come first
+        // (`) CHARACTER SET = utf8mb4 PARTITION BY HASH (c) PARTITIONS 50`)
+        let mut closed = false;
         for i in 0..self.toks.len() {
             match self.toks[i].token {
                 Token::LParen => depth += 1,
-                Token::RParen => depth -= 1,
+                Token::RParen => {
+                    depth -= 1;
+                    closed |= depth == 0;
+                }
                 _ => {}
             }
-            if depth == 0
-                && self.is(i, "PARTITION")
-                && self.is(i + 1, "BY")
-                && i > 0
-                && self.tok(i - 1) == Some(&Token::RParen)
-            {
+            if depth == 0 && closed && self.is(i, "PARTITION") && self.is(i + 1, "BY") {
                 let end =
                     (i..self.toks.len()).find(|&k| self.tok(k) == Some(&Token::SemiColon)).unwrap_or(self.toks.len());
                 self.blank(i, end);
@@ -993,6 +1081,10 @@ mod tests {
         );
         assert_eq!(fix("select _______ over (order by c)", Dialect::Generic), "select _____() over (order by c)");
         assert_eq!(repaired("select ____ from ____", Dialect::Generic), None);
+        assert_eq!(
+            fix("______________________ select * from all_rel", Dialect::Generic),
+            "with _ as (select 1) select * from all_rel"
+        );
     }
 
     #[test]
@@ -1013,6 +1105,10 @@ mod tests {
             "CREATE TABLE t (id INT PRIMARY KEY )"
         );
         assert_eq!(fix("SET @a += 1", Dialect::MsSql), "SET @a = 1");
+        assert_eq!(fix("DECLARE @t TABLE (a INT, b INT, )", Dialect::MsSql), "DECLARE @t TABLE (a INT, b INT )");
+        assert_eq!(repaired("SELECT f(a, b) FROM t", Dialect::MsSql), None);
+        assert_eq!(fix("SELECT @c = s.[T]::Get(x)", Dialect::MsSql), "SELECT @c = s.[T]._Get(x)");
+        assert_eq!(repaired("GRANT IMPERSONATE ON LOGIN::[l] TO [u]", Dialect::MsSql), None);
         assert_eq!(fix("SELECT 1 FROM t (NOLOCK) OPTION (RECOMPILE)", Dialect::MsSql), "SELECT 1 FROM t");
         assert_eq!(
             fix(
@@ -1021,6 +1117,12 @@ mod tests {
             ),
             "CREATE TABLE t (id INT, CONSTRAINT pk PRIMARY KEY (id) )"
         );
+    }
+
+    #[test]
+    fn bigquery_type_parameters_are_not_shifts() {
+        assert_eq!(repaired("CREATE TABLE t (a ARRAY<STRUCT<x INT64>>, b INT64)", Dialect::BigQuery), None);
+        assert_eq!(fix("SELECT a >> 1 FROM t", Dialect::BigQuery), "SELECT a + 1 FROM t");
     }
 
     #[test]
@@ -1041,5 +1143,18 @@ mod tests {
             "CREATE VIEW v AS SELECT 1"
         );
         assert_eq!(fix("INSERT INTO t VALUES (CURRENT DATE)", Dialect::Db2), "INSERT INTO t VALUES (CURRENT_DATE)");
+        assert_eq!(
+            fix("CREATE TABLE t (a INT) CHARACTER SET = utf8mb4 PARTITION BY HASH(a) PARTITIONS 50", Dialect::MySql),
+            "CREATE TABLE t (a INT) CHARACTER SET = utf8mb4"
+        );
+        assert_eq!(
+            fix("CREATE COLUMN TABLE T (A INTEGER CS_INT NOT NULL, B NCLOB ST_MEMORY_LOB)", Dialect::Generic),
+            "CREATE TABLE T (A INTEGER NOT NULL, B NCLOB )"
+        );
+        assert_eq!(repaired("CREATE TABLE cs_t (cs_a INTEGER)", Dialect::Generic), None);
+        assert_eq!(
+            fix("SELECT SUM(a << (b - 1)), c >> d & 1", Dialect::BigQuery),
+            "SELECT SUM(a + (b - 1)), c + d & 1"
+        );
     }
 }

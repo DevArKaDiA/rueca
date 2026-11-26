@@ -124,24 +124,41 @@ statement, and Oracle / DB2 files were read as ANSI. Choices:
   cases, 102 callables, 76 edges; the labeler agrees on 74, the 2 are the
   migration-order edges as before).
 - **Strict rate on the health corpus** (every SQL file of the gated S3
-  and S1 repositories; measured at the heads of sakila, dbt_hubspot, pgmq,
-  tSQLt, mimic-code, dbt-utils, dbt-project-evaluator,
-  dbt-external-tables, dbt-date, dbt_artifacts, dbt-snowflake-monitoring,
-  tuva-core, First Responder Kit, pg_partman, bigquery-utils): 32 of
-  2,671 files with a strict parse error (1.20%), 28 lenient (1.05%); it
-  was 238 (8.9%) strict when head-only acceptance was first counted. Of
-  21,745 statements, 118 have a strict error (61 head-only statements),
-  and 799 statements are read by the pack's productions rather than by
-  sqlparser (491 T-SQL, 201 PostgreSQL, 63 MySQL). What is left: tSQLt 15
-  files (12 of them experiments with unterminated comments, sqlcmd `:!!`,
-  broken or Service Broker statements; an SSMS template with
-  `<login_name, sysname, …>` parameters), mimic-code 5 (a HANA script:
-  `CREATE COLUMN TABLE`, `IMPORT FROM CSV FILE`; psql `\copy`
-  continuation lines; DuckDB and Oracle one-offs), bigquery-utils 5
-  (`<placeholder>` templates, a deliberate syntax error, `#legacySQL`),
-  First Responder Kit 4 (`FOR XML` without `FROM`, computed columns in a
-  2005 script), dbt_artifacts 2, dbt-utils 1 (a model that is only Jinja
-  `set` blocks).
+  and S1 repositories at their pinned commits, 3,419 files; the bench's
+  file set, counted by the `dialects` example): 26 files with a strict
+  parse error (0.76%), 23 lenient (0.67%). It was 71 (2.08%) before the
+  last constructs were closed and 238 of 2,671 at repository heads when
+  head-only acceptance was first counted. Closed by parsing, each with
+  accepted and rejected cases in the tests: BigQuery `LOAD DATA … FROM
+  FILES`, Redshift `COPY` parameters, SAP HANA `IMPORT FROM CSV FILE`,
+  MySQL `PREPARE` / `CREATE SCHEMA … COLLATE`, `ALTER TABLE … CLUSTER
+  ON`, T-SQL `ALTER TABLE t ADD a INT, b INT` (each column parsed as its
+  own `ADD`), and repairs for a trailing comma in a T-SQL column list, CLR
+  static methods, BigQuery bit shifts, HANA column-store hints and table
+  options before a MySQL partitioning clause; Jinja: a macro alone after
+  the CTE list is the main query, a macro first in the statement before
+  `select` is the `WITH` list, and comments before a placeholder do not
+  change where it stands. `DELIMITER` is a client command only with a
+  symbol delimiter (`DELIMITER ','` of a PostgreSQL `COPY` and a
+  parameter named `delimiter` were cutting statements).
+  What is left is not valid SQL of any dialect, or not SQL the pack reads:
+  tSQLt 14 files (12 under `Experiments/` and `Snippets/`: unterminated
+  comments and brackets, sqlcmd `:!!`, Service Broker and event-session
+  statements, statements cut on purpose; two build templates with SSMS
+  `<login_name, sysname, …>` parameters), mimic-code 8 + 2 (six generated
+  files that end after `CREATE TABLE … AS`, one with `CREATE TABLE
+  .first_day_lab`, one with two `CREATE TABLE … AS` heads and no query;
+  the last two are in both pins), First Responder Kit 1 (two select items
+  with no comma between them in the 2005 script), bigquery-utils 1
+  (`syntax_error.sql`, an input of its query fixer).
+- **A long statement is parsed in the file's dialect only.** Above 64 KiB
+  a statement is a routine or a data load; when the file's dialect
+  rejects it the pack's readers take it apart and every statement inside
+  is still tried in every dialect. Tokenizing all of it once more for each
+  of the seven other dialects was most of the time of the First Responder
+  Kit's 2 MB `Install-Azure.sql` (about 1.1 s, at the 5 s budget under
+  load; now about 0.4 s). The facts of 9,498 corpus files are
+  byte-identical with and without the limit.
 - **What still fails, and stays counted**: T-SQL at 6.4% of files (`FOR
   XML` without `FROM`, `GROUPING SETS`, `VECTOR_SEARCH`, `xml.modify`,
   deliberately broken experiment scripts), SQL*Plus substitution

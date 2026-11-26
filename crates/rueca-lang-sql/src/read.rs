@@ -23,6 +23,10 @@ use crate::text::Lines;
 use crate::utility::{self, Own};
 use crate::{block, forms, tsql};
 
+/// Above this many bytes a statement is parsed in the file's dialect only
+/// (see [`Reader::parse_variants`]).
+const LONG_STATEMENT: usize = 64 * 1024;
+
 /// Whether a statement may define something.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -146,6 +150,13 @@ impl<'a, 's> Reader<'a, 's> {
         self.productions += 1;
     }
 
+    /// Whether `range` parses as a statement with the file ranges `blanks`
+    /// blanked (no facts).
+    pub fn sql_parses(&self, range: (usize, usize), blanks: &[(usize, usize)]) -> bool {
+        let (text, base) = chunk(self.masked, range);
+        self.parse_variants(blanked(text, base, blanks), base, parse).is_some()
+    }
+
     /// Whether `range` parses as one expression (no facts).
     pub fn expr_parses(&self, range: (usize, usize)) -> bool {
         if range.1 <= range.0 {
@@ -254,7 +265,11 @@ impl<'a, 's> Reader<'a, 's> {
         f: impl Fn(&str, Dialect) -> Option<T>,
     ) -> Option<(T, String)> {
         let alt = with_queries(&text, base, self.alone);
-        let dialects = self.b.dialect.attempts();
+        // A statement this long is a routine or a data load: when the
+        // file's dialect rejects it, the pack's readers take it apart and
+        // every statement inside is tried in every dialect. Tokenizing
+        // the whole of it once more per dialect only costs time.
+        let dialects = if text.len() > LONG_STATEMENT { vec![self.b.dialect] } else { self.b.dialect.attempts() };
         for c in std::iter::once(text).chain(alt) {
             if let Some(t) = dialects.iter().find_map(|d| f(&c, *d)) {
                 return Some((t, c));
@@ -291,14 +306,7 @@ fn with_queries(chunk: &str, base: usize, alone: &[(usize, usize)]) -> Option<St
     let mut bytes = chunk.as_bytes().to_vec();
     let mut any = false;
     for &(s, e) in alone.iter().filter(|(s, e)| *s >= base && *e <= end) {
-        // Only where a query can stand: first in the statement, after
-        // `(`, after a set operator.
-        let before = chunk[..s - base].trim_end();
-        let word = before.rsplit(|c: char| !c.is_ascii_alphabetic()).next().unwrap_or("");
-        let query_position = before.is_empty()
-            || before.ends_with('(')
-            || ["all", "union", "except", "intersect", "distinct"].iter().any(|w| word.eq_ignore_ascii_case(w));
-        if !query_position {
+        if !query_position(chunk, s - base, e - base) {
             continue;
         }
         prep::blank(&mut bytes, s - base, e - base);
@@ -306,6 +314,38 @@ fn with_queries(chunk: &str, base: usize, alone: &[(usize, usize)]) -> Option<St
         any = true;
     }
     any.then(|| String::from_utf8(bytes).unwrap_or_default())
+}
+
+/// Whether the placeholder at `chunk[s..e]` stands where a query can:
+/// first in the statement, after `(`, after a set operator, or last after
+/// the CTE list of a `WITH` (comments before it do not count).
+fn query_position(chunk: &str, s: usize, e: usize) -> bool {
+    let before = code_before(&chunk[..s]);
+    let word = before.rsplit(|c: char| !c.is_ascii_alphabetic()).next().unwrap_or("");
+    let main_query = before.ends_with(')')
+        && chunk[e..].trim().is_empty()
+        && chunk.trim_start().get(..4).is_some_and(|w| w.eq_ignore_ascii_case("with"));
+    before.is_empty()
+        || before.ends_with('(')
+        || main_query
+        || ["all", "union", "except", "intersect", "distinct"].iter().any(|w| word.eq_ignore_ascii_case(w))
+}
+
+/// `text` without the white space and comments it ends with.
+fn code_before(text: &str) -> &str {
+    let mut t = text.trim_end();
+    loop {
+        let line_start = t.rfind('\n').map_or(0, |i| i + 1);
+        if t.ends_with("*/")
+            && let Some(open) = t.rfind("/*")
+        {
+            t = t[..open].trim_end();
+        } else if let Some(dashes) = t[line_start..].find("--") {
+            t = t[..line_start + dashes].trim_end();
+        } else {
+            return t;
+        }
+    }
 }
 
 fn parse(chunk: &str, d: Dialect) -> Option<Vec<Statement>> {

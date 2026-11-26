@@ -117,7 +117,10 @@ fn delimiter_line(line: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let d = rest.trim();
-    (!d.is_empty() && !d.contains(char::is_whitespace)).then(|| d.as_bytes().to_vec())
+    // `$$`, `//`, `;;`, `|`: never a word or a quoted string (a column
+    // named `delimiter`, PostgreSQL `COPY … DELIMITER ','`).
+    let symbols = !d.is_empty() && d.chars().all(|c| c.is_ascii_punctuation() && !matches!(c, '\'' | '"' | ',' | '`'));
+    symbols.then(|| d.as_bytes().to_vec())
 }
 
 /// `--#SET TERMINATOR @` (DB2 command line processor): the new statement

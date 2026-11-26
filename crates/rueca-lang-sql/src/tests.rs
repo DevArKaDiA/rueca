@@ -590,3 +590,46 @@ fn a_script_that_defines_nothing_is_a_function_named_after_its_file() {
     // nothing read (comments only): no definition
     assert!(defs(&facts("pg/empty.sql", "-- nothing here\n")).is_empty());
 }
+
+#[test]
+fn round_four_constructs() {
+    // A macro alone after the CTE list is the main query; comments
+    // before a placeholder do not change where it stands.
+    let src = "\
+with a as (
+    -- first source
+    {{ dbt_utils.union_relations(relations=[ref('x'), ref('y')]) }}
+)
+, b as (select * from a)
+
+/* the export */
+{{ the_tuva_project.create_json_object(
+    table_ref='b'
+) }}
+";
+    let f = facts("models/m.sql", src);
+    assert_eq!(f.parse_errors, 0, "{:?}", unparsed_statements("models/m.sql", src.as_bytes()));
+    assert!(has_ref(&f, RefKind::Read, "", "x", "m"), "{:?}", refs(&f));
+    // The same placeholder in the middle of a statement is not a query.
+    let bad = "with a as (select 1)\n{{ m() }}\nselect 2 from\n";
+    assert_eq!(facts("models/n.sql", bad).parse_errors, 1);
+
+    // `DELIMITER` is a client command only with a symbol delimiter.
+    let copy = "COPY t FROM '/data/t.csv'\nDELIMITER ','\nCSV HEADER;\nSELECT 1;\n";
+    assert_eq!(stats("pg/load.pgsql", copy.as_bytes()).statements, 2);
+    let udf = "CREATE OR REPLACE FUNCTION ds.f(\n  string STRING,\n  delimiter STRING,\n  part INT64)\nAS (SPLIT(string, delimiter)[ORDINAL(part)]);\n";
+    let s = stats("udfs/f.bq", udf.as_bytes());
+    assert_eq!((s.statements, s.unparsed_strict), (1, 0));
+
+    // T-SQL: several columns added by one `ADD`, tab-indented.
+    let alter = "CREATE TABLE #p (id INT)\nGO\nALTER TABLE #p\n\t\tADD waiter_mode\tNVARCHAR(256),\n\t\t\towner_mode NVARCHAR(256),\n\t\t\tis_victim INT\nGO\n";
+    let f = facts("mssql/a.sql", alter);
+    assert_eq!(f.parse_errors, 0, "{:?}", unparsed_statements("mssql/a.sql", alter.as_bytes()));
+    let d = defs(&f);
+    for column in ["#p.waiter_mode", "#p.owner_mode", "#p.is_victim"] {
+        assert!(d.contains(&(Label::Field, column.to_string())), "{column}: {d:?}");
+    }
+    // …and one column that is not a column definition is an error.
+    let broken = "ALTER TABLE t\n\tADD a INT,\n\tb INT NOT NUL,\n\tc INT\nGO\n";
+    assert_eq!(facts("mssql/b.sql", broken).parse_errors, 1);
+}

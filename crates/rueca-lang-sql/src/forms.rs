@@ -18,10 +18,12 @@
 //! | `DROP` | `DROP kind [IF EXISTS] name [(types)], … [CASCADE \| RESTRICT \| FORCE]`, kinds from a closed list |
 //! | types | `CREATE TYPE name FROM type [[NOT] NULL]` \| `… EXTERNAL NAME a.b` \| `… AS TABLE (columns)` \| `… AS \| IS OBJECT (attributes)` (the list parses as the columns of a table) \| `… AS \| IS TABLE OF type` \| `ALTER TYPE name OWNER TO n \| SET SCHEMA n \| RENAME TO n \| ADD ATTRIBUTE a type \| DROP ATTRIBUTE [IF EXISTS] a \| RENAME ATTRIBUTE a TO b [CASCADE \| RESTRICT]` |
 //! | synonyms | `CREATE [OR REPLACE] [PUBLIC] SYNONYM name FOR name` |
-//! | tables | `ALTER TABLE [IF EXISTS] [ONLY] name action, …` with `SET SCHEMA n`, `OWNER TO n`, `ALTER [COLUMN] c SET STATISTICS n`, `ALTER COLUMN c type [[NOT] NULL]`, `ADD CONSTRAINT n DEFAULT expr FOR c`, `[WITH CHECK \| NOCHECK] ADD CONSTRAINT n FOREIGN KEY (c, …) REFERENCES t (c, …) [ON DELETE \| UPDATE action]`, `[NO]CHECK CONSTRAINT n \| ALL`, `ALTER CONSTRAINT n [NOT] DEFERRABLE [INITIALLY DEFERRED \| IMMEDIATE]`, `ENABLE \| DISABLE TRIGGER n \| ALL`, `ENABLE \| DISABLE ROW LEVEL SECURITY` |
+//! | tables | `ALTER TABLE [IF EXISTS] [ONLY] name action, …` with `SET SCHEMA n`, `OWNER TO n`, `ALTER [COLUMN] c SET STATISTICS n`, `ALTER COLUMN c type [[NOT] NULL]`, `ADD CONSTRAINT n DEFAULT expr FOR c`, `[WITH CHECK \| NOCHECK] ADD CONSTRAINT n FOREIGN KEY (c, …) REFERENCES t (c, …) [ON DELETE \| UPDATE action]`, `[NO]CHECK CONSTRAINT n \| ALL`, `ALTER CONSTRAINT n [NOT] DEFERRABLE [INITIALLY DEFERRED \| IMMEDIATE]`, `ENABLE \| DISABLE TRIGGER n \| ALL`, `ENABLE \| DISABLE ROW LEVEL SECURITY`, `CLUSTER ON index`, `SET WITHOUT CLUSTER` |
 //! | loads | MySQL `LOAD DATA [LOCAL] INFILE 'f' [REPLACE \| IGNORE] INTO TABLE t [CHARACTER SET c] [FIELDS …] [LINES …] [IGNORE n LINES] [(columns)] [SET c = expr, …]` \| MonetDB `COPY [n [OFFSET n] RECORDS] INTO t FROM 'f' [USING DELIMITERS 's', …] [NULL AS 's']` \| DuckDB `EXPORT \| IMPORT DATABASE 'dir' [(options)]` |
 //! | keys and credentials (T-SQL) | `CREATE MASTER KEY ENCRYPTION BY PASSWORD = 's'` \| `OPEN MASTER KEY DECRYPTION BY PASSWORD = 's'` \| `CLOSE MASTER KEY` \| `CREATE DATABASE SCOPED CREDENTIAL name WITH option = value, …` \| `ALTER LOGIN name ENABLE \| DISABLE \| WITH option = value, …` |
 //! | languages (PostgreSQL) | `CREATE [OR REPLACE] [TRUSTED] [PROCEDURAL] LANGUAGE name [HANDLER f] [INLINE f] [VALIDATOR f]` \| `ALTER [PROCEDURAL] LANGUAGE name OWNER TO \| RENAME TO n` |
+//! | bulk loads | BigQuery `LOAD DATA INTO \| OVERWRITE t [(column type, …)] FROM FILES (option = value, …)` \| Redshift `COPY t [(columns)] FROM 'source' parameter…` (closed parameter list) \| SAP HANA `IMPORT FROM CSV FILE 'f' INTO t [WITH option…]` (closed option list) |
+//! | MySQL | `PREPARE name FROM 'text' \| @v` \| `DEALLOCATE PREPARE name` \| `CREATE SCHEMA [IF NOT EXISTS] name [[DEFAULT] CHARACTER SET [=] c] [[DEFAULT] COLLATE [=] c]` |
 //! | PostgreSQL | `DO [LANGUAGE l] 'body' [LANGUAGE l]` \| `CREATE [OR REPLACE] FUNCTION \| PROCEDURE name ([mode] [name] type [DEFAULT \| = expr], …) [RETURNS [SETOF] type \| TABLE (columns)] attribute… AS 'body' attribute…` (attributes from a closed list; the body is text, read by the scanner as for the routines sqlparser parses) \| `ALTER EXTENSION name UPDATE [TO version]` \| `ALTER EXTENSION name ADD \| DROP kind name [(types)]` \| `CREATE PUBLICATION name [FOR ALL TABLES \| FOR TABLE name, …]` \| `ALTER INDEX name SET TABLESPACE n` |
 
 use sqlparser::tokenizer::Token;
@@ -493,7 +495,8 @@ impl Cursor<'_> {
             "DROP" => self.drop(),
             "DO" => self.do_block(),
             "LOAD" => self.load_data(),
-            "COPY" => self.monet_copy(),
+            "COPY" => self.copy(),
+            "PREPARE" => self.prepare(),
             "CREATE" => self.create(),
             "ALTER" => self.alter(),
             _ => None,
@@ -512,6 +515,10 @@ impl Cursor<'_> {
     /// `OPEN | CLOSE | DEALLOCATE [GLOBAL] cursor`.
     fn cursor_or_key(&mut self) -> Option<()> {
         if self.up(0) == "DEALLOCATE" || self.up(1) != "MASTER" {
+            // MySQL `DEALLOCATE PREPARE name`
+            if self.up(0) == "DEALLOCATE" && self.toks.len() > 2 {
+                self.kw("PREPARE");
+            }
             self.kw("GLOBAL");
             return need(self.var() || self.word());
         }
@@ -546,6 +553,9 @@ impl Cursor<'_> {
     /// DuckDB `EXPORT DATABASE 'dir' [(option value, …)]`, `IMPORT DATABASE
     /// 'dir'`.
     fn duck_database(&mut self) -> Option<()> {
+        if self.up(0) == "IMPORT" && self.up(1) == "FROM" {
+            return self.hana_import();
+        }
         need(self.kw("DATABASE"))?;
         need(self.string())?;
         if self.eat(&Token::LParen) {
@@ -800,6 +810,9 @@ impl Cursor<'_> {
     fn load_data(&mut self) -> Option<()> {
         self.i = 1;
         need(self.kw("DATA"))?;
+        if self.any(&["INTO", "OVERWRITE"]).is_some() {
+            return self.bigquery_load();
+        }
         self.any(&["LOCAL", "LOW_PRIORITY", "CONCURRENT"]);
         self.kw("LOCAL");
         need(self.kw("INFILE"))?;
@@ -852,6 +865,159 @@ impl Cursor<'_> {
             need(self.string())?;
         }
         need(self.i > from)
+    }
+
+    /// BigQuery `LOAD DATA INTO | OVERWRITE t [(column type, …)] FROM FILES
+    /// (option = value, …)` (after `INTO` / `OVERWRITE`); a value is a
+    /// literal, a word or `['uri', …]`.
+    fn bigquery_load(&mut self) -> Option<()> {
+        let t = self.name()?;
+        self.out.writes.push(t);
+        if self.eat(&Token::LParen) {
+            self.list(|c| c.named_type(&[]))?;
+            need(self.eat(&Token::RParen))?;
+        }
+        need(self.seq(&["FROM", "FILES"]))?;
+        need(self.eat(&Token::LParen))?;
+        self.list(|c| {
+            need(c.word())?;
+            need(c.eat(&Token::Eq))?;
+            if !c.eat(&Token::LBracket) {
+                return need(c.scalar());
+            }
+            c.list(|c| need(c.string()))?;
+            need(c.eat(&Token::RBracket))
+        })?;
+        need(self.eat(&Token::RParen))
+    }
+
+    /// `COPY`: MonetDB's bulk load or Redshift's.
+    fn copy(&mut self) -> Option<()> {
+        let monet = self.up(1) == "INTO" || matches!(self.tok(1), Some(Token::Number(..)));
+        if monet { self.monet_copy() } else { self.redshift_copy() }
+    }
+
+    /// Redshift `COPY t [(column, …)] FROM 'source' parameter…`, with the
+    /// parameters of its closed list: flags (`CSV`, `GZIP`, `EMPTYASNULL`,
+    /// …) and `name [AS] value` (`ACCESS_KEY_ID 'k'`, `IGNOREHEADER 1`, …).
+    fn redshift_copy(&mut self) -> Option<()> {
+        const FLAGS: &[&str] = &[
+            "CSV",
+            "GZIP",
+            "BZIP2",
+            "ZSTD",
+            "LZOP",
+            "EMPTYASNULL",
+            "BLANKSASNULL",
+            "TRUNCATECOLUMNS",
+            "ESCAPE",
+            "REMOVEQUOTES",
+            "TRIMBLANKS",
+            "FILLRECORD",
+            "MANIFEST",
+            "ROUNDEC",
+            "EXPLICIT_IDS",
+            "ACCEPTANYDATE",
+            "NOLOAD",
+            "IGNOREBLANKLINES",
+            "PARQUET",
+            "AVRO",
+            "ORC",
+            "SHAPEFILE",
+            "HEADER",
+            "FORMAT",
+            "AS",
+        ];
+        const VALUED: &[&str] = &[
+            "ACCESS_KEY_ID",
+            "SECRET_ACCESS_KEY",
+            "SESSION_TOKEN",
+            "IAM_ROLE",
+            "CREDENTIALS",
+            "REGION",
+            "IGNOREHEADER",
+            "DELIMITER",
+            "QUOTE",
+            "NULL",
+            "DATEFORMAT",
+            "TIMEFORMAT",
+            "MAXERROR",
+            "JSON",
+            "ENCODING",
+            "FIXEDWIDTH",
+            "ACCEPTINVCHARS",
+            "COMPUPDATE",
+            "STATUPDATE",
+        ];
+        self.i = 1;
+        let t = self.name()?;
+        self.out.writes.push(t);
+        if self.tok(self.i) == Some(&Token::LParen) {
+            self.name_list()?;
+        }
+        need(self.kw("FROM"))?;
+        need(self.string())?;
+        while !self.end() && self.tok(self.i) != Some(&Token::SemiColon) {
+            if self.any(FLAGS).is_some() {
+                continue;
+            }
+            self.any(VALUED)?;
+            self.kw("AS");
+            need(
+                self.string()
+                    || self.number()
+                    || self.any(&["ON", "OFF", "PRESET", "DEFAULT", "UTF8", "UTF16"]).is_some(),
+            )?;
+        }
+        Some(())
+    }
+
+    /// SAP HANA `IMPORT FROM CSV FILE 'file' INTO t [WITH option…]` (after
+    /// `IMPORT`), with the options of its closed list.
+    fn hana_import(&mut self) -> Option<()> {
+        const FLAGS: &[&[&str]] = &[
+            &["TABLE", "LOCK"],
+            &["NO", "TYPE", "CHECK"],
+            &["COLUMN", "LIST", "IN", "FIRST", "ROW"],
+            &["FAIL", "ON", "INVALID", "DATA"],
+        ];
+        const TEXT: &[&[&str]] = &[
+            &["RECORD", "DELIMITED", "BY"],
+            &["FIELD", "DELIMITED", "BY"],
+            &["OPTIONALLY", "ENCLOSED", "BY"],
+            &["DATE", "FORMAT"],
+            &["TIME", "FORMAT"],
+            &["TIMESTAMP", "FORMAT"],
+            &["ERROR", "LOG"],
+        ];
+        need(self.seq(&["FROM", "CSV", "FILE"]))?;
+        need(self.string())?;
+        need(self.kw("INTO"))?;
+        let t = self.name()?;
+        self.out.writes.push(t);
+        self.kw("WITH");
+        while !self.end() && self.tok(self.i) != Some(&Token::SemiColon) {
+            if self.one_of(FLAGS) {
+                continue;
+            }
+            if self.one_of(TEXT) {
+                need(self.string())?;
+            } else if self.seq(&["SKIP", "FIRST"]) {
+                need(self.number())?;
+                need(self.kw("ROW"))?;
+            } else {
+                self.any(&["THREADS", "BATCH"])?;
+                need(self.number())?;
+            }
+        }
+        Some(())
+    }
+
+    /// MySQL `PREPARE name FROM 'text' | @variable`.
+    fn prepare(&mut self) -> Option<()> {
+        need(self.word())?;
+        need(self.kw("FROM"))?;
+        need(self.string() || self.var())
     }
 
     /// MonetDB `COPY [n [OFFSET n] RECORDS] INTO t FROM 'file' [USING
@@ -1006,6 +1172,7 @@ impl Cursor<'_> {
             "USER" => self.create_user(),
             "LOGIN" => self.create_login(),
             "DATABASE" => self.create_database(),
+            "SCHEMA" => self.create_schema(),
             _ => None,
         }
     }
@@ -1106,6 +1273,21 @@ impl Cursor<'_> {
         }
         need(self.kw("WITH"))?;
         self.options()
+    }
+
+    /// MySQL `CREATE SCHEMA [IF NOT EXISTS] name [[DEFAULT] CHARACTER SET [=]
+    /// c] [[DEFAULT] COLLATE [=] c]` (after `SCHEMA`).
+    fn create_schema(&mut self) -> Option<()> {
+        self.seq(&["IF", "NOT", "EXISTS"]);
+        need(self.word())?;
+        while !self.end() && self.tok(self.i) != Some(&Token::SemiColon) {
+            self.kw("DEFAULT");
+            let ok = self.seq(&["CHARACTER", "SET"]) || self.kw("CHARSET") || self.kw("COLLATE");
+            need(ok)?;
+            self.eat(&Token::Eq);
+            need(self.word())?;
+        }
+        Some(())
     }
 
     /// `CREATE DATABASE name [COLLATE c] [WITH option ON | OFF, …]` (after
@@ -1415,7 +1597,15 @@ impl Cursor<'_> {
         if self.seq(&["SET", "SCHEMA"]) || self.seq(&["OWNER", "TO"]) {
             return need(self.word());
         }
-        if self.seq(&["ENABLE", "ROW", "LEVEL", "SECURITY"]) || self.seq(&["DISABLE", "ROW", "LEVEL", "SECURITY"]) {
+        if self.seq(&["CLUSTER", "ON"]) {
+            return need(self.word());
+        }
+        let flags: &[&[&str]] = &[
+            &["ENABLE", "ROW", "LEVEL", "SECURITY"],
+            &["DISABLE", "ROW", "LEVEL", "SECURITY"],
+            &["SET", "WITHOUT", "CLUSTER"],
+        ];
+        if self.one_of(flags) {
             return Some(());
         }
         if self.any(&["ENABLE", "DISABLE"]).is_some() {
@@ -1566,6 +1756,7 @@ mod tests {
                 "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED",
                 "SET DEADLOCK_PRIORITY LOW",
                 "SET @n += LEN(@s) + 1",
+                "SET @re = RegEx::Expr(N'x').CaseSen",
                 "OPEN c",
                 "CLOSE GLOBAL c",
                 "DEALLOCATE @cur",
@@ -1583,7 +1774,7 @@ mod tests {
                 "SET STATISTICS BANANAS ON",
                 "SET TRANSACTION ISOLATION LEVEL CHAOS",
                 "SET @n = ",
-                "SET @re = RegEx::Expr(N'x').CaseSen",
+                "SET @re = RegEx::Expr(N'x'",
                 "OPEN",
                 "FETCH NEXT FROM c INTO a, b",
                 "FETCH NEXT FROM c INTO @a @b",
@@ -1795,6 +1986,59 @@ mod tests {
             Dialect::Generic,
             &["COPY 134 OFFSET 2 RECORDS INTO s.t FROM '/x.csv' USING DELIMITERS ',','\\n','\"' NULL AS ''"],
             &["COPY 134 OFFSET RECORDS INTO t FROM 'x'", "COPY 1 RECORDS INTO t"],
+        );
+        check(
+            Dialect::BigQuery,
+            &[
+                "LOAD DATA INTO ds.t (a string, b int64) FROM FILES (FORMAT = 'CSV', URIS = ['gs://b/a.csv*', 'gs://b/c.csv'], skip_leading_rows = 1)",
+                "LOAD DATA OVERWRITE ds.t FROM FILES (format = 'PARQUET', uris = ['gs://b/x'])",
+            ],
+            &[
+                "LOAD DATA INTO ds.t FROM FILES",
+                "LOAD DATA INTO ds.t FROM FILES (FORMAT 'CSV')",
+                "LOAD DATA INTO ds.t FROM FILES (URIS = ['a', )",
+                "LOAD DATA INTO FROM FILES (FORMAT = 'CSV')",
+            ],
+        );
+        check(
+            Dialect::Redshift,
+            &[
+                "COPY s.t FROM 's3://b/a.csv' ACCESS_KEY_ID 'k' SECRET_ACCESS_KEY 's' CSV GZIP EMPTYASNULL IGNOREHEADER 1 REGION AS 'us-east-1'",
+                "COPY t (a, b) FROM 's3://b/x' IAM_ROLE 'arn:aws:iam::1:role/r' FORMAT AS PARQUET",
+            ],
+            &[
+                "COPY t FROM 's3://b/x' ACCESS_KEY_ID",
+                "COPY t FROM 's3://b/x' SHINY 'k'",
+                "COPY t 's3://b/x' CSV",
+                "COPY t FROM s3 CSV",
+            ],
+        );
+        check(
+            Dialect::Generic,
+            &[
+                "IMPORT FROM CSV FILE '/p/a.csv' INTO S.T WITH THREADS 8 BATCH 2000 TABLE LOCK NO TYPE CHECK SKIP FIRST 1 ROW FIELD DELIMITED BY ',' OPTIONALLY ENCLOSED BY '\"' ERROR LOG '/p/e.log'",
+            ],
+            &[
+                "IMPORT FROM CSV FILE '/p/a.csv' INTO T WITH THREADS",
+                "IMPORT FROM CSV FILE '/p/a.csv' INTO T WITH MAGIC 3",
+                "IMPORT FROM CSV '/p/a.csv' INTO T",
+            ],
+        );
+        check(
+            Dialect::MySql,
+            &[
+                "PREPARE stmt FROM @query",
+                "PREPARE s FROM 'select 1'",
+                "DEALLOCATE PREPARE stmt",
+                "CREATE SCHEMA IF NOT EXISTS mimic COLLATE utf8mb4_0900_ai_ci",
+                "CREATE SCHEMA x DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE utf8mb4_bin",
+            ],
+            &["PREPARE stmt FROM", "PREPARE FROM @q", "CREATE SCHEMA x COLLATE", "CREATE SCHEMA x SHARDED"],
+        );
+        check(
+            Dialect::Postgres,
+            &["ALTER TABLE s.t CLUSTER ON t_pkey", "ALTER TABLE t SET WITHOUT CLUSTER"],
+            &["ALTER TABLE t CLUSTER ON", "ALTER TABLE t CLUSTER t_pkey"],
         );
         check(
             Dialect::DuckDb,

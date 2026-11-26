@@ -359,10 +359,71 @@ impl Tsql<'_, '_, '_, '_> {
                     return true;
                 }
             }
+            "ALTER" => return self.added_columns(i, e),
             _ => return false,
         }
         self.r.own += 1;
         true
+    }
+
+    /// `ALTER TABLE t ADD a INT, b INT, …` at tokens `[i, e)`, which
+    /// sqlparser rejects as a whole: each column is parsed as its own
+    /// `ALTER TABLE t ADD` (the other columns blanked). `false` when the
+    /// statement is not such a list or one of its columns does not parse.
+    fn added_columns(&mut self, i: usize, e: usize) -> bool {
+        let range = self.range(i, e);
+        let Some(items) = self.add_items(i, e) else { return false };
+        if items.len() < 2 || self.r.sql_parses(range, &[]) {
+            return false;
+        }
+        let others = |k: usize| -> Vec<(usize, usize)> {
+            let mut blanks = Vec::new();
+            if k > 0 {
+                blanks.push((items[0].0, items[k].0));
+            }
+            if k + 1 < items.len() {
+                blanks.push((items[k].1, range.1));
+            }
+            blanks
+        };
+        if !(0..items.len()).all(|k| self.r.sql_parses(range, &others(k))) {
+            return false;
+        }
+        let doc = if self.mode == Mode::Define { self.doc.take() } else { None };
+        for k in 0..items.len() {
+            self.r.sql_edit(range, self.enclosing, self.mode, doc.as_ref(), &others(k));
+        }
+        self.r.own += 1;
+        true
+    }
+
+    /// The byte ranges of the items of `ALTER TABLE name ADD item, item, …`
+    /// at tokens `[i, e)`.
+    fn add_items(&self, i: usize, e: usize) -> Option<Vec<(usize, usize)>> {
+        if self.up(i + 1) != "TABLE" {
+            return None;
+        }
+        let (_, after) = scan::read_name(self.toks, i + 2, Dialect::MsSql)?;
+        if self.up(after) != "ADD" || after + 1 >= e {
+            return None;
+        }
+        let mut items = Vec::new();
+        let (mut depth, mut start) = (0i32, after + 1);
+        for k in after + 1..e {
+            match self.toks[k].token {
+                Token::LParen => depth += 1,
+                Token::RParen => depth -= 1,
+                Token::Comma if depth == 0 && k > start => {
+                    items.push(self.range(start, k));
+                    start = k + 1;
+                }
+                _ => {}
+            }
+        }
+        if start < e && self.toks[e - 1].token != Token::SemiColon {
+            items.push(self.range(start, e));
+        }
+        Some(items)
     }
 
     /// `IF cond stmt [ELSE stmt]`, `WHILE cond stmt`.
