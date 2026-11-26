@@ -1,0 +1,6 @@
+{
+  "Main.cs:Counter.Inc": [],
+  "Main.cs:Counter.IncTwice": [
+    "Main.cs:Counter.Inc"
+  ]
+}

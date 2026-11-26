@@ -1,0 +1,6 @@
+{
+  "Main.cs:A.Root": [],
+  "Main.cs:C.Leaf": [
+    "Main.cs:A.Root"
+  ]
+}

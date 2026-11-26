@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-25 07:44 UTC",
+ "generated": "2026-11-25 13:23 UTC",
  "languages": {
   "python": {
    "label": "python",
@@ -3892,6 +3892,441 @@
      "min_n": null
     }
    }
+  },
+  "csharp": {
+   "label": "csharp",
+   "status": "stable",
+   "failing": [],
+   "metrics": {
+    "file_acc@5": {
+     "value": 0.48717948717948717,
+     "ci": [
+      0.33865175329862,
+      0.6380063711554202
+     ],
+     "n": 39,
+     "bm25": 0.48717948717948717,
+     "cbm": 0.5128205128205128,
+     "paired": {
+      "diff": 0.0,
+      "ci": [
+       -0.12884615384615325,
+       0.1282051282051282
+      ],
+      "n": 39
+     },
+     "label": "File Acc@5",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.8,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "func_acc@10": {
+     "value": 0.2631578947368421,
+     "ci": [
+      0.14971621254798143,
+      0.42008846187466364
+     ],
+     "n": 38,
+     "bm25": 0.2894736842105263,
+     "cbm": 0.15789473684210525,
+     "paired": {
+      "diff": -0.02631578947368421,
+      "ci": [
+       -0.13157894736842105,
+       0.07894736842105263
+      ],
+      "n": 38
+     },
+     "label": "Function Acc@10",
+     "family": "Localization",
+     "floor": "bm25",
+     "target": 0.65,
+     "better": "higher",
+     "gated": true,
+     "status": "\u26a0",
+     "target_met": false,
+     "min_n": 30
+    },
+    "callers_precision": {
+     "value": 0.9687751574206918,
+     "ci": [
+      0.9529887949844571,
+      0.9825076219512194
+     ],
+     "n": 335,
+     "cbm": 0.862253933637805,
+     "label": "Callers precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_precision": {
+     "value": 0.9553334127646055,
+     "ci": [
+      0.9429270225187655,
+      0.9664474562135112
+     ],
+     "n": 549,
+     "cbm": 0.7244526608657044,
+     "label": "Callees precision",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall": {
+     "value": 0.95202170963365,
+     "ci": [
+      0.929882406151063,
+      0.9716425825418362
+     ],
+     "n": 335,
+     "cbm": 0.5915153288814394,
+     "label": "Callers recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_recall": {
+     "value": 0.9658057283740343,
+     "ci": [
+      0.9541110460577675,
+      0.9767926565945692
+     ],
+     "n": 549,
+     "cbm": 0.3846501707157445,
+     "label": "Callees recall",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_precision@conf": {
+     "value": 0.9707539608670471,
+     "ci": [
+      0.9554101837201123,
+      0.9840536384648797
+     ],
+     "n": 335,
+     "cbm": 0.862253933637805,
+     "label": "Callers precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision@conf": {
+     "value": 0.954175701973867,
+     "ci": [
+      0.941711843202669,
+      0.9658576591604114
+     ],
+     "n": 549,
+     "cbm": 0.7244526608657044,
+     "label": "Callees precision, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callers_recall@conf": {
+     "value": 0.9147082767978291,
+     "ci": [
+      0.8856535504296699,
+      0.9410764360018091
+     ],
+     "n": 335,
+     "cbm": 0.5915153288814394,
+     "label": "Callers recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_recall@conf": {
+     "value": 0.9563397440446622,
+     "ci": [
+      0.9428431268185365,
+      0.9689680174106405
+     ],
+     "n": 549,
+     "cbm": 0.3846501707157445,
+     "label": "Callees recall, confidence \u2265 0.6",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_precision@strict": {
+     "value": 0.9714584859584859,
+     "ci": [
+      0.9558742063492064,
+      0.9851610347985349
+     ],
+     "n": 335,
+     "cbm": 0.8542614345704234,
+     "label": "Callers precision, strict (no SCIP equivalence classes)",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callers_recall@strict": {
+     "value": 0.9308276797829036,
+     "ci": [
+      0.9054040027137042,
+      0.9539620081411125
+     ],
+     "n": 335,
+     "cbm": 0.543306373657559,
+     "label": "Callers recall, strict (no SCIP equivalence classes)",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "callees_precision@strict": {
+     "value": 0.8729284324238453,
+     "ci": [
+      0.8479587602764208,
+      0.8960626166646809
+     ],
+     "n": 549,
+     "cbm": 0.6771355456138065,
+     "label": "Callees precision, strict (no SCIP equivalence classes)",
+     "family": "Structure",
+     "floor": 0.9,
+     "target": 0.97,
+     "better": "higher",
+     "gated": false,
+     "status": "\u274c",
+     "target_met": false,
+     "min_n": 300
+    },
+    "callees_recall@strict": {
+     "value": 0.8884789871128669,
+     "ci": [
+      0.8636122544729102,
+      0.9118401225368439
+     ],
+     "n": 549,
+     "cbm": 0.3620679866581506,
+     "label": "Callees recall, strict (no SCIP equivalence classes)",
+     "family": "Structure",
+     "floor": 0.75,
+     "target": 0.9,
+     "better": "higher",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": 300
+    },
+    "definition_found": {
+     "value": 1.0,
+     "ci": [
+      0.994463491952148,
+      1.0
+     ],
+     "n": 690,
+     "cbm": 0.5927536231884057,
+     "label": "Definition found",
+     "family": "Structure",
+     "floor": 0.95,
+     "target": 1.0,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": 300
+    },
+    "micro_callee_f1": {
+     "value": 0.9933774834437086,
+     "ci": [
+      0.9774436090225563,
+      1.0
+     ],
+     "n": null,
+     "cbm": 0.9103448275862069,
+     "detail": {
+      "precision": 1.0,
+      "recall": 0.9868421052631579,
+      "edges": 76
+     },
+     "n_callables": 164,
+     "label": "Micro-benchmark callee F1",
+     "family": "Micro",
+     "floor": 0.9,
+     "target": 0.98,
+     "better": "higher",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": null
+    },
+    "parse_error_rate": {
+     "value": 0.00021786492374727668,
+     "ci": [
+      3.845954398159124e-05,
+      0.0012331252229410604
+     ],
+     "n": 4590,
+     "repos": 10,
+     "partial": 1,
+     "label": "Files with parse errors",
+     "family": "Health",
+     "floor": 0.02,
+     "target": 0.005,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": null
+    },
+    "parse_error_rate_raw": {
+     "value": 0.00021786492374727668,
+     "ci": [
+      3.845954398159124e-05,
+      0.0012331252229410604
+     ],
+     "n": 4590,
+     "repos": 10,
+     "partial": 1,
+     "label": "Files with parse errors, raw (vendored and misdetected files included)",
+     "family": "Health",
+     "floor": 0.02,
+     "target": 0.005,
+     "better": "lower",
+     "gated": false,
+     "status": "\u2705",
+     "target_met": true,
+     "min_n": null
+    },
+    "latency_p95_ms": {
+     "value": 31.594500003848225,
+     "ci": [
+      23.910542018711567,
+      39.827333006542176
+     ],
+     "n": 1558,
+     "cbm": 485.9,
+     "label": "Query latency p95 (ms)",
+     "family": "Health",
+     "floor": 100,
+     "target": 20,
+     "better": "lower",
+     "gated": true,
+     "status": "\u2705",
+     "target_met": false,
+     "min_n": null
+    },
+    "search_tokens_to_first_hit": {
+     "value": 637.4444444444445,
+     "ci": [
+      420.38695652173914,
+      1075.9166666666667
+     ],
+     "n": 39,
+     "cbm": 1182.857142857143,
+     "label": "Tokens to first gold hit (search_symbols, top 10)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    },
+    "search_tokens_per_hit": {
+     "value": 352.1818181818182,
+     "ci": [
+      230.2591272378517,
+      646.2663478260869
+     ],
+     "n": 39,
+     "cbm": 670.2647058823529,
+     "label": "Tokens per gold hit (search_symbols, top 10)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    },
+    "trace_tokens_per_true_edge": {
+     "value": 70.43032015065913,
+     "ci": [
+      65.34408623591932,
+      75.47602703367413
+     ],
+     "n": 409,
+     "cbm": 77.79038224414303,
+     "label": "Tokens per true edge (trace)",
+     "family": "Efficiency",
+     "floor": null,
+     "target": {
+      "cbm_ratio": 0.5
+     },
+     "better": "lower",
+     "gated": false,
+     "status": "\u2014",
+     "target_met": false,
+     "min_n": null
+    }
+   }
   }
  },
  "config": {
@@ -4211,7 +4646,7 @@
    }
   }
  },
- "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830); rueca 0.1.0-alpha.2 (binary sha256 c5a6a874ed6b, rfc0005 contract, feat/lang-shell@1b25092); rueca 0.1.0-alpha.2 (binary sha256 e1918daa111e, rfc0005 contract, fix/rust-tokio-gaps@ebc4224); rueca 0.1.0-alpha.2 (binary sha256 eaaabeedec9c, rfc0005 contract)",
+ "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 0f16f3062a3f, rfc0005 contract, feat/lang-csharp@wip); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830); rueca 0.1.0-alpha.2 (binary sha256 c5a6a874ed6b, rfc0005 contract, feat/lang-shell@1b25092); rueca 0.1.0-alpha.2 (binary sha256 c624a58896e5, rfc0005 contract, feat/lang-csharp@1532771); rueca 0.1.0-alpha.2 (binary sha256 e1918daa111e, rfc0005 contract, fix/rust-tokio-gaps@ebc4224); rueca 0.1.0-alpha.2 (binary sha256 eaaabeedec9c, rfc0005 contract)",
  "org": {
   "status": "ok",
   "split": "gated",

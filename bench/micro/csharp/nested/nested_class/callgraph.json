@@ -1,0 +1,6 @@
+{
+  "Main.cs:Outer.Inner.Act": [],
+  "Main.cs:Outer.Use": [
+    "Main.cs:Outer.Inner.Act"
+  ]
+}

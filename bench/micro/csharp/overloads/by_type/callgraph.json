@@ -1,0 +1,8 @@
+{
+  "Main.cs:Writer.Both": [
+    "Main.cs:Writer.Write@5",
+    "Main.cs:Writer.Write@9"
+  ],
+  "Main.cs:Writer.Write@5": [],
+  "Main.cs:Writer.Write@9": []
+}

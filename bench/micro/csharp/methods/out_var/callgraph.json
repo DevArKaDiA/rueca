@@ -1,0 +1,8 @@
+{
+  "Main.cs:Cache.TryGet": [],
+  "Main.cs:Entry.Touch": [],
+  "Main.cs:Reader.Read": [
+    "Main.cs:Cache.TryGet",
+    "Main.cs:Entry.Touch"
+  ]
+}

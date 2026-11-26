@@ -1,5 +1,80 @@
 # Decisions log
 
+## 2026-11-25 — C#: namespaces bound by name, scip-dotnet gold in Docker, `stable`
+
+The C# pack (`rueca-lang-csharp`, RFC 0003 §10.4d) follows the Java model
+— classes with members, overload suffixes, implicit `this`, `OVERRIDES` —
+with three decisions specific to C#:
+
+- **Namespaces are module names, not paths.** A namespace spans files and
+  directories freely, so `resolve_import` cannot map `using A.B;` to a
+  directory the way Java's on-demand imports do. A new opt-in hook,
+  `LanguagePack::namespace_imports`, tells the resolver that an import
+  names a module: it binds the package whose module name is `A.B`
+  (`IMPORTS` to the directory holding most of its files). Weighed: a
+  pack-side guess from `RootNamespace` + folder names (wrong whenever a
+  project departs from the convention) and emitting synthetic imports for
+  the enclosing namespaces (an `IMPORTS` edge per parent namespace, noise);
+  the hook is additive and no other pack sets it. Namespaces stay module
+  names, not `Module` definitions, as Java packages.
+- **One resolver module, `csharp`, entered once per reference.** Enclosing
+  namespaces, `global using` per project (nearest `*.csproj`), `using
+  static`, aliases, namespace-qualified receivers, partial types (their
+  parts share members and bases), extension methods, `$ret:` receivers
+  typed from declared return types, and an overload choice by C#
+  conversion rules (exact type, then type parameter, then conversion;
+  `object` and `params` expansions last) sit behind `is_csharp` checks at
+  the entry points; the shared rules (`overload_by_types`, `may_accept`,
+  the Java ladder) are untouched, so no other language's numbers move.
+- **`#if` that splits a declaration.** tree-sitter-c-sharp walks every
+  branch, which is right where a directive stands as a declaration or a
+  statement but leaves `ERROR` nodes where it splits one (`void F() #if X
+  => G() #endif ;`, serilog's `ILogger`: 134 errors, its default interface
+  methods unseen). Such a file is parsed again with only the first branch
+  of each conditional, blanked in place (offsets unchanged), and the copy
+  is kept when it has fewer errors: 0 files with parse errors over the 10
+  corpus repositories.
+
+**Gold.** scip-dotnet 0.2.16 (Roslyn) runs in its official image pinned
+by digest, on a scratch copy with a generated solution of the listed
+projects, multi-targeting projects made single-target (`net8.0`;
+MSBuildWorkspace finds no `Compile` target in an outer multi-target
+build), NuGet audit off, packages restored from nuget.org into the
+bench cache. Its index has three shapes the derivation handles behind
+grammar flags only C# sets: `new T(…)` is a reference to the type (mapped
+to `T`'s constructors, one class when overloaded), local functions are
+`local` symbols (bound per document), and a call of a constructed generic
+method carries the first overload's symbol (`Write().` for `Write<T>(…)`,
+sent to the generic overloads that take the call's argument count; before
+that repair serilog's callees precision read 70.7). Blind spots kept and
+disclosed: constructor initializers, target-typed `new()` and explicit
+generic calls have no occurrence, so those true edges count against an
+arm. Repositories: serilog 4.4.0 (library) and eShopOnWeb (application)
+gated, YamlDotNet 18.1.0 calibration. S1: SWE-bench Multilingual and
+Multi-SWE-bench have no C#; SWE-rebench V2's `A`-screened rows give 39
+gated instances (kiota 25, moq 7, six small repositories) and 11
+calibration ones.
+
+**Organization scenario.** Its pin rule makes every gated S1 repository a
+member; adding the eleven C# repositories would change the organization
+whose numbers are published without re-measuring them (every arm, hours).
+They are listed in `[org] pending_languages` instead and join at the next
+full run of the scenario (owner's call when to run it).
+
+**Tuning** used only the micro-benchmark and YamlDotNet (calibration):
+`this` / `base` as arguments (unnamed keyword nodes), comments and default
+values kept out of signatures so a long parameter list keeps its arity,
+constrained type parameters as receivers, overload scoring.
+
+**Result** (binary `feat/lang-csharp` @ 1532771): `stable` — callers /
+callees precision 96.9 / 95.5, recall 95.2 / 96.6, definition found
+100.0, micro F1 99.3, 0.0% files with parse errors, p95 32 ms;
+localization not significantly below BM25 (File Acc@5 48.7 vs 48.7,
+Function Acc@10 26.3 vs 28.9). Not done: contract hints (ASP.NET routes,
+`HttpClient`), property chains across types, generic arguments as receiver
+types; `Directory.Packages.props` adds no package identity (central
+versions only).
+
 ## 2026-11-25 — Shell pack: bash's lookup by name, scripts as files, a code-backed gold; `preview`
 
 Shell landed as `rueca-lang-shell` (RFC 0003 §10.4c) with a `shell`

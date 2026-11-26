@@ -1,0 +1,7 @@
+{
+  "Main.cs:Cat.Speak": [],
+  "Main.cs:Dog.Speak": [],
+  "Main.cs:Owner.Call": [
+    "Main.cs:Dog.Speak"
+  ]
+}

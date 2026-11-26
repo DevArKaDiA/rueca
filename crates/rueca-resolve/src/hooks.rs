@@ -173,6 +173,22 @@ fn has_default_value(p: &str) -> bool {
     })
 }
 
+/// The parameter list written after `name(` in a signature (C#; see
+/// [`signature_params`]).
+pub(crate) fn signature_param_list<'s>(signature: &'s str, name: &str) -> Option<&'s str> {
+    signature_params(signature, name)
+}
+
+/// A parameter list split on its top-level commas (see [`split_params`]).
+pub(crate) fn split_param_list(params: &str) -> Vec<&str> {
+    split_params(params)
+}
+
+/// Whether a parameter has a default value (see [`has_default_value`]).
+pub(crate) fn has_default(p: &str) -> bool {
+    has_default_value(p)
+}
+
 /// The type name written in a `$type:` receiver or a base list, without
 /// pointers, references, qualifiers, array and generic arguments:
 /// `*http.Server` → `http.Server`, `const std::vector<int>&` → `std::vector`.
@@ -766,6 +782,9 @@ impl<'a> Resolver<'a> {
         let node = &self.nodes[n as usize];
         let from_signature = match node.language.map(Language::family) {
             Some(LanguageFamily::C) => node.signature.as_deref().and_then(|s| signature_arity(s, &node.name)),
+            Some(LanguageFamily::CSharp) => {
+                node.signature.as_deref().and_then(|s| crate::csharp::signature_arity(s, &node.name))
+            }
             _ => None,
         };
         from_signature.or_else(|| overload_suffix(&node.qualified_name).map(|(_, p)| params_arity(p)))
@@ -845,14 +864,8 @@ impl<'a> Resolver<'a> {
             Some(a) => set.iter().copied().filter(|&n| fits(n, a)).collect(),
             None => Vec::new(),
         };
-        if chosen.len() > 1
-            && let Some(args) = args
-        {
-            let typed: Vec<(NodeId, Vec<String>)> =
-                chosen.iter().filter_map(|&n| Some((n, self.param_types(n)?))).collect();
-            if typed.len() == chosen.len() {
-                chosen = overload_by_types(&typed, args);
-            }
+        if chosen.len() > 1 {
+            chosen = self.narrow_overloads(from, chosen, arity, args);
         }
         let fan_out = |cands: &[NodeId]| {
             without_caller(cands, caller).into_iter().map(|n| (n, strategy, confidence * OVERLOAD_FANOUT)).collect()
@@ -861,6 +874,33 @@ impl<'a> Resolver<'a> {
             1 => vec![(chosen[0], strategy, confidence)],
             0 => fan_out(set),
             _ => fan_out(&chosen),
+        }
+    }
+
+    /// Overloads that fit a call's arity, narrowed by the static argument
+    /// types ([`overload_by_types`]; C#: [`crate::csharp::choose_overloads`],
+    /// which ranks them even without argument types). Unchanged when a
+    /// candidate's parameter types are unknown.
+    fn narrow_overloads(
+        &self,
+        from: FileId,
+        chosen: Vec<NodeId>,
+        arity: Option<u32>,
+        args: Option<&[&str]>,
+    ) -> Vec<NodeId> {
+        let csharp = self.families[from as usize] == Some(LanguageFamily::CSharp);
+        if !csharp && args.is_none() {
+            return chosen;
+        }
+        let typed: Vec<(NodeId, Vec<String>)> =
+            chosen.iter().filter_map(|&n| Some((n, self.param_types(n)?))).collect();
+        if typed.len() != chosen.len() {
+            return chosen;
+        }
+        match args {
+            _ if csharp => crate::csharp::choose_overloads(&typed, arity, args),
+            Some(args) => overload_by_types(&typed, args),
+            None => chosen,
         }
     }
 
@@ -1079,7 +1119,7 @@ impl<'a> Resolver<'a> {
 
     /// Declared type of a member (field) node: its first `Type` reference
     /// (in source order) resolved in the member's file.
-    fn member_type(&self, member: NodeId) -> TypeLookup {
+    pub(crate) fn member_type(&self, member: NodeId) -> TypeLookup {
         let Some(g) = self.nodes[member as usize].file else { return TypeLookup::Unknown };
         let Some(j) = self.def_node[g as usize].iter().position(|&n| n == member) else {
             return TypeLookup::Unknown;
@@ -1099,8 +1139,9 @@ impl<'a> Resolver<'a> {
         else {
             return TypeLookup::Unknown;
         };
+        let sep = if self.families[g as usize] == Some(LanguageFamily::CSharp) { "." } else { "::" };
         let text = match r.receiver.as_deref() {
-            Some(q) => format!("{q}::{}", r.name),
+            Some(q) => format!("{q}{sep}{}", r.name),
             None => r.name.clone(),
         };
         self.resolve_type_text(g, self.parents[g as usize][j as usize], &text)

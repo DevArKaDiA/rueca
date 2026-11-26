@@ -1,0 +1,7 @@
+{
+  "Main.cs:IClock.Now": [],
+  "Main.cs:SystemClock.Now": [],
+  "Main.cs:Timer.Read": [
+    "Main.cs:SystemClock.Now"
+  ]
+}

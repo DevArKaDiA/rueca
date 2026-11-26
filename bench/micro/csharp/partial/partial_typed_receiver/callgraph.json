@@ -1,0 +1,8 @@
+{
+  "Cart.Totals.cs:Cart.Total": [],
+  "Cart.cs:Cart.Add": [],
+  "Main.cs:Shop.Buy": [
+    "Cart.cs:Cart.Add",
+    "Cart.Totals.cs:Cart.Total"
+  ]
+}

@@ -22,16 +22,24 @@
 //!   packages under the build file's directory (`java:<package>`); C / C++
 //!   repositories publish the directories and headers directly under their
 //!   `include/` (or `single_include/`) directories (`c:<dir>`); every Cargo
-//!   package with a library publishes its crate (`rust:<crate name>`).
+//!   package with a library publishes its crate (`rust:<crate name>`);
+//!   every MSBuild C# project (`*.csproj`, not a test project) publishes
+//!   its NuGet identity (`PackageId`, else `AssemblyName`, else the
+//!   project file's name) with the namespaces of the non-test C# files
+//!   under its directory (`cs:<namespace>`).
 //! - **Imports** the repository's own pack cannot resolve inside it (the
 //!   ones a single-repository index reports as external), as keys:
 //!   `npm:<package name>`, `py:<module>`, `go:<import path>`,
-//!   `java:<package>`, `php:<name>`, `c:<include path>`, `rust:<crate>`.
+//!   `java:<package>`, `php:<name>`, `c:<include path>`, `rust:<crate>`,
+//!   `cs:<namespace>` (C# usings of namespaces no file of the repository
+//!   declares).
 //! - **Requires**: dependencies declared by manifests (`package.json`
 //!   dependencies, `composer.json` require, `go.mod` require, PEP 621
-//!   dependencies, Maven dependencies, Cargo dependency tables), for
+//!   dependencies, Maven dependencies, Cargo dependency tables, `*.csproj`
+//!   `PackageReference`s), for
 //!   languages whose code can use a package without an import statement
-//!   (PHP fully qualified names, Rust paths through the extern prelude).
+//!   (PHP fully qualified names, Rust paths through the extern prelude, C#
+//!   fully qualified names and `global using`s of another project).
 //! - **Contracts**: the distinct keys of the segment's contract table
 //!   (`RepoDeps::contracts`), which make a consumer depend on the
 //!   repositories providing what it calls (RFC 0006 phase 4).
@@ -424,6 +432,7 @@ impl Manifests {
             "pom.xml" => self.pom(text, &dir, files),
             "settings.gradle" | "settings.gradle.kts" => self.gradle_settings(text, &dir, files),
             "Cargo.toml" => self.cargo_toml(text, dir),
+            n if n.ends_with(".csproj") => self.csproj(n, text, &dir, files),
             _ => {}
         }
     }
@@ -510,6 +519,26 @@ impl Manifests {
         if let (Some(name), Some(lib)) = (m.package.clone(), m.lib_crate_name()) {
             self.packages.push(Package { eco: "cargo".into(), name, dir, keys: vec![format!("rust:{lib}")] });
         }
+    }
+
+    /// An MSBuild C# project: its `PackageReference`s are requirements; a
+    /// project that is not a test project publishes its NuGet identity
+    /// (`PackageId`, `AssemblyName`, else the file name) with the
+    /// namespaces of its non-test C# files.
+    fn csproj(&mut self, file: &str, text: &str, dir: &str, files: &[FileModule]) {
+        let refs = msbuild_includes(text, "PackageReference");
+        let test_project = xml_tag(text, "IsTestProject").is_some_and(|v| v.eq_ignore_ascii_case("true"))
+            || refs.iter().any(|r| r.eq_ignore_ascii_case("Microsoft.NET.Test.Sdk"));
+        self.requires.extend(refs.into_iter().map(|r| format!("nuget:{}", r.to_lowercase())));
+        if test_project {
+            return;
+        }
+        let stem = file.strip_suffix(".csproj").unwrap_or(file);
+        let name = xml_tag(text, "PackageId").or_else(|| xml_tag(text, "AssemblyName")).unwrap_or(stem);
+        if name.is_empty() || name.contains("$(") {
+            return;
+        }
+        self.packages.push(csharp_package(name.to_string(), dir, files));
     }
 
     fn gradle_settings(&mut self, text: &str, dir: &str, files: &[FileModule]) {
@@ -653,6 +682,43 @@ fn java_package(name: String, dir: &str, files: &[FileModule]) -> Package {
     Package { eco: "maven".into(), name, dir: dir.to_string(), keys: keys.into_iter().collect() }
 }
 
+/// The `Include` values of an MSBuild item (`<PackageReference
+/// Include="Serilog" Version="3.1.1" />`).
+fn msbuild_includes(xml: &str, item: &str) -> Vec<String> {
+    let open = format!("<{item}");
+    let mut out = Vec::new();
+    for chunk in xml.split(&open).skip(1) {
+        let head = chunk.split('>').next().unwrap_or("");
+        if !head.starts_with(char::is_whitespace) {
+            continue;
+        }
+        if let Some(v) = head.split("Include=\"").nth(1).and_then(|r| r.split('"').next()) {
+            let v = v.trim();
+            if !v.is_empty() && !out.iter().any(|o: &String| o == v) {
+                out.push(v.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// A C# project publishing the namespaces of the non-test C# files under
+/// `dir`.
+fn csharp_package(name: String, dir: &str, files: &[FileModule]) -> Package {
+    let keys: BTreeSet<String> = files
+        .iter()
+        .filter(|f| {
+            f.1 == Some(Language::CSharp)
+                && under(dir, &f.0)
+                && !rueca_segment::is_test_path(&f.0)
+                && !rueca_lang_csharp::is_test_path(&f.0)
+                && !f.2.is_empty()
+        })
+        .map(|f| format!("cs:{}", f.2))
+        .collect();
+    Package { eco: "nuget".into(), name, dir: dir.to_string(), keys: keys.into_iter().collect() }
+}
+
 /// The import key of an import a pack could not resolve inside its
 /// repository, or `None` for relative imports and languages without
 /// cross-repository packages.
@@ -677,6 +743,8 @@ pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String>
         LanguageFamily::Python => (imp.relative_level == 0).then(|| format!("py:{m}")),
         LanguageFamily::Go => Some(format!("go:{m}")),
         LanguageFamily::Java => Some(format!("java:{m}")),
+        // The file's namespace record is not a using.
+        LanguageFamily::CSharp => (!imp.names.is_empty() || imp.module_alias.is_some()).then(|| format!("cs:{m}")),
         LanguageFamily::Php => Some(format!("php:{}", m.trim_start_matches('\\'))),
         LanguageFamily::C => Some(format!("c:{}", m.trim_start_matches("./"))),
         // Shell has no package identity: a sourced file is a path.
@@ -723,6 +791,10 @@ impl OrgLinker for PackageLinker {
             .map(|(i, f)| (f.path.clone(), f.language, seg.module_of(i as FileId).unwrap_or_default().to_string()))
             .collect();
         let (packages, requires) = manifests(&loaded.project, &modules);
+        // C# usings name namespaces: those a file of the repository declares
+        // resolve inside it.
+        let own_namespaces: HashSet<String> =
+            modules.iter().filter(|f| f.1 == Some(Language::CSharp)).map(|f| format!("cs:{}", f.2)).collect();
         let mut imports = BTreeSet::new();
         let resolved = catch_unwind(AssertUnwindSafe(|| {
             for f in &loaded.files {
@@ -742,6 +814,7 @@ impl OrgLinker for PackageLinker {
         if resolved.is_err() {
             return Err(other("a language pack panicked while resolving imports"));
         }
+        imports.retain(|k| !own_namespaces.contains(k));
         let contracts = ContractKey::of_rows(seg.contracts());
         Ok(RepoDeps { packages, imports: imports.into_iter().collect(), requires, contracts })
     }
@@ -1074,6 +1147,9 @@ impl LanguagePack for LinkPack {
     }
     fn facts_depend_on_path(&self) -> bool {
         self.inner.facts_depend_on_path()
+    }
+    fn namespace_imports(&self) -> bool {
+        self.inner.namespace_imports()
     }
 }
 

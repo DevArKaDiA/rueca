@@ -79,6 +79,8 @@ pub enum Language {
     /// dotfiles, extension-less scripts with a shell `#!` line) and zsh /
     /// ksh read with the bash grammar (best effort).
     Shell,
+    /// C# (`.cs`).
+    CSharp,
 }
 
 /// Shell start-up files detected by name (no extension of their own).
@@ -123,6 +125,7 @@ impl Language {
         Language::Rust,
         Language::Proto,
         Language::Shell,
+        Language::CSharp,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -149,6 +152,7 @@ impl Language {
             Language::Rust => "rust",
             Language::Proto => "proto",
             Language::Shell => "shell",
+            Language::CSharp => "csharp",
         }
     }
 
@@ -198,6 +202,7 @@ impl Language {
             "rs" => Language::Rust,
             "proto" => Language::Proto,
             "sh" | "bash" | "zsh" | "ksh" | "bats" | "zsh-theme" => Language::Shell,
+            "cs" => Language::CSharp,
             _ => return None,
         })
     }
@@ -269,6 +274,7 @@ impl Language {
             Language::Rust => LanguageFamily::Rust,
             Language::Proto => LanguageFamily::Proto,
             Language::Shell => LanguageFamily::Shell,
+            Language::CSharp => LanguageFamily::CSharp,
         }
     }
 }
@@ -308,6 +314,9 @@ pub enum LanguageFamily {
     /// Shell: module name = path with extension (`scripts/deploy.sh`);
     /// functions are global once their file is sourced.
     Shell,
+    /// C#: module name = namespace (`Acme.Shop`); local names join types
+    /// and members with `.` (`Store.Add`).
+    CSharp,
 }
 
 impl LanguageFamily {
@@ -318,13 +327,17 @@ impl LanguageFamily {
     /// `config/app.yaml:database.host`, Go
     /// `github.com/gin-gonic/gin.Engine.ServeHTTP`, Java
     /// `com.example.Owner.getPets`, Rust `rueca_index::link::Linker.new`,
-    /// shell `scripts/deploy.sh:deploy`.
+    /// shell `scripts/deploy.sh:deploy`, C# `Acme.Shop.Store.Add`.
     /// Protocol Buffers have no module names (the local name
     /// `helloworld.Greeter.SayHello` carries the package). C and C++ have no module names (the local name `fmt::v11::format_to`
     /// is global); `::` is the separator their local names use.
     pub fn module_separator(self) -> &'static str {
         match self {
-            LanguageFamily::Python | LanguageFamily::Go | LanguageFamily::Java | LanguageFamily::Proto => ".",
+            LanguageFamily::Python
+            | LanguageFamily::Go
+            | LanguageFamily::Java
+            | LanguageFamily::Proto
+            | LanguageFamily::CSharp => ".",
             LanguageFamily::EcmaScript | LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Shell => ":",
             LanguageFamily::Php => "\\",
             LanguageFamily::C | LanguageFamily::Rust => "::",
@@ -811,7 +824,8 @@ pub struct Node {
     /// - PHP symbols: the fully qualified PHP name, members after `::`
     ///   (`App\Models\User::save`, `App\Models\User::$email`).
     /// - Structured data: `<path>:<key path>` (`config/app.yaml:database.host`).
-    /// - Go: `<import path>.<local>`; Java: `<package>.<local>`; C/C++: the
+    /// - Go: `<import path>.<local>`; Java: `<package>.<local>`; C#:
+    ///   `<namespace>.<local>`; C/C++: the
     ///   namespace / class path (`fmt::v11::format_to`); Rust: `<module
     ///   path>::<local>` (`rueca_index::link::Linker.new`).
     /// - Canonical env vars (file-less `EnvVar` nodes): `$env:<NAME>`.
@@ -1110,6 +1124,7 @@ mod tests {
             ("home/.bashrc", Some(Shell)),
             (".zshrc", Some(Shell)),
             ("bin/nvm-exec", None),
+            ("src/Acme.Shop/Store.cs", Some(CSharp)),
         ];
         for (path, want) in cases {
             assert_eq!(Language::from_path(path), *want, "{path}");
@@ -1128,6 +1143,7 @@ mod tests {
         assert_eq!(Java.family().module_separator(), ".");
         assert_eq!(Rust.family().module_separator(), "::");
         assert_eq!(Shell.family().module_separator(), ":");
+        assert_eq!(CSharp.family().module_separator(), ".");
     }
 
     #[test]
@@ -1170,9 +1186,10 @@ mod tests {
             b[0]
         }
         let langs: Vec<u8> = Language::ALL.iter().map(idx).collect();
-        assert_eq!(langs, (0..22).collect::<Vec<u8>>());
+        assert_eq!(langs, (0..23).collect::<Vec<u8>>());
         assert_eq!(idx(&Language::Proto), 20);
         assert_eq!(idx(&Language::Shell), 21);
+        assert_eq!(idx(&Language::CSharp), 22);
         assert_eq!(idx(&ContractSide::Provides), 0);
         assert_eq!(idx(&ContractSide::Consumes), 1);
         assert_eq!(idx(&ContractKind::Http), 0);

@@ -390,6 +390,7 @@ use rueca_model::{
 
 mod bridge;
 mod contracts;
+mod csharp;
 mod go;
 mod hooks;
 mod rust;
@@ -540,6 +541,7 @@ pub fn resolve(
     r.rust_import_edges();
     r.rust_open_types();
     r.resolve_bases();
+    r.csharp_partial_types();
     r.override_edges();
     r.go_implicit_interfaces();
     r.resolve_references();
@@ -735,6 +737,8 @@ struct Resolver<'a> {
     /// Rust module files that are test code (declared by `#[cfg(test)] mod
     /// x;`, or below one).
     rust_test_files: HashSet<FileId>,
+    /// C# tables, built on first use (see the `csharp` module).
+    csharp: csharp::CSharpTables,
 
     /// Key: (module, name, reached through `export *`, namespace).
     lookup_memo: RefCell<HashMap<LookupKey, Option<Target>>>,
@@ -1196,6 +1200,7 @@ impl<'a> Resolver<'a> {
             rust_value_envs: Vec::new(),
             shell_memo: RefCell::new(HashMap::new()),
             rust_test_files: HashSet::new(),
+            csharp: csharp::CSharpTables::default(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
@@ -1436,6 +1441,9 @@ impl<'a> Resolver<'a> {
         let imports = self.imports(fid);
         let (mut t, mut d) = (vec![None; imports.len()], vec![None; imports.len()]);
         let Some(pack) = self.packs[fid as usize] else { return (t, d) };
+        if pack.namespace_imports() {
+            return self.namespace_import_targets(fid);
+        }
         let path = &self.files[fid as usize].path;
         for (k, imp) in imports.iter().enumerate() {
             let Some(p) = pack.resolve_import(path, imp, self.project) else { continue };
@@ -1915,6 +1923,9 @@ impl<'a> Resolver<'a> {
         if self.is_rust(fid) {
             return self.rust_env(fid, Ns::Type);
         }
+        if self.is_csharp(fid) {
+            return self.csharp_env(fid);
+        }
         let python = self.is_python(fid);
         for (k, imp) in self.imports(fid).iter().enumerate() {
             if imp.reexport && !python {
@@ -2034,7 +2045,7 @@ impl<'a> Resolver<'a> {
     }
 
     /// Member `name` of a base of the class enclosing `scope` (`super`, `parent`).
-    fn super_member(&self, f: FileId, scope: Option<LocalDefId>, name: &str, want: Want) -> Outcome {
+    pub(crate) fn super_member(&self, f: FileId, scope: Option<LocalDefId>, name: &str, want: Want) -> Outcome {
         let found = self
             .enclosing_type(f, scope)
             .and_then(|c| self.bases.get(&c)?.iter().find_map(|&b| self.find_member(b, name, want)));
@@ -2479,6 +2490,9 @@ impl<'a> Resolver<'a> {
         if self.is_rust(f) {
             return self.rust_scope_name(f, item);
         }
+        if self.is_csharp(f) {
+            return self.csharp_scope_name(f, item);
+        }
         if let Some(hit) = self.imported_name(f, item) {
             return Some(hit);
         }
@@ -2519,6 +2533,10 @@ impl<'a> Resolver<'a> {
         // 2. Self receiver (`$self`: also a method declared outside its type).
         if selfs.contains(&receiver) {
             return self.self_receiver_member(f, item, scope, receiver);
+        }
+        // C#: typed, return-typed, `base` and dotted receivers (`csharp`).
+        if self.is_csharp(f) {
+            return self.csharp_with_receiver(f, item, scope, receiver);
         }
         // 5. Typed receiver: `$type:T` (declared type known in the file);
         // Rust `$ret:` (the result of a call, typed from its signature).
@@ -2909,7 +2927,9 @@ impl<'a> Resolver<'a> {
         match self.families[f as usize] {
             Some(LanguageFamily::Php) => self.find_member(class, "__construct", Want::Call),
             // Constructors are members named like the class.
-            Some(LanguageFamily::Java | LanguageFamily::C) => self.named_constructor(class).map(|c| (c, false)),
+            Some(LanguageFamily::Java | LanguageFamily::C | LanguageFamily::CSharp) => {
+                self.named_constructor(class).map(|c| (c, false))
+            }
             // Rust: `T::new` is an ordinary associated function.
             Some(LanguageFamily::Rust) => None,
             _ => self

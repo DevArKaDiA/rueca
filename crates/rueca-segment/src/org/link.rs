@@ -133,7 +133,7 @@ impl ContractKey {
 /// Separator after which an import key continues a package key.
 fn key_separator(key: &str) -> &'static str {
     match key.split_once(':').map_or("", |(eco, _)| eco) {
-        "py" | "java" => ".",
+        "py" | "java" | "cs" => ".",
         "php" => "\\",
         _ => "/",
     }

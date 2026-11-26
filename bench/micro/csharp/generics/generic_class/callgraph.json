@@ -1,0 +1,6 @@
+{
+  "Main.cs:Box.Get": [],
+  "Main.cs:Shelf.Take": [
+    "Main.cs:Box.Get"
+  ]
+}

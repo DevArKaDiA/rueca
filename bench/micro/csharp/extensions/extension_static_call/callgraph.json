@@ -1,0 +1,6 @@
+{
+  "Main.cs:Article.Path": [
+    "Main.cs:TextExtensions.Slug"
+  ],
+  "Main.cs:TextExtensions.Slug": []
+}

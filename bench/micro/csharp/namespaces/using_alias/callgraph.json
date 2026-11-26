@@ -1,0 +1,6 @@
+{
+  "Main.cs:Checkout.Complete": [
+    "Store.cs:OrderStore.Commit"
+  ],
+  "Store.cs:OrderStore.Commit": []
+}

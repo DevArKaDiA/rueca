@@ -1,0 +1,6 @@
+{
+  "Main.cs:Greeter.Greet": [
+    "Main.cs:Strings.Shout"
+  ],
+  "Main.cs:Strings.Shout": []
+}

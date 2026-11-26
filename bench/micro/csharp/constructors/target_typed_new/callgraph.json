@@ -1,0 +1,9 @@
+{
+  "Main.cs:Host.Boot": [
+    "Main.cs:Settings.Settings"
+  ],
+  "Main.cs:Settings.Load": [],
+  "Main.cs:Settings.Settings": [
+    "Main.cs:Settings.Load"
+  ]
+}

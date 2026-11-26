@@ -312,6 +312,11 @@ reason = "not the language (Objective-C)"
 # the link layer); give it `split = "gated"` to have it in both
 # organizations and `pin` saying where its commit comes from.
 [org]
+# S1 languages whose repositories are not members yet: the organization
+# numbers above were measured without them, so they join (and the pin rule
+# covers them) at the next full run of the organization scenario, which
+# re-measures every arm. C# was added after the last run.
+pending_languages = ["csharp"]
 max_instances_per_repo = 3
 calibration_max_instances_per_repo = 5
 
@@ -882,6 +887,19 @@ s1_sources = "none: no localization dataset has shell instances (SWE-bench Multi
 s3_gold = "rueca-bench shell labeler (code-backed, tree-sitter-bash; nvm v0.41.0, acme.sh v3.1.7, bash-it v3.2.0; bats-core = calibration) and the rueca-bench shell micro-benchmark"
 notes = "No compiler-grade call graph exists for shell: the structural gold is the bench's own labeler (shellgold.py), written from bash's run-time name lookup, independent of the pack's path evaluation. Extension-less scripts are outside the bench's file set."
 
+[languages.csharp]
+label = "csharp"
+members = ["csharp"]
+extensions = [".cs"]
+# C# test projects are directories named `<Project>.Tests` (and `.Test`,
+# `.UnitTests`, …): `test_dir_suffixes` marks every file below them as
+# test code; `FooTests.cs` / `FooTest.cs` test classes elsewhere by name.
+test_files = ['.*Tests?\.cs$']
+test_dir_suffixes = [".Tests", ".Test", ".UnitTests", ".IntegrationTests", ".FunctionalTests", ".Specs", ".Spec"]
+s1_sources = "SWE-rebench V2 (C# rows its LLM screen rated A: microsoft/kiota, devlooped/moq and six smaller repositories; SWE-bench Multilingual and Multi-SWE-bench carry no C#); function gold from the tree-sitter labeler"
+s3_gold = "scip-dotnet 0.2.16 in its pinned Docker image (serilog 4.4.0, eShopOnWeb; YamlDotNet 18.1.0 = calibration) and the rueca-bench C# micro-benchmark"
+notes = "C# methods are named `Type.member` (constructors `Type.Type`, local functions `Type.method.local`), namespaces left out. scip-dotnet resolves interface calls to the interface method only and records `new T(…)` as a reference to the type: the gold maps it to `T`'s constructors (one equivalence class when overloaded); `: base(…)` / `: this(…)` initializers and target-typed `new(…)` have no occurrence in its index."
+
 # Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
 # callables). `binding` = Python package (pinned in pyproject.toml) and
 # function returning the language. `labeler = "nesting"` (default) is the
@@ -996,6 +1014,28 @@ package = "tree-sitter-bash 0.25.1 (MIT)"
 extensions = [".sh", ".bash", ".zsh", ".ksh", ".bats"]
 labeler = "shell"
 separator = "."
+
+# C#: code-backed labeler (constructors named like their type, operators
+# and destructors named like the C# pack's, explicit interface
+# implementations `Type.IFace.member`). `local_callables`: scip-dotnet's
+# `local N` symbols (local functions) are bound per document;
+# `type_constructions`: a type reference on `new T(…)` is a call of `T`'s
+# constructors; `generic_overloads`: a call scip-dotnet records with the
+# first overload's symbol goes to the generic overload that takes its
+# arguments (scip.py).
+[grammars.csharp]
+binding = "tree_sitter_c_sharp:language"
+package = "tree-sitter-c-sharp 0.24.0 (MIT)"
+extensions = [".cs"]
+labeler = "csharp"
+separator = "."
+callables = { method_declaration = "Method", constructor_declaration = "Method", destructor_declaration = "Method", operator_declaration = "Method", conversion_operator_declaration = "Method", local_function_statement = "Function" }
+containers = ["class_declaration", "struct_declaration", "record_declaration", "interface_declaration"]
+calls = { invocation_expression = "function", object_creation_expression = "type" }
+members = { member_access_expression = "name", member_binding_expression = "name", conditional_access_expression = "@-1", generic_name = "@0", qualified_name = "name", alias_qualified_name = "name" }
+local_callables = true
+type_constructions = true
+generic_overloads = true
 
 # ---------------------------------------------------------------- tools
 
@@ -1119,6 +1159,19 @@ url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-11-09/r
 archive_sha256 = "8c039b25cb338b3970c731646677a4c9d4e9dd7a92c9ab9ae459c71467fbf4a9"
 binary_sha256 = "dfd442f535bdd94c572637b7a875fd29b6152b4bb412d116cb8df728c33a5067"
 
+# C# S3 gold: scip-dotnet (Roslyn) in its official image, pinned by digest
+# (linux/amd64; .NET SDK 10.0.402 inside). It runs `dotnet restore`
+# (packages from nuget.org into bench/.cache/nuget) over a scratch copy of
+# the tree with a generated solution of the listed projects (s3.py:
+# run_scip_dotnet). Nothing .NET is installed on the host.
+[tools.scip_dotnet]
+name = "scip-dotnet"
+version = "0.2.16"
+license = "Apache-2.0"
+release = "https://github.com/sourcegraph/scip-dotnet/releases/tag/v0.2.16"
+image = "sourcegraph/scip-dotnet@sha256:46b32ebcbf9c8f644be59361387065ec93e7bc7aca2b3c4b4f5b2dffc2dc08df"
+image_name = "sourcegraph/scip-dotnet:v0.2.16 (linux/amd64, Ubuntu 24.04, .NET SDK 10.0.402; Apache-2.0, run as a separate process)"
+
 [artifacts.error_prone_annotations]
 url = "https://repo1.maven.org/maven2/com/google/errorprone/error_prone_annotations/2.50.0/error_prone_annotations-2.50.0.jar"
 sha256 = "4667724877f1d37a689202da191e23efa7657c62eef93ccdac406eccfe5cdd0a"
@@ -1134,7 +1187,7 @@ contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arm
 # 1ff5e82. Every other suite (carried): the RFC 0005 contract branch, main
 # 2c5a384 plus the response contract, whose quality metrics are identical
 # to main's binary on the same run (only tokens and latency differ).
-results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e)"
+results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -1755,6 +1808,80 @@ quota = 5
 sources = ["multi_swe_bench_rust"]
 split = "calibration"
 
+# C#: SWE-bench Multilingual and Multi-SWE-bench carry no C# instances;
+# SWE-rebench V2 (rows its own LLM screen rated `A`, as for PHP) is the
+# source, gated on microsoft/kiota (the only C# repository with more than
+# eleven rows) and every other repository with at most seven, calibration on
+# three repositories disjoint from them and from the S3 sets.
+[[s1.repos]]
+repo = "microsoft/kiota"
+language = "csharp"
+quota = 25
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "devlooped/moq"
+language = "csharp"
+quota = 7
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "dapr/dotnet-sdk"
+language = "csharp"
+quota = 2
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "radzenhq/radzen-blazor"
+language = "csharp"
+quota = 2
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "grpc/grpc-dotnet"
+language = "csharp"
+quota = 1
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "dotnet/yarp"
+language = "csharp"
+quota = 1
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "dotnet-script/dotnet-script"
+language = "csharp"
+quota = 1
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "mathnet/mathnet-numerics"
+language = "csharp"
+quota = 1
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "btcpayserver/btcpayserver"
+language = "csharp"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "ant-design-blazor/ant-design-blazor"
+language = "csharp"
+quota = 4
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "spectreconsole/spectre.console"
+language = "csharp"
+quota = 3
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
 # ---------------------------------------------------------------- S3 structural
 # Gold call edges from SCIP indexes (`gold = "scip"`, default) or, for PHP,
 # the bench's PHPStan collector (`gold = "phpstan"`) at pinned commits
@@ -2032,6 +2159,40 @@ include = ["lib/", "install.sh", "contrib/"]
 gold = "shell"
 split = "calibration"
 
+# C#: scip-dotnet gold (Roslyn through MSBuildWorkspace, in Docker; s3.py:
+# run_scip_dotnet). `dotnet.framework` makes the listed projects
+# single-target for the index; `dotnet.remove` drops a `global.json` that
+# pins an SDK the image does not ship.
+[[s3.repos]]
+repo = "serilog/serilog"
+language = "csharp"
+tag = "v4.4.0"
+commit = "6d9fc0b84e004418f2677b5961b9c8970349d0be"
+license = "Apache-2.0"
+include = ["src/Serilog/"]
+indexer = "scip_dotnet"
+dotnet = { projects = ["src/Serilog/Serilog.csproj"], framework = "net8.0" }
+
+[[s3.repos]]
+repo = "dotnet-architecture/eShopOnWeb"
+language = "csharp"
+commit = "4da8212117e87d808d4bbc7da6286fd2147ce606"
+license = "MIT"
+include = ["src/"]
+indexer = "scip_dotnet"
+dotnet = { projects = ["src/Web/Web.csproj", "src/PublicApi/PublicApi.csproj"], remove = ["global.json"] }
+
+[[s3.repos]]
+repo = "aaubry/YamlDotNet"
+language = "csharp"
+tag = "v18.1.0"
+commit = "748334a8fa7c227740018b284b71ad95cc6b7fc7"
+license = "MIT"
+include = ["YamlDotNet/"]
+indexer = "scip_dotnet"
+dotnet = { projects = ["YamlDotNet/YamlDotNet.csproj"], framework = "net8.0" }
+split = "calibration"
+
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
 [[s3.micro]]
 name = "pycg"
@@ -2140,6 +2301,15 @@ format = "rueca"
 local = "micro/shell"
 license = "Apache-2.0"
 crosscheck = "shell_labeler"
+
+[[s3.micro]]
+name = "csharp-micro"
+title = "C# micro-benchmark (rueca-bench)"
+language = "csharp"
+format = "rueca"
+local = "micro/csharp"
+license = "Apache-2.0"
+crosscheck = "scip_dotnet"
 
 # ---------------------------------------------------------------- data formats
 # RFC 0003 §3.3 (bench/README.md, "Data formats"): key recall and span line
@@ -5626,3 +5796,403 @@ language = "rust"
 base_commit = "cbd11d8a45dc80392c5f1be9679051085e6a3376"
 dataset = "multi_swe_bench_rust"
 assets = ["contextbench"]
+
+[[s1.instances]]
+id = "microsoft__kiota-4586"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "89d768022890cba3a1907eb84d42729ffc0c8150"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-6094"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "e999d71a03f1f2db3675887672f283e92af32452"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-5891"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "0731517a1c8c44f5b2a3a6386d8202b76e61937e"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-3798"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "3efac62b3a06f3d1c73f1dc1435357215c5a9c9f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4670"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "2f2d2036b5797df6fde56a3b53fffcdc2fd3a967"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-5614"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "a14fb8130851192316238393e4958844069967b8"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-6362"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "70c30b55787f9aced6c4cb202b8a9ea10615bab2"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4751"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "399a577ca71b4a8b078cb9b5f5996a85108af7bf"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4650"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "72e70baf817fa9c4783347985ee37f3fa88d3e9b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-5828"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "efac0c130df84cc86766fb6fdc4398d45c1a5eb0"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4360"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "72aa22530c39412ab5c7a4f136578658f657ce3d"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4606"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "6ac3cf631fd34d787d14fd0b275142cff7699236"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4646"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "e445e0bd1ff633259cefea3c046877e451a278ed"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4056"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "f7e9dd3f6f5eb7a46e41b5e07124335d7bf266b2"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4598"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "70016500a6b2eb732857ba57337e7d2eafdc8185"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4975"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "4d59461de79d1de58a309b4c25fee7b005a15ee5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4823"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "d439a9571469f074e785d1e0cd3479feed62d992"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4328"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "48505785435910859c64592416cb43e6566410b6"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4871"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "94ef79bf7988a6f3700e66649d380223ddc0da0e"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-6755"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "9a9e2a7750d8441f9a2b3d7d3ceb68a31d0dd4e1"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-5768"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "bc6f8f5cd6b1c4e00cfe8d9ca0cbcfbe0eba8163"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4937"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "285db9f80ab1743c08df6513e5bbfa4177885ca9"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4381"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "2501ba781c1946cb3a6fcdb6624c00ffeeaeee0f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4226"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "a807e66d49dd95f17bd5f7072ad755d91c12a8dd"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "microsoft__kiota-4502"
+repo = "microsoft/kiota"
+language = "csharp"
+base_commit = "fa26451e3d56ee4f0ebd339dc937d8cc9c14699e"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "devlooped__moq-1259"
+repo = "devlooped/moq"
+language = "csharp"
+base_commit = "eef6e1b8f9686f227e247956f4b235f9774f0afc"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "devlooped__moq-1281"
+repo = "devlooped/moq"
+language = "csharp"
+base_commit = "29fd4aa470b3bb331a32691d3f120f6479f2d54d"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "devlooped__moq-1260"
+repo = "devlooped/moq"
+language = "csharp"
+base_commit = "20eb04a168fe447eb987a58c0d161e0b5d034361"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "devlooped__moq-1325"
+repo = "devlooped/moq"
+language = "csharp"
+base_commit = "bc34f8e6f5fae84b74bd3354de84b714e77b7c80"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "devlooped__moq-1313"
+repo = "devlooped/moq"
+language = "csharp"
+base_commit = "042a2ebbeca20b6b718efb45af29a0dc2edb4ab6"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "devlooped__moq-1319"
+repo = "devlooped/moq"
+language = "csharp"
+base_commit = "1f2827f8f6be3701b0058dccaa52ada2b0cbee5c"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "devlooped__moq-1262"
+repo = "devlooped/moq"
+language = "csharp"
+base_commit = "6c7e7a103381b25324be1675a97a533082bce226"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "dapr__dotnet-sdk-1310"
+repo = "dapr/dotnet-sdk"
+language = "csharp"
+base_commit = "ddce8a2972c4ba4a9f5a7d7c6cd7a22412294d5b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "dapr__dotnet-sdk-1173"
+repo = "dapr/dotnet-sdk"
+language = "csharp"
+base_commit = "034de3e233dbff08a3d45b15840c2f98bdeef4e9"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "radzenhq__radzen-blazor-1933"
+repo = "radzenhq/radzen-blazor"
+language = "csharp"
+base_commit = "df0ad0d9f12f71db09fe36f26361b5ddc8403fe7"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "grpc__grpc-dotnet-2618"
+repo = "grpc/grpc-dotnet"
+language = "csharp"
+base_commit = "5816e69828ece5b5f3474d98057c2bc89a64dfd7"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "dotnet__yarp-2825"
+repo = "dotnet/yarp"
+language = "csharp"
+base_commit = "7c46ec2cc39a731b393cee033d4a2d81c8b8e492"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "dotnet-script__dotnet-script-762"
+repo = "dotnet-script/dotnet-script"
+language = "csharp"
+base_commit = "4e3fe383743ab7da7bf5f37d4ed7b9d8cd06e857"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "mathnet__mathnet-numerics-1072"
+repo = "mathnet/mathnet-numerics"
+language = "csharp"
+base_commit = "f19641843048df073b80f6ecfcbb229d3258049b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "btcpayserver__btcpayserver-6386"
+repo = "btcpayserver/btcpayserver"
+language = "csharp"
+base_commit = "e80296fa858c84e123b2c2965a14b17b21ce8e3b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "btcpayserver__btcpayserver-5986"
+repo = "btcpayserver/btcpayserver"
+language = "csharp"
+base_commit = "d2a04db49fa3781b61d8717365f5567c3e08ac36"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "btcpayserver__btcpayserver-6050"
+repo = "btcpayserver/btcpayserver"
+language = "csharp"
+base_commit = "d6d14b4170f6d2507ecd6408799f93cbf24ab18f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "btcpayserver__btcpayserver-6251"
+repo = "btcpayserver/btcpayserver"
+language = "csharp"
+base_commit = "272cc3d3c9caf97e538dfcc855ae2cee7c1c45fa"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "btcpayserver__btcpayserver-5538"
+repo = "btcpayserver/btcpayserver"
+language = "csharp"
+base_commit = "b13f140b86afc003d5df453cbbe1b51aa59f560b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ant-design-blazor__ant-design-blazor-4433"
+repo = "ant-design-blazor/ant-design-blazor"
+language = "csharp"
+base_commit = "ca8ee0072d8a4cc77fa686ab2f6e7632c2a7b157"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ant-design-blazor__ant-design-blazor-4634"
+repo = "ant-design-blazor/ant-design-blazor"
+language = "csharp"
+base_commit = "563ddf8e43ac0d35803c86894a08b8eaabf3ab5f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "ant-design-blazor__ant-design-blazor-4147"
+repo = "ant-design-blazor/ant-design-blazor"
+language = "csharp"
+base_commit = "946b89405b77ad0913c4cba0c23db26993048bf4"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "spectreconsole__spectre.console-1514"
+repo = "spectreconsole/spectre.console"
+language = "csharp"
+base_commit = "a32dc8030b17e1205d01a24957a13431b4cf33dc"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "spectreconsole__spectre.console-1627"
+repo = "spectreconsole/spectre.console"
+language = "csharp"
+base_commit = "753894de94c86efaa36d96bf3475750a6c030474"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "spectreconsole__spectre.console-1942"
+repo = "spectreconsole/spectre.console"
+language = "csharp"
+base_commit = "010beffae042a039daa273c3bae41643ad3c04ef"
+dataset = "swe_rebench_v2"
+assets = []

@@ -1,0 +1,6 @@
+{
+  "Main.cs:MoneyExtensions.Format": [],
+  "Main.cs:Receipt.Line": [
+    "Main.cs:MoneyExtensions.Format"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "Billing.cs:Invoice.Total": [],
+  "Legacy.cs:Invoice.Total": [],
+  "Main.cs:Screen.Show": [
+    "Billing.cs:Invoice.Total"
+  ]
+}

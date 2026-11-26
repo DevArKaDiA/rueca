@@ -1,0 +1,8 @@
+{
+  "Main.cs:Pipeline.Double": [],
+  "Main.cs:Pipeline.Parse": [],
+  "Main.cs:Pipeline.Run": [
+    "Main.cs:Pipeline.Double",
+    "Main.cs:Pipeline.Parse"
+  ]
+}

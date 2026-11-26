@@ -13,6 +13,7 @@ from functools import lru_cache
 
 import tree_sitter_bash
 import tree_sitter_c
+import tree_sitter_c_sharp
 import tree_sitter_cpp
 import tree_sitter_go
 import tree_sitter_java
@@ -31,6 +32,7 @@ from .common import load_manifest
 _BINDINGS = {
     "tree_sitter_bash": tree_sitter_bash,
     "tree_sitter_c": tree_sitter_c,
+    "tree_sitter_c_sharp": tree_sitter_c_sharp,
     "tree_sitter_cpp": tree_sitter_cpp,
     "tree_sitter_go": tree_sitter_go,
     "tree_sitter_java": tree_sitter_java,
@@ -62,6 +64,27 @@ def _language(kind: str) -> Language:
         raise ValueError(kind)
     mod, _, fn = spec["binding"].partition(":")
     return Language(getattr(_BINDINGS[mod], fn)())
+
+
+def grammar_spec(name: str | None) -> dict:
+    """The manifest entry of a grammar (`{}` for none)."""
+    return _grammars().get(name or "", {})
+
+
+def creation_type_at(tree, line0: int, byte_col: int, end_byte_col: int) -> bool:
+    """Whether the node at a range is the type of an object creation
+    (`Foo` in `new Foo(…)`, `new A.Foo(…)`, `new Foo<T>(…)`)."""
+    node = tree.root_node.named_descendant_for_point_range((line0, byte_col), (line0, max(byte_col, end_byte_col - 1)))
+    for _ in range(4):
+        if node is None or node.parent is None:
+            return False
+        parent = node.parent
+        if parent.type == "object_creation_expression":
+            return parent.child_by_field_name("type") == node
+        if parent.type not in ("qualified_name", "generic_name", "alias_qualified_name"):
+            return False
+        node = parent
+    return False
 
 
 def grammar_for(path: str, language: str | None = None) -> str | None:
@@ -180,6 +203,8 @@ def extract_functions(path: str, source: bytes, language: str | None = None) -> 
         return _rust_functions(tree.root_node, spec)
     if labeler == "shell":
         return _shell_functions(tree.root_node)
+    if labeler == "csharp":
+        return _csharp_functions(tree.root_node, spec)
     return _nesting_functions(tree.root_node, spec)
 
 
@@ -562,6 +587,117 @@ def _shell_functions(root: Node) -> list[Func]:
         if name:
             out.append(_func(name, name, "Function", node, nn))
     return out
+
+
+def _csharp_operator_name(node: Node) -> tuple[str, Node]:
+    """`operator+` / `operator true` / `implicit operator string` (the C#
+    pack's names) and the node the name sits on."""
+    if node.type == "conversion_operator_declaration":
+        kind = "explicit" if any(c.type == "explicit" for c in node.children) else "implicit"
+        ty = node.child_by_field_name("type")
+        text = re.sub(r"<.*>", "", _text(ty)).replace(" ", "").rstrip("?")
+        return f"{kind} operator {text.rsplit('.', 1)[-1]}", ty or node
+    op = node.child_by_field_name("operator")
+    t = _text(op)
+    return (f"operator {t}" if t[:1].isalpha() else f"operator{t}"), op or node
+
+
+def _csharp_name(node: Node, type_name: str) -> tuple[str, Node] | None:
+    """Name and name node of a C# callable (the C# pack's names):
+    constructors are named like their type, destructors `~Type`."""
+    if node.type in ("operator_declaration", "conversion_operator_declaration"):
+        return _csharp_operator_name(node)
+    nn = node.child_by_field_name("name")
+    if nn is None:
+        return None
+    if node.type == "destructor_declaration":
+        return f"~{type_name}", nn
+    return _text(nn), nn
+
+
+def _csharp_functions(root: Node, spec: dict) -> list[Func]:
+    """C# (the C# pack's qualified names): methods, constructors,
+    destructors, operators and conversion operators of types are `Method`s
+    named `Type.member` (nested types joined with `.`, namespaces left out;
+    an explicit interface implementation `Type.IFace.member`); local
+    functions are `Function`s under their enclosing callable
+    (`Type.method.local`). Property and event accessors are not callables
+    (their code belongs to no callable, as in the pack, where it belongs
+    to the property)."""
+    kinds: dict[str, str] = spec["callables"]
+    containers = set(spec.get("containers", []))
+    out: list[Func] = []
+    for node in _walk(root):
+        label = kinds.get(node.type)
+        if label is None:
+            continue
+        parts: list[str] = []
+        anc = node.parent
+        while anc is not None:
+            if anc.type in containers or anc.type in kinds:
+                info = _csharp_name(anc, "") if anc.type in kinds else (_text(anc.child_by_field_name("name")), anc)
+                parts.append(info[0] if info else "")
+            anc = anc.parent
+        parts.reverse()
+        type_name = next((p for p in reversed(parts) if p), "")
+        info = _csharp_name(node, type_name)
+        if info is None or not info[0]:
+            continue
+        name, nn = info
+        iface = next((c for c in node.named_children if c.type == "explicit_interface_specifier"), None)
+        local = [_text(iface.named_children[0]).rsplit(".", 1)[-1], name] if iface and iface.named_children else [name]
+        out.append(_func(name, ".".join([*parts, *local]), label, node, nn))
+    return out
+
+
+_CS_CALLABLES = ("method_declaration", "local_function_statement")
+
+
+def _cs_arity(params: Node | None) -> tuple[int, int | None]:
+    """(minimum, maximum; `None` = `params`) arguments of a C# parameter list."""
+    if params is None:
+        return 0, 0
+    lo = hi = 0
+    variadic = False
+    for c in params.children:
+        if c.type == "params":
+            variadic = True
+        elif c.type == "parameter":
+            hi += 1
+            fixed = (c.child_by_field_name("type"), c.child_by_field_name("name"))
+            has_default = any(k.is_named and k not in fixed and k.type not in ("attribute_list", "modifier") for k in c.children)
+            lo += 0 if has_default else 1
+    return lo, (None if variadic else hi)
+
+
+def csharp_signatures(tree) -> dict[tuple[int, str], tuple[int, int | None, bool]]:
+    """C# methods by (1-based name line, name): (minimum arguments, maximum
+    or `None` for `params`, generic). For the SCIP gold's generic-overload
+    repair (scip.py)."""
+    out: dict[tuple[int, str], tuple[int, int | None, bool]] = {}
+    for node in _walk(tree.root_node):
+        if node.type not in _CS_CALLABLES:
+            continue
+        nn = node.child_by_field_name("name")
+        if nn is None:
+            continue
+        lo, hi = _cs_arity(node.child_by_field_name("parameters"))
+        generic = node.child_by_field_name("type_parameters") is not None
+        out[(nn.start_point[0] + 1, _text(nn))] = (lo, hi, generic)
+    return out
+
+
+def call_arity_at(tree, line0: int, byte_col: int, end_byte_col: int) -> int | None:
+    """Argument count of the C# invocation whose callee is at a range."""
+    node = tree.root_node.named_descendant_for_point_range((line0, byte_col), (line0, max(byte_col, end_byte_col - 1)))
+    for _ in range(6):
+        if node is None:
+            return None
+        if node.type == "invocation_expression":
+            args = node.child_by_field_name("arguments")
+            return sum(1 for c in args.named_children if c.type == "argument") if args is not None else 0
+        node = node.parent
+    return None
 
 
 def innermost(funcs: list[Func], line: int) -> Func | None:

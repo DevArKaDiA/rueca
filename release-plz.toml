@@ -113,3 +113,7 @@ version_group = "rueca"
 [[package]]
 name = "rueca-lang-shell"
 version_group = "rueca"
+
+[[package]]
+name = "rueca-lang-csharp"
+version_group = "rueca"

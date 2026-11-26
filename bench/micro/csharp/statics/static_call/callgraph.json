@@ -1,0 +1,6 @@
+{
+  "Main.cs:Area.Of": [
+    "Main.cs:MathUtil.Square"
+  ],
+  "Main.cs:MathUtil.Square": []
+}

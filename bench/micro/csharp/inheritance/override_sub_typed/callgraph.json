@@ -1,0 +1,7 @@
+{
+  "Main.cs:Invoice.Title": [],
+  "Main.cs:Printer.Print": [
+    "Main.cs:Invoice.Title"
+  ],
+  "Main.cs:Report.Title": []
+}

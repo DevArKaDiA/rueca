@@ -20,7 +20,18 @@ Call-edge derivation (RFC 0002 §4.2):
 3. The caller is the innermost callable whose extent contains the occurrence.
    Occurrences outside any callable (module level) produce no edge.
 4. Both endpoints must be in-scope (repo `include` prefixes, not test paths).
-5. Equivalence classes: when one SCIP symbol binds to several callables
+5. C# (grammar flags): `local_callables` binds scip-dotnet's `local N`
+   symbols (local functions) per document, so calls of local functions are
+   edges; `type_constructions` makes a reference to a *type* on the type
+   of `new T(…)` a call of `T`'s constructors (scip-dotnet records the
+   type there, not the constructor), the constructors of one type forming
+   an equivalence class when there are several (which overload runs is not
+   recorded). `generic_overloads`: scip-dotnet records a call of a
+   constructed generic method (`Write<T>(…)`) with the symbol of the first
+   overload of its name (`Write().`); when that overload cannot take the
+   call's argument count, the call goes to the generic overloads of the
+   same name and symbol family that can (one class when several).
+6. Equivalence classes: when one SCIP symbol binds to several callables
    (scip-clang gives same-signature overloads, function template
    specializations and `#if` alternatives one symbol; two C `static`
    functions of one name share one), edges keep the first bound callable
@@ -38,7 +49,7 @@ from pathlib import Path
 
 from .common import is_test_path
 from .match import UnionFind, class_edges
-from .treesitter import Func, extract_functions, grammar_for, is_call_site, parse, utf16_col_to_byte
+from .treesitter import Func, call_arity_at, creation_type_at, csharp_signatures, extract_functions, grammar_for, grammar_spec, is_call_site, parse, utf16_col_to_byte
 
 ROLE_DEFINITION = 1
 
@@ -261,8 +272,9 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
     for d in scoped:
         index = {(f["def_line"], f["name"]): f for f in by_file.get(d.path, [])}
         lines = texts.get(d.path, [])
+        local_ok = bool(grammar_spec(grammar_for(d.path, language)).get("local_callables"))
         for o in d.occurrences:
-            if not (o.roles & ROLE_DEFINITION) or o.symbol.startswith("local "):
+            if not (o.roles & ROLE_DEFINITION) or (o.symbol.startswith("local ") and not local_ok):
                 continue
             stats["definitions"] += 1
             line0, sc, _, ec = o.range
@@ -277,13 +289,14 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
             if f is None:
                 continue
             bound.add(fid(d.path, f))
-            if o.symbol not in sym_to_fid:
-                sym_to_fid[o.symbol] = fid(d.path, f)
+            sym = _symbol_key(d.path, o.symbol)
+            if sym not in sym_to_fid:
+                sym_to_fid[sym] = fid(d.path, f)
                 stats["definitions_bound"] += 1
                 stats["definitions_bound_via_overload"] += int(aliased)
-            elif sym_to_fid[o.symbol] != fid(d.path, f):
+            elif sym_to_fid[sym] != fid(d.path, f):
                 # one symbol, several callables: the gold cannot tell them apart
-                same_symbol.union(sym_to_fid[o.symbol], fid(d.path, f))
+                same_symbol.union(sym_to_fid[sym], fid(d.path, f))
             if o.enclosing is not None and not aliased:
                 stats["definitions_with_enclosing_range"] += 1
                 es, ee = o.enclosing[0] + 1, o.enclosing[2] + 1
@@ -291,6 +304,8 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
                     start = f["start"] if keep_start else min(es, f["start"])
                     f["start"], f["end"], f["_enc"] = start, ee, True
 
+    ctors = _constructors_by_type(sym_to_fid, same_symbol)
+    repair = _GenericOverloads(sym_to_fid, callables, trees, same_symbol)
     stats["classes_by_symbol"] = len(same_symbol.groups())
     stats["class_members_unbound"] = join_unbound_alternatives(callables, bound, same_symbol, language)
 
@@ -301,12 +316,20 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
         if tree is None:
             continue
         grammar = grammar_for(d.path, language)
+        gspec = grammar_spec(grammar)
         lines = texts[d.path]
         funcs = by_file.get(d.path, [])
         for o in d.occurrences:
-            if o.roles & ROLE_DEFINITION or o.symbol.startswith("local "):
+            if o.roles & ROLE_DEFINITION or (o.symbol.startswith("local ") and not gspec.get("local_callables")):
                 continue
-            callee = sym_to_fid.get(o.symbol)
+            callee = sym_to_fid.get(_symbol_key(d.path, o.symbol))
+            if callee is not None and gspec.get("generic_overloads") and o.symbol.endswith("()."):
+                callee = repair.retarget(callee, o.symbol, tree, o.range, d.position_encoding, texts[d.path])
+            if callee is None and gspec.get("type_constructions"):
+                callee = ctors.get(o.symbol)
+                construction = callee is not None
+            else:
+                construction = False
             if callee is None:
                 continue
             stats["references_to_callables"] += 1
@@ -315,8 +338,11 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
                 continue
             b0 = _byte_col(lines[line0], sc, d.position_encoding)
             b1 = _byte_col(lines[line0], ec, d.position_encoding)
+            if construction and not creation_type_at(tree, line0, b0, b1):
+                continue
             if not is_call_site(tree, grammar, line0, b0, b1):
                 continue
+            stats["constructions"] += int(construction)
             stats["call_sites"] += 1
             line = line0 + 1
             best = None
@@ -341,6 +367,61 @@ def derive_call_graph(root: Path, docs: list[Doc], include: list[str], language:
     }
     add_class_stats(graph)
     return graph
+
+
+def _symbol_key(path: str, symbol: str) -> str:
+    """A SCIP symbol as bound: `local N` symbols are per document."""
+    return f"{path}\x00{symbol}" if symbol.startswith("local ") else symbol
+
+
+class _GenericOverloads:
+    """The repair of `generic_overloads` (module docs, step 5)."""
+
+    def __init__(self, sym_to_fid: dict[str, str], callables: dict[str, dict], trees: dict, uf: UnionFind):
+        self.family: dict[str, list[str]] = defaultdict(list)
+        for sym, f in sym_to_fid.items():
+            base = re.sub(r"\((\+\d+)?\)\.$", "", sym)
+            if base != sym:
+                self.family[base].append(f)
+        self.callables = callables
+        self.trees = trees
+        self.uf = uf
+        self.sigs: dict[str, dict] = {}
+
+    def _sig(self, f: str) -> tuple[int, int | None, bool] | None:
+        c = self.callables.get(f)
+        if c is None or c["path"] not in self.trees:
+            return None
+        if c["path"] not in self.sigs:
+            self.sigs[c["path"]] = csharp_signatures(self.trees[c["path"]])
+        return self.sigs[c["path"]].get((c["def_line"], c["name"]))
+
+    def retarget(self, callee: str, symbol: str, tree, rng, encoding: int, lines: list[str]) -> str:
+        line0, sc, _, ec = rng
+        if line0 >= len(lines):
+            return callee
+        n = call_arity_at(tree, line0, _byte_col(lines[line0], sc, encoding), _byte_col(lines[line0], ec, encoding))
+        fits = lambda s: s is not None and n >= s[0] and (s[1] is None or n <= s[1])
+        if n is None or fits(self._sig(callee)):
+            return callee
+        cands = sorted(f for f in self.family.get(symbol[: -len("().")], []) if (s := self._sig(f)) and s[2] and fits(s))
+        for f in cands[1:]:
+            self.uf.union(cands[0], f)
+        return cands[0] if cands else callee
+
+
+def _constructors_by_type(sym_to_fid: dict[str, str], uf: UnionFind) -> dict[str, str]:
+    """scip-dotnet constructor symbols (`T#`.ctor`(…).`) by their type's
+    symbol (`T#`): the first constructor's callable, the overloads of one
+    type joined as an equivalence class."""
+    by_type: dict[str, list[str]] = defaultdict(list)
+    for sym, f in sorted(sym_to_fid.items()):
+        if "`.ctor`" in sym:
+            by_type[sym[: sym.index("`.ctor`")]].append(f)
+    for fs in by_type.values():
+        for f in fs[1:]:
+            uf.union(fs[0], f)
+    return {t: fs[0] for t, fs in by_type.items()}
 
 
 # Indexers whose enclosing range starts above the declaration: rust-analyzer's
