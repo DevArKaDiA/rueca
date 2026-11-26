@@ -1,0 +1,6 @@
+{
+  "model.sql:orders": [],
+  "model.sql:order_totals": [
+    "model.sql:orders"
+  ]
+}

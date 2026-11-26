@@ -114,3 +114,14 @@ crates/rueca-lang-ruby/queries/locals.scm
     SOFTWARE.
 
   Modified for Rueca (see the file header for the list of changes).
+
+NOTICE of Apache-2.0 dependencies
+---------------------------------
+crates/rueca-lang-sql links the `sqlparser` crate (Apache-2.0), whose NOTICE
+reads:
+
+  Apache DataFusion sqlparser-rs
+  Copyright 2024-2026 The Apache Software Foundation
+
+  This product includes software developed at
+  The Apache Software Foundation (http://www.apache.org/).

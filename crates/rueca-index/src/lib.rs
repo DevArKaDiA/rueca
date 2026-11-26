@@ -182,7 +182,7 @@ pub struct PhaseTimings {
 }
 
 /// Language packs shipped with this build (Python, TypeScript/TSX/JavaScript,
-/// PHP, Java, C/C++, Markdown, Go, Rust, Protocol Buffers, shell, and the
+/// PHP, Java, C/C++, Markdown, Go, Rust, Protocol Buffers, shell, SQL, and the
 /// structured data formats of `rueca-lang-data`).
 pub fn default_registry() -> Registry {
     let mut r = Registry::new();
@@ -199,6 +199,7 @@ pub fn default_registry() -> Registry {
     r.register(Box::new(rueca_lang_csharp::CSharpPack));
     r.register(Box::new(rueca_lang_kotlin::KotlinPack));
     r.register(Box::new(rueca_lang_ruby::RubyPack));
+    r.register(Box::new(rueca_lang_sql::SqlPack));
     r.register(Box::new(rueca_lang_data::DataPack));
     r
 }

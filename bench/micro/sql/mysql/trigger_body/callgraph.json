@@ -1,0 +1,8 @@
+{
+  "schema.sql:film": [],
+  "schema.sql:film_text": [],
+  "schema.sql:film.ins_film": [
+    "schema.sql:film",
+    "schema.sql:film_text"
+  ]
+}

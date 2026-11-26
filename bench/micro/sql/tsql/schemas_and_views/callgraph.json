@@ -1,0 +1,10 @@
+{
+  "schema.sql:customers": [],
+  "schema.sql:sales.orders": [
+    "schema.sql:customers"
+  ],
+  "schema.sql:vcustomerorders": [
+    "schema.sql:customers",
+    "schema.sql:sales.orders"
+  ]
+}

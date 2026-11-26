@@ -1,0 +1,8 @@
+{
+  "schema.sql:events": [],
+  "schema.sql:classify": [],
+  "schema.sql:event_counts": [
+    "schema.sql:classify",
+    "schema.sql:events"
+  ]
+}

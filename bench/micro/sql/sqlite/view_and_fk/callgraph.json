@@ -1,0 +1,10 @@
+{
+  "schema.sql:artist": [],
+  "schema.sql:album": [
+    "schema.sql:artist"
+  ],
+  "schema.sql:album_artist": [
+    "schema.sql:album",
+    "schema.sql:artist"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schema.sql:author": [],
+  "schema.sql:book": [
+    "schema.sql:author"
+  ],
+  "schema.sql:book_list": [
+    "schema.sql:author",
+    "schema.sql:book"
+  ]
+}

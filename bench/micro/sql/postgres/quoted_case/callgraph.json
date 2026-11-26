@@ -1,0 +1,7 @@
+{
+  "schema.sql:Users": [],
+  "schema.sql:users": [],
+  "schema.sql:mixed": [
+    "schema.sql:Users"
+  ]
+}

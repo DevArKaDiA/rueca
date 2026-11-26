@@ -1,0 +1,9 @@
+{
+  "schema.sql:payment": [],
+  "schema.sql:payment_2024": [
+    "schema.sql:payment"
+  ],
+  "schema.sql:payment_totals": [
+    "schema.sql:payment"
+  ]
+}

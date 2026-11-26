@@ -128,6 +128,28 @@ def family_of(language: str) -> LanguageFamily:
     raise KeyError(f"language {language!r} is not declared in manifest [languages]")
 
 
+def trace_edges(language: str) -> list[str] | None:
+    """Edge types the structural suite traces for a language (manifest
+    `[languages.<x>] trace_edges`; `None` = the tool's default, `CALLS`)."""
+    try:
+        key = family_of(language).key
+    except KeyError:
+        return None
+    edges = load_manifest()["languages"][key].get("trace_edges")
+    return list(edges) if edges else None
+
+
+def extra_callable_labels(language: str) -> frozenset[str]:
+    """Labels besides functions and methods that a language's structural
+    questions count as callables (manifest `[languages.<x>]
+    callable_labels`)."""
+    try:
+        key = family_of(language).key
+    except KeyError:
+        return frozenset()
+    return frozenset(load_manifest()["languages"][key].get("callable_labels", []))
+
+
 def lang_family(language: str) -> str:
     return family_of(language).key
 

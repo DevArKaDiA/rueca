@@ -7,6 +7,8 @@ Gold sources (manifest `[[s3.repos]]` / `[[s3.micro]]`):
   indexer; see phpstan.py), same edge derivation;
 - `gold = "shell"`: the bench's code-backed shell labeler (no compiler-grade
   tool exists for shell; see shellgold.py);
+- `gold = "sql"`: the bench's code-backed SQL dependency labeler (sqlglot;
+  see sqlgold.py);
   both with ~50 functions per repo stratified by fan-in / fan-out;
 - micro-benchmarks: hand-written call graphs of small programs, every
   function of every snippet is a question — PyCG (Python, Apache-2.0,
@@ -272,6 +274,8 @@ def build_repo_gold(spec: dict, force: bool = False) -> dict:
         return build_phpstan_gold(spec, force)
     if method == "shell":
         return build_shell_gold(spec, force)
+    if method == "sql":
+        return build_sql_gold(spec, force)
     raise ValueError(f"unknown S3 gold method {method!r} for {spec['repo']}")
 
 
@@ -294,6 +298,46 @@ def build_phpstan_gold(spec: dict, force: bool = False) -> dict:
         "include": spec["include"],
         "exclude": spec.get("exclude", []),
         "indexer": version_string(),
+        "indexer_seconds": None,
+        "stats": graph["stats"],
+        "callables": graph["callables"],
+        "callers": graph["callers"],
+        "callees": graph["callees"],
+        "classes": graph.get("classes", []),
+        "sample": sample,
+    }
+    write_json(gp, gold)
+    qs = questions(graph, man["min_lines"])
+    log(f"s3 gold {name}: {graph['stats'].get('edges')} edges, {len(graph['callables'])} callables, questions callers {len(qs['callers'])} / callees {len(qs['callees'])}")
+    return gold
+
+
+def build_sql_gold(spec: dict, force: bool = False) -> dict:
+    """Gold from the code-backed SQL labeler (sqlgold.py) over the
+    repository's tracked files at the pinned commit, with the manifest's
+    per-tree dialects."""
+    from .corpus import list_files
+    from .sqlgold import sql_call_graph
+    from .sqlgold import version_string as sql_version
+
+    name = repo_name(spec)
+    gp = gold_path(name)
+    if gp.exists() and not force:
+        return read_json(gp)
+    man = load_manifest()["s3"]
+    with worktree(spec["repo"], spec["commit"], f"s3-{name}") as root:
+        log(f"sql labeler {name}: {', '.join(spec['include'])}")
+        graph = sql_call_graph(root, spec["include"], spec.get("exclude", []), list_files(root), spec.get("dialects", {}))
+    sample = sample_functions(graph, man["sample_per_repo"], man["seed"], man["min_lines"])
+    gold = {
+        "suite": "sql",
+        "name": name,
+        "repo": spec["repo"],
+        "language": spec["language"],
+        "commit": spec["commit"],
+        "include": spec["include"],
+        "exclude": spec.get("exclude", []),
+        "indexer": sql_version(),
         "indexer_seconds": None,
         "stats": graph["stats"],
         "callables": graph["callables"],
@@ -555,12 +599,22 @@ def build_pycg_gold(force: bool = False) -> dict:
 # `function`). Every key is a question (functions without calls have []).
 
 
+def _micro_functions(snip: Path, rel: str, language: str | None) -> list:
+    """Callables of one snippet file; SQL with the dialect of the snippet's
+    directory (`<dialect>__<case>`)."""
+    if language == "sql":
+        from .sqlgold import sql_functions
+
+        return sql_functions(rel, (snip / rel).read_bytes(), snip.name.split("__", 1)[0])
+    return extract_functions(rel, (snip / rel).read_bytes(), language)
+
+
 def rueca_micro_graph(snip: Path, answer: dict, language: str | None = None) -> dict:
     files = sorted(str(p.relative_to(snip)) for p in snip.rglob("*") if p.is_file() and ".git" not in p.parts and p.name != "callgraph.json")
     callables: dict[str, dict] = {}
     by_label: dict[str, str] = {}
     for rel in files:
-        for f in extract_functions(rel, (snip / rel).read_bytes(), language):
+        for f in _micro_functions(snip, rel, language):
             d = f.as_dict()
             d["path"] = rel
             k = fid(rel, d)
@@ -704,6 +758,37 @@ def _scip_agreement(spec: dict, dest: Path, snippets: dict[str, dict]) -> dict:
     }
 
 
+def _sql_agreement(dest: Path, snippets: dict[str, dict]) -> dict:
+    """Cross-check the hand-written SQL answer keys against the code-backed
+    labeler (sqlgold.py), edge by edge, per snippet (dialect = the
+    snippet's directory)."""
+    from .sqlgold import sql_call_graph, version_string
+
+    tp = fp = fn = 0
+    per: dict[str, dict] = {}
+    for sname, g in sorted(snippets.items()):
+        graph = sql_call_graph(dest / sname, [""], dialects={"": sname.split("__", 1)[0]})
+        want = {(a, b) for a, bs in g["callees"].items() for b in bs}
+        got = {(a, b) for a, bs in graph["callees"].items() for b in bs}
+        tp += len(want & got)
+        fp += len(got - want)
+        fn += len(want - got)
+        per[sname] = {"scip_only": sorted(f"{a} -> {b}" for a, b in got - want), "key_only": sorted(f"{a} -> {b}" for a, b in want - got)}
+    # Same shape as `_scip_agreement` (`scip_only` = edges only the labeler has).
+    return {
+        "available": True,
+        "tool": version_string(),
+        "edges_key": tp + fn,
+        "edges_scip": tp + fp,
+        "agree": tp,
+        "precision": tp / (tp + fp) if tp + fp else None,
+        "recall": tp / (tp + fn) if tp + fn else None,
+        "snippets_identical": sum(1 for v in per.values() if not v["scip_only"] and not v["key_only"]),
+        "snippets_failed": [],
+        "per_snippet": {k: v for k, v in per.items() if v["scip_only"] or v["key_only"]},
+    }
+
+
 def _shell_agreement(dest: Path, snippets: dict[str, dict]) -> dict:
     """Cross-check the hand-written shell answer keys against the
     code-backed labeler (shellgold.py), edge by edge, per snippet."""
@@ -763,6 +848,8 @@ def build_rueca_micro_gold(spec: dict, force: bool = False) -> dict:
         gold["phpstan_agreement"] = _phpstan_agreement(dest, gold["snippets"], name)
     if spec.get("crosscheck") == "shell_labeler":
         gold["crosscheck"] = _shell_agreement(dest, gold["snippets"])
+    elif spec.get("crosscheck") == "sql_labeler":
+        gold["crosscheck"] = _sql_agreement(dest, gold["snippets"])
     elif spec.get("crosscheck"):
         gold["crosscheck"] = _scip_agreement(spec, dest, gold["snippets"])
     for sname in sorted(keys):

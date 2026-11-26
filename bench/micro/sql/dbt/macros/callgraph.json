@@ -1,0 +1,11 @@
+{
+  "macros/money.sql:cents_to_dollars": [],
+  "macros/money.sql:dollars_with_tax": [
+    "macros/money.sql:cents_to_dollars"
+  ],
+  "models/payments.sql:payments": [
+    "macros/money.sql:dollars_with_tax",
+    "models/stg_payments.sql:stg_payments"
+  ],
+  "models/stg_payments.sql:stg_payments": []
+}

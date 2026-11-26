@@ -7,7 +7,7 @@
   *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. Go (§10.2), Java
   (§10.4) and C/C++ (§10.3) have landed as `preview`; Rust followed
   (addendum §10.4b), then shell (addendum §10.4c), C# (addendum §10.4d),
-  Kotlin (addendum §10.4e) and Ruby (addendum §10.4f).
+  Kotlin (addendum §10.4e), Ruby (addendum §10.4f) and SQL (addendum §10.4g).
 - Created: 2026-10-24
 - Depends on: RFC 0001 (architecture), RFC 0002 (building blocks)
 - Research date: 2026-10-24. Crate versions, licenses and dependency
@@ -446,6 +446,7 @@ builtin `getenv`), never by function name alone.
 | Rust (§10.4b) | `std::env::var("X")` / `var_os`, `env::var("X")` and `var("X")` with `std::env` / `std::env::var` imported, `env!("X")`, `option_env!("X")` | — |
 | Shell (§10.4c) | `$X`, `${X}`, `${X:-default}`, `${X:?msg}` with `X` upper case, bound nowhere in the file and not a shell variable; providers: `export X=…`, `declare -x X`, `X=value cmd` | — |
 | C# (§10.4d) | `Environment.GetEnvironmentVariable("X")` (also `System.Environment`) | on an `IConfiguration` / `IConfigurationRoot` / `IConfigurationManager` / `ConfigurationManager` receiver or a `Configuration` property: `config["A:B"]`, `GetValue<T>("A:B")`, `GetSection` / `GetRequiredSection("A:B")`, `GetConnectionString("Db")` → `ConnectionStrings:Db` (namespace `dotnet`) |
+| SQL (§10.4g) | dbt `{{ env_var('X') }}` | dbt `{{ var('x') }}` → key `vars.x` (of `dbt_project.yml`, unique key path) |
 
 *Implemented* for Python, TS / JS and PHP as listed, except Django
 `settings.X` and pydantic `BaseSettings` (later). Evidence: Python needs the
@@ -1040,6 +1041,53 @@ ActiveSupport `Concern` class methods, `super` inside a module (the next
 ancestor depends on the including class), union types of variables
 assigned two classes, `Gemfile.lock`, HTTP contracts (Rails routes and
 Sinatra routes are not extracted).
+
+### 10.4g SQL (addendum, 2026-11-25)
+
+Schemas, migrations, views, routines and analytics models are where an
+agent asks "what reads this table?" or "what breaks if I drop this
+column?". Designed in the form of §10.2–§10.4b; RFC 0001 §12 lists SQL in
+tier 2, RFC 0002 §3.3 named `sqlparser` for it.
+
+| Aspect | Design |
+|---|---|
+| Parser | `sqlparser` 0.64, Apache-2.0, pure Rust, one statement at a time (spans on identifiers); a token scanner reads statements no dialect parses and `$$` bodies. Chosen over tree-sitter SQL grammars by measured failure rates (decisions log, 2026-11-25) |
+| Files | `.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq` |
+| Dialects | PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, BigQuery, Snowflake (Redshift, DuckDB), ANSI; one per file: directive comment, path (extension, dialect words), content signals; a statement the file's dialect rejects is retried in the others; dbt Jinja masked |
+| Module model | empty module name: a database namespace is global; local names are normalized object names (`users`, `billing.invoices`, `users.email`; quoting and case per dialect, default schema dropped) |
+| Definitions | tables, views, materialized and virtual tables (`Struct`) with columns (`Field`), functions, procedures, macros, triggers (`Function`; triggers `table.trigger`), indexes, sequences, enum and other types, CTEs inside definitions, `-- name:` queries, dbt models, macros and snapshots |
+| References | relations read (`REFERENCES`) or written (`WRITES`: DML targets, `ALTER`, `DROP`, `TRUNCATE`), foreign keys, columns when the table is certain, routine calls (`CALLS`: `f()`, `FROM f()`, `CALL`, `EXEC`, `PERFORM`, trigger functions), dbt `ref` / `source` / macro calls; client includes (`\i`, `:r`, `.read`, `SOURCE`) are imports |
+| Resolution | by normalized qualified name over every SQL definition, then by place: earlier in the file, migration order (the effective definition), later in the file, nearest directory; partial qualification is a unique-name guess; ambiguous → none |
+| Migrations | one node per `CREATE`; references go to the definition effective at their point by migration order (Flyway, timestamps, numeric prefixes, `up.sql` directories); `ADD COLUMN` adds a column member in its migration; `ALTER` / `DROP` are writes from the migration file |
+| Tests | test paths; dbt singular tests under `tests/` |
+| Env bridge | §7.2 table (dbt `env_var`, `var`) |
+| Package identity | none (dbt `packages.yml` not read) |
+| Precision | none: no cross-reference tool exists for SQL repositories |
+| Bench | S1: none (no localization dataset has SQL instances); S3: the bench's code-backed labeler on sqlglot (independent of the pack's parser) on Sakila in six dialects and fivetran/dbt_hubspot (sqlc examples = calibration), and the `bench/micro/sql` micro-benchmark, one directory per dialect |
+
+Dialect coverage (statements no dialect parses, by detected dialect, on
+the bench corpus; the crate README has the constructs behind each row):
+
+| Dialect | Support | Unparsed statements |
+|---|---|---|
+| PostgreSQL | fully parsed; `$$` bodies read by the scanner (relations, calls; no columns) | 2.3% (67 / 2,932) |
+| MySQL / MariaDB | fully parsed except routine bodies (scanner) | 3.1% (20 / 645) |
+| SQLite | fully parsed | 1.1% (7 / 619) |
+| T-SQL | parsed; procedural code best effort | 16.5% (21 / 127); 45% on sql-server-maintenance-solution |
+| BigQuery | parsed; scripting best effort | 16.7% (19 / 114, bigquery-utils; none in the bench corpus) |
+| Snowflake | parsed; JavaScript / Python UDF bodies not read | 0 / 19 (not measured at scale) |
+| dbt Jinja | best effort (masked, not rendered) | 13.6% (22 / 162) |
+| ANSI, other dialects | generic dialect; Oracle PL/SQL, DB2 read as ANSI | 0% (sqlc); 32.4% on Sakila's Oracle / DB2 copies |
+
+*Implemented* (`rueca-lang-sql` plus the `sql` module of `rueca-resolve`;
+crate docs and README, [how-it-works](../how-it-works.md)): everything in
+the tables. Status **`preview`** under RFC 0004: no localization
+instances (missing results count as failing, RFC 0004 §6.2), files with
+parse errors above the 2% floor on the gated corpus, a callees population
+under 300, and a code-backed structural gold. Not done: SQL in string
+literals of other languages (follow-up), Liquibase XML changelogs,
+`search_path` evaluation, synonyms, grants and policies as edges, column
+references inside `$$` bodies and unparsed statements.
 
 ### 10.5 Risks
 

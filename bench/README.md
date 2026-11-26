@@ -28,7 +28,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Multi-step** (RFC 0009 §8, experimental code mode) | "How many tokens does a multi-step question cost as tool calls, as one code-mode script, and with cbm?" | reported; RFC 0009's per-language graduation gate |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
-the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust,shell,csharp,kotlin,ruby}/` and the
+the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust,shell,csharp,kotlin,ruby,sql}/` and the
 env-bridge labels in `labels/bridge/`). Datasets, repositories and tool
 binaries are fetched at runtime at pinned revisions into `bench/.cache`
 (git-ignored), so nothing with an unclear licence is vendored.
@@ -54,7 +54,7 @@ uv run --project bench rueca-bench check                 # regression check vs t
 
 - `setup [--lang FAMILY ...]` and `run ... [--lang FAMILY ...]` restrict work
   to language families (manifest `[languages]` keys: `python`, `ecma`,
-  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`, `csharp`, `kotlin`, `ruby`) and/or `data` (the data-format suite);
+  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`, `csharp`, `kotlin`, `ruby`, `sql`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
 - `run --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all|a,b} --suite {s1,s3,data,health,org,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--workers N] [--force] [--prune]`.
   `--split` restricts S1 to one split; the `vector`, `rueca-hybrid` and
@@ -488,7 +488,9 @@ Adding a language is data plus, at most, one labeler entry:
    `labeler` (`ecma` for JS/TS, `go` for receiver methods, `c` for C/C++
    declarators, `rust` for impl / trait / `mod` scopes and test code,
    `shell` for file-level shell functions and the parser repairs the shell
-   pack applies, `ruby` for constant paths and `#` / `.` method names).
+   pack applies, `ruby` for constant paths and `#` / `.` method names; `sql`
+   has no tree-sitter grammar — `[grammars.sql]` has no `binding` and the
+   code-backed SQL labeler gives its callables).
    `calls` / `members` describe call sites for SCIP edge
    derivation (`treesitter.py: _is_callee`); `token_calls` names a
    grammar's unparsed macro-argument node (Rust `token_tree`) whose
@@ -511,7 +513,7 @@ Adding a language is data plus, at most, one labeler entry:
    scip-java a `javac` source list), `include` / `exclude` path prefixes,
    `license`, optional `split` (`calibration`, `diagnostic`), or another
    gold method (`phpstan` for PHP, `shell` for the code-backed shell
-   labeler); scip-dotnet takes `dotnet = { projects
+   labeler, `sql` for the code-backed SQL labeler); scip-dotnet takes `dotnet = { projects
    = [...], framework = "net8.0", remove = ["global.json"] }`: a scratch
    copy of the tree gets a generated solution of the listed projects, each
    made single-target, and runs in the pinned image; and a `[[s3.micro]]` micro-benchmark
@@ -623,6 +625,7 @@ stays untuned:
 | csharp (11) | btcpayserver/btcpayserver (5), ant-design-blazor/ant-design-blazor (3), spectreconsole/spectre.console (3); SWE-rebench V2 | aaubry/YamlDotNet v18.1.0 (scip-dotnet) |
 | kotlin (15) | evant/kotlin-inject (5), square/anvil (5), ajalt/mordant (5); SWE-rebench V2 | square/kotlinpoet 2.4.0 (scip-java) |
 | ruby (4) | faker-ruby/faker (2), jordansissel/fpm (2); SWE-bench Multilingual | rack/rack v3.2.9, Shopify/packwerk v3.3.1 (scip-ruby) |
+| sql (0) | none (no dataset has SQL instances) | sqlc-dev/sqlc v1.31.1 `examples/` (SQL labeler) |
 
 Ruby stops at 4: SWE-bench Multilingual is the only dataset with Ruby
 instances (SWE-rebench V2, Multi-SWE-bench and SWE-PolyBench have none),
@@ -884,8 +887,10 @@ Lua), C++ 878 / 1085 (fmt, yaml-cpp), Rust 1417 / 1296 (serde_json
 342 / 513, ripgrep 1075 / 783), shell 1738 / 2170 (nvm 119 / 125, acme.sh
 1238 / 1630, bash-it 381 / 415), Ruby 1233 / 1205 (jekyll 585 / 513,
 ruby-lsp 648 / 692) — every language above the ≥ 300 per
-direction of §7.2. Calibration: click 210 / 191, goawk 245 / 186, bytes
-140 / 300, bats-core 33 / 21, rack 231 / 191, packwerk 240 / 170; diagnostic: express 8 / 19.
+direction of §7.2 — and SQL 349 / 281 (Sakila 94 / 136, dbt_hubspot
+255 / 145; callees under 300). Calibration: click 210 / 191, goawk
+245 / 186, bytes 140 / 300, bats-core 33 / 21, rack 231 / 191, packwerk
+240 / 170, sqlc 16 / 33; diagnostic: express 8 / 19.
 
 **Gold from SCIP** (RFC 0002 §4.2) at pinned tags: requests v2.34.2, flask
 3.1.3, jinja 3.1.6 (`src/jinja2/`), click 8.1.8 (calibration) (`scip-python`
@@ -969,6 +974,45 @@ not calls, so (`scip.py`):
    call; operators, index calls and symbols are not);
 3. the caller is the innermost callable containing the occurrence
    (module-level calls produce no edge).
+
+**Gold from the SQL labeler (sql).** No cross-reference tool exists for
+SQL repositories (a database resolves names at run time against a search
+path the repository does not state), so the bench derives the gold with
+its own labeler (`sqlgold.py`), built on sqlglot 30.35.0 (MIT, pinned in
+`pyproject.toml`) and independent of the pack's parser (sqlparser-rs):
+the dialect of each tree comes from the manifest (`dialects`, path prefix
+→ dialect), never from the pack's detection. Sets: jOOQ/sakila `e089a5b`
+(the schema files of the PostgreSQL, CockroachDB and YugabyteDB
+(PostgreSQL), MySQL, SQLite and SQL Server copies; Oracle / DB2 copies
+and data files out of scope), fivetran/dbt_hubspot v1.11.0 (`models/`,
+`macros/`); sqlc v1.31.1 `examples/` is the calibration set. Rules:
+
+1. callables: `CREATE TABLE` / `VIEW` / `MATERIALIZED VIEW` / `FUNCTION` /
+   `PROCEDURE` / `TRIGGER` (sqlglot's `Create`, else a `CREATE … <kind>
+   name` header), `-- name: X` queries, dbt models (Jinja files under
+   `models/`, named by file stem) and `{% macro %}` / `{% test %}` blocks;
+   names normalized as documented by the pack (unquoted lower case, quoted
+   kept where the dialect is case-sensitive, default schema dropped, a
+   trigger `table.trigger`);
+2. edges: tables in a parsed statement (`exp.Table`, minus the
+   statement's own name and its CTE names), user functions
+   (`exp.Anonymous`) and executed procedures (`exp.Execute`); in `$$`
+   bodies and statements sqlglot cannot parse, the names after `FROM`,
+   `JOIN`, `INTO`, `UPDATE`, `REFERENCES`, `ON`, `EXEC` / `CALL` /
+   `PERFORM`, and `name(` calls; dbt `ref('m')` and project macro calls in
+   Jinja tags;
+3. target: the callables with that normalized qualified name (else the one
+   qualified name ending with the written segments, or the other way
+   round); the last one earlier in the same file, else one later in it,
+   else the deepest shared directory when it holds one file; else none.
+   File-level statements give no edge. Migration order is not modelled
+   (the micro-benchmark's hand labels model it).
+
+The Rueca arm's `trace` for SQL follows `CALLS`, `REFERENCES` and `WRITES`
+(manifest `trace_edges`: an SQL dependency is any of them), and tables,
+views and dbt models (`Struct`) count as callables (`callable_labels`), so
+the callgraph format is unchanged: an SQL edge is any dependency between
+definitions.
 
 The SCIP reader decodes the protobuf wire format directly and reads **both**
 the deprecated packed `range` / `enclosing_range` fields and the typed
@@ -1057,6 +1101,17 @@ keys against the PHPStan extractor and the report prints the agreement
 (91 of 95 edges, no extra PHPStan edges; the 4 differences are
 `call_user_func` callables, a conditionally declared function and a trait
 `as` alias, which PHPStan does not resolve and the key does).
+
+**SQL micro-benchmark** (`micro/sql/<dialect>/<case>/`, Rueca's own
+labels, Apache-2.0): one directory per dialect — `postgres`, `mysql`,
+`sqlite`, `tsql`, `bigquery`, `snowflake`, `dbt` (Jinja) — 29 cases
+(views and joins, foreign keys, PL/pgSQL and T-SQL routines, triggers,
+`DELIMITER` procedures, `GO` batches, schemas and quoting, CTEs that
+shadow tables, built-ins, strings and comments, partitions, Flyway and
+numbered migrations with a table created again, copies of one table in two
+directories, named queries, dbt `ref` chains and macros). Keys list every
+dependency of each definition; cross-checked against the SQL labeler with
+the case's directory as its dialect (`crosscheck = "sql_labeler"`).
 
 **Python, TS/JS, Go, Java, C, C++, Rust, shell and Kotlin micro-benchmarks**
 (`micro/{python,ecma,go,java,c,cpp,rust,shell,kotlin}/`, Rueca's own labels, Apache-2.0), same
@@ -1957,6 +2012,9 @@ and the summary printed at the end.
 | PyCG micro-benchmark (`vitsalis/PyCG`) | commit | Apache-2.0 | S3 Python call-graph gold (diagnostic) |
 | PHP micro-benchmark (`bench/micro/php`) | in repository | Apache-2.0 (Rueca's own labels) | S3 PHP call-graph gold |
 | Python / TS/JS / Go / Java / C / C++ / Rust / shell / C# / Kotlin micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell,csharp,kotlin}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
+| SQL micro-benchmark (`bench/micro/sql`) | in repository | Apache-2.0 (Rueca's own labels) | S3 dependency gold, per dialect |
+| sqlglot (PyPI) | `uv.lock` (30.35.0) | MIT | SQL labeler (S3 gold) |
+| jOOQ/sakila, fivetran/dbt_hubspot, sqlc-dev/sqlc | commit | BSD-2-Clause / Apache-2.0 / MIT | S3 SQL repositories (gold built from the code) |
 | Env bridge labels (`bench/labels/bridge`) | in repository | Apache-2.0 (Rueca's own labels) | data-format suite gold |
 | PHPStan (`phpstan/phpstan`) release PHAR | version + sha256 | MIT | S3 PHP gold (run in Docker, never vendored) |
 | `php:8.3-cli` Docker official image | digest | PHP-3.01 (separate process) | runtime for PHPStan |

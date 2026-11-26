@@ -47,7 +47,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from ..common import CACHE, count_tokens, run, safe_name, sha256_file
+from ..common import CACHE, count_tokens, run, safe_name, sha256_file, trace_edges
 from ..efficiency import json_prefix_tokens, text_prefix_tokens
 from ..embed import DEFAULT_PRESET
 from .base import Arm, CallResult, Handle, is_callable_label, line_distance, line_match
@@ -586,18 +586,22 @@ class RuecaArm(Arm):
             if not oerr and isinstance(odata, dict):
                 walk(odata.get("symbols") or [])
             outlines[func["path"]] = flat
-        ok = [c for c in outlines[func["path"]] if c.get("name") == func["name"] and is_callable_label(c.get("label")) and line_match(c.get("start_line"), func)]
+        ok = [c for c in outlines[func["path"]] if c.get("name") == func["name"] and is_callable_label(c.get("label"), h.language) and line_match(c.get("start_line"), func)]
         if ok:
             c = min(ok, key=lambda n: line_distance(n.get("start_line"), func))
             return CallResult(True, secs, hits=[_brief(dict(c, path=func["path"]))], extra={"ref": c.get("id")})
         return CallResult(False, secs, error=err or "no candidate or outline symbol matched path+name+line")
 
     def neighbors(self, h: Handle, ref: Any) -> CallResult:
-        """One `trace` (direction `both`, depth 1, default edge types and
+        """One `trace` (direction `both`, depth 1, default edge types — or
+        the language's `trace_edges` in the manifest, SQL dependencies — and
         test exclusion): each depth-1 neighbour with the best confidence of
         the edges that link it to the root in that direction. `tokens` is
         what an agent reads for that request, `tokens_json` the JSON."""
         args = {"id": ref, "direction": "both", "depth": 1, "limit": 2000}
+        edges = trace_edges(h.language)
+        if edges:
+            args["edge_types"] = edges
         data, secs, err, raw = self._query_raw(h, "trace", args)
         if err:
             return CallResult(False, secs, error=err)

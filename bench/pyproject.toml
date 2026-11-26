@@ -20,6 +20,7 @@ dependencies = [
     "tree-sitter-c-sharp>=0.24.0,<0.25",
     "tree-sitter-kotlin==0.4.0",
     "tree-sitter-ruby>=0.23.1,<0.24",
+    "sqlglot==30.35.0",
     "pyyaml>=6.0.3,<7",
     "python-hcl2>=8.1.4,<9",
     "tomli-w>=1.0",

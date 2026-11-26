@@ -1,0 +1,13 @@
+{
+  "schema.sql:users": [],
+  "schema.sql:posts": [
+    "schema.sql:users"
+  ],
+  "query.sql:GetUser": [
+    "schema.sql:users"
+  ],
+  "query.sql:ListPosts": [
+    "schema.sql:posts",
+    "schema.sql:users"
+  ]
+}

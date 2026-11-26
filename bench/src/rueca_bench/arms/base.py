@@ -16,13 +16,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..common import extra_callable_labels
+
 CALLABLE_LABELS = {"Function", "Method", "Test", "Constructor"}
 
 
-def is_callable_label(label: str | None) -> bool:
+def is_callable_label(label: str | None, language: str | None = None) -> bool:
+    """A label the structural questions are about: functions and methods,
+    plus the language's `callable_labels` in the manifest (SQL: `Struct` —
+    tables, views and dbt models are definitions with dependencies)."""
     if not label:
         return False
-    if label in CALLABLE_LABELS:
+    if label in CALLABLE_LABELS or (language and label in extra_callable_labels(language)):
         return True
     return label.startswith("ext:") and label.endswith(("Function", "Method"))
 

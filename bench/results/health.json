@@ -567,6 +567,54 @@
    "carried": true
   },
   {
+   "name": "s3-sakila",
+   "repo": "jOOQ/sakila",
+   "commit": "e089a5b1ec9af0df7a9c6a5d47d49fa1736a4e84",
+   "language": "sql",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 25,
+   "files_partial": 10,
+   "duration_ms": 254,
+   "raw_files_extracted": 25,
+   "raw_files_partial": 10,
+   "excluded": {},
+   "carried": true
+  },
+  {
+   "name": "s3-dbt_hubspot",
+   "repo": "fivetran/dbt_hubspot",
+   "commit": "6de2fe2fb2e3cb67e5d2cb525646bce3de8e6623",
+   "language": "sql",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 335,
+   "files_partial": 22,
+   "duration_ms": 247,
+   "raw_files_extracted": 335,
+   "raw_files_partial": 22,
+   "excluded": {},
+   "carried": true
+  },
+  {
+   "name": "s3-sqlc",
+   "repo": "sqlc-dev/sqlc",
+   "commit": "a95e91d70ad9e1181253c333a1cfdd75ae4b95a5",
+   "language": "sql",
+   "source": "s3",
+   "split": "calibration",
+   "ok": true,
+   "files_extracted": 2015,
+   "files_partial": 35,
+   "duration_ms": 1474,
+   "raw_files_extracted": 2015,
+   "raw_files_partial": 35,
+   "excluded": {},
+   "carried": true
+  },
+  {
    "name": "s1-psf__requests",
    "repo": "psf/requests",
    "commit": "091991be0da19de9108dbe5e3752917fea3d7fdc",
@@ -1826,5 +1874,5 @@
    "carried": true
   }
  ],
- "carried": 112
+ "carried": 115
 }

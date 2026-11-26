@@ -302,6 +302,16 @@
 //! of a variable a sourced file assigns is a `REFERENCES` edge to that
 //! variable. See the `shell` module.
 //!
+//! # SQL
+//!
+//! A database namespace is global: a SQL name resolves against every SQL
+//! definition of the snapshot by qualified name (`users`, `billing.invoices`),
+//! narrowed to the referencing file, then by migration order (the effective
+//! definition of a table created again), then by nearest directory; a
+//! qualified name that matches only by its last segments is a unique-name
+//! guess; `$type:T` receivers are columns of relation `T`; CTE names resolve
+//! to the CTEs of the enclosing definitions. See the `sql` module.
+//!
 //! # Bridge and data references (RFC 0003 §6–§7)
 //!
 //! Handled outside the ladder (exact matches only, never name matching; see
@@ -397,6 +407,7 @@ mod jvm;
 mod ruby;
 mod rust;
 mod shell;
+mod sql;
 
 /// One file of the snapshot as seen by the resolver.
 #[derive(Debug, Clone)]
@@ -746,6 +757,8 @@ struct Resolver<'a> {
     jvm: jvm::JvmTables,
     /// Ruby tables (see the `ruby` module).
     ruby: ruby::RubyTables,
+    /// SQL definitions by qualified name (see the `sql` module).
+    sql_defs: OnceCell<sql::SqlIndex>,
 
     /// Key: (module, name, reached through `export *`, namespace).
     lookup_memo: RefCell<HashMap<LookupKey, Option<Target>>>,
@@ -1210,6 +1223,7 @@ impl<'a> Resolver<'a> {
             csharp: csharp::CSharpTables::default(),
             jvm: jvm::JvmTables::default(),
             ruby: ruby::RubyTables::default(),
+            sql_defs: OnceCell::new(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
@@ -2477,6 +2491,9 @@ impl<'a> Resolver<'a> {
         }
         if self.is_ruby(f) {
             return self.resolve_ruby(f, item, scope);
+        }
+        if self.is_sql(f) {
+            return self.resolve_sql(f, item);
         }
         match item.receiver.map(str::trim) {
             None => self.resolve_bare(f, item, scope),

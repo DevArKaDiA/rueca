@@ -109,7 +109,7 @@ def grammar_for(path: str, language: str | None = None) -> str | None:
 
 def parse(path: str, source: bytes, language: str | None = None):
     kind = grammar_for(path, language)
-    if kind is None:
+    if kind is None or "binding" not in _grammars()[kind]:
         return None
     parser = Parser(_language(kind))
     if _grammars()[kind].get("labeler") == "shell":
@@ -194,9 +194,14 @@ def extract_functions(path: str, source: bytes, language: str | None = None) -> 
     kind = grammar_for(path, language)
     if kind is None:
         return []
-    tree = parse(path, source, language)
     spec = _grammars()[kind]
     labeler = spec.get("labeler", "nesting")
+    if labeler == "sql":
+        # No tree-sitter grammar: the code-backed SQL labeler (sqlgold.py).
+        from .sqlgold import sql_functions
+
+        return sql_functions(path, source)
+    tree = parse(path, source, language)
     if labeler == "ecma":
         return _ecma_functions(tree.root_node)
     if labeler == "go":

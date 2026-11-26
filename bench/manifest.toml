@@ -924,6 +924,21 @@ s1_sources = "SWE-bench Multilingual (Ruby: rubocop, fluentd, fastlane, jekyll g
 s3_gold = "scip-ruby 0.5.1 (Sorbet; jekyll v4.4.1 untyped, ruby-lsp v0.26.11 typed with RBS comments; rack v3.2.9 and packwerk v3.3.1 = calibration) and the rueca-bench Ruby micro-benchmark"
 notes = "Ruby methods are named `Const::Path#method` (instance) and `Const::Path.method` (singleton, `class << self`, `module_function`). scip-ruby (Sorbet) resolves constants, `self` calls through the ancestors and mixins, `Foo.new` (to `initialize`) and receivers typed by a local `x = Foo.new`, a `sig` or an RBS comment; a call on a receiver of unknown type (an untyped parameter, the result of a method without a signature) has no gold edge, so a by-name guess there scores as a false positive."
 
+[languages.sql]
+label = "sql"
+members = ["sql"]
+extensions = [".sql", ".psql", ".pgsql", ".plpgsql", ".mysql", ".tsql", ".bq"]
+# pgTAP / plain SQL test scripts by name; dbt singular tests live in `tests/`
+# (a built-in test directory).
+test_files = ['^test_.*\.sql$', '.*_test\.sql$']
+s1_sources = "none: no localization dataset has SQL instances (SWE-bench Multilingual, SWE-bench Verified / Lite, SWE-PolyBench, Multi-SWE-bench, SWE-rebench V2)"
+s3_gold = "rueca-bench SQL labeler (code-backed, sqlglot 30.35.0; jOOQ/sakila multi-dialect schemas, fivetran/dbt_hubspot v1.11.0 dbt models; sqlc examples = calibration) and the rueca-bench SQL micro-benchmark (per dialect)"
+notes = "No cross-reference tool exists for SQL repositories: the structural gold is the bench's own labeler (sqlgold.py, sqlglot + dbt Jinja regexes), independent of the pack's parser (sqlparser-rs). Edges are any dependency between definitions (tables, views, routines, triggers, dbt models and macros, named queries): relation references, foreign keys, calls; the Rueca arm traces CALLS, REFERENCES and WRITES (`trace_edges`)."
+trace_edges = ["CALLS", "REFERENCES", "WRITES"]
+# Tables, views, dbt models and snapshots (`Struct`) are callables of the
+# structural questions too (arms/base.py: is_callable_label).
+callable_labels = ["Struct"]
+
 # Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
 # callables). `binding` = Python package (pinned in pyproject.toml) and
 # function returning the language. `labeler = "nesting"` (default) is the
@@ -1089,6 +1104,15 @@ package = "tree-sitter-ruby 0.23.1 (MIT)"
 extensions = [".rb", ".rake", ".gemspec", ".ru"]
 labeler = "ruby"
 separator = "::"
+
+# SQL: no tree-sitter grammar; the code-backed labeler (sqlgold.py, sqlglot)
+# gives the callables — tables, views, routines, triggers, dbt models and
+# macros, named queries (`labeler = "sql"`, no `binding`).
+[grammars.sql]
+package = "sqlglot 30.35.0 (MIT)"
+extensions = [".sql", ".psql", ".pgsql", ".plpgsql", ".mysql", ".tsql", ".bq"]
+labeler = "sql"
+separator = "."
 
 # ---------------------------------------------------------------- tools
 
@@ -1304,7 +1328,7 @@ contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arm
 # 1ff5e82. Every other suite (carried): the RFC 0005 contract branch, main
 # 2c5a384 plus the response contract, whose quality metrics are identical
 # to main's binary on the same run (only tokens and latency differ).
-results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4); Kotlin (every suite): feat/lang-kotlin @ 3265ba4 (binary sha256 aeca53b7707c6eb6d37890b90a72cb9dce8caad38741c0e2462f742f371f7624); Ruby (every suite): feat/lang-ruby @ 2e353ab (binary sha256 f4228890b7084a9c246a554e7f6b2bef8dd2c7e9b551dc06761bf2a89db149be)"
+results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4); Kotlin (every suite): feat/lang-kotlin @ 3265ba4 (binary sha256 aeca53b7707c6eb6d37890b90a72cb9dce8caad38741c0e2462f742f371f7624); Ruby (every suite): feat/lang-ruby @ 2e353ab (binary sha256 f4228890b7084a9c246a554e7f6b2bef8dd2c7e9b551dc06761bf2a89db149be); SQL (every suite): feat/lang-sql @ 9c6fb5d (binary sha256 10388ab51475399c7234c70836fb0a64243af5edd662dd3a65309884465ca9a6)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -2528,6 +2552,44 @@ indexer = "scip_ruby"
 args = ["--index-file", "{out}", "--gem-metadata", "packwerk@3.3.1", "--no-config", "--quiet", "--suppress-non-critical", "--max-threads", "4", "--parser=prism", "--enable-experimental-requires-ancestor", "--enable-experimental-rbs-comments", "--ignore=vendor/bundle", "."]
 split = "calibration"
 
+# SQL: no cross-reference tool exists, so the gold is the bench's code-backed
+# labeler (`gold = "sql"`, sqlgold.py: sqlglot plus dbt Jinja regexes) with
+# the dialect of each tree from `dialects` (path prefix → dialect), never
+# from the pack's detection. Gated: the Sakila sample database in the
+# dialects Rueca reads (tables, foreign keys, views, functions, procedures,
+# triggers; Oracle and DB2 copies and the data files out of scope) and a dbt
+# package (models and macros, `ref()` dependencies). Calibration: sqlc's
+# examples (schemas and `-- name:` queries in three dialects).
+[[s3.repos]]
+repo = "jOOQ/sakila"
+language = "sql"
+commit = "e089a5b1ec9af0df7a9c6a5d47d49fa1736a4e84"
+license = "BSD-2-Clause"
+include = ["postgres-sakila-db/postgres-sakila-schema.sql", "mysql-sakila-db/mysql-sakila-schema.sql", "sqlite-sakila-db/sqlite-sakila-schema.sql", "sql-server-sakila-db/sql-server-sakila-schema.sql", "cockroachdb-sakila-db/cockroachdb-sakila-schema.sql", "yugabytedb-sakila-db/yugabytedb-sakila-schema.sql"]
+dialects = { "postgres-sakila-db/" = "postgres", "cockroachdb-sakila-db/" = "postgres", "yugabytedb-sakila-db/" = "postgres", "mysql-sakila-db/" = "mysql", "sqlite-sakila-db/" = "sqlite", "sql-server-sakila-db/" = "tsql" }
+gold = "sql"
+
+[[s3.repos]]
+repo = "fivetran/dbt_hubspot"
+language = "sql"
+tag = "v1.11.0"
+commit = "6de2fe2fb2e3cb67e5d2cb525646bce3de8e6623"
+license = "Apache-2.0"
+include = ["models/", "macros/"]
+dialects = { "" = "dbt" }
+gold = "sql"
+
+[[s3.repos]]
+repo = "sqlc-dev/sqlc"
+language = "sql"
+tag = "v1.31.1"
+commit = "a95e91d70ad9e1181253c333a1cfdd75ae4b95a5"
+license = "MIT"
+include = ["examples/"]
+dialects = { "examples/" = "ansi", "examples/authors/postgresql/" = "postgres", "examples/batch/postgresql/" = "postgres", "examples/booktest/postgresql/" = "postgres", "examples/jets/postgresql/" = "postgres", "examples/ondeck/postgresql/" = "postgres", "examples/authors/mysql/" = "mysql", "examples/booktest/mysql/" = "mysql", "examples/ondeck/mysql/" = "mysql", "examples/authors/sqlite/" = "sqlite", "examples/booktest/sqlite/" = "sqlite", "examples/ondeck/sqlite/" = "sqlite" }
+gold = "sql"
+split = "calibration"
+
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
 [[s3.micro]]
 name = "pycg"
@@ -2669,6 +2731,21 @@ format = "rueca"
 local = "micro/ruby"
 license = "Apache-2.0"
 crosscheck = "scip_ruby"
+
+# SQL micro-benchmark: Rueca's own hand-labelled snippets (Apache-2.0), one
+# directory per dialect (postgres, mysql, sqlite, tsql, bigquery-snowflake,
+# dbt-jinja, migrations), each case a small tree whose callgraph.json lists
+# every dependency of each definition (relations, foreign keys, calls);
+# cross-checked against the code-backed labeler (`crosscheck =
+# "sql_labeler"`, dialect = the case's directory).
+[[s3.micro]]
+name = "sql-micro"
+title = "SQL micro-benchmark (rueca-bench)"
+language = "sql"
+format = "rueca"
+local = "micro/sql"
+license = "Apache-2.0"
+crosscheck = "sql_labeler"
 
 # ---------------------------------------------------------------- data formats
 # RFC 0003 §3.3 (bench/README.md, "Data formats"): key recall and span line

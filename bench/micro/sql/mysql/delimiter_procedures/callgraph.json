@@ -1,0 +1,13 @@
+{
+  "schema.sql:film": [],
+  "schema.sql:inventory": [
+    "schema.sql:film"
+  ],
+  "schema.sql:count_titles": [
+    "schema.sql:film"
+  ],
+  "schema.sql:film_in_stock": [
+    "schema.sql:count_titles",
+    "schema.sql:inventory"
+  ]
+}

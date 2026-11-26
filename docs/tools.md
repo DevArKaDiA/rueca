@@ -91,7 +91,11 @@ release with `"format": "verbose"` ([below](#verbose-alpha-format)).
   `scripts/deploy.sh:deploy` (path with extension, colon, function name —
   functions are file-level whatever their nesting; `bin/deploy:main` for an
   extension-less script found by its `#!` line; env providers inside a
-  function `deploy.sh:setup.DATABASE_URL`).
+  function `deploy.sh:setup.DATABASE_URL`); SQL `users`,
+  `billing.invoices`, `users.email` (normalized object names, no module:
+  a database namespace is global; a trigger `film.last_updated`, a dbt
+  model its file stem, a CTE `view.cte`; the signature ends with the
+  file's dialect, `CREATE TABLE users ( -- postgres`).
 - **Errors**: MCP tool errors use `isError: true` with a message; the CLI
   prints `{"error": "..."}` to stdout and exits with status 2.
 
@@ -391,7 +395,8 @@ refs](#several-refs-of-one-repository)).
 `typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`, `java`, `cpp`, `c` (a `.h` header is `cpp` when the
 repository has C++ sources), `rust`, `proto`, `shell` (sh, bash, zsh, ksh, bats;
 extension-less scripts by their `#!` line), `csharp`, `kotlin` (`.kt`, `.kts`),
-`ruby` (`.rb`, `.rake`, `.gemspec`, `.ru`, `Rakefile`, `Gemfile`), the data languages
+`ruby` (`.rb`, `.rake`, `.gemspec`, `.ru`, `Rakefile`, `Gemfile`), `sql` (`preview`;
+`.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq`; every dialect), the data languages
 `json` (JSONC included), `yaml`, `toml`, `dotenv`, `ini`, `properties`,
 `xml` (`pom.xml`, `*.csproj`, `AndroidManifest.xml` only), `hcl`
 (Terraform / OpenTofu included) and `dockerfile`. A language whose pack is not in
@@ -590,7 +595,13 @@ a Rust `impl Trait for Type` gives `IMPLEMENTS` `Type` → `Trait`. In
 shell, `source` / `.` are `IMPORTS`, a script run by path (`./deploy.sh`,
 `bash x.sh`) is a `CALLS` edge to the script's `File` node (so `trace` on
 `bin/deploy` with `direction: "callers"` lists who runs it), and a `trap`
-handler is a `REFERENCES` edge to the function it names. The code ↔ config
+handler is a `REFERENCES` edge to the function it names. In
+SQL, the tables and views a definition reads are `REFERENCES` edges, the
+ones it writes (`INSERT` … `DROP`) `WRITES` edges and the routines it
+calls `CALLS` edges, so the dependents of a table are `trace` with
+`direction: "callers"` and `edge_types: ["REFERENCES", "WRITES",
+"CALLS"]`; file-level statements (a migration's `ALTER TABLE`) come from
+the `File` node. The code ↔ config
 bridge (RFC 0003 §7) uses `READS` / `WRITES`:
 
 ```json
