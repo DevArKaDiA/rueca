@@ -134,8 +134,8 @@ def main() -> None:
             # Statements no dialect parses: "### <parser error>", "<file> [<line, column>]", text.
             for block in re.split(r"(?m)^### ", un.stdout)[1:]:
                 lines = block.split("\n")
-                m = re.match(r"(.*) \[[^\]]*\]$", lines[1])
-                rel = m.group(1) if m else lines[1]
+                head, sep, loc = lines[1].rpartition(" [")
+                rel = head if sep and loc.endswith("]") and "]" not in loc[:-1] else lines[1]
                 first = " ".join(" ".join(lines[2:]).split()[:3])[:60]
                 key = f"error | {lines[0].removeprefix('sql parser error: ')[:80]} | {first}"
                 causes.setdefault(rel, {})
