@@ -353,7 +353,8 @@
    "duration_ms": 349,
    "raw_files_extracted": 8,
    "raw_files_partial": 1,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-acme.sh",
@@ -368,7 +369,8 @@
    "duration_ms": 674,
    "raw_files_extracted": 304,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-bash-it",
@@ -385,7 +387,8 @@
    "raw_files_partial": 1,
    "excluded": {
     "vendored": 10
-   }
+   },
+   "carried": true
   },
   {
    "name": "s3-bats-core",
@@ -400,7 +403,8 @@
    "duration_ms": 371,
    "raw_files_extracted": 268,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s3-serilog",
@@ -571,12 +575,11 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 25,
-   "files_partial": 10,
-   "duration_ms": 254,
+   "files_partial": 0,
+   "duration_ms": 401,
    "raw_files_extracted": 25,
-   "raw_files_partial": 10,
-   "excluded": {},
-   "carried": true
+   "raw_files_partial": 0,
+   "excluded": {}
   },
   {
    "name": "s3-dbt_hubspot",
@@ -587,12 +590,56 @@
    "split": "gated",
    "ok": true,
    "files_extracted": 335,
-   "files_partial": 22,
-   "duration_ms": 247,
+   "files_partial": 0,
+   "duration_ms": 745,
    "raw_files_extracted": 335,
-   "raw_files_partial": 22,
-   "excluded": {},
-   "carried": true
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s3-pgmq",
+   "repo": "pgmq/pgmq",
+   "commit": "51468f6ba2afeb4a4a9a67e9a532f37b590a0929",
+   "language": "sql",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 101,
+   "files_partial": 0,
+   "duration_ms": 323,
+   "raw_files_extracted": 101,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s3-tSQLt",
+   "repo": "tSQLt-org/tSQLt",
+   "commit": "4a921d0dacfb1d66b3db124c58158c80e5e910e6",
+   "language": "sql",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 281,
+   "files_partial": 14,
+   "duration_ms": 653,
+   "raw_files_extracted": 281,
+   "raw_files_partial": 14,
+   "excluded": {}
+  },
+  {
+   "name": "s3-mimic-code",
+   "repo": "MIT-LCP/mimic-code",
+   "commit": "c7e07560dc847e32cbb0b2890213e8e7cbd8bc7e",
+   "language": "sql",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 469,
+   "files_partial": 8,
+   "duration_ms": 1148,
+   "raw_files_extracted": 469,
+   "raw_files_partial": 8,
+   "excluded": {}
   },
   {
    "name": "s3-sqlc",
@@ -603,12 +650,11 @@
    "split": "calibration",
    "ok": true,
    "files_extracted": 2015,
-   "files_partial": 35,
-   "duration_ms": 1474,
+   "files_partial": 19,
+   "duration_ms": 1735,
    "raw_files_extracted": 2015,
-   "raw_files_partial": 35,
-   "excluded": {},
-   "carried": true
+   "raw_files_partial": 19,
+   "excluded": {}
   },
   {
    "name": "s3-Alamofire",
@@ -2090,7 +2136,8 @@
    "duration_ms": 597,
    "raw_files_extracted": 319,
    "raw_files_partial": 5,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-spaceship-prompt__spaceship-prompt",
@@ -2105,7 +2152,8 @@
    "duration_ms": 267,
    "raw_files_extracted": 100,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-sorin-ionescu__prezto",
@@ -2120,7 +2168,8 @@
    "duration_ms": 189,
    "raw_files_extracted": 40,
    "raw_files_partial": 1,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-Bash-it__bash-it",
@@ -2135,7 +2184,8 @@
    "duration_ms": 503,
    "raw_files_extracted": 308,
    "raw_files_partial": 3,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-docker-mailserver__docker-mailserver",
@@ -2150,7 +2200,8 @@
    "duration_ms": 336,
    "raw_files_extracted": 115,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-asdf-vm__asdf",
@@ -2165,7 +2216,8 @@
    "duration_ms": 212,
    "raw_files_extracted": 49,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-sdkman__sdkman-cli",
@@ -2180,7 +2232,8 @@
    "duration_ms": 190,
    "raw_files_extracted": 35,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-ChrisTitusTech__linutil",
@@ -2195,7 +2248,8 @@
    "duration_ms": 202,
    "raw_files_extracted": 36,
    "raw_files_partial": 0,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-shellspec__shellspec",
@@ -2210,7 +2264,8 @@
    "duration_ms": 319,
    "raw_files_extracted": 182,
    "raw_files_partial": 2,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-zdharma-continuum__zinit",
@@ -2225,7 +2280,8 @@
    "duration_ms": 255,
    "raw_files_extracted": 22,
    "raw_files_partial": 5,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-ohmybash__oh-my-bash",
@@ -2240,7 +2296,8 @@
    "duration_ms": 413,
    "raw_files_extracted": 200,
    "raw_files_partial": 5,
-   "excluded": {}
+   "excluded": {},
+   "carried": true
   },
   {
    "name": "s1-bats-core__bats-core",
@@ -2255,8 +2312,236 @@
    "duration_ms": 388,
    "raw_files_extracted": 255,
    "raw_files_partial": 2,
+   "excluded": {},
+   "carried": true
+  },
+  {
+   "name": "s1-dbt-labs__dbt-utils",
+   "repo": "dbt-labs/dbt-utils",
+   "commit": "2dfdb3c4b1ef600e77f4a4a2d5a60fa09a82a42f",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 131,
+   "files_partial": 0,
+   "duration_ms": 478,
+   "raw_files_extracted": 131,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-dbt-labs__dbt-project-evaluator",
+   "repo": "dbt-labs/dbt-project-evaluator",
+   "commit": "8269c67c0fe13320e0cafd7d5c79c272621e546b",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 75,
+   "files_partial": 0,
+   "duration_ms": 267,
+   "raw_files_extracted": 75,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-dbt-labs__dbt-external-tables",
+   "repo": "dbt-labs/dbt-external-tables",
+   "commit": "c33165e5d8b2f8908571f11dfa61654109b8c5b5",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 47,
+   "files_partial": 0,
+   "duration_ms": 333,
+   "raw_files_extracted": 47,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-calogica__dbt-date",
+   "repo": "calogica/dbt-date",
+   "commit": "d2295ed0abfeb904888c35a9139250f6e7477ecd",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 46,
+   "files_partial": 0,
+   "duration_ms": 376,
+   "raw_files_extracted": 46,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-brooklyn-data__dbt_artifacts",
+   "repo": "brooklyn-data/dbt_artifacts",
+   "commit": "2d5be7aec567c2b9db9133030fe2754b735a08f3",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 37,
+   "files_partial": 0,
+   "duration_ms": 208,
+   "raw_files_extracted": 37,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-get-select__dbt-snowflake-monitoring",
+   "repo": "get-select/dbt-snowflake-monitoring",
+   "commit": "4c2bde6707883322314ac1b33a8a56429370c0c5",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 17,
+   "files_partial": 0,
+   "duration_ms": 203,
+   "raw_files_extracted": 17,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-tuva-health__tuva-core",
+   "repo": "tuva-health/tuva-core",
+   "commit": "5ca87115a4a4b4c940857715122bbeadfad770aa",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 1154,
+   "files_partial": 0,
+   "duration_ms": 1267,
+   "raw_files_extracted": 1154,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-BrentOzarULTD__SQL-Server-First-Responder-Kit",
+   "repo": "BrentOzarULTD/SQL-Server-First-Responder-Kit",
+   "commit": "ddf866623593e082969d1a82d41487a52abd2296",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 23,
+   "files_partial": 1,
+   "duration_ms": 975,
+   "raw_files_extracted": 23,
+   "raw_files_partial": 1,
+   "excluded": {}
+  },
+  {
+   "name": "s1-pgmq__pgmq",
+   "repo": "pgmq/pgmq",
+   "commit": "7fd411d8ffd53b5313039f59167124c861d46430",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 63,
+   "files_partial": 0,
+   "duration_ms": 243,
+   "raw_files_extracted": 63,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-pgpartman__pg_partman",
+   "repo": "pgpartman/pg_partman",
+   "commit": "cb0133a25d5c871517f9c40fcdef71ff0b657e0e",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 216,
+   "files_partial": 0,
+   "duration_ms": 690,
+   "raw_files_extracted": 216,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-MIT-LCP__mimic-code",
+   "repo": "MIT-LCP/mimic-code",
+   "commit": "ccb69726e52fbbe62cd9a42131e5786f312e6f61",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 294,
+   "files_partial": 2,
+   "duration_ms": 690,
+   "raw_files_extracted": 294,
+   "raw_files_partial": 2,
+   "excluded": {}
+  },
+  {
+   "name": "s1-GoogleCloudPlatform__bigquery-utils",
+   "repo": "GoogleCloudPlatform/bigquery-utils",
+   "commit": "7bd8ba2faa7ba8b22c2e6152b3e783eb2386cf67",
+   "language": "sql",
+   "source": "s1",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 105,
+   "files_partial": 1,
+   "duration_ms": 326,
+   "raw_files_extracted": 111,
+   "raw_files_partial": 1,
+   "excluded": {
+    "vendored": 6
+   }
+  },
+  {
+   "name": "s1-dbt-labs__dbt-codegen",
+   "repo": "dbt-labs/dbt-codegen",
+   "commit": "e24e5dc5daca47ba350415a59790d6b741be246b",
+   "language": "sql",
+   "source": "s1",
+   "split": "calibration",
+   "ok": true,
+   "files_extracted": 34,
+   "files_partial": 0,
+   "duration_ms": 212,
+   "raw_files_extracted": 34,
+   "raw_files_partial": 0,
+   "excluded": {}
+  },
+  {
+   "name": "s1-erikdarlingdata__DarlingData",
+   "repo": "erikdarlingdata/DarlingData",
+   "commit": "a0b7f3086b260f766233d104bc949260b4f16066",
+   "language": "sql",
+   "source": "s1",
+   "split": "calibration",
+   "ok": true,
+   "files_extracted": 55,
+   "files_partial": 7,
+   "duration_ms": 266,
+   "raw_files_extracted": 55,
+   "raw_files_partial": 7,
+   "excluded": {}
+  },
+  {
+   "name": "s1-NikolayS__postgres_dba",
+   "repo": "NikolayS/postgres_dba",
+   "commit": "8eec2ea90f34b25bba14ada58666be6c2b46cccb",
+   "language": "sql",
+   "source": "s1",
+   "split": "calibration",
+   "ok": true,
+   "files_extracted": 33,
+   "files_partial": 3,
+   "duration_ms": 219,
+   "raw_files_extracted": 33,
+   "raw_files_partial": 3,
    "excluded": {}
   }
  ],
- "carried": 124
+ "carried": 137
 }

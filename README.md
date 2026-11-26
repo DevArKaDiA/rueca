@@ -23,7 +23,7 @@ agent can follow.
 > **Status: alpha (`0.1.0-alpha.2`).** Local mode (one repository, or an
 > organization of local repositories with `--org`); Python,
 > TypeScript/JavaScript, PHP, Go, Java, C, C++, Rust, shell scripts,
-> C#, Kotlin, Ruby, SQL (`preview`) and Swift, plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
+> C#, Kotlin, Ruby, SQL and Swift, plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
 ## Features
@@ -98,7 +98,7 @@ the ancestors, reopened classes as one constant, `include` / `extend` /
 receivers typed from `Foo.new`, Sorbet `sig`s and RBS comments, `require` /
 `require_relative`, RSpec and Minitest tests, `ENV` reads, gemspec / Gemfile
 packages for cross-repository edges),
-SQL — `preview` (PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, Oracle with
+SQL (PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, Oracle with
 PL/SQL, DB2, BigQuery, Snowflake, one dialect per file from a directive,
 the path or the content; tables, views and their columns, functions,
 procedures, triggers, packages, indexes, types; procedural code read
@@ -477,7 +477,7 @@ scorecard (`stable` = every floor met; full tables in
 - **C#** `stable` (localization meets the floor at BM25's level: File Acc@5 48.7 vs 48.7, Function Acc@10 26.3 vs 28.9 over 39 SWE-rebench V2 issues, paired intervals cross zero; callers / callees precision 96.9 / 95.5, recall 95.2 / 96.6 against scip-dotnet on serilog and eShopOnWeb; 0.0% of files with parse errors)
 - **Kotlin** `stable` (callees precision at the floor: 90.0, interval 87.9–92.0; callers precision 96.4, recall 86.6 / 85.5 against scip-java's Kotlin indexer on moshi and clikt; localization not significantly below BM25: File Acc@5 56.5 vs 58.7, Function Acc@10 45.5 vs 31.8 over 46 Multi-SWE-bench issues; 0.15% of files with parse errors)
 - **Ruby** `stable` (callers / callees precision 98.4 / 95.4, recall 96.8 / 96.7 against scip-ruby on jekyll and ruby-lsp; localization not significantly below BM25: File Acc@5 55.0 vs 55.0, Function Acc@10 24.2 vs 18.2 over 40 SWE-bench Multilingual issues; 0.2% of files with parse errors)
-- **SQL** `preview` (no localization dataset has SQL instances, so the localization floors are pending; structure measured against the bench's code-backed labeler on sqlglot, not a compiler-grade oracle: callers / callees precision 99.8 / 99.6, recall 98.9 / 97.5 on Sakila in six dialects and a dbt package, callees population 281 < 300, micro callee F1 100.0; 8.9% of files with parse errors against the 2% floor — Oracle / DB2 copies, MySQL routines, T-SQL procedural code, Jinja macros)
+- **SQL** `stable` (localization not significantly below BM25: File Acc@5 76.9 vs 78.2, Function Acc@10 72.2 vs 75.9 over 78 issues mined from GitHub by the bench — no dataset has SQL instances — on seven dbt packages and T-SQL, PL/pgSQL and BigQuery repositories; where the issue does not name the file Rueca trails clearly, File Acc@5 56.0 vs 72.0 over 25; structure measured against the bench's code-backed labeler on sqlglot, not a compiler-grade oracle: callers / callees precision 99.5 / 98.8, recall 96.1 / 95.6 on Sakila in six dialects, a dbt package, pgmq, tSQLt and mimic-code, micro callee F1 100.0; 0.8% of files with parse errors, counted strictly — a statement accepted by its first words alone is an error — with T-SQL alone at 4.9% and Oracle PL/SQL object types still unparsed outside the gated corpus)
 - **Swift** `stable` (every structural floor met at the point estimate, two by a narrow margin: callees precision 90.8, interval 89.1–92.4, callees recall 75.5, interval 72.7–78.3; callers precision / recall 93.1 / 78.7 against the Swift compiler's index store on Alamofire and swift-algorithms; localization not significantly below BM25 but trailing it: File Acc@5 70.9 vs 80.0, Function Acc@10 51.1 vs 57.4 over 55 SWE-rebench V2 issues; 1.8% of files with parse errors)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
@@ -512,7 +512,7 @@ absolute floors and aspirational targets).
 | Stage | What it delivers | Status |
 |---|---|---|
 | **Local mode** | One binary, MCP over stdio, the tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
-| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Ruby, Swift, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c), SQL (§10.4g) | ✅ done, every language `stable` (shell on a localization set mined by the bench and a code-backed structural gold); SQL `preview` (no localization dataset, parse-error floor, code-backed structural gold) |
+| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Ruby, Swift, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c), SQL (§10.4g) | ✅ done, every language `stable` (shell and SQL on localization sets mined by the bench and code-backed structural gold) |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |

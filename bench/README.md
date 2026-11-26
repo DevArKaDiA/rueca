@@ -628,7 +628,7 @@ stays untuned:
 | csharp (11) | btcpayserver/btcpayserver (5), ant-design-blazor/ant-design-blazor (3), spectreconsole/spectre.console (3); SWE-rebench V2 | aaubry/YamlDotNet v18.1.0 (scip-dotnet) |
 | kotlin (15) | evant/kotlin-inject (5), square/anvil (5), ajalt/mordant (5); SWE-rebench V2 | square/kotlinpoet 2.4.0 (scip-java) |
 | ruby (4) | faker-ruby/faker (2), jordansissel/fpm (2); SWE-bench Multilingual | rack/rack v3.2.9, Shopify/packwerk v3.3.1 (scip-ruby) |
-| sql (0) | none (no dataset has SQL instances) | sqlc-dev/sqlc v1.31.1 `examples/` (SQL labeler) |
+| sql (15) | dbt-labs/dbt-codegen (5, dbt), erikdarlingdata/DarlingData (5, T-SQL), NikolayS/postgres_dba (5, psql); rueca-bench mined set | sqlc-dev/sqlc v1.31.1 `examples/` (SQL labeler) |
 | swift (15) | apple/swift-markdown (5), CreateAPI/CreateAPI (5), apple/swift-distributed-tracing (5); SWE-rebench V2 | JohnSundell/Plot 0.14.0 (Swift index store) |
 
 Ruby stops at 4: SWE-bench Multilingual is the only dataset with Ruby
@@ -801,6 +801,40 @@ substring: `gold.py: issue_names_gold_file`), which helps every lexical
 arm alike; the scorecard prints File Acc@5 and Function Acc@10 of every arm
 on the other 38 as a diagnostic line (not gated).
 
+SQL (78): mined the same way (`[datasets.rueca_mined_sql]`,
+`bench/datasets/rueca_mined_sql.jsonl`; same miner, rules and date; SQL
+files are `.sql` and the other extensions of `[languages.sql]`, and dbt
+property files and seeds — `.yml`, `.csv` — count as neutral, since they
+travel with every model change). Gated, on twelve repositories chosen from
+the mining counts before any arm ran: seven dbt packages (dbt-utils 8,
+dbt-project-evaluator 8, tuva-core 8, dbt-external-tables 5, dbt-date 4,
+dbt_artifacts 4, dbt-snowflake-monitoring 4), T-SQL (First Responder Kit
+12), PL/pgSQL (pgmq 6, pg_partman 6) and BigQuery / analytical SQL
+(mimic-code 8, bigquery-utils 5). Calibration: dbt-codegen, DarlingData
+(T-SQL), postgres_dba (psql report scripts), 5 each; sqlc, the S3
+calibration repository, has one eligible pair. Left out: the SQL Server
+maintenance solution (every pull request edits the same four procedures
+and their concatenation), sp_whoisactive and mysql-sys (GPL, the second
+archived with no linked pull requests), utPLSQL (its code is in `.pks` /
+`.pkb` files, which the bench did not read when the set was mined), and
+packages with fewer than five eligible pairs (the fivetran ones among
+them). No MySQL, SQLite or Oracle repository passed. Function gold comes
+from the SQL labeler, which needs a dialect: `[[s1.repos]] dialects` (path
+prefix → dialect, as for the S3 sets) gives it from what the repository is,
+for the gold and for the BM25 arm's function documents alike
+(`sqlgold.py: file_dialects`); 54 of the 78 patches change a callable
+(a table, view, routine, dbt model or macro). First Responder Kit's 12
+instances have none: the kit creates each procedure with
+`EXEC('CREATE PROCEDURE …')` and then `ALTER PROCEDURE`, which the
+labeler does not count as a definition, so they enter File Acc@5 only.
+dbt packages keep a test project under `integration_tests/`: test paths
+for SQL files (`own_test_dirs`). 53 of the 78 issues name a gold file
+(12 of 12 for First Responder Kit, whose issues are titled after the
+procedure and its file); the diagnostic line covers the other 25. The
+graph arms' function ranking counts the language's `callable_labels`
+(SQL: `Struct` — tables, views, dbt models), as their structural answers
+already did (*Changelog of scoring rules*).
+
 **Queries.** Same strings for every arm (`queries.py`):
 
 - `kw` — up to 12 tokens: identifiers from inline/fenced code first, then
@@ -929,8 +963,8 @@ Lua), C++ 878 / 1085 (fmt, yaml-cpp), Rust 1417 / 1296 (serde_json
 342 / 513, ripgrep 1075 / 783), shell 1740 / 2182 (nvm 119 / 125, acme.sh
 1238 / 1631, bash-it 383 / 426), Ruby 1233 / 1205 (jekyll 585 / 513,
 ruby-lsp 648 / 692) — every language above the ≥ 300 per
-direction of §7.2 — and SQL 349 / 281 (Sakila 94 / 136, dbt_hubspot
-255 / 145; callees under 300). Calibration: click 210 / 191, goawk
+direction of §7.2 — and SQL 528 / 471 (Sakila 94 / 136, dbt_hubspot
+255 / 145, pgmq 29 / 50, tSQLt 110 / 107, mimic-code 40 / 33). Calibration: click 210 / 191, goawk
 245 / 186, bytes 140 / 300, bats-core 33 / 21, rack 231 / 191, packwerk
 240 / 170, sqlc 16 / 33; diagnostic: express 8 / 19.
 
@@ -1027,7 +1061,17 @@ the dialect of each tree comes from the manifest (`dialects`, path prefix
 (the schema files of the PostgreSQL, CockroachDB and YugabyteDB
 (PostgreSQL), MySQL, SQLite and SQL Server copies; Oracle / DB2 copies
 and data files out of scope), fivetran/dbt_hubspot v1.11.0 (`models/`,
-`macros/`); sqlc v1.31.1 `examples/` is the calibration set. Rules:
+`macros/`), and three sets added so each direction pools 300 questions,
+chosen from the labeler's own counts before any arm ran on them
+(`bench/datasets/mined/s3_sql_candidates.md`): pgmq v1.13.2
+(`pgmq-extension/sql/pgmq.sql`, a PostgreSQL extension in PL/pgSQL; its
+upgrade scripts redefine the same functions and are out of scope), tSQLt
+`4a921d0` (`Source/`, a T-SQL framework of procedures, functions and
+views; no release tags) and mimic-code v3.0.1
+(`mimic-iv/concepts_postgres/`, `CREATE TABLE … AS SELECT` concepts over
+other concepts; that tree is generated with sqlglot, the labeler's own
+parser, so the gold reads it unusually well); sqlc v1.31.1 `examples/` is
+the calibration set. Rules:
 
 1. callables: `CREATE TABLE` / `VIEW` / `MATERIALIZED VIEW` / `FUNCTION` /
    `PROCEDURE` / `TRIGGER` (sqlglot's `Create`, else a `CREATE … <kind>
@@ -1146,7 +1190,7 @@ keys against the PHPStan extractor and the report prints the agreement
 
 **SQL micro-benchmark** (`micro/sql/<dialect>/<case>/`, Rueca's own
 labels, Apache-2.0): one directory per dialect — `postgres`, `mysql`,
-`sqlite`, `tsql`, `bigquery`, `snowflake`, `dbt` (Jinja) — 29 cases
+`sqlite`, `tsql`, `bigquery`, `snowflake`, `dbt` (Jinja), `oracle`, `db2` — 32 cases
 (views and joins, foreign keys, PL/pgSQL and T-SQL routines, triggers,
 `DELIMITER` procedures, `GO` batches, schemas and quoting, CTEs that
 shadow tables, built-ins, strings and comments, partitions, Flyway and
@@ -2085,7 +2129,8 @@ and the summary printed at the end.
 | Python / TS/JS / Go / Java / C / C++ / Rust / shell / C# / Kotlin / Swift micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell,csharp,kotlin,swift}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
 | SQL micro-benchmark (`bench/micro/sql`) | in repository | Apache-2.0 (Rueca's own labels) | S3 dependency gold, per dialect |
 | sqlglot (PyPI) | `uv.lock` (30.35.0) | MIT | SQL labeler (S3 gold) |
-| jOOQ/sakila, fivetran/dbt_hubspot, sqlc-dev/sqlc | commit | BSD-2-Clause / Apache-2.0 / MIT | S3 SQL repositories (gold built from the code) |
+| jOOQ/sakila, fivetran/dbt_hubspot, pgmq/pgmq, tSQLt-org/tSQLt, MIT-LCP/mimic-code, sqlc-dev/sqlc | commit | BSD-2-Clause / Apache-2.0 / PostgreSQL / Apache-2.0 / MIT / MIT | S3 SQL repositories (gold built from the code) |
+| rueca-bench mined SQL set (`bench/datasets/rueca_mined_sql.jsonl`, miner and provenance in `bench/datasets/mined/`) | in repository, sha256 | issue and pull-request text from GitHub; patches under each repository's licence (Apache-2.0, MIT, PostgreSQL, BSD-3-Clause), recorded per row | S1 SQL issues and patches, gated and calibration |
 | `swift:6.4.3-noble` Docker official image | digest | Apache-2.0 (separate process) | S3 Swift gold: `swift build` with the index store, read through its libIndexStore; Swift micro cross-check |
 | tree-sitter-swift 0.7.4 (PyPI) | `uv.lock` | MIT | bench labeler for Swift |
 | Env bridge labels (`bench/labels/bridge`) | in repository | Apache-2.0 (Rueca's own labels) | data-format suite gold |
@@ -2356,6 +2401,25 @@ file paths and function names of the public corpus repositories.
   not. Extension-less scripts are outside the bench's file set, so
   repositories that keep their code in them (pyenv, rbenv, dokku) could
   not be used.
+- **Mined localization set (SQL).** As for shell: unvalidated by people,
+  only issues a pull request closes by keyword. 53 of the 78 gated issues
+  name a gold file (reported apart). 41 of the 78 are dbt packages; MySQL,
+  SQLite and Oracle are absent; the T-SQL repository (First Responder Kit)
+  has no function gold. An SQL "function" is any definition the labeler
+  holds (a table, view, routine, dbt model or macro), so Function Acc@10
+  on a dbt package is close to file localization: a model is one file.
+- **SQL parse errors are counted strictly, by a parser the pack partly
+  wrote.** A file has a parse error when one of its statements is read by
+  the token scanner only, or is accepted by its first words alone (the
+  *strict* count, the gated one; the *lenient* count, without the second
+  clause, is shown next to it in the crate README). Statements sqlparser
+  has no grammar for are parsed by the pack's own productions
+  (`rueca-lang-sql` `forms.rs`: every token consumed, expressions through
+  sqlparser), and procedural code is walked by the pack with each inner
+  statement parsed: "parsed" therefore means "accepted by sqlparser or by
+  one of these productions", not "accepted by an independent grammar of
+  the dialect". T-SQL alone stays above 2% on the corpus; the floor is on
+  the pooled files.
 - **scip-ruby gold for Ruby** (jekyll, ruby-lsp, rack, packwerk, micro) is
   Sorbet's view of the code:
   - untyped code is inferred (as `# typed: true`, also in `# typed: false`
@@ -2407,6 +2471,18 @@ Rule changes that move published numbers, newest first (the results files
 carry the S3 schema version; rows scored under an older schema are never
 carried forward).
 
+- **2026-11-25 — S1 function ranking of the graph arms.** The ranked
+  function list of the `rueca` and `cbm` arms is their callable hits; it
+  now counts the language's `callable_labels` too (SQL: `Struct` — tables,
+  views, dbt models), as their structural answers have since the SQL pack
+  (`arms/base.py: is_callable_label` with the language). Before, a table,
+  view or dbt model the SQL labeler holds as gold could not be hit by
+  either graph arm, while BM25 ranks every labeler callable. No other
+  language declares `callable_labels`, so no other number moves. Found on
+  the first gated SQL run (the calibration instances with function gold
+  are macros and procedures, `Function`s): Function Acc@10 was 48.1 for
+  Rueca and 9.3 for cbm under the old rule, 72.2 and 9.3 under this one,
+  same binary and same instances; both are in `docs/decisions.md`.
 - **2026-11-25 — C# gold and test paths.** scip.py gains three grammar
   flags used by C# only (`local_callables`, `type_constructions`,
   `generic_overloads`, *Known biases*), and the shared test-path heuristic

@@ -73,8 +73,29 @@ statement only recognized by its first words is an error. **Lenient**
 leaves those head-only statements out. On the health corpus (every SQL
 file of the gated repositories at their pinned commits, 3,419 files): 26
 files with a strict error (0.76%), 23 lenient (0.67%); what is left is
-listed in `docs/decisions.md`. The table below is the
-lenient rate on the wider evaluation corpus of the first round.
+listed in `docs/decisions.md`. By detected dialect:
+
+| Dialect | Files | With a parse error (strict, the gated count) | Lenient |
+|---|---|---|---|
+| ANSI / dbt Jinja | 1,864 | 0 | 0 |
+| PostgreSQL | 601 | 10 (1.66%) | 10 |
+| BigQuery | 401 | 1 (0.25%) | 1 |
+| T-SQL | 304 | 15 (4.93%) | 12 |
+| Snowflake | 98 | 0 | 0 |
+| DuckDB | 69 | 0 | 0 |
+| MySQL | 50 | 0 | 0 |
+| Redshift | 15 | 0 | 0 |
+| Oracle | 11 | 0 | 0 |
+| DB2 | 3 | 0 | 0 |
+| SQLite | 3 | 0 | 0 |
+| **All** | **3,419** | **26 (0.76%)** | **23 (0.67%)** |
+
+T-SQL alone is above 2% there (deliberately broken experiment scripts,
+Service Broker and certificate statements, build templates), and Oracle is
+barely in that corpus: on utPLSQL, outside it, 158 of 483 files keep a
+strict error (object type specifications with member functions have no
+production yet). The second table below is the lenient rate on the wider
+evaluation corpus of the first round.
 
 Bench corpus at its pinned commits — jOOQ/sakila `e089a5b` (seven dialect
 copies), fivetran/dbt_hubspot v1.11.0 — plus the parser-evaluation corpus
@@ -112,8 +133,10 @@ if not loop.last %} union all {% endif %}`) is blanked; in a file under
 
 ## Status
 
-`preview` under RFC 0004 until its scorecard says otherwise: the status is
-computed by `rueca-bench report` from the gated suites (localization,
-structure, files with parse errors, latency) and written to
-`docs/bench/alpha-results.md`; floors are unchanged. The structural gold
-is the bench's code-backed labeler (sqlglot), not a compiler-grade oracle.
+`stable` under RFC 0004 since 2026-11-25: the status is computed by
+`rueca-bench report` from the gated suites (localization, structure,
+files with parse errors, latency) and written to
+`docs/bench/alpha-results.md`; floors are unchanged. Two things the word
+does not cover: the structural gold is the bench's code-backed labeler
+(sqlglot), not a compiler-grade oracle, and the localization set is mined
+by the bench from GitHub, not validated by people.

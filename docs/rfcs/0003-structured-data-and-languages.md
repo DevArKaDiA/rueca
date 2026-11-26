@@ -1070,11 +1070,14 @@ tier 2, RFC 0002 §3.3 named `sqlparser` for it.
 | Env bridge | §7.2 table (dbt `env_var`, `var`) |
 | Package identity | none (dbt `packages.yml` not read) |
 | Precision | none: no cross-reference tool exists for SQL repositories |
-| Bench | S1: none (no localization dataset has SQL instances); S3: the bench's code-backed labeler on sqlglot (independent of the pack's parser) on Sakila in six dialects and fivetran/dbt_hubspot (sqlc examples = calibration), and the `bench/micro/sql` micro-benchmark, one directory per dialect |
+| Bench | S1: no localization dataset has SQL instances, so the bench mines its own (merged GitHub pull requests that close an issue, screened by rule; 78 gated on twelve repositories, 15 calibration; `bench/README.md`); S3: the bench's code-backed labeler on sqlglot (independent of the pack's parser) on Sakila in six dialects, fivetran/dbt_hubspot, pgmq, tSQLt and mimic-code (sqlc examples = calibration), and the `bench/micro/sql` micro-benchmark, one directory per dialect |
 
-Dialect coverage (files with a parse error, by detected dialect, on the
-bench corpus and the parser-evaluation corpus pooled; the crate README has
-the corpus, the statement counts and the constructs behind each row):
+Dialect coverage (files with a parse error under the *lenient* count of
+the first round, by detected dialect, on the bench corpus of that round
+and the parser-evaluation corpus pooled; the crate README has the corpus,
+the statement counts, the constructs behind each row, and the *strict*
+count the health floor uses — 26 of 3,419 files, 0.76%, on the gated
+corpus):
 
 | Dialect | Support | Files with a parse error |
 |---|---|---|
@@ -1090,10 +1093,13 @@ the corpus, the statement counts and the constructs behind each row):
 
 *Implemented* (`rueca-lang-sql` plus the `sql` module of `rueca-resolve`;
 crate docs and README, [how-it-works](../how-it-works.md)): everything in
-the tables. Status **`preview`** under RFC 0004: no localization
-instances (missing results count as failing, RFC 0004 §6.2), files with
-parse errors above the 2% floor on the gated corpus, a callees population
-under 300, and a code-backed structural gold. Not done: SQL in string
+the tables. Status **`stable`** under RFC 0004 (2026-11-25; it shipped as
+`preview` with no localization instances, 8.9% of files with parse errors
+and a callees population under 300): every gated floor is met, on a
+localization set the bench mined itself and a code-backed structural
+gold, both disclosed with the scorecard. Not done: Oracle object type
+specifications and other statements the strict count still rejects
+(crate README), SQL in string
 literals of other languages (follow-up), Liquibase XML changelogs,
 `search_path` evaluation, synonyms, grants and policies as edges, column
 references inside `$$` bodies and unparsed statements.

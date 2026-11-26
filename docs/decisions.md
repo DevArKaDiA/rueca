@@ -1,5 +1,107 @@
 # Decisions log
 
+## 2026-11-25 — SQL: mined localization set, three more structural sets, the strict parse-error count; `stable`
+
+SQL was `preview` on four counts: no localization instances, 8.9% of files
+with parse errors, a callees population of 281, and a code-backed gold.
+The parser work is the next entry. The rest:
+
+- **Localization set mined by the bench**, as for shell
+  (`[datasets.rueca_mined_sql]`; same miner, rules and date). Gated 78 on
+  twelve repositories fixed from the mining counts before any arm ran:
+  dbt-utils 8, dbt-project-evaluator 8, tuva-core 8, dbt-external-tables
+  5, dbt-date 4, dbt_artifacts 4, dbt-snowflake-monitoring 4 (dbt); First
+  Responder Kit 12 (T-SQL); pgmq 6, pg_partman 6 (PL/pgSQL); mimic-code 8,
+  bigquery-utils 5 (BigQuery / analytical). Calibration 15: dbt-codegen,
+  DarlingData, postgres_dba. The labeler needs a dialect for function
+  gold: `[[s1.repos]] dialects` gives it from what the repository is
+  (never from the pack), for the gold and for BM25's function documents
+  alike. 54 of the 78 patches change a callable; 53 of the 78 issues name
+  a gold file, reported apart.
+- **Three more structural sets** so callees pool ≥ 300 (RFC 0004 §7.2):
+  pgmq v1.13.2, tSQLt `4a921d0`, mimic-code v3.0.1 PostgreSQL concepts,
+  chosen from the labeler's own question counts (50, 107, 33 callees)
+  before any arm ran (`bench/datasets/mined/s3_sql_candidates.md`).
+  Pooled: callers 528, callees 471. mimic-code's tree is generated with
+  sqlglot, the labeler's parser: a bias in the gold's favour, kept and
+  disclosed; without it callees would be 438.
+- **The gated parse-error count is strict.** The first version of the
+  pack's own readers accepted utility statements by their first words and
+  balanced parentheses. That lowers the rate without parsing, so such a
+  statement is a parse error of the file (`Reader::head_only`,
+  `Facts::parse_errors`); the lenient count is printed next to it. Under
+  the strict count the first corpora were at 39.5% (T-SQL), 33.6% (Oracle)
+  and 8.2% (PostgreSQL) of files, which is what the productions of
+  `forms.rs` then closed by parsing every token of each form.
+- **A script that defines nothing is a `Function` named after its file**
+  (`extract.rs: script`), found on the calibration split: postgres_dba's
+  reports are one query per file, so the pack emitted no symbol for them
+  and symbol search could not return the file (File Acc@5 on calibration:
+  Rueca 66.7 vs BM25 93.3; with the rule 93.3 vs 93.3). Its qualified name
+  keeps the extension (`report.sql`) so no call written in SQL resolves to
+  it; it encloses the references of its statements, which were on the
+  `File` node before. Tuned on calibration only, before the gated run.
+- **The gated sets, and what happened after the first pass.** In order:
+  1. *First gated pass* (binary `fix/sql-stable@4a8942c`): File Acc@5
+     76.9 vs BM25 78.2; Function Acc@10 **48.1 vs 75.9, Δ −27.8 (−42.6 to
+     −14.8), failing**; callers / callees precision 99.5 / 98.8, recall
+     96.1 / 95.6; definitions 99.2; micro F1 100.0; files with parse
+     errors **71 of 3,419, 2.1% (1.6–2.6), failing** (the pinned commits
+     are older than the heads the parser was measured on, and two
+     repositories are in the corpus at two pins).
+  2. *A harness rule, not the pack*: the graph arms' S1 function ranking
+     dropped `Struct` hits — tables, views, dbt models — although the
+     manifest has declared them callables for SQL since the SQL pack and
+     the structural scoring honours it (`bench/README.md`, *Changelog of
+     scoring rules*). 41 of the 78 gated instances are dbt models, which
+     neither graph arm could hit while BM25 ranks every labeler callable.
+     With the rule applied to both graph arms, same binary and instances:
+     Function Acc@10 72.2 vs 75.9, Δ −3.7 (−13.0 to +5.6); cbm 9.3
+     (unchanged: it has no node for a model). The calibration split could
+     not show it: its instances with function gold are macros and
+     procedures.
+  3. *Parser work on the health corpus at its pinned commits*, by
+     construct, with accepted and rejected cases per production (next
+     entry): 71 → 26 files. No localization or structural score guided it;
+     the list of failing files did. Plus a refactor for the SonarQube
+     complexity limit, checked byte-identical on 6,079 files, and a
+     dialect-fallback limit for statements over 64 KiB (identical on 9,498
+     files; a 2 MB script took the whole 5 s parse budget under load).
+  4. *Final pass* with the final binary (`fix/sql-stable@05ff770`), Rueca
+     arm only: File Acc@5 76.9 (66.4–84.9) vs 78.2, Δ −1.3 (−9.0 to +6.4);
+     Function Acc@10 72.2 (59.1–82.4) vs 75.9, Δ −3.7 (−13.0 to +5.6);
+     structure, definitions and micro unchanged to the decimal; files with
+     parse errors 26 of 3,419, 0.8% (0.5–1.1). These are the published
+     numbers. So the gated sets were scored twice by Rueca; the second
+     pass changed no localization or structural number, only the parse
+     errors.
+- **`rueca-bench check` flags the SQL structural rows, and why.** The
+  pooled numbers moved against the last publication (callers / callees
+  precision 99.8 / 99.6 → 99.5 / 98.8, recall 98.9 / 97.5 → 96.1 / 95.6,
+  definitions 100.0 → 99.2) because the pool grew from two sets to five:
+  dbt_hubspot is unchanged to the question, pgmq and tSQLt score lower
+  than the first two (pgmq callers recall 75.9, definitions 90.3). On
+  Sakila two questions of the SQL Server copy changed: `CREATE TABLE
+  film_text (…)` is followed, without `GO` or `;`, by `CREATE TABLE
+  inventory (… REFERENCES film …)`; the labeler reads the batch as one
+  statement and gives `film_text → film`, the pack now splits the batch
+  and gives `inventory → film`, so one gold edge that is the labeler's
+  artifact is no longer matched (Sakila callers recall 97.0 → 96.7). The
+  gold was not changed. No other language's row moves.
+- **Where the issue names no gold file** (25 of 78; 23 with function
+  gold): File Acc@5 56.0 vs BM25 72.0 vs cbm 28.0; Function Acc@10 56.5 vs
+  60.9 vs 4.3. Rueca trails BM25 clearly on files there: the pass on the
+  whole set leans on issues that name the file. Not a floor; stated in the
+  README.
+- **What `stable` does not say.** The structural gold is the bench's
+  code-backed labeler; the localization set is unvalidated by people; an
+  SQL "function" is any definition, so on dbt packages Function Acc@10 is
+  close to file localization; "parsed" includes the pack's own
+  productions; T-SQL alone is at 4.9% of files on the corpus (15 of 304:
+  deliberately broken experiment scripts, Service Broker and certificate
+  statements, two build templates) and Oracle is 11 files of it — on
+  utPLSQL, outside the corpus, 158 of 483 files keep a strict error.
+
 ## 2026-11-25 — SQL: procedural code read by the pack, Oracle and DB2 as dialects, what a parse error is
 
 The SQL pack's files with parse errors were 8.9% on the gated corpus
