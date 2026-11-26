@@ -23,7 +23,7 @@ agent can follow.
 > **Status: alpha (`0.1.0-alpha.2`).** Local mode (one repository, or an
 > organization of local repositories with `--org`); Python,
 > TypeScript/JavaScript, PHP, Go, Java, C, C++, Rust, shell scripts
-> (`preview`), C#, Kotlin, Ruby and SQL (`preview`), plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
+> (`preview`), C#, Kotlin, Ruby, SQL (`preview`) and Swift, plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
 ## Features
@@ -104,7 +104,18 @@ types; relations read and written, columns when the table is certain,
 routine calls and foreign keys as `REFERENCES` / `WRITES` / `CALLS`;
 migrations resolved to the definition effective at each point; dbt models,
 `ref()` / `source()` and macros; `-- name:` queries; per-dialect coverage in
-[`rueca-lang-sql`](crates/rueca-lang-sql/README.md)).
+[`rueca-lang-sql`](crates/rueca-lang-sql/README.md)),
+Swift (SwiftPM targets as modules, from `Package.swift` and the
+`Sources/<Target>` layout, every file of a target visible to the others,
+`import` binding a whole module; classes, structs, enums, actors,
+protocols and extensions whose members attach to the extended type in any
+file or module; callables named by their selector, `init(x:y:)`, with
+initializers called without `new` and overloads chosen by argument labels,
+defaults, variadics and trailing closures; receivers typed from
+declarations, constructions, casts, `if let` / `guard let`, array elements,
+generic constraints, contextual `.member` calls and declared return types;
+XCTest and Swift Testing tests; `ProcessInfo` / `getenv` reads; SwiftPM
+dependencies for cross-repository package edges).
 Documents: Markdown headings become `Section` symbols and file links become
 `IMPORTS` edges, in the same graph as the code.
 Configuration: JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
@@ -407,7 +418,8 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    namespaces, wherever their files are; Kotlin imports through
    packages, wherever their files are, shared with Java; Ruby constants through
    the lexical nesting and the ancestors, `require` through `lib/` load paths;
-   SQL names over a global namespace, by migration order and nearest directory),
+   SQL names over a global namespace, by migration order and nearest directory;
+   Swift imports through SwiftPM targets),
    re-export chains, `self`/`this` with base classes and traits,
    receiver types the file declares or constructs (every code language:
    `c: Context`, `const app = new Hono()`, `x = Session()`), declarations to
@@ -463,6 +475,7 @@ scorecard (`stable` = every floor met; full tables in
 - **Kotlin** `stable` (callees precision at the floor: 90.0, interval 87.9–92.0; callers precision 96.4, recall 86.6 / 85.5 against scip-java's Kotlin indexer on moshi and clikt; localization not significantly below BM25: File Acc@5 56.5 vs 58.7, Function Acc@10 45.5 vs 31.8 over 46 Multi-SWE-bench issues; 0.15% of files with parse errors)
 - **Ruby** `stable` (callers / callees precision 98.4 / 95.4, recall 96.8 / 96.7 against scip-ruby on jekyll and ruby-lsp; localization not significantly below BM25: File Acc@5 55.0 vs 55.0, Function Acc@10 24.2 vs 18.2 over 40 SWE-bench Multilingual issues; 0.2% of files with parse errors)
 - **SQL** `preview` (no localization dataset has SQL instances, so the localization floors are pending; structure measured against the bench's code-backed labeler on sqlglot, not a compiler-grade oracle: callers / callees precision 99.8 / 99.6, recall 98.9 / 97.5 on Sakila in six dialects and a dbt package, callees population 281 < 300, micro callee F1 100.0; 8.9% of files with parse errors against the 2% floor — Oracle / DB2 copies, MySQL routines, T-SQL procedural code, Jinja macros)
+- **Swift** `stable` (every structural floor met at the point estimate, two by a narrow margin: callees precision 90.8, interval 89.1–92.4, callees recall 75.5, interval 72.7–78.3; callers precision / recall 93.1 / 78.7 against the Swift compiler's index store on Alamofire and swift-algorithms; localization not significantly below BM25 but trailing it: File Acc@5 70.9 vs 80.0, Function Acc@10 51.1 vs 57.4 over 55 SWE-rebench V2 issues; 1.8% of files with parse errors)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 **Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),
@@ -496,7 +509,7 @@ absolute floors and aspirational targets).
 | Stage | What it delivers | Status |
 |---|---|---|
 | **Local mode** | One binary, MCP over stdio, the tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
-| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Ruby, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c), SQL (§10.4g) | ✅ done, every language `stable`; shell `preview` (no localization dataset, code-backed structural gold); SQL `preview` (no localization dataset, parse-error floor, code-backed structural gold) |
+| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Ruby, Swift, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c), SQL (§10.4g) | ✅ done, every language `stable`; shell `preview` (no localization dataset, code-backed structural gold); SQL `preview` (no localization dataset, parse-error floor, code-backed structural gold) |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
@@ -507,7 +520,7 @@ absolute floors and aspirational targets).
 | **Org mode** | Every repository of a GitHub / GitLab / Bitbucket org, mirrored permissions, cross-service edges | 🗺️ planned |
 | **Agent benchmark** | End-to-end agent runs with and without Rueca (answer quality, tokens, tool calls) | 🗺️ when budget allows |
 
-More languages (Swift, …) follow the same gate.
+More languages follow the same gate.
 
 ## Workspace
 
@@ -527,6 +540,7 @@ More languages (Swift, …) follow the same gate.
 | [`rueca-lang-rust`](crates/rueca-lang-rust) | Rust extraction, receivers, macro arguments and the Cargo module model |
 | [`rueca-lang-csharp`](crates/rueca-lang-csharp) | C# extraction, namespaces and usings, receivers, `#if` configurations and the .NET configuration bridge |
 | [`rueca-lang-kotlin`](crates/rueca-lang-kotlin) | Kotlin extraction, packages shared with Java, receivers and extension functions |
+| [`rueca-lang-swift`](crates/rueca-lang-swift) | Swift extraction, SwiftPM targets as modules, extensions, selectors and labels |
 | [`rueca-lang-proto`](crates/rueca-lang-proto) | Protocol Buffers services, RPC methods, messages and enums; RPC contracts |
 | [`rueca-lang-shell`](crates/rueca-lang-shell) | Shell scripts (sh, bash; zsh / ksh best effort): functions, `source` paths, script runs, bats / shunit2 tests, env reads and providers |
 | [`rueca-lang-ruby`](crates/rueca-lang-ruby) | Ruby extraction, constant paths, receivers, `require` paths and gem manifests |

@@ -1,0 +1,7 @@
+{
+  "Sources/App/main.swift:move@1": [],
+  "Sources/App/main.swift:move@5": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:move@5"
+  ]
+}

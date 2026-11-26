@@ -163,7 +163,8 @@ impl View {
             | LanguageFamily::Proto
             | LanguageFamily::Shell
             | LanguageFamily::CSharp
-            | LanguageFamily::Sql),
+            | LanguageFamily::Sql
+            | LanguageFamily::Swift),
         ) = family
             && let Some(local) = self.module_local_name(node, family)
         {
@@ -430,13 +431,16 @@ impl View {
         if !suffix.is_empty() {
             return suffix;
         }
-        // Overloads (Java, C/C++): the parameter suffix is optional, so
-        // `Parser.parse` finds `com.x.Parser.parse(String)` and its siblings.
+        // Overloads (Java, C/C++, Swift): the parameter suffix is optional, so
+        // `Parser.parse` finds `com.x.Parser.parse(String)` and its siblings
+        // (Swift: `Point.init` finds `Point.init(x:y:)`).
         (0..nodes.len() as NodeId)
             .filter(|&i| {
                 let n = &nodes[i as usize];
-                let overloadable =
-                    matches!(n.language.map(|l| l.family()), Some(LanguageFamily::Java | LanguageFamily::C));
+                let overloadable = matches!(
+                    n.language.map(|l| l.family()),
+                    Some(LanguageFamily::Java | LanguageFamily::C | LanguageFamily::Swift)
+                );
                 overloadable
                     && !is_container(n.label)
                     && overload_base(&n.qualified_name).is_some_and(|b| b == q || is_qualified_suffix(b, q))

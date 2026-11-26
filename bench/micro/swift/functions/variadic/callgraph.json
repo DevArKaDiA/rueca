@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:sum"
+  ],
+  "Sources/App/main.swift:sum": []
+}

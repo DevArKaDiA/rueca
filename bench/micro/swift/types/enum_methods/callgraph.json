@@ -1,0 +1,9 @@
+{
+  "Sources/App/main.swift:Direction.flipped": [
+    "Sources/App/main.swift:Direction.opposite"
+  ],
+  "Sources/App/main.swift:Direction.opposite": [],
+  "Sources/App/main.swift:turn": [
+    "Sources/App/main.swift:Direction.flipped"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:Settings.load": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:Settings.load"
+  ]
+}

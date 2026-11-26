@@ -88,6 +88,8 @@ pub enum Language {
     /// SQL (`.sql`, `.psql`, `.pgsql`, `.mysql`, `.tsql`, `.bq`): DDL,
     /// routines and queries of several dialects, dbt Jinja templates.
     Sql,
+    /// Swift (`.swift`).
+    Swift,
 }
 
 /// Shell start-up files detected by name (no extension of their own).
@@ -136,6 +138,7 @@ impl Language {
         Language::Kotlin,
         Language::Ruby,
         Language::Sql,
+        Language::Swift,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -166,6 +169,7 @@ impl Language {
             Language::Kotlin => "kotlin",
             Language::Ruby => "ruby",
             Language::Sql => "sql",
+            Language::Swift => "swift",
         }
     }
 
@@ -219,6 +223,7 @@ impl Language {
             "kt" | "kts" => Language::Kotlin,
             "rb" | "rake" | "gemspec" | "ru" => Language::Ruby,
             "sql" | "psql" | "pgsql" | "plpgsql" | "mysql" | "tsql" | "bq" => Language::Sql,
+            "swift" => Language::Swift,
             _ => return None,
         })
     }
@@ -296,6 +301,7 @@ impl Language {
             Language::CSharp => LanguageFamily::CSharp,
             Language::Ruby => LanguageFamily::Ruby,
             Language::Sql => LanguageFamily::Sql,
+            Language::Swift => LanguageFamily::Swift,
         }
     }
 }
@@ -346,6 +352,9 @@ pub enum LanguageFamily {
     /// SQL: no module names; local names are the normalized object names
     /// (`users`, `billing.invoices`, `users.email`), global like a database.
     Sql,
+    /// Swift: module name = the SwiftPM target (`ArgumentParser`); local
+    /// names join types and members with `.` (`Point.init(x:y:)`).
+    Swift,
 }
 
 impl LanguageFamily {
@@ -367,7 +376,8 @@ impl LanguageFamily {
             | LanguageFamily::Java
             | LanguageFamily::Proto
             | LanguageFamily::CSharp
-            | LanguageFamily::Sql => ".",
+            | LanguageFamily::Sql
+            | LanguageFamily::Swift => ".",
             LanguageFamily::EcmaScript | LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Shell => ":",
             LanguageFamily::Php => "\\",
             LanguageFamily::C | LanguageFamily::Rust | LanguageFamily::Ruby => "::",
@@ -1169,6 +1179,7 @@ mod tests {
             ("schema/app.pgsql", Some(Sql)),
             ("procs/report.tsql", Some(Sql)),
             ("data.sqlite", None),
+            ("Sources/ArgumentParser/Parsing/Parser.swift", Some(Swift)),
         ];
         for (path, want) in cases {
             assert_eq!(Language::from_path(path), *want, "{path}");
@@ -1190,6 +1201,7 @@ mod tests {
         assert_eq!(CSharp.family().module_separator(), ".");
         assert_eq!(Kotlin.family(), Java.family());
         assert_eq!(Ruby.family().module_separator(), "::");
+        assert_eq!(Swift.family().module_separator(), ".");
     }
 
     #[test]
@@ -1232,13 +1244,14 @@ mod tests {
             b[0]
         }
         let langs: Vec<u8> = Language::ALL.iter().map(idx).collect();
-        assert_eq!(langs, (0..26).collect::<Vec<u8>>());
+        assert_eq!(langs, (0..27).collect::<Vec<u8>>());
         assert_eq!(idx(&Language::Proto), 20);
         assert_eq!(idx(&Language::Shell), 21);
         assert_eq!(idx(&Language::CSharp), 22);
         assert_eq!(idx(&Language::Kotlin), 23);
         assert_eq!(idx(&Language::Ruby), 24);
         assert_eq!(idx(&Language::Sql), 25);
+        assert_eq!(idx(&Language::Swift), 26);
         assert_eq!(idx(&ContractSide::Provides), 0);
         assert_eq!(idx(&ContractSide::Consumes), 1);
         assert_eq!(idx(&ContractKind::Http), 0);

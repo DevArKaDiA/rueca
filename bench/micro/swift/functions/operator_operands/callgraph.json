@@ -1,0 +1,10 @@
+{
+  "Sources/App/main.swift:base": [],
+  "Sources/App/main.swift:check": [],
+  "Sources/App/main.swift:extra": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:base",
+    "Sources/App/main.swift:check",
+    "Sources/App/main.swift:extra"
+  ]
+}

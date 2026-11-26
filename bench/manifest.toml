@@ -315,8 +315,9 @@ reason = "not the language (Objective-C)"
 # S1 languages whose repositories are not members yet: the organization
 # numbers above were measured without them, so they join (and the pin rule
 # covers them) at the next full run of the organization scenario, which
-# re-measures every arm. C#, Kotlin and Ruby were added after the last run.
-pending_languages = ["csharp", "kotlin", "ruby"]
+# re-measures every arm. C#, Kotlin, Ruby and Swift were added after the last
+# run.
+pending_languages = ["csharp", "kotlin", "ruby", "swift"]
 max_instances_per_repo = 3
 calibration_max_instances_per_repo = 5
 
@@ -939,6 +940,18 @@ trace_edges = ["CALLS", "REFERENCES", "WRITES"]
 # structural questions too (arms/base.py: is_callable_label).
 callable_labels = ["Struct"]
 
+[languages.swift]
+label = "swift"
+members = ["swift"]
+extensions = [".swift"]
+# SwiftPM test targets live in `Tests/<Target>/` (only Swift files there are
+# tests: `own_test_dirs`); XCTest classes are named `FooTests.swift`.
+test_files = ['.*Tests?\.swift$']
+own_test_dirs = ["Tests"]
+s1_sources = "SWE-rebench V2 (Swift rows its LLM screen rated A: apple/swift-argument-parser, apple/swift-docc, mapbox/mapbox-directions-swift, cpisciotta/xcbeautify, Quick/Nimble, parse-community/Parse-Swift, vapor/jwt-kit gated; apple/swift-markdown, CreateAPI/CreateAPI, apple/swift-distributed-tracing = calibration; SWE-bench Multilingual and Multi-SWE-bench carry no Swift); function gold from the tree-sitter labeler"
+s3_gold = "the Swift compiler's index store (swift 6.4.3 in its pinned Docker image, `swift build` with index-while-building; Alamofire 5.12.2, swift-algorithms 1.2.1; Plot 0.14.0 = calibration) and the rueca-bench Swift micro-benchmark"
+notes = "Swift callables are functions, methods, protocol requirements, `init`, `deinit`, `subscript` and operators, named `Type.name` (members of `extension T` are `T.name`); property accessors and closures are not callables. The index store resolves calls through protocols, generics and non-final classes to the requirement or base method only; calls of closure values and function references have no gold edge."
+
 # Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
 # callables). `binding` = Python package (pinned in pyproject.toml) and
 # function returning the language. `labeler = "nesting"` (default) is the
@@ -1114,6 +1127,22 @@ extensions = [".sql", ".psql", ".pgsql", ".plpgsql", ".mysql", ".tsql", ".bq"]
 labeler = "sql"
 separator = "."
 
+# Swift: code-backed labeler (treesitter.py: _swift_functions) over
+# alex-pinkus/tree-sitter-swift 0.7.4 (the Swift pack's grammar). A call's
+# callee is the first child of `call_expression` (`f()`, `a.f()`, `T()`,
+# trailing closures), the type of a `constructor_expression` (`Box<Int>()`),
+# or the target of a `.init()` prefix expression. The grammar attaches a
+# call to a whole `+` / `*` / prefix-operator expression (`a + b.f(1)`,
+# `!x.isEmpty()`): its right-most operand is the callee.
+[grammars.swift]
+binding = "tree_sitter_swift:language"
+package = "tree-sitter-swift 0.7.4 (alex-pinkus, MIT)"
+extensions = [".swift"]
+labeler = "swift"
+separator = "."
+calls = { call_expression = "@0", constructor_expression = "constructed_type" }
+members = { navigation_expression = "suffix", navigation_suffix = "suffix", prefix_expression = "target", user_type = "@0", additive_expression = "rhs", multiplicative_expression = "rhs", bitwise_operation = "rhs", infix_expression = "rhs", range_expression = "rhs" }
+
 # ---------------------------------------------------------------- tools
 
 [tools.cbm]
@@ -1236,6 +1265,20 @@ url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-11-09/r
 archive_sha256 = "8c039b25cb338b3970c731646677a4c9d4e9dd7a92c9ab9ae459c71467fbf4a9"
 binary_sha256 = "dfd442f535bdd94c572637b7a875fd29b6152b4bb412d116cb8df728c33a5067"
 
+# Swift S3 gold: the compiler's own index store. `swift build` (every target,
+# tests included, index-while-building, `-index-include-locals`) runs in the
+# official image pinned by digest (`--network=none` after a networked
+# `swift package resolve`), then the bench's `indexstore_dump.py` reads the
+# store through the image's libIndexStore (ctypes) and writes occurrences +
+# roles (`indexstore.py`). No binary is downloaded.
+[tools.swift_indexstore]
+name = "swift-indexstore"
+version = "6.4.3"
+license = "Apache-2.0"
+release = "https://www.swift.org/install/linux/ (swift-6.4.3-RELEASE)"
+image = "swift@sha256:4ed5e0210b244aab174450e0b79014c17db60c63c6daf0709347fe50c767293a"
+image_name = "swift:6.4.3-noble (Docker official image, multi-arch index; Swift 6.4.3 RELEASE, libIndexStore.so.21, store format v5; Apache-2.0, run as a separate process)"
+
 # Ruby S3 gold: scip-ruby (Sourcegraph's SCIP indexer built on Sorbet),
 # release binary run over the pinned tree (no `bundle install`, no Ruby on
 # the host: Sorbet parses and type-checks statically, never runs the code).
@@ -1328,7 +1371,7 @@ contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arm
 # 1ff5e82. Every other suite (carried): the RFC 0005 contract branch, main
 # 2c5a384 plus the response contract, whose quality metrics are identical
 # to main's binary on the same run (only tokens and latency differ).
-results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4); Kotlin (every suite): feat/lang-kotlin @ 3265ba4 (binary sha256 aeca53b7707c6eb6d37890b90a72cb9dce8caad38741c0e2462f742f371f7624); Ruby (every suite): feat/lang-ruby @ 2e353ab (binary sha256 f4228890b7084a9c246a554e7f6b2bef8dd2c7e9b551dc06761bf2a89db149be); SQL (every suite): feat/lang-sql @ 9c6fb5d (binary sha256 10388ab51475399c7234c70836fb0a64243af5edd662dd3a65309884465ca9a6)"
+results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4); Kotlin (every suite): feat/lang-kotlin @ 3265ba4 (binary sha256 aeca53b7707c6eb6d37890b90a72cb9dce8caad38741c0e2462f742f371f7624); Ruby (every suite): feat/lang-ruby @ 2e353ab (binary sha256 f4228890b7084a9c246a554e7f6b2bef8dd2c7e9b551dc06761bf2a89db149be); SQL (every suite): feat/lang-sql @ 9c6fb5d (binary sha256 10388ab51475399c7234c70836fb0a64243af5edd662dd3a65309884465ca9a6); Swift (every suite): feat/lang-swift @ 36d1077 (binary sha256 9b91d453ad464231001453dea42f3d4926d38274ebb31402c7cd191a1a6b0604)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -2162,6 +2205,76 @@ split = "calibration"
 # (RFC 0002 §4.2). Micro-benchmarks (`[[s3.micro]]`) are hand-written call
 # graphs of small programs; every function is a question.
 
+# Swift: SWE-bench Multilingual and Multi-SWE-bench carry no Swift; SWE-rebench
+# V2 (rows its LLM screen rated `A`, as for PHP, C# and Kotlin calibration)
+# is the only source. Gated: seven SwiftPM repositories, at most 16 instances
+# each (swift-syntax and hylo, compilers of 300k+ lines, left out);
+# calibration: three other repositories, disjoint from the gated ones and
+# from the S3 sets.
+[[s1.repos]]
+repo = "apple/swift-argument-parser"
+language = "swift"
+quota = 16
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "apple/swift-docc"
+language = "swift"
+quota = 10
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "mapbox/mapbox-directions-swift"
+language = "swift"
+quota = 8
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "cpisciotta/xcbeautify"
+language = "swift"
+quota = 6
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "Quick/Nimble"
+language = "swift"
+quota = 5
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "parse-community/Parse-Swift"
+language = "swift"
+quota = 5
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "vapor/jwt-kit"
+language = "swift"
+quota = 5
+sources = ["swe_rebench_v2"]
+
+[[s1.repos]]
+repo = "apple/swift-markdown"
+language = "swift"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "CreateAPI/CreateAPI"
+language = "swift"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "apple/swift-distributed-tracing"
+language = "swift"
+quota = 5
+sources = ["swe_rebench_v2"]
+split = "calibration"
+
+
 # RFC 0004 §7.1: questions are every in-scope callable with at least one gold
 # edge in that direction, minus dunders and one-line bodies (extent shorter
 # than `min_lines`); the symbol lookup (one search per question) keeps a
@@ -2590,6 +2703,40 @@ dialects = { "examples/" = "ansi", "examples/authors/postgresql/" = "postgres", 
 gold = "sql"
 split = "calibration"
 
+# Swift: the compiler's index store (`swift build` in the pinned image, see
+# `[tools.swift_indexstore]`) over pure SwiftPM packages without build-tool
+# plugins or macros: a networking library built on classes and protocols
+# (Alamofire, sources in `Source/`) and a generic algorithms library
+# (swift-algorithms, one dependency: swift-numerics); Plot (an HTML DSL of
+# static functions and closures) = calibration.
+[[s3.repos]]
+repo = "Alamofire/Alamofire"
+language = "swift"
+tag = "5.12.2"
+commit = "bda9ed57d72988a3a2ada33d824583541f86eac6"
+license = "MIT"
+include = ["Source/"]
+indexer = "swift_indexstore"
+
+[[s3.repos]]
+repo = "apple/swift-algorithms"
+language = "swift"
+tag = "1.2.1"
+commit = "87e50f483c54e6efd60e885f7f5aa946cee68023"
+license = "Apache-2.0"
+include = ["Sources/Algorithms/"]
+indexer = "swift_indexstore"
+
+[[s3.repos]]
+repo = "JohnSundell/Plot"
+language = "swift"
+tag = "0.14.0"
+commit = "271926b4413fe868739d99f5eadcf2bd6cd62fb8"
+license = "MIT"
+include = ["Sources/Plot/"]
+indexer = "swift_indexstore"
+split = "calibration"
+
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
 [[s3.micro]]
 name = "pycg"
@@ -2686,6 +2833,18 @@ format = "rueca"
 local = "micro/rust"
 license = "Apache-2.0"
 crosscheck = "rust_analyzer"
+
+# Swift micro-benchmark: Rueca's own hand-labelled snippets (Apache-2.0); each
+# case is a SwiftPM package (`Package.swift`, `Sources/<Target>/…`),
+# cross-checked against the compiler's index store (the S3 gold tool).
+[[s3.micro]]
+name = "swift-micro"
+title = "Swift micro-benchmark (rueca-bench)"
+language = "swift"
+format = "rueca"
+local = "micro/swift"
+license = "Apache-2.0"
+crosscheck = "swift_indexstore"
 
 # Shell micro-benchmark: Rueca's own hand-labelled snippets (Apache-2.0), each
 # a small script tree; cross-checked against the code-backed labeler
@@ -7470,5 +7629,565 @@ id = "ajalt__mordant-42"
 repo = "ajalt/mordant"
 language = "kotlin"
 base_commit = "ec7d1a517dc0a8971f3f21ae83b99eb4825abf8e"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-728"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "5b1320e9d668e0d327438088945a4074c7a35a66"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-680"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "41d58ffe702cfe7b00b2c4c6a6611d9d25a0adc1"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-10"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "7e25c0005f173369e52ae1bfc6edc7c76cb8d34e"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-690"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "2edadce25de36a31a5494a1165f7c96a0d7342f3"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-592"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "b7f5d8cff2255346c43e711f2e053b0e69e6f485"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-67"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "3af071f5667dbada4886fb32ddd3a9578bf719db"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-782"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "0104c39cc3db772cb1bbf210e9a74c2f2eb02173"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-552"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "fee6933f37fde9a5e12a1e4aeaa93fe60116ff2a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-48"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "59d36639e88dc5e3da08e22b11d1356ce945bdff"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-492"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "d88d4de38b8a81d11503a10c073ac3ce570d9262"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-63"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "b3a77c4dc79c3017c4f5d1d4016c8d36d4258faa"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-754"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "d67151befa39533a6a449136c7992537cbf8ec99"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-55"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "9ebf401d274c4ef0a634cd4c4494b4a63f12baaf"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-62"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "d8fb6bdd63fa541e0ea52a99556093e1c3a60586"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-71"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "39616cbbf90142a5ab40a5c86d84c19db8a82463"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-argument-parser-614"
+repo = "apple/swift-argument-parser"
+language = "swift"
+base_commit = "c4138099b4d238cf0549a0203102b98133334c63"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-947"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "a76ddce126b357e850de9d666801189d4d4c6091"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-642"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "2131c4358d9345cb72007dd53cca33ef410cf6b6"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-398"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "8fb7dddcdf4246e4139192ba1276586edb8ec21f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-633"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "2026dccea2d5b5e158f495ecf2f12d49f3babea3"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-280"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "321dbccfda7b27b98871660f17e3ec221677215c"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-421"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "6e35675cd6173426a87e1ba6d9ab4cf4e43c74af"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-733"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "04be889de4ce38d0ddb191411d3e7894925822ef"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-683"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "5e511c28cd9c2004dd505e72fd0f113dbad026a7"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-851"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "e0a862c0ed1c52def62718d6462ac22728047117"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-docc-1184"
+repo = "apple/swift-docc"
+language = "swift"
+base_commit = "926d85bac692d3a181aa1097c35e1ad6da4b921f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "mapbox__mapbox-directions-swift-557"
+repo = "mapbox/mapbox-directions-swift"
+language = "swift"
+base_commit = "773a627b25067c9a06c42de8c695ee613e6e0fb5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "mapbox__mapbox-directions-swift-529"
+repo = "mapbox/mapbox-directions-swift"
+language = "swift"
+base_commit = "f61e24de19777256670320bd20bc934cec72a020"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "mapbox__mapbox-directions-swift-691"
+repo = "mapbox/mapbox-directions-swift"
+language = "swift"
+base_commit = "be1f307c8fe45cd832ff56df5a060c7710c90312"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "mapbox__mapbox-directions-swift-485"
+repo = "mapbox/mapbox-directions-swift"
+language = "swift"
+base_commit = "1fd9019925683972ee1a78cb8c329b78376f272f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "mapbox__mapbox-directions-swift-728"
+repo = "mapbox/mapbox-directions-swift"
+language = "swift"
+base_commit = "dc8c9e64c2adb9a7498e726f5e4255315f8c2566"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "mapbox__mapbox-directions-swift-688"
+repo = "mapbox/mapbox-directions-swift"
+language = "swift"
+base_commit = "9d986d4d00e39bd5e0f8dc1cf71acf4041dc43ef"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "mapbox__mapbox-directions-swift-616"
+repo = "mapbox/mapbox-directions-swift"
+language = "swift"
+base_commit = "2ea4d664ac4bc776b1e13f4255fd8062088e40c6"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "mapbox__mapbox-directions-swift-647"
+repo = "mapbox/mapbox-directions-swift"
+language = "swift"
+base_commit = "40fa816b163d2b47afe11f634ec4f74d0fc98ff6"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cpisciotta__xcbeautify-284"
+repo = "cpisciotta/xcbeautify"
+language = "swift"
+base_commit = "4995c78396b3eb2a065680d2001278dbe0f94971"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cpisciotta__xcbeautify-99"
+repo = "cpisciotta/xcbeautify"
+language = "swift"
+base_commit = "9f3d55d3b6e048f91e03af843b488f99c483f1aa"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cpisciotta__xcbeautify-12"
+repo = "cpisciotta/xcbeautify"
+language = "swift"
+base_commit = "d7363b1990200996040b5aa79106536aa8b132d3"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cpisciotta__xcbeautify-75"
+repo = "cpisciotta/xcbeautify"
+language = "swift"
+base_commit = "ee0ff0997d4cc806b3a373ef63e8e92d05d56ef4"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cpisciotta__xcbeautify-305"
+repo = "cpisciotta/xcbeautify"
+language = "swift"
+base_commit = "ab7ca709a13d7c0090e9280e22cac42b6be6c7eb"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "cpisciotta__xcbeautify-323"
+repo = "cpisciotta/xcbeautify"
+language = "swift"
+base_commit = "44e7f62fa71546fc8a7a4b34fb78492a10cc4dce"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "quick__nimble-706"
+repo = "Quick/Nimble"
+language = "swift"
+base_commit = "4ce709fb95e18bbc72c35c2fd21831aaf88380dd"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "quick__nimble-1183"
+repo = "Quick/Nimble"
+language = "swift"
+base_commit = "6de34566f4e2aa3fcd97a49e761259a4d16e49d9"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "quick__nimble-1020"
+repo = "Quick/Nimble"
+language = "swift"
+base_commit = "e669a59a2a82490343885e7c8fc438d45a1101a8"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "quick__nimble-1017"
+repo = "Quick/Nimble"
+language = "swift"
+base_commit = "96f0ee4751318a5b3c36f347522cfacfd5aa1473"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "quick__nimble-1163"
+repo = "Quick/Nimble"
+language = "swift"
+base_commit = "f459a201e9f5dd9456ad372f9c09df474104a959"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "parse-community__parse-swift-248"
+repo = "parse-community/Parse-Swift"
+language = "swift"
+base_commit = "7932ba7d76d4a4f3bdc3e5e8698c5131f13d53a5"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "parse-community__parse-swift-241"
+repo = "parse-community/Parse-Swift"
+language = "swift"
+base_commit = "ddcf35f54365397f75068744e6ff975e875dd73a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "parse-community__parse-swift-202"
+repo = "parse-community/Parse-Swift"
+language = "swift"
+base_commit = "252df53eee6e8f95178eb3f58ce7124ab5673b3a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "parse-community__parse-swift-381"
+repo = "parse-community/Parse-Swift"
+language = "swift"
+base_commit = "926fc0552405c08475b259c92901e01ec440999b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "parse-community__parse-swift-139"
+repo = "parse-community/Parse-Swift"
+language = "swift"
+base_commit = "50935e0edd16060058c17d4304de206351a729dc"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "vapor__jwt-kit-177"
+repo = "vapor/jwt-kit"
+language = "swift"
+base_commit = "0bb40ec7a02363aa015b3bfb4375440f550e4546"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "vapor__jwt-kit-187"
+repo = "vapor/jwt-kit"
+language = "swift"
+base_commit = "831fe3c82ce5e827eef12a0abccc7c0e153dae8c"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "vapor__jwt-kit-150"
+repo = "vapor/jwt-kit"
+language = "swift"
+base_commit = "3a077f93d53152329c9992e7bcfbad64a8f52132"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "vapor__jwt-kit-82"
+repo = "vapor/jwt-kit"
+language = "swift"
+base_commit = "87ce13a1df913ba4d51cf00606df7ef24d455571"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "vapor__jwt-kit-27"
+repo = "vapor/jwt-kit"
+language = "swift"
+base_commit = "b5aa3d4eb91b54d0bd31a1a0c238199f2bf65969"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-markdown-133"
+repo = "apple/swift-markdown"
+language = "swift"
+base_commit = "8ea3072e4ba2a2aa6395d529fbfc188c838c2dba"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-markdown-50"
+repo = "apple/swift-markdown"
+language = "swift"
+base_commit = "d03ad208210c23cba8652395fff05bc906e2334c"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-markdown-66"
+repo = "apple/swift-markdown"
+language = "swift"
+base_commit = "395fbf23fc09e76efaecbb731edb2aebf910948b"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-markdown-154"
+repo = "apple/swift-markdown"
+language = "swift"
+base_commit = "4312077f61bec25f034bdefed0b2fd72f51034ee"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-markdown-79"
+repo = "apple/swift-markdown"
+language = "swift"
+base_commit = "6f5d869207b3584465786e26581c2d298ae4d7ce"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "createapi__createapi-109"
+repo = "CreateAPI/CreateAPI"
+language = "swift"
+base_commit = "cb7918b1ee80cdc37a73da60a0a82c4568dfe1bb"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "createapi__createapi-118"
+repo = "CreateAPI/CreateAPI"
+language = "swift"
+base_commit = "9c45499ef60d98cd8bb1bd82ffa2104962a96cf6"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "createapi__createapi-131"
+repo = "CreateAPI/CreateAPI"
+language = "swift"
+base_commit = "31f8d0460246fd4ad9d1565d10739e177c537e7a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "createapi__createapi-133"
+repo = "CreateAPI/CreateAPI"
+language = "swift"
+base_commit = "ecdc74f3a282f0912fc1265228723b1279d8de2f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "createapi__createapi-142"
+repo = "CreateAPI/CreateAPI"
+language = "swift"
+base_commit = "ea1b9d7df7cfea8550da19b833c70ccf8acde19a"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-distributed-tracing-118"
+repo = "apple/swift-distributed-tracing"
+language = "swift"
+base_commit = "aae93f8a736be863bbeefd5d40978c01b84a4929"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-distributed-tracing-88"
+repo = "apple/swift-distributed-tracing"
+language = "swift"
+base_commit = "499a31723f817678ba34122a2f3b43ac9188166f"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-distributed-tracing-68"
+repo = "apple/swift-distributed-tracing"
+language = "swift"
+base_commit = "6173049f396771a35e82f6a19b6f63b5cedc4603"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-distributed-tracing-90"
+repo = "apple/swift-distributed-tracing"
+language = "swift"
+base_commit = "b7a1e20ee0e9d31b04b5c5918ced565d6e6e55c1"
+dataset = "swe_rebench_v2"
+assets = []
+
+[[s1.instances]]
+id = "apple__swift-distributed-tracing-95"
+repo = "apple/swift-distributed-tracing"
+language = "swift"
+base_commit = "e9c732463750b48f5c60f972e1faaf67a0937c11"
 dataset = "swe_rebench_v2"
 assets = []

@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:Greeter.greet": [
+    "Sources/App/main.swift:Greeter.name"
+  ],
+  "Sources/App/main.swift:Greeter.name": []
+}

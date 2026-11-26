@@ -1,0 +1,9 @@
+{
+  "Sources/App/main.swift:Box.init": [
+    "Sources/App/main.swift:Box.validate"
+  ],
+  "Sources/App/main.swift:Box.validate": [],
+  "Sources/App/main.swift:make": [
+    "Sources/App/main.swift:Box.init"
+  ]
+}

@@ -1001,6 +1001,10 @@ and Java files is one module for the resolver.
 | Precision | scip-java 0.14.2's Kotlin indexer (Kotlin Analysis API, K2) without a build: sources and pinned classpath jars in the pinned JDK image |
 | Bench | S1: Multi-SWE-bench Kotlin (gated) and SWE-rebench V2 (calibration); S3: scip-java gold on moshi and clikt (kotlinpoet calibration), and the `bench/micro/kotlin` micro-benchmark |
 
+### 10.4d Swift (addendum, 2026-11-25)
+
+Swift follows the gate of §10.2–§10.4.
+
 *Implemented* (`rueca-lang-kotlin` plus the `jvm` module of
 `rueca-resolve`; crate docs and [how-it-works](../how-it-works.md)):
 everything in the table. Not done: inferred return types of other files'
@@ -1088,6 +1092,29 @@ under 300, and a code-backed structural gold. Not done: SQL in string
 literals of other languages (follow-up), Liquibase XML changelogs,
 `search_path` evaluation, synonyms, grants and policies as edges, column
 references inside `$$` bodies and unparsed statements.
+
+| Aspect | Design |
+|---|---|
+| Grammar | `tree-sitter-swift` 0.7.4 (alex-pinkus), MIT, generated parser at ABI 15 (links with tree-sitter 0.27) |
+| Module model | module = SwiftPM target: a `path:` declared in the nearest `Package.swift` (read with the Swift grammar, never evaluated), else `Sources/<Target>/…` (also `Source`, `src`, `Tests`, `Plugins`), else the top-level directory (Xcode projects, best effort); every file of a target sees the others without imports (`ModuleScope::Package`) |
+| Imports | `import Foo` / `@testable import Foo` bind every exported name of target `Foo` (`namespace_imports`, the hook the Kotlin pack added); `import struct Foo.Bar` binds `Bar`; modules outside the snapshot are external |
+| Qualified names | target + `.` + local name; callables carry their selector (`Point.draw(at:_:)`, `Point.init(x:y:)`); members of `extension T` are top-level `T.m`, attached by the resolver to `T` in their target, an imported target or the only Swift type of that name |
+| Receivers | `self` / `Self` → `$self`; `super`; `$type:` from annotations, constructions (`T(…)`, `Box<T>(…)`), casts, literals, `if let` / `guard let`, `for` over typed arrays, generic constraints, properties declared in the file; `$member:a.b` for properties declared in another file; `$ret:` call results typed from the callee's `-> T`; `.member(…)` typed by the property it initializes or the declared return type it is returned as |
+| Overloads | every same-named callable of a type is an overload; a call's argument labels (`_` unlabeled, a trailing closure filling a closure parameter) choose among those whose parameters accept them (defaults skipped, variadics); a callable that cannot accept the labels is never linked (the memberwise initializer a struct keeps beside an extension's `init`) |
+| Tests | `XCTestCase` (and Quick) subclasses and their members, `@Suite` types, `@Test` functions |
+| Heuristic | methods on receivers of unknown type and contextual `.member(…)` calls by unique name |
+| Precision | the Swift compiler's index store (`swift build` with index-while-building in the pinned `swift:6.4.3` image, read through libIndexStore) |
+| Bench | S1: SWE-rebench V2 Swift rows (LLM screen `A`); S3: index-store gold on Alamofire and swift-algorithms (Plot = calibration), and the `bench/micro/swift` micro-benchmarks |
+
+*Implemented* (`rueca-lang-swift` plus the `swift` module of
+`rueca-resolve`; crate docs and [how-it-works](../how-it-works.md)):
+everything in the table; env reads (`ProcessInfo.processInfo.environment["X"]`,
+`getenv("X")`) as in §7.2; `Package.swift` publishes `swift:<module>` keys
+(its library products' targets) and requires `swiftpm:<identity>` for its
+package dependencies (RFC 0006). Not done: protocol conformances declared
+in extensions as bases, property-wrapper and macro-generated members,
+result-builder implicit calls, `#if` evaluation, Info.plist / xcconfig
+keys, CocoaPods and Carthage manifests, Vapor routes.
 
 ### 10.5 Risks
 

@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:Service.run": [
+    "Sources/App/main.swift:Store.save"
+  ],
+  "Sources/App/main.swift:Store.save": []
+}

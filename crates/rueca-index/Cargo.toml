@@ -29,6 +29,7 @@ rueca-lang-csharp.workspace = true
 rueca-lang-kotlin.workspace = true
 rueca-lang-ruby.workspace = true
 rueca-lang-sql.workspace = true
+rueca-lang-swift.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

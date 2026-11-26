@@ -1,0 +1,9 @@
+{
+  "Sources/App/main.swift:Shape.init": [],
+  "Sources/App/main.swift:Square.init@12": [
+    "Sources/App/main.swift:Shape.init"
+  ],
+  "Sources/App/main.swift:Square.init@17": [
+    "Sources/App/main.swift:Square.init@12"
+  ]
+}

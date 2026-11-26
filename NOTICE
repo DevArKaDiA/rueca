@@ -115,6 +115,12 @@ crates/rueca-lang-ruby/queries/locals.scm
 
   Modified for Rueca (see the file header for the list of changes).
 
+crates/rueca-lang-swift/queries/locals.scm
+  Adapted from nvim-treesitter, runtime/queries/swift/locals.scm,
+  https://github.com/nvim-treesitter/nvim-treesitter (commit 29212d826054bb2948fa9d3a99eca9bf6a050eb2).
+  Copyright nvim-treesitter contributors. Licensed under the Apache License, Version 2.0.
+  Modified for Rueca (see the file header for the list of changes).
+
 NOTICE of Apache-2.0 dependencies
 ---------------------------------
 crates/rueca-lang-sql links the `sqlparser` crate (Apache-2.0), whose NOTICE

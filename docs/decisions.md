@@ -209,6 +209,64 @@ model — packages, classes with members, overload suffixes, implicit
   and default arguments are written); `init` blocks belong to the class,
   like Java initializers; callable references `::f` are reads, not calls.
 
+## 2026-11-25 — Swift language pack (RFC 0003 §10.4d), `stable` under the RFC 0004 floors
+
+- **Grammar**: `tree-sitter-swift` 0.7.4 (alex-pinkus, MIT), the grammar
+  nvim-treesitter uses; the crate ships its generated parser at ABI 15 and
+  depends only on `tree-sitter-language`, so it links with the 0.27
+  runtime and passes cargo-deny and MSRV 1.90. The grammar attaches a call
+  to a whole `+` / `*` / prefix-operator expression (`a + b.f(1)` parses as
+  `(a + b.f)(1)`): the pack and the bench's call-site test both take the
+  right-most operand as the callee.
+- **Modules are SwiftPM targets.** The module of a file is the target a
+  `Package.swift` `path:` declares (the manifest is read with the Swift
+  grammar, never evaluated), else `Sources/<Target>/…`, else the top-level
+  directory (Xcode projects, best effort). `import Foo` binds target `Foo`
+  wherever its files are, through `LanguagePack::namespace_imports` —
+  re-implemented here with the name and signature the Kotlin pack gave it,
+  so the two branches meet without a conflict of meaning. A declaration of
+  the importing module shadows an imported one (Swift's lookup order).
+- **Selectors in qualified names.** Every callable but `deinit` carries its
+  argument labels (`Point.init(x:y:)`), Swift's own full name and its
+  overloading axis; callables of one scope sharing labels add their
+  parameter types after a `|`. Overloads are chosen by the call's labels
+  (defaults skipped, variadics, a trailing closure fills a closure
+  parameter only), and a callable whose parameters cannot take the labels
+  is never linked: a struct keeps its memberwise initializer beside an
+  extension's `init`, and that call has no definition in the source.
+- **Extensions** are not definitions: their members are top-level `T.m`,
+  attached by the resolver to `T` in their target (the package hook, now
+  also for suffixed names), an imported target or the only Swift type of
+  that name; a call on a type outside the snapshot (`"s".shouted()`) finds
+  a unique extension member of that type name.
+- **Gold: the compiler's index store.** No maintained SCIP indexer builds
+  Swift packages without Xcode; `swift build` with index-while-building in
+  the official `swift:6.4.3` image pinned by digest, read through its
+  libIndexStore (`indexstore_dump.py`, ctypes), is compiler-grade and runs
+  every third-party build step inside Docker. Implicit occurrences
+  (property accessors, memberwise initializers) are dropped; edges are
+  derived like every SCIP gold. Validated on the hand-labelled
+  micro-benchmark before use: 88 / 88 edges, 60 / 60 snippets identical.
+  Gated repositories: Alamofire 5.12.2 and swift-algorithms 1.2.1 (pure
+  SwiftPM, no plugins or macros); Plot 0.14.0 = calibration. S1: SWE-rebench
+  V2 Swift rows rated `A` (55 gated, 15 calibration); SWE-bench Multilingual
+  and Multi-SWE-bench carry no Swift. CocoaPods / Carthage manifests,
+  Info.plist / xcconfig keys and Vapor routes are not done.
+- **Tuning** used Plot and the micro-benchmark only (contextual types of
+  `.member(…)` calls from the declared return type, `for` over typed
+  arrays, generic constraints, the trailing-closure rule). The gated sets
+  were run once for the published numbers; the first attempt did not
+  produce scores (a stack overflow on `let x = x.f()`, a local shadowing
+  itself, crashed indexing on gated and S1 repositories alike); the fix
+  bounds receiver typing through initializers and was made without looking
+  at any gated score.
+- **Result**: `stable`, two floors by a narrow margin — callees precision
+  90.8 (89.1–92.4) and recall 75.5 (72.7–78.3), callers 93.1 / 78.7,
+  definition found 97.9, micro callee F1 99.4, 1.8% of files with parse
+  errors, p95 21 ms; localization trails BM25 (File Acc@5 70.9 vs 80.0)
+  without being significantly below it. Swift joins the organization
+  scenario at its next full run (`[org] pending_languages`).
+
 **Gold.** scip-java 0.14.2's Kotlin indexer (Kotlin Analysis API 2.4.0,
 K2) runs without a build tool from a `scip-java.json` listing sources and
 sha256-pinned classpath jars, in the Temurin image the Java gold already

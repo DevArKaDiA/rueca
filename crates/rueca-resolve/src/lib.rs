@@ -408,6 +408,7 @@ mod ruby;
 mod rust;
 mod shell;
 mod sql;
+mod swift;
 
 /// One file of the snapshot as seen by the resolver.
 #[derive(Debug, Clone)]
@@ -759,6 +760,8 @@ struct Resolver<'a> {
     ruby: ruby::RubyTables,
     /// SQL definitions by qualified name (see the `sql` module).
     sql_defs: OnceCell<sql::SqlIndex>,
+    /// Swift tables, built on first use (see the `swift` module).
+    swift: swift::SwiftTables,
 
     /// Key: (module, name, reached through `export *`, namespace).
     lookup_memo: RefCell<HashMap<LookupKey, Option<Target>>>,
@@ -1224,6 +1227,7 @@ impl<'a> Resolver<'a> {
             jvm: jvm::JvmTables::default(),
             ruby: ruby::RubyTables::default(),
             sql_defs: OnceCell::new(),
+            swift: swift::SwiftTables::default(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
@@ -1432,7 +1436,9 @@ impl<'a> Resolver<'a> {
         let package_scoped = self.package_of[i].is_some() && !self.is_kotlin(i as FileId);
         for &j in top {
             let d = &defs[j as usize];
-            if (package_scoped && d.qualified_name != d.name) || self.is_rust_impl_item(i as FileId, d) {
+            if (package_scoped && hooks::unsuffixed(&d.qualified_name) != d.name)
+                || self.is_rust_impl_item(i as FileId, d)
+            {
                 continue;
             }
             let node = self.def_node[i][j as usize];
@@ -1467,11 +1473,12 @@ impl<'a> Resolver<'a> {
         let (mut t, mut d) = (vec![None; imports.len()], vec![None; imports.len()]);
         let Some(pack) = self.packs[fid as usize] else { return (t, d) };
         if pack.namespace_imports() {
-            // C# usings name namespaces, Kotlin imports JVM packages.
+            // C# usings name namespaces; Kotlin imports JVM packages and
+            // Swift imports modules, both found by (family, module name).
             return if self.is_csharp(fid) {
                 self.csharp_namespace_import_targets(fid)
             } else {
-                self.jvm_namespace_import_targets(fid)
+                self.package_namespace_import_targets(fid)
             };
         }
         let path = &self.files[fid as usize].path;
@@ -2501,8 +2508,12 @@ impl<'a> Resolver<'a> {
                 if let Some(out) = self.kotlin_implicit_receiver(f, item, scope, receiver) {
                     return out;
                 }
+                if let Some(hit) = self.swift_module_member(f, item, receiver) {
+                    return hit;
+                }
                 let out = self.resolve_with_receiver(f, item, scope, receiver);
-                self.kotlin_extension(f, item, scope, receiver, out)
+                let out = self.kotlin_extension(f, item, scope, receiver, out);
+                self.swift_extension(f, item, receiver, out)
             }
         }
     }
@@ -2538,6 +2549,12 @@ impl<'a> Resolver<'a> {
         }
         if self.is_csharp(f) {
             return self.csharp_scope_name(f, item);
+        }
+        // Swift: a declaration of the module shadows an imported one.
+        if self.is_swift(f)
+            && let Some(n) = self.module_def(f, item.name)
+        {
+            return Some(Outcome::Hit(n, Strategy::SameModule, 0.9));
         }
         if let Some(hit) = self.imported_name(f, item) {
             return Some(hit);
@@ -2980,6 +2997,8 @@ impl<'a> Resolver<'a> {
             Some(LanguageFamily::Rust) => None,
             // Ruby: `Foo.new` runs `initialize` (own or inherited).
             Some(LanguageFamily::Ruby) => self.ruby_constructor(class),
+            // Swift: initializers are members named `init`.
+            Some(LanguageFamily::Swift) => self.find_member(class, "init", Want::Call),
             _ => self
                 .find_member(class, "__init__", Want::Call)
                 .or_else(|| self.find_member(class, "constructor", Want::Call)),

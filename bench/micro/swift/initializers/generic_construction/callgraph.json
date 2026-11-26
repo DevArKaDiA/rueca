@@ -1,0 +1,8 @@
+{
+  "Sources/App/main.swift:Wrapper.get": [],
+  "Sources/App/main.swift:Wrapper.init": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:Wrapper.get",
+    "Sources/App/main.swift:Wrapper.init"
+  ]
+}

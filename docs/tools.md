@@ -95,7 +95,12 @@ release with `"format": "verbose"` ([below](#verbose-alpha-format)).
   `billing.invoices`, `users.email` (normalized object names, no module:
   a database namespace is global; a trigger `film.last_updated`, a dbt
   model its file stem, a CTE `view.cte`; the signature ends with the
-  file's dialect, `CREATE TABLE users ( -- postgres`).
+  file's dialect, `CREATE TABLE users ( -- postgres`); Swift
+  `Core.Point.draw(at:_:)` (the SwiftPM target, then the local name with
+  the callable's selector: `Point.init(x:y:)`, `Point.subscript(_:)`; a
+  member of `extension Point` in any file is `Point.m`; the selector is
+  optional when looking a name up, `Core.Point.init` finds every
+  initializer).
 - **Errors**: MCP tool errors use `isError: true` with a message; the CLI
   prints `{"error": "..."}` to stdout and exits with status 2.
 
@@ -396,7 +401,7 @@ refs](#several-refs-of-one-repository)).
 repository has C++ sources), `rust`, `proto`, `shell` (sh, bash, zsh, ksh, bats;
 extension-less scripts by their `#!` line), `csharp`, `kotlin` (`.kt`, `.kts`),
 `ruby` (`.rb`, `.rake`, `.gemspec`, `.ru`, `Rakefile`, `Gemfile`), `sql` (`preview`;
-`.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq`; every dialect), the data languages
+`.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq`; every dialect), `swift`, the data languages
 `json` (JSONC included), `yaml`, `toml`, `dotenv`, `ini`, `properties`,
 `xml` (`pom.xml`, `*.csproj`, `AndroidManifest.xml` only), `hcl`
 (Terraform / OpenTofu included) and `dockerfile`. A language whose pack is not in

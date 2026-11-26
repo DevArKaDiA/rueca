@@ -1,0 +1,8 @@
+{
+  "Sources/App/main.swift:Base.setup": [],
+  "Sources/App/main.swift:Child.configure": [],
+  "Sources/App/main.swift:Child.setup": [
+    "Sources/App/main.swift:Base.setup",
+    "Sources/App/main.swift:Child.configure"
+  ]
+}

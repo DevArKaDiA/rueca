@@ -1,0 +1,8 @@
+{
+  "Sources/App/main.swift:Button.tap": [],
+  "Sources/App/main.swift:handle": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:Button.tap",
+    "Sources/App/main.swift:handle"
+  ]
+}

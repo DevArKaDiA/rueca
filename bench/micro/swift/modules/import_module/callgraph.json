@@ -1,0 +1,15 @@
+{
+  "Sources/App/main.swift:show": [
+    "Sources/Lib/Format.swift:Formatter.init",
+    "Sources/Lib/Format.swift:Formatter.run",
+    "Sources/Lib/Format.swift:format"
+  ],
+  "Sources/Lib/Format.swift:Formatter.init": [],
+  "Sources/Lib/Format.swift:Formatter.run": [
+    "Sources/Lib/Format.swift:format"
+  ],
+  "Sources/Lib/Format.swift:format": [
+    "Sources/Lib/Format.swift:pad"
+  ],
+  "Sources/Lib/Format.swift:pad": []
+}

@@ -1,0 +1,9 @@
+{
+  "Sources/App/main.swift:String.shouted": [],
+  "Sources/App/main.swift:greet": [
+    "Sources/App/main.swift:String.shouted"
+  ],
+  "Sources/App/main.swift:literal": [
+    "Sources/App/main.swift:String.shouted"
+  ]
+}

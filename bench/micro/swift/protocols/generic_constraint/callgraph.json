@@ -1,0 +1,7 @@
+{
+  "Sources/App/main.swift:Fast.run": [],
+  "Sources/App/main.swift:Runner.run": [],
+  "Sources/App/main.swift:execute": [
+    "Sources/App/main.swift:Runner.run"
+  ]
+}

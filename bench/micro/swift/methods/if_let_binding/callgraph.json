@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:Item.open": [],
+  "Sources/App/main.swift:use": [
+    "Sources/App/main.swift:Item.open"
+  ]
+}

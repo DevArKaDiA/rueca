@@ -1,0 +1,6 @@
+{
+  "Sources/App/Other.swift:shared": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/Other.swift:shared"
+  ]
+}

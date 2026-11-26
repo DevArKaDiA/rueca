@@ -1,0 +1,6 @@
+{
+  "Sources/App/main.swift:outer": [
+    "Sources/App/main.swift:outer.inner"
+  ],
+  "Sources/App/main.swift:outer.inner": []
+}

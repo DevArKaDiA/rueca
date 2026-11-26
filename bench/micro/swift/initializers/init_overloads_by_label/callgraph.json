@@ -1,0 +1,9 @@
+{
+  "Sources/App/main.swift:Temperature.init@4": [],
+  "Sources/App/main.swift:Temperature.init@8": [
+    "Sources/App/main.swift:Temperature.init@4"
+  ],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:Temperature.init@8"
+  ]
+}

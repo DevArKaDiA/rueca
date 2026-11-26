@@ -1,0 +1,7 @@
+{
+  "Sources/App/main.swift:FileLoader.load": [],
+  "Sources/App/main.swift:Loader.load": [],
+  "Sources/App/main.swift:run": [
+    "Sources/App/main.swift:FileLoader.load"
+  ]
+}

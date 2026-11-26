@@ -1,0 +1,5 @@
+func run() {
+    shared()
+}
+
+run()
