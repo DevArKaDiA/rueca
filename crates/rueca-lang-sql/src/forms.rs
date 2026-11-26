@@ -303,8 +303,8 @@ impl Cursor<'_> {
     /// Index after the `)` matching the `(` at `open`.
     fn close(&self, open: usize) -> Option<usize> {
         let mut depth = 0i32;
-        for k in open..self.toks.len() {
-            match self.toks[k].token {
+        for (k, tok) in self.toks.iter().enumerate().skip(open) {
+            match tok.token {
                 Token::LParen => depth += 1,
                 Token::RParen => {
                     depth -= 1;

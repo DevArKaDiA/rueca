@@ -149,8 +149,8 @@ impl Block<'_, '_, '_, '_> {
     /// Index after the `)` matching the `(` at `open`.
     fn close(&self, open: usize) -> usize {
         let mut depth = 0i32;
-        for j in open..self.len() {
-            match self.toks[j].token {
+        for (j, tok) in self.toks.iter().enumerate().skip(open) {
+            match tok.token {
                 Token::LParen => depth += 1,
                 Token::RParen => {
                     depth -= 1;
