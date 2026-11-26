@@ -55,7 +55,21 @@ def _key(d: dict) -> tuple[str, str]:
     return d["path"], d["qualname"]
 
 
+def _sql_dialects(inst: dict):
+    """The SQL labeler's dialects for the files of an instance's repository
+    (`[[s1.repos]] dialects`, path prefix -> dialect); a no-op elsewhere."""
+    from .sqlgold import file_dialects
+
+    spec = next((r for r in load_manifest()["s1"]["repos"] if r["repo"] == inst["repo"]), {})
+    return file_dialects(spec.get("dialects"))
+
+
 def s1_gold(inst: dict) -> dict:
+    with _sql_dialects(inst):
+        return _s1_gold(inst)
+
+
+def _s1_gold(inst: dict) -> dict:
     """Gold for one S1 instance; cached in .cache/gold/s1/<id>.json.
 
     Function gold preference: LocAgent `edit_functions` > SWE-PolyBench
@@ -212,7 +226,7 @@ def run_instance(inst: dict, arm_names: list[str], limit: int, force: bool, suit
         return
     s1_gold(inst)
     qs = queries_for(inst)
-    with worktree(inst["repo"], inst["base_commit"], f"s1-{inst['id']}") as root:
+    with _sql_dialects(inst), worktree(inst["repo"], inst["base_commit"], f"s1-{inst['id']}") as root:
         for name in pending:
             arm = make_arm(name)
             t_ok, why = arm.available()

@@ -1,0 +1,20 @@
+{
+  "schema.sql:actor": [],
+  "schema.sql:actor_audit": [
+    "schema.sql:actor"
+  ],
+  "schema.sql:actor.actor_before_update": [
+    "schema.sql:actor"
+  ],
+  "schema.sql:record_change": [
+    "schema.sql:actor_audit"
+  ],
+  "schema.sql:rename_actor": [
+    "schema.sql:actor",
+    "schema.sql:record_change"
+  ],
+  "schema.sql:actor_changes": [
+    "schema.sql:actor",
+    "schema.sql:actor_audit"
+  ]
+}

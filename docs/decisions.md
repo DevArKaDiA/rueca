@@ -1,5 +1,485 @@
 # Decisions log
 
+## 2026-11-25 — SQL: held-out parse errors 25.0%; back to `preview`
+
+The measurement fixed in the next entry, run as written there. **1,624 of
+6,496 files of the 25 held-out repositories keep a strict parse error:
+25.0% (Wilson 95% 24.0–26.1), against a floor of ≤ 2%.** The 0.76% of the
+entry after it was the rate on the files the parser was repaired against.
+SQL is `preview`.
+
+- **What ran.** `rueca-bench run --arm rueca --suite health --lang sql`
+  on the 25 repositories as `[[health.repos]]` of the manifest (source
+  `held-out`, gated; `health.py` learns that one list, nothing else in the
+  harness changed), with `rueca` built from `git archive 05ff770` (sha256
+  `460fa3c27315…`; the published `678465c5b359…` was built in another
+  directory and is not bit-reproducible). The rebuilt binary gives the
+  published rows on six repositories of the first corpus (tSQLt 14 of 281,
+  mimic-code 8 of 469, Sakila 0 of 25, pgmq 0 of 101, bigquery-utils 1 of
+  105, First Responder Kit 1 of 23). No file of `rueca-lang-sql` changed.
+  No health rule excludes any of the 6,496 files, so the raw rate is the
+  same number. The index does not extract 14 more files (13 in UTF-16, one
+  over 2 MiB; `files_skipped`); with them, as the crate's `dialects`
+  example counts, 1,637 of 6,510 (25.1%, 24.1–26.2); lenient (head-only
+  statements not counted) 835 of 6,510 (12.8%, 12.0–13.7).
+- **By the dialect given to each file before measuring** (the files the
+  index extracted):
+
+  | Dialect (a priori) | Files | Strict errors | % | Wilson 95% |
+  |---|---:|---:|---:|---|
+  | PostgreSQL | 1,204 | 114 | 9.5 | 7.9–11.3 |
+  | MySQL / MariaDB | 1,020 | 311 | 30.5 | 27.7–33.4 |
+  | SQLite | 279 | 14 | 5.0 | 3.0–8.2 |
+  | T-SQL | 1,517 | 635 | 41.9 | 39.4–44.4 |
+  | Oracle | 248 | 101 | 40.7 | 34.8–46.9 |
+  | DB2 | 94 | 3 | 3.2 | 1.1–9.0 |
+  | H2 | 89 | 7 | 7.9 | 3.9–15.4 |
+  | BigQuery | 681 | 130 | 19.1 | 16.3–22.2 |
+  | Snowflake | 647 | 287 | 44.4 | 40.6–48.2 |
+  | dbt Jinja | 706 | 22 | 3.1 | 2.1–4.7 |
+  | unlabelled | 11 | 0 | 0.0 | 0.0–25.9 |
+  | **All** | **6,496** | **1,624** | **25.0** | **24.0–26.1** |
+
+  No dialect meets 2% with its interval, and no single repository decides
+  it: leaving any one out, the pooled rate stays between 19.0% (without
+  sql-server-samples) and 26.9%. By what the pack detected instead, 1,548
+  files were read as ANSI (397 with an error), 1,415 as T-SQL, 997 as
+  PostgreSQL, 931 as MySQL, 796 as BigQuery, 270 as Oracle, 227 as
+  Snowflake (of 647 Snowflake files), 188 as SQLite.
+- **By repository** (files extracted, with a strict error): supabase/postgres
+  264 / 36 (13.6%), synapse 301 / 1 (0.3%), supabase/auth 79 / 2 (2.5%),
+  pgvector 56 / 17 (30.4%), age 69 / 50 (72.5%), cloudstack 225 / 61
+  (27.1%), vitess 274 / 136 (49.6%), gh-ost 104 / 94 (90.4%),
+  dolphinscheduler 74 / 16 (21.6%), temporal 111 / 9 (8.1%), diesel 465 /
+  2 (0.4%), authelia 174 / 13 (7.5%), camunda-bpm-platform 546 / 24
+  (4.4%), actual 59 / 1 (1.7%), atuin 78 / 1 (1.3%), sql-server-samples
+  1,087 / 595 (54.7%), sqlwatch 337 / 39 (11.6%), cortex-data-foundation
+  595 / 127 (21.3%), ethereum-etl-airflow 86 / 3 (3.5%), dbt-ga4 72 / 1
+  (1.4%), sf-samples 647 / 287 (44.4%), dbt-adapters 409 / 10 (2.4%),
+  ra_data_warehouse 225 / 11 (4.9%), db-sample-schemas 89 / 76 (85.4%),
+  pljson 70 / 12 (17.1%). Five repositories are at or under 2%: the
+  migrations of applications (synapse, diesel, actual, atuin) and one dbt
+  package.
+- **Causes, by file** (a file with several is counted in each; categories
+  written after the fact from the parser errors and the first words of
+  head-only statements, `bench/datasets/heldout/sql_causes.py`;
+  descriptive, nothing was changed for them):
+
+  | Files | Construct |
+  |---:|---|
+  | 420 | T-SQL statements read by their head only: `ALTER DATABASE`, `CREATE STATISTICS`, `CREATE EXTERNAL …`, `RESTORE`, partition functions and schemes, event sessions, variants of `ALTER TABLE` / `DROP TABLE` (sql-server-samples 395) |
+  | 207 | MySQL scheduled events, `CREATE / DROP EVENT`, head only (vitess 124, gh-ost 83) |
+  | 192 | SSMS template parameters `<name, type, value>` in place of names (sql-server-samples; text a client fills in, as the two tSQLt templates of the first corpus) |
+  | 187 | T-SQL statements no dialect parses: `INSERT t FROM '<file>' WITH (…)` of the AdventureWorks install scripts, graph tables (`AS NODE` / `AS EDGE`), natively compiled `BEGIN ATOMIC WITH`, `ROWGUIDCOL`, `OPENJSON … WITH` |
+  | 128 | Snowflake statements with no grammar: dynamic tables, `CREATE COMPUTE POOL` / `IMAGE REPOSITORY` / `STREAMLIT`, procedure parameters with `DEFAULT`, `$` and `&{…}` variables |
+  | 121 | `#` line comments (120 files of cortex-data-foundation start with a `#--` licence header that its Jinja step removes) |
+  | 117 | Snowflake account and object statements, head only: `GRANT`, `CREATE DATABASE / SCHEMA / ROLE / STAGE / STREAM`, `ALTER WAREHOUSE`, `CREATE OR REPLACE` of objects without a production |
+  | 103 | Snowflake `USE ROLE / DATABASE / SCHEMA / WAREHOUSE`, head only |
+  | 57 | Oracle DDL and PL/SQL without a grammar: object types (`CREATE TYPE … OID`), identity columns, `CREATE USER`, `NUMBER(*, n)` |
+  | 56 | PostgreSQL statements, head only: `CREATE CAST`, `CREATE OPERATOR`, `CREATE EVENT TRIGGER`, `ALTER ROLE`, `CREATE PUBLICATION`, `DO LANGUAGE` |
+  | 51 | MySQL statements no dialect parses: a column's `charset`, multi-table `UPDATE a, b SET` |
+  | 48 | SQL*Plus commands: `SET DEFINE`, `rem` |
+  | 47 | a `--` comment with no space after it, in MySQL files (cloudstack 45) |
+  | 45 | MySQL statements, head only: variants of `ALTER TABLE`, `CREATE USER`, `GRANT`, `SIGNAL` |
+  | 39 | a column definition list after a set-returning function, `… AS (v agtype)` (Apache AGE's `cypher()`) |
+  | 30 | SQL*Plus line continuation `-` inside an `INSERT` (db-sample-schemas) |
+  | 22 + 22 | other PostgreSQL statements (operators, `CREATE TABLE … USING`); dbt and Python-format placeholders (`{schema}`) in fixtures |
+  | 13 + 13 | MySQL `delimiter d//`; UTF-16 files |
+
+  Half of the failing files (802 of 1,637) fail only by the strict rule:
+  statements the pack recognizes by their first words and does not parse.
+  The productions of `forms.rs` cover the utility statements that occurred
+  in the first corpus; the held-out one has others.
+- **Decisions.** (1) The held-out repositories stay in the manifest as
+  gated health targets ("held-out, added 2026-11-25 after the tuning of
+  PR #87"), so the scorecard pools them: 1,650 of 9,915 files, 16.6%
+  (15.9–17.4), `preview`, failing floor "files with parse errors". The
+  two populations are reported apart wherever the number is quoted, since
+  the pooled one mixes a tuned corpus with an untuned one. (2) `rueca-bench
+  check` reports the row as a regression against the last publication
+  (0.76% → 16.6%); it is the population that changed, not the pack. No
+  other language's row moves. (3) Once the parser is repaired against
+  these 25 repositories they are a tuning corpus too: the next claim of
+  `stable` for SQL needs a third set chosen the same way, and the repairs
+  should be argued by construct (above), not by this list of files. (4)
+  Every other pack's parse-error rate is also measured on the repositories
+  the pack was developed against; only SQL has a held-out number today.
+- **Limits of this number.** One person's selection from metadata, not a
+  random sample of SQL; test schemas (gh-ost, vitess) and vendor samples
+  (sql-server-samples, sf-samples, db-sample-schemas) weigh more than they
+  would in an application's repository, and they are where the rate is
+  highest; application migrations are where it is lowest. A file counts
+  the same with one unparsed statement or fifty. The a-priori dialect of a
+  file is its repository's or a path word, not verified per file.
+
+## 2026-11-25 — SQL: a held-out health corpus, chosen before measuring
+
+The 0.76% of files with a strict parse error behind SQL's `stable` (next
+entry) was measured on the corpus the parser was repaired against: the
+last pass went from 71 to 26 failing files guided by the list of failing
+files. That number is contaminated as an estimate of the rate on SQL the
+pack has not seen. This entry fixes a second corpus **before any Rueca
+binary or the `dialects` example has read a file of it**; it is committed
+alone, and the measurement follows in a later commit.
+
+- **Rules of the measurement.** Binary: `fix/sql-stable@05ff770`, the
+  source of the published scorecard (the two later commits change two
+  loops for clippy; the build is from a `git archive` of `05ff770`). No
+  change to `rueca-lang-sql` during or after it. Strict count. Every file
+  with an SQL extension of the manifest at the pinned commit, tests and
+  fixtures included; the only files left out of the gated rate are those
+  the health rules already leave out (vendored directories, RFC 0004 §5
+  and `bench/README.md` *Health*), and the raw rate is reported next to
+  it. No file, directory or repository is dropped after seeing a result,
+  and none is added. The repositories then enter `bench/manifest.toml` as
+  gated health targets for SQL, and the scorecard computes the status from
+  the pooled number: above 2% SQL is `preview`.
+- **How the repositories were chosen**: from metadata only (GitHub
+  licence, stars, release tags and the file list of the pinned tree,
+  through the API; nothing was cloned). Public; permissive licence read
+  from the repository; SQL written for a product or by a vendor for its
+  users, not parser fixtures; at least 50 SQL files at the pin; not in
+  `bench/manifest.toml`, not in the mining lists
+  (`bench/datasets/mined/repos_sql.txt`, `repos_sql_extra.txt`, the mining
+  output), not among the repositories named in the two entries below, and
+  no copy of one of them in its tree (checked by file name). Pin: the
+  latest release, or the default branch's head on 2026-11-25 where there
+  is no release or the latest one is an asset holder older than the tree
+  (sql-server-samples, sf-samples, dbt-adapters, whose `v1.10.4` predates
+  the monorepo). Dialect mix after what developers use (PostgreSQL and
+  MySQL first, then SQLite and SQL Server, Oracle, then the warehouses and
+  dbt), with the engines the first corpus lacks (MySQL, SQLite, Oracle)
+  given real populations.
+
+  | Repository | Pin | Licence | Dialect (a priori) | SQL files | What it is |
+  |---|---|---|---|---|---|
+  | supabase/postgres | `v17.12.0.005-cli` = `968515a` | PostgreSQL | PostgreSQL | 264 | migrations, extension tests |
+  | matrix-org/synapse | `v1.98.0` = `15733b0` (last Apache-2.0 release) | Apache-2.0 | PostgreSQL (deltas also run on SQLite) | 305 | schema deltas of a server |
+  | supabase/auth | `v2.199.0` = `0725a1d` | MIT | PostgreSQL | 79 | migrations |
+  | pgvector/pgvector | `v0.8.7` = `f37c13f` | PostgreSQL | PostgreSQL | 56 | extension scripts and regress tests |
+  | apache/age | `PG18/v1.8.0-rc0` = `e43dc1a` | Apache-2.0 | PostgreSQL | 69 | extension scripts and regress tests |
+  | apache/cloudstack | `4.23.0.0` = `463f8d0` | Apache-2.0 | MySQL / MariaDB | 225 | schema upgrades, views |
+  | vitessio/vitess | `v24.0.5` = `9b28c87` | Apache-2.0 | MySQL / MariaDB | 274 | schemas and queries of tests and examples |
+  | github/gh-ost | `v1.1.11` = `2ed192c` | MIT | MySQL / MariaDB | 104 | test schemas |
+  | apache/dolphinscheduler | `3.4.3` = `a190201` | Apache-2.0 | MySQL / MariaDB, PostgreSQL, H2 by path | 74 | schema and upgrades per engine |
+  | temporalio/temporal | `v1.32.2` = `6d08582` | MIT | MySQL, PostgreSQL, SQLite by path | 111 | versioned schema per engine |
+  | diesel-rs/diesel | `v2.4.0` = `48acdc8` | Apache-2.0 (dual MIT) | PostgreSQL, MySQL, SQLite by path | 465 | migrations of tests and examples |
+  | authelia/authelia | `v4.39.28` = `8da42b2` | Apache-2.0 | MySQL, PostgreSQL, SQLite by path | 174 | migrations per engine |
+  | camunda/camunda-bpm-platform | `7.24.0` = `2d8b7ed` | Apache-2.0 | DB2, H2, MariaDB, MySQL, SQL Server, Oracle, PostgreSQL by path | 546 | create, drop and upgrade scripts per engine |
+  | actualbudget/actual | `v26.11.0` = `1766241` | MIT | SQLite | 59 | migrations |
+  | atuinsh/atuin | `v18.25.1` = `a4c2ee4` | MIT | SQLite; PostgreSQL by path | 78 | migrations |
+  | microsoft/sql-server-samples | `master` @ `26dc125` | MIT (`license.txt`) | T-SQL | 1,102 | sample databases and feature samples |
+  | marcingminski/sqlwatch | `4.11` = `859ae60` | MIT (`LICENSE`) | T-SQL | 338 | a database project: tables, views, procedures |
+  | GoogleCloudPlatform/cortex-data-foundation | `v6.3.4` = `a24ea50` | Apache-2.0 | BigQuery (Jinja-templated) | 595 | reporting views over SAP, Salesforce, marketing data |
+  | blockchain-etl/ethereum-etl-airflow | `v2022.10.19.0-composer1` = `6d458f5` | MIT | BigQuery | 86 | queries of a pipeline |
+  | Velir/dbt-ga4 | `6.3.0` = `4d7582e` | MIT | dbt Jinja (BigQuery) | 72 | dbt package |
+  | Snowflake-Labs/sf-samples | `main` @ `96ef1b2` | Apache-2.0 | Snowflake | 647 | vendor samples |
+  | dbt-labs/dbt-adapters | `main` @ `8327d91` | Apache-2.0 | dbt Jinja (macros of eight adapters) | 409 | adapter macros |
+  | rittmananalytics/ra_data_warehouse | `v1.2.1` = `ecde71f` | Apache-2.0 | dbt Jinja | 225 | dbt project |
+  | oracle-samples/db-sample-schemas | `v23.3` = `e3325a8` | MIT | Oracle | 89 | sample schemas |
+  | pljson/pljson | `v3.7.1` = `2d7cdb9` | MIT (`LICENSE`) | Oracle (PL/SQL) | 70 | PL/SQL library |
+
+  25 repositories, 6,516 files by the tree listings (the bench's own walk
+  may differ by a few: symbolic links, its excludes); the largest is 16.9%
+  of them. A file's a-priori dialect is its repository's, except in the
+  six multi-engine repositories (dolphinscheduler, temporal, diesel,
+  authelia, camunda, atuin), where a path word decides (`mysql`,
+  `mariadb`; `postgres`, `postgresql`, `pg`, `cockroach`; `sqlite`,
+  `sqlite3`; `mssql`, `sqlserver`; `oracle`; `db2`; `h2`) and a file with
+  none is "unlabelled". The per-dialect table uses these labels, not the
+  dialect the pack detects, so a wrong detection is not hidden.
+- **Looked at and left out, with the reason**: sqlfluff (2,809 files that
+  are parser fixtures, not SQL anybody runs), ory/kratos (5,158 migration
+  files, most of the corpus by itself), HTTPArchive/almanac (3,655 BigQuery
+  queries, more than a third), flowable-engine (1,321; the same lineage of
+  scripts as camunda, one of the two is enough), oracle-db-examples
+  (1,513) and tpt-oracle (1,075; either would make Oracle a quarter of the
+  files, and tpt-oracle's licence file is not a standard one),
+  alexandria-plsql-utils (no licence file), MadeiraToolbox and
+  tigertoolbox (T-SQL is already the largest group), mozilla/bigquery-etl
+  (MPL-2.0), datacharmer/test_db (CC BY-SA), mysql-sys (GPL-2.0), and
+  repositories under 50 SQL files (harbor, PostgREST, quartz, sqlean,
+  memos, jaffle-shop, chinook, pg_cron, schemachange). Oracle is therefore
+  a small group (about 240 files with camunda's), and its row will have a
+  wide interval.
+
+## 2026-11-25 — SQL: mined localization set, three more structural sets, the strict parse-error count; `stable`
+
+*Superseded the same day on one point: the parse-error rate below is the
+rate on the corpus the parser was repaired against; on a held-out corpus
+it is 25.0% and SQL is `preview` (first entry of this log). The rest
+stands.*
+
+SQL was `preview` on four counts: no localization instances, 8.9% of files
+with parse errors, a callees population of 281, and a code-backed gold.
+The parser work is the next entry. The rest:
+
+- **Localization set mined by the bench**, as for shell
+  (`[datasets.rueca_mined_sql]`; same miner, rules and date). Gated 78 on
+  twelve repositories fixed from the mining counts before any arm ran:
+  dbt-utils 8, dbt-project-evaluator 8, tuva-core 8, dbt-external-tables
+  5, dbt-date 4, dbt_artifacts 4, dbt-snowflake-monitoring 4 (dbt); First
+  Responder Kit 12 (T-SQL); pgmq 6, pg_partman 6 (PL/pgSQL); mimic-code 8,
+  bigquery-utils 5 (BigQuery / analytical). Calibration 15: dbt-codegen,
+  DarlingData, postgres_dba. The labeler needs a dialect for function
+  gold: `[[s1.repos]] dialects` gives it from what the repository is
+  (never from the pack), for the gold and for BM25's function documents
+  alike. 54 of the 78 patches change a callable; 53 of the 78 issues name
+  a gold file, reported apart.
+- **Three more structural sets** so callees pool ≥ 300 (RFC 0004 §7.2):
+  pgmq v1.13.2, tSQLt `4a921d0`, mimic-code v3.0.1 PostgreSQL concepts,
+  chosen from the labeler's own question counts (50, 107, 33 callees)
+  before any arm ran (`bench/datasets/mined/s3_sql_candidates.md`).
+  Pooled: callers 528, callees 471. mimic-code's tree is generated with
+  sqlglot, the labeler's parser: a bias in the gold's favour, kept and
+  disclosed; without it callees would be 438.
+- **The gated parse-error count is strict.** The first version of the
+  pack's own readers accepted utility statements by their first words and
+  balanced parentheses. That lowers the rate without parsing, so such a
+  statement is a parse error of the file (`Reader::head_only`,
+  `Facts::parse_errors`); the lenient count is printed next to it. Under
+  the strict count the first corpora were at 39.5% (T-SQL), 33.6% (Oracle)
+  and 8.2% (PostgreSQL) of files, which is what the productions of
+  `forms.rs` then closed by parsing every token of each form.
+- **A script that defines nothing is a `Function` named after its file**
+  (`extract.rs: script`), found on the calibration split: postgres_dba's
+  reports are one query per file, so the pack emitted no symbol for them
+  and symbol search could not return the file (File Acc@5 on calibration:
+  Rueca 66.7 vs BM25 93.3; with the rule 93.3 vs 93.3). Its qualified name
+  keeps the extension (`report.sql`) so no call written in SQL resolves to
+  it; it encloses the references of its statements, which were on the
+  `File` node before. Tuned on calibration only, before the gated run.
+- **The gated sets, and what happened after the first pass.** In order:
+  1. *First gated pass* (binary `fix/sql-stable@4a8942c`): File Acc@5
+     76.9 vs BM25 78.2; Function Acc@10 **48.1 vs 75.9, Δ −27.8 (−42.6 to
+     −14.8), failing**; callers / callees precision 99.5 / 98.8, recall
+     96.1 / 95.6; definitions 99.2; micro F1 100.0; files with parse
+     errors **71 of 3,419, 2.1% (1.6–2.6), failing** (the pinned commits
+     are older than the heads the parser was measured on, and two
+     repositories are in the corpus at two pins).
+  2. *A harness rule, not the pack*: the graph arms' S1 function ranking
+     dropped `Struct` hits — tables, views, dbt models — although the
+     manifest has declared them callables for SQL since the SQL pack and
+     the structural scoring honours it (`bench/README.md`, *Changelog of
+     scoring rules*). 41 of the 78 gated instances are dbt models, which
+     neither graph arm could hit while BM25 ranks every labeler callable.
+     With the rule applied to both graph arms, same binary and instances:
+     Function Acc@10 72.2 vs 75.9, Δ −3.7 (−13.0 to +5.6); cbm 9.3
+     (unchanged: it has no node for a model). The calibration split could
+     not show it: its instances with function gold are macros and
+     procedures.
+  3. *Parser work on the health corpus at its pinned commits*, by
+     construct, with accepted and rejected cases per production (next
+     entry): 71 → 26 files. No localization or structural score guided it;
+     the list of failing files did. Plus a refactor for the SonarQube
+     complexity limit, checked byte-identical on 6,079 files, and a
+     dialect-fallback limit for statements over 64 KiB (identical on 9,498
+     files; a 2 MB script took the whole 5 s parse budget under load).
+  4. *Final pass* with the final binary (`fix/sql-stable@05ff770`), Rueca
+     arm only: File Acc@5 76.9 (66.4–84.9) vs 78.2, Δ −1.3 (−9.0 to +6.4);
+     Function Acc@10 72.2 (59.1–82.4) vs 75.9, Δ −3.7 (−13.0 to +5.6);
+     structure, definitions and micro unchanged to the decimal; files with
+     parse errors 26 of 3,419, 0.8% (0.5–1.1). These are the published
+     numbers. So the gated sets were scored twice by Rueca; the second
+     pass changed no localization or structural number, only the parse
+     errors.
+- **`rueca-bench check` flags the SQL structural rows, and why.** The
+  pooled numbers moved against the last publication (callers / callees
+  precision 99.8 / 99.6 → 99.5 / 98.8, recall 98.9 / 97.5 → 96.1 / 95.6,
+  definitions 100.0 → 99.2) because the pool grew from two sets to five:
+  dbt_hubspot is unchanged to the question, pgmq and tSQLt score lower
+  than the first two (pgmq callers recall 75.9, definitions 90.3). On
+  Sakila two questions of the SQL Server copy changed: `CREATE TABLE
+  film_text (…)` is followed, without `GO` or `;`, by `CREATE TABLE
+  inventory (… REFERENCES film …)`; the labeler reads the batch as one
+  statement and gives `film_text → film`, the pack now splits the batch
+  and gives `inventory → film`, so one gold edge that is the labeler's
+  artifact is no longer matched (Sakila callers recall 97.0 → 96.7). The
+  gold was not changed. No other language's row moves.
+- **Where the issue names no gold file** (25 of 78; 23 with function
+  gold): File Acc@5 56.0 vs BM25 72.0 vs cbm 28.0; Function Acc@10 56.5 vs
+  60.9 vs 4.3. Rueca trails BM25 clearly on files there: the pass on the
+  whole set leans on issues that name the file. Not a floor; stated in the
+  README.
+- **What `stable` does not say.** The structural gold is the bench's
+  code-backed labeler; the localization set is unvalidated by people; an
+  SQL "function" is any definition, so on dbt packages Function Acc@10 is
+  close to file localization; "parsed" includes the pack's own
+  productions; T-SQL alone is at 4.9% of files on the corpus (15 of 304:
+  deliberately broken experiment scripts, Service Broker and certificate
+  statements, two build templates) and Oracle is 11 files of it — on
+  utPLSQL, outside the corpus, 158 of 483 files keep a strict error.
+
+## 2026-11-25 — SQL: procedural code read by the pack, Oracle and DB2 as dialects, what a parse error is
+
+The SQL pack's files with parse errors were 8.9% on the gated corpus
+(floor ≤ 2%). The cause was one rule — "a statement sqlparser rejects in
+every dialect is a parse error" — applied to code sqlparser has no
+grammar for: a T-SQL procedure is one statement, a PL/SQL package is one
+statement, and Oracle / DB2 files were read as ANSI. Choices:
+
+- **The parser stays sqlparser; the pack reads the structure around it.**
+  sqlparser 0.64 is the latest release and already has an Oracle dialect
+  (SQL only; no PL/SQL) and none for DB2; no other maintained pure-Rust
+  parser covers procedural T-SQL or PL/SQL. So the pack now reads, itself:
+  T-SQL batches (statement boundaries without `;`, `BEGIN … END`, `TRY` /
+  `CATCH`, `IF` / `WHILE`, routine heads; `tsql` module) and
+  `;`-terminated procedural code (PL/SQL packages, routines, triggers,
+  type bodies, anonymous blocks; MySQL and DB2 SQL PL routines and
+  triggers; BigQuery scripts; `block` module). Every query, DML statement,
+  condition, assigned value and call inside is still parsed by sqlparser,
+  one at a time, with the routine as the enclosing definition — so a
+  10,000-line procedure with one exotic statement loses that statement
+  only, and procedure bodies now give column references too.
+- **A parse error is unchanged in meaning and finer in grain.** It is a
+  statement — now also a statement *of a routine body* — that nothing
+  parses and that only the token scanner reads. A file is `partial` when
+  it has one. What changed is what counts as parsed:
+  1. sqlparser, as before;
+  2. sqlparser after **same-length repairs** (`repair` module): a
+     documented table of constructs — physical attributes, `CLUSTERED`,
+     hints, `INCLUDING ALL`, `%TYPE`, a Jinja placeholder that expands to
+     a clause — blanked or replaced by an equivalent of the same length.
+     Positions do not move; no relation, column or routine name is
+     removed (storage names are);
+  3. **the pack's own grammars**: the procedural readers above, and
+     the productions of the `forms` module — one grammar per statement
+     form sqlparser lacks (T-SQL flow, transaction, cursor, `SET`, `EXEC`,
+     `DBCC`, `BACKUP`, security statements; `GRANT`; `DROP` kinds; type
+     and synonym definitions; non-column `ALTER TABLE` actions;
+     PostgreSQL `DO`, routine heads with a text body, `ALTER EXTENSION`;
+     MySQL `LOAD DATA`). A production must consume every token of the
+     statement — names, typed argument lists, option keywords from closed
+     sets — and every expression in it must parse with sqlparser's
+     expression parser. Each has accepted and rejected (malformed) cases
+     in `forms::tests`.
+  **Known by the head is not parsed (strict rate).** The first version of
+  this work also accepted statements by their first words and balanced
+  parentheses (`utility` module). That is not parsing, and the gated
+  health number does not count it: such a statement keeps the references
+  the token scanner reads but is a parse error (`FileFacts::parse_errors`,
+  `Stats::unparsed_strict`). The lenient rate, which leaves those out, is
+  printed next to the strict one by the `dialects` example (`--heads`
+  lists the forms still known by their head only). PL/SQL control
+  statements read by the block reader (`RAISE`, `FETCH … INTO`, `EXECUTE
+  IMMEDIATE`, …) have closed grammars too; what does not fit goes through
+  the same strict count.
+  Still not validated inside the procedural readers: parameter lists of
+  T-SQL and PL/SQL routine heads, declared types of PL/SQL variables,
+  `TYPE` / `SUBTYPE` / `PRAGMA` declarations, and the arguments of
+  chained member calls (`a.b(x).c(y)`), read by the token scanner.
+- **Not excluded, not relabelled.** No file was taken out of the health
+  metric and no `[[health.not_language]]` entry was added. Client
+  commands (SQL*Plus, sqlcmd, psql) were already masked as commands; the
+  new ones follow the same rule (a line that is a command between
+  statements). Two rules skip text that is not SQL by construction: in a
+  dbt file under `macros/` only macro blocks are read (text outside them
+  is never rendered), and a statement that is only `{{ ref() }}` tags is
+  template output (its relations are still references).
+- **Oracle and DB2 are dialects; their unit files are SQL.** Detection
+  follows the existing ladder (directive → extension → path word →
+  content signals). `.pks`, `.pkb`, `.pck`, `.pls`, `.plsql`, `.tps`,
+  `.tpb` are now `Language::Sql` (they were not indexed at all: utPLSQL
+  has 415 such files and 78 `.sql`). `.prc`, `.fnc`, `.trg`, `.ddl` stay
+  out: the names are not specific to Oracle. A package is a `Module`, its
+  subprograms `Function`s named `package.name` (specification entries are
+  declarations), so calls `pkg.proc(…)` resolve by qualified name like
+  schema-qualified routines. ClickHouse, Hive and Databricks get their
+  sqlparser dialects by path word or directive only.
+- **Parameters and variables are not columns.** Inside routines the
+  variable lists of `SELECT … INTO` / `RETURNING … INTO` are blanked
+  before parsing (they were `Write` references to tables named like the
+  variables), and declared names and parameters are never column
+  references.
+- **Measured** (files with a parse error; `cargo run --release -p
+  rueca-lang-sql --example dialects -- <tree>`), evaluation corpus pinned
+  at: pg_partman `e0a6c38`, pgmq `51468f6`, pgTAP `21ceed1`,
+  First Responder Kit `5d3a681`, DarlingData `bf5a066`, tSQLt `4a921d0`,
+  sql-server-maintenance-solution `4161757`, utPLSQL `01a89ea`, Logger
+  `600f0c4`, bigquery-utils `d5bde4f`, dbt-utils `5e1e195`,
+  dbt-project-evaluator `5104628`, dbt-expectations `db3dc81`,
+  dbt_artifacts `433dbd6`, elementary `b7fdff1`, plus the bench's sakila
+  `e089a5b` and dbt_hubspot `6de2fe2`:
+
+  | Dialect | Before | After |
+  |---|---|---|
+  | PostgreSQL | 156 / 415 (37.6%) | 1 / 413 (0.2%) |
+  | MySQL | 4 / 94 | 2 / 94 |
+  | SQLite | 1 / 3 (Sakila) | 0 / 3 |
+  | T-SQL | 335 / 443 (75.6%) | 26 / 404 (6.4%) |
+  | Oracle | read as ANSI / T-SQL / SQLite | 12 / 515 (2.3%) |
+  | DB2 | read as ANSI | 0 / 4 |
+  | BigQuery | 13 / 79 | 4 / 79 |
+  | Snowflake | 11 / 39 | 0 / 39 |
+  | ANSI and dbt Jinja | 102 / 1,108 (9.2%) | 3 / 1,052 (0.3%) |
+  | All | 626 / 2,185 (28.6%) | 48 / 2,603 (1.8%) |
+
+  Gated corpus alone: Sakila 10 → 0 of 25 files, dbt_hubspot 22 → 0 of
+  335. These repositories were used to find constructs, as every pack's
+  repairs were; no structural or localization score was read on a gated
+  set while doing it. Extraction on the calibration repository (sqlc
+  `examples/`), the micro-benchmark and the crate fixture was compared
+  before and after file by file: 7 of 93 files differ, all by statements
+  that were unparsed and now give column references, one wrong `Write`
+  reference to a variable removed, and the dialect of two ClickHouse
+  files.
+- **The labeler reads Oracle and DB2 trees; three micro cases.**
+  `sqlgold.py` learns the two dialect names (`/` buffers and PL/SQL units,
+  `--#SET TERMINATOR`, bodies read as text, upper-case folding), all
+  conditional on the dialect: the gold of Sakila, dbt_hubspot and sqlc was
+  compared before and after and is identical. Package subprograms are not
+  labeler callables (a blind spot, listed with the others).
+  `bench/micro/sql` gains `oracle/standalone_units`,
+  `oracle/procedures_and_loops` and `db2/trigger_and_procedure` (32
+  cases, 102 callables, 76 edges; the labeler agrees on 74, the 2 are the
+  migration-order edges as before).
+- **Strict rate on the health corpus** (every SQL file of the gated S3
+  and S1 repositories at their pinned commits, 3,419 files; the bench's
+  file set, counted by the `dialects` example): 26 files with a strict
+  parse error (0.76%), 23 lenient (0.67%). It was 71 (2.08%) before the
+  last constructs were closed and 238 of 2,671 at repository heads when
+  head-only acceptance was first counted. Closed by parsing, each with
+  accepted and rejected cases in the tests: BigQuery `LOAD DATA … FROM
+  FILES`, Redshift `COPY` parameters, SAP HANA `IMPORT FROM CSV FILE`,
+  MySQL `PREPARE` / `CREATE SCHEMA … COLLATE`, `ALTER TABLE … CLUSTER
+  ON`, T-SQL `ALTER TABLE t ADD a INT, b INT` (each column parsed as its
+  own `ADD`), and repairs for a trailing comma in a T-SQL column list, CLR
+  static methods, BigQuery bit shifts, HANA column-store hints and table
+  options before a MySQL partitioning clause; Jinja: a macro alone after
+  the CTE list is the main query, a macro first in the statement before
+  `select` is the `WITH` list, and comments before a placeholder do not
+  change where it stands. `DELIMITER` is a client command only with a
+  symbol delimiter (`DELIMITER ','` of a PostgreSQL `COPY` and a
+  parameter named `delimiter` were cutting statements).
+  What is left is not valid SQL of any dialect, or not SQL the pack reads:
+  tSQLt 14 files (12 under `Experiments/` and `Snippets/`: unterminated
+  comments and brackets, sqlcmd `:!!`, Service Broker and event-session
+  statements, statements cut on purpose; two build templates with SSMS
+  `<login_name, sysname, …>` parameters), mimic-code 8 + 2 (six generated
+  files that end after `CREATE TABLE … AS`, one with `CREATE TABLE
+  .first_day_lab`, one with two `CREATE TABLE … AS` heads and no query;
+  the last two are in both pins), First Responder Kit 1 (two select items
+  with no comma between them in the 2005 script), bigquery-utils 1
+  (`syntax_error.sql`, an input of its query fixer).
+- **A long statement is parsed in the file's dialect only.** Above 64 KiB
+  a statement is a routine or a data load; when the file's dialect
+  rejects it the pack's readers take it apart and every statement inside
+  is still tried in every dialect. Tokenizing all of it once more for each
+  of the seven other dialects was most of the time of the First Responder
+  Kit's 2 MB `Install-Azure.sql` (about 1.1 s, at the 5 s budget under
+  load; now about 0.4 s). The facts of 9,498 corpus files are
+  byte-identical with and without the limit.
+- **What still fails, and stays counted**: T-SQL at 6.4% of files (`FOR
+  XML` without `FROM`, `GROUPING SETS`, `VECTOR_SEARCH`, `xml.modify`,
+  deliberately broken experiment scripts), SQL*Plus substitution
+  variables that stand for keywords, Oracle XML functions, BigQuery
+  templates with `<placeholders>`. A repository of procedural T-SQL alone
+  is therefore still above 2%.
+- **Not done**: SQL in string literals and dynamic SQL, PL/pgSQL bodies
+  beyond the token scanner (sqlparser keeps them as text; they are not
+  counted as errors either, as before), compound triggers, Snowflake
+  Scripting, Oracle conditional compilation beyond "read every branch".
+
 ## 2026-11-25 — Shell: a localization set mined by the bench; `stable`
 
 Shell was `preview` for two reasons: no localization dataset has shell
@@ -64,6 +544,7 @@ is the dialect work below. For the first:
   pack, and since the dialect work the pack's dialect rules and repairs
   too), and the localization set is unvalidated by people. Both are
   disclosed next to the scorecard; neither is a floor of RFC 0004.
+
 
 ## 2026-11-25 — Shell: one dialect per file, tree-sitter-zsh for zsh files
 
@@ -187,6 +668,7 @@ now has dialects the way SQL has (`rueca-lang-shell` `dialect.rs`):
 - **Cost.** tree-sitter-zsh's generated parser is 43 MB of C (the bash
   grammar's is 9.5 MB); ohmyzsh's 572 files are read in 0.37 s and
   acme.sh's 304 in 0.30 s (dialect, repairs, both grammars when needed).
+
 
 ## 2026-11-25 — SQL pack: sqlparser per statement over a tree-sitter grammar, one dialect per file, a code-backed gold; `preview`
 

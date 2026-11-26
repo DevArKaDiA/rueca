@@ -1,0 +1,21 @@
+{
+  "schema.sql:customer": [],
+  "schema.sql:payment": [
+    "schema.sql:customer"
+  ],
+  "schema.sql:customer_total": [
+    "schema.sql:payment"
+  ],
+  "schema.sql:purge_customer": [
+    "schema.sql:customer",
+    "schema.sql:customer_total",
+    "schema.sql:payment"
+  ],
+  "schema.sql:payment.payment_before_update": [
+    "schema.sql:payment"
+  ],
+  "schema.sql:big_spenders": [
+    "schema.sql:customer",
+    "schema.sql:customer_total"
+  ]
+}

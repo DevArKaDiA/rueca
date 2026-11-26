@@ -3,8 +3,10 @@ language, from Rueca's own IndexReport.
 
 Population: every file of the language (source extensions of its family,
 tests included) in each corpus repository — the S3 gold repositories at
-their pinned tags and every S1 repository at the base commit of its first
-instance (manifest order). Each repository is indexed once per language on
+their pinned tags, every S1 repository at the base commit of its first
+instance (manifest order), and the health-only repositories of manifest
+`[[health.repos]]` at their pinned commits (source `held-out`: repositories
+added after a pack was tuned, which no other suite uses). Each repository is indexed once per language on
 a hard-linked scratch tree that holds only that language's files, so
 `files_partial / files_extracted` is that language's rate (`.h` follows the
 repository: C++ when it has C++ sources). Query latency p95 comes from the
@@ -58,6 +60,10 @@ def targets(languages: set[str] | None = None) -> list[dict]:
             continue
         seen.add(inst["repo"])
         out.append({"name": f"s1-{inst['repo'].replace('/', '__')}", "repo": inst["repo"], "commit": inst["base_commit"], "language": inst["language"], "source": "s1", "split": split_by_repo.get(inst["repo"], "gated")})
+    # Health-only repositories (manifest `[[health.repos]]`): no S1 instances
+    # and no S3 gold, only the parse-error rate at a pinned commit.
+    for spec in man.get("health", {}).get("repos", []):
+        out.append({"name": f"held-{spec['repo'].replace('/', '__')}", "repo": spec["repo"], "commit": spec["commit"], "language": spec["language"], "source": "held-out", "split": split_of(spec)})
     if languages:
         out = [t for t in out if lang_family(t["language"]) in languages]
     return out

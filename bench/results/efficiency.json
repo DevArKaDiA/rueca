@@ -1251,58 +1251,104 @@
   "sql": {
    "trace": {
     "rueca": {
-     "n": 12,
-     "true_edges": 29,
-     "per_true_edge": 62.206896551724135,
-     "tokens_median": 140.5,
+     "n": 25,
+     "true_edges": 53,
+     "per_true_edge": 67.81132075471699,
+     "tokens_median": 127.0,
      "ci": [
-      56.05551801801802,
-      70.27285353535353
+      60.98385752688172,
+      77.02084441489362
      ]
     },
     "cbm": {
-     "n": 12,
+     "n": 25,
      "true_edges": 8,
-     "per_true_edge": 163.5,
-     "tokens_median": 107.0,
+     "per_true_edge": 304.0,
+     "tokens_median": 85.0,
      "ci": [
-      109.61538461538461,
-      387.6916666666663
+      182.63,
+      800.3333333333334
      ]
+    }
+   },
+   "search": {
+    "rueca": {
+     "n": 78,
+     "hit_rate": 0.7307692307692307,
+     "to_first_hit": 273.43859649122805,
+     "to_first_hit_ci": [
+      204.95237379807693,
+      362.00098039215686
+     ],
+     "per_hit": 285.8666666666667,
+     "per_hit_ci": [
+      219.96398108785698,
+      383.1078124999999
+     ],
+     "func_hit_rate": 0.3974358974358974,
+     "func_to_first_hit": 689.0322580645161,
+     "func_per_hit": 638.6382978723404,
+     "tokens_median": 361.0,
+     "formats": [
+      "text"
+     ],
+     "approx": 0
+    },
+    "cbm": {
+     "n": 78,
+     "hit_rate": 0.5512820512820513,
+     "to_first_hit": 635.046511627907,
+     "to_first_hit_ci": [
+      455.4142169811321,
+      894.0328571428571
+     ],
+     "per_hit": 559.0131578947369,
+     "per_hit_ci": [
+      396.61303744798886,
+      838.8120098039215
+     ],
+     "func_hit_rate": 0.21794871794871795,
+     "func_to_first_hit": 2099.764705882353,
+     "func_per_hit": 1699.4,
+     "tokens_median": 533.0,
+     "formats": [
+      "tree"
+     ],
+     "approx": 0
     }
    },
    "lookup": {
     "rueca": {
-     "n": 100,
-     "found": 97,
-     "per_found": 370.96907216494844
+     "n": 240,
+     "found": 235,
+     "per_found": 428.22978723404253
     },
     "cbm": {
-     "n": 100,
-     "found": 2,
-     "per_found": 12388.5
+     "n": 240,
+     "found": 14,
+     "per_found": 4705.857142857143
     }
    },
    "raw": {
     "trace": {
-     "n": 12,
-     "rueca_median": 517.5,
-     "cbm_median": 160.5,
-     "rueca_mean": 560.5833333333334,
-     "cbm_mean": 156,
-     "agent_n": 12,
-     "agent_rueca_median": 140.5,
-     "agent_cbm_median": 107.0
+     "n": 25,
+     "rueca_median": 480,
+     "cbm_median": 132,
+     "rueca_mean": 536.92,
+     "cbm_mean": 145.04,
+     "agent_n": 25,
+     "agent_rueca_median": 127,
+     "agent_cbm_median": 85
     },
     "search": {
-     "n": 100,
-     "rueca_median": 1280.0,
-     "cbm_median": 243.5,
-     "rueca_mean": 1342.64,
-     "cbm_mean": 277.48,
-     "agent_n": 100,
-     "agent_rueca_median": 334.5,
-     "agent_cbm_median": 216.0
+     "n": 240,
+     "rueca_median": 1453.5,
+     "cbm_median": 254.0,
+     "rueca_mean": 1436.1791666666666,
+     "cbm_mean": 310.0083333333333,
+     "agent_n": 240,
+     "agent_rueca_median": 427.5,
+     "agent_cbm_median": 226.5
     }
    }
   },

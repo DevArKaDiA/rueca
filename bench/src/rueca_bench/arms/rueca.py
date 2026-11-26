@@ -549,7 +549,7 @@ class RuecaArm(Arm):
         for hit in res.hits:
             if hit["path"] and hit["path"] not in files:
                 files.append(hit["path"])
-            if is_callable_label(hit["label"]):
+            if is_callable_label(hit["label"], h.language):
                 funcs.append(hit)
         res.extra.update({"files": files, "functions": funcs})
         if self.config.embeds:

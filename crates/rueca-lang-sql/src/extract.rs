@@ -6,66 +6,128 @@ use std::time::Instant;
 
 use rueca_extract::{Budget, ExtractError};
 use rueca_model::{FileFacts, Import, Label, LocalDefId, RefKind};
-use sqlparser::parser::Parser;
 
-use crate::ast::{self, Ctx, Pos};
+use crate::ast::Ctx;
 use crate::dialect::{self, Dialect};
-use crate::facts::{Builder, NewDef};
+use crate::facts::{Builder, Name, NewDef};
+use crate::names::Part;
 use crate::prep::{self, JinjaKind, Prepared};
-use crate::scan;
+use crate::read::Reader;
 use crate::split::{self, Stmt};
-use crate::text::Lines;
 
 /// Statement counts of one file (for the dialect coverage table).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stats {
     pub dialect: Dialect,
     pub statements: u32,
-    /// Statements no dialect parses (read by the token scanner).
+    /// Statements with at least one parse error.
     pub unparsed: u32,
+    /// Parse errors: statements, or statements of a routine body, that
+    /// nothing parsed (read by the token scanner).
+    pub errors: u32,
+    /// Statements read by the pack's own readers rather than sqlparser.
+    pub own: u32,
+    /// Statements accepted by their head alone (a subset of `own`): parse
+    /// errors of the strict count, which is what `Facts::parse_errors` and
+    /// the health metric use.
+    pub head_only: u32,
+    /// Statements read in full by the pack's productions (a subset of
+    /// `own`): parsed, by the pack's grammar rather than sqlparser's.
+    pub productions: u32,
+    /// Statements with at least one parse error or head-only statement.
+    pub unparsed_strict: u32,
 }
 
-/// Statement counts of the SQL file at `path` (no facts).
+/// Statement counts of the SQL file at `path` (no facts kept).
 pub fn stats(path: &str, source: &[u8]) -> Stats {
-    let text = String::from_utf8_lossy(source);
-    let (dialect, _) = dialect::detect(path, &text);
-    let p = prep::prepare(&text);
-    let mut masked = p.text;
-    let stmts: Vec<Stmt> = split::split(&mut masked, dialect)
-        .into_iter()
-        .filter(|st| !is_template_output(&masked[st.start..st.end]))
-        .collect();
-    let unparsed = stmts.iter().filter(|st| !parses(&masked, &p.alone, st, dialect)).count() as u32;
-    Stats { dialect, statements: stmts.len() as u32, unparsed }
+    let (stats, _) = run(path, source, false);
+    stats
 }
 
-/// Whether some dialect parses the statement (with alone placeholders as
-/// queries if needed).
-fn parses(masked: &str, alone: &[(usize, usize)], st: &Stmt, dialect: Dialect) -> bool {
-    let (c, base) = chunk(masked, st);
-    let alt = with_queries(&c, base, alone);
-    std::iter::once(c).chain(alt).any(|c| dialect.attempts().into_iter().any(|d| parse(&c, d).is_some()))
-}
-
-/// The statements of a file no dialect parses, as the parser sees them,
-/// with the error of the file's own dialect (for diagnosing coverage).
+/// The statements (or statements of a routine body) of a file nothing
+/// parses, as the parser sees them, with the error of the file's own
+/// dialect (for diagnosing coverage).
 #[doc(hidden)]
 pub fn unparsed_statements(path: &str, source: &[u8]) -> Vec<(String, String)> {
+    run(path, source, true).1
+}
+
+/// The first words of the statements of a file accepted by their head
+/// alone (for the strict / lenient coverage table).
+#[doc(hidden)]
+pub fn head_only_statements(path: &str, source: &[u8]) -> Vec<String> {
     let text = String::from_utf8_lossy(source);
-    let (dialect, _) = dialect::detect(path, &text);
-    let p = prep::prepare(&text);
-    let mut masked = p.text;
-    let stmts = split::split(&mut masked, dialect);
-    let mut out = Vec::new();
-    for st in stmts.iter().filter(|st| !is_template_output(&masked[st.start..st.end])) {
-        let (c, _) = chunk(&masked, st);
-        if !parses(&masked, &p.alone, st, dialect) {
-            let p = dialect.parser();
-            let err = Parser::new(p.as_ref()).try_with_sql(&c).and_then(|mut x| x.parse_statements()).err();
-            out.push((c, err.map(|e| e.to_string()).unwrap_or_default()));
+    let mut pass = Pass::new(path, &text);
+    let mut b = Builder::new(&text, pass.dialect, false);
+    let model = pass.definitions(&mut b, path);
+    let mut r = Reader::new(&mut b, &pass.masked, &pass.prepared.alone);
+    r.heads = Some(Vec::new());
+    for st in &pass.stmts {
+        statement(&mut r, st, model, &pass.prepared.relations);
+    }
+    r.heads.take().unwrap_or_default()
+}
+
+fn run(path: &str, source: &[u8], failures: bool) -> (Stats, Vec<(String, String)>) {
+    let text = String::from_utf8_lossy(source);
+    let mut pass = Pass::new(path, &text);
+    let mut b = Builder::new(&text, pass.dialect, false);
+    let model = pass.definitions(&mut b, path);
+    let mut r = Reader::new(&mut b, &pass.masked, &pass.prepared.alone);
+    if failures {
+        r.failures = Some(Vec::new());
+    }
+    let (mut statements, mut unparsed, mut unparsed_strict) = (0u32, 0u32, 0u32);
+    for st in &pass.stmts {
+        let (before, before_strict) = (r.errors, r.errors + r.head_only);
+        if statement(&mut r, st, model, &pass.prepared.relations) {
+            statements += 1;
+            unparsed += u32::from(r.errors > before);
+            unparsed_strict += u32::from(r.errors + r.head_only > before_strict);
         }
     }
-    out
+    let stats = Stats {
+        dialect: pass.dialect,
+        statements,
+        unparsed,
+        errors: r.errors,
+        own: r.own,
+        head_only: r.head_only,
+        productions: r.productions,
+        unparsed_strict,
+    };
+    (stats, r.failures.take().unwrap_or_default())
+}
+
+/// The masked text of a file and its statements.
+struct Pass {
+    dialect: Dialect,
+    prepared: Prepared,
+    masked: String,
+    stmts: Vec<Stmt>,
+}
+
+impl Pass {
+    fn new(path: &str, text: &str) -> Pass {
+        let (dialect, _) = dialect::detect(path, text);
+        let mut prepared = prep::prepare(text, dialect);
+        let mut masked = std::mem::take(&mut prepared.text);
+        let mut stmts = split::split(&mut masked, dialect);
+        // A dbt macros file: only its macro blocks are code.
+        if !prepared.macros.is_empty() && path.split('/').any(|s| s == "macros") {
+            stmts.clear();
+        }
+        Pass { dialect, prepared, masked, stmts }
+    }
+
+    /// The definitions and references masking found: the dbt model,
+    /// macros and snapshots, includes, Jinja calls.
+    fn definitions(&mut self, b: &mut Builder<'_>, path: &str) -> Option<LocalDefId> {
+        let model = dbt_model(b, path, &self.prepared);
+        jinja_blocks(b, &self.prepared);
+        includes(b, &self.prepared);
+        model
+    }
 }
 
 /// Extracts the facts of the SQL file at `path`.
@@ -76,26 +138,58 @@ pub fn extract(path: &str, source: &[u8], budget: &Budget) -> Result<FileFacts, 
     let deadline = Instant::now() + budget.max_parse_time;
     let text = String::from_utf8_lossy(source);
     let invalid_utf8 = u32::from(matches!(text, std::borrow::Cow::Owned(_)));
-    let (dialect, _) = dialect::detect(path, &text);
-    let mut prepared = prep::prepare(&text);
-    let mut b = Builder::new(&text, dialect, rueca_model::is_test_path(path));
-    let model = dbt_model(&mut b, path, &prepared);
-    jinja_blocks(&mut b, &prepared);
-    includes(&mut b, &prepared);
-    let mut masked = std::mem::take(&mut prepared.text);
-    let stmts = split::split(&mut masked, dialect);
-    let mut errors = 0u32;
-    for st in &stmts {
+    let mut pass = Pass::new(path, &text);
+    let mut b = Builder::new(&text, pass.dialect, rueca_model::is_test_path(path));
+    let model = pass.definitions(&mut b, path);
+    let mut r = Reader::new(&mut b, &pass.masked, &pass.prepared.alone);
+    let mut read = 0u32;
+    for st in &pass.stmts {
         if Instant::now() > deadline {
             return Err(ExtractError::Timeout);
         }
-        statement(&mut b, &masked, &prepared.alone, st, model, &mut errors);
+        read += u32::from(statement(&mut r, st, model, &pass.prepared.relations));
     }
-    jinja_refs(&mut b, &prepared);
+    // strict: a statement accepted by its head alone was not parsed
+    let errors = r.errors + r.head_only;
+    jinja_refs(&mut b, &pass.prepared);
+    if read > 0 {
+        script(&mut b, path);
+    }
     let mut facts = b.facts;
     facts.parse_errors = errors + invalid_utf8;
     facts.line_count = rueca_extract::line_count(source);
     Ok(facts)
+}
+
+/// A script that defines nothing — a report query, an analysis, a
+/// maintenance or data script — is the unit people name and search: one
+/// `Function` named after the file, spanning it, that encloses the
+/// references its statements make (as a `-- name:` query does for one
+/// statement). Its qualified name keeps the extension (`report.sql`), so
+/// no call written in SQL resolves to it by name.
+fn script(b: &mut Builder<'_>, path: &str) {
+    if !b.facts.definitions.is_empty() {
+        return;
+    }
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
+    if stem.is_empty() {
+        return;
+    }
+    let def = NewDef {
+        label: Label::Function,
+        name: stem.to_string(),
+        qualified_name: file.to_string(),
+        parent: None,
+        range: (0, b.source.len()),
+        name_range: (0, 0),
+        signature: Some(format!("script {stem} -- {}", b.dialect.as_str())),
+        doc: None,
+    };
+    let id = b.add_def(def);
+    for r in &mut b.facts.references {
+        r.enclosing.get_or_insert(id);
+    }
 }
 
 /// A dbt model (or analysis, singular test): a file with `ref` / `source`
@@ -188,72 +282,57 @@ fn jinja_refs(b: &mut Builder<'_>, p: &Prepared) {
     }
 }
 
-/// One statement: a named query annotation, then the first dialect that
-/// parses it, else the token scanner (counted as a parse error).
-fn statement(
-    b: &mut Builder<'_>,
-    masked: &str,
-    alone: &[(usize, usize)],
-    st: &Stmt,
-    model: Option<LocalDefId>,
-    errors: &mut u32,
-) {
-    if is_template_output(&masked[st.start..st.end]) {
-        return;
+/// One statement: a named query annotation, then the readers of
+/// [`crate::read`]. `false` for a statement that is only template output.
+fn statement(r: &mut Reader<'_, '_>, st: &Stmt, model: Option<LocalDefId>, relations: &[(usize, usize)]) -> bool {
+    if is_template_output(r, st, relations) {
+        template_relations(r, st, relations, model);
+        return false;
     }
-    let doc = b.doc(st.leading);
-    let named = named_query(b, st);
-    let enclosing = named.or_else(|| b.enclosing_of((st.start, st.end))).or(model);
-    let ctx = Ctx { enclosing, range: (st.start, st.end), doc: if named.is_some() { None } else { doc.clone() } };
-    let (text, base) = chunk(masked, st);
-    let alt = with_queries(&text, base, alone);
-    for chunk in std::iter::once(text).chain(alt) {
-        let Some(parsed) = b.dialect.attempts().into_iter().find_map(|d| parse(&chunk, d)) else { continue };
-        let pos = Pos { lines: Lines::new(&chunk), base };
-        for s in &parsed {
-            for body in ast::statement(b, &pos, s, &ctx) {
-                scan::body(b, masked, body.range, body.enclosing);
-            }
+    let doc = r.b.doc(st.leading);
+    let named = named_query(r.b, st);
+    let enclosing = named.or_else(|| r.b.enclosing_of((st.start, st.end))).or(model);
+    let ctx = Ctx { enclosing, range: (st.start, st.end), doc: if named.is_some() { None } else { doc } };
+    r.b.locals.clear();
+    r.statement(&ctx);
+    true
+}
+
+/// The relations a template-only statement names (`{{ ref('a') }}` alone):
+/// read by the model.
+fn template_relations(r: &mut Reader<'_, '_>, st: &Stmt, relations: &[(usize, usize)], model: Option<LocalDefId>) {
+    for &(s, _) in relations.iter().filter(|(s, _)| *s >= st.start && *s < st.end) {
+        let word = r.masked[s..st.end].split_whitespace().next().unwrap_or("");
+        let mut name = Name { parts: Vec::new(), ranges: Vec::new() };
+        let mut at = s;
+        for part in word.split('.') {
+            name.parts.push(Part { text: part.to_string(), quoted: false });
+            name.ranges.push((at, at + part.len()));
+            at += part.len() + 1;
         }
-        return;
+        let enclosing = r.b.enclosing_of((st.start, st.end)).or(model);
+        r.b.relation_ref(RefKind::Read, &name, enclosing);
     }
-    *errors += 1;
-    scan::statement(b, masked, ctx.range, ctx.enclosing, ctx.doc);
 }
 
-/// The chunk with its alone Jinja placeholders written as a query
-/// (`select 1`), when it has any.
-fn with_queries(chunk: &str, base: usize, alone: &[(usize, usize)]) -> Option<String> {
-    let end = base + chunk.len();
-    let mut bytes = chunk.as_bytes().to_vec();
-    let mut any = false;
-    for &(s, e) in alone.iter().filter(|(s, e)| *s >= base && *e <= end) {
-        prep::blank(&mut bytes, s - base, e - base);
-        bytes[s - base..s - base + prep::ALONE_QUERY.len()].copy_from_slice(prep::ALONE_QUERY.as_bytes());
-        any = true;
+/// A statement that is only Jinja output — placeholders, or one `ref` /
+/// `source` (a model whose body is one macro call or one relation):
+/// nothing to parse.
+fn is_template_output(r: &Reader<'_, '_>, st: &Stmt, relations: &[(usize, usize)]) -> bool {
+    let text = &r.masked[st.start..st.end];
+    if text.bytes().all(|b| b == b'_' || b.is_ascii_whitespace()) {
+        return true;
     }
-    any.then(|| String::from_utf8(bytes).unwrap_or_default())
-}
-
-/// A statement that is only Jinja output (a model whose body is one macro
-/// call): nothing to parse.
-fn is_template_output(text: &str) -> bool {
-    text.bytes().all(|b| b == b'_' || b.is_ascii_whitespace())
-}
-
-fn parse(chunk: &str, d: Dialect) -> Option<Vec<sqlparser::ast::Statement>> {
-    let dialect = d.parser();
-    Parser::new(dialect.as_ref()).try_with_sql(chunk).ok()?.parse_statements().ok().filter(|v| !v.is_empty())
-}
-
-/// The statement's text from the start of its first line (the part of
-/// that line before it blanked), so parser columns are line columns; and
-/// the file offset the chunk starts at.
-fn chunk(masked: &str, st: &Stmt) -> (String, usize) {
-    let line_start = masked[..st.start].rfind('\n').map_or(0, |i| i + 1);
-    let mut bytes = masked.as_bytes()[line_start..st.end].to_vec();
-    prep::blank(&mut bytes, 0, st.start - line_start);
-    (String::from_utf8(bytes).unwrap_or_default(), line_start)
+    // every word is a `ref` / `source` tag or a placeholder
+    let mut at = st.start;
+    text.split_inclusive(char::is_whitespace).all(|piece| {
+        let start = at;
+        at += piece.len();
+        let word = piece.trim_end();
+        word.is_empty()
+            || word.bytes().all(|b| b == b'_')
+            || relations.iter().any(|&(s, e)| s == start && start + word.len() <= e)
+    })
 }
 
 /// `-- name: GetAuthor :one` (sqlc, yesql, aiosql, HugSQL `-- :name`)

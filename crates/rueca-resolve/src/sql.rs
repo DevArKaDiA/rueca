@@ -193,7 +193,10 @@ impl Resolver<'_> {
             .filter(|&n| {
                 let node = &self.nodes[n as usize];
                 let Some(file) = node.file else { return false };
+                // A declaration with one body (a subprogram of an Oracle
+                // package specification) is not a target: its body is.
                 want.accepts(node.label)
+                    && !self.body_of.contains_key(&n)
                     && (file == f || !migration_of(&self.files[file as usize].path).is_some_and(|m| m.down))
             })
             .collect()

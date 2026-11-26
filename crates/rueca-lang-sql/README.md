@@ -7,11 +7,19 @@ code. Status: **`preview`** under RFC 0004 (see *Status*).
 
 - Parser: [`sqlparser`](https://github.com/apache/datafusion-sqlparser-rs)
   0.64 (Apache-2.0, pure Rust), one statement at a time, with source spans
-  on identifiers; a token scanner reads what no dialect parses.
-- Files: `.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq`.
-- Dialects: PostgreSQL, MySQL / MariaDB, SQLite, T-SQL (SQL Server),
-  BigQuery, Snowflake (Redshift and DuckDB through their sqlparser
-  dialects), ANSI; dbt Jinja models and macros best effort.
+  on identifiers. The pack cuts the statements, repairs (same length) the
+  constructs sqlparser rejects inside plain SQL, and reads procedural code
+  itself — T-SQL batches and routines, Oracle PL/SQL, MySQL and DB2
+  routines, BigQuery scripts — handing every query, DML statement and
+  expression inside to sqlparser. A token scanner reads what nothing
+  parses (one parse error per statement).
+- Files: `.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq`,
+  Oracle `.pks`, `.pkb`, `.pck`, `.pls`, `.plsql`, `.tps`, `.tpb`.
+- Dialects, one per file (directive comment → path → content signals →
+  ANSI): PostgreSQL, MySQL / MariaDB, SQLite, T-SQL (SQL Server), Oracle
+  (SQL, SQL*Plus scripts, PL/SQL), DB2, BigQuery, Snowflake; Redshift,
+  DuckDB, ClickHouse, Hive and Databricks through their sqlparser
+  dialects; ANSI; dbt Jinja models and macros best effort.
 
 The crate docs (`src/lib.rs`) are the reference: dialect selection,
 statement splitting and recovery, names, definitions, references,
@@ -23,6 +31,7 @@ migrations, limits. Resolution is the `sql` module of `rueca-resolve`.
 |---|---|
 | `CREATE [TEMP] TABLE`, `CREATE [MATERIALIZED] VIEW`, `CREATE VIRTUAL TABLE` | `Struct` (`users`, `billing.invoices`) with `Field` columns (`users.email`) |
 | `CREATE FUNCTION` / `PROCEDURE` / `MACRO`, `CREATE TRIGGER` | `Function` (a trigger is qualified by its table: `film.last_updated`) |
+| Oracle `CREATE PACKAGE [BODY]` / `TYPE BODY` and their subprograms | `Module` (`billing`) with `Function` children (`billing.close_invoice`; declarations of a specification marked as such) |
 | `CREATE INDEX` / `SEQUENCE` / `TYPE … AS ENUM` / `DOMAIN` | `Constant` / `Variable` / `Enum` (values `Constant`) / `TypeAlias` |
 | CTEs of a query inside a definition | `Variable`, child of the definition |
 | `-- name: GetAuthor :one` (sqlc, yesql, aiosql, HugSQL) | `Function` for the query |
@@ -33,7 +42,7 @@ migrations, limits. Resolution is the `sql` module of `rueca-resolve`.
 | `f(…)` (not built in), `FROM f(…)`, `CALL` / `EXEC` / `PERFORM`, trigger `EXECUTE FUNCTION` | `CALLS` |
 | dbt `ref('m')` / `source('s', 't')`, macro calls | `REFERENCES` to the model / `CALLS` to the macro |
 | dbt `env_var('X')` / `var('x')` | `READS` of `$env:X` / of the `vars.x` key of `dbt_project.yml` |
-| psql `\i` / `\ir`, sqlcmd `:r`, SQLite `.read`, MySQL `SOURCE` | `IMPORTS` |
+| psql `\i` / `\ir`, sqlcmd `:r`, SQLite `.read`, MySQL `SOURCE`, SQL*Plus `@` / `@@` / `START` | `IMPORTS` |
 
 The dialect is shown at the end of every top-level signature
 (`CREATE TABLE users ( -- postgres`). Migrations: each migration file keeps
@@ -46,43 +55,116 @@ are writes from the migration file. The ordering lives in the resolver
 
 ## Dialect coverage
 
-Measured with `cargo run -p rueca-lang-sql --example dialects -- <tree>`
-(statements no dialect parses, by the dialect the pack detects; files over
-2 MiB are skipped as in indexing) on the bench corpus at its pinned
-commits — jOOQ/sakila `e089a5b`, fivetran/dbt_hubspot v1.11.0, sqlc
-v1.31.1 (calibration) — plus, for BigQuery and T-SQL procedural code, the
-parser-evaluation corpus (GoogleCloudPlatform/bigquery-utils `d5bde4f`,
-olahallengren/sql-server-maintenance-solution `4161757`). An unparsed
-statement is still read by the token scanner (definitions, relations,
-calls; no columns).
+Measured with `cargo run --release -p rueca-lang-sql --example dialects --
+<tree> [--files]` (per detected dialect: files, files with a parse error,
+statements, statements with an error, parse errors, statements read by
+the pack's own readers; files over 2 MiB are skipped as in indexing), and
+`--example unparsed -- <tree> [--full] [--grep text]` for the statements
+behind the errors. A parse error is a statement — or a statement of a
+routine body — that sqlparser rejects in every dialect after the repairs
+and that is not one of the pack's own forms; it is still read by the
+token scanner (definitions, relations, calls; no columns).
 
-| Dialect | Support | Unparsed statements (bench corpus) | Files with one or more | Known unsupported constructs |
-|---|---|---|---|---|
-| PostgreSQL | fully parsed | 67 / 2,932 (2.3%) | 26 / 1,218 | `$$` routine bodies (PL/pgSQL and SQL) are kept as text by sqlparser and read by the token scanner (relations and calls, no columns); `CREATE PROCEDURAL LANGUAGE`, `ALTER TYPE … OWNER TO`, `ALTER … SET SCHEMA`, `EXECUTE PROCEDURE f('literal', …)` in triggers |
-| MySQL / MariaDB | fully parsed except routines | 20 / 645 (3.1%) | 10 / 280 | `CREATE PROCEDURE` / `FUNCTION` with `BEGIN … END` bodies and characteristics (`READS SQL DATA`, `DETERMINISTIC`) are not parsed by sqlparser: header and body read by the scanner; `DELIMITER` handled by the splitter; `CHARACTER SET … COLLATE` column options |
-| SQLite | fully parsed | 7 / 619 (1.1%) | 4 / 199 | FTS5 virtual-table options, `CHARACTER(n)` types |
-| T-SQL (SQL Server) | parsed, procedural code best effort | 21 / 127 (16.5%); maintenance-solution 29 / 64 (45%) | 2 / 5; 9 / 9 | `GO` batches split; procedures without parentheses around parameters, `ADD CONSTRAINT … DEFAULT … FOR`, `NONCLUSTERED` indexes, large procedural bodies (dynamic SQL, cursors) fall back to the scanner |
-| BigQuery | parsed, scripting best effort | none in the bench corpus; bigquery-utils 19 / 114 (16.7%) | 11 / 47 | scripting (`FOR … DO`, `EXCEPTION WHEN`, `DECLARE … DEFAULT`), legacy SQL `[project:dataset.table]` |
-| Snowflake | parsed | 0 / 2 (dbt_hubspot); bigquery-utils 0 / 17 | 0 / 9 | JavaScript / Python UDF bodies are strings (not read); not measured at scale (no Snowflake corpus in the bench) |
-| dbt Jinja (any warehouse) | best effort | 22 / 162 (13.6%, dbt_hubspot) | 22 / 331 | Jinja is masked, not rendered: macros that expand to clauses (window frames, column lists with commas, whole queries in a CTE) can leave a statement unparsed; `ref()` / `source()` / macro calls are read from the Jinja itself, so dependencies survive; only the first branch of `{% if %}` is parsed (`ref`s in the others still count) |
-| ANSI (no dialect signal) | parsed with sqlparser's generic dialect | 0 / 431 (sqlc) | 0 / 680 | Oracle PL/SQL, DB2, H2 and other dialects without a sqlparser dialect are read as ANSI: 148 / 457 (32.4%) on Sakila's Oracle / DB2 / other copies |
+Two rates are printed. **Strict** (the one `FileFacts::parse_errors` and
+the health metric use): a statement is parsed when sqlparser accepts it
+(as written or after a same-length repair) or one of the pack's grammars
+reads every token of it (`forms` productions, the procedural readers); a
+statement only recognized by its first words is an error. **Lenient**
+leaves those head-only statements out. On the health corpus (every SQL
+file of the gated repositories at their pinned commits, 3,419 files): 26
+files with a strict error (0.76%), 23 lenient (0.67%); what is left is
+listed in `docs/decisions.md`. The parser was repaired against these
+files, so this is not the rate on SQL it has not seen: that one is 25.0%
+(*Status*). By detected dialect:
 
-The micro-benchmark (`bench/micro/sql`, 29 cases, every dialect) has 4
-unparsed statements of 89, all MySQL routines and a SQLite column type.
+| Dialect | Files | With a parse error (strict, the gated count) | Lenient |
+|---|---|---|---|
+| ANSI / dbt Jinja | 1,864 | 0 | 0 |
+| PostgreSQL | 601 | 10 (1.66%) | 10 |
+| BigQuery | 401 | 1 (0.25%) | 1 |
+| T-SQL | 304 | 15 (4.93%) | 12 |
+| Snowflake | 98 | 0 | 0 |
+| DuckDB | 69 | 0 | 0 |
+| MySQL | 50 | 0 | 0 |
+| Redshift | 15 | 0 | 0 |
+| Oracle | 11 | 0 | 0 |
+| DB2 | 3 | 0 | 0 |
+| SQLite | 3 | 0 | 0 |
+| **All** | **3,419** | **26 (0.76%)** | **23 (0.67%)** |
+
+T-SQL alone is above 2% there (deliberately broken experiment scripts,
+Service Broker and certificate statements, build templates), and Oracle is
+barely in that corpus: on utPLSQL, outside it, 158 of 483 files keep a
+strict error (object type specifications with member functions have no
+production yet). The second table below is the lenient rate on the wider
+evaluation corpus of the first round.
+
+Bench corpus at its pinned commits — jOOQ/sakila `e089a5b` (seven dialect
+copies), fivetran/dbt_hubspot v1.11.0 — plus the parser-evaluation corpus
+(not bench repositories; commits in `docs/decisions.md`): pg_partman,
+pgmq, pgTAP (PostgreSQL), SQL Server First Responder Kit, DarlingData,
+tSQLt, sql-server-maintenance-solution (T-SQL), utPLSQL, OraOpenSource
+Logger (Oracle), bigquery-utils (BigQuery), dbt-utils,
+dbt-project-evaluator, dbt-expectations, dbt_artifacts, elementary (dbt
+Jinja). Pooled, by detected dialect:
+
+| Dialect | Files | Files with a parse error | Statements | With an error | Read by the pack's own readers | What still fails |
+|---|---|---|---|---|---|---|
+| PostgreSQL | 413 | 1 (0.2%) | 17,656 | 2 | 965 (`DO` blocks, procedures with defaults, `ALTER EXTENSION`, …) | a string spanning `''` at a line start in pgTAP's `privs.sql`; `$$` bodies are text: scanner only, never counted |
+| MySQL / MariaDB | 94 | 2 (2.1%) | 123 | 2 | 22 (routine bodies) | dbt_artifacts Jinja inside `cast(… as {{ type }})` chains |
+| SQLite | 3 | 0 | 112 | 0 | 0 | — |
+| T-SQL (SQL Server) | 404 | 26 (6.4%) | 5,118 | 46 (69 errors) | 2,518 | `SELECT … FOR XML` without `FROM`, `GROUPING SETS`, `VECTOR_SEARCH`, `xml.modify()`, CLR `::` method calls, unterminated comments and deliberately broken experiments (tSQLt `Experiments/`), sqlcmd templates |
+| Oracle (SQL, SQL*Plus, PL/SQL) | 515 | 12 (2.3%) | 1,161 | 65 (68 errors) | 10,095 | substitution variables that stand for keywords (`create &kind synonym`, 53 statements of one file), `XMLELEMENT(NAME "x", …)`, `XMLTABLE … PASSING`, `XMLSERIALIZE` |
+| DB2 | 4 | 0 | 111 | 0 | 15 (triggers) | not measured beyond Sakila |
+| BigQuery | 79 | 4 (5.1%) | 114 | 5 | 14 (scripts) | templates with `<placeholders>`, a deliberate syntax error, `#legacySQL` |
+| Snowflake | 39 | 0 | 35 | 0 | 2 | JavaScript / Python UDF bodies are strings (not read); not measured at scale |
+| ANSI / dbt Jinja (no dialect signal) | 1,052 | 3 (0.3%) | 809 | 3 | 6 | a test that fails on purpose (dbt-utils `test_star_no_columns`), a template placeholder file |
+| **All** | **2,603** | **48 (1.8%)** | **25,239** | **123 (149 errors)** | **13,637** | |
+
+Before these readers the same trees gave 626 of 2,185 files (28.6%; the
+Oracle unit extensions were not indexed). On the bench corpus alone:
+Sakila 0 of 25 files (was 10), dbt_hubspot 0 of 335 (was 22), and the
+calibration repository (sqlc `examples/`) 2 of 39 (a GoogleSQL `THEN
+RETURN` clause and `STRING(MAX)`).
+
+dbt Jinja is masked, not rendered: `ref()` / `source()` / macro calls are
+read from the Jinja itself; the first branch of `{% if %}` is parsed
+(`ref`s in the others still count); what separates loop iterations (`{%
+if not loop.last %} union all {% endif %}`) is blanked; in a file under
+`macros/` only the macro blocks are read.
 
 ## Status
 
-`preview` under RFC 0004: no localization dataset has SQL instances (the
-localization floors are pending, and missing results count as failing,
-§6.2), files with parse errors exceed the 2% floor on the gated corpus,
-and the structural gold is the bench's code-backed labeler (sqlglot)
-rather than a compiler-grade oracle. Floors are unchanged; the scorecard
-row is in `docs/bench/alpha-results.md`.
+`preview` under RFC 0004: held-out parse errors 25.0%. The status is
+computed by `rueca-bench report` from the gated suites (localization,
+structure, files with parse errors, latency) and written to
+`docs/bench/alpha-results.md`; floors are unchanged. Every floor but one is
+met. The parse-error floor (≤ 2% of files, strict) was met only on the
+corpus the parser was repaired against (0.76% of 3,419 files, above). On
+25 repositories chosen before any measurement and added to the bench as
+gated health targets on 2026-11-25, with the same parser, 1,624 of 6,496
+files keep a strict error (25.0%, 24.0–26.1):
 
-## Not done
+| Dialect (given to the file before measuring) | Files | With a strict parse error | 95% interval |
+|---|---:|---:|---|
+| PostgreSQL | 1,204 | 114 (9.5%) | 7.9–11.3 |
+| MySQL / MariaDB | 1,020 | 311 (30.5%) | 27.7–33.4 |
+| SQLite | 279 | 14 (5.0%) | 3.0–8.2 |
+| T-SQL | 1,517 | 635 (41.9%) | 39.4–44.4 |
+| Oracle | 248 | 101 (40.7%) | 34.8–46.9 |
+| DB2 | 94 | 3 (3.2%) | 1.1–9.0 |
+| H2 | 89 | 7 (7.9%) | 3.9–15.4 |
+| BigQuery | 681 | 130 (19.1%) | 16.3–22.2 |
+| Snowflake | 647 | 287 (44.4%) | 40.6–48.2 |
+| dbt Jinja | 706 | 22 (3.1%) | 2.1–4.7 |
+| unlabelled | 11 | 0 | 0.0–25.9 |
+| **All** | **6,496** | **1,624 (25.0%)** | **24.0–26.1** |
 
-SQL in string literals of other languages (a follow-up: the bridge from
-code to tables), Liquibase XML changelogs, column references in `$$`
-bodies and unparsed statements, search-path evaluation (`SET search_path`),
-synonyms, `GRANT` / policies as edges, dbt `packages.yml` package identity
-(no RFC 0006 package keys), psql `:var` variables.
+Most of it is statements read by their head only (T-SQL and Snowflake
+administration and DDL, MySQL scheduled events, PostgreSQL `CREATE CAST` /
+`OPERATOR`), SSMS template parameters, `#` comments, SQL*Plus
+continuation lines and commands; repositories, causes and the files are
+in `docs/decisions.md` and `bench/datasets/heldout/`. Two more things the
+status does not cover: the structural gold is the bench's code-backed
+labeler (sqlglot), not a compiler-grade oracle, and the localization set
+is mined by the bench from GitHub, not validated by people.

@@ -43,7 +43,7 @@ struct Batch {
 /// Splits `text` (blanking `GO` / `DELIMITER` lines in place) into
 /// statements.
 pub fn split(text: &mut String, dialect: Dialect) -> Vec<Stmt> {
-    let batches = batches(text);
+    let batches = batches(text, dialect);
     let mut out = Vec::new();
     for b in batches {
         split_batch(text, dialect, b, &mut out);
@@ -52,7 +52,7 @@ pub fn split(text: &mut String, dialect: Dialect) -> Vec<Stmt> {
 }
 
 /// Cuts the text at `GO` lines and `DELIMITER` regions, blanking them.
-fn batches(text: &mut String) -> Vec<Batch> {
+fn batches(text: &mut String, dialect: Dialect) -> Vec<Batch> {
     // Safety of the byte edits: only ASCII bytes are replaced by spaces.
     let mut bytes = std::mem::take(text).into_bytes();
     let mut out = Vec::new();
@@ -62,12 +62,12 @@ fn batches(text: &mut String) -> Vec<Batch> {
     while pos < bytes.len() {
         let line_end = bytes[pos..].iter().position(|b| *b == b'\n').map_or(bytes.len(), |i| pos + i);
         let line = &bytes[pos..line_end];
-        if let Some(d) = delimiter_line(line) {
+        if let Some(d) = delimiter_line(line).or_else(|| db2_terminator(line, dialect)) {
             push_batch(&mut out, start, pos, delimiter.is_none());
             blank(&mut bytes[pos..line_end]);
             delimiter = (d != b";").then_some(d);
             start = line_end;
-        } else if is_go_line(line) {
+        } else if is_go_line(line) || (dialect == Dialect::Oracle && is_slash_line(line)) {
             push_batch(&mut out, start, pos, delimiter.is_none());
             blank(&mut bytes[pos..line_end]);
             start = line_end;
@@ -117,7 +117,30 @@ fn delimiter_line(line: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let d = rest.trim();
-    (!d.is_empty() && !d.contains(char::is_whitespace)).then(|| d.as_bytes().to_vec())
+    // `$$`, `//`, `;;`, `|`: never a word or a quoted string (a column
+    // named `delimiter`, PostgreSQL `COPY … DELIMITER ','`).
+    let symbols = !d.is_empty() && d.chars().all(|c| c.is_ascii_punctuation() && !matches!(c, '\'' | '"' | ',' | '`'));
+    symbols.then(|| d.as_bytes().to_vec())
+}
+
+/// `--#SET TERMINATOR @` (DB2 command line processor): the new statement
+/// terminator.
+fn db2_terminator(line: &[u8], dialect: Dialect) -> Option<Vec<u8>> {
+    if !matches!(dialect, Dialect::Db2 | Dialect::Generic) {
+        return None;
+    }
+    let text = std::str::from_utf8(line).ok()?.trim();
+    let rest = text.strip_prefix("--#")?.trim_start();
+    let (set, rest) = rest.split_once(char::is_whitespace)?;
+    let (word, d) = rest.trim().split_once(char::is_whitespace)?;
+    let d = d.trim();
+    (set.eq_ignore_ascii_case("set") && word.eq_ignore_ascii_case("terminator") && !d.is_empty() && !d.contains(' '))
+        .then(|| d.as_bytes().to_vec())
+}
+
+/// SQL*Plus: `/` alone on its line runs the buffer (ends a PL/SQL unit).
+fn is_slash_line(line: &[u8]) -> bool {
+    std::str::from_utf8(line).is_ok_and(|t| t.trim() == "/")
 }
 
 /// A T-SQL batch separator: `GO` alone on its line (optionally a count).
@@ -138,9 +161,26 @@ fn split_batch(text: &str, dialect: Dialect, b: Batch, out: &mut Vec<Stmt>) {
     };
     let lines = Lines::new(slice);
     let spans: Vec<(usize, usize)> = tokens.iter().map(|t| token_range(&lines, t)).collect();
-    let whole = !b.split_semicolons || (dialect == Dialect::MsSql && starts_routine(&tokens));
-    let mut cutter =
-        Cutter { tokens: &tokens, spans: &spans, depth: 0, base: b.start, cur: None, leading: None, newlines: 0 };
+    let whole = !b.split_semicolons
+        || (dialect == Dialect::MsSql && starts_routine(&tokens))
+        || (dialect == Dialect::Oracle && starts_plsql_unit(&tokens));
+    let scripted = matches!(
+        dialect,
+        Dialect::BigQuery | Dialect::MySql | Dialect::Oracle | Dialect::Db2 | Dialect::Generic | Dialect::Snowflake
+    );
+    let mut cutter = Cutter {
+        tokens: &tokens,
+        spans: &spans,
+        depth: 0,
+        control: 0,
+        scripted,
+        oracle: dialect == Dialect::Oracle,
+        rest: false,
+        base: b.start,
+        cur: None,
+        leading: None,
+        newlines: 0,
+    };
     for i in 0..tokens.len() {
         cutter.step(i, whole, text, out);
     }
@@ -170,6 +210,15 @@ struct Cutter<'t> {
     tokens: &'t [TokenWithSpan],
     spans: &'t [(usize, usize)],
     depth: u32,
+    /// Open control statements of a script (`IF … END IF`, `FOR … END
+    /// FOR`, `WHILE`, `LOOP`, `REPEAT`) at the top level.
+    control: u32,
+    /// Whether the dialect has such statements outside routines.
+    scripted: bool,
+    oracle: bool,
+    /// Inside an Oracle PL/SQL unit that started after other statements
+    /// of its buffer: it runs to the end of the buffer.
+    rest: bool,
     base: usize,
     /// Current statement: (first byte, last byte) relative to the batch.
     cur: Option<(usize, usize)>,
@@ -187,7 +236,10 @@ impl Cutter<'_> {
             self.whitespace(w, s, e);
             return;
         }
-        if matches!(tok, Token::SemiColon) && self.depth == 0 && !whole {
+        if self.oracle && self.cur.is_none() && !self.rest && starts_plsql_unit(&self.tokens[i..]) {
+            self.rest = !matches!(tok, Token::Word(w) if w.keyword == Keyword::BEGIN);
+        }
+        if matches!(tok, Token::SemiColon) && self.depth == 0 && self.control == 0 && !whole && !self.rest {
             self.flush(text, out);
             return;
         }
@@ -225,14 +277,69 @@ impl Cutter<'_> {
         }
         let next = self.next_word(i);
         let next = next.as_deref();
+        let prev = self.prev_word(i);
+        if self.scripted && self.depth == 0 {
+            self.track_control(i, &w.value.to_ascii_uppercase(), &prev, next);
+        }
         match w.keyword {
             Keyword::BEGIN if !begins_transaction(next) => self.depth += 1,
-            Keyword::CASE => self.depth += 1,
+            Keyword::CASE if prev != "END" => self.depth += 1,
             Keyword::END if !matches!(next, Some("IF" | "LOOP" | "WHILE" | "REPEAT" | "FOR")) => {
                 self.depth = self.depth.saturating_sub(1);
             }
             _ => {}
         }
+    }
+
+    /// Script control statements outside `BEGIN … END`: one opens at the
+    /// start of a statement (or, inside another, after `;` / `THEN` /
+    /// `ELSE` / `DO` / `LOOP`) when its `THEN` / `DO` / `LOOP` comes
+    /// before the next `;`, and closes at its `END IF` / `END FOR` / ….
+    fn track_control(&mut self, i: usize, k: &str, prev: &str, next: Option<&str>) {
+        if k == "END" && matches!(next, Some("IF" | "LOOP" | "WHILE" | "REPEAT" | "FOR")) {
+            self.control = self.control.saturating_sub(1);
+            return;
+        }
+        let at_start =
+            if self.control == 0 { self.cur.is_none() } else { matches!(prev, ";" | "THEN" | "ELSE" | "DO" | "LOOP") };
+        if !at_start {
+            return;
+        }
+        let opens = match k {
+            "IF" => self.before_semicolon(i, &["THEN"]),
+            "FOR" | "WHILE" => self.before_semicolon(i, &["DO", "LOOP"]),
+            "LOOP" | "REPEAT" => true,
+            _ => false,
+        };
+        if opens {
+            self.control += 1;
+        }
+    }
+
+    /// Whether one of `words` comes before the next `;` after token `i`.
+    fn before_semicolon(&self, i: usize, words: &[&str]) -> bool {
+        for t in &self.tokens[i + 1..] {
+            match &t.token {
+                Token::SemiColon => return false,
+                Token::Word(w) if w.quote_style.is_none() && words.iter().any(|x| w.value.eq_ignore_ascii_case(x)) => {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// The previous significant token: an unquoted word in upper case,
+    /// `";"` for a semicolon, `""` otherwise.
+    fn prev_word(&self, i: usize) -> String {
+        self.tokens[..i].iter().rev().find(|t| !matches!(t.token, Token::Whitespace(_))).map_or(String::new(), |t| {
+            match &t.token {
+                Token::Word(w) if w.quote_style.is_none() => w.value.to_ascii_uppercase(),
+                Token::SemiColon => ";".to_string(),
+                _ => String::new(),
+            }
+        })
     }
 
     /// The next significant token in upper case when it is an unquoted
@@ -286,6 +393,48 @@ fn starts_routine(tokens: &[TokenWithSpan]) -> bool {
     )
 }
 
+/// An Oracle buffer that is a PL/SQL unit (it runs to its `/` line): an
+/// anonymous block, or `CREATE … PROCEDURE | FUNCTION | PACKAGE | TRIGGER
+/// | TYPE`.
+fn starts_plsql_unit(tokens: &[TokenWithSpan]) -> bool {
+    let words: Vec<String> = tokens
+        .iter()
+        .filter_map(|t| match &t.token {
+            Token::Word(w) => Some(w.value.to_ascii_uppercase()),
+            Token::Whitespace(_) => None,
+            _ => Some(String::new()),
+        })
+        .take(7)
+        .collect();
+    match words.first().map(String::as_str) {
+        Some("DECLARE" | "BEGIN") => words.get(1).is_none_or(|w| !matches!(w.as_str(), "TRANSACTION" | "WORK" | "")),
+        Some("CREATE") => {
+            let object = words.iter().skip(1).position(|w| {
+                matches!(
+                    w.as_str(),
+                    "PROCEDURE"
+                        | "FUNCTION"
+                        | "PACKAGE"
+                        | "TRIGGER"
+                        | "TYPE"
+                        | "TABLE"
+                        | "VIEW"
+                        | "INDEX"
+                        | "SEQUENCE"
+                        | "SYNONYM"
+                )
+            });
+            match object.map(|i| (words[i + 1].as_str(), words.get(i + 2).map(String::as_str))) {
+                Some(("PROCEDURE" | "FUNCTION" | "PACKAGE" | "TRIGGER", _)) => true,
+                // A type specification ends at its `;`; a body is a unit.
+                Some(("TYPE", next)) => next == Some("BODY"),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 fn push_stmt(text: &str, start: usize, end: usize, leading: Option<(usize, usize)>, out: &mut Vec<Stmt>) {
     let slice = &text[start..end];
     let trimmed = slice.trim_start();
@@ -329,6 +478,19 @@ mod tests {
     fn go_batches() {
         let src = "CREATE PROCEDURE p AS\nSELECT 1;\nSELECT 2;\nGO\nSELECT 3\nGO 2\n";
         assert_eq!(texts(src, Dialect::MsSql), ["CREATE PROCEDURE p AS\nSELECT 1;\nSELECT 2;", "SELECT 3"]);
+    }
+
+    #[test]
+    fn oracle_units_and_scripts() {
+        let src = "CREATE TABLE t (a INT);\nCREATE OR REPLACE PROCEDURE p IS\n  x INT;\nBEGIN\n  NULL;\nEND;\n/\nSELECT 1 FROM dual;\n";
+        let got = texts(src, Dialect::Oracle);
+        assert_eq!(got.len(), 3, "{got:?}");
+        assert!(got[1].starts_with("CREATE OR REPLACE PROCEDURE") && got[1].ends_with("END;"));
+        let src = "DECLARE x INT64 DEFAULT 0;\nFOR r IN (SELECT 1) DO\n  SET x = 1;\n  IF x = 1 THEN SELECT 2; END IF;\nEND FOR;\nSELECT 3;";
+        let got = texts(src, Dialect::BigQuery);
+        assert_eq!(got.len(), 3, "{got:?}");
+        let src = "--#SET TERMINATOR @\nCREATE PROCEDURE p() BEGIN SELECT 1; END@\nSELECT 2@\n";
+        assert_eq!(texts(src, Dialect::Db2), ["CREATE PROCEDURE p() BEGIN SELECT 1; END", "SELECT 2"]);
     }
 
     #[test]

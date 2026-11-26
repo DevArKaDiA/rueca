@@ -1,0 +1,10 @@
+{
+  "install.sql:audit_log": [],
+  "install.sql:write_audit": [
+    "install.sql:audit_log"
+  ],
+  "install.sql:rotate_audit": [
+    "install.sql:audit_log",
+    "install.sql:write_audit"
+  ]
+}

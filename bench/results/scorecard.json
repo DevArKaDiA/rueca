@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-25 21:41 UTC",
+ "generated": "2026-11-26 03:14 UTC",
  "languages": {
   "python": {
    "label": "python",
@@ -5225,55 +5225,71 @@
    "label": "sql",
    "status": "preview",
    "failing": [
-    "file_acc@5",
-    "func_acc@10",
-    "callees_precision",
-    "callees_recall",
     "parse_error_rate"
    ],
    "metrics": {
     "file_acc@5": {
-     "value": null,
-     "ci": null,
-     "n": null,
-     "bm25": null,
-     "cbm": null,
-     "paired": null,
+     "value": 0.7692307692307693,
+     "ci": [
+      0.6644424217371642,
+      0.8487449114947313
+     ],
+     "n": 78,
+     "bm25": 0.782051282051282,
+     "cbm": 0.6153846153846154,
+     "paired": {
+      "diff": -0.01282051282051282,
+      "ci": [
+       -0.08974358974358974,
+       0.0641025641025641
+      ],
+      "n": 78
+     },
      "label": "File Acc@5",
      "family": "Localization",
      "floor": "bm25",
      "target": 0.8,
      "better": "higher",
      "gated": true,
-     "status": "pending",
-     "target_met": null,
+     "status": "\u26a0",
+     "target_met": false,
      "min_n": 30
     },
     "func_acc@10": {
-     "value": null,
-     "ci": null,
-     "n": null,
-     "bm25": null,
-     "cbm": null,
-     "paired": null,
+     "value": 0.7222222222222222,
+     "ci": [
+      0.5910955707120475,
+      0.8238317234697763
+     ],
+     "n": 54,
+     "bm25": 0.7592592592592593,
+     "cbm": 0.09259259259259259,
+     "paired": {
+      "diff": -0.037037037037037035,
+      "ci": [
+       -0.12962962962962962,
+       0.05555555555555555
+      ],
+      "n": 54
+     },
      "label": "Function Acc@10",
      "family": "Localization",
      "floor": "bm25",
      "target": 0.65,
      "better": "higher",
      "gated": true,
-     "status": "pending",
-     "target_met": null,
+     "status": "\u26a0",
+     "target_met": true,
      "min_n": 30
     },
     "callers_precision": {
-     "value": 0.9984986112153742,
+     "value": 0.9953956676070178,
      "ci": [
-      0.9968470835522859,
-      0.9997372569626904
+      0.9916130835896003,
+      0.9983925076880067
      ],
-     "n": 349,
-     "cbm": 1.0,
+     "n": 528,
+     "cbm": 0.6666666666666666,
      "label": "Callers precision",
      "family": "Structure",
      "floor": 0.9,
@@ -5285,31 +5301,31 @@
      "min_n": 300
     },
     "callees_precision": {
-     "value": 0.9955197132616488,
+     "value": 0.9881521739130436,
      "ci": [
-      0.9901433691756273,
-      0.9991039426523297
+      0.9811956521739131,
+      0.9943487318840579
      ],
-     "n": 281,
-     "cbm": 1.0,
+     "n": 471,
+     "cbm": 0.8,
      "label": "Callees precision",
      "family": "Structure",
      "floor": 0.9,
      "target": 0.97,
      "better": "higher",
      "gated": true,
-     "status": "\u274c",
+     "status": "\u2705",
      "target_met": true,
      "min_n": 300
     },
     "callers_recall": {
-     "value": 0.9889467743335938,
+     "value": 0.9612034430216249,
      "ci": [
-      0.9774594078319007,
-      0.9976903707562733
+      0.9449605224321134,
+      0.9761136220156106
      ],
-     "n": 349,
-     "cbm": 0.0057306590257879654,
+     "n": 528,
+     "cbm": 0.003787878787878788,
      "label": "Callers recall",
      "family": "Structure",
      "floor": 0.75,
@@ -5321,31 +5337,31 @@
      "min_n": 300
     },
     "callees_recall": {
-     "value": 0.9750748460712874,
+     "value": 0.9562371516193172,
      "ci": [
-      0.9606281421228041,
-      0.9869234734225839
+      0.9401896715869646,
+      0.9709841859603006
      ],
-     "n": 281,
-     "cbm": 0.0071174377224199285,
+     "n": 471,
+     "cbm": 0.004246284501061571,
      "label": "Callees recall",
      "family": "Structure",
      "floor": 0.75,
      "target": 0.9,
      "better": "higher",
      "gated": true,
-     "status": "\u274c",
+     "status": "\u2705",
      "target_met": true,
      "min_n": 300
     },
     "callers_precision@conf": {
-     "value": 0.9984986112153742,
+     "value": 0.9953956676070178,
      "ci": [
-      0.9968470835522859,
-      0.9997372569626904
+      0.9917528655297736,
+      0.9984242763107735
      ],
-     "n": 349,
-     "cbm": 1.0,
+     "n": 528,
+     "cbm": 0.6666666666666666,
      "label": "Callers precision, confidence \u2265 0.6",
      "family": "Structure",
      "floor": 0.9,
@@ -5357,31 +5373,31 @@
      "min_n": 300
     },
     "callees_precision@conf": {
-     "value": 0.9955197132616488,
+     "value": 0.9881521739130436,
      "ci": [
-      0.9901433691756273,
-      0.9991039426523297
+      0.9809420289855073,
+      0.9942400362318841
      ],
-     "n": 281,
-     "cbm": 1.0,
+     "n": 471,
+     "cbm": 0.8,
      "label": "Callees precision, confidence \u2265 0.6",
      "family": "Structure",
      "floor": 0.9,
      "target": 0.97,
      "better": "higher",
      "gated": false,
-     "status": "\u274c",
+     "status": "\u2705",
      "target_met": true,
      "min_n": 300
     },
     "callers_recall@conf": {
-     "value": 0.9889467743335938,
+     "value": 0.9612034430216249,
      "ci": [
-      0.9777459407831901,
-      0.9978032473734479
+      0.945004503861038,
+      0.9756584947565061
      ],
-     "n": 349,
-     "cbm": 0.0057306590257879654,
+     "n": 528,
+     "cbm": 0.003787878787878788,
      "label": "Callers recall, confidence \u2265 0.6",
      "family": "Structure",
      "floor": 0.75,
@@ -5393,31 +5409,31 @@
      "min_n": 300
     },
     "callees_recall@conf": {
-     "value": 0.9750748460712874,
+     "value": 0.9562371516193172,
      "ci": [
-      0.9605575326215896,
-      0.9871208269784784
+      0.93976748643548,
+      0.9709549085026792
      ],
-     "n": 281,
-     "cbm": 0.0071174377224199285,
+     "n": 471,
+     "cbm": 0.004246284501061571,
      "label": "Callees recall, confidence \u2265 0.6",
      "family": "Structure",
      "floor": 0.75,
      "target": 0.9,
      "better": "higher",
      "gated": false,
-     "status": "\u274c",
+     "status": "\u2705",
      "target_met": true,
      "min_n": 300
     },
     "callers_precision@strict": {
-     "value": 0.9984986112153742,
+     "value": 0.9953956676070178,
      "ci": [
-      0.9968470835522859,
-      0.9997372569626904
+      0.9916446404215483,
+      0.9984242763107735
      ],
-     "n": 349,
-     "cbm": 1.0,
+     "n": 528,
+     "cbm": 0.6666666666666666,
      "label": "Callers precision, strict (no SCIP equivalence classes)",
      "family": "Structure",
      "floor": 0.9,
@@ -5429,13 +5445,13 @@
      "min_n": 300
     },
     "callers_recall@strict": {
-     "value": 0.9889467743335938,
+     "value": 0.9612034430216249,
      "ci": [
-      0.9777719892333073,
-      0.9978032473734479
+      0.9447275333567947,
+      0.9759431572215662
      ],
-     "n": 349,
-     "cbm": 0.0057306590257879654,
+     "n": 528,
+     "cbm": 0.003787878787878788,
      "label": "Callers recall, strict (no SCIP equivalence classes)",
      "family": "Structure",
      "floor": 0.75,
@@ -5447,49 +5463,49 @@
      "min_n": 300
     },
     "callees_precision@strict": {
-     "value": 0.9955197132616488,
+     "value": 0.9881521739130436,
      "ci": [
-      0.9901433691756273,
-      0.9991039426523297
+      0.981086956521739,
+      0.9943124999999999
      ],
-     "n": 281,
-     "cbm": 1.0,
+     "n": 471,
+     "cbm": 0.8,
      "label": "Callees precision, strict (no SCIP equivalence classes)",
      "family": "Structure",
      "floor": 0.9,
      "target": 0.97,
      "better": "higher",
      "gated": false,
-     "status": "\u274c",
+     "status": "\u2705",
      "target_met": true,
      "min_n": 300
     },
     "callees_recall@strict": {
-     "value": 0.9750748460712874,
+     "value": 0.9562371516193172,
      "ci": [
-      0.9604586793198894,
-      0.9869513641755634
+      0.9401275570383851,
+      0.9710108937417854
      ],
-     "n": 281,
-     "cbm": 0.0071174377224199285,
+     "n": 471,
+     "cbm": 0.004246284501061571,
      "label": "Callees recall, strict (no SCIP equivalence classes)",
      "family": "Structure",
      "floor": 0.75,
      "target": 0.9,
      "better": "higher",
      "gated": false,
-     "status": "\u274c",
+     "status": "\u2705",
      "target_met": true,
      "min_n": 300
     },
     "definition_found": {
-     "value": 1.0,
+     "value": 0.9922178988326849,
      "ci": [
-      0.992141708213617,
-      1.0
+      0.9831265717260222,
+      0.9964286538748321
      ],
-     "n": 485,
-     "cbm": 0.024742268041237112,
+     "n": 771,
+     "cbm": 0.03761348897535668,
      "label": "Definition found",
      "family": "Structure",
      "floor": 0.95,
@@ -5497,7 +5513,7 @@
      "better": "higher",
      "gated": true,
      "status": "\u2705",
-     "target_met": true,
+     "target_met": false,
      "min_n": 300
     },
     "micro_callee_f1": {
@@ -5507,13 +5523,13 @@
       1.0
      ],
      "n": null,
-     "cbm": 0.03389830508474576,
+     "cbm": 0.025974025974025976,
      "detail": {
       "precision": 1.0,
       "recall": 1.0,
-      "edges": 58
+      "edges": 76
      },
-     "n_callables": 87,
+     "n_callables": 102,
      "label": "Micro-benchmark callee F1",
      "family": "Micro",
      "floor": 0.9,
@@ -5525,14 +5541,14 @@
      "min_n": null
     },
     "parse_error_rate": {
-     "value": 0.08888888888888889,
+     "value": 0.1664145234493192,
      "ci": [
-      0.06366741226963568,
-      0.1227914345055123
+      0.15921284352105872,
+      0.17387459139127484
      ],
-     "n": 360,
-     "repos": 2,
-     "partial": 32,
+     "n": 9915,
+     "repos": 42,
+     "partial": 1650,
      "label": "Files with parse errors",
      "family": "Health",
      "floor": 0.02,
@@ -5544,14 +5560,14 @@
      "min_n": null
     },
     "parse_error_rate_raw": {
-     "value": 0.08888888888888889,
+     "value": 0.16631387964922892,
      "ci": [
-      0.06366741226963568,
-      0.1227914345055123
+      0.15911615044477403,
+      0.17376991856990107
      ],
-     "n": 360,
-     "repos": 2,
-     "partial": 32,
+     "n": 9921,
+     "repos": 42,
+     "partial": 1650,
      "label": "Files with parse errors, raw (vendored and misdetected files included)",
      "family": "Health",
      "floor": 0.02,
@@ -5563,13 +5579,13 @@
      "min_n": null
     },
     "latency_p95_ms": {
-     "value": 20.9,
+     "value": 44.6,
      "ci": [
-      19.900000000000002,
-      22.5
+      42.6065829815343,
+      47.6
      ],
-     "n": 1070,
-     "cbm": 433.0,
+     "n": 1932,
+     "cbm": 454.2,
      "label": "Query latency p95 (ms)",
      "family": "Health",
      "floor": 100,
@@ -5581,10 +5597,13 @@
      "min_n": null
     },
     "search_tokens_to_first_hit": {
-     "value": null,
-     "ci": null,
-     "n": null,
-     "cbm": null,
+     "value": 273.43859649122805,
+     "ci": [
+      204.95237379807693,
+      362.00098039215686
+     ],
+     "n": 78,
+     "cbm": 635.046511627907,
      "label": "Tokens to first gold hit (search_symbols, top 10)",
      "family": "Efficiency",
      "floor": null,
@@ -5594,14 +5613,17 @@
      "better": "lower",
      "gated": false,
      "status": "\u2014",
-     "target_met": null,
+     "target_met": true,
      "min_n": null
     },
     "search_tokens_per_hit": {
-     "value": null,
-     "ci": null,
-     "n": null,
-     "cbm": null,
+     "value": 285.8666666666667,
+     "ci": [
+      219.96398108785698,
+      383.1078124999999
+     ],
+     "n": 78,
+     "cbm": 559.0131578947369,
      "label": "Tokens per gold hit (search_symbols, top 10)",
      "family": "Efficiency",
      "floor": null,
@@ -5611,17 +5633,17 @@
      "better": "lower",
      "gated": false,
      "status": "\u2014",
-     "target_met": null,
+     "target_met": false,
      "min_n": null
     },
     "trace_tokens_per_true_edge": {
-     "value": 62.206896551724135,
+     "value": 67.81132075471699,
      "ci": [
-      56.05551801801802,
-      70.27285353535353
+      60.98385752688172,
+      77.02084441489362
      ],
-     "n": 12,
-     "cbm": 163.5,
+     "n": 25,
+     "cbm": 304.0,
      "label": "Tokens per true edge (trace)",
      "family": "Efficiency",
      "floor": null,
@@ -6389,7 +6411,7 @@
    }
   }
  },
- "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 0f16f3062a3f, rfc0005 contract, feat/lang-csharp@wip); rueca 0.1.0-alpha.2 (binary sha256 10388ab51475, rfc0005 contract, feat/lang-sql@9c6fb5d); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830); rueca 0.1.0-alpha.2 (binary sha256 7cdcd19e9d33, rfc0005 contract, fix/shell-stable@62caa40); rueca 0.1.0-alpha.2 (binary sha256 9b91d453ad46, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 aeca53b7707c, rfc0005 contract, feat/lang-kotlin@3265ba4); rueca 0.1.0-alpha.2 (binary sha256 c5a6a874ed6b, rfc0005 contract, feat/lang-shell@1b25092); rueca 0.1.0-alpha.2 (binary sha256 c624a58896e5, rfc0005 contract, feat/lang-csharp@1532771); rueca 0.1.0-alpha.2 (binary sha256 e1918daa111e, rfc0005 contract, fix/rust-tokio-gaps@ebc4224); rueca 0.1.0-alpha.2 (binary sha256 eaaabeedec9c, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 f4228890b708, rfc0005 contract, feat/lang-ruby@2e353ab)",
+ "rueca": "rueca 0.1.0-alpha.1 (binary sha256 70b2219809fc, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 0076db277f21, rfc0005 contract, feat/lang-rust@69e64c4); rueca 0.1.0-alpha.2 (binary sha256 0f16f3062a3f, rfc0005 contract, feat/lang-csharp@wip); rueca 0.1.0-alpha.2 (binary sha256 10388ab51475, rfc0005 contract, feat/lang-sql@9c6fb5d); rueca 0.1.0-alpha.2 (binary sha256 460fa3c27315, rfc0005 contract, fix/sql-stable@05ff770); rueca 0.1.0-alpha.2 (binary sha256 650f50edfa69, rfc0005 contract, feat/lang-rust@1170830); rueca 0.1.0-alpha.2 (binary sha256 678465c5b359, rfc0005 contract, fix/sql-stable@05ff770); rueca 0.1.0-alpha.2 (binary sha256 7cdcd19e9d33, rfc0005 contract, fix/shell-stable@62caa40); rueca 0.1.0-alpha.2 (binary sha256 9b91d453ad46, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 aeca53b7707c, rfc0005 contract, feat/lang-kotlin@3265ba4); rueca 0.1.0-alpha.2 (binary sha256 c5a6a874ed6b, rfc0005 contract, feat/lang-shell@1b25092); rueca 0.1.0-alpha.2 (binary sha256 c624a58896e5, rfc0005 contract, feat/lang-csharp@1532771); rueca 0.1.0-alpha.2 (binary sha256 e1918daa111e, rfc0005 contract, fix/rust-tokio-gaps@ebc4224); rueca 0.1.0-alpha.2 (binary sha256 eaaabeedec9c, rfc0005 contract); rueca 0.1.0-alpha.2 (binary sha256 f4228890b708, rfc0005 contract, feat/lang-ruby@2e353ab)",
  "org": {
   "status": "ok",
   "split": "gated",

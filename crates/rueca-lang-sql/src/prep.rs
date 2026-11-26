@@ -14,6 +14,8 @@
 //!   include a file), sqlcmd `:r` / `:setvar` / `:on error`, SQLite `.read`
 //!   and other dot commands, MySQL `SOURCE file`.
 
+use crate::dialect::Dialect;
+
 /// A `{% macro name(args) %}` (also `test`, `materialization`) block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Macro {
@@ -81,6 +83,9 @@ pub struct Prepared {
     /// The file has a `{{ config(…) }}` call or a `ref` / `source` call
     /// outside macros (a dbt model, analysis or test).
     pub dbt_model_markers: bool,
+    /// `{{ ref(…) }}` / `{{ source(…) }}` tags written as identifiers:
+    /// byte ranges of the tags.
+    pub relations: Vec<(usize, usize)>,
 }
 
 /// What an alone placeholder becomes when a statement does not parse
@@ -165,10 +170,14 @@ const JINJA_BUILTINS: &[&str] = &[
 ];
 
 /// Masks `source` (see the module docs).
-pub fn prepare(source: &str) -> Prepared {
+pub fn prepare(source: &str, dialect: Dialect) -> Prepared {
     let mut p = Prepared { text: String::new(), ..Prepared::default() };
     let mut bytes = source.as_bytes().to_vec();
-    client_commands(source, &mut bytes, &mut p);
+    if source.starts_with('\u{feff}') {
+        blank(&mut bytes, 0, 3);
+    }
+    client_commands(source, &mut bytes, &mut p, dialect);
+    substitutions(&mut bytes, dialect);
     if source.contains("{{") || source.contains("{%") || source.contains("{#") {
         p.jinja = true;
         Jinja { src: source, out: &mut bytes, p: &mut p, macro_depth: 0, placeholders: Vec::new() }.run();
@@ -190,27 +199,329 @@ pub(crate) fn blank(bytes: &mut [u8], start: usize, end: usize) {
 // Client commands
 // ---------------------------------------------------------------------------
 
-fn client_commands(source: &str, bytes: &mut [u8], p: &mut Prepared) {
-    let mut pos = 0;
-    let mut copy_data = false;
+fn client_commands(source: &str, bytes: &mut [u8], p: &mut Prepared, dialect: Dialect) {
+    let mut c = Client { bytes, p, pos: 0, copy_data: false, unit: false, stmt: false, comment: false };
     for line in source.split_inclusive('\n') {
         let body = line.trim_end_matches(['\n', '\r']);
         let trimmed = body.trim_start();
-        if copy_data {
-            // psql `COPY … FROM stdin;` rows, up to the `\.` line.
-            copy_data = trimmed != "\\.";
-            blank(bytes, pos, pos + body.len());
-        } else if let Some(path) = command_line(trimmed) {
-            if let Some((path, off)) = path {
-                let start = pos + (body.len() - trimmed.len()) + off;
-                p.includes.push(Include { path, start, end: pos + body.len() });
-            }
-            blank(bytes, pos, pos + body.len());
-        } else {
-            copy_data = copies_from_stdin(trimmed);
+        if !(dialect == Dialect::Oracle && c.oracle_line(body, trimmed)) {
+            c.line(body, trimmed);
         }
-        pos += line.len();
+        c.pos += line.len();
     }
+}
+
+/// Line-by-line state of [`client_commands`].
+struct Client<'a> {
+    bytes: &'a mut [u8],
+    p: &'a mut Prepared,
+    /// Byte offset of the current line.
+    pos: usize,
+    /// Inside the rows of a psql `COPY … FROM stdin`.
+    copy_data: bool,
+    // SQL*Plus commands are lines of their own between statements; inside
+    // a statement or a PL/SQL unit (which runs to its `/` line) the same
+    // words are code.
+    unit: bool,
+    stmt: bool,
+    comment: bool,
+}
+
+impl Client<'_> {
+    /// Blanks a command line; a file it includes is an import.
+    fn command(&mut self, body: &str, trimmed: &str, path: Option<(String, usize)>) {
+        if let Some((path, off)) = path {
+            let start = self.pos + (body.len() - trimmed.len()) + off;
+            self.p.includes.push(Include { path, start, end: self.pos + body.len() });
+        }
+        blank(self.bytes, self.pos, self.pos + body.len());
+    }
+
+    /// An Oracle script line: `true` when it is consumed here (a block
+    /// comment between statements, a SQL*Plus command).
+    fn oracle_line(&mut self, body: &str, trimmed: &str) -> bool {
+        let between = !self.unit && !self.stmt;
+        if self.comment || trimmed.starts_with("/*") {
+            // A block comment between statements is not code.
+            let from = if self.comment { 0 } else { 2 };
+            self.comment = !trimmed[from.min(trimmed.len())..].contains("*/");
+            if between {
+                return true;
+            }
+        }
+        if between && let Some(path) = sqlplus_line(trimmed) {
+            self.command(body, trimmed, path);
+            return true;
+        }
+        self.track(trimmed);
+        false
+    }
+
+    /// Whether the lines after this one are inside a statement or a
+    /// PL/SQL unit.
+    fn track(&mut self, trimmed: &str) {
+        let code = trimmed.split("--").next().unwrap_or("").trim_end();
+        if code == "/" {
+            (self.unit, self.stmt) = (false, false);
+            return;
+        }
+        if code.is_empty() || self.unit {
+            return;
+        }
+        if !self.stmt && plsql_unit(code) {
+            self.unit = true;
+        } else {
+            self.stmt = !code.ends_with(';');
+        }
+    }
+
+    /// A line of any dialect: `COPY` data, a client command, or code.
+    fn line(&mut self, body: &str, trimmed: &str) {
+        if self.copy_data {
+            // psql `COPY … FROM stdin;` rows, up to the `\.` line.
+            self.copy_data = trimmed != "\\.";
+            blank(self.bytes, self.pos, self.pos + body.len());
+            return;
+        }
+        let Some(path) = command_line(trimmed) else {
+            self.copy_data = copies_from_stdin(trimmed);
+            return;
+        };
+        self.command(body, trimmed, path);
+        // psql `\gset` / `\gexec` / `\g` / `\crosstabview` / `\watch`
+        // run the statement before them: they end it.
+        if ["\\g", "\\crosstabview", "\\watch"].iter().any(|c| trimmed.starts_with(c)) {
+            self.bytes[self.pos + (body.len() - trimmed.len())] = b';';
+        }
+    }
+}
+
+/// Whether a line opens a PL/SQL unit, which runs to its `/` line.
+fn plsql_unit(code: &str) -> bool {
+    let lower = code.to_ascii_lowercase();
+    let first = lower.split_whitespace().next().unwrap_or("");
+    matches!(first, "declare" | "begin")
+        || (first == "create"
+            && ["procedure", "function", "package", "trigger", "type"]
+                .iter()
+                .any(|w| lower.split_whitespace().take(6).any(|x| x == *w)))
+}
+
+/// SQL*Plus commands (Oracle scripts): `Some` when the line is one,
+/// `Some(Some((path, offset)))` for `@file` / `@@file` / `START file`.
+fn sqlplus_line(line: &str) -> Option<Option<(String, usize)>> {
+    const COMMANDS: &[&str] = &[
+        "prompt",
+        "pro",
+        "spool",
+        "whenever",
+        "define",
+        "undefine",
+        "accept",
+        "column",
+        "col",
+        "show",
+        "exit",
+        "quit",
+        "set",
+        "variable",
+        "var",
+        "print",
+        "rem",
+        "remark",
+        "pause",
+        "clear",
+        "ttitle",
+        "btitle",
+        "break",
+        "compute",
+        "host",
+        "timing",
+        "conn",
+        "connect",
+        "disconnect",
+        "exec",
+        "execute",
+        "start",
+    ];
+    if line.starts_with("$ ") || line.starts_with("! ") {
+        return Some(None);
+    }
+    if let Some(rest) = line.strip_prefix('@') {
+        let rest = rest.trim_start_matches('@').trim().trim_end_matches(';');
+        let path = rest.split_whitespace().next()?;
+        return Some(Some((path.to_string(), line.find(path).unwrap_or(0))));
+    }
+    let first = line.split_whitespace().next()?;
+    let lower = first.trim_end_matches(';').to_ascii_lowercase();
+    if !COMMANDS.contains(&lower.as_str()) {
+        return None;
+    }
+    let rest = line[first.len()..].trim();
+    match lower.as_str() {
+        // SQL statements that share a first word with a command.
+        "set" => {
+            let w = rest.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+            (!matches!(w.as_str(), "transaction" | "role" | "constraint" | "constraints")).then_some(None)
+        }
+        "start" => {
+            let path = rest.trim_end_matches(';').split_whitespace().next()?;
+            (!path.eq_ignore_ascii_case("with")).then(|| Some((path.to_string(), line.find(path).unwrap_or(0))))
+        }
+        "connect" | "conn" => (!rest.to_ascii_lowercase().starts_with("by")).then_some(None),
+        "show" | "exit" | "quit" | "print" | "break" | "column" | "col" | "var" | "variable" | "define" | "clear"
+        | "compute" | "host" | "timing" | "pause" | "accept" | "undefine" | "disconnect" | "ttitle" | "btitle" => {
+            (!rest.contains(":=") && !rest.starts_with('(')).then_some(None)
+        }
+        _ => Some(None),
+    }
+}
+
+/// Client-side substitutions, rewritten in place (same length) so the
+/// statement around them parses:
+///
+/// - sqlcmd `$(Name)` → the identifier `__Name_`;
+/// - PostgreSQL extension scripts `@extschema@` → `__extschema` (a schema
+///   placeholder, dropped from names like a Jinja one);
+/// - psql `:'name'` / `:"name"` → the quoted value without the colon, and
+///   a statement ended by `\gset` / `\gexec` / `\g` → `;`;
+/// - Oracle trigger rows `:new.` / `:old.` → `new.` / `old.`.
+fn substitutions(bytes: &mut [u8], dialect: Dialect) {
+    let mut i = 0;
+    while i < bytes.len() {
+        i = substitute(bytes, i, dialect) + 1;
+    }
+}
+
+/// The substitution at byte `i`, if any; the index of its last byte (`i`
+/// when there is none).
+fn substitute(bytes: &mut [u8], i: usize, dialect: Dialect) -> usize {
+    let oracle = dialect == Dialect::Oracle;
+    match bytes[i] {
+        b'$' if bytes.get(i + 1) == Some(&b'(') => sqlcmd_variable(bytes, i),
+        b'$' if oracle => conditional_compilation(bytes, i),
+        b'@' if bytes[i..].starts_with(b"@extschema@") => {
+            bytes[i] = b'_';
+            bytes[i + 1..i + 11].copy_from_slice(b"_extschema");
+            i + 10
+        }
+        b':' if psql_interpolation(bytes, i, dialect) || (oracle && trigger_row(bytes, i)) => {
+            bytes[i] = b' ';
+            i
+        }
+        b'&' if oracle => substitution_variable(bytes, i),
+        b'\\' if psql_terminator(bytes, i, dialect) => {
+            let end = (i..bytes.len()).find(|&j| bytes[j] == b'\n').unwrap_or(bytes.len());
+            blank(bytes, i, end);
+            bytes[i] = b';';
+            end
+        }
+        _ => i,
+    }
+}
+
+fn is_name_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// sqlcmd `$(Name)` → `__Name_`.
+fn sqlcmd_variable(bytes: &mut [u8], i: usize) -> usize {
+    let n = bytes.len();
+    let end = (i + 2..n).find(|&j| !is_name_char(bytes[j])).unwrap_or(n);
+    if end <= i + 2 || bytes.get(end) != Some(&b')') {
+        return i;
+    }
+    bytes[i] = b'_';
+    bytes[i + 1] = b'_';
+    bytes[end] = b'_';
+    end
+}
+
+/// psql `:'name'` / `:"name"` at the colon `i`: not `::`, and not a path
+/// into semi-structured data (Snowflake `value:"key"`).
+fn psql_interpolation(bytes: &[u8], i: usize, dialect: Dialect) -> bool {
+    matches!(dialect, Dialect::Postgres | Dialect::Generic | Dialect::Redshift)
+        && matches!(bytes.get(i + 1), Some(b'\'' | b'"'))
+        && i > 0
+        && !matches!(bytes[i - 1], b':' | b'_' | b')' | b']' | b'"')
+        && !bytes[i - 1].is_ascii_alphanumeric()
+        && psql_variable(bytes, i + 1)
+}
+
+/// Oracle trigger rows `:new.` / `:old.` at the colon `i`.
+fn trigger_row(bytes: &[u8], i: usize) -> bool {
+    i > 0
+        && !bytes[i - 1].is_ascii_alphanumeric()
+        && bytes.get(i + 4) == Some(&b'.')
+        && (bytes[i + 1..i + 4].eq_ignore_ascii_case(b"new") || bytes[i + 1..i + 4].eq_ignore_ascii_case(b"old"))
+}
+
+/// psql `\gset` / `\gexec` / `\g` after a statement on its line.
+fn psql_terminator(bytes: &[u8], i: usize, dialect: Dialect) -> bool {
+    matches!(dialect, Dialect::Postgres | Dialect::Generic)
+        && bytes.get(i + 1) == Some(&b'g')
+        && i > 0
+        && bytes[i - 1].is_ascii_whitespace()
+}
+
+/// SQL*Plus substitution variable `&name` / `&&name.` → an identifier.
+fn substitution_variable(bytes: &mut [u8], i: usize) -> usize {
+    let n = bytes.len();
+    let from = if bytes.get(i + 1) == Some(&b'&') { i + 2 } else { i + 1 };
+    let end = (from..n).find(|&j| !is_name_char(bytes[j])).unwrap_or(n);
+    if end <= from {
+        return i;
+    }
+    blank_with(bytes, i, from, b'_');
+    if bytes.get(end) == Some(&b'.') {
+        bytes[end] = b'_';
+    }
+    end
+}
+
+/// Oracle conditional compilation: `$if … $then`, `$elsif … $then`,
+/// `$else`, `$end` are blanked (every branch is read); `$$name` inquiry
+/// directives become identifiers.
+fn conditional_compilation(bytes: &mut [u8], i: usize) -> usize {
+    let n = bytes.len();
+    let end = (i + 1..n).find(|&j| !(is_name_char(bytes[j]) || (j == i + 1 && bytes[j] == b'$'))).unwrap_or(n);
+    let word = bytes[i + 1..end].to_ascii_lowercase();
+    // Blanks through the directive `closer` that ends this one.
+    let through = |bytes: &mut [u8], closer: &[u8]| {
+        let len = closer.len();
+        let stop = (end..n.saturating_sub(len - 1))
+            .find(|&j| bytes[j..j + len].eq_ignore_ascii_case(closer))
+            .map_or(end, |j| j + len);
+        blank(bytes, i, stop);
+        stop.max(i + 1) - 1
+    };
+    match word.as_slice() {
+        b"if" | b"elsif" => through(bytes, b"$then"),
+        b"error" => through(bytes, b"$end"),
+        b"else" | b"end" | b"then" => {
+            blank(bytes, i, end);
+            i
+        }
+        w if w.first() == Some(&b'$') && w.len() > 1 => {
+            blank_with(bytes, i, i + 2, b'_');
+            i
+        }
+        _ => i,
+    }
+}
+
+fn blank_with(bytes: &mut [u8], from: usize, to: usize, byte: u8) {
+    for b in &mut bytes[from..to] {
+        *b = byte;
+    }
+}
+
+/// `'name'` / `"name"` at `i` with a variable-like name inside.
+fn psql_variable(bytes: &[u8], i: usize) -> bool {
+    let q = bytes[i];
+    let end =
+        (i + 1..bytes.len()).find(|&j| !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_')).unwrap_or(bytes.len());
+    end > i + 1 && bytes.get(end) == Some(&q)
 }
 
 /// `COPY t (a, b) FROM stdin;` (psql inline data follows).
@@ -227,7 +538,11 @@ fn command_line(line: &str) -> Option<Option<(String, usize)>> {
     let include = match lower.as_str() {
         "\\i" | "\\ir" | "\\include" | "\\include_relative" | ":r" | ".read" | "source" | "\\." => true,
         _ if first.starts_with('\\') => false,
-        ":setvar" | ":on" | ":connect" | ":out" | ":error" => false,
+        // mysql client: show warnings after every statement, or not
+        "warnings" | "nowarning" if line.trim().trim_end_matches(';') == first => false,
+        ":setvar" | ":on" | ":connect" | ":out" | ":error" | ":reset" | ":ed" | ":list" | ":help" | ":xml"
+        | ":perftrace" | ":serverlist" | ":listvar" | "!!" => false,
+        _ if lower.starts_with(":exit") || lower.starts_with(":quit") => false,
         _ if first.starts_with('.') && first.len() > 1 && first[1..].chars().all(|c| c.is_ascii_alphabetic()) => false,
         _ => return None,
     };
@@ -328,6 +643,7 @@ impl Jinja<'_> {
         {
             self.p.dbt_model_markers = true;
             self.out[t.start..t.start + ident.len()].copy_from_slice(ident.as_bytes());
+            self.p.relations.push((t.start, t.end));
             return;
         }
         if self.macro_depth == 0 {
@@ -341,16 +657,33 @@ impl Jinja<'_> {
     /// alone on its lines is also recorded in [`Prepared::alone`].
     fn placeholder(&mut self, t: &Tag) {
         let first_end = self.src[t.start..t.end].find('\n').map_or(t.end, |i| t.start + i);
-        for b in &mut self.out[t.start..first_end] {
-            *b = b'_';
-        }
-        self.placeholders.push((t.start, first_end));
         let line_start = self.src[..t.start].rfind('\n').map_or(0, |i| i + 1);
         let line_end = self.src[t.end..].find('\n').map_or(self.src.len(), |i| t.end + i);
         let before = self.src[line_start..t.start].trim().is_empty();
         let after = self.src[t.end..line_end].trim().trim_end_matches(',').is_empty();
-        if before && after && first_end - t.start >= ALONE_QUERY.len() {
-            self.p.alone.push((t.start, first_end));
+        let alone = before && after;
+        // A tag alone on its lines whose first line is too short for the
+        // query form (`{{` then the call on the next lines): the
+        // placeholder goes on its first line that is long enough.
+        let (mut s, mut e) = (t.start, first_end);
+        if alone && e - s < ALONE_QUERY.len() {
+            let mut at = t.start;
+            for line in self.src[t.start..t.end].split_inclusive('\n') {
+                let body = line.trim_end_matches(['\n', '\r']);
+                let indent = body.len() - body.trim_start().len();
+                if body.len() - indent >= ALONE_QUERY.len() {
+                    (s, e) = (at + indent, at + body.len());
+                    break;
+                }
+                at += line.len();
+            }
+        }
+        for b in &mut self.out[s..e] {
+            *b = b'_';
+        }
+        self.placeholders.push((s, e));
+        if alone && e - s >= ALONE_QUERY.len() {
+            self.p.alone.push((s, e));
         }
     }
 
@@ -364,6 +697,9 @@ impl Jinja<'_> {
             "snapshot" => self.snapshot(tags, i, &inner, off),
             "elif" | "else" if self.macro_depth == 0 => return self.skip_branch(tags, i),
             "set" if !inner.contains('=') => return self.set_block(tags, i),
+            "if" if self.macro_depth == 0 && (inner.contains("loop.last") || inner.contains("loop.first")) => {
+                return self.separator(tags, i);
+            }
             _ => {}
         }
         blank(self.out, t.start, t.end);
@@ -427,6 +763,19 @@ impl Jinja<'_> {
         self.calls_in(&tags[i..j.min(tags.len())]);
         blank(self.out, tags[i].start, end);
         j + 1
+    }
+
+    /// `{% if not loop.last %} union all {% endif %}`: what separates the
+    /// iterations of a loop; the loop body is read once, so the separator
+    /// is blanked (calls reported).
+    fn separator(&mut self, tags: &[Tag], i: usize) -> usize {
+        let Some(close) = matching(self.src, tags, i, "if", "endif") else {
+            blank(self.out, tags[i].start, tags[i].end);
+            return i + 1;
+        };
+        self.calls_in(&tags[i..close]);
+        blank(self.out, tags[i].start, tags[close].end);
+        close + 1
     }
 
     /// `{% set x %} … {% endset %}`: blanked, calls reported.
@@ -554,11 +903,42 @@ fn tag_at(b: &[u8], i: usize) -> Option<Tag> {
         b'%' => b"%}",
         _ => b"#}",
     };
-    let end = i + 2 + find(&b[i + 2..], close)? + 2;
+    let end = i + 2 + find_close(&b[i + 2..], close, kind != b'#')? + 2;
     let dash = |c: Option<&u8>| matches!(c, Some(b'-' | b'+'));
     let inner_start = i + 2 + usize::from(dash(b.get(i + 2)));
     let inner_end = end - 2 - usize::from(end - 2 > inner_start && dash(b.get(end - 3)));
     Some(Tag { start: i, end, kind, inner_start, inner_end })
+}
+
+/// The closing delimiter of a tag; in `{{ … }}` and `{% … %}` one inside a
+/// string literal (`post_hook="{{ m() }}"`) does not close the tag. A
+/// string that never ends falls back to the first delimiter.
+fn find_close(hay: &[u8], close: &[u8], strings: bool) -> Option<usize> {
+    let plain = find(hay, close)?;
+    if !strings {
+        return Some(plain);
+    }
+    let mut i = 0;
+    while i + 1 < hay.len() {
+        match hay[i] {
+            b'\'' | b'"' => {
+                let q = hay[i];
+                match (i + 1..hay.len()).find(|&j| hay[j] == q && hay[j - 1] != b'\\') {
+                    Some(j)
+                        if !hay[i..j].contains(&b'\n')
+                            || hay[i + 1..j].windows(2).any(|w| w == b"{{" || w == b"{%") =>
+                    {
+                        i = j
+                    }
+                    _ => {}
+                }
+            }
+            _ if hay[i..].starts_with(close) => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    Some(plain)
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -684,7 +1064,7 @@ mod tests {
     #[test]
     fn refs_become_identifiers() {
         let src = "{{ config(materialized='table') }}\nselect * from {{ ref('stg_orders') }} o\njoin {{ source('shop', 'raw_customers') }} c on 1=1";
-        let p = prepare(src);
+        let p = prepare(src, Dialect::Generic);
         assert_eq!(p.text.len(), src.len());
         assert!(p.text.contains("from stg_orders "));
         assert!(p.text.contains("join shop.raw_customers "));
@@ -695,7 +1075,7 @@ mod tests {
     #[test]
     fn branches_macros_and_calls() {
         let src = "{% macro cents(col) %}({{ col }} / 100){% endmacro %}\nselect {{ dbt_utils.star(from=ref('a')) }}, {{ cents('x') }} from t\n{% if var('full') %}where 1=1{% else %}where {{ ref('b') }}.x = 1{% endif %}\n-- {{ env_var('DBT_USER') }}";
-        let p = prepare(src);
+        let p = prepare(src, Dialect::Generic);
         assert_eq!(p.macros.len(), 1);
         assert_eq!(p.macros[0].name, "cents");
         assert!(p.text.contains("select ___"));
@@ -715,7 +1095,7 @@ mod tests {
     #[test]
     fn client_commands_masked() {
         let src = "\\set ON_ERROR_STOP on\n\\i schema/tables.sql\n:r .\\procs.sql\n.read seed.sql\nCOPY t (a) FROM stdin;\n1\tx\n\\.\nselect 1;";
-        let p = prepare(src);
+        let p = prepare(src, Dialect::Generic);
         let paths: Vec<&str> = p.includes.iter().map(|i| i.path.as_str()).collect();
         assert_eq!(paths, ["schema/tables.sql", ".\\procs.sql", "seed.sql"]);
         assert_eq!(&src[p.includes[0].start..p.includes[0].end], "schema/tables.sql");
