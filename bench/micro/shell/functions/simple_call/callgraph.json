@@ -1,0 +1,6 @@
+{
+  "main.sh:greet": [],
+  "main.sh:main": [
+    "main.sh:greet"
+  ]
+}

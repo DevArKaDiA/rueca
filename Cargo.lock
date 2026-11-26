@@ -4184,6 +4184,7 @@ dependencies = [
  "rueca-lang-proto",
  "rueca-lang-python",
  "rueca-lang-rust",
+ "rueca-lang-shell",
  "rueca-lang-typescript",
  "rueca-model",
  "rueca-resolve",
@@ -4299,6 +4300,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rueca-lang-shell"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "rueca-extract",
+ "rueca-model",
+ "tree-sitter",
+ "tree-sitter-bash",
+]
+
+[[package]]
 name = "rueca-lang-typescript"
 version = "0.1.0-alpha.2"
 dependencies = [
@@ -4362,6 +4373,7 @@ dependencies = [
  "rueca-lang-php",
  "rueca-lang-python",
  "rueca-lang-rust",
+ "rueca-lang-shell",
  "rueca-lang-typescript",
  "rueca-model",
  "serde_json",
@@ -5770,6 +5782,16 @@ dependencies = [
  "regex",
  "serde_json",
  "streaming-iterator",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-bash"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e5ec769279cc91b561d3df0d8a5deb26b0ad40d183127f409494d6d8fc53062"
+dependencies = [
+ "cc",
  "tree-sitter-language",
 ]
 

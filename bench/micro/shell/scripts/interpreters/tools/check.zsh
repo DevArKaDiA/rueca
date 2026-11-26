@@ -1,0 +1,4 @@
+check() {
+  print ok
+}
+check

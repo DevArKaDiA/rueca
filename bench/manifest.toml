@@ -871,6 +871,17 @@ s1_sources = "SWE-bench Multilingual (Rust: tokio, bat, axum, ruff, coreutils, n
 s3_gold = "rust-analyzer 2026-11-09 `scip` (serde_json v1.0.154, ripgrep 15.2.0; bytes = calibration) and the rueca-bench Rust micro-benchmark"
 notes = "Rust methods are named `Type.method` (last path segment of the impl's self type) and trait methods `Trait.method`; items under `#[cfg(test)]` / `#[test]` are test code. rust-analyzer resolves calls on a generic `T: Trait` or `dyn Trait` receiver to the trait method only, and calls in a `macro_rules!` body to nothing."
 
+[languages.shell]
+label = "shell"
+members = ["shell"]
+extensions = [".sh", ".bash", ".zsh", ".ksh", ".bats"]
+# bats files are tests; shunit2 / plain test scripts by name (`test_x.sh`,
+# `x_test.sh`, shellspec `x_spec.sh`).
+test_files = ['.*\.bats$', '^test_.*\.(sh|bash|zsh|ksh)$', '.*_test\.(sh|bash|zsh|ksh)$', '.*_spec\.sh$']
+s1_sources = "none: no localization dataset has shell instances (SWE-bench Multilingual, SWE-bench Verified / Lite, SWE-PolyBench, Multi-SWE-bench, SWE-rebench V2)"
+s3_gold = "rueca-bench shell labeler (code-backed, tree-sitter-bash; nvm v0.41.0, acme.sh v3.1.7, bash-it v3.2.0; bats-core = calibration) and the rueca-bench shell micro-benchmark"
+notes = "No compiler-grade call graph exists for shell: the structural gold is the bench's own labeler (shellgold.py), written from bash's run-time name lookup, independent of the pack's path evaluation. Extension-less scripts are outside the bench's file set."
+
 # Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
 # callables). `binding` = Python package (pinned in pyproject.toml) and
 # function returning the language. `labeler = "nesting"` (default) is the
@@ -975,6 +986,16 @@ containers = ["mod_item", "impl_item", "trait_item"]
 calls = { call_expression = "function", macro_invocation = "macro" }
 members = { field_expression = "field", scoped_identifier = "name", generic_function = "function" }
 token_calls = "token_tree"
+
+# Shell (sh / bash; zsh and ksh best effort): code-backed labeler — every
+# `function_definition` is a callable named by its name (shell functions are
+# global, nesting does not qualify them; treesitter.py: _shell_functions).
+[grammars.bash]
+binding = "tree_sitter_bash:language"
+package = "tree-sitter-bash 0.25.1 (MIT)"
+extensions = [".sh", ".bash", ".zsh", ".ksh", ".bats"]
+labeler = "shell"
+separator = "."
 
 # ---------------------------------------------------------------- tools
 
@@ -1113,7 +1134,7 @@ contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arm
 # 1ff5e82. Every other suite (carried): the RFC 0005 contract branch, main
 # 2c5a384 plus the response contract, whose quality metrics are identical
 # to main's binary on the same run (only tokens and latency differ).
-results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537)"
+results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -1967,6 +1988,50 @@ indexer = "rust_analyzer"
 args = ["scip", "{root}", "--output", "{out}"]
 split = "calibration"
 
+# Shell: no compiler-grade call graph exists, so the gold is the bench's
+# code-backed labeler (`gold = "shell"`, shellgold.py) over a library (nvm:
+# one large sourced script) and an application with plugins (acme.sh: the
+# main script plus DNS / deploy / notify hooks it sources at run time).
+[[s3.repos]]
+repo = "nvm-sh/nvm"
+language = "shell"
+tag = "v0.41.0"
+commit = "4e8758a801eea9479b32a904f31093e410ddaba4"
+license = "MIT"
+include = ["nvm.sh", "install.sh"]
+gold = "shell"
+
+[[s3.repos]]
+repo = "acmesh-official/acme.sh"
+language = "shell"
+tag = "v3.1.7"
+commit = "5567d7fe7298fd37aca53194885ba444c6678669"
+license = "GPL-3.0"
+include = ["acme.sh", "dnsapi/", "deploy/", "notify/"]
+gold = "shell"
+
+# A framework of sourced components: bash_it.sh sources its libraries and
+# themes through `${BASH_IT}/…` paths, plugins / completions / aliases call
+# the libraries' helpers (vendored composure is out of scope).
+[[s3.repos]]
+repo = "Bash-it/bash-it"
+language = "shell"
+tag = "v3.2.0"
+commit = "0f04edce0ca93fbe66f1fe23c8d9b7a01e53f94c"
+license = "MIT"
+include = ["bash_it.sh", "install.sh", "uninstall.sh", "lib/", "plugins/", "completion/", "aliases/", "themes/", "scripts/", "hooks/"]
+gold = "shell"
+
+[[s3.repos]]
+repo = "bats-core/bats-core"
+language = "shell"
+tag = "v1.13.0"
+commit = "3bca150ec86275d6d9d5a4fd7d48ab8b6c6f3d87"
+license = "MIT"
+include = ["lib/", "install.sh", "contrib/"]
+gold = "shell"
+split = "calibration"
+
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
 [[s3.micro]]
 name = "pycg"
@@ -2063,6 +2128,18 @@ format = "rueca"
 local = "micro/rust"
 license = "Apache-2.0"
 crosscheck = "rust_analyzer"
+
+# Shell micro-benchmark: Rueca's own hand-labelled snippets (Apache-2.0), each
+# a small script tree; cross-checked against the code-backed labeler
+# (`crosscheck = "shell_labeler"`: no SCIP indexer exists for shell).
+[[s3.micro]]
+name = "shell-micro"
+title = "Shell micro-benchmark (rueca-bench)"
+language = "shell"
+format = "rueca"
+local = "micro/shell"
+license = "Apache-2.0"
+crosscheck = "shell_labeler"
 
 # ---------------------------------------------------------------- data formats
 # RFC 0003 §3.3 (bench/README.md, "Data formats"): key recall and span line

@@ -679,7 +679,12 @@ pub(crate) fn import_key(family: LanguageFamily, imp: &Import) -> Option<String>
         LanguageFamily::Java => Some(format!("java:{m}")),
         LanguageFamily::Php => Some(format!("php:{}", m.trim_start_matches('\\'))),
         LanguageFamily::C => Some(format!("c:{}", m.trim_start_matches("./"))),
-        LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Rust | LanguageFamily::Proto => None,
+        // Shell has no package identity: a sourced file is a path.
+        LanguageFamily::Markdown
+        | LanguageFamily::Data
+        | LanguageFamily::Rust
+        | LanguageFamily::Proto
+        | LanguageFamily::Shell => None,
     }
 }
 
@@ -1106,6 +1111,7 @@ mod tests {
         assert_eq!(import_key(LanguageFamily::Rust, &imp("crate::a", 0)), None);
         assert_eq!(import_key(LanguageFamily::Rust, &imp("std::fmt", 0)), None);
         assert_eq!(import_key(LanguageFamily::Rust, &imp("a", 2)), None);
+        assert_eq!(import_key(LanguageFamily::Shell, &imp("*/nvm.sh", 0)), None);
     }
 
     #[test]

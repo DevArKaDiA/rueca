@@ -1,0 +1,10 @@
+{
+  "main.sh:fmt": [],
+  "main.sh:get_value": [],
+  "main.sh:main": [
+    "main.sh:fmt",
+    "main.sh:get_value",
+    "main.sh:stamp"
+  ],
+  "main.sh:stamp": []
+}

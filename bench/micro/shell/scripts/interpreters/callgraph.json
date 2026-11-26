@@ -1,0 +1,5 @@
+{
+  "main.sh:build_all": [],
+  "scripts/build.sh:build": [],
+  "tools/check.zsh:check": []
+}

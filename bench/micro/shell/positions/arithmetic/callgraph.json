@@ -1,0 +1,6 @@
+{
+  "main.sh:count": [],
+  "main.sh:next": [
+    "main.sh:count"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "main.sh:main": [
+    "main.sh:setup_env"
+  ],
+  "main.sh:setup_env": []
+}

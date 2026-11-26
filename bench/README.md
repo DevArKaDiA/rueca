@@ -28,7 +28,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Multi-step** (RFC 0009 §8, experimental code mode) | "How many tokens does a multi-step question cost as tool calls, as one code-mode script, and with cbm?" | reported; RFC 0009's per-language graduation gate |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
-the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust}/` and the
+the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust,shell}/` and the
 env-bridge labels in `labels/bridge/`). Datasets, repositories and tool
 binaries are fetched at runtime at pinned revisions into `bench/.cache`
 (git-ignored), so nothing with an unclear licence is vendored.
@@ -54,7 +54,7 @@ uv run --project bench rueca-bench check                 # regression check vs t
 
 - `setup [--lang FAMILY ...]` and `run ... [--lang FAMILY ...]` restrict work
   to language families (manifest `[languages]` keys: `python`, `ecma`,
-  `php`, `go`, `java`, `c`, `cpp`, `rust`) and/or `data` (the data-format suite);
+  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
 - `run --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all|a,b} --suite {s1,s3,data,health,org,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--workers N] [--force] [--prune]`.
   `--split` restricts S1 to one split; the `vector`, `rueca-hybrid` and
@@ -478,7 +478,9 @@ Adding a language is data plus, at most, one labeler entry:
    (→ `Function` / `Method`), container node types and the qualified-name
    separator. Grammars whose function shapes need code name a code-backed
    `labeler` (`ecma` for JS/TS, `go` for receiver methods, `c` for C/C++
-   declarators, `rust` for impl / trait / `mod` scopes and test code).
+   declarators, `rust` for impl / trait / `mod` scopes and test code,
+   `shell` for file-level shell functions and the parser repairs the shell
+   pack applies).
    `calls` / `members` describe call sites for SCIP edge
    derivation (`treesitter.py: _is_callee`); `token_calls` names a
    grammar's unparsed macro-argument node (Rust `token_tree`) whose
@@ -500,7 +502,8 @@ Adding a language is data plus, at most, one labeler entry:
    scip-clang gets a synthesized `compdb` whose `files` may be globs,
    scip-java a `javac` source list), `include` / `exclude` path prefixes,
    `license`, optional `split` (`calibration`, `diagnostic`), or another
-   gold method (`phpstan` for PHP); and a `[[s3.micro]]` micro-benchmark
+   gold method (`phpstan` for PHP, `shell` for the code-backed shell
+   labeler); and a `[[s3.micro]]` micro-benchmark
    (`format = "rueca"` with snippets under `bench/micro/<lang>/`,
    `crosscheck = "<SCIP indexer>"`, `crosscheck_args` for npm indexers;
    a snippet carries whatever its indexer needs to see a project: Go a
@@ -605,6 +608,7 @@ stays untuned:
 | c (15) | nanomsg/nng (5; SWE-rebench V2) · facebook/zstd (5), ponylang/ponyc (5; Multi-SWE-bench) | — |
 | cpp (13) | randombit/botan (5), zeek/zeek (5), ccache/ccache (3); SWE-rebench V2 | — |
 | rust (15) | tokio-rs/bytes (5), tokio-rs/tracing (5), sharkdp/fd (5); Multi-SWE-bench | tokio-rs/bytes v1.12.1 (rust-analyzer) |
+| shell (0) | none (no dataset has shell instances) | bats-core/bats-core v1.13.0 (shell labeler) |
 
 C++ stops at 13: outside the gated repositories, Multi-SWE-bench has only
 cpp-httplib (one eligible instance) and SWE-rebench V2 only zeek (70
@@ -835,9 +839,10 @@ line tolerance) is a class too; the two PHP repositories have none.
 365 / 372, zod 75 / 190), PHP 710 / 811 (monolog, commonmark), Go 351 / 521
 (gin, urfave/cli), Java 667 / 884 (gson, javapoet), C 978 / 1035 (cJSON,
 Lua), C++ 878 / 1085 (fmt, yaml-cpp), Rust 1417 / 1296 (serde_json
-342 / 513, ripgrep 1075 / 783) — every language above the ≥ 300 per
+342 / 513, ripgrep 1075 / 783), shell 1738 / 2170 (nvm 119 / 125, acme.sh
+1238 / 1630, bash-it 381 / 415) — every language above the ≥ 300 per
 direction of §7.2. Calibration: click 210 / 191, goawk 245 / 186, bytes
-140 / 300; diagnostic: express 8 / 19.
+140 / 300, bats-core 33 / 21; diagnostic: express 8 / 19.
 
 **Gold from SCIP** (RFC 0002 §4.2) at pinned tags: requests v2.34.2, flask
 3.1.3, jinja 3.1.6 (`src/jinja2/`), click 8.1.8 (calibration) (`scip-python`
@@ -903,6 +908,46 @@ The SCIP reader decodes the protobuf wire format directly and reads **both**
 the deprecated packed `range` / `enclosing_range` fields and the typed
 `single_line_*` / `multi_line_*` oneofs.
 
+**Gold from the shell labeler (shell).** No compiler-grade call graph
+exists for shell (no SCIP indexer, no type checker), so the bench derives
+it from the code with its own labeler (`shellgold.py`, tree-sitter-bash
+0.25.1), written from bash's run-time name lookup and independent of the
+pack's path evaluation (the pack evaluates `source` paths from
+`$(dirname "$0")`, `${BASH_SOURCE%/*}` and directory variables and resolves
+names through import edges; the labeler matches sourced paths by their
+literal tail and looks names up over files), at pinned tags: nvm v0.41.0
+(`nvm.sh`, `install.sh`: one large library), acme.sh v3.1.7 (`acme.sh` and
+its `dnsapi/`, `deploy/`, `notify/` hooks, which call the main script's
+helpers it sources at run time), bash-it v3.2.0 (`bash_it.sh`, `lib/`,
+`plugins/`, `completion/`, `aliases/`, `themes/`, `scripts/`, `hooks/`:
+components sourced through `${BASH_IT}/…`); bats-core v1.13.0 (`lib/`,
+`install.sh`, `contrib/`) is the calibration set. Rules:
+
+1. callables = every `function_definition` of an in-scope, non-test shell
+   file (extension-less scripts are outside the bench's file set), named
+   by its name (shell functions are global; nesting does not qualify
+   them); several definitions of one name in one file (conditional
+   definitions) are one equivalence class;
+2. sources: `source P` / `. P` (`\. P`) whose end is a literal path (the
+   tail after the last expansion, starting at a `/`; `.` and `..`
+   dropped), resolved to the only file whose path ends with that tail;
+   dynamic, home and absolute paths source nothing; transitive (depth ≤ 10);
+3. calls: every command whose word is a literal name, in any position
+   (pipelines, lists, subshells, `$(…)`, `<(…)`, conditions); not the
+   operands of other commands (`command f`, `exec f`, `xargs f`, `sudo f`,
+   a `trap` handler — a callback —, `eval "f"`, `time f`); the caller is
+   the innermost callable containing the command; file-level code has no
+   edge;
+4. target: the name's definitions in the caller's file; else in the files
+   it sources, when one file holds them (several: no edge, the run order
+   decides); else in the only non-test file of the repository that
+   defines the name (a library calling a helper its entry script sources);
+   else none.
+
+The labeler and the pack read one grammar with the same same-length
+repairs (`${s:$i:1}`, `&` / `<` / `>` in an expansion's pattern, a
+line-start `\.`, zsh parameter flags).
+
 **Gold from PHPStan (PHP).** PHP has no usable SCIP indexer (scip-php: no
 enclosing ranges, no relationships; RFC 0002 §4.2), so the bench ships a
 small PHPStan extension (`bench/phpstan/`, Apache-2.0): a collector that
@@ -947,8 +992,8 @@ keys against the PHPStan extractor and the report prints the agreement
 `call_user_func` callables, a conditionally declared function and a trait
 `as` alias, which PHPStan does not resolve and the key does).
 
-**Python, TS/JS, Go, Java, C, C++ and Rust micro-benchmarks**
-(`micro/{python,ecma,go,java,c,cpp,rust}/`, Rueca's own labels, Apache-2.0), same
+**Python, TS/JS, Go, Java, C, C++, Rust and shell micro-benchmarks**
+(`micro/{python,ecma,go,java,c,cpp,rust,shell}/`, Rueca's own labels, Apache-2.0), same
 format and spirit as the PHP one; every snippet compiles (`py_compile`,
 `tsc --strict` 5.6 / `node --check`, `go vet`, `javac` 21 in Docker,
 `clang -fsyntax-only` / `clang++ -std=c++17 -fsyntax-only`, `cargo check
@@ -964,6 +1009,7 @@ labeler's qualified names; overloads (Java, C++) are told apart as
 | Go | 60 | 240 | 156 | functions, packages (same package across files, sub-packages, aliases, dot / blank imports, package name ≠ directory), methods (value / pointer receivers, `&T{}` / `T{}` / `var x T` / constructor functions, typed params, fields, range and map / slice elements, chained returns, method values vs method expressions), embedding (promotion, pointer embedding, shadowing, multilevel), interfaces, type assertions and switches, closures, `go` / `defer`, generics, `init` / `main`, name traps |
 | Java | 65 | 195 | 109 | packages (same package, single-type / on-demand / static imports, fully qualified calls), methods (`this`, implicit this, typed receivers, `var`, chains, builders), overloads (arity, type, varargs, widening, constructors), constructors (`new`, `this(...)`, `super(...)`), inheritance and overrides, interfaces (default, static, abstract, `I.super.m()`), nested / inner / anonymous / local classes, lambdas and method references, statics, enums and records, generics |
 | C | 26 | 82 | 50 | prototypes in headers vs definitions, `static` same-name functions in two files, `static inline` in headers, includes from sub-directories, function pointers and dispatch tables, function-like macros, opaque handles and callbacks |
+| Shell | 43 | 109 | 54 | functions (both forms, recursion, nested definitions, wrappers named like utilities, a function passed as an argument), call positions (`$(…)`, backticks, pipelines, `&&` / `||`, subshells, `&`, conditions and loops, `<(…)`, `!`, `time`, here-documents, arithmetic), runners (`command`, `exec`, `xargs`, `sudo`, `env`, `nohup`, `eval` literals, `trap` handlers), sourcing (`$(dirname "$0")`, `.` literal paths, `${BASH_SOURCE%/*}`, directory variables, transitive sources, a library calling a sibling library, the own definition winning, one name in two sourced files, sourcing loops, unknown prefixes, `\.` after a word), script runs (by path, through `bash` / `sh -c` / `zsh`, a script named like a function), env syntax around calls (`VAR=1 cmd`, `${X:-$(f)}`, `export -f`, a variable named like a function), zsh (common syntax, parameter flags, `${0:A:h}`), name traps (dynamic command words, strings and comments, one name in unrelated scripts) |
 | Rust | 58 | 190 | 133 | functions (nested `fn`, items local to a function, turbofish, recursion), modules (inline `mod`, `mod` file and `mod.rs`, same-name functions in two modules, `use` / glob / alias imports, `super::` / `crate::`, `pub use` re-export chains, library + binary crate), methods (`self`, `Self::` / `Type::new()`, builder chains, field receivers, `&T` / `Box<T>` / `Option<T>` / slice receivers, two impl blocks in two files, returned receivers), traits (default methods, `impl Tr for T` on a concrete receiver, `T: Tr` bounds and `where`, `dyn Tr`, `impl Tr` parameters and returns, supertraits, `T::create()` / `<T as Tr>::f()`, blanket impls, operator traits, `Default`, `From` / `Into`), closures and iterator adapters, `macro_rules!` (invoked, in another module with `#[macro_use]`, `crate::m!`, inside `println!`), calls in `println!` / `format!` / `vec!` / `assert_eq!` arguments, derives, struct / tuple-struct / enum-variant literals, generics, traps (strings and comments, a closure shadowing a function, a method and a function of one name, `?`, test functions) |
 | C++ | 46 | 148 | 82 | namespaces (nested, `using`, aliases, anonymous), classes (inline and out-of-line methods across `.h` / `.cpp`, implicit `this`, static methods, nested classes), overloads, constructors, inheritance and virtuals, templates, operators, lambdas, name traps |
 
@@ -1033,7 +1079,15 @@ one gives no edge; a function named as a value (`map(double)`, `let g =
 double; g(1)`) gives none; operators, `?`, `.into()` (the standard blanket
 impl), derived impls and struct / tuple-struct / enum-variant
 constructions give none; test code (`#[test]`, `#[cfg(test)] mod tests`)
-has no callables.
+has no callables. **Shell**: callables are `function_definition`s named by
+their name; an edge exists for every command word that bash would look up
+as a function defined in the snippet when the script runs as written (the
+caller's file, what it sources in the order written — the last of two
+sourced definitions wins —, what its entry script sources); `command f`,
+`exec f`, `xargs f`, `sudo f`, `env f`, `nohup f`, `sh -c 'f'` and a
+`trap` handler give none (a handler is a callback); `eval 'f'` and `time
+f` do; running a script by path gives no edge to its functions;
+file-level code has no edge.
 
 Setup cross-checks every answer key against a SCIP indexer, deriving edges
 exactly like the repository gold (`crosscheck` in the manifest; scratch
@@ -1058,7 +1112,10 @@ call of `macros/macro_body_calls` follows scip-clang's convention), C++ 79 / 82 
 rust-analyzer 133 / 133 (58 snippets identical; one key was aligned with
 rust-analyzer after the check: `make().render()` on an opaque `impl Render`
 return points to `Page.render`, the impl `make` returns, not to the trait
-method).
+method), shell vs the shell labeler 51 / 54 with no extra edge (40 of 43
+snippets identical: the labeler, like the S3 gold, follows neither `time
+f` nor `eval 'f'`, and gives no edge for a name two sourced files define,
+where the key follows the order the script sources them).
 
 **Gold from PyCG** (Apache-2.0, **diagnostic**): the hand-written
 `callgraph.json` of every snippet of the PyCG micro-benchmark, restricted to
@@ -1777,11 +1834,11 @@ and the summary printed at the end.
 | Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`), four C++, three Rust, two C, two Go, two Java and one JS JSONL file | HF revision + per-file sha256 | CC0 (dataset README; upstream repository licences apply) | S1 C++ issues, patches (fmt, nlohmann/json, Catch2, simdjson); calibration repositories: Rust (bytes, tracing, fd), C (zstd, ponyc), Go (grpc-go, go-zero), Java (jackson-core, mockito), JS (dayjs) |
 | PyCG micro-benchmark (`vitsalis/PyCG`) | commit | Apache-2.0 | S3 Python call-graph gold (diagnostic) |
 | PHP micro-benchmark (`bench/micro/php`) | in repository | Apache-2.0 (Rueca's own labels) | S3 PHP call-graph gold |
-| Python / TS/JS / Go / Java / C / C++ / Rust micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
+| Python / TS/JS / Go / Java / C / C++ / Rust / shell micro-benchmarks (`bench/micro/{python,ecma,go,java,c,cpp,rust,shell}`) | in repository | Apache-2.0 (Rueca's own labels) | S3 call-graph gold |
 | Env bridge labels (`bench/labels/bridge`) | in repository | Apache-2.0 (Rueca's own labels) | data-format suite gold |
 | PHPStan (`phpstan/phpstan`) release PHAR | version + sha256 | MIT | S3 PHP gold (run in Docker, never vendored) |
 | `php:8.3-cli` Docker official image | digest | PHP-3.01 (separate process) | runtime for PHPStan |
-| tree-sitter-php, -go, -java, -c, -cpp, -rust (PyPI) | `uv.lock` | MIT | bench labeler for PHP, Go, Java, C, C++, Rust |
+| tree-sitter-php, -go, -java, -c, -cpp, -rust, -bash (PyPI) | `uv.lock` | MIT | bench labeler for PHP, Go, Java, C, C++, Rust, shell (and the shell S3 gold) |
 | PyYAML, python-hcl2 (+ lark, regex) (PyPI) | `uv.lock` | MIT / MIT (+ MIT, Apache-2.0) | data-format reference parsers |
 | numpy (PyPI) | `uv.lock` | BSD-3-Clause | bootstrap intervals |
 | tiktoken (PyPI) + the `cl100k_base` encoding file | `uv.lock`; the encoding by tiktoken's own sha256 | MIT | efficiency (tokens per correct answer) |
@@ -1793,7 +1850,7 @@ and the summary printed at the end.
 | `eclipse-temurin:21-jdk` Docker official image | digest | GPL-2.0 with Classpath Exception (separate process) | runtime for javac + scip-java |
 | `error_prone_annotations` 2.50.0 (Maven Central) | sha256 | Apache-2.0 | compile-only classpath for the gson gold |
 | codebase-memory-mcp v0.12.0 | release URL + archive and binary sha256 (darwin-arm64, linux-amd64) | MIT | `cbm` arm |
-| Corpus repositories | commit SHAs | their own (requests Apache-2.0, flask BSD-3, jinja BSD-3, click BSD-3, pytest MIT, pylint GPL-2.0, sphinx BSD-2, tailwindcss MIT, code-server MIT, vue MIT, preact MIT, axios MIT, hono MIT, zod MIT, express MIT, yargs MIT, carbon MIT, php-cs-fixer MIT, laravel/framework MIT, phpspreadsheet MIT, Twig BSD-3, monolog MIT, commonmark BSD-3, JsonMapper MIT; caddy Apache-2.0, gin MIT, prometheus Apache-2.0, hugo Apache-2.0, terraform BUSL-1.1 (source-available), urfave/cli MIT, goawk MIT; gson Apache-2.0, javapoet Apache-2.0, eo-yaml BSD-3, lombok MIT, dubbo Apache-2.0, rocketmq Apache-2.0, apollo Apache-2.0; redis BSD-3 before 7.4, RSALv2 / SSPLv1 (and AGPLv3 from 8.0) after (source-available at most pinned commits), jq MIT, micropython MIT, valkey BSD-3, cJSON MIT, Lua MIT (text in `lua.h`), nng MIT; fmt MIT, yaml-cpp MIT, Botan BSD-2, nlohmann/json MIT, Catch2 BSL-1.0, simdjson Apache-2.0; tokio MIT, bat MIT OR Apache-2.0, axum MIT, ruff MIT, coreutils MIT, nushell MIT, ripgrep Unlicense OR MIT, bytes MIT, serde_json MIT OR Apache-2.0; microservices-demo Apache-2.0, awesome-compose CC0-1.0, terraform-aws-vpc Apache-2.0) | cloned at runtime as benchmark input only; nothing vendored or copied (RFC 0002 §2 governs what enters the repository) |
+| Corpus repositories | commit SHAs | their own (requests Apache-2.0, flask BSD-3, jinja BSD-3, click BSD-3, pytest MIT, pylint GPL-2.0, sphinx BSD-2, tailwindcss MIT, code-server MIT, vue MIT, preact MIT, axios MIT, hono MIT, zod MIT, express MIT, yargs MIT, carbon MIT, php-cs-fixer MIT, laravel/framework MIT, phpspreadsheet MIT, Twig BSD-3, monolog MIT, commonmark BSD-3, JsonMapper MIT; caddy Apache-2.0, gin MIT, prometheus Apache-2.0, hugo Apache-2.0, terraform BUSL-1.1 (source-available), urfave/cli MIT, goawk MIT; gson Apache-2.0, javapoet Apache-2.0, eo-yaml BSD-3, lombok MIT, dubbo Apache-2.0, rocketmq Apache-2.0, apollo Apache-2.0; redis BSD-3 before 7.4, RSALv2 / SSPLv1 (and AGPLv3 from 8.0) after (source-available at most pinned commits), jq MIT, micropython MIT, valkey BSD-3, cJSON MIT, Lua MIT (text in `lua.h`), nng MIT; fmt MIT, yaml-cpp MIT, Botan BSD-2, nlohmann/json MIT, Catch2 BSL-1.0, simdjson Apache-2.0; tokio MIT, bat MIT OR Apache-2.0, axum MIT, ruff MIT, coreutils MIT, nushell MIT, ripgrep Unlicense OR MIT, bytes MIT, serde_json MIT OR Apache-2.0; nvm MIT, acme.sh GPL-3.0, bash-it MIT, bats-core MIT; microservices-demo Apache-2.0, awesome-compose CC0-1.0, terraform-aws-vpc Apache-2.0) | cloned at runtime as benchmark input only; nothing vendored or copied (RFC 0002 §2 governs what enters the repository) |
 
 Citations: Jimenez et al., *SWE-bench* (ICLR 2024); OpenAI, *SWE-bench
 Verified* (2024); Rashid et al., *SWE-PolyBench* (2025); Chen et al.,
@@ -1964,6 +2021,24 @@ file paths and function names of the public corpus repositories.
     types of dependencies can change with that, never the in-scope edges'
     endpoints, so the gold is stable up to the inference of method
     receivers whose type comes from a dependency.
+- **Shell structural gold is code-backed.** No compiler-grade oracle
+  exists for shell; the gold (`shellgold.py`) encodes bash's run-time
+  name lookup, which the pack implements too, so high agreement shows the
+  pack follows those rules on real code, not that an independent tool
+  confirms the edges. The two differ where they read the code differently
+  (`source` paths by tail vs by evaluation, `time f` and `eval 'f'`,
+  builtin-named functions outside the file). Dynamic behaviour neither
+  sees: functions defined by `eval` or `autoload`, aliases, variable
+  command words, sourcing loops (`for f in lib/*.sh; do . "$f"; done`:
+  both fall back to a unique name), and calls a library makes to
+  functions its caller defines when the name is not unique. nvm's library
+  is one file and acme.sh computes its hook paths at run time, so their
+  gold edges come from the file itself (nvm; acme.sh 4,857 call sites) and
+  from unique names (acme.sh's hooks calling its helpers: 13,242 call
+  sites); sourced paths are exercised by bash-it (33 of 57 `source` paths
+  resolve, 24 call sites through them), the calibration set and the
+  micro-benchmark. No localization dataset has shell instances, so shell
+  has no S1 row and cannot be `stable`.
 - **Micro-benchmarks** are written by the bench authors; their conventions
   are choices (above). The SCIP cross-checks guard against labelling
   mistakes, not against convention bias.

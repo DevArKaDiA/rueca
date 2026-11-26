@@ -158,7 +158,8 @@ impl View {
             | LanguageFamily::C
             | LanguageFamily::Java
             | LanguageFamily::Rust
-            | LanguageFamily::Proto),
+            | LanguageFamily::Proto
+            | LanguageFamily::Shell),
         ) = family
             && let Some(local) = self.module_local_name(node, family)
         {
@@ -200,7 +201,7 @@ impl View {
         let module = match self.seg.module_of(file) {
             Some(m) => m.to_string(),
             None => match family {
-                LanguageFamily::Data => self.seg.file(file).path.clone(),
+                LanguageFamily::Data | LanguageFamily::Shell => self.seg.file(file).path.clone(),
                 LanguageFamily::C | LanguageFamily::Proto => String::new(),
                 _ => return None,
             },

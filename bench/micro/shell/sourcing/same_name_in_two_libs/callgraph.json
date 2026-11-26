@@ -1,0 +1,7 @@
+{
+  "lib/a.sh:pick": [],
+  "lib/b.sh:pick": [],
+  "main.sh:run": [
+    "lib/b.sh:pick"
+  ]
+}

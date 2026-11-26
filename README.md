@@ -22,8 +22,8 @@ agent can follow.
 
 > **Status: alpha (`0.1.0-alpha.2`).** Local mode (one repository, or an
 > organization of local repositories with `--org`); Python,
-> TypeScript/JavaScript, PHP, Go, Java, C, C++ and Rust, plus Markdown and
-> structured configuration. Formats and tool shapes may change before 1.0. See
+> TypeScript/JavaScript, PHP, Go, Java, C, C++ and Rust, shell scripts
+> (`preview`), plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
 > [Benchmark](#benchmark) for where it stands today — including where it loses.
 
 ## Features
@@ -69,7 +69,13 @@ trait items named `Type.method` / `Trait.method`, receivers from `self` /
 `dyn Trait` / `impl Trait` / generic bounds bound to the trait item,
 `macro_rules!` as callables and calls recovered inside macro arguments,
 `#[test]` / `#[cfg(test)]` / `tests/` tests, `env!` / `option_env!` /
-`env::var` reads, Cargo dependencies for cross-repository package edges).
+`env::var` reads, Cargo dependencies for cross-repository package edges),
+shell — `preview` (sh and bash, zsh and ksh best effort; extension-less
+scripts by their `#!` line; functions in both forms, `source` / `.` paths
+through `$(dirname "$0")` / `${BASH_SOURCE%/*}` / directory variables,
+sourced functions resolved transitively, scripts run by path as calls of
+the script's file, `trap` handlers, bats and shunit2 tests, `$VAR` reads
+and `export` providers in the env bridge).
 Documents: Markdown headings become `Section` symbols and file links become
 `IMPORTS` edges, in the same graph as the code.
 Configuration: JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
@@ -368,7 +374,7 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    `namespace` / `use` and Composer autoload; Go import paths through
    `go.mod`; Java packages and imports through Maven / Gradle source roots; C/C++
    `#include` through `compile_commands.json` include directories; Rust
-   `mod` / `use` through the Cargo workspace model),
+   `mod` / `use` through the Cargo workspace model; shell `source` paths),
    re-export chains, `self`/`this` with base classes and traits,
    receiver types the file declares or constructs (every code language:
    `c: Context`, `const app = new Hono()`, `x = Session()`), declarations to
@@ -419,6 +425,7 @@ scorecard (`stable` = every floor met; full tables in
 - **C** `stable` (1.1% of files with parse errors, vendored code excluded)
 - **C++** `stable` (callees precision 92.5 with SCIP-ambiguous definitions scored as one class; 0.5% of files with parse errors, vendored code excluded)
 - **Rust** `stable` (localization meets the floor but trails BM25 on the point estimate: File Acc@5 62.8 vs 67.4, Function Acc@10 39.0 vs 46.3 over 43 issues, paired intervals cross zero; callers / callees precision 98.5 / 98.0, recall 86.8 / 87.1 against rust-analyzer on serde_json and ripgrep; 0.1% of files with parse errors)
+- **Shell** `preview` (no localization dataset has shell instances, so the localization floors are pending; structure measured against the bench's code-backed labeler, not a compiler-grade oracle: callers / callees precision 100.0 / 100.0, recall 99.9 / 99.9 on nvm, acme.sh and bash-it, micro callee F1 99.1; 1.9% of files with parse errors, interval crossing the 2% floor; zsh best effort)
 - **Configuration** (JSON, YAML, HCL keys; env-var bridge) `stable`
 
 **Tokens per correct answer** ([RFC 0005 §8](docs/rfcs/0005-agent-responses.md),
@@ -452,7 +459,7 @@ absolute floors and aspirational targets).
 | Stage | What it delivers | Status |
 |---|---|---|
 | **Local mode** | One binary, MCP over stdio, the tools; segments, content packs, facts cache ([RFC 0001](docs/rfcs/0001-architecture.md)) | ✅ done |
-| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)) | ✅ done, every language `stable` |
+| **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c) | ✅ done, every language `stable`; shell `preview` (no localization dataset, code-backed structural gold) |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
 | **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
@@ -482,6 +489,7 @@ More languages (Kotlin, Swift, Ruby, C#, …) follow the same gate.
 | [`rueca-lang-cpp`](crates/rueca-lang-cpp) | C and C++ extraction, macro masking and include resolution |
 | [`rueca-lang-rust`](crates/rueca-lang-rust) | Rust extraction, receivers, macro arguments and the Cargo module model |
 | [`rueca-lang-proto`](crates/rueca-lang-proto) | Protocol Buffers services, RPC methods, messages and enums; RPC contracts |
+| [`rueca-lang-shell`](crates/rueca-lang-shell) | Shell scripts (sh, bash; zsh / ksh best effort): functions, `source` paths, script runs, bats / shunit2 tests, env reads and providers |
 | [`rueca-resolve`](crates/rueca-resolve) | cross-file resolution with confidence |
 | [`rueca-segment`](crates/rueca-segment) | segment format, search, content packs, catalog |
 | [`rueca-index`](crates/rueca-index) | indexing pipeline |

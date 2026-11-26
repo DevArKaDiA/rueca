@@ -1,0 +1,8 @@
+{
+  "main.sh:default_port": [],
+  "main.sh:load_config": [],
+  "main.sh:serve": [
+    "main.sh:default_port",
+    "main.sh:load_config"
+  ]
+}

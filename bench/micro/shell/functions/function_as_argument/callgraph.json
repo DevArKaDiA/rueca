@@ -1,0 +1,7 @@
+{
+  "main.sh:fetch_page": [],
+  "main.sh:main": [
+    "main.sh:retry"
+  ],
+  "main.sh:retry": []
+}

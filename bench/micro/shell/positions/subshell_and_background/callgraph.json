@@ -1,0 +1,8 @@
+{
+  "main.sh:main": [
+    "main.sh:setup",
+    "main.sh:worker"
+  ],
+  "main.sh:setup": [],
+  "main.sh:worker": []
+}

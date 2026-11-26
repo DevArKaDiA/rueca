@@ -1,0 +1,6 @@
+{
+  "main.sh:run": [
+    "plugins/hello.sh:plugin_hello"
+  ],
+  "plugins/hello.sh:plugin_hello": []
+}

@@ -1,0 +1,14 @@
+{
+  "main.sh:act": [],
+  "main.sh:check": [],
+  "main.sh:main": [
+    "main.sh:act",
+    "main.sh:check",
+    "main.sh:on_start",
+    "main.sh:poll",
+    "main.sh:step"
+  ],
+  "main.sh:on_start": [],
+  "main.sh:poll": [],
+  "main.sh:step": []
+}

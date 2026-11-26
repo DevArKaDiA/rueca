@@ -341,6 +341,68 @@
    "carried": true
   },
   {
+   "name": "s3-nvm",
+   "repo": "nvm-sh/nvm",
+   "commit": "4e8758a801eea9479b32a904f31093e410ddaba4",
+   "language": "shell",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 8,
+   "files_partial": 1,
+   "duration_ms": 256,
+   "raw_files_extracted": 8,
+   "raw_files_partial": 1,
+   "excluded": {}
+  },
+  {
+   "name": "s3-acme.sh",
+   "repo": "acmesh-official/acme.sh",
+   "commit": "5567d7fe7298fd37aca53194885ba444c6678669",
+   "language": "shell",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 304,
+   "files_partial": 8,
+   "duration_ms": 649,
+   "raw_files_extracted": 304,
+   "raw_files_partial": 8,
+   "excluded": {}
+  },
+  {
+   "name": "s3-bash-it",
+   "repo": "Bash-it/bash-it",
+   "commit": "0f04edce0ca93fbe66f1fe23c8d9b7a01e53f94c",
+   "language": "shell",
+   "source": "s3",
+   "split": "gated",
+   "ok": true,
+   "files_extracted": 355,
+   "files_partial": 4,
+   "duration_ms": 348,
+   "raw_files_extracted": 355,
+   "raw_files_partial": 4,
+   "excluded": {
+    "vendored": 10
+   }
+  },
+  {
+   "name": "s3-bats-core",
+   "repo": "bats-core/bats-core",
+   "commit": "3bca150ec86275d6d9d5a4fd7d48ab8b6c6f3d87",
+   "language": "shell",
+   "source": "s3",
+   "split": "calibration",
+   "ok": true,
+   "files_extracted": 268,
+   "files_partial": 2,
+   "duration_ms": 252,
+   "raw_files_extracted": 268,
+   "raw_files_partial": 2,
+   "excluded": {}
+  },
+  {
    "name": "s1-psf__requests",
    "repo": "psf/requests",
    "commit": "091991be0da19de9108dbe5e3752917fea3d7fdc",

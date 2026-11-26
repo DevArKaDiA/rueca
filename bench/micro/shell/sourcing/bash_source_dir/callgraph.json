@@ -1,0 +1,6 @@
+{
+  "bin/helpers.sh:helper_one": [],
+  "bin/run.sh:run": [
+    "bin/helpers.sh:helper_one"
+  ]
+}

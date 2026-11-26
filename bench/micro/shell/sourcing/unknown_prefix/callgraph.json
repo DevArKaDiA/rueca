@@ -1,0 +1,6 @@
+{
+  "bin/app.sh:start": [
+    "lib/core.sh:core_init"
+  ],
+  "lib/core.sh:core_init": []
+}

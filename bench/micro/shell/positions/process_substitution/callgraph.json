@@ -1,0 +1,8 @@
+{
+  "main.sh:compare": [
+    "main.sh:left",
+    "main.sh:right"
+  ],
+  "main.sh:left": [],
+  "main.sh:right": []
+}

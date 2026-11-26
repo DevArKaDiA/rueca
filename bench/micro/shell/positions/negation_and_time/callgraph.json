@@ -1,0 +1,8 @@
+{
+  "main.sh:failing": [],
+  "main.sh:main": [
+    "main.sh:failing",
+    "main.sh:slow"
+  ],
+  "main.sh:slow": []
+}

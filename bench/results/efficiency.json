@@ -831,6 +831,64 @@
      "agent_cbm_median": 165.5
     }
    }
+  },
+  "shell": {
+   "trace": {
+    "rueca": {
+     "n": 2341,
+     "true_edges": 18723,
+     "per_true_edge": 39.974416493083375,
+     "tokens_median": 212.0,
+     "ci": [
+      39.14151505276363,
+      40.98702668628621
+     ]
+    },
+    "cbm": {
+     "n": 2341,
+     "true_edges": 17866,
+     "per_true_edge": 26.097895443859844,
+     "tokens_median": 164.0,
+     "ci": [
+      23.92933945530923,
+      28.505059939210255
+     ]
+    }
+   },
+   "lookup": {
+    "rueca": {
+     "n": 150,
+     "found": 146,
+     "per_found": 248.6164383561644
+    },
+    "cbm": {
+     "n": 150,
+     "found": 138,
+     "per_found": 233.2246376811594
+    }
+   },
+   "raw": {
+    "trace": {
+     "n": 2341,
+     "rueca_median": 798,
+     "cbm_median": 200,
+     "rueca_mean": 1148.91243058522,
+     "cbm_mean": 243.05211448099104,
+     "agent_n": 2341,
+     "agent_rueca_median": 212,
+     "agent_cbm_median": 164
+    },
+    "search": {
+     "n": 150,
+     "rueca_median": 1170.0,
+     "cbm_median": 166.0,
+     "rueca_mean": 1157.7933333333333,
+     "cbm_mean": 238.34666666666666,
+     "agent_n": 150,
+     "agent_rueca_median": 244.0,
+     "agent_cbm_median": 149.5
+    }
+   }
   }
  }
 }

@@ -75,7 +75,28 @@ pub enum Language {
     Rust,
     /// Protocol Buffers (`.proto`): services, RPC methods, messages, enums.
     Proto,
+    /// Shell scripts: POSIX sh, bash (`.sh`, `.bash`, `.bats`, shell
+    /// dotfiles, extension-less scripts with a shell `#!` line) and zsh /
+    /// ksh read with the bash grammar (best effort).
+    Shell,
 }
+
+/// Shell start-up files detected by name (no extension of their own).
+const SHELL_DOTFILES: &[&str] = &[
+    ".bashrc",
+    ".bash_profile",
+    ".bash_login",
+    ".bash_logout",
+    ".profile",
+    ".zshrc",
+    ".zshenv",
+    ".zprofile",
+    ".zlogin",
+    ".kshrc",
+];
+
+/// Interpreters of a `#!` line that make a file a shell script.
+const SHELL_INTERPRETERS: &[&str] = &["sh", "bash", "dash", "ash", "ksh", "mksh", "zsh", "bats"];
 
 impl Language {
     /// Every variant, in declaration (on-disk) order.
@@ -101,6 +122,7 @@ impl Language {
         Language::Java,
         Language::Rust,
         Language::Proto,
+        Language::Shell,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -126,6 +148,7 @@ impl Language {
             Language::Java => "java",
             Language::Rust => "rust",
             Language::Proto => "proto",
+            Language::Shell => "shell",
         }
     }
 
@@ -174,6 +197,7 @@ impl Language {
             "java" => Language::Java,
             "rs" => Language::Rust,
             "proto" => Language::Proto,
+            "sh" | "bash" | "zsh" | "ksh" | "bats" | "zsh-theme" => Language::Shell,
             _ => return None,
         })
     }
@@ -189,7 +213,28 @@ impl Language {
         if name == "pom.xml" || name == "AndroidManifest.xml" {
             return Some(Language::Xml);
         }
+        if SHELL_DOTFILES.contains(&name) {
+            return Some(Language::Shell);
+        }
         None
+    }
+
+    /// Language of a file the path does not name, from its first line: a
+    /// `#!` line whose interpreter (or `env`'s program, options skipped) is
+    /// a shell — `sh`, `bash`, `dash`, `ash`, `ksh`, `mksh`, `zsh`, `bats`
+    /// (RFC 0003 §10.4c). The indexer asks only for paths
+    /// [`Language::from_path`] does not recognize.
+    pub fn from_shebang(head: &[u8]) -> Option<Language> {
+        let line = head.split(|b| *b == b'\n').next()?;
+        let rest = line.strip_prefix(b"#!")?;
+        let rest = std::str::from_utf8(rest).ok()?;
+        let mut words = rest.split_ascii_whitespace();
+        let mut prog = words.next()?.rsplit('/').next()?;
+        if prog == "env" {
+            prog = words.find(|w| !w.starts_with('-') && !w.contains('='))?;
+        }
+        let prog = prog.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+        SHELL_INTERPRETERS.contains(&prog).then_some(Language::Shell)
     }
 
     /// Language of a C/C++ header (`.h`) in a snapshot: C++ when the snapshot
@@ -223,6 +268,7 @@ impl Language {
             Language::Java => LanguageFamily::Java,
             Language::Rust => LanguageFamily::Rust,
             Language::Proto => LanguageFamily::Proto,
+            Language::Shell => LanguageFamily::Shell,
         }
     }
 }
@@ -259,6 +305,9 @@ pub enum LanguageFamily {
     /// Protocol Buffers: no module names; local names carry the package
     /// (`helloworld.Greeter.SayHello`).
     Proto,
+    /// Shell: module name = path with extension (`scripts/deploy.sh`);
+    /// functions are global once their file is sourced.
+    Shell,
 }
 
 impl LanguageFamily {
@@ -268,14 +317,15 @@ impl LanguageFamily {
     /// (module = namespace), Markdown `docs/guide.md:Install > Linux`, data
     /// `config/app.yaml:database.host`, Go
     /// `github.com/gin-gonic/gin.Engine.ServeHTTP`, Java
-    /// `com.example.Owner.getPets`, Rust `rueca_index::link::Linker.new`.
+    /// `com.example.Owner.getPets`, Rust `rueca_index::link::Linker.new`,
+    /// shell `scripts/deploy.sh:deploy`.
     /// Protocol Buffers have no module names (the local name
     /// `helloworld.Greeter.SayHello` carries the package). C and C++ have no module names (the local name `fmt::v11::format_to`
     /// is global); `::` is the separator their local names use.
     pub fn module_separator(self) -> &'static str {
         match self {
             LanguageFamily::Python | LanguageFamily::Go | LanguageFamily::Java | LanguageFamily::Proto => ".",
-            LanguageFamily::EcmaScript | LanguageFamily::Markdown | LanguageFamily::Data => ":",
+            LanguageFamily::EcmaScript | LanguageFamily::Markdown | LanguageFamily::Data | LanguageFamily::Shell => ":",
             LanguageFamily::Php => "\\",
             LanguageFamily::C | LanguageFamily::Rust => "::",
         }
@@ -1052,6 +1102,14 @@ mod tests {
             ("src/main/java/com/x/Owner.java", Some(Java)),
             ("crates/x/src/lib.rs", Some(Rust)),
             ("proto/helloworld.proto", Some(Proto)),
+            ("scripts/deploy.sh", Some(Shell)),
+            ("lib/util.bash", Some(Shell)),
+            ("plugins/git/git.plugin.zsh", Some(Shell)),
+            ("themes/robbyrussell.zsh-theme", Some(Shell)),
+            ("test/install.bats", Some(Shell)),
+            ("home/.bashrc", Some(Shell)),
+            (".zshrc", Some(Shell)),
+            ("bin/nvm-exec", None),
         ];
         for (path, want) in cases {
             assert_eq!(Language::from_path(path), *want, "{path}");
@@ -1069,6 +1127,36 @@ mod tests {
         assert_eq!(Cpp.family(), C.family());
         assert_eq!(Java.family().module_separator(), ".");
         assert_eq!(Rust.family().module_separator(), "::");
+        assert_eq!(Shell.family().module_separator(), ":");
+    }
+
+    #[test]
+    fn shebang_detection() {
+        let sh = Some(Language::Shell);
+        for head in [
+            &b"#!/bin/sh\necho"[..],
+            b"#!/bin/bash -e",
+            b"#! /usr/bin/env bash",
+            b"#!/usr/bin/env -S bash -eu",
+            b"#!/usr/bin/env -S LC_ALL=C bash",
+            b"#!/usr/local/bin/zsh",
+            b"#!/usr/bin/env bats",
+            b"#!/bin/ksh93",
+            b"#!/usr/bin/dash",
+        ] {
+            assert_eq!(Language::from_shebang(head), sh, "{}", String::from_utf8_lossy(head));
+        }
+        for head in [
+            &b"#!/usr/bin/env python3"[..],
+            b"#!/usr/bin/perl",
+            b"echo hi",
+            b"",
+            b"#!",
+            b"# !/bin/sh",
+            b"#!/usr/bin/env",
+        ] {
+            assert_eq!(Language::from_shebang(head), None, "{}", String::from_utf8_lossy(head));
+        }
     }
 
     /// Segments and facts store enum variants by index (postcard). These
@@ -1082,8 +1170,9 @@ mod tests {
             b[0]
         }
         let langs: Vec<u8> = Language::ALL.iter().map(idx).collect();
-        assert_eq!(langs, (0..21).collect::<Vec<u8>>());
+        assert_eq!(langs, (0..22).collect::<Vec<u8>>());
         assert_eq!(idx(&Language::Proto), 20);
+        assert_eq!(idx(&Language::Shell), 21);
         assert_eq!(idx(&ContractSide::Provides), 0);
         assert_eq!(idx(&ContractSide::Consumes), 1);
         assert_eq!(idx(&ContractKind::Http), 0);
