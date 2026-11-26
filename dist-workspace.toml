@@ -21,3 +21,9 @@ install-updater = false
 allow-dirty = ["ci"]
 # Releases are dispatched by release-plz after it tags (see release-plz.yml).
 dispatch-releases = true
+
+# GitHub no longer runs macos-14 (cargo-dist 0.33's default for Apple Silicon):
+# the v0.2.0-alpha.1 build was cancelled with "The configuration
+# 'macos-14-arm64-us-default' is not supported".
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
