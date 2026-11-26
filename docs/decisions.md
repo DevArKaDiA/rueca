@@ -1,5 +1,96 @@
 # Decisions log
 
+## 2026-11-25 — SQL: a held-out health corpus, chosen before measuring
+
+The 0.76% of files with a strict parse error behind SQL's `stable` (next
+entry) was measured on the corpus the parser was repaired against: the
+last pass went from 71 to 26 failing files guided by the list of failing
+files. That number is contaminated as an estimate of the rate on SQL the
+pack has not seen. This entry fixes a second corpus **before any Rueca
+binary or the `dialects` example has read a file of it**; it is committed
+alone, and the measurement follows in a later commit.
+
+- **Rules of the measurement.** Binary: `fix/sql-stable@05ff770`, the
+  source of the published scorecard (the two later commits change two
+  loops for clippy; the build is from a `git archive` of `05ff770`). No
+  change to `rueca-lang-sql` during or after it. Strict count. Every file
+  with an SQL extension of the manifest at the pinned commit, tests and
+  fixtures included; the only files left out of the gated rate are those
+  the health rules already leave out (vendored directories, RFC 0004 §5
+  and `bench/README.md` *Health*), and the raw rate is reported next to
+  it. No file, directory or repository is dropped after seeing a result,
+  and none is added. The repositories then enter `bench/manifest.toml` as
+  gated health targets for SQL, and the scorecard computes the status from
+  the pooled number: above 2% SQL is `preview`.
+- **How the repositories were chosen**: from metadata only (GitHub
+  licence, stars, release tags and the file list of the pinned tree,
+  through the API; nothing was cloned). Public; permissive licence read
+  from the repository; SQL written for a product or by a vendor for its
+  users, not parser fixtures; at least 50 SQL files at the pin; not in
+  `bench/manifest.toml`, not in the mining lists
+  (`bench/datasets/mined/repos_sql.txt`, `repos_sql_extra.txt`, the mining
+  output), not among the repositories named in the two entries below, and
+  no copy of one of them in its tree (checked by file name). Pin: the
+  latest release, or the default branch's head on 2026-11-25 where there
+  is no release or the latest one is an asset holder older than the tree
+  (sql-server-samples, sf-samples, dbt-adapters, whose `v1.10.4` predates
+  the monorepo). Dialect mix after what developers use (PostgreSQL and
+  MySQL first, then SQLite and SQL Server, Oracle, then the warehouses and
+  dbt), with the engines the first corpus lacks (MySQL, SQLite, Oracle)
+  given real populations.
+
+  | Repository | Pin | Licence | Dialect (a priori) | SQL files | What it is |
+  |---|---|---|---|---|---|
+  | supabase/postgres | `v17.12.0.005-cli` = `968515a` | PostgreSQL | PostgreSQL | 264 | migrations, extension tests |
+  | matrix-org/synapse | `v1.98.0` = `15733b0` (last Apache-2.0 release) | Apache-2.0 | PostgreSQL (deltas also run on SQLite) | 305 | schema deltas of a server |
+  | supabase/auth | `v2.199.0` = `0725a1d` | MIT | PostgreSQL | 79 | migrations |
+  | pgvector/pgvector | `v0.8.7` = `f37c13f` | PostgreSQL | PostgreSQL | 56 | extension scripts and regress tests |
+  | apache/age | `PG18/v1.8.0-rc0` = `e43dc1a` | Apache-2.0 | PostgreSQL | 69 | extension scripts and regress tests |
+  | apache/cloudstack | `4.23.0.0` = `463f8d0` | Apache-2.0 | MySQL / MariaDB | 225 | schema upgrades, views |
+  | vitessio/vitess | `v24.0.5` = `9b28c87` | Apache-2.0 | MySQL / MariaDB | 274 | schemas and queries of tests and examples |
+  | github/gh-ost | `v1.1.11` = `2ed192c` | MIT | MySQL / MariaDB | 104 | test schemas |
+  | apache/dolphinscheduler | `3.4.3` = `a190201` | Apache-2.0 | MySQL / MariaDB, PostgreSQL, H2 by path | 74 | schema and upgrades per engine |
+  | temporalio/temporal | `v1.32.2` = `6d08582` | MIT | MySQL, PostgreSQL, SQLite by path | 111 | versioned schema per engine |
+  | diesel-rs/diesel | `v2.4.0` = `48acdc8` | Apache-2.0 (dual MIT) | PostgreSQL, MySQL, SQLite by path | 465 | migrations of tests and examples |
+  | authelia/authelia | `v4.39.28` = `8da42b2` | Apache-2.0 | MySQL, PostgreSQL, SQLite by path | 174 | migrations per engine |
+  | camunda/camunda-bpm-platform | `7.24.0` = `2d8b7ed` | Apache-2.0 | DB2, H2, MariaDB, MySQL, SQL Server, Oracle, PostgreSQL by path | 546 | create, drop and upgrade scripts per engine |
+  | actualbudget/actual | `v26.11.0` = `1766241` | MIT | SQLite | 59 | migrations |
+  | atuinsh/atuin | `v18.25.1` = `a4c2ee4` | MIT | SQLite; PostgreSQL by path | 78 | migrations |
+  | microsoft/sql-server-samples | `master` @ `26dc125` | MIT (`license.txt`) | T-SQL | 1,102 | sample databases and feature samples |
+  | marcingminski/sqlwatch | `4.11` = `859ae60` | MIT (`LICENSE`) | T-SQL | 338 | a database project: tables, views, procedures |
+  | GoogleCloudPlatform/cortex-data-foundation | `v6.3.4` = `a24ea50` | Apache-2.0 | BigQuery (Jinja-templated) | 595 | reporting views over SAP, Salesforce, marketing data |
+  | blockchain-etl/ethereum-etl-airflow | `v2022.10.19.0-composer1` = `6d458f5` | MIT | BigQuery | 86 | queries of a pipeline |
+  | Velir/dbt-ga4 | `6.3.0` = `4d7582e` | MIT | dbt Jinja (BigQuery) | 72 | dbt package |
+  | Snowflake-Labs/sf-samples | `main` @ `96ef1b2` | Apache-2.0 | Snowflake | 647 | vendor samples |
+  | dbt-labs/dbt-adapters | `main` @ `8327d91` | Apache-2.0 | dbt Jinja (macros of eight adapters) | 409 | adapter macros |
+  | rittmananalytics/ra_data_warehouse | `v1.2.1` = `ecde71f` | Apache-2.0 | dbt Jinja | 225 | dbt project |
+  | oracle-samples/db-sample-schemas | `v23.3` = `e3325a8` | MIT | Oracle | 89 | sample schemas |
+  | pljson/pljson | `v3.7.1` = `2d7cdb9` | MIT (`LICENSE`) | Oracle (PL/SQL) | 70 | PL/SQL library |
+
+  25 repositories, 6,516 files by the tree listings (the bench's own walk
+  may differ by a few: symbolic links, its excludes); the largest is 16.9%
+  of them. A file's a-priori dialect is its repository's, except in the
+  six multi-engine repositories (dolphinscheduler, temporal, diesel,
+  authelia, camunda, atuin), where a path word decides (`mysql`,
+  `mariadb`; `postgres`, `postgresql`, `pg`, `cockroach`; `sqlite`,
+  `sqlite3`; `mssql`, `sqlserver`; `oracle`; `db2`; `h2`) and a file with
+  none is "unlabelled". The per-dialect table uses these labels, not the
+  dialect the pack detects, so a wrong detection is not hidden.
+- **Looked at and left out, with the reason**: sqlfluff (2,809 files that
+  are parser fixtures, not SQL anybody runs), ory/kratos (5,158 migration
+  files, most of the corpus by itself), HTTPArchive/almanac (3,655 BigQuery
+  queries, more than a third), flowable-engine (1,321; the same lineage of
+  scripts as camunda, one of the two is enough), oracle-db-examples
+  (1,513) and tpt-oracle (1,075; either would make Oracle a quarter of the
+  files, and tpt-oracle's licence file is not a standard one),
+  alexandria-plsql-utils (no licence file), MadeiraToolbox and
+  tigertoolbox (T-SQL is already the largest group), mozilla/bigquery-etl
+  (MPL-2.0), datacharmer/test_db (CC BY-SA), mysql-sys (GPL-2.0), and
+  repositories under 50 SQL files (harbor, PostgREST, quartz, sqlean,
+  memos, jaffle-shop, chinook, pg_cron, schemachange). Oracle is therefore
+  a small group (about 240 files with camunda's), and its row will have a
+  wide interval.
+
 ## 2026-11-25 — SQL: mined localization set, three more structural sets, the strict parse-error count; `stable`
 
 SQL was `preview` on four counts: no localization instances, 8.9% of files
