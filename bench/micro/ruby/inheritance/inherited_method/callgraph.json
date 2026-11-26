@@ -1,0 +1,9 @@
+{
+  "main.rb:Animal#sound": [],
+  "main.rb:Animal#speak": [
+    "main.rb:Animal#sound"
+  ],
+  "main.rb:Dog#bark": [
+    "main.rb:Animal#speak"
+  ]
+}

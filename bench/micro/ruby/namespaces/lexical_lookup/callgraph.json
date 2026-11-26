@@ -1,0 +1,7 @@
+{
+  "main.rb:App::Logger.info": [],
+  "main.rb:App::Worker#perform": [
+    "main.rb:App::Logger.info"
+  ],
+  "main.rb:Logger.info": []
+}

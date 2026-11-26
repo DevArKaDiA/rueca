@@ -1,0 +1,7 @@
+{
+  "main.rb:Repo#save": [],
+  "main.rb:Service#handle": [
+    "main.rb:Repo#save"
+  ],
+  "main.rb:Service#initialize": []
+}

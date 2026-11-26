@@ -1,0 +1,6 @@
+{
+  "main.rb:App::Error.wrap": [],
+  "main.rb:App::Runner#go": [
+    "main.rb:App::Error.wrap"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "main.rb:Util#clean": [],
+  "main.rb:Util#slug": [
+    "main.rb:Util#clean"
+  ],
+  "main.rb:run": [
+    "main.rb:Util#slug"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "main.rb:Token#initialize": [],
+  "main.rb:Token.parse": [
+    "main.rb:Token#initialize"
+  ]
+}

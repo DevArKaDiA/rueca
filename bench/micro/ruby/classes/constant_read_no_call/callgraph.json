@@ -1,0 +1,6 @@
+{
+  "main.rb:Limits.max": [],
+  "main.rb:check": [
+    "main.rb:Limits.max"
+  ]
+}

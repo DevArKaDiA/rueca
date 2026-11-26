@@ -1,0 +1,8 @@
+{
+  "main.rb:Point#sum": [
+    "main.rb:Point#x",
+    "main.rb:Point#y"
+  ],
+  "main.rb:Point#x": [],
+  "main.rb:Point#y": []
+}

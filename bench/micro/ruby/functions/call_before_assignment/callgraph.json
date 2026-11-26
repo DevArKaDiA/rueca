@@ -1,0 +1,6 @@
+{
+  "main.rb:Counter#count": [],
+  "main.rb:Counter#run": [
+    "main.rb:Counter#count"
+  ]
+}

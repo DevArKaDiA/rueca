@@ -1,0 +1,10 @@
+{
+  "main.rb:Batch#double": [],
+  "main.rb:Batch#items": [],
+  "main.rb:Batch#log": [],
+  "main.rb:Batch#run": [
+    "main.rb:Batch#double",
+    "main.rb:Batch#items",
+    "main.rb:Batch#log"
+  ]
+}

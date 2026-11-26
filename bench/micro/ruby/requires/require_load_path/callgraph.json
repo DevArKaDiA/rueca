@@ -1,0 +1,6 @@
+{
+  "lib/tool.rb:Tool.banner": [
+    "lib/tool/version.rb:Tool::Version.string"
+  ],
+  "lib/tool/version.rb:Tool::Version.string": []
+}

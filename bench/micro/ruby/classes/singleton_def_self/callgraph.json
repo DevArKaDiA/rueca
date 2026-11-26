@@ -1,0 +1,9 @@
+{
+  "main.rb:Config.load": [
+    "main.rb:Config.parse"
+  ],
+  "main.rb:Config.parse": [],
+  "main.rb:main": [
+    "main.rb:Config.load"
+  ]
+}

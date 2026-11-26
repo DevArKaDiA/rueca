@@ -21,6 +21,7 @@ import tree_sitter_javascript
 import tree_sitter_kotlin
 import tree_sitter_php
 import tree_sitter_python
+import tree_sitter_ruby
 import tree_sitter_rust
 import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
@@ -41,6 +42,7 @@ _BINDINGS = {
     "tree_sitter_kotlin": tree_sitter_kotlin,
     "tree_sitter_php": tree_sitter_php,
     "tree_sitter_python": tree_sitter_python,
+    "tree_sitter_ruby": tree_sitter_ruby,
     "tree_sitter_rust": tree_sitter_rust,
     "tree_sitter_typescript": tree_sitter_typescript,
 }
@@ -209,6 +211,8 @@ def extract_functions(path: str, source: bytes, language: str | None = None) -> 
         return _csharp_functions(tree.root_node, spec)
     if labeler == "kotlin":
         return _kotlin_functions(tree.root_node)
+    if labeler == "ruby":
+        return _ruby_functions(tree.root_node)
     return _nesting_functions(tree.root_node, spec)
 
 
@@ -832,6 +836,119 @@ def _kotlin_functions(root: Node) -> list[Func]:
     return out
 
 
+def _ruby_const_path(node: Node | None) -> str:
+    """`A`, `A::B`, `::A` as written; "" for anything else."""
+    if node is None:
+        return ""
+    if node.type == "constant":
+        return _text(node)
+    if node.type == "scope_resolution":
+        name = _text(node.child_by_field_name("name"))
+        scope = node.child_by_field_name("scope")
+        if scope is None:
+            return f"::{name}"
+        head = _ruby_const_path(scope)
+        return f"{head}::{name}" if head else ""
+    return ""
+
+
+def _ruby_struct_constant(block: Node) -> str:
+    """The constant a `X = Struct.new(...) do ... end` block defines."""
+    call = block.parent
+    assign = call.parent if call is not None else None
+    if call is None or call.type != "call" or assign is None or assign.type != "assignment":
+        return ""
+    return _ruby_const_path(assign.child_by_field_name("left"))
+
+
+def _ruby_container_path(node: Node) -> str:
+    """The constant path a `class` / `module` body or a `X = Struct.new do`
+    block opens ("" for anything else)."""
+    if node.type in ("class", "module"):
+        return _ruby_const_path(node.child_by_field_name("name"))
+    if node.type in ("do_block", "block"):
+        return _ruby_struct_constant(node)
+    return ""
+
+
+def _ruby_is_self_class(node: Node) -> bool:
+    """`class << self`."""
+    value = node.child_by_field_name("value") if node.type == "singleton_class" else None
+    return value is not None and value.type == "self"
+
+
+def _ruby_scope(node: Node) -> tuple[list[str], bool]:
+    """(namespace path segments outermost first, singleton) of a `def`: the
+    enclosing `class` / `module` bodies (compact `A::B` paths kept, `::A`
+    absolute), `class << self` and `X = Struct.new do` blocks."""
+    parts: list[str] = []
+    singleton = False
+    cur = node.parent
+    while cur is not None:
+        singleton = singleton or _ruby_is_self_class(cur)
+        p = _ruby_container_path(cur)
+        if p:
+            parts.append(p.lstrip(":"))
+        if p.startswith("::"):
+            break
+        cur = cur.parent
+    parts.reverse()
+    return [s for p in parts for s in p.split("::")], singleton
+
+
+def _ruby_def(node: Node) -> Func | None:
+    """One `def` node -> Func (module docs of `_ruby_functions`)."""
+    nn = node.child_by_field_name("name")
+    name = _text(nn)
+    if nn is None or not name:
+        return None
+    parts, singleton = _ruby_scope(node)
+    if node.type == "singleton_method":
+        obj = node.child_by_field_name("object")
+        extra = "" if obj is None or obj.type == "self" else _ruby_const_path(obj)
+        if obj is None or (obj.type != "self" and not extra):
+            return None
+        singleton = True
+        parts = [*parts, *[x for x in extra.lstrip(":").split("::") if x]]
+    ns = "::".join(parts)
+    qual, label = (f"{ns}{'.' if singleton else '#'}{name}", "Method") if ns else (name, "Function")
+    stmt = node.parent.parent if node.parent is not None and node.parent.type == "argument_list" else None
+    return _func(name, qual, label, node, nn, stmt if stmt is not None and stmt.type == "call" else None)
+
+
+def _ruby_functions(root: Node) -> list[Func]:
+    """Ruby (the Ruby pack's qualified names): every `def` is a callable —
+    `A::B#m` for an instance method, `A::B.m` for `def self.m`, a `def`
+    inside `class << self` or `def A.m`, `m` for a top-level `def`.
+    `define_method`, accessors and aliases are not (no `def`)."""
+    out = (_ruby_def(n) for n in _walk(root) if n.type in ("method", "singleton_method"))
+    return [f for f in out if f is not None]
+
+
+# A Ruby reference occurrence on one of these parents is a name, not a call.
+_RUBY_NOT_CALL = {"alias", "undef", "method", "singleton_method", "method_parameters", "block_parameters", "lambda_parameters"}
+
+
+def _ruby_is_call(node: Node) -> bool:
+    """Ruby: an occurrence of a method symbol is a call when it is the
+    `method` of a `call` (`x.m`, `m(a)`, `Foo.new` — scip-ruby puts
+    `initialize` on `new`), a bare identifier (`helper`, also as a receiver:
+    `items.map`; Sorbet gives locals `local` symbols, so a bare name bound to
+    a method is a call), or `super`.
+    Operators (`a + b`), index calls (`a[b]`), symbols (`:m`) and alias
+    names are not."""
+    parent = node.parent
+    if parent is None:
+        return False
+    if node.type == "super":
+        return True
+    if node.type not in ("identifier", "constant"):
+        return False
+    if parent.type == "call" and parent.child_by_field_name("method") == node:
+        return True
+    return node.type == "identifier" and parent.type not in _RUBY_NOT_CALL
+
+
 def innermost(funcs: list[Func], line: int) -> Func | None:
     best: Func | None = None
     for f in funcs:
@@ -951,6 +1068,8 @@ def is_call_site(tree, grammar: str, line0: int, byte_col: int, end_byte_col: in
     if parent is None:
         return False
     spec = _grammars().get(grammar, {})
+    if spec.get("labeler") == "ruby":
+        return _ruby_is_call(node)
     if "calls" in spec:
         return (
             _is_callee(node, spec["calls"], spec.get("members", {}))

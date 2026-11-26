@@ -1,0 +1,7 @@
+{
+  "main.rb:Greeting#greet": [],
+  "main.rb:Person#hello": [
+    "main.rb:Greeting#greet"
+  ],
+  "main.rb:Person#name": []
+}

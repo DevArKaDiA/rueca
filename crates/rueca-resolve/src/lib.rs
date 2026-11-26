@@ -394,6 +394,7 @@ mod csharp;
 mod go;
 mod hooks;
 mod jvm;
+mod ruby;
 mod rust;
 mod shell;
 
@@ -541,6 +542,7 @@ pub fn resolve(
     r.build_envs();
     r.rust_import_edges();
     r.rust_open_types();
+    r.ruby_build();
     r.resolve_bases();
     r.csharp_partial_types();
     r.override_edges();
@@ -742,6 +744,8 @@ struct Resolver<'a> {
     csharp: csharp::CSharpTables,
     /// JVM (Kotlin) tables, built on first use (see the `jvm` module).
     jvm: jvm::JvmTables,
+    /// Ruby tables (see the `ruby` module).
+    ruby: ruby::RubyTables,
 
     /// Key: (module, name, reached through `export *`, namespace).
     lookup_memo: RefCell<HashMap<LookupKey, Option<Target>>>,
@@ -1205,6 +1209,7 @@ impl<'a> Resolver<'a> {
             rust_test_files: HashSet::new(),
             csharp: csharp::CSharpTables::default(),
             jvm: jvm::JvmTables::default(),
+            ruby: ruby::RubyTables::default(),
             lookup_memo: RefCell::new(HashMap::new()),
             module_memo: RefCell::new(HashMap::new()),
             edges: BTreeMap::new(),
@@ -1928,7 +1933,8 @@ impl<'a> Resolver<'a> {
     /// environment.
     fn env_of(&self, fid: FileId) -> Env {
         let mut env = Env::new();
-        if self.is_php(fid) {
+        // PHP names arrive qualified; Ruby `require`s bind no names.
+        if self.is_php(fid) || self.is_ruby(fid) {
             return env;
         }
         if self.is_rust(fid) {
@@ -2288,6 +2294,8 @@ impl<'a> Resolver<'a> {
                 }
                 if self.families[i] == Some(LanguageFamily::Data) {
                     self.data_bases(fid, j as LocalDefId, d);
+                } else if self.families[i] == Some(LanguageFamily::Ruby) {
+                    // Resolved by `ruby_build` (superclasses and mixins).
                 } else {
                     self.code_bases(fid, j as LocalDefId, d);
                 }
@@ -2466,6 +2474,9 @@ impl<'a> Resolver<'a> {
         }
         if self.is_shell(f) {
             return self.resolve_shell(f, item);
+        }
+        if self.is_ruby(f) {
+            return self.resolve_ruby(f, item, scope);
         }
         match item.receiver.map(str::trim) {
             None => self.resolve_bare(f, item, scope),
@@ -2950,6 +2961,8 @@ impl<'a> Resolver<'a> {
             }
             // Rust: `T::new` is an ordinary associated function.
             Some(LanguageFamily::Rust) => None,
+            // Ruby: `Foo.new` runs `initialize` (own or inherited).
+            Some(LanguageFamily::Ruby) => self.ruby_constructor(class),
             _ => self
                 .find_member(class, "__init__", Want::Call)
                 .or_else(|| self.find_member(class, "constructor", Want::Call)),

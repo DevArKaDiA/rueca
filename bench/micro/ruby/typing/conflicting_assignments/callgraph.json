@@ -1,0 +1,8 @@
+{
+  "main.rb:Cat#speak": [],
+  "main.rb:Robot#speak": [],
+  "main.rb:run": [
+    "main.rb:Cat#speak",
+    "main.rb:Robot#speak"
+  ]
+}

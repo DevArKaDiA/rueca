@@ -1,0 +1,8 @@
+{
+  "main.rb:Conn#query": [],
+  "main.rb:Pool#checkout": [],
+  "main.rb:Pool#run": [
+    "main.rb:Conn#query",
+    "main.rb:Pool#checkout"
+  ]
+}

@@ -145,7 +145,8 @@ impl View {
         let family = node.language.map(|l| l.family());
         // PHP names carry their namespace and use `::` for members: the
         // global qualified name is the local one (`App\Models\User::save`).
-        if family == Some(LanguageFamily::Php) {
+        // Ruby names are global constant paths (`Rack::Request#params`).
+        if matches!(family, Some(LanguageFamily::Php | LanguageFamily::Ruby)) {
             return Some(node.qualified_name.clone());
         }
         // RFC 0003 families, Rust and C#: the global name is module +

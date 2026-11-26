@@ -1,0 +1,9 @@
+{
+  "main.rb:Base#initialize": [
+    "main.rb:Base#setup"
+  ],
+  "main.rb:Base#setup": [],
+  "main.rb:make": [
+    "main.rb:Base#initialize"
+  ]
+}

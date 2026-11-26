@@ -1,0 +1,6 @@
+{
+  "main.rb:Handler#call_it": [
+    "main.rb:Handler#transform"
+  ],
+  "main.rb:Handler#transform": []
+}

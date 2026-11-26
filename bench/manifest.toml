@@ -315,8 +315,8 @@ reason = "not the language (Objective-C)"
 # S1 languages whose repositories are not members yet: the organization
 # numbers above were measured without them, so they join (and the pin rule
 # covers them) at the next full run of the organization scenario, which
-# re-measures every arm. C# and Kotlin were added after the last run.
-pending_languages = ["csharp", "kotlin"]
+# re-measures every arm. C#, Kotlin and Ruby were added after the last run.
+pending_languages = ["csharp", "kotlin", "ruby"]
 max_instances_per_repo = 3
 calibration_max_instances_per_repo = 5
 
@@ -913,6 +913,17 @@ s1_sources = "Multi-SWE-bench Kotlin (ktlint, detekt, ORT, TeXiFy-IDEA, Kotlin D
 s3_gold = "scip-java 0.14.2 Kotlin Analysis API indexer via a scip-java.json build in Docker (moshi 2.0.0-alpha.1, clikt 5.2.1; kotlinpoet 2.4.0 = calibration)"
 notes = "Constructors are named like their class (`Foo.Foo`): the primary one (explicit or implicit) on the class name's line, secondary ones on their first line. Property accessors, lambdas and `init` blocks are not callables. scip-java resolves interface calls to the interface method only."
 
+[languages.ruby]
+label = "ruby"
+members = ["ruby"]
+extensions = [".rb", ".rake", ".gemspec", ".ru"]
+# RSpec `*_spec.rb` and Minitest / Test::Unit `*_test.rb` files (and the
+# built-in `spec/` and `test/` directories) are test code.
+test_files = ['.*_spec\.rb$', '.*_test\.rb$']
+s1_sources = "SWE-bench Multilingual (Ruby: rubocop, fluentd, fastlane, jekyll gated; faker, fpm = calibration); function gold from the tree-sitter labeler"
+s3_gold = "scip-ruby 0.5.1 (Sorbet; jekyll v4.4.1 untyped, ruby-lsp v0.26.11 typed with RBS comments; rack v3.2.9 and packwerk v3.3.1 = calibration) and the rueca-bench Ruby micro-benchmark"
+notes = "Ruby methods are named `Const::Path#method` (instance) and `Const::Path.method` (singleton, `class << self`, `module_function`). scip-ruby (Sorbet) resolves constants, `self` calls through the ancestors and mixins, `Foo.new` (to `initialize`) and receivers typed by a local `x = Foo.new`, a `sig` or an RBS comment; a call on a receiver of unknown type (an untyped parameter, the result of a method without a signature) has no gold edge, so a by-name guess there scores as a false positive."
+
 # Tree-sitter grammars of the bench labeler (S1 function gold, grep arm, S3
 # callables). `binding` = Python package (pinned in pyproject.toml) and
 # function returning the language. `labeler = "nesting"` (default) is the
@@ -1066,6 +1077,19 @@ separator = "."
 calls = { call_expression = "@0", constructor_invocation = "@0" }
 members = { navigation_expression = "@-1", navigation_suffix = "@-1", user_type = "@last:type_identifier" }
 
+# Ruby: code-backed labeler for the Ruby pack's qualified names (constant
+# path of the enclosing class / module bodies, `#` instance and `.`
+# singleton methods; treesitter.py: _ruby_functions). A SCIP occurrence of a
+# method is a call when it is the `method` of a `call` node or a bare
+# identifier (Sorbet gives locals `local` symbols), or `super`
+# (treesitter.py: _ruby_is_call).
+[grammars.ruby]
+binding = "tree_sitter_ruby:language"
+package = "tree-sitter-ruby 0.23.1 (MIT)"
+extensions = [".rb", ".rake", ".gemspec", ".ru"]
+labeler = "ruby"
+separator = "::"
+
 # ---------------------------------------------------------------- tools
 
 [tools.cbm]
@@ -1188,6 +1212,28 @@ url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-11-09/r
 archive_sha256 = "8c039b25cb338b3970c731646677a4c9d4e9dd7a92c9ab9ae459c71467fbf4a9"
 binary_sha256 = "dfd442f535bdd94c572637b7a875fd29b6152b4bb412d116cb8df728c33a5067"
 
+# Ruby S3 gold: scip-ruby (Sourcegraph's SCIP indexer built on Sorbet),
+# release binary run over the pinned tree (no `bundle install`, no Ruby on
+# the host: Sorbet parses and type-checks statically, never runs the code).
+# Untyped files are inferred like `# typed: true`: constants, `self` calls,
+# `Foo.new` and locals assigned from it resolve; calls on untyped receivers
+# do not.
+[tools.scip_ruby]
+name = "scip-ruby"
+version = "0.5.1"
+build = "git fe92d977da9cec04c964de881b07001f96162f0c (Sorbet 0.6 e8f0eb82de923877387fa02fd6bbb2aac4801a66)"
+license = "Apache-2.0"
+release = "https://github.com/sourcegraph/scip-ruby/releases/tag/scip-ruby-v0.5.1"
+
+[tools.scip_ruby.binaries.darwin-arm64]
+url = "https://github.com/sourcegraph/scip-ruby/releases/download/scip-ruby-v0.5.1/scip-ruby-arm64-darwin"
+binary_sha256 = "af0c8be10e714b56eb4a9ac64ec0014e7eff15cca86eb77a88eac58be222ddb1"
+
+# Linux (the CI regression check, .github/workflows/bench.yml)
+[tools.scip_ruby.binaries.linux-amd64]
+url = "https://github.com/sourcegraph/scip-ruby/releases/download/scip-ruby-v0.5.1/scip-ruby-x86_64-linux"
+binary_sha256 = "3b0eec58c00d2c742e182fc9070a048d933ff6485098bcc3e3c8b28fbcf32c8e"
+
 # C# S3 gold: scip-dotnet (Roslyn) in its official image, pinned by digest
 # (linux/amd64; .NET SDK 10.0.402 inside). It runs `dotnet restore`
 # (packages from nuget.org into bench/.cache/nuget) over a scratch copy of
@@ -1258,7 +1304,7 @@ contract = "docs/tools.md (RFC 0005; the alpha contract is still understood, arm
 # 1ff5e82. Every other suite (carried): the RFC 0005 contract branch, main
 # 2c5a384 plus the response contract, whose quality metrics are identical
 # to main's binary on the same run (only tokens and latency differ).
-results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4); Kotlin (every suite): feat/lang-kotlin @ 3265ba4 (binary sha256 aeca53b7707c6eb6d37890b90a72cb9dce8caad38741c0e2462f742f371f7624)"
+results = "S3: main @ 1ff5e82 (binary sha256 abb2d6532f0f1b7ac56d5a0483842ac948e863729f16a4165bc8391321f9270f); other suites: feat/rfc0005-contract @ 692adb5 (binary sha256 82f22ebb90ab90f964f270d07b58e7993e60befce612b08330af2e1fd567e886); Rust (every suite): feat/lang-rust @ 69e64c4 (binary sha256 0076db277f21894cb8cc37d8922008c7fbdfe7046b9935fe4e55bf1917125537); shell (every suite): feat/lang-shell @ 1b25092 (binary sha256 c5a6a874ed6bee17588dc7ae5e71935b16e25a7b322da016f0a1670a3ca6b07e); C# (every suite): feat/lang-csharp @ 1532771 (binary sha256 c624a58896e5981e92738e9b6abb91ba808bb4218edde1f612f70aa776b3d5a4); Kotlin (every suite): feat/lang-kotlin @ 3265ba4 (binary sha256 aeca53b7707c6eb6d37890b90a72cb9dce8caad38741c0e2462f742f371f7624); Ruby (every suite): feat/lang-ruby @ 2e353ab (binary sha256 f4228890b7084a9c246a554e7f6b2bef8dd2c7e9b551dc06761bf2a89db149be)"
 
 # ---------------------------------------------------------------- datasets
 # Fetched from Hugging Face at the pinned revision and verified by sha256.
@@ -1877,6 +1923,51 @@ language = "rust"
 quota = 2
 sources = ["swe_bench_multilingual"]
 
+# Ruby: SWE-bench Multilingual is the only dataset with Ruby instances
+# (SWE-rebench V2, Multi-SWE-bench and SWE-PolyBench carry none): every one
+# of its 44 Ruby instances is used, gated on rubocop, fluentd, fastlane and
+# jekyll (40, of which 33 change a function: RFC 0004 §7.2's minimum of 30
+# for Function Acc@10 needs fastlane in the gated split) and calibration on
+# faker and fpm (4), disjoint repositories.
+
+[[s1.repos]]
+repo = "rubocop/rubocop"
+language = "ruby"
+quota = 16
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "fluent/fluentd"
+language = "ruby"
+quota = 12
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "fastlane/fastlane"
+language = "ruby"
+quota = 7
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "jekyll/jekyll"
+language = "ruby"
+quota = 5
+sources = ["swe_bench_multilingual"]
+
+[[s1.repos]]
+repo = "faker-ruby/faker"
+language = "ruby"
+quota = 2
+sources = ["swe_bench_multilingual"]
+split = "calibration"
+
+[[s1.repos]]
+repo = "jordansissel/fpm"
+language = "ruby"
+quota = 2
+sources = ["swe_bench_multilingual"]
+split = "calibration"
+
 [[s1.repos]]
 repo = "tokio-rs/bytes"
 language = "rust"
@@ -2389,6 +2480,54 @@ include = ["clikt/src/commonMain/", "clikt/src/jvmMain/"]
 indexer = "scip_kotlin"
 kotlin = { sources = ["clikt/src/commonMain", "clikt/src/jvmMain"], classpath = ["kotlin_stdlib"] }
 
+# Ruby: scip-ruby gold (Sorbet) over a library without types (jekyll) and a
+# Sorbet-typed one with RBS inline comments (ruby-lsp); rack and packwerk =
+# calibration (disjoint from the gated S1 / S3 repositories). Each run
+# passes the repository's Sorbet options on the command line with
+# `--no-config` (a `sorbet/config` may set a cache directory inside the
+# tree).
+[[s3.repos]]
+repo = "jekyll/jekyll"
+language = "ruby"
+tag = "v4.4.1"
+commit = "1f319fb273b6cdf876bc6edd38d7477935cdda8c"
+license = "MIT"
+include = ["lib/"]
+indexer = "scip_ruby"
+args = ["--index-file", "{out}", "--gem-metadata", "jekyll@4.4.1", "--no-config", "--quiet", "--suppress-non-critical", "--max-threads", "4", "."]
+
+[[s3.repos]]
+repo = "Shopify/ruby-lsp"
+language = "ruby"
+tag = "v0.26.11"
+commit = "6745c162fce98b1738f8f602fbca38806c6863aa"
+license = "MIT"
+include = ["lib/"]
+indexer = "scip_ruby"
+args = ["--index-file", "{out}", "--gem-metadata", "ruby-lsp@0.26.11", "--no-config", "--quiet", "--suppress-non-critical", "--max-threads", "4", "--parser=prism", "--enable-experimental-requires-ancestor", "--enable-experimental-rbs-comments", "--ignore=vendor/", "--ignore=test/fixtures/", "--ignore=test/expectations/", "--ignore=jekyll/", "."]
+
+[[s3.repos]]
+repo = "rack/rack"
+language = "ruby"
+tag = "v3.2.9"
+commit = "52941a02842fd956e3c5532147116354a0240149"
+license = "MIT"
+include = ["lib/"]
+indexer = "scip_ruby"
+args = ["--index-file", "{out}", "--gem-metadata", "rack@3.2.9", "--no-config", "--quiet", "--suppress-non-critical", "--max-threads", "4", "."]
+split = "calibration"
+
+[[s3.repos]]
+repo = "Shopify/packwerk"
+language = "ruby"
+tag = "v3.3.1"
+commit = "31e534283f93a225b520cddab3c2d735557c76de"
+license = "MIT"
+include = ["lib/"]
+indexer = "scip_ruby"
+args = ["--index-file", "{out}", "--gem-metadata", "packwerk@3.3.1", "--no-config", "--quiet", "--suppress-non-critical", "--max-threads", "4", "--parser=prism", "--enable-experimental-requires-ancestor", "--enable-experimental-rbs-comments", "--ignore=vendor/bundle", "."]
+split = "calibration"
+
 # PyCG micro-benchmark (Apache-2.0): hand-written Python call-graph gold.
 [[s3.micro]]
 name = "pycg"
@@ -2519,6 +2658,17 @@ local = "micro/kotlin"
 license = "Apache-2.0"
 crosscheck = "scip_kotlin"
 crosscheck_classpath = ["kotlin_stdlib"]
+
+# Ruby micro-benchmark (rueca-bench): hand-labelled snippets, cross-checked
+# against scip-ruby.
+[[s3.micro]]
+name = "ruby-micro"
+title = "Ruby micro-benchmark (rueca-bench)"
+language = "ruby"
+format = "rueca"
+local = "micro/ruby"
+license = "Apache-2.0"
+crosscheck = "scip_ruby"
 
 # ---------------------------------------------------------------- data formats
 # RFC 0003 §3.3 (bench/README.md, "Data formats"): key recall and span line
@@ -5883,6 +6033,358 @@ id = "burntsushi__ripgrep-2209"
 repo = "burntsushi/ripgrep"
 language = "rust"
 base_commit = "4dc6c73c5a9203c5a8a89ce2161feca542329812"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13431"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "33b9f51cc0bdad7585a855018625c155493664ec"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13503"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "5800663c334011cc0fb580498ebc54f5a09187c2"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13479"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "04dd02e71a444fb36019d892fde6948a88aac637"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13560"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "fd13dabcae2ad9fdf228029671dee6f1ee96248a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13396"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "3e855b0e2eb51311c690bb809d767653d1a0ee4a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13627"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "020c1bf13b25b7ec5f15ac467c7538eba3cef0b4"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13668"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "418fdc98d631cfb52333c7aeae80c43c4a68d13a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13362"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "7e82e44afdf65d585603a2b615e497eefa5b02a9"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13375"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "75160946ac3620005874d5188101dab77d585be2"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13687"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "f0ec1b58283bbf89625883b45d2aec5e515c95b3"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13680"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "9500c427cf346ba523984d7a692e23a943d57a9f"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13424"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "acae60d2b80987b0f4e3b6fd26c99b0975ba618e"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13393"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "8454d9332297e82b50239fcaaae74cc2e7c4a399"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13653"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "34beb4adc7d00bf828031783d860441c1aed659a"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13579"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "c5ac2b9a31dbe8dac520ecf4307b1ac206a65630"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "rubocop__rubocop-13705"
+repo = "rubocop/rubocop"
+language = "ruby"
+base_commit = "f2671d877442d7553fe2d0998ec934e36400b8f9"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-3641"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "296f02180749bee4c22605474cd95194b04012d8"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-4598"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "a6978e59adaced5626506d5083056c39f4b629bf"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-3917"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "c0f1db966a2809a13de217b0ec0adc9a29decc79"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-3616"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "26c62cddbf236361b797eac498301c7d4a77d010"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-3631"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "e890533484dfb7d4546f68a84fdff9a98fb459bd"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-4030"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "a5bf404134f98f32c5cbcbc2f0989d9f88542853"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-4655"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "6f5ea8971d1c9aa5cad29bf6aaf24789e868f842"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-3328"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "07df9a0d850a4f03d95ac82e3d818a90631ad9d3"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-3640"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "8ced42ce86edf5a5c73e009cfd093e6c3fcc7e2d"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-4311"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "fcbcb567c93f8aff3e817371c18dc98b2a5094ff"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-3466"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "d2867c02472185f610a49cff1cf39c491df1039b"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fluent__fluentd-3608"
+repo = "fluent/fluentd"
+language = "ruby"
+base_commit = "a60603346483da721799ccb3faebcbdd757c5f16"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fastlane__fastlane-19207"
+repo = "fastlane/fastlane"
+language = "ruby"
+base_commit = "eadd030370cc62807c22fbb1af3663e98e293f8c"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fastlane__fastlane-20958"
+repo = "fastlane/fastlane"
+language = "ruby"
+base_commit = "6ff1c49bd90bdc29a94b6f99f568cf86fffc376d"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fastlane__fastlane-19765"
+repo = "fastlane/fastlane"
+language = "ruby"
+base_commit = "eaf77b0c319da3f18fc256aa79698aa239e58ef3"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fastlane__fastlane-20642"
+repo = "fastlane/fastlane"
+language = "ruby"
+base_commit = "950bb820237d52e15690408083e328f739ac0ef3"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fastlane__fastlane-20975"
+repo = "fastlane/fastlane"
+language = "ruby"
+base_commit = "65db20a25897595169cb64d7e0900b8176aa62c3"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fastlane__fastlane-19304"
+repo = "fastlane/fastlane"
+language = "ruby"
+base_commit = "9b6d47e74da8cf05a8993ec8b4c2c66a466ce358"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "fastlane__fastlane-21857"
+repo = "fastlane/fastlane"
+language = "ruby"
+base_commit = "c18d01c03cf22b82ff5e2e03f01e59f956684708"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jekyll__jekyll-9141"
+repo = "jekyll/jekyll"
+language = "ruby"
+base_commit = "bb851e235dfbe1f197388aea3e7f0eeb1b50c4e3"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jekyll__jekyll-8047"
+repo = "jekyll/jekyll"
+language = "ruby"
+base_commit = "ab6ef0b257e4c7aafec0518d93bea3e9c4b75b75"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jekyll__jekyll-8761"
+repo = "jekyll/jekyll"
+language = "ruby"
+base_commit = "310459370ad8bb9c0b574735dcca4868a5f05803"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jekyll__jekyll-8771"
+repo = "jekyll/jekyll"
+language = "ruby"
+base_commit = "d45fb9647761c8c208865f71cedb9f2f0dc26f1d"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jekyll__jekyll-8167"
+repo = "jekyll/jekyll"
+language = "ruby"
+base_commit = "11dd8934166d0947055bc01017426bad01277bc1"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "faker-ruby__faker-2970"
+repo = "faker-ruby/faker"
+language = "ruby"
+base_commit = "37a7ea2cdceae530d79197d887a347a877cd3dd4"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "faker-ruby__faker-2705"
+repo = "faker-ruby/faker"
+language = "ruby"
+base_commit = "4d52bc1e148d5290da10cb2775e244e0023778b0"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jordansissel__fpm-1829"
+repo = "jordansissel/fpm"
+language = "ruby"
+base_commit = "c7e7b187316a0969c90706b04db35e78b0e2fc09"
+dataset = "swe_bench_multilingual"
+assets = []
+
+[[s1.instances]]
+id = "jordansissel__fpm-1850"
+repo = "jordansissel/fpm"
+language = "ruby"
+base_commit = "809c7269442f6b6e4be7c3d480bb4489caa281c5"
 dataset = "swe_bench_multilingual"
 assets = []
 

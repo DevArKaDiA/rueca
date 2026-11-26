@@ -1,0 +1,9 @@
+{
+  "main.rb:Model.table": [],
+  "main.rb:Post.query": [
+    "main.rb:Model.table"
+  ],
+  "main.rb:run": [
+    "main.rb:Model.table"
+  ]
+}

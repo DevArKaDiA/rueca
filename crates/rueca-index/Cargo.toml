@@ -27,6 +27,7 @@ rueca-lang-proto.workspace = true
 rueca-lang-shell.workspace = true
 rueca-lang-csharp.workspace = true
 rueca-lang-kotlin.workspace = true
+rueca-lang-ruby.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -1,0 +1,7 @@
+{
+  "main.rb:App::Runner#go": [
+    "main.rb:Tool.use"
+  ],
+  "main.rb:App::Tool.use": [],
+  "main.rb:Tool.use": []
+}

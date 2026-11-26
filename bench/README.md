@@ -28,7 +28,7 @@ Suites, by name (the S-numbers stay as short identifiers):
 | **Multi-step** (RFC 0009 §8, experimental code mode) | "How many tokens does a multi-step question cost as tool calls, as one code-mode script, and with cbm?" | reported; RFC 0009's per-language graduation gate |
 
 The repository ships **manifests and code only** (plus Rueca's own labels:
-the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust,shell,csharp,kotlin}/` and the
+the micro-benchmarks in `micro/{python,ecma,php,go,java,c,cpp,rust,shell,csharp,kotlin,ruby}/` and the
 env-bridge labels in `labels/bridge/`). Datasets, repositories and tool
 binaries are fetched at runtime at pinned revisions into `bench/.cache`
 (git-ignored), so nothing with an unclear licence is vendored.
@@ -54,7 +54,7 @@ uv run --project bench rueca-bench check                 # regression check vs t
 
 - `setup [--lang FAMILY ...]` and `run ... [--lang FAMILY ...]` restrict work
   to language families (manifest `[languages]` keys: `python`, `ecma`,
-  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`, `csharp`, `kotlin`) and/or `data` (the data-format suite);
+  `php`, `go`, `java`, `c`, `cpp`, `rust`, `shell`, `csharp`, `kotlin`, `ruby`) and/or `data` (the data-format suite);
   `report` always scores everything cached.
 - `run --arm {grep,cbm,rueca,vector,rueca-hybrid,rueca-semantic,all|a,b} --suite {s1,s3,data,health,org,all|a,b} [--only ID|REPO|SET ...] [--split gated|calibration] [--workers N] [--force] [--prune]`.
   `--split` restricts S1 to one split; the `vector`, `rueca-hybrid` and
@@ -421,8 +421,9 @@ command runs `cargo metadata`, and `cargo check` for build scripts and proc
 macros; the pinned rust-analyzer is a release binary, not the toolchain's
 own), Docker for the C# gold (scip-dotnet's pinned `linux/amd64` image,
 ≈ 2.4 GB in Docker's storage, with the .NET SDK inside; `dotnet restore`
-needs network to nuget.org; nothing .NET is installed on the host
-own), network for `setup` (and for the
+needs network to nuget.org; nothing .NET is installed on the host), the
+pinned scip-ruby release binary for the Ruby gold (Sorbet, static: no
+Ruby, Bundler or gem installation on the host), network for `setup` (and for the
 first token count: tiktoken fetches `cl100k_base` once into
 `bench/.cache/tiktoken`, verified by its own hash). `git-lfs` is not needed:
 worktrees are created with the LFS filter disabled (pointers stay pointers).
@@ -487,7 +488,7 @@ Adding a language is data plus, at most, one labeler entry:
    `labeler` (`ecma` for JS/TS, `go` for receiver methods, `c` for C/C++
    declarators, `rust` for impl / trait / `mod` scopes and test code,
    `shell` for file-level shell functions and the parser repairs the shell
-   pack applies).
+   pack applies, `ruby` for constant paths and `#` / `.` method names).
    `calls` / `members` describe call sites for SCIP edge
    derivation (`treesitter.py: _is_callee`); `token_calls` names a
    grammar's unparsed macro-argument node (Rust `token_tree`) whose
@@ -621,6 +622,12 @@ stays untuned:
 | shell (0) | none (no dataset has shell instances) | bats-core/bats-core v1.13.0 (shell labeler) |
 | csharp (11) | btcpayserver/btcpayserver (5), ant-design-blazor/ant-design-blazor (3), spectreconsole/spectre.console (3); SWE-rebench V2 | aaubry/YamlDotNet v18.1.0 (scip-dotnet) |
 | kotlin (15) | evant/kotlin-inject (5), square/anvil (5), ajalt/mordant (5); SWE-rebench V2 | square/kotlinpoet 2.4.0 (scip-java) |
+| ruby (4) | faker-ruby/faker (2), jordansissel/fpm (2); SWE-bench Multilingual | rack/rack v3.2.9, Shopify/packwerk v3.3.1 (scip-ruby) |
+
+Ruby stops at 4: SWE-bench Multilingual is the only dataset with Ruby
+instances (SWE-rebench V2, Multi-SWE-bench and SWE-PolyBench have none),
+and its 44 are needed in the gated split to reach 30 instances that
+change a function (RFC 0004 §7.2); no Ruby ranking weight was tuned.
 
 C++ stops at 13: outside the gated repositories, Multi-SWE-bench has only
 cpp-httplib (one eligible instance) and SWE-rebench V2 only zeek (70
@@ -875,9 +882,10 @@ line tolerance) is a class too; the two PHP repositories have none.
 (gin, urfave/cli), Java 667 / 884 (gson, javapoet), C 978 / 1035 (cJSON,
 Lua), C++ 878 / 1085 (fmt, yaml-cpp), Rust 1417 / 1296 (serde_json
 342 / 513, ripgrep 1075 / 783), shell 1738 / 2170 (nvm 119 / 125, acme.sh
-1238 / 1630, bash-it 381 / 415) — every language above the ≥ 300 per
+1238 / 1630, bash-it 381 / 415), Ruby 1233 / 1205 (jekyll 585 / 513,
+ruby-lsp 648 / 692) — every language above the ≥ 300 per
 direction of §7.2. Calibration: click 210 / 191, goawk 245 / 186, bytes
-140 / 300, bats-core 33 / 21; diagnostic: express 8 / 19.
+140 / 300, bats-core 33 / 21, rack 231 / 191, packwerk 240 / 170; diagnostic: express 8 / 19.
 
 **Gold from SCIP** (RFC 0002 §4.2) at pinned tags: requests v2.34.2, flask
 3.1.3, jinja 3.1.6 (`src/jinja2/`), click 8.1.8 (calibration) (`scip-python`
@@ -917,7 +925,15 @@ directories and sha256-pinned classpath jars — kotlin-stdlib and
 kotlin-reflect 2.3.21, okio-jvm 3.16.4, jsr305 — run by the pinned
 launcher in the same `eclipse-temurin:21-jdk` image as the Java gold with
 `--network=none` and read-only sources; nothing is compiled; about 5 s
-per repository, no file skipped). SCIP gives references,
+per repository, no file skipped); jekyll v4.4.1 (untyped,
+`lib/`), ruby-lsp v0.26.11 (Sorbet `# typed: strict` with RBS inline
+comments, `lib/`), rack v3.2.9 and packwerk v3.3.1 (calibration, `lib/`)
+(`scip-ruby` 0.5.1 release binary — Sourcegraph's indexer on Sorbet — run
+in the worktree with `--no-config` and the repository's own Sorbet options
+on the command line: `--parser=prism --enable-experimental-rbs-comments
+--enable-experimental-requires-ancestor` for the two Shopify repositories,
+whose `sorbet/config` also sets a cache directory inside the tree; no
+`bundle install`: gem constants are unresolved and out of scope). SCIP gives references,
 not calls, so (`scip.py`):
 
 1. callables = tree-sitter functions/methods in scope (`include` prefixes, no
@@ -945,7 +961,12 @@ not calls, so (`scip.py`):
    resolves those tokens through the expansion. Operators (`a + b` with a
    user `impl Add`, on which rust-analyzer puts a reference to `add`) and
    `?` (a reference to `Try::branch`) are not calls; a function named as a
-   value (`.map(double)`, `let f = double;`) is a reference, not a call);
+   value (`.map(double)`, `let f = double;`) is a reference, not a call;
+   Ruby: the `method` of a `call` node (`x.m`, `m(a)`, `Foo.new`, on
+   which scip-ruby puts its reference to `initialize`) and a bare
+   identifier, also as a receiver (`helper`, `items.map`): Sorbet gives
+   local variables `local` symbols, so a bare name bound to a method is a
+   call; operators, index calls and symbols are not);
 3. the caller is the innermost callable containing the occurrence
    (module-level calls produce no edge).
 
@@ -1058,6 +1079,7 @@ labeler's qualified names; overloads (Java, C++) are told apart as
 | C# | 72 | 164 | 76 | methods (`this`, typed parameters / fields / properties, `var`, conditional access `?.`, `out var`, patterns, casts and `as`, `foreach`, chains through return types, same name in two types), statics (`using static`, inherited statics, factory chains), inheritance (inherited and implicit-`this` calls, `base.M()`, overrides through base- and sub-typed receivers, multilevel), interfaces (interface and concrete receivers, default interface methods, explicit implementations), constructors (`new`, `: base(…)`, `: this(…)`, target-typed `new()`, object initializers, exception constructors), overloads (arity, argument type, optional parameters, `params`), namespaces (same namespace in two files, `using`, enclosing namespace, fully qualified calls, aliases, a type name in two namespaces, `global using`, nested blocks), partial classes over two files, extension methods (receiver and static form), nested types, local functions, generics (generic classes and methods, constrained type parameters), lambdas, LINQ, method groups, `async` / `await`, records, structs, enums and switch expressions, expression-bodied properties, traps (a local delegate shadowing a method, `nameof`, strings and comments, a library method named like a project one), recursion, top-level statements |
 | Rust | 58 | 190 | 133 | functions (nested `fn`, items local to a function, turbofish, recursion), modules (inline `mod`, `mod` file and `mod.rs`, same-name functions in two modules, `use` / glob / alias imports, `super::` / `crate::`, `pub use` re-export chains, library + binary crate), methods (`self`, `Self::` / `Type::new()`, builder chains, field receivers, `&T` / `Box<T>` / `Option<T>` / slice receivers, two impl blocks in two files, returned receivers), traits (default methods, `impl Tr for T` on a concrete receiver, `T: Tr` bounds and `where`, `dyn Tr`, `impl Tr` parameters and returns, supertraits, `T::create()` / `<T as Tr>::f()`, blanket impls, operator traits, `Default`, `From` / `Into`), closures and iterator adapters, `macro_rules!` (invoked, in another module with `#[macro_use]`, `crate::m!`, inside `println!`), calls in `println!` / `format!` / `vec!` / `assert_eq!` arguments, derives, struct / tuple-struct / enum-variant literals, generics, traps (strings and comments, a closure shadowing a function, a method and a function of one name, `?`, test functions) |
 | C++ | 46 | 148 | 82 | namespaces (nested, `using`, aliases, anonymous), classes (inline and out-of-line methods across `.h` / `.cpp`, implicit `this`, static methods, nested classes), overloads, constructors, inheritance and virtuals, templates, operators, lambdas, name traps |
+| Ruby | 61 | 152 | 76 | functions (top-level `def`, recursion, calls without parentheses, a local shadowing a method, a call before the assignment that makes the name a local, calls in blocks and lambdas, predicate / bang names, endless methods), classes (`self`, `def self.m`, `class << self`, `new` → `initialize` own and inherited, `new` inside the class, `self.class.m`, private methods, accessors, constants), inheritance (inherited and overridden methods, `super` with and without arguments, multilevel, singleton methods inherited, namespaced superclasses), mixins (`include`, `extend`, `prepend`, `module_function`, `extend self`, a mixin in another file, module singleton methods), namespaces (nested modules, compact `class A::B`, lexical lookup, `::Top`, one name in two namespaces, a class reopened in two files, a constant through the superclass, a compact body that does not see its outer module), typing (`x = Foo.new`, `@x = Foo.new` in `initialize`, Sorbet `sig` parameters and returns, RBS comment parameters and returns, `T.let`, two classes assigned to one variable, `Foo.new.m`), `require` / `require_relative`, `Struct.new` with a block, traps (untyped parameters, call results without a declared type, an unknown method on `self`, `&:sym`, strings and comments, an alias) |
 
 Answer-key conventions (beyond the PHP ones): an edge exists for every
 explicit call whose target is statically determinable from types declared
@@ -1148,6 +1170,19 @@ sourced definitions wins —, what its entry script sources); `command f`,
 `trap` handler give none (a handler is a callback); `eval 'f'` and `time
 f` do; running a script by path gives no edge to its functions;
 file-level code has no edge.
+**Ruby**: callables are `def`s (named as in the pack: `A::B#m`,
+`A::B.m`, top-level `m`); accessors, aliases and `define_method` blocks
+are not; an edge exists for a call whose target follows from constants
+(Ruby's lexical lookup, then ancestors), `self` and the ancestors
+(`prepend`, the class, `include`, the superclass; singleton methods
+through `extend` and the superclass chain), `Foo.new` (to the
+`initialize` the ancestors give, none when the project defines none),
+`super`, a local or instance variable assigned `Foo.new`, a Sorbet `sig`,
+an RBS comment or `T.let`, and a call result with a declared return type;
+a call on an untyped parameter or on the result of a method without a
+declared type gives none, and so do `&:sym` blocks; a variable assigned two
+classes calls both; calls in blocks belong to the enclosing `def`; a call
+of an alias points to the aliased method.
 
 Setup cross-checks every answer key against a SCIP indexer, deriving edges
 exactly like the repository gold (`crosscheck` in the manifest; scratch
@@ -1180,7 +1215,13 @@ identical: scip-dotnet records no occurrence for `: base(…)` / `: this(…)`
 initializers, target-typed `new()` and explicit generic calls `M<T>()`), Kotlin vs scip-java 85 / 89 with no extra edge (62 of 65
 snippets identical: scip-java's Kotlin indexer records no occurrence for
 constructor delegation, `: this(…)` / `: super(…)`; the key keeps those
-four edges).
+four edges), Ruby vs scip-ruby 70 / 76 key edges with 1 extra (56 of 61
+snippets identical: scip-ruby records no occurrence for `super` — 2 edges
+—, does not dispatch through `prepend` — the extra edge is `talk → say`
+on the class instead of the prepended module's `say`, and the module's
+`super` is unresolved —, does not type an instance variable from `@x =
+Foo.new` in `initialize` without a `T.let`, and leaves `new.run` inside a
+singleton method untyped).
 **C#**: callables are methods (with or without a body), constructors,
 destructors, operators, conversion operators and local functions (named as
 in the pack: `Type.member`, constructors `Type.Type`, explicit interface
@@ -2159,6 +2200,32 @@ file paths and function names of the public corpus repositories.
   resolve, 24 call sites through them), the calibration set and the
   micro-benchmark. No localization dataset has shell instances, so shell
   has no S1 row and cannot be `stable`.
+- **scip-ruby gold for Ruby** (jekyll, ruby-lsp, rack, packwerk, micro) is
+  Sorbet's view of the code:
+  - untyped code is inferred (as `# typed: true`, also in `# typed: false`
+    files): constants, `self` calls through the ancestors and mixins,
+    `Foo.new` (to `initialize`) and locals assigned `Foo.new` resolve; a
+    method without a `sig` or RBS comment returns `T.untyped`, so calls on
+    its result and on untyped parameters have no gold edge. Rueca's by-name
+    rung (`heuristic` 0.5) binds some of those calls to the only method of
+    their name: right or wrong in fact, they count as false positives
+    unless Sorbet types the receiver (they are the confidence ≥ 0.6 row's
+    difference);
+  - `super` has no occurrence in scip-ruby's index, so `super` calls are
+    not gold edges (Rueca's are false positives); `prepend` does not
+    change dispatch; an instance variable assigned `Foo.new` in
+    `initialize` is untyped without `T.let`; `new` called inside a
+    singleton method is untyped; methods defined after `module_function`
+    inside an `if` and calls after code Sorbet considers unreachable have
+    no occurrence;
+  - an alias resolves to the aliased method (`alias_method :n, :o`: a call
+    of `n` is a call of `o`), which the micro key and Rueca follow;
+  - the bench labeler's tree-sitter-ruby 0.23.1 does not parse an endless
+    method with a command-call body (`def m = raise E, "x"`; the Rueca pack
+    repairs it before parsing, the labeler does not): the rest of such a
+    file is one ERROR node, and its callables there get the qualified name
+    of the top level (packwerk's `validator.rb`); lines and names still
+    match.
 - **Micro-benchmarks** are written by the bench authors; their conventions
   are choices (above). The SCIP cross-checks guard against labelling
   mistakes, not against convention bias.

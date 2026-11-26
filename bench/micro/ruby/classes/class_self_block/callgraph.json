@@ -1,0 +1,9 @@
+{
+  "main.rb:Registry.register": [
+    "main.rb:Registry.store"
+  ],
+  "main.rb:Registry.store": [],
+  "main.rb:boot": [
+    "main.rb:Registry.register"
+  ]
+}

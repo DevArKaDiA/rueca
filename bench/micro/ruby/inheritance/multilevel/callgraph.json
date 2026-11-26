@@ -1,0 +1,6 @@
+{
+  "main.rb:A#ping": [],
+  "main.rb:C#go": [
+    "main.rb:A#ping"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "main.rb:Doc#render": [],
+  "main.rb:Doc#show": [
+    "main.rb:Doc#render"
+  ]
+}

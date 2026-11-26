@@ -136,7 +136,7 @@ such edges disappear. The sections below reference this example.
    (`github.com/owner/name`) or `local/<dir>`; commit = `HEAD`; *dirty* when
    any indexed blob differs from the `HEAD` tree.
 
-### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-shell`, `rueca-lang-csharp`, `rueca-lang-kotlin`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
+### 4.2 Extract facts per file (`rueca-lang-python`, `rueca-lang-typescript`, `rueca-lang-php`, `rueca-lang-go`, `rueca-lang-java`, `rueca-lang-cpp`, `rueca-lang-rust`, `rueca-lang-shell`, `rueca-lang-csharp`, `rueca-lang-kotlin`, `rueca-lang-ruby`, `rueca-lang-markdown`, `rueca-lang-data`, `rueca-lang-proto`)
 
 Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
@@ -324,6 +324,25 @@ What packs deliberately do and don't do:
   as `#[serde(…)]`) is a `Decorator` reference of the item, which the
   resolver turns into `DECORATES` from the `#[proc_macro_attribute]`
   function to the item, also across repositories.
+- **Ruby names are constant paths.** Ruby constants are global and classes
+  open, so a Ruby file has no module name and a definition is named by its
+  constant path: the enclosing `module` / `class` bodies joined with
+  their compact paths (`module A; class B::C` → `A::B::C`, `class ::D` →
+  `D`), instance methods after `#` (`A::B#m`), singleton methods after `.`
+  (`def self.m`, a `def` inside `class << self`, a `module_function`
+  method: `A::B.m`), top-level `def`s by name (`Function`). A class
+  reopened in another file is another node with the same name. Accessors
+  (`attr_reader :a`) are `Field`s, `alias` / `alias_method` and a literal
+  `define_method(:m)` are methods, `X = Struct.new(…) do … end` is a
+  class. Superclasses and mixins are `bases` (`Base`, `include:M`,
+  `extend:M`, `prepend:M`). A bare identifier is a call with an implicit
+  `self` unless the vendored `locals.scm` says it is a local variable
+  (assigned earlier in its `def`, or a parameter). Receivers are written
+  for the resolver: `self`, `self.class`, constant paths, `$type:Foo` for
+  a variable every assignment of which builds `Foo` (`Foo.new`), a Sorbet
+  `sig`, an RBS comment (`#: (Foo a) -> Bar`) or `T.let`, `$ret:<receiver>#<name>`
+  for the result of a call, and `$super`; a declared return type is kept
+  in the signature after ` #: -> ` for the resolver (§4.4).
 - **Receiver types from declarations and assignments** (TS/JS, Python;
   "strategy 5"). A per-file pre-pass records what every binding of a name
   says about its type, per function (and for module-level names and class
@@ -534,7 +553,8 @@ receiver (or a `Configuration` property) `config["A:B"]`,
 (`ConnectionStrings:Db`), namespace `dotnet` (`appsettings*.json`, `:`
 read as `.`); Kotlin `System.getenv("X")`,
 Spring `@Value("\${a.b}")` and `env.getProperty("a.b")` on an `Environment`,
-as in Java. Laravel config files are PHP:
+as in Java; Ruby `ENV["X"]`,
+`ENV.fetch("X")` (with or without a default) and `ENV.key?("X")`. Laravel config files are PHP:
 the array a `config/<file>.php` returns becomes `Key`s (`name`,
 `providers.cache.driver`), and `env()` calls inside an entry are reads by
 that key.
@@ -616,8 +636,8 @@ name) add a hash of the path to the key. A pack may also decline a file with
 a reason (`skipped:data-shape`): the file stays listed and searchable.
 
 **Detection** is by extension (`.rs` is Rust, `.sh` / `.bash` / `.zsh` /
-`.ksh` / `.bats` shell, `.cs` C#, `.kt` / `.kts` Kotlin), then by file name (`Dockerfile`,
-`Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`,
+`.ksh` / `.bats` shell, `.cs` C#, `.kt` / `.kts` Kotlin, `.rb` / `.rake` / `.gemspec` / `.ru` Ruby), then by file name (`Dockerfile`,
+`Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`, `Rakefile`, `Gemfile`,
 `AndroidManifest.xml`, the shell start-up files `.bashrc`, `.profile`,
 `.zshrc`, …; other XML stays text); a C header
 (`.h`) is C++ when the snapshot has C++ sources; a file name without an
@@ -734,6 +754,13 @@ Two per-language hooks, still without guessing symbols:
   and, for an unknown prefix (`"$NVM_DIR/nvm.sh"`), the only file whose
   path ends with the literal tail; dynamic paths (`source "$f"`) import
   nothing.
+  Ruby files have an empty module name (constants are global). `require
+  "a/b"` (also `load`, `autoload`) is `<ancestor>/lib/a/b.rb` for the
+  nearest ancestor of the requiring file that has it (then `test/` and
+  `spec/` roots, then the only `…/lib/a/b.rb` of the snapshot), and
+  `require_relative "x"` is `x.rb` next to the file; anything else is a
+  gem or the standard library. A `require` binds no names: it only gives
+  `IMPORTS`.
 
 Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0);
 for documents that means "links to" (docs → docs, code files, images).
@@ -908,6 +935,28 @@ callables get their arity range from the signature (defaults optional,
 `vararg` open), and among overloads the argument types the pack knows
 choose (value types rule out others; a spread argument needs a `vararg`;
 a call result takes the callee's declared return type).
+
+Ruby references go through their own rules (`rueca-resolve` crate docs,
+*Ruby*): constants are looked up as Ruby does — the lexical nesting of the
+reference innermost first (`Module.nesting`: a compact `class A::B` body
+does not see `A`'s constants), then the ancestors of the innermost class,
+then the top level — and methods through the ancestors: prepended modules,
+the class (every reopening of it), included modules (last first), the
+superclass, recursively; singleton methods through `extend` and the
+superclass chain. A class with an ancestor outside the project is open: a
+method it does not define is external, never a guess.
+
+| Ruby reference | Rule (edge `strategy`) | Confidence |
+|---|---|---|
+| `Foo`, `A::B`, `::Foo`, a superclass or mixin | constant lookup (`import_resolved`) | 0.95 |
+| `m`, `self.m` in an instance method | instance method of the class or an ancestor, else a top-level `def` (`type_resolved`) | 0.90 / 0.85 inherited |
+| `m`, `self.m` in a class body or singleton method; `self.class.m` | singleton method of the class or an ancestor (`type_resolved`) | 0.90 / 0.85 |
+| `Foo.bar`, `A::B.new` | singleton method of the constant; `new` without one is the class and its `initialize` (× 0.95) (`import_resolved`) | 0.85 |
+| `x.m` with `x = Foo.new`, a `sig` / RBS type, `T.let`, `@x` assigned `Foo.new` | instance method of `Foo` (`type_resolved`) | 0.85 |
+| `a.b.m`, `helper.m` (a call's result) | the callee's declared return type (`#: -> T`), then as above (`type_resolved`) | 0.85 |
+| `super` | the same method after the enclosing class in its ancestors (`type_resolved`) | 0.85 |
+| an alias (`alias n o`) | the method it names | as the rule |
+| `x.m` with `x` of unknown type | the only non-test instance method named `m` (≥ 4 characters, not a core-class method such as `each`, `fetch`) (`heuristic`) | 0.50 |
 
 Rust references go through the same ladder with Rust's module semantics
 (`rueca-resolve` crate docs, *Rust*): a name in a module is one of its
