@@ -1,15 +1,16 @@
 # RFC 0008 — Service mode
 
-- Status: Draft; phases 0–2 (§10.1–§10.3) are implemented
-- Created: 2026-11-17
-- Depends on: RFC 0001 (§8 storage, §13 security, §14 deployment modes),
-  RFC 0004 (latency floor), RFC 0005 (envelope, pinned ids, `repo` /
-  `ref`), RFC 0006 (organization layer, refs, generations), RFC 0007
+- **Status:** Draft; phases 0–2 (§10.1–§10.3) are implemented
+- **Created:** 2026-11-17
+- **Updated:** 2026-11-18
+- **Depends on:** [RFC 0001](0001-architecture.md) (§8 storage, §13 security, §14 deployment modes),
+  [RFC 0004](0004-quality-and-benchmark.md) (latency floor), [RFC 0005](0005-agent-responses.md) (envelope, pinned ids, `repo` /
+  `ref`), [RFC 0006](0006-org-graph.md) (organization layer, refs, generations), [RFC 0007](0007-semantic-search.md)
   (embeddings, §5.5 vector cache, §8.3 service mode)
-- Amends: RFC 0001 §5, §8.3, §8.4, §13, §14, §19 open questions 1, 5, 7,
-  8; RFC 0002 §7.1, §7.3, §9; RFC 0006 §9.3, §12 open questions 5, 6, 9; RFC 0007
+- **Amends:** [RFC 0001](0001-architecture.md) §5, §8.3, §8.4, §13, §14, §19 open questions 1, 5, 7,
+  8; [RFC 0002](0002-building-blocks.md) §7.1, §7.3, §9; [RFC 0006](0006-org-graph.md) §9.3, §12 open questions 5, 6, 9; [RFC 0007](0007-semantic-search.md)
   §8.3, §15 open question 8
-- Research date: 2026-11-17. Crate versions, specifications, host
+- **Research date:** 2026-11-17. Crate versions, specifications, host
   documentation and comparable systems were checked that day (§15). Code
   references are to commit `1568e47` (`main` after #60, #63 and #64)
   unless a reference names `c82029013c6d`, the commit the draft was
@@ -132,7 +133,7 @@ embeddings. Local mode unchanged in behaviour, numbers and store.
 
 ### 4.1 Picture
 
-```
+```text
    code hosts: GitHub · GitLab · Bitbucket           MCP clients       OIDC issuer
      │ webhooks (HMAC)    ▲ ls-remote / fetch           │ POST /mcp      │ JWKS
      ▼                    │                             ▼                ▼
@@ -297,7 +298,7 @@ references and the store, then exits.
 
 ### 5.1 Layout
 
-```
+```text
 <bucket>/<prefix>/
   store.json                               format, created_at, org          (CAS, once)
   repos/<repo-dir>/catalog.json            refs → snapshots                  (CAS)
@@ -476,7 +477,7 @@ the idle period.
 **Retention** (answers RFC 0006 §12 open question 6; *(defaults)*):
 
 | Ref kind | Snapshots kept | Expiry |
-|---|---|---|
+|---|---:|---|
 | Default branch | 2 | never |
 | Branch (glob) | 1 | the host stops listing it, or it leaves the glob |
 | Tag | 1 | never; only `DELETE /admin/refs` |
@@ -1004,7 +1005,7 @@ intended path.
  "updated_at": 1794929131}
 ```
 
-```
+```text
             desired ≠ catalog                 lease (CAS)              all desired refs indexed
   done ──────────────────────────▶ pending ───────────────▶ leased ──────────────────────────▶ done
                                     ▲  ▲                     │  │
@@ -1187,7 +1188,7 @@ turn ordinary failures into coverage gaps.
 Push → queryable for a one-commit push to a repository of this one's size:
 
 | Stage | Estimate | Basis |
-|---|---|---|
+|---|---:|---|
 | Webhook ack, `ls-remote`, lease | 1–3 s | *(estimate: three round trips)* |
 | Fetch, depth 1, filtered | 1–10 s | *(estimate)* |
 | Export + index, warm facts | ≈ 1–2 s | 864 ms warm index (measured on this repository at `c82029013c6d`) + export *(estimate)* |

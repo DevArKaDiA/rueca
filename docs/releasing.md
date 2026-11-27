@@ -4,7 +4,7 @@ Releases are automated. Nobody runs `cargo publish` or pushes tags by hand.
 
 ## How it works
 
-```
+```text
 PR merged to main ──▶ release-plz opens/updates the release PR
                       (version bump + CHANGELOG from Conventional Commits)
 

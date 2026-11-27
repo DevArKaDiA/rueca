@@ -1,12 +1,13 @@
 # MCP protocol reference (Rueca's own layer)
 
-Status: behaviour reference of Rueca's own MCP layer in `crates/rueca-mcp`,
-which replaced `rmcp` 3.10.0 on 2026-11-17. Why: `cargo deny` failed on
-RUSTSEC-2026-0543 (`chrono` unmaintained). `chrono` reaches Rueca only through `rmcp`: directly,
-and through `rmcp`'s `schemars` dependency with feature `chrono04`.
-`rueca-query`'s own `schemars = "1"` (default features `derive`, `std`) does
-not enable it. The owner chose to write a small MCP layer that behaves the
-same for clients.
+> [!NOTE]
+> **Status:** behaviour reference of Rueca's own MCP layer in `crates/rueca-mcp`,
+> which replaced `rmcp` 3.10.0 on 2026-11-17. Why: `cargo deny` failed on
+> RUSTSEC-2026-0543 (`chrono` unmaintained). `chrono` reaches Rueca only through `rmcp`: directly,
+> and through `rmcp`'s `schemars` dependency with feature `chrono04`.
+> `rueca-query`'s own `schemars = "1"` (default features `derive`, `std`) does
+> not enable it. The owner chose to write a small MCP layer that behaves the
+> same for clients.
 
 This document describes what clients observe from `rueca mcp` at `c820290`
 (rmcp 3.10.0, Rueca's `ServerHandler`). Every "rmcp does X" statement below
@@ -14,6 +15,20 @@ comes from reading rmcp's source (paths in §11). The golden transcripts
 (`crates/rueca-mcp/tests/golden/`) are the final word: if they disagree with
 this document, the transcripts win and this document gets fixed. Words
 **MUST** and **SHOULD** describe the target implementation.
+
+Contents:
+
+1. [Scope](#1-scope)
+2. [Framing (stdio)](#2-framing-stdio)
+3. [JSON-RPC shapes](#3-json-rpc-shapes)
+4. [Lifecycle selection and legacy `initialize`](#4-lifecycle-selection-and-legacy-initialize)
+5. [Per-request `_meta` and the 2026-07-28 rules](#5-per-request-_meta-and-the-2026-07-28-rules)
+6. [Methods](#6-methods)
+7. [Protocol versions](#7-protocol-versions)
+8. [Module layout and transport seam](#8-module-layout-and-transport-seam)
+9. [Accepted differences from rmcp](#9-accepted-differences-from-rmcp)
+10. [Test plan](#10-test-plan)
+11. [References](#11-references)
 
 ## 1. Scope
 

@@ -1,5 +1,79 @@
 # Decisions log
 
+<details>
+<summary>Contents</summary>
+
+- [2026-11-25 — SQL: held-out parse errors 25.0%; back to `preview`](#2026-11-25--sql-held-out-parse-errors-250-back-to-preview)
+- [2026-11-25 — SQL: a held-out health corpus, chosen before measuring](#2026-11-25--sql-a-held-out-health-corpus-chosen-before-measuring)
+- [2026-11-25 — SQL: mined localization set, three more structural sets, the strict parse-error count; `stable`](#2026-11-25--sql-mined-localization-set-three-more-structural-sets-the-strict-parse-error-count-stable)
+- [2026-11-25 — SQL: procedural code read by the pack, Oracle and DB2 as dialects, what a parse error is](#2026-11-25--sql-procedural-code-read-by-the-pack-oracle-and-db2-as-dialects-what-a-parse-error-is)
+- [2026-11-25 — Shell: a localization set mined by the bench; `stable`](#2026-11-25--shell-a-localization-set-mined-by-the-bench-stable)
+- [2026-11-25 — Shell: one dialect per file, tree-sitter-zsh for zsh files](#2026-11-25--shell-one-dialect-per-file-tree-sitter-zsh-for-zsh-files)
+- [2026-11-25 — SQL pack: sqlparser per statement over a tree-sitter grammar, one dialect per file, a code-backed gold; `preview`](#2026-11-25--sql-pack-sqlparser-per-statement-over-a-tree-sitter-grammar-one-dialect-per-file-a-code-backed-gold-preview)
+- [2026-11-25 — Ruby: global constant paths, Ruby's own lookup, scip-ruby gold, `stable`](#2026-11-25--ruby-global-constant-paths-rubys-own-lookup-scip-ruby-gold-stable)
+- [2026-11-25 — Kotlin: the JVM family, imports by package, scip-java's Kotlin indexer, `stable`](#2026-11-25--kotlin-the-jvm-family-imports-by-package-scip-javas-kotlin-indexer-stable)
+- [2026-11-25 — Swift language pack (RFC 0003 §10.4d), `stable` under the RFC 0004 floors](#2026-11-25--swift-language-pack-rfc-0003-104d-stable-under-the-rfc-0004-floors)
+- [2026-11-25 — C#: namespaces bound by name, scip-dotnet gold in Docker, `stable`](#2026-11-25--c-namespaces-bound-by-name-scip-dotnet-gold-in-docker-stable)
+- [2026-11-25 — Shell pack: bash's lookup by name, scripts as files, a code-backed gold; `preview`](#2026-11-25--shell-pack-bashs-lookup-by-name-scripts-as-files-a-code-backed-gold-preview)
+- [2026-11-24 — Code mode: Starlark stays as built; the API friction is fixed before merge (RFC 0009)](#2026-11-24--code-mode-starlark-stays-as-built-the-api-friction-is-fixed-before-merge-rfc-0009)
+- [2026-11-24 — Code mode phase 3: verdict and recommendation; the owner decides (RFC 0009)](#2026-11-24--code-mode-phase-3-verdict-and-recommendation-the-owner-decides-rfc-0009)
+- [2026-11-24 — Code mode phase 1: `execute` and `describe_api` behind a flag; Starlark opt-in (RFC 0009)](#2026-11-24--code-mode-phase-1-execute-and-describe_api-behind-a-flag-starlark-opt-in-rfc-0009)
+- [2026-11-24 — Code mode: both languages ship behind one `Sandbox` for the experiment (RFC 0009)](#2026-11-24--code-mode-both-languages-ship-behind-one-sandbox-for-the-experiment-rfc-0009)
+- [2026-11-24 — Hybrid search, opt-in: the owner's defaults (RFC 0007 phase 1)](#2026-11-24--hybrid-search-opt-in-the-owners-defaults-rfc-0007-phase-1)
+- [2026-11-24 — Embedding runtime: default model, canonical text, token budget, llama.cpp (RFC 0007 phase 0)](#2026-11-24--embedding-runtime-default-model-canonical-text-token-budget-llamacpp-rfc-0007-phase-0)
+- [2026-11-18 — Rust: a `use` leaf before its module; the bench after the Rust fixes](#2026-11-18--rust-a-use-leaf-before-its-module-the-bench-after-the-rust-fixes)
+- [2026-11-17 — Rust: value and type namespaces; types bind in scope, another crate's by name only as a guess; test doubles never bind](#2026-11-17--rust-value-and-type-namespaces-types-bind-in-scope-another-crates-by-name-only-as-a-guess-test-doubles-never-bind)
+- [2026-11-17 — Rust: items inside macro invocation bodies; attribute macros are decorators](#2026-11-17--rust-items-inside-macro-invocation-bodies-attribute-macros-are-decorators)
+- [2026-11-18 — Indexer role: leased job objects, child processes per ref, webhooks as hints](#2026-11-18--indexer-role-leased-job-objects-child-processes-per-ref-webhooks-as-hints)
+- [2026-11-17 — Service query role: Rueca's own HTTP transport and auth layer, governor over tower_governor](#2026-11-17--service-query-role-ruecas-own-http-transport-and-auth-layer-governor-over-tower_governor)
+- [2026-11-17 — Service store: rusty-s3 and own backends instead of object_store](#2026-11-17--service-store-rusty-s3-and-own-backends-instead-of-object_store)
+- [2026-11-17 — Own MCP layer instead of rmcp](#2026-11-17--own-mcp-layer-instead-of-rmcp)
+- [2026-11-17 — Contracts in the organization link layer (RFC 0006 phase 4)](#2026-11-17--contracts-in-the-organization-link-layer-rfc-0006-phase-4)
+- [2026-11-17 — Service mode: object storage as the store of record, compare-and-swap instead of a lock](#2026-11-17--service-mode-object-storage-as-the-store-of-record-compare-and-swap-instead-of-a-lock)
+- [2026-11-16 — Refs are snapshots of their own, exported from the object database](#2026-11-16--refs-are-snapshots-of-their-own-exported-from-the-object-database)
+- [2026-11-16 — A ref view is a selection of segments of the one organization index](#2026-11-16--a-ref-view-is-a-selection-of-segments-of-the-one-organization-index)
+- [2026-11-16 — Link sets per ref against the defaults, remapped on read](#2026-11-16--link-sets-per-ref-against-the-defaults-remapped-on-read)
+- [2026-11-16 — Collapse across refs by file blob](#2026-11-16--collapse-across-refs-by-file-blob)
+- [2026-11-16 — Organization suite: pinned members, gold at the pin, BM25 as the floor arm](#2026-11-16--organization-suite-pinned-members-gold-at-the-pin-bm25-as-the-floor-arm)
+- [2026-11-16 — Semantic search: top-tier embeddings in presets, vectors by content hash, convex fusion, reranker gated by measurement](#2026-11-16--semantic-search-top-tier-embeddings-in-presets-vectors-by-content-hash-convex-fusion-reranker-gated-by-measurement)
+- [2026-11-16 — Rust: call results typed from signatures; methods by name only when unique](#2026-11-16--rust-call-results-typed-from-signatures-methods-by-name-only-when-unique)
+- [2026-11-16 — Rust pack: module paths, `Type.method`, impl items outside their type](#2026-11-16--rust-pack-module-paths-typemethod-impl-items-outside-their-type)
+- [2026-11-16 — Rust: macro arguments are code, macro bodies are not](#2026-11-16--rust-macro-arguments-are-code-macro-bodies-are-not)
+- [2026-11-16 — Rust: trait dispatch and methods called by name](#2026-11-16--rust-trait-dispatch-and-methods-called-by-name)
+- [2026-11-16 — Cargo packages in the organization layer](#2026-11-16--cargo-packages-in-the-organization-layer)
+- [2026-10-27 — An ambiguous overload call never targets its caller](#2026-10-27--an-ambiguous-overload-call-never-targets-its-caller)
+- [2026-10-27 — Quality gate: ephemeral SonarQube Community, for merges and releases](#2026-10-27--quality-gate-ephemeral-sonarqube-community-for-merges-and-releases)
+- [2026-10-26 — Repository routing as a prior; package links by joint resolution](#2026-10-26--repository-routing-as-a-prior-package-links-by-joint-resolution)
+- [2026-10-26 — Organization index from the repositories' own segments](#2026-10-26--organization-index-from-the-repositories-own-segments)
+- [2026-10-26 — C/C++: test heads as blocks, errors searched inside, the remaining C++ precision gap is the gold's](#2026-10-26--cc-test-heads-as-blocks-errors-searched-inside-the-remaining-c-precision-gap-is-the-golds)
+- [2026-10-26 — Organization graph on top of repository graphs](#2026-10-26--organization-graph-on-top-of-repository-graphs)
+- [2026-10-25 — Tool responses designed for the org mode](#2026-10-25--tool-responses-designed-for-the-org-mode)
+- [2026-10-25 — Ranking: bodies over declarations, sources over copies](#2026-10-25--ranking-bodies-over-declarations-sources-over-copies)
+- [2026-10-25 — C/C++: macros expand to their calls, overloads by argument type, more repairs](#2026-10-25--cc-macros-expand-to-their-calls-overloads-by-argument-type-more-repairs)
+- [2026-10-25 — Structure floors: members by kind, overloads by type, receiver types from assignments](#2026-10-25--structure-floors-members-by-kind-overloads-by-type-receiver-types-from-assignments)
+- [2026-10-25 — C/C++: a same-length preprocessor in the pack, resolver rules for C++ names](#2026-10-25--cc-a-same-length-preprocessor-in-the-pack-resolver-rules-for-c-names)
+- [2026-10-25 — Quality bar: deterministic metrics, absolute floors, cbm as reference](#2026-10-25--quality-bar-deterministic-metrics-absolute-floors-cbm-as-reference)
+- [2026-10-25 — Structured data and the code ↔ config bridge](#2026-10-25--structured-data-and-the-code--config-bridge)
+- [2026-10-24 — Go pack (preview): file-local receiver types, heuristic interfaces](#2026-10-24--go-pack-preview-file-local-receiver-types-heuristic-interfaces)
+- [2026-10-25 — Java: packages from the package clause, constructors vs implicit `this`](#2026-10-25--java-packages-from-the-package-clause-constructors-vs-implicit-this)
+- [2026-10-25 — C and C++: one pack, macro masking, all overloads suffixed](#2026-10-25--c-and-c-one-pack-macro-masking-all-overloads-suffixed)
+- [2026-10-24 — Wave R: shared model, contract and resolver for RFC 0003](#2026-10-24--wave-r-shared-model-contract-and-resolver-for-rfc-0003)
+- [2026-10-24 — Language order for the first release](#2026-10-24--language-order-for-the-first-release)
+- [2026-10-24 — Alpha 2 quality pass: ranking over code, segment format 2](#2026-10-24--alpha-2-quality-pass-ranking-over-code-segment-format-2)
+- [2026-10-24 — Markdown: sections and links, parsed with pulldown-cmark](#2026-10-24--markdown-sections-and-links-parsed-with-pulldown-cmark)
+- [2026-10-24 — PHP: names qualified at extraction, no file modules](#2026-10-24--php-names-qualified-at-extraction-no-file-modules)
+- [2026-10-22 — Project renamed from Telar to Rueca](#2026-10-22--project-renamed-from-telar-to-rueca)
+- [2026-10-22 — Alpha 1 (local mode) shipped; deviations from RFC 0001/0002](#2026-10-22--alpha-1-local-mode-shipped-deviations-from-rfc-00010002)
+- [2026-10-20 — Scope: code only](#2026-10-20--scope-code-only)
+- [2026-10-20 — Zero capability loss vs cbm (superseded 2026-10-21)](#2026-10-20--zero-capability-loss-vs-cbm-superseded-2026-10-21)
+- [2026-10-21 — Built from scratch; cbm is a baseline, not a dependency](#2026-10-21--built-from-scratch-cbm-is-a-baseline-not-a-dependency)
+- [2026-10-22 — RFC 0002 amendments applied to RFC 0001](#2026-10-22--rfc-0002-amendments-applied-to-rfc-0001)
+- [2026-10-20 — Storage model (segment format superseded 2026-10-22)](#2026-10-20--storage-model-segment-format-superseded-2026-10-22)
+- [2026-10-20 — Core language](#2026-10-20--core-language)
+- [2026-10-20 — Open source, vendor-neutral](#2026-10-20--open-source-vendor-neutral)
+
+</details>
+
 ## 2026-11-25 — SQL: held-out parse errors 25.0%; back to `preview`
 
 The measurement fixed in the next entry, run as written there. **1,624 of
@@ -26,7 +100,7 @@ SQL is `preview`.
   index extracted):
 
   | Dialect (a priori) | Files | Strict errors | % | Wilson 95% |
-  |---|---:|---:|---:|---|
+  |---|---:|---:|---:|---:|
   | PostgreSQL | 1,204 | 114 | 9.5 | 7.9–11.3 |
   | MySQL / MariaDB | 1,020 | 311 | 30.5 | 27.7–33.4 |
   | SQLite | 279 | 14 | 5.0 | 3.0–8.2 |
@@ -152,7 +226,7 @@ alone, and the measurement follows in a later commit.
   given real populations.
 
   | Repository | Pin | Licence | Dialect (a priori) | SQL files | What it is |
-  |---|---|---|---|---|---|
+  |---|---|---|---|---:|---|
   | supabase/postgres | `v17.12.0.005-cli` = `968515a` | PostgreSQL | PostgreSQL | 264 | migrations, extension tests |
   | matrix-org/synapse | `v1.98.0` = `15733b0` (last Apache-2.0 release) | Apache-2.0 | PostgreSQL (deltas also run on SQLite) | 305 | schema deltas of a server |
   | supabase/auth | `v2.199.0` = `0725a1d` | MIT | PostgreSQL | 79 | migrations |
@@ -205,10 +279,11 @@ alone, and the measurement follows in a later commit.
 
 ## 2026-11-25 — SQL: mined localization set, three more structural sets, the strict parse-error count; `stable`
 
-*Superseded the same day on one point: the parse-error rate below is the
-rate on the corpus the parser was repaired against; on a held-out corpus
-it is 25.0% and SQL is `preview` (first entry of this log). The rest
-stands.*
+> [!NOTE]
+> *Superseded the same day on one point: the parse-error rate below is the
+> rate on the corpus the parser was repaired against; on a held-out corpus
+> it is 25.0% and SQL is `preview` (first entry of this log). The rest
+> stands.*
 
 SQL was `preview` on four counts: no localization instances, 8.9% of files
 with parse errors, a callees population of 281, and a code-backed gold.
@@ -402,7 +477,7 @@ statement, and Oracle / DB2 files were read as ANSI. Choices:
   `e089a5b` and dbt_hubspot `6de2fe2`:
 
   | Dialect | Before | After |
-  |---|---|---|
+  |---|---:|---:|
   | PostgreSQL | 156 / 415 (37.6%) | 1 / 413 (0.2%) |
   | MySQL | 4 / 94 | 2 / 94 |
   | SQLite | 1 / 3 (Sakila) | 0 / 3 |
@@ -584,7 +659,7 @@ now has dialects the way SQL has (`rueca-lang-shell` `dialect.rs`):
   MISSING node, same files (by extension, before the dialect rules):
 
   | Files | tree-sitter-bash raw | + the pack's repairs (what shipped) | tree-sitter-zsh raw |
-  |---|---|---|---|
+  |---|---:|---:|---:|
   | ohmyzsh `.zsh` / `.zsh-theme` (545) | 298 | 288 (52.8%) | 17 (3.1%) |
   | prezto `.zsh` (41) | 33 | 32 | 1 |
   | spaceship-prompt (122) | 53 | 43 | 3 |
@@ -644,7 +719,7 @@ now has dialects the way SQL has (`rueca-lang-shell` `dialect.rs`):
   zsh-syntax-highlighting `e6683f2`):
 
   | Dialect | Grammar | Files | With errors | Before (one grammar, by extension) |
-  |---|---|---|---|---|
+  |---|---|---:|---:|---|
   | sh | tree-sitter-bash | 720 | 4 (0.56%) | |
   | bash | tree-sitter-bash | 1,155 | 10 (0.87%) | `.sh` / `.bash` / `.ksh`: 28 / 812 (3.4%) |
   | zsh | tree-sitter-zsh | 1,075 | 24 (2.23%) | `.zsh` / `.zsh-theme`: 403 / 1,041 (38.7%) |
@@ -687,7 +762,7 @@ SQL landed as `rueca-lang-sql` (RFC 0003 §10.4g) with a `sql` module in
   bigquery-utils `d5bde4f`, sql-server-maintenance-solution `4161757`:
 
   | Dialect | Files | tree-sitter-sequel (whole file) | the pack: sqlparser per statement, dialect fallback | Statements unparsed |
-  |---|---|---|---|---|
+  |---|---:|---:|---:|---:|
   | PostgreSQL | 1,073 | 117 (10.9%) | 23 (2.1%) | 33 / 2,315 |
   | MySQL | 278 | 27 (9.7%) | 10 (3.6%) | 20 / 643 |
   | SQLite | 199 | 27 (13.6%) | 4 (2.0%) | 7 / 619 |
@@ -1355,7 +1430,7 @@ evidence below; they are the code's defaults.
 Acc@10, paired against BM25):
 
 | Query | BM25 | Rueca lexical | Hybrid, Qwen3-0.6B, α 0.5 | Hybrid, granite-47m |
-|---|---|---|---|---|
+|---|---:|---:|---:|---:|
 | Issue text (`raw`) | 78.8 / 57.9 | 73.7 / 61.7 | **83.1 / 70.1** | 83.1 / 64.5 |
 | Keywords (`kw`) | 72.9 / 57.9 | 75.4 / 53.3 | 73.7 / 56.1 | — |
 

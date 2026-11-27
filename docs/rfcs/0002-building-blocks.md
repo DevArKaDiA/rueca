@@ -1,9 +1,10 @@
 # RFC 0002 — Building blocks: what to assemble, what to build
 
-- Status: Draft
-- Created: 2026-10-22
-- Depends on: RFC 0001 (architecture)
-- Research date: 2026-10-22. Versions, dates and licenses were checked against
+- **Status:** Draft
+- **Created:** 2026-10-22
+- **Updated:** 2026-11-17
+- **Depends on:** [RFC 0001](0001-architecture.md) (architecture)
+- **Research date:** 2026-10-22. Versions, dates and licenses were checked against
   crates.io, GitHub, Hugging Face and upstream sources on that day. Claims that
   could not be checked against a primary source are marked *(unverified)*.
 

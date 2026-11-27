@@ -1,28 +1,29 @@
 # RFC 0009 — Code mode (experimental)
 
-- Status: Experimental — phases 0–3 implemented; off by default (behind
+- **Status:** Experimental — phases 0–3 implemented; off by default (behind
   `--experimental-code-mode`; Starlark behind the non-default
   `code-mode-starlark` cargo feature, §13); verdict and recommendation in
   §14; graduation pending the owner's decision
-- Created: 2026-11-24
-- Amended: 2026-11-24 — both languages ship behind one `Sandbox` trait
+- **Created:** 2026-11-24
+- **Updated:** 2026-11-24
+- **Amended:** 2026-11-24 — both languages ship behind one `Sandbox` trait
   during the experiment so they can be compared; the language is an output
   of the experiment, not an up-front pick (§1, §4, §6, §8, §10, §12–§14)
-- Amended: 2026-11-24 — phase 1: the details §4–§5 left open are settled
+- **Amended:** 2026-11-24 — phase 1: the details §4–§5 left open are settled
   (§4.4), and Starlark is a non-default cargo feature (§13)
-- Amended: 2026-11-24 — phase 2: the multi-step suite as built (§8) and
+- **Amended:** 2026-11-24 — phase 2: the multi-step suite as built (§8) and
   its results (§13.1); no helper earned a place (§4.3)
-- Amended: 2026-11-24 — phase 3: the fluency probe and the decision
+- **Amended:** 2026-11-24 — phase 3: the fluency probe and the decision
   (§14): keep code mode experimental with JavaScript only; open questions
   updated (§12)
-- Amended: 2026-11-24 — the owner's decisions (§14.6): Starlark stays the
+- **Amended:** 2026-11-24 — the owner's decisions (§14.6): Starlark stays the
   optional build feature as built; the four API friction items of §14.4
   (5) are fixed before merge (§4.4)
-- Depends on: RFC 0001 (§11 tools, §13 security), RFC 0004 (efficiency
-  metrics), RFC 0005 (envelope, pinned ids, `repo` / `ref`, tokens per
-  correct answer), RFC 0006 (organization, contracts), RFC 0008 (service
+- **Depends on:** [RFC 0001](0001-architecture.md) (§11 tools, §13 security), [RFC 0004](0004-quality-and-benchmark.md) (efficiency
+  metrics), [RFC 0005](0005-agent-responses.md) (envelope, pinned ids, `repo` / `ref`, tokens per
+  correct answer), [RFC 0006](0006-org-graph.md) (organization, contracts), [RFC 0008](0008-service-mode.md) (service
   mode, child-process isolation)
-- Research date: 2026-11-24. Crate versions were read from crates.io that
+- **Research date:** 2026-11-24. Crate versions were read from crates.io that
   day (§11). *(estimate)* marks arithmetic on stated inputs;
   *(unverified)* a claim no primary source confirmed; *(default)* a value
   chosen here, to be tuned by measurement.
@@ -541,7 +542,7 @@ and the ms25 plan without their workarounds); the first run's numbers,
 before the fixes, are in the second table.
 
 | Arm | Correct | Read / correct | … `describe_api` amortised | Written / correct | Round trips | `execute` overhead median / p95 |
-|---|---|---|---|---|---|---|
+|---|---:|---:|---:|---:|---:|---:|
 | Tool-call plans | 18/25 | 2,743 | — | 254 | 143 | — |
 | JavaScript | 18/25 | 429 | 666 | 352 | 25 | 0.63 / 1.20 ms |
 | Starlark | 18/25 | 434 | 675 | 387 | 25 | 0.33 / 0.65 ms |
@@ -550,7 +551,7 @@ before the fixes, are in the second table.
 Before / after the API fixes (§14.6):
 
 | | Plans | JavaScript | Starlark |
-|---|---|---|---|
+|---|---:|---:|---:|
 | Correct | 18/25 → 18/25 | 18/25 → 18/25 | 18/25 → 18/25 |
 | Read / correct | 3,639 → 2,743 | 444 → 429 | 448 → 434 |
 | … `describe_api` amortised | — | 671 → 666 (4,086 → 4,260 tokens) | 680 → 675 (4,166 → 4,338 tokens) |
@@ -670,7 +671,7 @@ scripts and plans it is compared with below are the re-measured ones of
 §13.1, after the fixes (before them: 339 / 338 and 4,169 tokens).
 
 | | JavaScript | Starlark |
-|---|---|---|
+|---|---:|---:|
 | Correct, first try | 9/10 | 9/10 |
 | Correct after one repair | 9/10 | 9/10 |
 | Script tokens, mean / median | 830 / 771 | 640 / 622.5 |
@@ -710,7 +711,7 @@ scripts and plans it is compared with below are the re-measured ones of
 ### 14.2 Gate (§8)
 
 | Language | Read / correct vs plans (≥ 40%) | … `describe_api` amortised | Tasks regressed (none) | Median overhead (< 20 ms) | Gate |
-|---|---|---|---|---|---|
+|---|---:|---:|---|---:|---|
 | JavaScript | −84.4% (429 vs 2,743) | −75.7% (666) | none | 0.63 ms | pass |
 | Starlark | −84.2% (434 vs 2,743) | −75.4% (675) | none | 0.33 ms | pass |
 

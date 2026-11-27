@@ -1,20 +1,21 @@
 # RFC 0007 — Semantic search
 
-- Status: **phases 0–1 implemented**, opt-in. Phase 0: the runtime
+- **Status:** **phases 0–1 implemented**, opt-in. Phase 0: the runtime
   (`rueca-embed`, `rueca models`, `rueca embed`, the bench's vector arm).
   Phase 1: hybrid search (`rueca index --embed` / `RUECA_EMBED`, the store
   vector cache, `vectors.*` components, `search_symbols` `mode` and
   `retrieval`, the bench's hybrid arm). The owner's decisions of
   2026-11-24 (§0) set the defaults; phases 2–3 are follow-ups (§12)
-- Created: 2026-11-16
-- Depends on: RFC 0001 (§8 storage, §11 query engine), RFC 0004 (metrics,
-  calibration split), RFC 0005 (envelope), RFC 0006 (org index, routing)
-- Amends: RFC 0001 §8.1 item 5, §11.3, §19 open question 3; RFC 0002 §2
+- **Created:** 2026-11-16
+- **Updated:** 2026-11-24
+- **Depends on:** [RFC 0001](0001-architecture.md) (§8 storage, §11 query engine), [RFC 0004](0004-quality-and-benchmark.md) (metrics,
+  calibration split), [RFC 0005](0005-agent-responses.md) (envelope), [RFC 0006](0006-org-graph.md) (org index, routing)
+- **Amends:** [RFC 0001](0001-architecture.md) §8.1 item 5, §11.3, §19 open question 3; [RFC 0002](0002-building-blocks.md) §2
   (excluded models), §6.2 (rows "Vectors", "Offline embeddings", "Quality
-  embeddings"); RFC 0004 §6, §11, §13 open questions 1–2; RFC 0006 §6, §9.2
-- Revised: 2026-11-17 (the owner's answers, §15; organization-suite
+  embeddings"); [RFC 0004](0004-quality-and-benchmark.md) §6, §11, §13 open questions 1–2; [RFC 0006](0006-org-graph.md) §6, §9.2
+- **Revised:** 2026-11-17 (the owner's answers, §15; organization-suite
   evidence, §2)
-- Research date: 2026-11-16. Model cards, licenses, file sizes, crate
+- **Research date:** 2026-11-16. Model cards, licenses, file sizes, crate
   versions and prices were checked that day (§17). *(estimate)* marks
   arithmetic on published figures, with its inputs; *(unverified)* marks a
   claim no primary source confirmed.
@@ -133,7 +134,7 @@ finds what an agent names, not what it describes.
 ### 3.1 Presets
 
 | Preset | Model and file | Params | Dims (MRL) | Context | License | On disk | Code quality (nDCG@10 unless noted) | Status |
-|---|---|---|---|---|---|---|---|---|
+|---|---|---:|---:|---:|---|---|---|---|
 | `qwen3-0.6b-q8` | Qwen3-Embedding-0.6B, official `Q8_0` GGUF | 0.6B | 1024 (32–1024) | 32k | Apache-2.0 | 639 MB | MTEB-Code 75.41 ([Qwen3 report](https://arxiv.org/html/2506.05176v3)); CoIR-10 74.96 *(derived from [C2LLM](https://arxiv.org/html/2512.21332), Table 2)* | **default, provisional (§3.3)** |
 | `qwen3-0.6b-q4` | same, `Q4_K_M` converted and hosted by Rueca | 0.6B | 1024 | 32k | Apache-2.0 | ≈ 380–400 MB *(estimate; a [community Q4_K_M](https://huggingface.co/PeterAM4/Qwen3-Embedding-0.6B-GGUF) is 378 MB)* | no published run; 4-bit RTN −7.5% ([arXiv 2609.24322](https://arxiv.org/html/2609.24322v1)) | optional; default on a backend only by §3.3's rule |
 | `qwen3-0.6b-f16` | same, official `f16` | 0.6B | 1024 | 32k | Apache-2.0 | 1,198 MB | reference | optional; reference for rank overlap |
@@ -218,7 +219,7 @@ in `docs/decisions.md` with the sweep.
 The 0.6B is the weakest candidate on the tasks closest to localization:
 
 | Task | Qwen3-0.6B | Qwen3-4B | Qwen3-8B | Others | Source |
-|---|---|---|---|---|---|
+|---|---:|---:|---:|---|---|
 | SWE-Bench retrieval (issue → code), nDCG@10 | 76.12 | — | — | code-specialised 83.00–87.40 | [jina-code-embeddings](https://arxiv.org/html/2508.21290), Table 2 |
 | CodeEditSearch, nDCG@10 | 64.42 | 76.49 | 76.97 | 80.30–84.43 | C2LLM; jina paper |
 | SWE-bench Lite, Fn Acc@10 (all-gold) | 62.77 | — | 71.53 | CodeRankEmbed 58.76 | SweRank+, Table 2; LocAgent |
@@ -260,7 +261,7 @@ visible wherever it ranked.
 permissions) rather than one switch per organization.
 
 | Preset | $ / 1M tokens | Dims | Code evidence | Source |
-|---|---|---|---|---|
+|---|---:|---|---|---|
 | `remote:voyage/voyage-code-4` | 0.12 (first 200M free) | 2048 / 1024 / 512 / 256 | vendor: +27.54% over voyage-code-3 on 19 agentic sets | [Voyage](https://blog.voyageai.com/2026/08/13/voyage-code-4/), [pricing](https://docs.voyageai.com/docs/pricing) |
 | `remote:voyage/voyage-code-3` | 0.18 | same | MTEB Code 79.84, SWE-Bench 87.02 | jina-code-embeddings |
 | `remote:openai/text-embedding-3-large` | 0.13 | up to 3072 | MTEB (Code) 58.95 | [pricing](https://developers.openai.com/api/docs/pricing); Qwen3 report |
@@ -505,7 +506,7 @@ non-embedding parameters at 100% to 50% utilisation; no tokens/s is
 published for Qwen3-Embedding-0.6B itself)*:
 
 | Hardware | 0.6B | 4B | 8B |
-|---|---|---|---|
+|---|---:|---:|---:|
 | M1 Pro GPU (Metal, F16 rate) | 77–154 min | 10.6–21 h | 20–41 h |
 | M4 Max GPU (Metal, F16 rate) | 25–51 min | 3.5–7 h | 6.7–13.3 h |
 | Ryzen 7950X CPU (Q4_0 rate) | 2.5–4.9 h | 20–41 h | 39–78 h |
@@ -687,7 +688,7 @@ holds. The owner first chose Qwen3-Reranker-0.6B; the evidence below
 moved the order. **Evidence:**
 
 | Reranker | Params | License | MTEB-Code, reranking Qwen3-Emb-0.6B's top 100 | CoIR, reranking jina-v3's top 100 |
-|---|---|---|---|---|
+|---|---:|---|---:|---:|
 | none (Qwen3-Embedding-0.6B alone) | — | — | 75.41 | — |
 | Qwen3-Reranker-0.6B | 0.6B | Apache-2.0 | **73.42** | **65.18** |
 | Qwen3-Reranker-4B / 8B | 4B / 8B | Apache-2.0 | 81.20 / 81.22 | 73.91 / — |
@@ -979,7 +980,7 @@ search exists for; `kw` keeps RFC 0004's floor and must not regress. RFC
 ### 11.3 Calibrating RFC 0004's targets (its open question 1)
 
 | System | Lite File Acc@5 / Fn Acc@10 | LocBench File Acc@5 / Fn Acc@10 | Source |
-|---|---|---|---|
+|---|---:|---:|---|
 | BM25 | 61.7 / 36.9 | 49.3 / — | LocAgent; [LARGER](https://arxiv.org/html/2605.16352) (all-gold) |
 | CodeRankEmbed (137M, MIT) | 84.7 / 58.8 | 74.3 / 43.4–47.9 | LocAgent; SweRank (the papers disagree) |
 | Qwen3-Embedding-0.6B · 8B | — / 62.8 · — / 71.5 | — / 47.3 · — / 55.0 | SweRank+ |

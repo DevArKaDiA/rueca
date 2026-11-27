@@ -1,10 +1,11 @@
 # RFC 0006 — The organization graph
 
-- Status: Draft; phases 1–4 (§9) are implemented
-- Created: 2026-10-26
-- Depends on: RFC 0001 (§8 storage, §10 org linker, §11 query engine,
-  §13 permissions), RFC 0005 (responses, `repo` / `ref`)
-- Amends: RFC 0001 §10–§11 (org linker → org layer, views), RFC 0005 §5
+- **Status:** Draft; phases 1–4 (§9) are implemented
+- **Created:** 2026-10-26
+- **Updated:** 2026-11-24
+- **Depends on:** [RFC 0001](0001-architecture.md) (§8 storage, §10 org linker, §11 query engine,
+  §13 permissions), [RFC 0005](0005-agent-responses.md) (responses, `repo` / `ref`)
+- **Amends:** [RFC 0001](0001-architecture.md) §10–§11 (org linker → org layer, views), [RFC 0005](0005-agent-responses.md) §5
   (no rank fusion across repositories)
 
 ## 1. Summary
@@ -47,7 +48,7 @@ variable. The answer needs one ranking and real edges between repositories.
 
 ## 3. Layers
 
-```
+```text
                          organization layer (per organization, per generation)
    ┌───────────────────────────────────────────────────────────────────────┐
    │ org symbol index   one tantivy index, one internal segment per repo   │
@@ -204,7 +205,7 @@ path = "~/src/payments"
 The benchmark's multi-repository scenario becomes the organization suite:
 
 | Metric | Today (gated split, n = 120; `docs/bench/alpha-results.md`) | Floor | Target |
-|---|---|---|---|
+|---|---|---|---:|
 | File Acc@5, organization scope vs the right repository alone | 56.7% vs 66.7% (0.85×, 95% CI 0.74–0.96 ⚠; rank fusion: 24.2%) | ≥ 0.85 × single-repository | ≥ 0.95 × |
 | Cross-repository edges (packages) precision / recall on labelled pairs | 12 pairs: 99.4 / 94.7; without Rust (8 pairs) 100.0 / 96.2; Rust alone (4 pairs) 98.3 / 93.1 | ≥ 90 / 75 | ≥ 97 / 90 |
 | Incremental update: re-index one repository of 42 | micropython/micropython: organization layer 504 ms vs 2,681 ms (0.19×) | org layer ≤ 2× the repository's own index time | ≤ 1× |
@@ -315,7 +316,7 @@ Measured at the time (the first organization scenario, 21 instances over
 record of phase 1, not comparable with §9.2):
 
 | Metric | Phase 1 | Floor | Target |
-|---|---|---|---|
+|---|---|---|---:|
 | File Acc@5, organization scope vs the right repository alone | 47.6% vs 61.9% (0.77×; rank fusion: 9.5%) | ≥ 0.85× | ≥ 0.95× |
 | Other repositories' share of the top 10 | 36.7% (rank fusion: 94.3%) | — | — |
 | Incremental update: re-index micropython (95k symbols) of 21 | organization layer 123 ms vs 2,713 ms (0.05×) | ≤ 2× | ≤ 1× |
@@ -366,7 +367,7 @@ repositories) and the CLI (`rueca links --org`). Choices and deviations:
   50-member organization, measures the chosen default):
 
   | Routing | File Acc@5 org / single | Other repositories in the top 10 | Tokens per correct answer, org / single |
-  |---|---|---|---|
+  |---|---:|---:|---:|
   | off (phase 1) | 45.7 / 71.4 (0.64×) | 34.6% | 1.69× |
   | prior α 0.5 / 1 / **2** / 3 | 0.84× / 0.88× / **0.92×** / 0.88× | 15.4% / 11.1% / **9.1%** / 8.3% | 1.29× / 1.27× / **1.25×** / 1.24× |
   | prior α 2, document only / terms only | 0.84× / 0.88× | 13.4% / 13.7% | 1.32× / 1.26× |
@@ -424,7 +425,7 @@ published here before 2026-11-16 are dropped: another population, not
 comparable and no longer carried (§10).
 
 | Metric | Phase 2 | Floor | Target |
-|---|---|---|---|
+|---|---:|---:|---:|
 | File Acc@5, organization scope vs the right repository alone, gated (120 issue instances, 42 members) | 56.7% (47.7–65.2) vs 66.7% (0.85×, 0.74–0.96 ⚠) | ≥ 0.85× | ≥ 0.95× |
 | File Acc@5, organization scope vs the right repository alone, calibration split (29 issue instances, 50 members; routing tuned here, never gated) | 62.1% (44.0–77.3) vs 79.3% (0.78×, 0.60–0.95) | ≥ 0.85× | ≥ 0.95× |
 | Function Acc@10, organization scope vs alone, gated (n = 115) | 37.4% (29.1–46.5) vs 48.7% | — | — |
@@ -713,7 +714,7 @@ wall times; with the hands' measurements on this repository and on
 from GitHub; its head is based on an older `main`).
 
 | Metric | Measured | Floor | Target |
-|---|---|---|---|
+|---|---|---:|---:|
 | Indexing a second ref vs the first snapshot: files extracted (of them from the facts cache), index time | click: default 156 (4), 1,312 ms; `8.5.1` 156 (104), 1,200 ms; `stable` 156 (143), 1,219 ms. flask: default 105 (5), 875 ms; `3.1.3` 104 (60), 903 ms; `pr/5918` 105 (95), 917 ms. Rueca: working tree 1,454 extracted, 6.2 s; `origin/main` 1,451 (1,434), 4.6 s | — | — |
 | Export of a ref (blobs from the object database) | click 47 ms (179 files, 1.6 MB), flask 98–112 ms, Rueca ≈ 0.5 s; `pr/5918` fetch 577 ms | — | — |
 | Re-indexing an unchanged ref | 225 ms (Rueca, local); `pr/5918` 547 ms, of which 509 ms its fetch | — | — |
@@ -949,7 +950,7 @@ recall pooled over the gated groups per kind, the *all* row shown, not
 gated; RFC 0004 §5):
 
 | Kind | Measured (precision / recall) | Floor | Target |
-|---|---|---|---|
+|---|---|---:|---:|
 | http-code | 98.3 / 98.0 (n=118 predicted, 99 gold) | ≥ 90 / 75 | ≥ 97 / 90 |
 | http-spec | 100.0 / 100.0 (n=131 predicted, 110 gold) | ≥ 90 / 75 | ≥ 97 / 90 |
 | rpc-spec-client | 96.1 / 100.0 (n=228 predicted, 212 gold) | ≥ 90 / 75 | ≥ 97 / 90 |

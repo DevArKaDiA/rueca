@@ -60,7 +60,7 @@ Type into Claude Code:
 Expect a `trace` call on `mio::poll::Poll.poll`, callers, depth 3 or 4
 (it may search first). The key lines:
 
-```
+```text
 [0] github.com/tokio-rs/mio@101e5b7c92b1 (HEAD)
 [1] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 1 [1] in d1 Method Driver.turn  tokio/src/runtime/io/driver.rs L185-258  →0 CALLS 0.85 type_resolved @199
@@ -81,7 +81,7 @@ signal driver, then the process driver."
 Expect `search_symbols` for "graceful shutdown", then `trace` on
 `tokio::sync::watch::channel`, callers. The key lines:
 
-```
+```text
 1 [1] in d1 Method Serve.run  axum/src/serve/mod.rs L179-193  →0 CALLS 0.9 import_resolved @186
 2 [1] in d1 Method WithGracefulShutdown.run  axum/src/serve/mod.rs L267-304  →0 CALLS 0.9 import_resolved @275
 3 [0] in d1 Method GracefulCoordinator.new  grpc/src/server/mod.rs L166-169  →0 CALLS 0.9 import_resolved @167
@@ -101,7 +101,7 @@ Expect `search_symbols` or `get_symbol` for `spawn`, then `trace` on
 `tokio::spawn` first, it gets "no symbol found" and searches; cut that
 part. The key lines:
 
-```
+```text
 1 [2] in d1 Method WebSocketUpgrade.on_upgrade  axum/src/extract/ws.rs L347-411  →0 CALLS 0.9 import_resolved @359
 2 [2] in d1 Method WithGracefulShutdown.run  axum/src/serve/mod.rs L267-304  →0 CALLS 0.9 import_resolved @276
 6 [1] in d1 Function main  grpc-benchmark/src/bin/bench.rs L135-336  →0 CALLS 0.9 import_resolved @176
@@ -123,7 +123,7 @@ agent tries `ref: "tokio-1.54.1"`, the error lists the indexed refs
 (`HEAD@b53b2001ed2c, tokio-1.53.3@a85c3f5baa29`) and it retries; cut
 that part. The key lines:
 
-```
+```text
   Method Semaphore.blocking_acquire L802-804  pub fn blocking_acquire(&self) -> Result<SemaphorePermit<'_>, AcquireError> changed
   Method Mutex.blocking_lock L520-522  pub fn blocking_lock(&self) -> MutexGuard<'_, T> [0,1]
   Method RwLock.blocking_write L877-879  pub fn blocking_write(&self) -> RwLockWriteGuard<'_, T> changed

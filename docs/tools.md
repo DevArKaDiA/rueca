@@ -7,6 +7,16 @@ ranking, cross-repository edges, refs, contracts). The MCP
 server, the CLI and the benchmark all use it. The alpha shapes (v0.1.0-alpha) stay available for one
 release with `"format": "verbose"` ([below](#verbose-alpha-format)).
 
+Contents:
+
+- [Common conventions](#common-conventions)
+- [The envelope](#the-envelope)
+- [Tools](#tools)
+- [Experimental: code mode](#experimental-code-mode)
+- [Over HTTP](#over-http)
+- [CLI](#cli)
+- [Verbose (alpha) format](#verbose-alpha-format)
+
 ## Common conventions
 
 - **Lines are 1-based** in every tool result.
@@ -177,7 +187,7 @@ one line per group (file path) and item. Items show the **local** name (the
 `#` part of the id), so `<header repo@commit>:<path>#<name>` is the item's
 id, and the name also works as a `qualified_name` argument:
 
-```
+```text
 github.com/acme/billing@7696364aef89+ (main)
 src/invoices/service.py
   Method InvoiceService.issue L41-63  def issue(self, invoice_id: str) -> Invoice
@@ -203,6 +213,7 @@ best match of each other snapshot is listed in `candidates`).
 `get_file_outline` and path snippets need the path to exist in the
 snapshots of one repository.
 
+<a id="several-refs-of-one-repository"></a>
 **Several refs of one repository** (a `ref` list, RFC 0005 §6). `ref:
 ["main", "pr/7"]` reads both snapshots of each selected repository, side by
 side; the envelope lists every requested snapshot of such a repository.
@@ -248,7 +259,7 @@ qualified name, path), its versions are collapsed by file blob, and it is
   `get_file_outline` always names its snapshots (`path (python, 17 lines)
   [0] changed`):
 
-```
+```text
 [0] github.com/acme/billing@7696364aef89+ (main)
 [1] github.com/acme/billing@c0ffee00c0ff (feature/x)
 [0] pkg/service.py
@@ -431,7 +442,7 @@ Literal or regex search over file contents (from content packs).
 Results: `[ {"s", "path", "matches": [ {"line", "text", "before" (opt), "after" (opt), "symbol" (opt brief: innermost enclosing definition)} ]} ]`,
 plus `"files_scanned"` next to `next_cursor`. Text:
 
-```
+```text
 src/http.py
   [Method Session.request L3-9]
   4- def request(self, method, url):
@@ -476,7 +487,7 @@ says what was left out; there is no cursor (use `get_file_outline` or
 `"changed"` and the symbol's other versions in `"versions"` ([Several
 refs](#several-refs-of-one-repository)); text:
 
-```
+```text
 Method InvoiceService.issue  pkg/service.py L9-11  python exported changed
   …
   version [1] changed: Method InvoiceService.issue L9-12  def issue(self, invoice)  callers 0, callees 3
@@ -485,7 +496,7 @@ Method InvoiceService.issue  pkg/service.py L9-11  python exported changed
 ### `get_snippet`
 
 | Arg | Type | Default |
-|---|---|---|
+|---|---|---:|
 | `id` / `qualified_name` / `name` | string | — |
 | or `path` + `start_line` (+ `end_line`) | | |
 | `context_lines` | int, 0–50 | 0 |
@@ -547,7 +558,7 @@ result's `"s"` is the root's), the
 envelope lists the snapshots touched, and the text prefixes such nodes with
 `[s]`:
 
-```
+```text
 [0] github.com/acme/billing@7696364aef89 (main)
 [1] github.com/acme/payments@a1b2c3d4e5f6 (main)
 0 [1] Function charge_card  payments/charge.py L1-2
@@ -561,7 +572,7 @@ Node 0 is the root (`d` 0, `dir` `root`, never filtered); the others are ordered
 plus a seventh element, the call-site path, when it is not the source
 node's file (`call_site_line` is `null` without evidence). Text:
 
-```
+```text
 github.com/acme/billing@7696364aef89+ (main)
 0 Method InvoiceService.issue  src/invoices/service.py L41-63
 1 in d1 Method Api.issue  src/api.py L7-8  →0 CALLS 0.9 type_resolved @8
@@ -575,7 +586,7 @@ list), nodes carry `in` / `changed` and the edges of that repository end
 with an object `{"in": [s, …]}` (plus `"changed": true` when a walk from
 some requested ref did not find it); text:
 
-```
+```text
 [0] github.com/acme/billing@7696364aef89+ (main)
 [1] github.com/acme/billing@c0ffee00c0ff (feature/x)
 0 [0] Method InvoiceService.issue  pkg/service.py L9-11 [0,1] changed
@@ -669,7 +680,7 @@ repositories already returned. Verbose: `{"org", "repositories": [{"repo",
 most 8 then `(+n)`; `packages …`, `depends on …` and `(score)` follow when
 present):
 
-```
+```text
 [0] github.com/acme/billing@7696364aef89 (main)
 [1] github.com/acme/payments@a1b2c3d4e5f6 (main)
 [0] github.com/acme/billing  refs main@7696364aef89, pr/7@c0ffee00c0ff  120 files, 3400 symbols, 9100 edges  python 110, yaml 10
@@ -712,7 +723,7 @@ Dangling entries are computed at query time, nothing is stored.
 repo:path#local-name Lline  (matches)`, `[s]` first with several
 snapshots):
 
-```
+```text
 [0] local/api@worktree (worktree)
 [1] local/client@worktree (worktree)
 [0] GET /users/{}  provides  openapi  local/api:openapi.yaml#paths./users/{id}.get L7  (1)
@@ -808,7 +819,7 @@ only). Arguments keep the tools' snake_case names in both.
 language, the kind, the script line when known and the interpreter's
 message, so a script can be fixed in one more turn:
 
-```
+```text
 js runtime error at line 2: Error: rueca.getSymbol: no symbol found for name `nope`; try `search_symbols` to find the right name (describe_api lists the API)
 ```
 
@@ -933,7 +944,7 @@ checked, used from phase 2 on.
 
 ## CLI
 
-```
+```text
 rueca index [PATH] [--store DIR] [--repo ID] [--json]
     Index the working tree at PATH (default: current dir). Prints a summary
     (or the IndexReport as JSON). Organizations holding PATH are updated

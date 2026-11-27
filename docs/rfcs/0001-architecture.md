@@ -1,11 +1,12 @@
 # RFC 0001 — Architecture
 
-- Status: Draft
-- Created: 2026-10-22
-- Supersedes: —
-- Amended by: RFC 0002 (2026-10-22): segment bundle format, blob-visibility
+- **Status:** Draft
+- **Created:** 2026-10-22
+- **Updated:** 2026-11-17
+- **Supersedes:** —
+- **Amended by:** [RFC 0002](0002-building-blocks.md) (2026-10-22): segment bundle format, blob-visibility
   deltas, precision layer, MCP 2026-07-28 auth, git transport, untrusted input;
-  decisions log (2026-11-17): own MCP layer instead of `rmcp` (§11, §13)
+  [decisions log](../decisions.md) (2026-11-17): own MCP layer instead of `rmcp` (§11, §13)
 
 ## 1. Summary
 
@@ -106,7 +107,7 @@ of the same architecture rather than the other way around.
 
 ## 5. Architecture
 
-```
+```text
           ┌────────────────────────── Connectors ───────────────────────────┐
           │ GitHub · GitLab · Bitbucket · Gitea · local working tree         │
           │ inventory, webhooks/polling, permissions, blob fetch             │
@@ -145,7 +146,7 @@ of the same architecture rather than the other way around.
 
 Every node has a stable, human-readable ID:
 
-```
+```text
 <host>/<owner>/<repo>@<commit>:<path>#<qualified-name>
 github.com/acme/billing@3f2a91c:src/invoices/service.py#InvoiceService.issue
 ```
@@ -313,7 +314,7 @@ because delta chains make random access multi-hop.
 
 Small, mutable, transactional:
 
-```
+```text
 repositories(id, host, owner, name, default_branch, visibility, archived)
 refs(repo_id, name, kind, head_commit, updated_at)
 snapshots(repo_id, commit, tree_sha, base_snapshot, segment_uri, status, indexed_at)
@@ -419,6 +420,7 @@ Canonicalization is shared across languages:
 
 ## 10. Org linker
 
+> [!NOTE]
 > *Amended by [RFC 0006](0006-org-graph.md) (2026-10-26): the org linker is
 > the contract producer of the organization link layer, which sits in an
 > organization graph built on top of the repository graphs.*
@@ -439,7 +441,7 @@ repository does not reindex any other repository.
 
 A view is built per request:
 
-```
+```text
 view = org_link_segment
      + for each visible repository: base segment [+ delta segments]
 ```
@@ -488,6 +490,7 @@ structured data and the next languages):
 Output conventions: compact by default, fully pinned IDs plus host URLs,
 explicit `truncated` / `next_cursor`, token budget parameter on every tool.
 
+> [!NOTE]
 > *Amended 2026-11-17 ([decisions log](../decisions.md)): the transports
 > are built on Rueca's own MCP layer, not on the `rmcp` SDK, after
 > RUSTSEC-2026-0543 (`chrono`, reached only through `rmcp`). Behaviour
@@ -597,6 +600,7 @@ language, plus a polyglot microservice system for cross-service edges
 **Baselines:** codebase-memory-mcp v0.12.0 and plain file exploration, run
 outside Rueca with recorded outputs.
 
+> [!NOTE]
 > *Amended by [RFC 0004](0004-quality-and-benchmark.md) (2026-10-25): the
 > adoption gate below is replaced by absolute floors per metric family;
 > baselines are published as reference and suite 4 moves to the roadmap.*

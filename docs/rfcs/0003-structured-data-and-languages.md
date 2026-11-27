@@ -1,6 +1,6 @@
 # RFC 0003 — Structured data and the next languages
 
-- Status: Draft; the shared groundwork (§9.2 contract, §9.3 model, §10.1
+- **Status:** Draft; the shared groundwork (§9.2 contract, §9.3 model, §10.1
   resolver, wave R of §12) is **implemented**, and so are the data formats,
   file kinds and the code ↔ config bridge (waves 1, 2a and 2b:
   `rueca-lang-data` plus the Python, TS/JS and PHP packs) — see the
@@ -8,9 +8,10 @@
   (§10.4) and C/C++ (§10.3) have landed as `preview`; Rust followed
   (addendum §10.4b), then shell (addendum §10.4c), C# (addendum §10.4d),
   Kotlin (addendum §10.4e), Ruby (addendum §10.4f) and SQL (addendum §10.4g).
-- Created: 2026-10-24
-- Depends on: RFC 0001 (architecture), RFC 0002 (building blocks)
-- Research date: 2026-10-24. Crate versions, licenses and dependency
+- **Created:** 2026-10-24
+- **Updated:** 2026-11-25
+- **Depends on:** [RFC 0001](0001-architecture.md) (architecture), [RFC 0002](0002-building-blocks.md) (building blocks)
+- **Research date:** 2026-10-24. Crate versions, licenses and dependency
   requirements were checked against the crates.io API and the crate sources;
   dataset licenses against the Hugging Face API; baseline behaviour against
   the codebase-memory-mcp v0.12.0 README at its tag. Claims that could not be
@@ -72,6 +73,7 @@ final tool list; that list moves to a later RFC, and the six-tool contract in
 
 ### 3.1 The gate
 
+> [!NOTE]
 > *Amended by [RFC 0004](0004-quality-and-benchmark.md) (2026-10-25):
 > "supported" is renamed `stable` and also requires the metric floors of
 > RFC 0004 §6; the parity row becomes the scorecard row (RFC 0004 §9) and
@@ -414,7 +416,7 @@ are modelled differently:
   `${DATABASE_URL}`, Laravel `env('X')` inside `config/*.php`) gets
   `READS` from the `Key` to the canonical env var, so chains compose:
 
-```
+```text
 Method OwnerController.find ─READS─▶ Key application.yml:spring.datasource.url
 Key spring.datasource.url    ─READS─▶ EnvVar $env:DB_URL
 EnvVar k8s/app.yaml:…env["DB_URL"] ─WRITES─▶ EnvVar $env:DB_URL
@@ -567,7 +569,7 @@ Not chosen:
 One crate, features per format (`json`, `yaml`, `toml`, `xml`, `hcl`,
 `dockerfile`; all default):
 
-```
+```text
 rueca-lang-data/
   src/tree.rs        spanned data tree: Map / Seq / Scalar / Alias, comments, LineIndex
   src/keypath.rs     key-path grammar of §4.3 (format + parse, round-trip tested)
@@ -1080,7 +1082,7 @@ count the health floor uses — 26 of 3,419 files, 0.76%, on the gated
 corpus):
 
 | Dialect | Support | Files with a parse error |
-|---|---|---|
+|---|---|---:|
 | PostgreSQL | parsed; `DO` blocks and routine heads sqlparser rejects read by the pack; `$$` bodies read by the scanner (relations, calls; no columns) | 1 / 413 (0.2%) |
 | MySQL / MariaDB | parsed; routine and trigger bodies read statement by statement | 2 / 94 (2.1%) |
 | SQLite | parsed | 0 / 3 |
@@ -1164,7 +1166,7 @@ Estimates are focused engineer-weeks for one contributor (or agent stream),
 including tests and docs, excluding review.
 
 | Wave | Content | Depends on | Estimate |
-|---|---|---|---|
+|---|---|---|---:|
 | 0 | PHP, Markdown (in flight) | — | — |
 | 1 | **JSON, YAML**: model additions (§9.3 except `is_declaration`), `rueca-lang-data` core (tree, key paths, emit, budgets), JSON/JSONC + YAML front ends, kinds `package.json`, tsconfig, `composer.json`, `search_symbols` default-label rule, key-recall test — *done* | 0 (model) | 2–3 |
 | 2a | **Other config formats**: TOML, `.env`, INI, `.properties`, HCL (definitions), Dockerfile, XML kinds; `pyproject` — *done* | 1 | 2 |

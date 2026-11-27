@@ -29,7 +29,7 @@ Contents:
 
 ## 1. The pipeline in one picture
 
-```
+```text
                  per file (parallel, cached by blob)              per snapshot                   query time
               ┌──────────────────────────────────────┐   ┌──────────────────────────┐   ┌─────────────────────────┐
 working tree ─┤ walk → read → blob SHA → tree-sitter ├──▶│ resolve: facts → graph   ├──▶│ segment (one file)      │◀── the tools
@@ -97,7 +97,7 @@ def get(url):
 
 `rueca index` produces **9 nodes and 12 edges** (actual output):
 
-```
+```text
 Repository local/shop
 └─CONTAINS─ Folder shop
    ├─CONTAINS─ File shop/__init__.py
@@ -142,7 +142,7 @@ Each supported code file is parsed with tree-sitter under a budget (size, time,
 depth). The pack walks the syntax tree and emits facts. In the example,
 `shop/http.py` yields:
 
-```
+```text
 definitions:
   0 Class    Session           parent: —   span 1–8  signature "class Session"  doc "HTTP session…"
   1 Method   Session.request   parent: 0   span 4–5  signature "def request(self, method, url)"
@@ -861,7 +861,7 @@ by fully qualified name (case-insensitive where PHP is).
 order; the first one that succeeds wins and stamps the edge:
 
 | Order | Strategy (edge `strategy`) | Applies when | Confidence |
-|---|---|---|---|
+|---|---|---|---:|
 | 1 | local scope (`same_module`) | no receiver; name defined in an enclosing function | 0.95 |
 | 2 | self receiver (`type_resolved`) | receiver is `self` / `cls` / `this`: member of the enclosing class | 0.90 |
 | 2 | …inherited / `super` (`type_resolved`) | member found in a base class (depth-first, left-to-right) | 0.85 |
@@ -947,7 +947,7 @@ type by unique name. Calls to a class also call its
 PHP references use the same rungs with PHP receivers:
 
 | Strategy (edge `strategy`) | Applies when | Confidence |
-|---|---|---|
+|---|---|---:|
 | name (`import_resolved`) | class, function or constant by fully qualified name (`new User`, `format_money()`, `User::class`) | 0.95 |
 | global fallback (`import_resolved`) | unqualified function / constant not in the current namespace (`helper()` → global `helper`) | 0.90 |
 | autoload file (`import_resolved`) | class not indexed under that name, found in the file Composer maps it to | 0.80 |
@@ -2034,7 +2034,7 @@ a lexical-only binary. `cuda` is an opt-in feature for service builds.
 Qwen3-Embedding family (Apache-2.0, official GGUF files):
 
 | Preset | File | Width (Matryoshka) | Size |
-|---|---|---|---|
+|---|---|---:|---|
 | `qwen3-0.6b-q8` | Qwen3-Embedding-0.6B, official `Q8_0` | 1024 (32–1024) | 639 MB — **default** ([decisions](decisions.md)) |
 | `qwen3-0.6b-f16` | same, official `f16` | 1024 (32–1024) | 1,198 MB — reference for rank overlap |
 | `qwen3-4b-q4`, `qwen3-4b-q8` | Qwen3-Embedding-4B, official `Q4_K_M` / `Q8_0` | 2560 | 2,497 / 4,280 MB — GPU |
