@@ -5,26 +5,48 @@
   </picture>
 </p>
 
-# Rueca
+<h1 align="center">Rueca</h1>
 
-[![CI](https://github.com/DevArKaDiA/rueca/actions/workflows/ci.yml/badge.svg)](https://github.com/DevArKaDiA/rueca/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![MSRV](https://img.shields.io/badge/rustc-1.90+-orange.svg)](Cargo.toml)
-[![crates.io](https://img.shields.io/crates/v/rueca.svg)](https://crates.io/crates/rueca)
+<p align="center">
+  <strong>Code intelligence for coding agents.</strong>
+</p>
 
-**Code intelligence for coding agents.** Rueca indexes a repository into a
-symbol and call graph and serves it to agents over [MCP](https://modelcontextprotocol.io):
-find a symbol, read it, and follow who calls it — without grepping the whole
-tree into the context window.
+<p align="center">
+  <a href="https://github.com/DevArKaDiA/rueca/actions/workflows/ci.yml"><img src="https://github.com/DevArKaDiA/rueca/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/rueca"><img src="https://img.shields.io/crates/v/rueca.svg" alt="crates.io"></a>
+  <a href="https://crates.io/crates/rueca"><img src="https://img.shields.io/crates/d/rueca.svg" alt="crates.io downloads"></a>
+  <a href="https://github.com/DevArKaDiA/rueca/releases"><img src="https://img.shields.io/github/v/release/DevArKaDiA/rueca?include_prereleases&amp;sort=semver" alt="Latest GitHub release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"></a>
+  <a href="Cargo.toml"><img src="https://img.shields.io/badge/rustc-1.90+-orange.svg" alt="MSRV"></a>
+</p>
+
+<p align="center">
+  <a href="docs/how-it-works.md"><strong>Documentation</strong></a> ·
+  <a href="docs/tools.md"><strong>Tools</strong></a> ·
+  <a href="#benchmark"><strong>Benchmark</strong></a> ·
+  <a href="#roadmap"><strong>Roadmap</strong></a> ·
+  <a href="CHANGELOG.md"><strong>Changelog</strong></a> ·
+  <a href="CONTRIBUTING.md"><strong>Contributing</strong></a>
+</p>
+
+---
+
+Rueca indexes a repository into a symbol and call graph and serves it to
+agents over [MCP](https://modelcontextprotocol.io): find a symbol, read it,
+and follow who calls it — without grepping the whole tree into the context
+window.
 
 *Rueca* is Spanish for spinning wheel: it spins raw source into the thread an
 agent can follow.
 
-> **Status: alpha (`0.1.0-alpha.2`).** Local mode (one repository, or an
+> [!WARNING]
+> **Status: alpha (`0.2.0-alpha.1`).** Local mode (one repository, or an
 > organization of local repositories with `--org`); Python,
-> TypeScript/JavaScript, PHP, Go, Java, C, C++, Rust, shell scripts,
-> C#, Kotlin, Ruby, SQL and Swift, plus Markdown and structured configuration. Formats and tool shapes may change before 1.0. See
-> [Benchmark](#benchmark) for where it stands today — including where it loses.
+> TypeScript/JavaScript, PHP, Go, Java, C, C++, Rust, shell scripts, C#,
+> Kotlin, Ruby, SQL and Swift, plus Markdown and structured configuration.
+> Formats and tool shapes may change before 1.0. See
+> [Benchmark](#benchmark) for where it stands today — including where it
+> loses.
 
 ## Features
 
@@ -52,84 +74,91 @@ agent can follow.
 - **Stable symbol IDs** (`repo@commit:path#Class.method`) that other tools can
   cross-reference.
 
-Languages: Python, TypeScript, TSX, JavaScript (incl. JSX, CommonJS, ESM),
-PHP (incl. HTML templates, Composer PSR-4 / PSR-0 autoload, PHPUnit and Pest
-tests), Go (`go.mod` / `go.work` import paths, packages across files,
-methods with typed receivers, embedding, implicit interfaces as heuristic
-`IMPLEMENTS`, generics, `go test` functions), Java (packages, Maven /
-Gradle multi-module source roots, overloads, `OVERRIDES`, JUnit and TestNG
-tests, Spring `@Value` and `System.getenv` reads), C and C++ (namespaces,
-classes, out-of-line bodies linked to their declarations, overloads,
-templates, macros, `#include` through `compile_commands.json` include
-directories, GoogleTest and Catch2 tests), Rust (Cargo workspaces and crate
-roots, `mod` files / `mod.rs` / inline modules, `use` with `crate::` /
-`super::` / `self::`, globs and `pub use` re-export chains, `impl` and
-trait items named `Type.method` / `Trait.method`, receivers from `self` /
-`Self`, annotations, constructors, fields and return types, calls through
-`dyn Trait` / `impl Trait` / generic bounds bound to the trait item,
-`macro_rules!` as callables and calls recovered inside macro arguments,
-`#[test]` / `#[cfg(test)]` / `tests/` tests, `env!` / `option_env!` /
-`env::var` reads, Cargo dependencies for cross-repository package edges),
-shell (POSIX sh, bash, zsh, ksh and bats, one dialect per
-file, zsh read with its own grammar; extension-less
-scripts by their `#!` line; functions in both forms, `source` / `.` paths
-through `$(dirname "$0")` / `${BASH_SOURCE%/*}` / directory variables,
-sourced functions resolved transitively, scripts run by path as calls of
-the script's file, `trap` handlers, bats and shunit2 tests, `$VAR` reads
-and `export` providers in the env bridge), C#
-(namespaces as packages across files, `using` / `using static` / aliases /
-`global using`, overloads chosen by C# conversions, partial types,
-extension methods, receivers typed from declarations and from declared
-return types, xUnit / NUnit / MSTest tests, `Environment` and
-`IConfiguration` reads into `appsettings.json`, NuGet projects for
-cross-repository package edges),
-Kotlin (packages bound by name wherever their files are and shared with
-Java in both directions, `import` with aliases and on demand, classes,
-objects and companion objects, primary / secondary / implicit constructors
-called without `new`, extension functions, overloads chosen by arity,
-defaults, `vararg` and argument types, receivers typed from declarations,
-constructions, smart casts, scope-function lambdas and declared return
-types, JUnit / kotlin.test / Kotest tests, `System.getenv` and Spring
-`@Value` reads, Gradle `.kts` scripts),
-Ruby (constants by path with Ruby's lookup through the lexical nesting and
-the ancestors, reopened classes as one constant, `include` / `extend` /
-`prepend` mixins, `module_function`, `class << self`, `super`, `Foo.new` →
-`initialize`, calls without parentheses told from local variables,
-receivers typed from `Foo.new`, Sorbet `sig`s and RBS comments, `require` /
-`require_relative`, RSpec and Minitest tests, `ENV` reads, gemspec / Gemfile
-packages for cross-repository edges),
-SQL (PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, Oracle with
-PL/SQL, DB2, BigQuery, Snowflake, one dialect per file from a directive,
-the path or the content; tables, views and their columns, functions,
-procedures, triggers, packages, indexes, types; procedural code read
-statement by statement; relations read and written, columns when the
-table is certain,
-routine calls and foreign keys as `REFERENCES` / `WRITES` / `CALLS`;
-migrations resolved to the definition effective at each point; dbt models,
-`ref()` / `source()` and macros; `-- name:` queries; per-dialect coverage in
-[`rueca-lang-sql`](crates/rueca-lang-sql/README.md)),
-Swift (SwiftPM targets as modules, from `Package.swift` and the
-`Sources/<Target>` layout, every file of a target visible to the others,
-`import` binding a whole module; classes, structs, enums, actors,
-protocols and extensions whose members attach to the extended type in any
-file or module; callables named by their selector, `init(x:y:)`, with
-initializers called without `new` and overloads chosen by argument labels,
-defaults, variadics and trailing closures; receivers typed from
-declarations, constructions, casts, `if let` / `guard let`, array elements,
-generic constraints, contextual `.member` calls and declared return types;
-XCTest and Swift Testing tests; `ProcessInfo` / `getenv` reads; SwiftPM
-dependencies for cross-repository package edges).
-Documents: Markdown headings become `Section` symbols and file links become
-`IMPORTS` edges, in the same graph as the code.
-Configuration: JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
-(Maven, MSBuild, Android manifests), HCL/Terraform and Dockerfile become
-keys addressed by key path (`k8s/web.yaml:Deployment/web.spec.replicas`),
-with file kinds — docker compose, Kubernetes, GitHub Actions, OpenAPI,
-JSON Schema, Terraform, Dockerfile, `package.json`, tsconfig,
-`pyproject.toml`, Spring — and the **code ↔ config bridge**: `trace` on
-`$env:DATABASE_URL` lists the code that reads it (`os.getenv`,
-`process.env`, `getenv`, Laravel `env()`) and the manifests that set it;
-`config('app.name')` reads its key in `config/app.php`.
+**Languages:**
+
+- **Python**
+- **TypeScript, TSX, JavaScript** (incl. JSX, CommonJS, ESM)
+- **PHP** (incl. HTML templates, Composer PSR-4 / PSR-0 autoload, PHPUnit and
+  Pest tests)
+- **Go** (`go.mod` / `go.work` import paths, packages across files, methods
+  with typed receivers, embedding, implicit interfaces as heuristic
+  `IMPLEMENTS`, generics, `go test` functions)
+- **Java** (packages, Maven / Gradle multi-module source roots, overloads,
+  `OVERRIDES`, JUnit and TestNG tests, Spring `@Value` and `System.getenv`
+  reads)
+- **C and C++** (namespaces, classes, out-of-line bodies linked to their
+  declarations, overloads, templates, macros, `#include` through
+  `compile_commands.json` include directories, GoogleTest and Catch2 tests)
+- **Rust** (Cargo workspaces and crate roots, `mod` files / `mod.rs` / inline
+  modules, `use` with `crate::` / `super::` / `self::`, globs and `pub use`
+  re-export chains, `impl` and trait items named `Type.method` /
+  `Trait.method`, receivers from `self` / `Self`, annotations, constructors,
+  fields and return types, calls through `dyn Trait` / `impl Trait` / generic
+  bounds bound to the trait item, `macro_rules!` as callables and calls
+  recovered inside macro arguments, `#[test]` / `#[cfg(test)]` / `tests/`
+  tests, `env!` / `option_env!` / `env::var` reads, Cargo dependencies for
+  cross-repository package edges)
+- **Shell** (POSIX sh, bash, zsh, ksh and bats, one dialect per file, zsh read
+  with its own grammar; extension-less scripts by their `#!` line; functions
+  in both forms, `source` / `.` paths through `$(dirname "$0")` /
+  `${BASH_SOURCE%/*}` / directory variables, sourced functions resolved
+  transitively, scripts run by path as calls of the script's file, `trap`
+  handlers, bats and shunit2 tests, `$VAR` reads and `export` providers in the
+  env bridge)
+- **C#** (namespaces as packages across files, `using` / `using static` /
+  aliases / `global using`, overloads chosen by C# conversions, partial types,
+  extension methods, receivers typed from declarations and from declared
+  return types, xUnit / NUnit / MSTest tests, `Environment` and
+  `IConfiguration` reads into `appsettings.json`, NuGet projects for
+  cross-repository package edges)
+- **Kotlin** (packages bound by name wherever their files are and shared with
+  Java in both directions, `import` with aliases and on demand, classes,
+  objects and companion objects, primary / secondary / implicit constructors
+  called without `new`, extension functions, overloads chosen by arity,
+  defaults, `vararg` and argument types, receivers typed from declarations,
+  constructions, smart casts, scope-function lambdas and declared return
+  types, JUnit / kotlin.test / Kotest tests, `System.getenv` and Spring
+  `@Value` reads, Gradle `.kts` scripts)
+- **Ruby** (constants by path with Ruby's lookup through the lexical nesting
+  and the ancestors, reopened classes as one constant, `include` / `extend` /
+  `prepend` mixins, `module_function`, `class << self`, `super`, `Foo.new` →
+  `initialize`, calls without parentheses told from local variables, receivers
+  typed from `Foo.new`, Sorbet `sig`s and RBS comments, `require` /
+  `require_relative`, RSpec and Minitest tests, `ENV` reads, gemspec / Gemfile
+  packages for cross-repository edges)
+- **SQL** (PostgreSQL, MySQL / MariaDB, SQLite, T-SQL, Oracle with PL/SQL,
+  DB2, BigQuery, Snowflake, one dialect per file from a directive, the path or
+  the content; tables, views and their columns, functions, procedures,
+  triggers, packages, indexes, types; procedural code read statement by
+  statement; relations read and written, columns when the table is certain,
+  routine calls and foreign keys as `REFERENCES` / `WRITES` / `CALLS`;
+  migrations resolved to the definition effective at each point; dbt models,
+  `ref()` / `source()` and macros; `-- name:` queries; per-dialect coverage in
+  [`rueca-lang-sql`](crates/rueca-lang-sql/README.md))
+- **Swift** (SwiftPM targets as modules, from `Package.swift` and the
+  `Sources/<Target>` layout, every file of a target visible to the others,
+  `import` binding a whole module; classes, structs, enums, actors, protocols
+  and extensions whose members attach to the extended type in any file or
+  module; callables named by their selector, `init(x:y:)`, with initializers
+  called without `new` and overloads chosen by argument labels, defaults,
+  variadics and trailing closures; receivers typed from declarations,
+  constructions, casts, `if let` / `guard let`, array elements, generic
+  constraints, contextual `.member` calls and declared return types; XCTest
+  and Swift Testing tests; `ProcessInfo` / `getenv` reads; SwiftPM
+  dependencies for cross-repository package edges)
+
+**Documents:** Markdown headings become `Section` symbols and file links
+become `IMPORTS` edges, in the same graph as the code.
+
+**Configuration:** JSON/JSONC, YAML, TOML, `.env`, INI, `.properties`, XML
+(Maven, MSBuild, Android manifests), HCL/Terraform and Dockerfile become keys
+addressed by key path (`k8s/web.yaml:Deployment/web.spec.replicas`), with file
+kinds — docker compose, Kubernetes, GitHub Actions, OpenAPI, JSON Schema,
+Terraform, Dockerfile, `package.json`, tsconfig, `pyproject.toml`, Spring —
+and the **code ↔ config bridge**: `trace` on `$env:DATABASE_URL` lists the
+code that reads it (`os.getenv`, `process.env`, `getenv`, Laravel `env()`) and
+the manifests that set it; `config('app.name')` reads its key in
+`config/app.php`.
 
 ## Install
 
@@ -137,15 +166,18 @@ Prebuilt binaries (macOS and Linux, x86_64 and arm64):
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/DevArKaDiA/rueca/releases/download/v0.1.0-alpha.2/rueca-installer.sh | sh
+  https://github.com/DevArKaDiA/rueca/releases/download/v0.2.0-alpha.1/rueca-installer.sh | sh
 ```
+
+The archives and their SHA-256 checksums are also on
+[GitHub Releases](https://github.com/DevArKaDiA/rueca/releases/tag/v0.2.0-alpha.1).
 
 With Cargo (Rust 1.90+; the default `embeddings` feature builds llama.cpp
 from source and needs CMake, a C/C++ compiler and libclang —
 `--no-default-features --features service` builds without it, lexical only):
 
 ```sh
-cargo install rueca@0.1.0-alpha.2 --locked
+cargo install rueca@0.2.0-alpha.1 --locked
 ```
 
 From source:
@@ -168,7 +200,7 @@ rueca status
 JSON envelope; see [docs/tools.md](docs/tools.md)). On
 [psf/requests](https://github.com/psf/requests):
 
-```
+```text
 github.com/psf/requests@611c6162cbc4 (main)
 src/requests/sessions.py
   Method Session.request L557-653  def request(self, method: str, url: _t.UriType, params: …
@@ -348,13 +380,11 @@ claude mcp add --transport http rueca https://rueca.acme.internal/mcp --header "
   "headers": { "Authorization": "Bearer ${input:rueca-token}" } } } }
 ```
 
-**Code mode (experimental)**: `rueca mcp --experimental-code-mode` (or `RUECA_EXPERIMENTAL_CODE_MODE=1`) adds `execute` and `describe_api`, which run a short JavaScript script (Starlark only in a build with `--features code-mode-starlark`, off by default) against the tools and return only its answer ([details](docs/tools.md#experimental-code-mode)).
-
 (VS Code, `.vscode/mcp.json`; Cursor: `{"mcpServers": {"rueca": {"url":
 "https://rueca.acme.internal/mcp", "headers": {"Authorization": "Bearer
 …"}}}}`.)
 
-Running the service: `rueca serve --role all` indexes the configured
+**Running the service**: `rueca serve --role all` indexes the configured
 repositories from their URLs into an object store, keeps them current
 (adaptive polling, plus signed webhooks pointed at
 `https://<host>/webhooks/github`, `/gitlab` or `/bitbucket`) and serves
@@ -395,12 +425,18 @@ rueca serve --config rueca-service.toml --role all
 rueca status --store-url s3://acme-rueca/prod      # repositories, refs, commits, closed pull requests
 ```
 
+**Code mode (experimental)**: `rueca mcp --experimental-code-mode` (or
+`RUECA_EXPERIMENTAL_CODE_MODE=1`) adds `execute` and `describe_api`, which run
+a short JavaScript script (Starlark only in a build with `--features
+code-mode-starlark`, off by default) against the tools and return only its
+answer ([details](docs/tools.md#experimental-code-mode)).
+
 Recommended agent flow: `search_symbols` → `get_symbol` / `get_snippet` →
 `trace`; `search_code` for literals and config.
 
 ## How it works
 
-```
+```text
 working tree ──walk──▶ files ──tree-sitter──▶ facts ──resolve──▶ graph ──▶ segment ──▶ MCP tools
               (ignore)        (per language,     (per blob,     (imports,    (CSR + tantivy
                                cached by blob)    cached)        scopes, MRO)  + trigrams + packs)
@@ -439,16 +475,18 @@ The full method — what is extracted, how references are resolved, the graph
 schema, and exactly what each tool reads — is in
 [docs/how-it-works.md](docs/how-it-works.md).
 
-Design documents: [architecture (RFC 0001)](docs/rfcs/0001-architecture.md),
-[building blocks (RFC 0002)](docs/rfcs/0002-building-blocks.md),
-[structured data and the next languages (RFC 0003)](docs/rfcs/0003-structured-data-and-languages.md),
-[quality bar and benchmark (RFC 0004)](docs/rfcs/0004-quality-and-benchmark.md),
-[responses for agents: org-wide, multi-ref, token-efficient (RFC 0005)](docs/rfcs/0005-agent-responses.md),
-[the organization graph (RFC 0006)](docs/rfcs/0006-org-graph.md),
-[semantic search (RFC 0007)](docs/rfcs/0007-semantic-search.md),
-[service mode (RFC 0008)](docs/rfcs/0008-service-mode.md),
-[code mode, experimental (RFC 0009)](docs/rfcs/0009-code-mode.md),
-[decisions log](docs/decisions.md).
+Design documents:
+
+- [architecture (RFC 0001)](docs/rfcs/0001-architecture.md)
+- [building blocks (RFC 0002)](docs/rfcs/0002-building-blocks.md)
+- [structured data and the next languages (RFC 0003)](docs/rfcs/0003-structured-data-and-languages.md)
+- [quality bar and benchmark (RFC 0004)](docs/rfcs/0004-quality-and-benchmark.md)
+- [responses for agents: org-wide, multi-ref, token-efficient (RFC 0005)](docs/rfcs/0005-agent-responses.md)
+- [the organization graph (RFC 0006)](docs/rfcs/0006-org-graph.md)
+- [semantic search (RFC 0007)](docs/rfcs/0007-semantic-search.md)
+- [service mode (RFC 0008)](docs/rfcs/0008-service-mode.md)
+- [code mode, experimental (RFC 0009)](docs/rfcs/0009-code-mode.md)
+- [decisions log](docs/decisions.md)
 
 ## Benchmark
 
