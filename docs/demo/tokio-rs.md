@@ -105,9 +105,12 @@ Once a later release is out, the usual install lines from the
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/DevArKaDiA/rueca/releases/download/v0.1.0-alpha.2/rueca-installer.sh | sh
-cargo install rueca@0.1.0-alpha.2 --locked
+  https://github.com/DevArKaDiA/rueca/releases/download/v0.2.0-alpha.1/rueca-installer.sh | sh
+cargo install rueca@0.2.0-alpha.1 --locked
 ```
+
+> [!NOTE]
+> `v0.2.0-alpha.1` is that later release (it contains `4905a37`). The outputs on this page were recorded with `0.1.0-alpha.2` built from `4905a37`.
 
 Then run the whole demo (clone, index, queries, checks):
 
