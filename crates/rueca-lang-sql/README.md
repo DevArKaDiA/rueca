@@ -78,7 +78,7 @@ files, so this is not the rate on SQL it has not seen: that one is 25.0%
 (*Status*). By detected dialect:
 
 | Dialect | Files | With a parse error (strict, the gated count) | Lenient |
-|---|---|---|---|
+|---|---:|---:|---:|
 | ANSI / dbt Jinja | 1,864 | 0 | 0 |
 | PostgreSQL | 601 | 10 (1.66%) | 10 |
 | BigQuery | 401 | 1 (0.25%) | 1 |
@@ -109,7 +109,7 @@ dbt-project-evaluator, dbt-expectations, dbt_artifacts, elementary (dbt
 Jinja). Pooled, by detected dialect:
 
 | Dialect | Files | Files with a parse error | Statements | With an error | Read by the pack's own readers | What still fails |
-|---|---|---|---|---|---|---|
+|---|---:|---:|---:|---:|---|---|
 | PostgreSQL | 413 | 1 (0.2%) | 17,656 | 2 | 965 (`DO` blocks, procedures with defaults, `ALTER EXTENSION`, …) | a string spanning `''` at a line start in pgTAP's `privs.sql`; `$$` bodies are text: scanner only, never counted |
 | MySQL / MariaDB | 94 | 2 (2.1%) | 123 | 2 | 22 (routine bodies) | dbt_artifacts Jinja inside `cast(… as {{ type }})` chains |
 | SQLite | 3 | 0 | 112 | 0 | 0 | — |
