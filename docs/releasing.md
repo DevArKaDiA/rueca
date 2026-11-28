@@ -38,17 +38,19 @@ release PR merged ──▶ SonarQube quality gate on the merged commit
 
 ## Status
 
-Publishing is **disabled** until the first public release: the release job
-only runs when the repository variable `RELEASE_ENABLED` is `true`. While it
-is unset, merging PRs publishes nothing and creates no tag (the release PR
-job still runs). To enable releases:
+Publishing is **enabled**: the repository variable `RELEASE_ENABLED` has been
+`true` since 2026-10-27, so merging the release PR publishes every crate to
+crates.io, tags `vX.Y.Z` and dispatches the binary release.
+
+Published so far: `0.1.0-alpha.2` (2026-10-27) and `0.2.0-alpha.1`
+(2026-11-26), on crates.io and GitHub Releases.
+
+To pause releases, unset the variable (merging PRs then publishes nothing and
+creates no tag; the release PR job still runs):
 
 ```sh
-gh variable set RELEASE_ENABLED --body true --repo DevArKaDiA/rueca
+gh variable delete RELEASE_ENABLED --repo DevArKaDiA/rueca
 ```
-
-The next push to `main` then publishes the current version
-(`0.1.0-alpha.2`) if it is not on crates.io yet.
 
 ## Cutting a release
 
