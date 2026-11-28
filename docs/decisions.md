@@ -12,7 +12,7 @@
 - [2026-11-25 — SQL pack: sqlparser per statement over a tree-sitter grammar, one dialect per file, a code-backed gold; `preview`](#2026-11-25--sql-pack-sqlparser-per-statement-over-a-tree-sitter-grammar-one-dialect-per-file-a-code-backed-gold-preview)
 - [2026-11-25 — Ruby: global constant paths, Ruby's own lookup, scip-ruby gold, `stable`](#2026-11-25--ruby-global-constant-paths-rubys-own-lookup-scip-ruby-gold-stable)
 - [2026-11-25 — Kotlin: the JVM family, imports by package, scip-java's Kotlin indexer, `stable`](#2026-11-25--kotlin-the-jvm-family-imports-by-package-scip-javas-kotlin-indexer-stable)
-- [2026-11-25 — Swift language pack (RFC 0003 §10.4d), `stable` under the RFC 0004 floors](#2026-11-25--swift-language-pack-rfc-0003-104d-stable-under-the-rfc-0004-floors)
+- [2026-11-25 — Swift language pack (RFC 0003 §10.4h), `stable` under the RFC 0004 floors](#2026-11-25--swift-language-pack-rfc-0003-104h-stable-under-the-rfc-0004-floors)
 - [2026-11-25 — C#: namespaces bound by name, scip-dotnet gold in Docker, `stable`](#2026-11-25--c-namespaces-bound-by-name-scip-dotnet-gold-in-docker-stable)
 - [2026-11-25 — Shell pack: bash's lookup by name, scripts as files, a code-backed gold; `preview`](#2026-11-25--shell-pack-bashs-lookup-by-name-scripts-as-files-a-code-backed-gold-preview)
 - [2026-11-24 — Code mode: Starlark stays as built; the API friction is fixed before merge (RFC 0009)](#2026-11-24--code-mode-starlark-stays-as-built-the-api-friction-is-fixed-before-merge-rfc-0009)
@@ -1071,7 +1071,7 @@ model — packages, classes with members, overload suffixes, implicit
   and default arguments are written); `init` blocks belong to the class,
   like Java initializers; callable references `::f` are reads, not calls.
 
-## 2026-11-25 — Swift language pack (RFC 0003 §10.4d), `stable` under the RFC 0004 floors
+## 2026-11-25 — Swift language pack (RFC 0003 §10.4h), `stable` under the RFC 0004 floors
 
 - **Grammar**: `tree-sitter-swift` 0.7.4 (alex-pinkus, MIT), the grammar
   nvim-treesitter uses; the crate ships its generated parser at ABI 15 and

@@ -41,7 +41,8 @@ agent can follow.
 
 > [!WARNING]
 > **Status: alpha (`0.2.0-alpha.1`).** Local mode (one repository, or an
-> organization of local repositories with `--org`); Python,
+> organization of local repositories with `--org`) and service mode
+> (`rueca serve`, alpha); Python,
 > TypeScript/JavaScript, PHP, Go, Java, C, C++, Rust, shell scripts, C#,
 > Kotlin, Ruby, SQL and Swift, plus Markdown and structured configuration.
 > Formats and tool shapes may change before 1.0. See
@@ -586,7 +587,7 @@ absolute floors and aspirational targets).
 | **Languages and data** | Python, TS/JS, PHP, Go, Java, C, C++, Rust, C#, Kotlin, Ruby, Swift, Markdown, structured config formats, the code ↔ config bridge ([RFC 0003](docs/rfcs/0003-structured-data-and-languages.md)); shell scripts (§10.4c), SQL (§10.4g) | ✅ done; every language `stable` except SQL, `preview` (held-out parse errors 25.0%); shell and SQL on localization sets mined by the bench and code-backed structural gold |
 | **Quality bar** | Benchmark rebuilt for trustworthy numbers; every language but SQL `stable` against the floors of [RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) | ✅ done, Rust included; SQL is `preview` |
 | **Agent responses** | Pinned ids, snapshot envelope, `ref` and multi-repo queries, collapse across refs, compact output, tokens per correct answer ([RFC 0005](docs/rfcs/0005-agent-responses.md)) | ✅ landed (pinned ids, envelope, multi-repo, compact output, token metric; other refs with `--ref` and collapse across refs, in local mode and over an organization) |
-| **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.1.0-alpha.2` published; `0.1.0` follows |
+| **First public release** | `0.1.0` on crates.io and GitHub Releases | ✅ `0.2.0-alpha.1` published; `0.2.0` follows |
 | **Retrieval** | Semantic search inside `search_symbols` ([RFC 0007](docs/rfcs/0007-semantic-search.md)): Qwen3-Embedding presets (default `qwen3-0.6b-q8`), weights downloaded only on request; vectors keyed by content hash, cached in the store and reused across branches, refs, worktrees and repositories; BM25 and an exhaustive int8 vector scan fused by a convex combination (min-max, α 0.5, N 100); opt-in locally | 🚧 phases 0–1 landed (`rueca-embed`, `rueca models`, `rueca embed`, `rueca index --embed` / `RUECA_EMBED`, `search_symbols` `mode` and `retrieval`, the bench's vector and hybrid arms); next: graph expansion, centrality prior and reranker (phase 2), organization scope and service mode (phase 3) |
 | **Precision layer** | Optional compiler-grade edges imported from SCIP indexes | 🗺️ planned |
 | **Service mode** | One container, segments in object storage, MCP over HTTP, organization-wide indexing with GPU for embeddings ([RFC 0008](docs/rfcs/0008-service-mode.md)): one image with `query` / `indexer` roles, per-repository catalogs and packs written by compare-and-swap (no lock, no database), stateless Streamable HTTP with OIDC or static tokens and deny-by-default visibility, webhooks as hints over adaptive polling, child-process isolation per ref, retention for branches and PRs | 🚧 phases 0–2 landed (`rueca-storage`: memory / file / S3-compatible stores with compare-and-swap; `rueca-service`: publish, pull, generations, garbage collection, jobs and leases, reconciler, updater; `rueca serve`: the query role — stateless MCP over HTTP, static tokens and OIDC, visibility rules, deadlines, rate limits, health and metrics — and the indexer role — git mirrors with filtered fetches, `index-worker` child processes, webhooks for GitHub / GitLab / Bitbucket, adaptive polling, pull-request lifecycle; the container image); next: phase 3 — `embed` jobs on GPU indexers and inventory discovery, after RFC 0007 lands |

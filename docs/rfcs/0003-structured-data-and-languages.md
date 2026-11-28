@@ -7,7 +7,8 @@
   *Implemented* notes in §3, §4.5, §5, §6, §7.2 and §8. Go (§10.2), Java
   (§10.4) and C/C++ (§10.3) have landed as `preview`; Rust followed
   (addendum §10.4b), then shell (addendum §10.4c), C# (addendum §10.4d),
-  Kotlin (addendum §10.4e), Ruby (addendum §10.4f) and SQL (addendum §10.4g).
+  Kotlin (addendum §10.4e), Ruby (addendum §10.4f), SQL (addendum §10.4g)
+  and Swift (addendum §10.4h).
 - **Created:** 2026-10-24
 - **Updated:** 2026-11-25
 - **Depends on:** [RFC 0001](0001-architecture.md) (architecture), [RFC 0002](0002-building-blocks.md) (building blocks)
@@ -1057,7 +1058,7 @@ and Java files is one module for the resolver.
 | Precision | scip-java 0.14.2's Kotlin indexer (Kotlin Analysis API, K2) without a build: sources and pinned classpath jars in the pinned JDK image |
 | Bench | S1: Multi-SWE-bench Kotlin (gated) and SWE-rebench V2 (calibration); S3: scip-java gold on moshi and clikt (kotlinpoet calibration), and the `bench/micro/kotlin` micro-benchmark |
 
-### 10.4d Swift (addendum, 2026-11-25)
+### 10.4h Swift (addendum, 2026-11-25)
 
 Swift follows the gate of §10.2–§10.4.
 
