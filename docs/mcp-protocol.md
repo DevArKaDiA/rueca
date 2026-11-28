@@ -1,12 +1,13 @@
 # MCP protocol reference (Rueca's own layer)
 
-Status: behaviour reference of Rueca's own MCP layer in `crates/rueca-mcp`,
-which replaced `rmcp` 3.10.0 on 2026-11-17. Why: `cargo deny` failed on
-RUSTSEC-2026-0543 (`chrono` unmaintained). `chrono` reaches Rueca only through `rmcp`: directly,
-and through `rmcp`'s `schemars` dependency with feature `chrono04`.
-`rueca-query`'s own `schemars = "1"` (default features `derive`, `std`) does
-not enable it. The owner chose to write a small MCP layer that behaves the
-same for clients.
+> [!NOTE]
+> **Status:** behaviour reference of Rueca's own MCP layer in `crates/rueca-mcp`,
+> which replaced `rmcp` 3.10.0 on 2026-11-17. Why: `cargo deny` failed on
+> RUSTSEC-2026-0543 (`chrono` unmaintained). `chrono` reaches Rueca only through `rmcp`: directly,
+> and through `rmcp`'s `schemars` dependency with feature `chrono04`.
+> `rueca-query`'s own `schemars = "1"` (default features `derive`, `std`) does
+> not enable it. The owner chose to write a small MCP layer that behaves the
+> same for clients.
 
 This document describes what clients observe from `rueca mcp` at `c820290`
 (rmcp 3.10.0, Rueca's `ServerHandler`). Every "rmcp does X" statement below
@@ -14,6 +15,20 @@ comes from reading rmcp's source (paths in §11). The golden transcripts
 (`crates/rueca-mcp/tests/golden/`) are the final word: if they disagree with
 this document, the transcripts win and this document gets fixed. Words
 **MUST** and **SHOULD** describe the target implementation.
+
+Contents:
+
+1. [Scope](#1-scope)
+2. [Framing (stdio)](#2-framing-stdio)
+3. [JSON-RPC shapes](#3-json-rpc-shapes)
+4. [Lifecycle selection and legacy `initialize`](#4-lifecycle-selection-and-legacy-initialize)
+5. [Per-request `_meta` and the 2026-07-28 rules](#5-per-request-_meta-and-the-2026-07-28-rules)
+6. [Methods](#6-methods)
+7. [Protocol versions](#7-protocol-versions)
+8. [Module layout and transport seam](#8-module-layout-and-transport-seam)
+9. [Accepted differences from rmcp](#9-accepted-differences-from-rmcp)
+10. [Test plan](#10-test-plan)
+11. [References](#11-references)
 
 ## 1. Scope
 
@@ -321,17 +336,23 @@ Advertised and accepted: `2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25,
 Public API kept for `rueca-cli`: `ServerOptions`, `RuecaServer::{new,
 with_index_gate}`, `tools()`, `serve_stdio`, `INSTRUCTIONS`, `INDEX_WAIT`,
 `root_to_index`, `index_root`, `ensure_indexed`, `spawn_auto_index`,
-`spawn_org_index`, `IndexGate`. `tools()` now returns Rueca's own
+`spawn_org_index`, `IndexGate`.
+
+`tools()` now returns Rueca's own
 `Vec<Tool>` (was `Vec<rmcp::model::Tool>`); `serve` is synchronous over
-`std::io` (was async over a tokio stream). Added: `RuecaServer::from_options`
-(what `serve_stdio` serves, usable by other transports), `RuecaServer::handle`
-and the types below; `RuecaServer::with_visibility` (the same server for a
-caller who may read only some repositories: the engine is cloned cheaply,
-sharing its opened segments and organization index); `ToolCall::run_with`
-(a call with `rueca_query::RespondOptions`: a visibility and a cooperative
-deadline, without cloning the engine) and `DEADLINE_EXCEEDED` (-32001),
-which the HTTP transport (`rueca-serve`, `rueca serve`) uses per tool
-call.
+`std::io` (was async over a tokio stream).
+
+Added:
+
+- `RuecaServer::from_options` (what `serve_stdio` serves, usable by other
+  transports), `RuecaServer::handle` and the types below;
+- `RuecaServer::with_visibility` (the same server for a caller who may
+  read only some repositories: the engine is cloned cheaply, sharing its
+  opened segments and organization index);
+- `ToolCall::run_with` (a call with `rueca_query::RespondOptions`: a
+  visibility and a cooperative deadline, without cloning the engine) and
+  `DEADLINE_EXCEEDED` (-32001), which the HTTP transport (`rueca-serve`,
+  `rueca serve`) uses per tool call.
 
 ```text
 crates/rueca-mcp/src/

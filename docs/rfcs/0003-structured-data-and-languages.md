@@ -1,6 +1,6 @@
 # RFC 0003 — Structured data and the next languages
 
-- Status: Draft; the shared groundwork (§9.2 contract, §9.3 model, §10.1
+- **Status:** Draft; the shared groundwork (§9.2 contract, §9.3 model, §10.1
   resolver, wave R of §12) is **implemented**, and so are the data formats,
   file kinds and the code ↔ config bridge (waves 1, 2a and 2b:
   `rueca-lang-data` plus the Python, TS/JS and PHP packs) — see the
@@ -8,9 +8,10 @@
   (§10.4) and C/C++ (§10.3) have landed as `preview`; Rust followed
   (addendum §10.4b), then shell (addendum §10.4c), C# (addendum §10.4d),
   Kotlin (addendum §10.4e), Ruby (addendum §10.4f) and SQL (addendum §10.4g).
-- Created: 2026-10-24
-- Depends on: RFC 0001 (architecture), RFC 0002 (building blocks)
-- Research date: 2026-10-24. Crate versions, licenses and dependency
+- **Created:** 2026-10-24
+- **Updated:** 2026-11-25
+- **Depends on:** [RFC 0001](0001-architecture.md) (architecture), [RFC 0002](0002-building-blocks.md) (building blocks)
+- **Research date:** 2026-10-24. Crate versions, licenses and dependency
   requirements were checked against the crates.io API and the crate sources;
   dataset licenses against the Hugging Face API; baseline behaviour against
   the codebase-memory-mcp v0.12.0 README at its tag. Claims that could not be
@@ -72,6 +73,7 @@ final tool list; that list moves to a later RFC, and the six-tool contract in
 
 ### 3.1 The gate
 
+> [!NOTE]
 > *Amended by [RFC 0004](0004-quality-and-benchmark.md) (2026-10-25):
 > "supported" is renamed `stable` and also requires the metric floors of
 > RFC 0004 §6; the parity row becomes the scorecard row (RFC 0004 §9) and
@@ -351,12 +353,18 @@ wave 3), `go.mod` / `go.work` (with Go) and Android components (later).
 Maven and MSBuild projects get keys (`dependencies.dependency["g:a"]`,
 `ItemGroup.PackageReference["Serilog"]`) and imports (`modules/module`,
 `parent/relativePath`, `ProjectReference`); Java source roots come with
-Java. Additions: `pyproject.toml` entry points include
-`[project.gui-scripts]`, `[project.entry-points.*]` and
-`[tool.poetry.scripts]`; Kubernetes `secretKeyRef` points at `data` and
-`stringData`; compose `build` also imports `<context>/Dockerfile`;
-GitHub Actions `${{ env.X }}` and Kubernetes `$(X)` are env var reads by
-the key that holds them. Terraform references (wave 3 in the table) are
+Java.
+
+Additions:
+
+- `pyproject.toml` entry points include `[project.gui-scripts]`,
+  `[project.entry-points.*]` and `[tool.poetry.scripts]`;
+- Kubernetes `secretKeyRef` points at `data` and `stringData`;
+- compose `build` also imports `<context>/Dockerfile`;
+- GitHub Actions `${{ env.X }}` and Kubernetes `$(X)` are env var reads by
+  the key that holds them.
+
+Terraform references (wave 3 in the table) are
 implemented too, since directory scope landed in wave R:
 `var.x` / `local.x` / `module.m` / `data.t.n` / `t.n` traversals resolve
 within the module directory.
@@ -414,7 +422,7 @@ are modelled differently:
   `${DATABASE_URL}`, Laravel `env('X')` inside `config/*.php`) gets
   `READS` from the `Key` to the canonical env var, so chains compose:
 
-```
+```text
 Method OwnerController.find ─READS─▶ Key application.yml:spring.datasource.url
 Key spring.datasource.url    ─READS─▶ EnvVar $env:DB_URL
 EnvVar k8s/app.yaml:…env["DB_URL"] ─WRITES─▶ EnvVar $env:DB_URL
@@ -449,12 +457,19 @@ builtin `getenv`), never by function name alone.
 | SQL (§10.4g) | dbt `{{ env_var('X') }}` | dbt `{{ var('x') }}` → key `vars.x` (of `dbt_project.yml`, unique key path) |
 
 *Implemented* for Python, TS / JS and PHP as listed, except Django
-`settings.X` and pydantic `BaseSettings` (later). Evidence: Python needs the
-file's `import os` / `from os import …` (aliases followed); TS / JS needs
-`process` / `Deno` not to be a local binding and, for node-config, an
-import or `require` of `config`; PHP matches the unqualified builtin /
-helper names (`getenv`, `env`, `config`) and the `Config` facade, so a
-project-defined namespaced `env()` would be misread. Assignment and
+`settings.X` and pydantic `BaseSettings` (later).
+
+Evidence:
+
+- Python needs the file's `import os` / `from os import …` (aliases
+  followed);
+- TS / JS needs `process` / `Deno` not to be a local binding and, for
+  node-config, an import or `require` of `config`;
+- PHP matches the unqualified builtin / helper names (`getenv`, `env`,
+  `config`) and the `Config` facade, so a project-defined namespaced
+  `env()` would be misread.
+
+Assignment and
 `del` / `delete` targets are writes, not reads. Laravel config files are
 handled in the PHP pack as §7.3 says: `config/<file>.php` arrays become
 `Key`s (PHP has no module name, so their global name is the key path,
@@ -567,7 +582,7 @@ Not chosen:
 One crate, features per format (`json`, `yaml`, `toml`, `xml`, `hcl`,
 `dockerfile`; all default):
 
-```
+```text
 rueca-lang-data/
   src/tree.rs        spanned data tree: Map / Seq / Scalar / Alias, comments, LineIndex
   src/keypath.rs     key-path grammar of §4.3 (format + parse, round-trip tested)
@@ -611,15 +626,19 @@ resolves `T` like a `Type` reference, then looks the member up in it
 file-local declaration scan.
 
 *Implemented* (wave R) as listed, with these refinements, all defaulted:
-`module_scope(language)` takes the language (one pack serves several:
-Terraform is directory-scoped, YAML is not) and has a third variant,
-`ModuleScope::Directory` (every file of one language in a directory, for
-Terraform modules whose files keep their path as module name); `overloads()`
-and `overrides()` opt into §10.1 items 4–5; `facts_depend_on_path()` adds
-the path to the facts cache key for packs whose output depends on it (data
-kinds chosen by name); `ExtractError::Skipped(reason)` reports the §4.5
-skips as `skipped:<reason>`; `module_name_for(path, facts, project)` answers
-open question 2 (§15). `$self` is honoured for packs that list it in
+
+- `module_scope(language)` takes the language (one pack serves several:
+  Terraform is directory-scoped, YAML is not) and has a third variant,
+  `ModuleScope::Directory` (every file of one language in a directory, for
+  Terraform modules whose files keep their path as module name);
+- `overloads()` and `overrides()` opt into §10.1 items 4–5;
+- `facts_depend_on_path()` adds the path to the facts cache key for packs
+  whose output depends on it (data kinds chosen by name);
+- `ExtractError::Skipped(reason)` reports the §4.5 skips as
+  `skipped:<reason>`;
+- `module_name_for(path, facts, project)` answers open question 2 (§15).
+
+`$self` is honoured for packs that list it in
 `self_receivers()` (JavaScript, Java and PHP allow `$self` as an identifier,
 so it cannot be reserved for everyone). `ProjectFiles::max_config_bytes`
 allows 8 MiB for `compile_commands.json`. `.csproj` is not loaded: no
@@ -639,13 +658,18 @@ planned resolver reads it.
 | `Reference` | add `arity: Option<u32>` (call argument count, for §10.1 overload choice) | **no**, same facts-format bump (`FACTS_FORMAT` = 2) |
 | `ResolvedGraph` | add `modules: Vec<String>` (module name per file), stored in an optional segment component `files.modules` | yes: readers ignore unknown components; older segments read as "unknown" |
 
-*Implemented* (wave R). All `Language` variants landed at once (with
-`Language::ALL`, `parse`, name-based detection and `header_language` for
-`.h`); `Label::is_data_detail()` marks `Key` / `Document`; `RefKind::DataRef`
-receivers are `None` (same file, then same package), an import specifier,
-`$qn` (a global qualified name) or `$any` (any data file); `ConfigKey`
-namespaces are `spring`, `laravel`, `dotnet`, `node-config`, `viper` and
-`viper:<config name>`. The segment format stays 2: a store written before
+*Implemented* (wave R).
+
+- All `Language` variants landed at once (with `Language::ALL`, `parse`,
+  name-based detection and `header_language` for `.h`);
+- `Label::is_data_detail()` marks `Key` / `Document`;
+- `RefKind::DataRef` receivers are `None` (same file, then same package),
+  an import specifier, `$qn` (a global qualified name) or `$any` (any data
+  file);
+- `ConfigKey` namespaces are `spring`, `laravel`, `dotnet`, `node-config`,
+  `viper` and `viper:<config name>`.
+
+The segment format stays 2: a store written before
 the change opens unchanged (`rueca-segment/tests/compat.rs`), and enum
 variant indexes are pinned by a test in `rueca-model`. `files.modules`
 lets tools split Go and Java qualified names (import paths and packages
@@ -675,18 +699,28 @@ bloop (Go, Java) / scip-syntax (Go, Java), adapted as in RFC 0002 §3.4.
    interface method can then add `OVERRIDES` to reach implementations.
 
 *Implemented* (wave R; `rueca-resolve` crate docs, *RFC 0003 hooks*):
-package and directory scope, directory imports (a package-scoped import
-binds the package whose module name is the specifier, else the largest in
-the directory), `$type:` and `$self` receivers, implicit self as rung 1b,
-`is_declaration` → unique body, overloads (`Reference::arity`, fan-out
-× 0.8; constructors of Java and C/C++ are the members named like the
-class) and `OVERRIDES` (`type_resolved` 0.90). Also generic, for the packs
-that need them: C/C++ includes as transitive star imports, member imports
-`C.m` (Java `import static`), the bridge of §7.3 and the data pointers of §6
-(`rueca-resolve` `bridge` module), and in `rueca-query` symbol ids for every
-new family, the `$env` pseudo-path, optional overload suffixes in lookups,
-`readers_count` / `writers_count` and the default-label rule of §11. Each
-hook has a fake-pack example in `rueca-resolve/tests/hooks.rs`.
+
+- Package and directory scope;
+- directory imports (a package-scoped import binds the package whose
+  module name is the specifier, else the largest in the directory);
+- `$type:` and `$self` receivers;
+- implicit self as rung 1b;
+- `is_declaration` → unique body;
+- overloads (`Reference::arity`, fan-out × 0.8; constructors of Java and
+  C/C++ are the members named like the class);
+- `OVERRIDES` (`type_resolved` 0.90).
+
+Also generic, for the packs that need them:
+
+- C/C++ includes as transitive star imports;
+- member imports `C.m` (Java `import static`);
+- the bridge of §7.3 and the data pointers of §6 (`rueca-resolve` `bridge`
+  module);
+- in `rueca-query` symbol ids for every new family, the `$env`
+  pseudo-path, optional overload suffixes in lookups, `readers_count` /
+  `writers_count` and the default-label rule of §11.
+
+Each hook has a fake-pack example in `rueca-resolve/tests/hooks.rs`.
 
 ### 10.2 Go
 
@@ -819,12 +853,19 @@ choices and deviations (details in the crate docs and
   conditions, one configuration per file), and error-driven repairs kept
   only when a file's error count drops — took the files with parse errors
   to 0.0% (hiredis), 1.3% (jq), 0.0% (cJSON), 0.5% (redis `src/`) and 5.7%
-  (fmt with vendored GoogleTest; 1.5% without). Deviations from the table
-  above: `static` and anonymous-namespace definitions are exported (an
-  include is textual); a macro invocation is a use (`REFERENCES`), not a
-  call; class template specializations are their own classes, named with
-  their arguments; a declaration and its body in one file are one node;
-  `OVERRIDES` joins bodies. New receivers `$ns:` (namespace-qualified
+  (fmt with vendored GoogleTest; 1.5% without).
+
+  Deviations from the table above:
+
+  - `static` and anonymous-namespace definitions are exported (an include
+    is textual);
+  - a macro invocation is a use (`REFERENCES`), not a call;
+  - class template specializations are their own classes, named with
+    their arguments;
+  - a declaration and its body in one file are one node;
+  - `OVERRIDES` joins bodies.
+
+  New receivers `$ns:` (namespace-qualified
   names, looked up from the enclosing namespaces) and `$member:` (member
   chains typed from declarations in other files), C++ namespace scope as
   rung 1c, overload sets across files with arity from signatures and
@@ -871,11 +912,13 @@ with these choices (crate docs list them all):
   stated (a second overload renames the first).
 - **Constructors and implicit `this`.** With constructors as members named
   like the class, a bare type name that is an enclosing class or its
-  superclass reached the constructor through the implicit-self rung. The
-  pack first worked around it; since 2026-10-25 the resolver keeps members
+  superclass reached the constructor through the implicit-self rung.
+
+  The pack first worked around it; since 2026-10-25 the resolver keeps members
   in slots by kind (callables, types, values) and reaches a constructor by
   calls only, so types are written as in the source, fields and methods
   with one name coexist, and the workarounds are gone (`docs/decisions.md`).
+
   Anonymous classes are classes named after their base (`TypeAdapter$1`),
   `OVERRIDES` pairs overloads by signature, and calls carry the static
   types of their arguments to choose overloads (§10.1 item 4 refined).
@@ -907,12 +950,18 @@ release work, and is designed here in the form of §10.2–§10.4.
 
 *Implemented* (`rueca-lang-rust` plus the `rust` module of
 `rueca-resolve`; crate docs and [how-it-works](../how-it-works.md)):
-everything in the table; env reads (`std::env::var`, `env!`,
-`option_env!`) as in §7.2; Cargo packages publish `rust:<crate>` keys to
-the organization layer (RFC 0006). Parse errors: 0 files on rueca, tokio
+
+- Everything in the table;
+- env reads (`std::env::var`, `env!`, `option_env!`) as in §7.2;
+- Cargo packages publish `rust:<crate>` keys to the organization layer
+  (RFC 0006).
+
+Parse errors: 0 files on rueca, tokio
 and ripgrep, 1 of 72 on serde_json (an intentionally invalid UI test).
 Items that macros pass through (`cfg_if!`, tokio's `cfg_*!` blocks) were
-added on 2026-11-17 (decisions log). Not done: items generated by macros
+added on 2026-11-17 (decisions log).
+
+Not done: items generated by macros
 (derives, `bitflags!`, `impl` blocks built by a `macro_rules!`), `#[cfg]`
 evaluation, return-position `impl Trait` resolved to the concrete type,
 types across files beyond `$member:` chains.
@@ -939,14 +988,18 @@ needs them in the graph. Designed in the form of §10.2–§10.4b.
 
 *Implemented* (`rueca-lang-shell` plus the `shell` module of
 `rueca-resolve`; crate docs and [how-it-works](../how-it-works.md)):
-everything in the table. Status **`stable`** under RFC 0004 (2026-11-25,
+everything in the table.
+
+Status **`stable`** under RFC 0004 (2026-11-25,
 after the dialects and the mined localization set; it shipped as
 `preview` while the localization floors had no instances and 1.95% of the
 files kept a parse error): every gated floor is met, localization on a
 set the bench mined itself (not human-validated) and structure against a
 code-backed labeler rather than a compiler-grade oracle, so its agreement
 with the pack measures the pack against bash's lookup rules, not against
-an independent tool. Not done: aliases, functions defined by `eval` or
+an independent tool.
+
+Not done: aliases, functions defined by `eval` or
 zsh `autoload` files, variable command words (`$cmd args`), a ksh
 grammar (ksh files are read as bash; ksh93's own forms are parse errors,
 counted).
@@ -1080,7 +1133,7 @@ count the health floor uses — 26 of 3,419 files, 0.76%, on the gated
 corpus):
 
 | Dialect | Support | Files with a parse error |
-|---|---|---|
+|---|---|---:|
 | PostgreSQL | parsed; `DO` blocks and routine heads sqlparser rejects read by the pack; `$$` bodies read by the scanner (relations, calls; no columns) | 1 / 413 (0.2%) |
 | MySQL / MariaDB | parsed; routine and trigger bodies read statement by statement | 2 / 94 (2.1%) |
 | SQLite | parsed | 0 / 3 |
@@ -1093,11 +1146,15 @@ corpus):
 
 *Implemented* (`rueca-lang-sql` plus the `sql` module of `rueca-resolve`;
 crate docs and README, [how-it-works](../how-it-works.md)): everything in
-the tables. Status **`stable`** under RFC 0004 (2026-11-25; it shipped as
+the tables.
+
+Status **`stable`** under RFC 0004 (2026-11-25; it shipped as
 `preview` with no localization instances, 8.9% of files with parse errors
 and a callees population under 300): every gated floor is met, on a
 localization set the bench mined itself and a code-backed structural
-gold, both disclosed with the scorecard. Not done: Oracle object type
+gold, both disclosed with the scorecard.
+
+Not done: Oracle object type
 specifications and other statements the strict count still rejects
 (crate README), SQL in string
 literals of other languages (follow-up), Liquibase XML changelogs,
@@ -1164,7 +1221,7 @@ Estimates are focused engineer-weeks for one contributor (or agent stream),
 including tests and docs, excluding review.
 
 | Wave | Content | Depends on | Estimate |
-|---|---|---|---|
+|---|---|---|---:|
 | 0 | PHP, Markdown (in flight) | — | — |
 | 1 | **JSON, YAML**: model additions (§9.3 except `is_declaration`), `rueca-lang-data` core (tree, key paths, emit, budgets), JSON/JSONC + YAML front ends, kinds `package.json`, tsconfig, `composer.json`, `search_symbols` default-label rule, key-recall test — *done* | 0 (model) | 2–3 |
 | 2a | **Other config formats**: TOML, `.env`, INI, `.properties`, HCL (definitions), Dockerfile, XML kinds; `pyproject` — *done* | 1 | 2 |
@@ -1267,16 +1324,25 @@ one complete release instead.)
 ## 16. Sources
 
 - crates.io API (versions, licenses, dependency requirements), 2026-10-24:
-  https://crates.io/crates/jsonc-parser , https://crates.io/crates/saphyr-parser ,
-  https://crates.io/crates/saphyr , https://crates.io/crates/toml_edit ,
-  https://crates.io/crates/roxmltree , https://crates.io/crates/quick-xml ,
-  https://crates.io/crates/hcl-edit , https://crates.io/crates/dockerfile-parser ,
-  https://crates.io/crates/tree-sitter-dockerfile , https://crates.io/crates/dotenvy ,
-  https://crates.io/crates/rust-ini , https://crates.io/crates/java-properties ,
-  https://crates.io/crates/taplo , https://crates.io/crates/oas3 ,
-  https://crates.io/crates/openapiv3 , https://crates.io/crates/tree-sitter-go ,
-  https://crates.io/crates/tree-sitter-c , https://crates.io/crates/tree-sitter-cpp ,
-  https://crates.io/crates/tree-sitter-java
+  - https://crates.io/crates/jsonc-parser
+  - https://crates.io/crates/saphyr-parser
+  - https://crates.io/crates/saphyr
+  - https://crates.io/crates/toml_edit
+  - https://crates.io/crates/roxmltree
+  - https://crates.io/crates/quick-xml
+  - https://crates.io/crates/hcl-edit
+  - https://crates.io/crates/dockerfile-parser
+  - https://crates.io/crates/tree-sitter-dockerfile
+  - https://crates.io/crates/dotenvy
+  - https://crates.io/crates/rust-ini
+  - https://crates.io/crates/java-properties
+  - https://crates.io/crates/taplo
+  - https://crates.io/crates/oas3
+  - https://crates.io/crates/openapiv3
+  - https://crates.io/crates/tree-sitter-go
+  - https://crates.io/crates/tree-sitter-c
+  - https://crates.io/crates/tree-sitter-cpp
+  - https://crates.io/crates/tree-sitter-java
 - Crate sources read for span and limit behaviour: `saphyr-parser` 0.2.2
   (`scanner.rs` `Marker`, `parser.rs` `SpannedEventReceiver`), `saphyr`
   0.2.2 (`loader.rs` alias handling), `jsonc-parser` 0.34.0 (`common.rs`

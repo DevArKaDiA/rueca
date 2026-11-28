@@ -105,9 +105,12 @@ Once a later release is out, the usual install lines from the
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/DevArKaDiA/rueca/releases/download/v0.1.0-alpha.2/rueca-installer.sh | sh
-cargo install rueca@0.1.0-alpha.2 --locked
+  https://github.com/DevArKaDiA/rueca/releases/download/v0.2.0-alpha.1/rueca-installer.sh | sh
+cargo install rueca@0.2.0-alpha.1 --locked
 ```
+
+> [!NOTE]
+> `v0.2.0-alpha.1` is that later release (it contains `4905a37`). The outputs on this page were recorded with `0.1.0-alpha.2` built from `4905a37`.
 
 Then run the whole demo (clone, index, queries, checks):
 
@@ -164,7 +167,7 @@ Running `rueca index --org` again with nothing changed took 5,060 ms
 replaced and the generation goes up; only the ref is skipped
 (`out/index-again.txt`, first lines):
 
-```
+```text
 indexed /private/tmp/rueca-demo-cache/repos/tokio (github.com/tokio-rs/tokio @ b53b2001ed2c): 886 files, 16443 nodes, 56615 edges in 581 ms
 […]
 indexed ref tokio-1.53.3 of github.com/tokio-rs/tokio (tag @ a85c3f5baa29): unchanged in 11 ms
@@ -259,7 +262,7 @@ rueca query list_repositories '{"query":"http router"}' --org tokio-rs --text
 I cut the long `packages` lists (the ones that end in `(+N)`) to
 `packages […]`; the short ones are as captured.
 
-```
+```text
 [0] github.com/hyperium/hyper@7f67699ce32d (HEAD)
 [1] github.com/hyperium/tonic@4c0f455c264f (HEAD)
 [2] github.com/tokio-rs/axum@c59208c86fde (HEAD)
@@ -288,7 +291,7 @@ search.
 rueca query search_symbols '{"query":"graceful shutdown","limit":8}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/hyperium/hyper@7f67699ce32d (HEAD)
 [1] github.com/tokio-rs/axum@c59208c86fde (HEAD)
 [1] axum/src/serve/mod.rs
@@ -317,7 +320,7 @@ back in one list instead of one list per repository.
 rueca query search_symbols '{"query":"decode frame","limit":8}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/hyperium/hyper@7f67699ce32d (HEAD)
 src/proto/h1/decode.rs
   Method Decoder.decode_fut L241-243  async fn decode_fut<R: MemRead>(&mut self, body: &mut R) -> Result<Frame<Bytes>, io::Error>
@@ -340,7 +343,7 @@ src/proto/h1/conn.rs
 rueca query search_symbols '{"query":"decode frame","repo":"github.com/tokio-rs/tokio","limit":6}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 tokio-util/src/codec/decoder.rs
   Method Decoder.decode_eof L144-155  fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error>
@@ -361,7 +364,7 @@ tokio/src/runtime/dump.rs
 rueca query search_symbols '{"query":"decode frame","repo":["github.com/hyperium/tonic","github.com/tokio-rs/tokio"],"limit":8}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/hyperium/tonic@4c0f455c264f (HEAD)
 tonic-web/src/call.rs
   Method GrpcWebCall.poll_decode L194-238  fn poll_decode( mut self: Pin<&mut Self>, cx: &mut Context<'_>, ) -> Poll<Option<Result<Frame<Bytes>, Status>>>
@@ -390,7 +393,7 @@ hits come from tonic; tokio's codec methods rank lower in that ranking.
 rueca query trace '{"qualified_name":"mio::poll::Poll.poll","direction":"callers","depth":4}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/tokio-rs/mio@101e5b7c92b1 (HEAD)
 [1] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 0 [0] Method Poll.poll  src/poll.rs L438-440
@@ -418,7 +421,7 @@ answer is one call with the provenance of each step.
 rueca query trace '{"qualified_name":"bytes::bytes::Bytes.copy_from_slice","direction":"callers","limit":15}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/hyperium/hyper@7f67699ce32d (HEAD)
 [1] github.com/hyperium/tonic@4c0f455c264f (HEAD)
 [2] github.com/tokio-rs/axum@c59208c86fde (HEAD)
@@ -455,7 +458,7 @@ counted separately.
 rueca query trace '{"qualified_name":"tokio::sync::watch::channel","direction":"callers","limit":12}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/hyperium/tonic@4c0f455c264f (HEAD)
 [1] github.com/tokio-rs/axum@c59208c86fde (HEAD)
 [2] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
@@ -489,7 +492,7 @@ of two searches that may use different words.
 rueca query trace '{"qualified_name":"tokio::runtime::io::driver::Driver.turn","direction":"callees"}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/tokio-rs/mio@101e5b7c92b1 (HEAD)
 [1] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 0 [1] Method Driver.turn  tokio/src/runtime/io/driver.rs L185-258
@@ -513,7 +516,7 @@ lines.
 rueca query trace '{"qualified_name":"ServiceBuilder.layer","repo":"github.com/tower-rs/tower","direction":"callers","min_confidence":0.85,"limit":10}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/tower-rs/tower@4b0a6b0e688b (HEAD)
 [1] github.com/hyperium/tonic@4c0f455c264f (HEAD)
 [2] github.com/tokio-rs/axum@c59208c86fde (HEAD)
@@ -545,7 +548,7 @@ the full module path.
 rueca query trace '{"qualified_name":"tokio::task::spawn::spawn","direction":"callers","limit":15}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/hyperium/hyper@7f67699ce32d (HEAD)
 [1] github.com/hyperium/tonic@4c0f455c264f (HEAD)
 [2] github.com/tokio-rs/axum@c59208c86fde (HEAD)
@@ -588,7 +591,7 @@ across the organization.
 rueca query trace '{"qualified_name":"tokio_macros::main","direction":"callees","edge_types":["DECORATES"],"limit":10}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/hyperium/tonic@4c0f455c264f (HEAD)
 [1] github.com/tokio-rs/axum@c59208c86fde (HEAD)
 [2] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
@@ -625,7 +628,7 @@ runtime, and which tests run on one" is one call per macro.
 rueca query search_symbols '{"query":"blocking acquire lock","repo":"github.com/tokio-rs/tokio","ref":["HEAD","tokio-1.53.3"],"limit":8}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 [1] github.com/tokio-rs/tokio@a85c3f5baa29 (tokio-1.53.3)
 [0] tokio/src/sync/semaphore.rs
@@ -646,7 +649,7 @@ rueca query search_symbols '{"query":"blocking acquire lock","repo":"github.com/
 rueca query search_symbols '{"query":"blocking acquire lock","repo":"github.com/tokio-rs/tokio","ref":"tokio-1.53.3","limit":5}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/tokio-rs/tokio@a85c3f5baa29 (tokio-1.53.3)
 tokio/src/sync/mutex.rs
   Method Mutex.blocking_lock L520-522  pub fn blocking_lock(&self) -> MutexGuard<'_, T>
@@ -660,12 +663,16 @@ tokio/src/sync/rwlock.rs
 
 Medians 34 and 23 ms. With a `ref` list, a symbol that is identical in
 both releases comes back once, marked ` [0,1]` (the `Mutex` methods); a
-symbol whose version differs is marked ` changed`. The comparison is per
+symbol whose version differs is marked ` changed`.
+
+The comparison is per
 file blob, not per symbol: `semaphore.rs` changed between the releases
 (new methods, `permits` from `u32` to `usize`), so every `Semaphore`
 method is `changed`, and `rwlock.rs` changed only in two doc-test lines
 of other methods, yet `RwLock.blocking_write` is `changed` too. Read
-` changed` as "its file changed"; ` [0,1]` is exact. The second query
+` changed` as "its file changed"; ` [0,1]` is exact.
+
+The second query
 reads the older release alone, with no `changed` marks. Why it matters
 for an agent: "what is different in this release around X" is one call,
 and ` [0,1]` rules out the code that did not move.
@@ -676,7 +683,7 @@ and ` [0,1]` rules out the code that did not move.
 rueca query list_contracts '{"kind":"rpc","query":"Greeter/SayHello","limit":12}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/hyperium/tonic@4c0f455c264f (HEAD)
 Greeter/SayHello  provides  tonic  github.com/hyperium/tonic:examples/src/autoreload/server.rs#MyGreeter.say_hello L39  (24)
 Greeter/SayHello  consumes  tonic  github.com/hyperium/tonic:examples/src/blocking/client.rs#BlockingClient.say_hello L61  (26)
@@ -697,7 +704,7 @@ Greeter/SayHello  provides  tonic  github.com/hyperium/tonic:examples/src/grpc-w
 rueca query list_contracts '{"side":"dangling","limit":6}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/hyperium/tonic@4c0f455c264f (HEAD)
 Blocking/SayHello  consumes  tonic  github.com/hyperium/tonic:examples/src/blocking/client.rs#main L72  (0)
 Echo/Unwrap  consumes  tonic  github.com/hyperium/tonic:examples/src/streaming/client.rs#main L92  (0)
@@ -729,7 +736,7 @@ The first 16 lines; the remaining 28 (the other structs, enums,
 constants, the methods of `Driver` and `Handle`, and one test) are in
 `out/20-outline-io-driver.txt`.
 
-```
+```text
 github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 tokio/src/runtime/io/driver.rs (rust, 407 lines)
   Struct Driver L26-39  pub(crate) struct Driver
@@ -759,7 +766,7 @@ the file.
 rueca query search_code '{"pattern":"cfg_net!\\s*\\{","regex":true,"language":"rust","limit":8}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/tokio-rs/mio@101e5b7c92b1 (HEAD)
 [1] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 [0] src/lib.rs
@@ -792,7 +799,7 @@ the graph now holds the items inside them (query 9).
 rueca query trace '{"qualified_name":"tokio::sync::oneshot::channel","direction":"callers","budget_tokens":400}' --org tokio-rs --text
 ```
 
-```
+```text
 [0] github.com/hyperium/hyper@7f67699ce32d (HEAD)
 [1] github.com/hyperium/tonic@4c0f455c264f (HEAD)
 [2] github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
@@ -831,7 +838,7 @@ and fails when the answer is named with other words.
 rueca query search_symbols '{"query":"where does axum turn a handler into a service","limit":6}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/tokio-rs/axum@c59208c86fde (HEAD)
 axum/src/handler/service.rs
   Method HandlerService.into_make_service L63-65  pub fn into_make_service(self) -> IntoMakeService<HandlerService<H, T, S>>
@@ -853,7 +860,7 @@ is on the path from a handler to a service.
 rueca query search_symbols '{"query":"how does tokio steal work from other workers","limit":6}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 tokio/src/runtime/scheduler/multi_thread/worker.rs
   Method Core.steal_work L1168-1196  fn steal_work(&mut self, worker: &Worker) -> Option<Notified>
@@ -878,7 +885,7 @@ and second.
 rueca query search_symbols '{"query":"how does tonic encode a message with prost","limit":6}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/hyperium/tonic@4c0f455c264f (HEAD)
 tonic-prost/README.md
   Section tonic-prost L1-19  # tonic-prost
@@ -903,7 +910,7 @@ sections rank above it because they repeat "tonic" and "prost".
 rueca query search_symbols '{"query":"how does tokio decide which worker thread runs a task","limit":6}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/tokio-rs/tokio@b53b2001ed2c (HEAD)
 tokio/src/runtime/metrics/runtime.rs
   Method RuntimeMetrics.worker_thread_id L349-354  pub fn worker_thread_id(&self, worker: usize) -> Option<ThreadId>
@@ -929,7 +936,7 @@ noise. The decision itself lives in `Handle.schedule_task` and
 rueca query search_symbols '{"query":"how does hyper read the request body","limit":6}' --org tokio-rs --text
 ```
 
-```
+```text
 github.com/hyperium/hyper@7f67699ce32d (HEAD)
 src/ffi/http_types.rs
   Function hyper_request_set_body L248-253  fn hyper_request_set_body(req: *mut hyper_request, body: *mut hyper_body) -> hyper_code
@@ -1012,6 +1019,7 @@ The details, measured again:
   with 46 wrong), REFERENCES 77, IMPORTS 16, OVERRIDES 9, IMPLEMENTS 3,
   TESTS 1 (was 10, 9 of them wrong). Checked by hand against the source:
   15 of the 52 CALLS (7 `import_resolved`, 8 `type_resolved`), 15 right.
+
   Edges whose source lies in a dependency of the consumer went from 19 (13
   wrong) to 13; checked by hand, all 13 are `impl LocalTrait for
   ForeignType`, which is right (`impl IntoResponse for Bytes` in axum,

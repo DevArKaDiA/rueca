@@ -1,11 +1,12 @@
 # RFC 0005 — Responses for agents: org-wide, multi-ref, token-efficient
 
-- Status: Draft; the local-mode part (§9) is implemented
-- Created: 2026-10-25
-- Depends on: RFC 0001 (§6.1 identifiers, §8.3 catalog, §11 query engine,
-  §13 permissions), RFC 0004 (efficiency metric)
-- Amends: `docs/tools.md` (response envelope, identifiers, `ref`, defaults),
-  RFC 0004 §5 / §6 (efficiency metric)
+- **Status:** Draft; the local-mode part (§9) is implemented
+- **Created:** 2026-10-25
+- **Updated:** 2026-11-24
+- **Depends on:** [RFC 0001](0001-architecture.md) (§6.1 identifiers, §8.3 catalog, §11 query engine,
+  §13 permissions), [RFC 0004](0004-quality-and-benchmark.md) (efficiency metric)
+- **Amends:** `docs/tools.md` (response envelope, identifiers, `ref`, defaults),
+  [RFC 0004](0004-quality-and-benchmark.md) §5 / §6 (efficiency metric)
 
 ## 1. Summary
 
@@ -67,7 +68,7 @@ with 40% callers recall where Rueca has 85%.
 
 ## 3. Identifiers
 
-```
+```text
 <repo>@<commit12>:<path>#<local-qualified-name>
 github.com/acme/billing@7696364aef89:src/invoices/service.py#InvoiceService.issue
 ```
@@ -123,6 +124,7 @@ Every tool response is:
 - An unknown or unindexed ref is an error that lists the indexed refs of
   that repository.
 
+> [!NOTE]
 > *Amended by [RFC 0006](0006-org-graph.md) (2026-10-26): rank fusion
 > across repositories is removed; an organization has one symbol index and
 > one ranking. The paragraph below is kept for history.*
@@ -178,7 +180,9 @@ once, the difference highlighted.
   qualified name (module included: `billing.invoices.service.InvoiceService.issue`,
   `src/util/index:Session.request`); `local` is the **file-local** qualified
   name its id is built from (the id's `#` part, `InvoiceService.issue`; a
-  file's path), the name the text rendering prints. Every object with an
+  file's path), the name the text rendering prints.
+
+  Every object with an
   `id` (search items, outline symbols, `get_symbol`'s symbol and lists,
   `trace` nodes, a match's or snippet's `symbol`, contract rows) carries
   `local`, and the `repo` and `ref` of the snapshot it was read from, so a
@@ -209,7 +213,7 @@ is the source node's file unless an eighth element gives it.)
 **Text content.** MCP results carry the JSON above in `structuredContent`
 and a compact text rendering as text content, one line per item:
 
-```
+```text
 acme/billing@7696364aef89 (main)
 src/invoices/service.py
   Method InvoiceService.issue  L41-63  def issue(self, invoice_id: str) -> Invoice
@@ -304,7 +308,7 @@ Measured on `psf/requests`, `gin-gonic/gin` and `sindresorhus/ky` (text
 content vs alpha verbose JSON, ~tokens = bytes / 4):
 
 | Tool | requests | gin | ky |
-|---|---|---|---|
+|---|---:|---:|---:|
 | `search_symbols`, defaults (10 vs 20) | 1,834 → 310 | 1,537 → 234 | 1,683 → 277 |
 | `search_symbols`, limit 10 both | 868 → 310 | 778 → 234 | 833 → 277 |
 | `trace` depth 1 | 2,034 → 391 | 843 → 174 | 2,306 → 434 |

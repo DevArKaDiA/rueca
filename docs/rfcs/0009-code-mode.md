@@ -1,28 +1,29 @@
 # RFC 0009 — Code mode (experimental)
 
-- Status: Experimental — phases 0–3 implemented; off by default (behind
+- **Status:** Experimental — phases 0–3 implemented; off by default (behind
   `--experimental-code-mode`; Starlark behind the non-default
   `code-mode-starlark` cargo feature, §13); verdict and recommendation in
   §14; graduation pending the owner's decision
-- Created: 2026-11-24
-- Amended: 2026-11-24 — both languages ship behind one `Sandbox` trait
+- **Created:** 2026-11-24
+- **Updated:** 2026-11-24
+- **Amended:** 2026-11-24 — both languages ship behind one `Sandbox` trait
   during the experiment so they can be compared; the language is an output
   of the experiment, not an up-front pick (§1, §4, §6, §8, §10, §12–§14)
-- Amended: 2026-11-24 — phase 1: the details §4–§5 left open are settled
+- **Amended:** 2026-11-24 — phase 1: the details §4–§5 left open are settled
   (§4.4), and Starlark is a non-default cargo feature (§13)
-- Amended: 2026-11-24 — phase 2: the multi-step suite as built (§8) and
+- **Amended:** 2026-11-24 — phase 2: the multi-step suite as built (§8) and
   its results (§13.1); no helper earned a place (§4.3)
-- Amended: 2026-11-24 — phase 3: the fluency probe and the decision
+- **Amended:** 2026-11-24 — phase 3: the fluency probe and the decision
   (§14): keep code mode experimental with JavaScript only; open questions
   updated (§12)
-- Amended: 2026-11-24 — the owner's decisions (§14.6): Starlark stays the
+- **Amended:** 2026-11-24 — the owner's decisions (§14.6): Starlark stays the
   optional build feature as built; the four API friction items of §14.4
   (5) are fixed before merge (§4.4)
-- Depends on: RFC 0001 (§11 tools, §13 security), RFC 0004 (efficiency
-  metrics), RFC 0005 (envelope, pinned ids, `repo` / `ref`, tokens per
-  correct answer), RFC 0006 (organization, contracts), RFC 0008 (service
+- **Depends on:** [RFC 0001](0001-architecture.md) (§11 tools, §13 security), [RFC 0004](0004-quality-and-benchmark.md) (efficiency
+  metrics), [RFC 0005](0005-agent-responses.md) (envelope, pinned ids, `repo` / `ref`, tokens per
+  correct answer), [RFC 0006](0006-org-graph.md) (organization, contracts), [RFC 0008](0008-service-mode.md) (service
   mode, child-process isolation)
-- Research date: 2026-11-24. Crate versions were read from crates.io that
+- **Research date:** 2026-11-24. Crate versions were read from crates.io that
   day (§11). *(estimate)* marks arithmetic on stated inputs;
   *(unverified)* a claim no primary source confirmed; *(default)* a value
   chosen here, to be tuned by measurement.
@@ -200,12 +201,14 @@ task. Helpers are thin compositions of the eight tools.
 - **Snapshots and `s`.** The calls' snapshot entries are merged (same
   entry once) and numbered in first-read order; every `s` and `in` in a
   call's `results` is renumbered to that list before the script sees it.
+
   A script does not need them to place a symbol: every object with an `id`
   carries `local` (the file-local name the id is built from), `qn` (the
   global one), `repo` and `ref` — one rule for every tool and every
   answer, single- or multi-snapshot, in the tools' structured JSON (not in
   their text, so single-repository answers do not grow), added before merge
   (§14.6).
+
   Envelope fields other than `results` are not passed to scripts; a call
   the tool cut (`truncated`) is reported in `partial` with its
   `next_cursor`.
@@ -340,23 +343,47 @@ improve and must not regress, since the tools are unchanged.
 
 **As built (phase 2).** `bench/` command `rueca-bench multistep`
 (`bench/README.md`, *Code mode … and the multi-step suite*): **25 tasks**
-over three S3 repositories (Flask, Requests, Hono; 16 tasks), the Flask
-cross-repository group (Flask with Click, Jinja, Werkzeug; 4), the S2
-`ollama` group (server and two clients; 4) and the multi-ref scenario (1).
-Kinds: 2-hop callers, exactly-2-hop count, callers ∩ callers, callees ∩
-callees, outline → per-member caller counts, top-N by fan-in in a file,
-uncalled functions of a file, callees that call nothing, search → filter →
-details, the callee with most callers, callers in a directory, callers of a
-library function / classes from another repository, routes called by both
-clients / by one only, OpenAPI operations a client calls, a route's
-handlers, the organization's dependencies, functions that differ between
-two refs; 5 of the 25 are expected not to favour code mode (one call
-answers them). Gold is derived in code from the existing gold (S3 call
-graphs, the cross-repository labeler's uses, S2 pairs, `collapse_gold`),
-committed with its inputs and re-derived by a test. Arms: the reference
-tool-call plan, the reference JavaScript and Starlark scripts, and cbm
-0.12.0 (one `query_graph` where its Cypher subset can express the task:
-16 of 25; the cross-repository, contract and multi-ref tasks it cannot).
+over:
+
+- Three S3 repositories (Flask, Requests, Hono; 16 tasks),
+- The Flask cross-repository group (Flask with Click, Jinja, Werkzeug;
+  4),
+- The S2 `ollama` group (server and two clients; 4),
+- The multi-ref scenario (1).
+
+Kinds:
+
+- 2-hop callers,
+- Exactly-2-hop count,
+- Callers ∩ callers,
+- Callees ∩ callees,
+- Outline → per-member caller counts,
+- Top-N by fan-in in a file,
+- Uncalled functions of a file,
+- Callees that call nothing,
+- Search → filter → details,
+- The callee with most callers,
+- Callers in a directory,
+- Callers of a library function / classes from another repository,
+- Routes called by both clients / by one only,
+- OpenAPI operations a client calls,
+- A route's handlers,
+- The organization's dependencies,
+- Functions that differ between two refs.
+
+5 of the 25 are expected not to favour code mode (one call answers
+them). Gold is derived in code from the existing gold (S3 call graphs,
+the cross-repository labeler's uses, S2 pairs, `collapse_gold`),
+committed with its inputs and re-derived by a test.
+
+Arms:
+
+- The reference tool-call plan,
+- The reference JavaScript and Starlark scripts,
+- cbm 0.12.0 (one `query_graph` where its Cypher subset can express the
+  task: 16 of 25; the cross-repository, contract and multi-ref tasks it
+  cannot).
+
 Each task's statement is written for the phase 3 probe (`rueca-bench
 multistep tasks`, `probe`, `describe-api`). Results: §13.1.
 
@@ -445,11 +472,15 @@ not an agentic evaluation.
 Crate `rueca-codemode` (features `js`, `starlark`; both default-on in
 phase 0, Starlark opt-in since phase 1):
 `Sandbox::run(script, &mut dyn Host, &Limits) -> Result<Outcome,
-ScriptError>`, two tools bound through an in-memory host. Measured
+ScriptError>`, two tools bound through an in-memory host.
+
+Measured
 2026-11-24 on an Apple M1 Pro (10 cores, 32 GB), macOS, Rust stable
 1.99, release profile of the workspace (`lto = "thin"`,
 `codegen-units = 4`, `strip`). Versions: `rquickjs` 0.14.0 (QuickJS-ng,
-built from C by `rquickjs-sys` 0.14.0), `starlark` 0.14.3. Timings come
+built from C by `rquickjs-sys` 0.14.0), `starlark` 0.14.3.
+
+Timings come
 from `cargo run --release -p rueca-codemode --example phase0`; each limit
 probe runs in its own child process (peak RSS from `getrusage`), under
 the default limits (2 s, 64 MiB).
@@ -496,26 +527,33 @@ What the rows mean for the experiment:
   script or a worker pool. Its deadline is enforceable except inside one
   long operation (3.1 s observed for a 2 s limit).
 - **cargo-deny**: Starlark cannot be merged to `main` as is. Options:
-  (a) set `[advisories] unmaintained = "workspace"` in `deny.toml`, which
-  reports unmaintained crates only when they are direct dependencies of a
-  workspace crate (verified: all checks then pass; it is a policy change,
-  not an ignore, and applies to every future transitive crate); (b) make
-  the `starlark` feature non-default (verified: `cargo deny check` passes
-  with `default = ["js"]`, since the check uses default features), which
-  also takes Starlark out of CI's tests unless a job enables it; (c) wait
-  for upstream: `starlark-rust`'s main branch has already dropped `paste`
-  and `fxhash` but still uses `derivative`; (d) drop Starlark. No
-  advisory is ignored and no licence was added to the allow-list.
+  - (a) set `[advisories] unmaintained = "workspace"` in `deny.toml`,
+    which reports unmaintained crates only when they are direct
+    dependencies of a workspace crate (verified: all checks then pass; it
+    is a policy change, not an ignore, and applies to every future
+    transitive crate);
+  - (b) make the `starlark` feature non-default (verified: `cargo deny
+    check` passes with `default = ["js"]`, since the check uses default
+    features), which also takes Starlark out of CI's tests unless a job
+    enables it;
+  - (c) wait for upstream: `starlark-rust`'s main branch has already
+    dropped `paste` and `fxhash` but still uses `derivative`;
+  - (d) drop Starlark.
+
+  No advisory is ignored and no licence was added to the allow-list.
 - **Outcome (phase 1): option (b).** The owner rejected advisory
   ignores and policy changes, so Starlark is a **non-default cargo
   feature**: `rueca-codemode` has `default = ["js"]`, and the feature is
   forwarded as `code-mode-starlark` by `rueca-mcp` and the `rueca` binary.
+
   `cargo deny check` (CI's invocation: default features, `deny.toml`
   unchanged) passes; the default binary has no Starlark, and
   `language: "starlark"` there is an error that says to rebuild with
   `--features code-mode-starlark`. A CI job runs clippy and the tests of
   the code-mode crates with the feature on, so Starlark keeps building and
-  passing; it is not in the deny job. For phase 3 this is evidence against
+  passing; it is not in the deny job.
+
+  For phase 3 this is evidence against
   keeping Starlark as is: it cannot be in the default build until upstream
   drops `derivative`, `paste` and `fxhash` (or the policy changes), and
   its memory limit stays best-effort in-process (`docs/tools.md`,
@@ -533,15 +571,19 @@ What the rows mean for the experiment:
 `rueca-bench multistep run`, 2026-11-24, Apple M4 Pro; `rueca` release
 build `--no-default-features --features code-mode-starlark` (lexical only,
 no embedding runtime: nothing in the suite embeds), cbm 0.12.0 (the bench's
-pinned binary). Tokens: cl100k_base. All 25 tasks and all four arms ran;
+pinned binary).
+
+Tokens: cl100k_base. All 25 tasks and all four arms ran;
 full tables in `docs/bench/multistep-results.md`, records in
-`bench/results/multistep.json`. The numbers below are re-measured after the
+`bench/results/multistep.json`.
+
+The numbers below are re-measured after the
 API fixes of §14.6 (stores re-indexed with that binary; reference scripts
 and the ms25 plan without their workarounds); the first run's numbers,
 before the fixes, are in the second table.
 
 | Arm | Correct | Read / correct | … `describe_api` amortised | Written / correct | Round trips | `execute` overhead median / p95 |
-|---|---|---|---|---|---|---|
+|---|---:|---:|---:|---:|---:|---:|
 | Tool-call plans | 18/25 | 2,743 | — | 254 | 143 | — |
 | JavaScript | 18/25 | 429 | 666 | 352 | 25 | 0.63 / 1.20 ms |
 | Starlark | 18/25 | 434 | 675 | 387 | 25 | 0.33 / 0.65 ms |
@@ -550,7 +592,7 @@ before the fixes, are in the second table.
 Before / after the API fixes (§14.6):
 
 | | Plans | JavaScript | Starlark |
-|---|---|---|---|
+|---|---:|---:|---:|
 | Correct | 18/25 → 18/25 | 18/25 → 18/25 | 18/25 → 18/25 |
 | Read / correct | 3,639 → 2,743 | 444 → 429 | 448 → 434 |
 | … `describe_api` amortised | — | 671 → 666 (4,086 → 4,260 tokens) | 680 → 675 (4,166 → 4,338 tokens) |
@@ -571,11 +613,15 @@ in any arm (cbm did not change: same binary, same answers).
   the 25 tasks; no task the plans answer correctly is wrong in either
   language; median overhead under 1 ms (gate 20 ms).
 - **Where it comes from.** The pooled ratio is dominated by the plans that
-  must read whole listings: the three contract tasks (6,533–7,780 tokens),
-  the classes of a library used across the organization (ms19, 3,385),
-  callers of a library function across the organization (ms17, 2,502 for
-  one `trace`) and the ref diff (ms25, 1,614: one outline at both refs;
-  11,625 before the fixes, when it read the file at both refs). Without
+  must read whole listings:
+  - The three contract tasks (6,533–7,780 tokens),
+  - The classes of a library used across the organization (ms19, 3,385),
+  - Callers of a library function across the organization (ms17, 2,502
+    for one `trace`),
+  - The ref diff (ms25, 1,614: one outline at both refs; 11,625 before
+    the fixes, when it read the file at both refs).
+
+  Without
   the five tasks that dominated the first run (ms17, ms21–ms23, ms25) the
   reduction is 76% (as before the fixes); the median per-task ratio of
   code mode to plan is 0.36 (0.26 over the 20 tasks expected to win),
@@ -592,23 +638,29 @@ in any arm (cbm did not change: same binary, same answers).
   Rueca arm gets right (ms05, ms06, ms08, ms11, ms12, ms13, ms16) differ
   from the SCIP gold by one element each (a caller Rueca resolves that SCIP
   does not, a nested-function name); plans and both languages give the same
-  answer on every task. The fixes of §14.6 moved none of them: the test
+  answer on every task.
+
+  The fixes of §14.6 moved none of them: the test
   code `trace` now leaves out was never in their answers (ms16 asks for
   callers under `src/`, and its plan only stopped reading the test-file
-  callers it had to filter out). cbm's 12 misses are its own call graph (no
+  callers it had to filter out).
+
+  cbm's 12 misses are its own call graph (no
   constructor calls, class-less names for TypeScript object-literal
   methods, a missing `api.py` hop) — and its `[:CALLS*1..2]` / `[:CALLS*2]`
   return the direct callers only, so its plans spell the second hop out.
 - **Limits hit**: none in any arm (plans ask for whole answers with
   `budget_tokens`; the tools' default budget would cut five of them).
-- **Helpers (§4.3): none added.** Considered: depth-1 neighbours of a
-  root in one direction as `path#Qualname` (the same five-line filter in 16
-  of 25 scripts per language — but it saves no round trip: one `trace` with
-  `labels` already does the work, and a local-name field in the shapes
-  would remove the boilerplate for every tool); `callersAcrossRepos` (the
-  three cross-repository tasks are one `trace` each plus an id-prefix
-  filter); a ref-diff helper (one task; the honest version needs a
-  per-symbol comparison in the engine, below).
+- **Helpers (§4.3): none added.** Considered:
+  - Depth-1 neighbours of a root in one direction as `path#Qualname` (the
+    same five-line filter in 16 of 25 scripts per language — but it saves
+    no round trip: one `trace` with `labels` already does the work, and a
+    local-name field in the shapes would remove the boilerplate for every
+    tool);
+  - `callersAcrossRepos` (the three cross-repository tasks are one
+    `trace` each plus an id-prefix filter);
+  - A ref-diff helper (one task; the honest version needs a per-symbol
+    comparison in the engine, below).
 
 Friction from writing the 50 reference scripts (all four engine and API
 items were fixed before merge, §14.6; the reference scripts no longer work
@@ -655,22 +707,27 @@ the owner's decision.
 Protocol (`bench/multistep/probe/README.md`): 10 tasks of the suite
 (ms01, ms02, ms07, ms09, ms14, ms15, ms17, ms19, ms22, ms25), chosen among
 the 18 whose reference answers match gold and spanning kinds, × 2
-languages. One fresh Claude Opus subagent per (task, language) was given
-only that language's `describe_api` output and the task statement — no
-repository access, no reference script, no way to run anything — and
-wrote one script, run unchanged with `rueca-bench multistep probe`. On a
-failure, exactly one repair attempt, given the `execute` output. n = 1
-per cell and one model: an indication, not a measurement of model fluency
-in general. Scripts, runner output and prompt template are committed in
-`bench/multistep/probe/`; per-task table in
-`docs/bench/multistep-results.md` (*Fluency probe*). The probe ran against
+languages.
+
+One fresh Claude Opus subagent per (task, language) was given only that
+language's `describe_api` output and the task statement — no repository
+access, no reference script, no way to run anything — and wrote one
+script, run unchanged with `rueca-bench multistep probe`. On a failure,
+exactly one repair attempt, given the `execute` output.
+
+n = 1 per cell and one model: an indication, not a measurement of model
+fluency in general. Scripts, runner output and prompt template are
+committed in `bench/multistep/probe/`; per-task table in
+`docs/bench/multistep-results.md` (*Fluency probe*).
+
+The probe ran against
 the API *before* the fixes of §14.6, and its scripts and runner output are
 kept as they were (they are not re-run as first tries); the reference
 scripts and plans it is compared with below are the re-measured ones of
 §13.1, after the fixes (before them: 339 / 338 and 4,169 tokens).
 
 | | JavaScript | Starlark |
-|---|---|---|
+|---|---:|---:|
 | Correct, first try | 9/10 | 9/10 |
 | Correct after one repair | 9/10 | 9/10 |
 | Script tokens, mean / median | 830 / 771 | 640 / 622.5 |
@@ -689,7 +746,9 @@ scripts and plans it is compared with below are the re-measured ones of
   the gold file lists but keyed the object by the short class names
   (`HTTPException`) where the statement asks for the names "exactly as
   written" (`werkzeug.exceptions.HTTPException`) — an ambiguity in the
-  statement's answer shape. With no error to read, the JavaScript repair
+  statement's answer shape.
+
+  With no error to read, the JavaScript repair
   guessed at a different cause (it widened what counts as a use) and
   returned a worse answer, still wrong. The Starlark repair was not
   obtained: the repair subagent's file write was blocked by the harness's
@@ -698,19 +757,23 @@ scripts and plans it is compared with below are the re-measured ones of
   tasks the first-try scripts have 3.5× (JavaScript) and 2.7× (Starlark)
   the source tokens of the reference scripts (defensive checks,
   `try`/`catch` in 9 of 10 JavaScript scripts, helper functions) and make
-  twice the engine calls (166 and 167 vs 81). Tokens read per correct
-  answer still fall 61% (JavaScript) and 69% (Starlark) against the plans
-  on the same tasks — above the 40% gate, but short of the 88% the
-  reference scripts show there; on ms01, ms02 and ms09 the JavaScript
-  script reads as much as the plan or more (Starlark on ms01). Starlark
-  scripts were about 23% shorter than JavaScript ones. (Against the plans
-  and reference scripts before the fixes: 3.2× / 2.5×, 83 calls, 76% /
-  81% vs 92%; the plans of ms17, ms19 and ms25 got much cheaper.)
+  twice the engine calls (166 and 167 vs 81).
+
+  Tokens read per correct answer still fall 61% (JavaScript) and 69%
+  (Starlark) against the plans on the same tasks — above the 40% gate,
+  but short of the 88% the reference scripts show there; on ms01, ms02
+  and ms09 the JavaScript script reads as much as the plan or more
+  (Starlark on ms01). Starlark scripts were about 23% shorter than
+  JavaScript ones.
+
+  (Against the plans and reference scripts before the fixes: 3.2× /
+  2.5×, 83 calls, 76% / 81% vs 92%; the plans of ms17, ms19 and ms25 got
+  much cheaper.)
 
 ### 14.2 Gate (§8)
 
 | Language | Read / correct vs plans (≥ 40%) | … `describe_api` amortised | Tasks regressed (none) | Median overhead (< 20 ms) | Gate |
-|---|---|---|---|---|---|
+|---|---:|---:|---|---:|---|
 | JavaScript | −84.4% (429 vs 2,743) | −75.7% (666) | none | 0.63 ms | pass |
 | Starlark | −84.2% (434 vs 2,743) | −75.4% (675) | none | 0.33 ms | pass |
 
@@ -718,7 +781,9 @@ Re-measured after the API fixes of §14.6; before them −87.8% / −87.7%
 (444 / 448 vs 3,639), −81.6% / −81.3% amortised, overhead 0.56 / 0.32 ms
 (§13.1). The cut shrank because the plans got cheaper, not because the
 scripts got dearer. The same 18 of 25 tasks are correct in all three Rueca
-arms, before and after. The pooled ratio is dominated by the three
+arms, before and after.
+
+The pooled ratio is dominated by the three
 contract tasks (6,533–7,780 tokens as plans) and the cross-repository
 listings; without the five tasks that dominated the first run (ms17,
 ms21–ms23, ms25) the cut is 76%, and the median per-task ratio of code
@@ -739,17 +804,23 @@ both languages share.
 **Starlark: works, but costs what JavaScript does not.** It passes the
 gate with numbers indistinguishable from JavaScript's, and starts faster
 (about 1.5 µs against about 0.1 ms; irrelevant next to engine calls that
-take milliseconds). In the probe its scripts were about 23% shorter (796
-vs 1,007 tokens read per correct answer on those tasks, n = 1 per cell;
-the reference scripts show no such gap: 434 vs 429 suite-wide) and it
-scored 9/10 on the first try: the hypothesis that models would trip over
-the dialect was not confirmed at this sample size. Against it: its
-dependency tree fails the repository's `cargo deny` advisory policy (three
-unmaintained crates: `derivative`, `paste`, `fxhash`), so it cannot be a
-default feature; its memory limit cannot be enforced in-process (an
-impossible allocation aborts the process, dictionary tables are not
-counted, a long built-in overruns the deadline: §13); and it adds
-+5.72 MB and +145 crates.
+take milliseconds).
+
+In the probe its scripts were about 23% shorter (796 vs 1,007 tokens
+read per correct answer on those tasks, n = 1 per cell; the reference
+scripts show no such gap: 434 vs 429 suite-wide) and it scored 9/10 on
+the first try: the hypothesis that models would trip over the dialect
+was not confirmed at this sample size.
+
+Against it:
+
+- Its dependency tree fails the repository's `cargo deny` advisory
+  policy (three unmaintained crates: `derivative`, `paste`, `fxhash`),
+  so it cannot be a default feature;
+- Its memory limit cannot be enforced in-process (an impossible
+  allocation aborts the process, dictionary tables are not counted, a
+  long built-in overruns the deadline: §13);
+- It adds +5.72 MB and +145 crates.
 
 ### 14.4 Where code mode falls short
 
@@ -845,10 +916,14 @@ counted, a long built-in overruns the deadline: §13); and it adds
   The reference scripts and the ms25 tool-call plan drop their
   workarounds (every reference answer is unchanged; the ms25 plan reads
   one outline instead of the file at both refs). `describe_api` grows to
-  4,260 (JavaScript) and 4,338 (Starlark) tokens. The suite numbers of
-  §13.1 and §14 are re-measured after the fixes (before / after in §13.1
-  and `docs/bench/multistep-results.md`): the gate still passes in both
-  languages (−84.4% / −84.2%, −75.7% / −75.4% amortised; −87.8% / −87.7%
-  before), no task changed correctness, and the multi-ref scenario of the
-  organization suite now scores: no unchanged symbol of the changed file
-  is flagged `changed` (6 before the fixes, 0 after; `docs/bench/alpha-results.md`).
+  4,260 (JavaScript) and 4,338 (Starlark) tokens.
+
+  The suite numbers of §13.1 and §14 are re-measured after the fixes
+  (before / after in §13.1 and `docs/bench/multistep-results.md`):
+
+  - The gate still passes in both languages (−84.4% / −84.2%, −75.7% /
+    −75.4% amortised; −87.8% / −87.7% before),
+  - No task changed correctness,
+  - The multi-ref scenario of the organization suite now scores: no
+    unchanged symbol of the changed file is flagged `changed` (6 before
+    the fixes, 0 after; `docs/bench/alpha-results.md`).

@@ -1,9 +1,10 @@
 # RFC 0004 — Quality bar and benchmark
 
-- Status: Draft
-- Created: 2026-10-25
-- Depends on: RFC 0001 (§15 benchmark), RFC 0003 (§3 release gate)
-- Amends: RFC 0001 §15 (adoption gate), RFC 0003 §3 (statuses, parity row)
+- **Status:** Draft
+- **Created:** 2026-10-25
+- **Updated:** 2026-11-17
+- **Depends on:** [RFC 0001](0001-architecture.md) (§15 benchmark), [RFC 0003](0003-structured-data-and-languages.md) (§3 release gate)
+- **Amends:** [RFC 0001](0001-architecture.md) §15 (adoption gate), [RFC 0003](0003-structured-data-and-languages.md) §3 (statuses, parity row)
 
 ## 1. Summary
 
@@ -182,7 +183,7 @@ only; the cheapest signal of agent cost that needs no agent.
 ## 6. Floors, targets and statuses
 
 | Family | Metric | Floor (`stable`) | Target |
-|---|---|---|---|
+|---|---|---|---:|
 | Localization | File Acc@5 | not significantly below BM25 (§6.1) | ≥ 80% |
 | Localization | Function Acc@10 | not significantly below BM25 (§6.1) | ≥ 65% |
 | Structure | Precision, callers and callees | ≥ 90% | ≥ 97% |
@@ -295,7 +296,7 @@ RFC 0003's "supported" becomes `stable`; its "parity row" becomes the
 `docs/bench/<release>-results.md` opens with one scorecard per language:
 
 | Metric | Rueca (95% CI) | Floor | Target | Status | BM25 | cbm |
-|---|---|---|---|---|---|---|
+|---|---:|---:|---:|---|---:|---:|
 | Callers precision | 98.1 (97.4–98.7) | 90 | 97 | ✅ | — | 96.6 |
 | … | | | | | | |
 

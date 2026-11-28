@@ -1,20 +1,21 @@
 # RFC 0007 — Semantic search
 
-- Status: **phases 0–1 implemented**, opt-in. Phase 0: the runtime
+- **Status:** **phases 0–1 implemented**, opt-in. Phase 0: the runtime
   (`rueca-embed`, `rueca models`, `rueca embed`, the bench's vector arm).
   Phase 1: hybrid search (`rueca index --embed` / `RUECA_EMBED`, the store
   vector cache, `vectors.*` components, `search_symbols` `mode` and
   `retrieval`, the bench's hybrid arm). The owner's decisions of
   2026-11-24 (§0) set the defaults; phases 2–3 are follow-ups (§12)
-- Created: 2026-11-16
-- Depends on: RFC 0001 (§8 storage, §11 query engine), RFC 0004 (metrics,
-  calibration split), RFC 0005 (envelope), RFC 0006 (org index, routing)
-- Amends: RFC 0001 §8.1 item 5, §11.3, §19 open question 3; RFC 0002 §2
+- **Created:** 2026-11-16
+- **Updated:** 2026-11-24
+- **Depends on:** [RFC 0001](0001-architecture.md) (§8 storage, §11 query engine), [RFC 0004](0004-quality-and-benchmark.md) (metrics,
+  calibration split), [RFC 0005](0005-agent-responses.md) (envelope), [RFC 0006](0006-org-graph.md) (org index, routing)
+- **Amends:** [RFC 0001](0001-architecture.md) §8.1 item 5, §11.3, §19 open question 3; [RFC 0002](0002-building-blocks.md) §2
   (excluded models), §6.2 (rows "Vectors", "Offline embeddings", "Quality
-  embeddings"); RFC 0004 §6, §11, §13 open questions 1–2; RFC 0006 §6, §9.2
-- Revised: 2026-11-17 (the owner's answers, §15; organization-suite
+  embeddings"); [RFC 0004](0004-quality-and-benchmark.md) §6, §11, §13 open questions 1–2; [RFC 0006](0006-org-graph.md) §6, §9.2
+- **Revised:** 2026-11-17 (the owner's answers, §15; organization-suite
   evidence, §2)
-- Research date: 2026-11-16. Model cards, licenses, file sizes, crate
+- **Research date:** 2026-11-16. Model cards, licenses, file sizes, crate
   versions and prices were checked that day (§17). *(estimate)* marks
   arithmetic on published figures, with its inputs; *(unverified)* marks a
   claim no primary source confirmed.
@@ -133,7 +134,7 @@ finds what an agent names, not what it describes.
 ### 3.1 Presets
 
 | Preset | Model and file | Params | Dims (MRL) | Context | License | On disk | Code quality (nDCG@10 unless noted) | Status |
-|---|---|---|---|---|---|---|---|---|
+|---|---|---:|---:|---:|---|---|---|---|
 | `qwen3-0.6b-q8` | Qwen3-Embedding-0.6B, official `Q8_0` GGUF | 0.6B | 1024 (32–1024) | 32k | Apache-2.0 | 639 MB | MTEB-Code 75.41 ([Qwen3 report](https://arxiv.org/html/2506.05176v3)); CoIR-10 74.96 *(derived from [C2LLM](https://arxiv.org/html/2512.21332), Table 2)* | **default, provisional (§3.3)** |
 | `qwen3-0.6b-q4` | same, `Q4_K_M` converted and hosted by Rueca | 0.6B | 1024 | 32k | Apache-2.0 | ≈ 380–400 MB *(estimate; a [community Q4_K_M](https://huggingface.co/PeterAM4/Qwen3-Embedding-0.6B-GGUF) is 378 MB)* | no published run; 4-bit RTN −7.5% ([arXiv 2609.24322](https://arxiv.org/html/2609.24322v1)) | optional; default on a backend only by §3.3's rule |
 | `qwen3-0.6b-f16` | same, official `f16` | 0.6B | 1024 | 32k | Apache-2.0 | 1,198 MB | reference | optional; reference for rank overlap |
@@ -192,6 +193,7 @@ acceptable"; on the evidence below the rule yields Q8 on Metal and x86.
   Qwen3-Embedding-0.6B loses 7.5% nDCG@10 on four BEIR sets and, of the
   queries whose top 1 was relevant, 22.2% lose it, the worst of the
   three sizes (8B: −3.1%) ([arXiv 2609.24322](https://arxiv.org/html/2609.24322v1)).
+
   A second study of the same model keeps 98.7% of nDCG@10 at group 128
   and about 100% at group 16 (asymmetric; SciFact, NFCorpus and the
   SkillRet test split), yet group 16 still replaces 13–22% of the top 10
@@ -218,7 +220,7 @@ in `docs/decisions.md` with the sweep.
 The 0.6B is the weakest candidate on the tasks closest to localization:
 
 | Task | Qwen3-0.6B | Qwen3-4B | Qwen3-8B | Others | Source |
-|---|---|---|---|---|---|
+|---|---:|---:|---:|---|---|
 | SWE-Bench retrieval (issue → code), nDCG@10 | 76.12 | — | — | code-specialised 83.00–87.40 | [jina-code-embeddings](https://arxiv.org/html/2508.21290), Table 2 |
 | CodeEditSearch, nDCG@10 | 64.42 | 76.49 | 76.97 | 80.30–84.43 | C2LLM; jina paper |
 | SWE-bench Lite, Fn Acc@10 (all-gold) | 62.77 | — | 71.53 | CodeRankEmbed 58.76 | SweRank+, Table 2; LocAgent |
@@ -231,7 +233,9 @@ the configs *(estimate)*): 100k symbols take 77–154 min with the 0.6B and
 **Recorded (decided by rule, 2026-11-17):** phase 0 measures
 `qwen3-0.6b-q8`, `qwen3-4b-q4`, `coderank-137m` and, as a fourth
 candidate, `gte-modernbert-149m` on the S1 calibration split (`raw` and
-`kw`) and the CoIR cheap profile. **Rule:** the local default is the
+`kw`) and the CoIR cheap profile.
+
+**Rule:** the local default is the
 candidate with the best macro over languages of ½ (File Acc@5 + Function
 Acc@10) on the calibration split, `raw` and `kw` averaged, among those
 whose cold indexing time on an M1 Pro GPU stays within **twice the
@@ -260,7 +264,7 @@ visible wherever it ranked.
 permissions) rather than one switch per organization.
 
 | Preset | $ / 1M tokens | Dims | Code evidence | Source |
-|---|---|---|---|---|
+|---|---:|---|---|---|
 | `remote:voyage/voyage-code-4` | 0.12 (first 200M free) | 2048 / 1024 / 512 / 256 | vendor: +27.54% over voyage-code-3 on 19 agentic sets | [Voyage](https://blog.voyageai.com/2026/08/13/voyage-code-4/), [pricing](https://docs.voyageai.com/docs/pricing) |
 | `remote:voyage/voyage-code-3` | 0.18 | same | MTEB Code 79.84, SWE-Bench 87.02 | jina-code-embeddings |
 | `remote:openai/text-embedding-3-large` | 0.13 | up to 3072 | MTEB (Code) 58.95 | [pricing](https://developers.openai.com/api/docs/pricing); Qwen3 report |
@@ -311,19 +315,25 @@ breaks cargo-dist or the size budget.
   C/C++ compiler, on CI and for `cargo install` with default features.
 - **x86 CPU features are fixed at compile time** (`GGML_NATIVE` is off
   unless `target-cpu=native`; `build.rs` maps rustc target features to
-  `GGML_AVX2` and friends). **Recorded (provisional, 2026-11-17):** the
+  `GGML_AVX2` and friends).
+
+  **Recorded (provisional, 2026-11-17):** the
   cargo-dist x86_64 builds with the `embeddings` feature target
   `x86-64-v3` (AVX2, FMA, F16C, BMI2,
   [x86-64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI)); on an older
   CPU the vectors pass and dense queries fail with a clear error naming
   the missing level, and the documented fallback is
-  `cargo install --no-default-features` (lexical only). Rationale: one
+  `cargo install --no-default-features` (lexical only).
+
+  Rationale: one
   static binary per target, as the project promises, with no extra
   shared libraries; AVX2 has shipped since Intel Haswell (2013) and AMD
   Excavator (2015), though Celeron and Pentium models gained it only in
   2020 ([AVX2](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions)).
   The alternative, llama.cpp's dynamic CPU backends, is a shared library
-  per CPU level. *Revisit if:* users report pre-AVX2 machines, or the
+  per CPU level.
+
+  *Revisit if:* users report pre-AVX2 machines, or the
   dynamic backends become loadable from inside one static binary.
 - **API churn.** The crate "does not follow semver meaningfully": pinned
   exactly, upgraded in its own pull request with the tests of §9 and the
@@ -374,6 +384,7 @@ breaks cargo-dist or the size budget.
   `DevArKaDiA/rueca-models` repository: immutable tagged assets, their
   sha256 in the manifest, no Hugging Face account or token at download
   time, the same CDN as the binaries; mirrors to Hugging Face may follow.
+
   Each release file must be under 2 GiB, with no limit on a release's
   total size or bandwidth
   ([GitHub](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)):
@@ -381,7 +392,9 @@ breaks cargo-dist or the size budget.
   `Q4_K_M` would be about 2.5 GB *(estimate: the official 4B embedder
   file at that quantization is 2,497 MB)*, above the limit, and ships
   split with llama.cpp's `gguf-split` (loading split files through
-  `llama-cpp-2` *(unverified)*). Upstream official files stay on
+  `llama-cpp-2` *(unverified)*).
+
+  Upstream official files stay on
   Hugging Face. *Revisit if:* split files prove fragile, or bandwidth
   becomes a problem.
 
@@ -438,12 +451,15 @@ path: <repository-relative path>
 Qwen3 queries carry an instruction, documents none:
 `Instruct: {task}\nQuery:{query}`; omitting it costs "1% to 5%", and
 instructions should be English ([model card](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B)).
+
 Phase 0 chooses between Qwen's code instruction ("Given a question about
 coding, retrieval code or passage that can solve user's question",
 [task prompts](https://media.githubusercontent.com/media/QwenLM/Qwen3-Embedding/main/evaluation/task_prompts.json))
 and an issue instruction ("Given a GitHub issue or a question about a code
 base, retrieve the functions, classes or sections that answer it or must
-change"). The dense arm cuts the query to its own token budget (512 capped by
+change").
+
+The dense arm cuts the query to its own token budget (512 capped by
 the model's context, whatever the documents' budget); BM25 keeps it
 whole.
 
@@ -505,7 +521,7 @@ non-embedding parameters at 100% to 50% utilisation; no tokens/s is
 published for Qwen3-Embedding-0.6B itself)*:
 
 | Hardware | 0.6B | 4B | 8B |
-|---|---|---|---|
+|---|---:|---:|---:|
 | M1 Pro GPU (Metal, F16 rate) | 77–154 min | 10.6–21 h | 20–41 h |
 | M4 Max GPU (Metal, F16 rate) | 25–51 min | 3.5–7 h | 6.7–13.3 h |
 | Ryzen 7950X CPU (Q4_0 rate) | 2.5–4.9 h | 20–41 h | 39–78 h |
@@ -648,17 +664,25 @@ s(c) = (α·b̂(c) + (1 − α)·d̂(c)) · prior(c) · route(repo(c))
 Seeds are the top 5 of each list; their 1-hop neighbours over `CALLS`
 (callers, callees) and `CONTAINS` (parent, children) join with s(n) =
 max(s(n), 0.5 · s(seed)), at most 50 per query, their own scores computed
-as for any candidate. Evidence: expansion over contains edges lifts
-function Recall@20 by 0.05–0.12 while import and inheritance edges add
-nothing, and helps only if admitted neighbours are more precise than what
-they displace ([SpIDER](https://arxiv.org/html/2512.16956)); a 1-hop ego
-graph lifts Agentless function localization from 51.0 to 54.0 while 2 hops
-fall below the baseline (26.00 vs 27.33 resolved,
-[RepoGraph](https://arxiv.org/html/2410.14684v2)); without expansion
-MuLocBench file Acc@5 drops from 55.7 to 48.2
-([LARGER](https://arxiv.org/html/2605.16352)). Swept: decay {0, 0.25, 0.5},
+as for any candidate.
+
+Evidence:
+
+- expansion over contains edges lifts function Recall@20 by 0.05–0.12
+  while import and inheritance edges add nothing, and helps only if
+  admitted neighbours are more precise than what they displace
+  ([SpIDER](https://arxiv.org/html/2512.16956));
+- a 1-hop ego graph lifts Agentless function localization from 51.0 to
+  54.0 while 2 hops fall below the baseline (26.00 vs 27.33 resolved,
+  [RepoGraph](https://arxiv.org/html/2410.14684v2));
+- without expansion MuLocBench file Acc@5 drops from 55.7 to 48.2
+  ([LARGER](https://arxiv.org/html/2605.16352)).
+
+Swept: decay {0, 0.25, 0.5},
 edges {none, contains, contains + calls}, and SpIDER's pool filter (a
-neighbour enters only if it is in the dense top 500). The organization
+neighbour enters only if it is in the dense top 500).
+
+The organization
 suite's impact questions (§2) are the direct test of expansion: a changed
 symbol's consumers are its 1-hop `CALLS` / `IMPORTS` neighbours, across
 repositories through the link layer (RFC 0006 §3.3), so the edge sweep
@@ -687,7 +711,7 @@ holds. The owner first chose Qwen3-Reranker-0.6B; the evidence below
 moved the order. **Evidence:**
 
 | Reranker | Params | License | MTEB-Code, reranking Qwen3-Emb-0.6B's top 100 | CoIR, reranking jina-v3's top 100 |
-|---|---|---|---|---|
+|---|---:|---|---:|---:|
 | none (Qwen3-Embedding-0.6B alone) | — | — | 75.41 | — |
 | Qwen3-Reranker-0.6B | 0.6B | Apache-2.0 | **73.42** | **65.18** |
 | Qwen3-Reranker-4B / 8B | 4B / 8B | Apache-2.0 | 81.20 / 81.22 | 73.91 / — |
@@ -815,14 +839,19 @@ ids (not snapshot indexes), `warnings` why a call fell back to lexical,
   built-in default.
 - ~~**Embedding by default** once phase 1's acceptance holds~~ —
   **superseded by the owner's decision (2026-11-24, §0): opt-in locally.**
+
   `rueca index` embeds only with `--embed[=PRESET]` or `RUECA_EMBED=1` /
   `RUECA_EMBED=<preset>` (`0`, empty, `false`, `off`, `no`: disabled);
   `--no-embed` overrides the environment. Precedence: argument >
   environment > configuration; `[retrieval]` chooses `preset`, `dims`,
   `alpha`, `fusion_n` and `normalization` but never enables embedding by
-  itself. Missing weights are an error naming `rueca models pull`; nothing
+  itself.
+
+  Missing weights are an error naming `rueca models pull`; nothing
   downloads on first use. `RUECA_FUSION_ALPHA` / `_N` / `_NORM` are the
-  experiment knobs (instead of one `RUECA_SEARCH` string). As implemented,
+  experiment knobs (instead of one `RUECA_SEARCH` string).
+
+  As implemented,
   `rueca index --ref` embeds too; `rueca index --org` and the MCP server's
   auto-index stay lexical until phase 3.
 - **Service mode** embeds on a GPU through the CUDA build or an external
@@ -979,7 +1008,7 @@ search exists for; `kw` keeps RFC 0004's floor and must not regress. RFC
 ### 11.3 Calibrating RFC 0004's targets (its open question 1)
 
 | System | Lite File Acc@5 / Fn Acc@10 | LocBench File Acc@5 / Fn Acc@10 | Source |
-|---|---|---|---|
+|---|---:|---:|---|
 | BM25 | 61.7 / 36.9 | 49.3 / — | LocAgent; [LARGER](https://arxiv.org/html/2605.16352) (all-gold) |
 | CodeRankEmbed (137M, MIT) | 84.7 / 58.8 | 74.3 / 43.4–47.9 | LocAgent; SweRank (the papers disagree) |
 | Qwen3-Embedding-0.6B · 8B | — / 62.8 · — / 71.5 | — / 47.3 · — / 55.0 | SweRank+ |
@@ -1072,25 +1101,34 @@ Follow-ups, not phases:
   "agentic search generally works better" and avoids security, privacy
   and staleness issues; no benchmark was published
   ([Boris Cherny](https://x.com/bcherny/status/2017824286489383315)).
+
   Cline explains the same choice
   ([Cline](https://cline.bot/blog/why-cline-doesnt-index-your-codebase-and-why-thats-a-good-thing)),
   Codex CLI's instructions prefer `rg` and its semantic-indexing request
   is still open ([codex #5181](https://github.com/openai/codex/issues/5181)),
   and Sourcegraph replaced Cody's embeddings with its keyword search (same
-  post). On the other side, semantic search beat deep agentic search (a
-  planner and a search sub-agent) on SWE-QA, 65.2% vs 46.2%, at less than
-  half the cost per correct answer
-  ([Deep Agentic Search](https://arxiv.org/abs/2608.01507)); Cursor reports
-  12.5% higher answer accuracy with a custom embedder next to grep
-  ([Cursor](https://cursor.com/blog/semsearch)); GitHub reports 2% less
-  time at unchanged quality ([GitHub](https://github.blog/changelog/2026-03-17-copilot-coding-agent-works-faster-with-semantic-code-search/)).
+  post).
+
+  On the other side:
+
+  - semantic search beat deep agentic search (a planner and a search
+    sub-agent) on SWE-QA, 65.2% vs 46.2%, at less than half the cost per
+    correct answer
+    ([Deep Agentic Search](https://arxiv.org/abs/2608.01507));
+  - Cursor reports 12.5% higher answer accuracy with a custom embedder
+    next to grep ([Cursor](https://cursor.com/blog/semsearch));
+  - GitHub reports 2% less time at unchanged quality
+    ([GitHub](https://github.blog/changelog/2026-03-17-copilot-coding-agent-works-faster-with-semantic-code-search/)).
+
   Claude Context (Zilliz: AST chunks, hybrid BM25 + dense search) keeps
   F1 at 0.40 against grep alone with 39% fewer tokens on 30 SWE-bench
   Verified instances
   ([evaluation](https://github.com/zilliztech/claude-context/tree/master/evaluation)).
+
   Augment's Context Engine, served over MCP, reports 30–80% quality gains
   in a vendor-run benchmark of 300 Elasticsearch PRs without disclosing
   its method ([Augment](https://www.augmentcode.com/blog/context-engine-mcp-now-live)).
+
   Rueca keeps both — `search_code` for grep-shaped work, hybrid
   `search_symbols` for descriptions — and measures tokens per correct
   answer next to localization.
@@ -1134,39 +1172,136 @@ opt-in and its precedence) are the owner's, in §0.
 The integration points of this RFC were located with Rueca's own tools on
 this repository (10–20 ms per query). Free-text search was the weakest
 tool whenever the words were not the identifiers — the case semantic
-search is for: (1) "bm25 ranking" (Rust) returned `RouteMode`,
-`RouteParams`, `OrgScope` and missed `scoring_query`, `build_query`,
-`BOOSTS` and `top_hits`; (2) "read symbol source text from content pack"
-missed `body_texts`, `Segment::content` and `Engine::get_snippet`; (3)
-"multiply score by prior inside top-k" ranked `top_hits` fifth and missed
-`priors::priors`; (4) "routing prior repository relevance boost" missed
-`OrgIndex::route` and `OrgIndex::search_with`.
+search is for:
 
-Unrelated follow-ups: (5) `trace` misses `views[0].seg.search_symbols(…)`,
-whose receiver type comes from a struct field (`View.seg: Arc<Segment>`)
-declared in another file, and `Engine.search_symbols →
-OrgIndex.search_with` is only a heuristic 0.5 edge; (6) `get_symbol
-{"qualified_name": "search_symbols"}` picks a `pub(crate)` helper, and
-`pub(crate)` items are reported as exported; (7) `get_file_outline` of a
-large file is cut at the 2,000-token budget, the CLI has no
-`--budget-tokens` flag, and struct outlines cannot hide fields; (8)
-`list_repositories --root <worktree>` prints the main checkout's branch in
-the header; (9) `search_code` lists matches in path order and stops at the
-limit, with no relevance order or per-file cap; (10) `rueca-segment`'s
-documented store layout omits `facts/`, and RFC 0001 §8.1 describes
-`SegmentReader` / `SegmentWriter` traits the code lacks.
+1. "bm25 ranking" (Rust) returned `RouteMode`, `RouteParams`, `OrgScope`
+   and missed `scoring_query`, `build_query`, `BOOSTS` and `top_hits`;
+2. "read symbol source text from content pack" missed `body_texts`,
+   `Segment::content` and `Engine::get_snippet`;
+3. "multiply score by prior inside top-k" ranked `top_hits` fifth and
+   missed `priors::priors`;
+4. "routing prior repository relevance boost" missed `OrgIndex::route` and
+   `OrgIndex::search_with`.
+
+Unrelated follow-ups:
+
+5. `trace` misses `views[0].seg.search_symbols(…)`, whose receiver type
+   comes from a struct field (`View.seg: Arc<Segment>`) declared in another
+   file, and `Engine.search_symbols → OrgIndex.search_with` is only a
+   heuristic 0.5 edge;
+6. `get_symbol {"qualified_name": "search_symbols"}` picks a `pub(crate)`
+   helper, and `pub(crate)` items are reported as exported;
+7. `get_file_outline` of a large file is cut at the 2,000-token budget, the
+   CLI has no `--budget-tokens` flag, and struct outlines cannot hide
+   fields;
+8. `list_repositories --root <worktree>` prints the main checkout's branch
+   in the header;
+9. `search_code` lists matches in path order and stops at the limit, with
+   no relevance order or per-file cap;
+10. `rueca-segment`'s documented store layout omits `facts/`, and RFC 0001
+    §8.1 describes `SegmentReader` / `SegmentWriter` traits the code lacks.
 
 ## 17. Sources
 
 All consulted on 2026-11-16, except the revision's, consulted on
 2026-11-17.
 
-- **Qwen3:** https://huggingface.co/Qwen/Qwen3-Embedding-0.6B · https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF (and the 4B / 8B GGUF repositories via the Hugging Face API) · https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/discussions/5 · https://x.com/Alibaba_Qwen/status/1944425668235977146 · https://arxiv.org/html/2506.05176v3 · https://media.githubusercontent.com/media/QwenLM/Qwen3-Embedding/main/evaluation/task_prompts.json · https://huggingface.co/Qwen/Qwen3-Reranker-0.6B · https://github.com/QwenLM/Qwen3-Embedding · https://gist.github.com/VooDisss/42bce4eb5c76d3c325633886c5e348ee · https://github.com/jamesburton/dotLLM/issues/1398
-- **Other models and licenses:** https://arxiv.org/html/2512.21332 · https://huggingface.co/codefuse-ai/C2LLM-0.5B · https://arxiv.org/html/2508.21290 · https://huggingface.co/jinaai/jina-code-embeddings-1.5b · https://jina.ai/news/jina-embeddings-v5-text-distilling-4b-quality-into-sub-1b-multilingual-embeddings/ · https://arxiv.org/html/2509.25085 · https://huggingface.co/mixedbread-ai/mxbai-rerank-base-v2 · https://huggingface.co/nomic-ai/CodeRankEmbed · https://huggingface.co/nomic-ai/nomic-embed-code · https://huggingface.co/Alibaba-NLP/gte-modernbert-base · https://arxiv.org/html/2508.21085 · https://huggingface.co/voyageai/voyage-4-nano · https://www.qodo.ai/open-rail-m-license/ · https://huggingface.co/PeterAM4/Qwen3-Embedding-0.6B-GGUF
-- **Quantization and storage:** https://arxiv.org/html/2609.24322v1 · https://arxiv.org/html/2609.16391v1 · https://huggingface.co/blog/embedding-quantization · https://blog.voyageai.com/2024/12/04/voyage-code-3/ · https://arxiv.org/pdf/2601.04720 (via a search summary) · https://dylancastillo.co/posts/matryoshka-vs-pca · https://crates.io/crates/usearch
-- **Runtimes and throughput:** https://github.com/utilityai/llama-cpp-rs · https://github.com/Anush008/fastembed-rs · https://github.com/huggingface/candle · https://raw.githubusercontent.com/pykeio/ort/main/docs/content/setup/linking.mdx · https://github.com/EricLBuehler/mistral.rs · https://github.com/StarlightSearch/EmbedAnything · https://github.com/huggingface/text-embeddings-inference · crates.io API for `llama-cpp-2`, `fastembed`, `ort`, `candle-core`, `burn`, `mistralrs`, `embed_anything` · https://github.com/ggml-org/llama.cpp/discussions/4167 · https://github.com/ggml-org/llama.cpp/discussions/15013 · https://github.com/ikawrakow/ik_llama.cpp/wiki/Jan-2025:-prompt-processing-performance-comparison · https://github.com/ggml-org/llama.cpp/issues/28656 · https://github.com/ggml-org/llama.cpp/issues/28963 · https://github.com/withcatai/node-llama-cpp/issues/674 · https://regolo.ai/embeddinggemma-2-vs-qwen3-embedding-benchmarks/ · https://dev.to/m_smith_2f854964fdd6/building-a-production-rag-system-qwen3-embeddings-reranking-and-vector-database-insights-4jh3
-- **Remote providers:** https://blog.voyageai.com/2026/08/13/voyage-code-4/ · https://docs.voyageai.com/docs/pricing · https://docs.voyageai.com/docs/embeddings · https://developers.openai.com/api/docs/pricing · https://developers.openai.com/api/reference/resources/embeddings/methods/create · https://aistudio.google.com/docs/pricing · https://aistudio.google.com/docs/embeddings · https://aws.amazon.com/bedrock/pricing/ · https://aws.amazon.com/blogs/machine-learning/get-started-with-amazon-titan-text-embeddings-v2-a-new-state-of-the-art-embeddings-model-on-amazon-bedrock/ · https://www.getmaxim.ai/bifrost/llm-cost-calculator/provider/bedrock/model/cohere.embed-v4-0
-- **Localization, fusion, chunking:** https://arxiv.org/html/2503.09089 · https://arxiv.org/html/2505.07849 · https://arxiv.org/html/2512.20482 · https://arxiv.org/html/2412.01007 · https://arxiv.org/html/2605.16352 · https://www.swebench.com/lite.html · https://arxiv.org/html/2210.11934v2 · http://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf · https://arxiv.org/html/2512.16956 · https://arxiv.org/html/2410.14684v2 · https://aider.chat/docs/repomap.html · https://arxiv.org/html/2505.24715 · https://arxiv.org/html/2506.15655 · https://www.greptile.com/blog/semantic-codebase-search · https://arxiv.org/html/2607.24882
-- **Benchmarks:** https://arxiv.org/abs/2407.02883 · https://github.com/CoIR-team/coir · https://github.com/embeddings-benchmark/mteb · https://arxiv.org/abs/2606.11864
-- **Practice:** https://cursor.com/blog/semsearch · https://github.blog/changelog/2026-03-17-copilot-coding-agent-works-faster-with-semantic-code-search/ · https://sourcegraph.com/blog/how-cody-understands-your-codebase · https://cline.bot/blog/why-cline-doesnt-index-your-codebase-and-why-thats-a-good-thing · https://github.com/openai/codex/issues/5181 · https://arxiv.org/abs/2608.01507 · https://x.com/bcherny/status/2017824286489383315 · https://github.com/zilliztech/claude-context (and its `evaluation/`) · https://www.augmentcode.com/blog/context-engine-mcp-now-live
-- **Revision of 2026-11-17:** https://github.com/DevArKaDiA/rueca/pull/60 (bench organization suite) · https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases · https://gitlab.com/x86-psABIs/x86-64-ABI · https://en.wikipedia.org/wiki/Advanced_Vector_Extensions
+- **Qwen3:**
+  - https://huggingface.co/Qwen/Qwen3-Embedding-0.6B
+  - https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF (and the 4B / 8B GGUF repositories via the Hugging Face API)
+  - https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/discussions/5
+  - https://x.com/Alibaba_Qwen/status/1944425668235977146
+  - https://arxiv.org/html/2506.05176v3
+  - https://media.githubusercontent.com/media/QwenLM/Qwen3-Embedding/main/evaluation/task_prompts.json
+  - https://huggingface.co/Qwen/Qwen3-Reranker-0.6B
+  - https://github.com/QwenLM/Qwen3-Embedding
+  - https://gist.github.com/VooDisss/42bce4eb5c76d3c325633886c5e348ee
+  - https://github.com/jamesburton/dotLLM/issues/1398
+- **Other models and licenses:**
+  - https://arxiv.org/html/2512.21332
+  - https://huggingface.co/codefuse-ai/C2LLM-0.5B
+  - https://arxiv.org/html/2508.21290
+  - https://huggingface.co/jinaai/jina-code-embeddings-1.5b
+  - https://jina.ai/news/jina-embeddings-v5-text-distilling-4b-quality-into-sub-1b-multilingual-embeddings/
+  - https://arxiv.org/html/2509.25085
+  - https://huggingface.co/mixedbread-ai/mxbai-rerank-base-v2
+  - https://huggingface.co/nomic-ai/CodeRankEmbed
+  - https://huggingface.co/nomic-ai/nomic-embed-code
+  - https://huggingface.co/Alibaba-NLP/gte-modernbert-base
+  - https://arxiv.org/html/2508.21085
+  - https://huggingface.co/voyageai/voyage-4-nano
+  - https://www.qodo.ai/open-rail-m-license/
+  - https://huggingface.co/PeterAM4/Qwen3-Embedding-0.6B-GGUF
+- **Quantization and storage:**
+  - https://arxiv.org/html/2609.24322v1
+  - https://arxiv.org/html/2609.16391v1
+  - https://huggingface.co/blog/embedding-quantization
+  - https://blog.voyageai.com/2024/12/04/voyage-code-3/
+  - https://arxiv.org/pdf/2601.04720 (via a search summary)
+  - https://dylancastillo.co/posts/matryoshka-vs-pca
+  - https://crates.io/crates/usearch
+- **Runtimes and throughput:**
+  - https://github.com/utilityai/llama-cpp-rs
+  - https://github.com/Anush008/fastembed-rs
+  - https://github.com/huggingface/candle
+  - https://raw.githubusercontent.com/pykeio/ort/main/docs/content/setup/linking.mdx
+  - https://github.com/EricLBuehler/mistral.rs
+  - https://github.com/StarlightSearch/EmbedAnything
+  - https://github.com/huggingface/text-embeddings-inference
+  - crates.io API for `llama-cpp-2`, `fastembed`, `ort`, `candle-core`,
+    `burn`, `mistralrs`, `embed_anything`
+  - https://github.com/ggml-org/llama.cpp/discussions/4167
+  - https://github.com/ggml-org/llama.cpp/discussions/15013
+  - https://github.com/ikawrakow/ik_llama.cpp/wiki/Jan-2025:-prompt-processing-performance-comparison
+  - https://github.com/ggml-org/llama.cpp/issues/28656
+  - https://github.com/ggml-org/llama.cpp/issues/28963
+  - https://github.com/withcatai/node-llama-cpp/issues/674
+  - https://regolo.ai/embeddinggemma-2-vs-qwen3-embedding-benchmarks/
+  - https://dev.to/m_smith_2f854964fdd6/building-a-production-rag-system-qwen3-embeddings-reranking-and-vector-database-insights-4jh3
+- **Remote providers:**
+  - https://blog.voyageai.com/2026/08/13/voyage-code-4/
+  - https://docs.voyageai.com/docs/pricing
+  - https://docs.voyageai.com/docs/embeddings
+  - https://developers.openai.com/api/docs/pricing
+  - https://developers.openai.com/api/reference/resources/embeddings/methods/create
+  - https://aistudio.google.com/docs/pricing
+  - https://aistudio.google.com/docs/embeddings
+  - https://aws.amazon.com/bedrock/pricing/
+  - https://aws.amazon.com/blogs/machine-learning/get-started-with-amazon-titan-text-embeddings-v2-a-new-state-of-the-art-embeddings-model-on-amazon-bedrock/
+  - https://www.getmaxim.ai/bifrost/llm-cost-calculator/provider/bedrock/model/cohere.embed-v4-0
+- **Localization, fusion, chunking:**
+  - https://arxiv.org/html/2503.09089
+  - https://arxiv.org/html/2505.07849
+  - https://arxiv.org/html/2512.20482
+  - https://arxiv.org/html/2412.01007
+  - https://arxiv.org/html/2605.16352
+  - https://www.swebench.com/lite.html
+  - https://arxiv.org/html/2210.11934v2
+  - http://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf
+  - https://arxiv.org/html/2512.16956
+  - https://arxiv.org/html/2410.14684v2
+  - https://aider.chat/docs/repomap.html
+  - https://arxiv.org/html/2505.24715
+  - https://arxiv.org/html/2506.15655
+  - https://www.greptile.com/blog/semantic-codebase-search
+  - https://arxiv.org/html/2607.24882
+- **Benchmarks:**
+  - https://arxiv.org/abs/2407.02883
+  - https://github.com/CoIR-team/coir
+  - https://github.com/embeddings-benchmark/mteb
+  - https://arxiv.org/abs/2606.11864
+- **Practice:**
+  - https://cursor.com/blog/semsearch
+  - https://github.blog/changelog/2026-03-17-copilot-coding-agent-works-faster-with-semantic-code-search/
+  - https://sourcegraph.com/blog/how-cody-understands-your-codebase
+  - https://cline.bot/blog/why-cline-doesnt-index-your-codebase-and-why-thats-a-good-thing
+  - https://github.com/openai/codex/issues/5181
+  - https://arxiv.org/abs/2608.01507
+  - https://x.com/bcherny/status/2017824286489383315
+  - https://github.com/zilliztech/claude-context (and its `evaluation/`)
+  - https://www.augmentcode.com/blog/context-engine-mcp-now-live
+- **Revision of 2026-11-17:**
+  - https://github.com/DevArKaDiA/rueca/pull/60 (bench organization suite)
+  - https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases
+  - https://gitlab.com/x86-psABIs/x86-64-ABI
+  - https://en.wikipedia.org/wiki/Advanced_Vector_Extensions
