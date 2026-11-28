@@ -180,7 +180,9 @@ once, the difference highlighted.
   qualified name (module included: `billing.invoices.service.InvoiceService.issue`,
   `src/util/index:Session.request`); `local` is the **file-local** qualified
   name its id is built from (the id's `#` part, `InvoiceService.issue`; a
-  file's path), the name the text rendering prints. Every object with an
+  file's path), the name the text rendering prints.
+
+  Every object with an
   `id` (search items, outline symbols, `get_symbol`'s symbol and lists,
   `trace` nodes, a match's or snippet's `symbol`, contract rows) carries
   `local`, and the `repo` and `ref` of the snapshot it was read from, so a

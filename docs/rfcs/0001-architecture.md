@@ -564,10 +564,13 @@ All three are the same binary with different configuration
 **Git transport.** All object reads (trees, blob SHAs, tree diffs, rev-walk,
 status, ignore rules) use `gix`. Network operations shell out to the `git`
 CLI (≥ 2.49), because gix has no partial-clone support and libgit2 cannot
-open partial clones. Per repository Rueca keeps a bare, blobless, depth-1
+open partial clones.
+
+Per repository Rueca keeps a bare, blobless, depth-1
 cache: fetch the new commit with `--filter=blob:none`, diff trees with gix,
 fetch exactly the changed blob OIDs, read them with `GIT_NO_LAZY_FETCH=1`
 (the Zoekt indexserver pattern). Caches expire by time rather than repack.
+
 Hosts without partial clone (Bitbucket Cloud) fall back to depth-1 fetches or
 the host API. Rueca computes its own tree diffs (host compare APIs truncate).
 Service and org images therefore include `git`; the local binary stays fully

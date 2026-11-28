@@ -663,12 +663,16 @@ tokio/src/sync/rwlock.rs
 
 Medians 34 and 23 ms. With a `ref` list, a symbol that is identical in
 both releases comes back once, marked ` [0,1]` (the `Mutex` methods); a
-symbol whose version differs is marked ` changed`. The comparison is per
+symbol whose version differs is marked ` changed`.
+
+The comparison is per
 file blob, not per symbol: `semaphore.rs` changed between the releases
 (new methods, `permits` from `u32` to `usize`), so every `Semaphore`
 method is `changed`, and `rwlock.rs` changed only in two doc-test lines
 of other methods, yet `RwLock.blocking_write` is `changed` too. Read
-` changed` as "its file changed"; ` [0,1]` is exact. The second query
+` changed` as "its file changed"; ` [0,1]` is exact.
+
+The second query
 reads the older release alone, with no `changed` marks. Why it matters
 for an agent: "what is different in this release around X" is one call,
 and ` [0,1]` rules out the code that did not move.
@@ -1015,6 +1019,7 @@ The details, measured again:
   with 46 wrong), REFERENCES 77, IMPORTS 16, OVERRIDES 9, IMPLEMENTS 3,
   TESTS 1 (was 10, 9 of them wrong). Checked by hand against the source:
   15 of the 52 CALLS (7 `import_resolved`, 8 `type_resolved`), 15 right.
+
   Edges whose source lies in a dependency of the consumer went from 19 (13
   wrong) to 13; checked by hand, all 13 are `impl LocalTrait for
   ForeignType`, which is right (`impl IntoResponse for Bytes` in axum,

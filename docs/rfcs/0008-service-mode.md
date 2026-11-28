@@ -103,17 +103,22 @@ embeddings".
 
 ## 3. Goals and non-goals
 
-**Goals.** Index every configured repository of one organization
-(default branch, branch and tag globs, pull request heads) from URLs,
-with no operator action after configuration. Serve the eight tools
-(`search_symbols`, `search_code`, `get_symbol`, `get_snippet`, `trace`,
-`get_file_outline`, `list_repositories`, `list_contracts`) with `docs/tools.md`'s arguments
-(`repo`, `ref`, `budget_tokens`, `cursor`, `format`) unchanged. Answers
-equal to local mode for the same snapshots (§8.3). N stateless replicas
-and N indexers with no coordinator but object storage. Per-caller
-visibility, deny by default, with the seam for Org mode's mirrored
-permissions. CPU-only deployments complete; GPUs only speed up
-embeddings. Local mode unchanged in behaviour, numbers and store.
+**Goals.**
+
+- Index every configured repository of one organization (default
+  branch, branch and tag globs, pull request heads) from URLs, with no
+  operator action after configuration.
+- Serve the eight tools (`search_symbols`, `search_code`, `get_symbol`,
+  `get_snippet`, `trace`, `get_file_outline`, `list_repositories`,
+  `list_contracts`) with `docs/tools.md`'s arguments (`repo`, `ref`,
+  `budget_tokens`, `cursor`, `format`) unchanged.
+- Answers equal to local mode for the same snapshots (§8.3).
+- N stateless replicas and N indexers with no coordinator but object
+  storage.
+- Per-caller visibility, deny by default, with the seam for Org mode's
+  mirrored permissions.
+- CPU-only deployments complete; GPUs only speed up embeddings.
+- Local mode unchanged in behaviour, numbers and store.
 
 **Non-goals.**
 
@@ -184,9 +189,13 @@ index`, `rueca query` and `rueca mcp` keep their local behaviour.
 **`git` ≥ 2.45** is required (§7.6). distroless has no package manager
 and `git-remote-https` links libcurl, TLS and zlib, copied from a Debian
 build stage; if that proves brittle the CPU base becomes
-`debian:trixie-slim` (≈ 30 MB compressed, Docker Hub). Ubuntu 24.04
+`debian:trixie-slim` (≈ 30 MB compressed, Docker Hub).
+
+Ubuntu 24.04
 ships git 2.43 ([packages](https://packages.ubuntu.com/noble/git)), so one `git` build stage feeds both images
-and each build asserts the version. A new container workflow builds from
+and each build asserts the version.
+
+A new container workflow builds from
 the release binaries; cargo-dist 0.33.1 keeps archives and installers (no
 images *(unverified: from its README)*). Images run non-root on a
 read-only root filesystem, with volumes for `cache_dir`, `mirror_dir` and
@@ -386,10 +395,14 @@ e-tag read when the build started (`Precondition`: the same); (3) no
 inline garbage collection (§5.8).
 
 The updater is elected by `leases/org-updater.json`, `{"owner":
-"indexer-2/7f3a91", "until": 1794929190, "epoch": 412}`: taken with
-`Create` when absent or `Update` once `until` is 30 s *(default, clock
-skew)* in the past; 60 s lease renewed every 20 s *(defaults)*; `epoch`
-increments on take-over. Leader election by conditional writes is "only
+"indexer-2/7f3a91", "until": 1794929190, "epoch": 412}`:
+
+- Taken with `Create` when absent or `Update` once `until` is 30 s
+  *(default, clock skew)* in the past;
+- 60 s lease renewed every 20 s *(defaults)*;
+- `epoch` increments on take-over.
+
+Leader election by conditional writes is "only
 ever … eventually correct"
 ([Morling](https://www.morling.dev/blog/leader-election-with-s3-conditional-writes/);
 single-object `If-Match` variant,
@@ -410,21 +423,26 @@ when a generation file is gone, `org/mod.rs:360-376`).
 publication (`atomic_write`, `store.rs:21-30`) and adds an **advisory
 exclusive lock** on `<store>/.lock` around every read-modify-write of
 `catalog.json`, `packs/index.rcpi` and `orgs/<name>/org.json`, and around
-organization garbage collection. Readers take no lock; a writer waiting
-more than 60 s *(default)* fails naming the holder's pid. Mechanism:
-`std::fs::File::lock` (stable since Rust 1.89,
+organization garbage collection.
+
+Readers take no lock; a writer waiting more than 60 s *(default)* fails
+naming the holder's pid. Mechanism: `std::fs::File::lock` (stable since
+Rust 1.89,
 [docs](https://doc.rust-lang.org/std/fs/struct.File.html#method.lock); MSRV 1.90),
 else `fs4` 0.13.1, already in `Cargo.lock` through tantivy (MIT OR
-Apache-2.0, MSRV 1.75): no new dependency. This answers RFC 0006 §12 open
-question 9 for local mode as well; the `file://` service backend uses the
-same lock and is single-host.
+Apache-2.0, MSRV 1.75): no new dependency.
+
+This answers RFC 0006 §12 open question 9 for local mode as well; the
+`file://` service backend uses the same lock and is single-host.
 
 ### 5.6 Replica disk cache
 
 A replica downloads the segments, packs and organization index files it
 needs into `cache_dir` (temporary name, BLAKE3 trailer check, rename)
 and opens them as today, `mmap` + BLAKE3 over every component
-(`Bundle::open`, `bundle.rs:175-181`). Eviction is LRU by bytes within
+(`Bundle::open`, `bundle.rs:175-181`).
+
+Eviction is LRU by bytes within
 `cache_bytes`, never touching the current generation's open set, and
 drops the segment from the engine's map (`evict_stale`,
 `crates/rueca-query/src/lib.rs:808-812`). Each new generation prefetches
@@ -462,17 +480,22 @@ bench organization's measured time to ready exceeds 60 s.
 
 ### 5.8 Garbage collection
 
-Mark-and-sweep by the updater, hourly *(default)*. **Live set**: every
-snapshot in a repository catalog (segment, `vectors` segment, packs); the
-current and previous generations, as today's `collect_garbage` keeps `n`
-and `n − 1` (`org/mod.rs:1024-1056`), with every `index/`, `profiles/`,
-`links/` object and segment they name; vector files named by a live
-segment's `vectors.meta`. **Sweep**: list each immutable prefix and
-delete what is outside the live set and older than the **grace period,
-24 h** *(default)*, so a publish in flight (objects written, catalog CAS pending) and
-a replica downloading a just-replaced generation are safe. Facts are a
-cache: deleted 90 days after their last write *(default)*; `reads/` after
-the idle period.
+Mark-and-sweep by the updater, hourly *(default)*.
+
+- **Live set**:
+  - Every snapshot in a repository catalog (segment, `vectors` segment,
+    packs);
+  - The current and previous generations, as today's `collect_garbage`
+    keeps `n` and `n − 1` (`org/mod.rs:1024-1056`), with every `index/`,
+    `profiles/`, `links/` object and segment they name;
+  - Vector files named by a live segment's `vectors.meta`.
+- **Sweep**: list each immutable prefix and delete what is outside the
+  live set and older than the **grace period, 24 h** *(default)*, so a
+  publish in flight (objects written, catalog CAS pending) and a replica
+  downloading a just-replaced generation are safe.
+
+Facts are a cache: deleted 90 days after their last write *(default)*;
+`reads/` after the idle period.
 
 **Retention** (answers RFC 0006 §12 open question 6; *(defaults)*):
 
@@ -504,9 +527,13 @@ error listing the indexed refs.
 `SegmentMeta` (`crates/rueca-segment/src/lib.rs:323-336`) gains
 `#[serde(default, skip_serializing_if = "Vec::is_empty")] pub packs:
 Vec<String>`, the packs holding the snapshot's blobs; local stores leave
-it empty and keep `index.rcpi`. Format 2 takes it without a bump
+it empty and keep `index.rcpi`.
+
+Format 2 takes it without a bump
 ("Readers ignore components they do not know", `lib.rs:61-62`;
-precedents `files.modules`, `symbols.bodiless`). Readers build the blob
+precedents `files.modules`, `symbols.bodiless`).
+
+Readers build the blob
 map from those packs' footers (44-byte entries, `packs.rs:15-25`) instead
 of `index.rcpi`, a derived file "rebuilt whenever the set of packs …
 differs" (`lib.rs:34-37`) that has no meaning over a bucket; the catalog
@@ -527,26 +554,36 @@ build, never a lost write. Local mode gets §5.5's file lock.
 | Verdict | ~~chosen~~ rejected at implementation (below) | rejected (§12) |
 
 **Amended 2026-11-17 (phase 0, owner decision).** Adding `object_store`
-0.14.2 fails `cargo deny`: it depends unconditionally, even with no
-features, on `chrono` 0.4.45 (RUSTSEC-2026-0543, unmaintained) and
-`humantime` 2.4.0 (RUSTSEC-2026-0542, unmaintained), and its `aws` /
-`gcp` / `azure` features pull `webpki-root-certs` (CDLA-Permissive-2.0,
-not in `deny.toml`) through `reqwest/rustls`. Advisory ignores are
-rejected (the same rule that replaced `rmcp`, §6.1), and OpenDAL needs
-MSRV 1.91. **Recorded:** `rueca-storage` keeps the `Storage` trait of
+0.14.2 fails `cargo deny`:
+
+- It depends unconditionally, even with no features, on `chrono` 0.4.45
+  (RUSTSEC-2026-0543, unmaintained) and `humantime` 2.4.0
+  (RUSTSEC-2026-0542, unmaintained);
+- Its `aws` / `gcp` / `azure` features pull `webpki-root-certs`
+  (CDLA-Permissive-2.0, not in `deny.toml`) through `reqwest/rustls`.
+
+Advisory ignores are rejected (the same rule that replaced `rmcp`,
+§6.1), and OpenDAL needs MSRV 1.91.
+
+**Recorded:** `rueca-storage` keeps the `Storage` trait of
 §5.11 and assembles the S3 backend from
 [`rusty-s3`](https://crates.io/crates/rusty-s3) 0.11 (sans-IO request
 builder and SigV4 signer, BSD-2-Clause, `jiff` for dates) and `ureq`
 3.5 (`rustls-no-provider` + `ring`) with the platform's roots through
 `rustls-native-certs` (no CDLA bundle); the in-memory and `file://`
-backends are Rueca's own. Signing is never written in-house. Covered:
-AWS S3 and S3-compatible stores (MinIO verified in phase 0, R2); GCS
-through its XML API with HMAC keys, the generation preconditions
-signed, verified against a fake server only; Azure Blob is deferred (an
-S3-compatible gateway in front of it works today). Credentials come
-from options or `AWS_*` environment variables; IMDS / IRSA providers
-are phase 2 (`CredentialsProvider` seam). The rest of this section stays as
-the behaviour reference for conditional writes.
+backends are Rueca's own. Signing is never written in-house.
+
+Covered:
+
+- AWS S3 and S3-compatible stores (MinIO verified in phase 0, R2);
+- GCS through its XML API with HMAC keys, the generation preconditions
+  signed, verified against a fake server only;
+- Azure Blob is deferred (an S3-compatible gateway in front of it works
+  today).
+
+Credentials come from options or `AWS_*` environment variables; IMDS /
+IRSA providers are phase 2 (`CredentialsProvider` seam). The rest of
+this section stays as the behaviour reference for conditional writes.
 
 The first draft chose `object_store = { version = "0.14", default-features = false, features =
 ["aws", "gcp", "azure", "fs"] }`; the in-memory backend backs every test.
@@ -568,14 +605,17 @@ policies requiring conditional writes on 2024-11-25
 [announcement](https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-functionality-conditional-writes),
 [enforcement](https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-enforcement-conditional-write-operations-general-purpose-buckets/));
 concurrent conditional requests can return 409, after which a multipart
-upload is redone. `S3ConditionalPut::ETagMatch` is the default since
+upload is redone.
+
+`S3ConditionalPut::ETagMatch` is the default since
 0.12.0 ([docs](https://docs.rs/object_store/0.14.2/object_store/aws/enum.S3ConditionalPut.html));
 DynamoDB locking was removed in 0.13.0
 ([changelog](https://github.com/apache/arrow-rs-object-store/blob/main/CHANGELOG-old.md)),
 so stores without conditional writes are unsupported. `RetryConfig`
 defaults to 10 retries within 3 min, without renewing credentials; no
-`~/.aws/config` profile reader *(unverified: from the source)*. R2
-documents the conditional headers
+`~/.aws/config` profile reader *(unverified: from the source)*.
+
+R2 documents the conditional headers
 ([R2](https://developers.cloudflare.com/r2/api/s3/extensions/)); MinIO
 accepts `If-None-Match: *` since 2024
 ([#19682](https://github.com/minio/minio/pull/19682),
@@ -631,13 +671,17 @@ a segment is still a local file; only how it arrives changes.
 deny` failed on `main` with RUSTSEC-2026-0543, `chrono` unmaintained
 ([advisory](https://rustsec.org/advisories/RUSTSEC-2026-0543)); `chrono`
 reaches Rueca only through `rmcp` 3.10.0 (directly, and through its
-`schemars` dependency, `cargo tree -i chrono` at `c82029013c6d`). The
-owner rejected ignoring the advisory and chose a minimal MCP layer of
-Rueca's own (branch `refactor/mcp-without-rmcp`: JSON-RPC `initialize`,
-`tools/list`, `tools/call`, `ping`, stdio first, a transport abstraction
-for HTTP) over a dependency tree Rueca does not control. The first draft
-of this section ran rmcp's `transport-streamable-http-server` under
-`axum`; the behaviour chosen then is kept, the implementation is Rueca's.
+`schemars` dependency, `cargo tree -i chrono` at `c82029013c6d`).
+
+The owner rejected ignoring the advisory and chose a minimal MCP layer
+of Rueca's own (branch `refactor/mcp-without-rmcp`: JSON-RPC
+`initialize`, `tools/list`, `tools/call`, `ping`, stdio first, a
+transport abstraction for HTTP) over a dependency tree Rueca does not
+control.
+
+The first draft of this section ran rmcp's
+`transport-streamable-http-server` under `axum`; the behaviour chosen
+then is kept, the implementation is Rueca's.
 
 | Item | Choice | Source |
 |---|---|---|
@@ -660,12 +704,16 @@ Transport behaviour, the same choices made against rmcp's
 | Shutdown | the server stops accepting, drains in-flight calls up to `request_timeout`, exits | graceful drain |
 
 The handler is one message per `POST`: `parse_line(body)` → `handle` →
-`Step::Reply` is `200` with `Outgoing::to_json()`; `Step::Call` runs
-`call.run(&server)` under `spawn_blocking` (it ends in
-`RuecaServer::call_blocking` → `Engine::respond`,
-`crates/rueca-mcp/src/lib.rs:133-144`) and answers `200`; `Step::Silent`
-and `Step::Cancel` answer `202`; `Incoming::Unparsable` is `400` with
--32700 (`docs/mcp-protocol.md` §8). The validated principal travels as an
+
+- `Step::Reply` is `200` with `Outgoing::to_json()`;
+- `Step::Call` runs `call.run(&server)` under `spawn_blocking` (it ends
+  in `RuecaServer::call_blocking` → `Engine::respond`,
+  `crates/rueca-mcp/src/lib.rs:133-144`) and answers `200`;
+- `Step::Silent` and `Step::Cancel` answer `202`;
+- `Incoming::Unparsable` is `400` with -32700 (`docs/mcp-protocol.md`
+  §8).
+
+The validated principal travels as an
 `axum` request extension into the handler and selects that call's
 `Visibility`. `IndexGate` and `INDEX_WAIT` (120 s, `lib.rs:164`) are
 local only; `tokio` enters only in the HTTP layer, as that document
@@ -908,12 +956,15 @@ and linking.
 ### 7.1 Inventory
 
 v1: the `[[repo]]` entries (`url`, `default_branch`, `branches`, `tags`,
-`prs`), like `rueca-org.toml`'s `url` members. **Phase 3:**
-`[org].inventory` lists every repository of a GitHub organization, GitLab
-group or Bitbucket workspace on each reconcile (paginated), filtered by
-`include` / `exclude` / `archived`; new repositories get a job, vanished
-ones leave the catalog after the grace. Users, teams and grants stay Org
-mode. A GitHub App installation gets 5,000 REST requests/h, +50/h per
+`prs`), like `rueca-org.toml`'s `url` members.
+
+**Phase 3:** `[org].inventory` lists every repository of a GitHub
+organization, GitLab group or Bitbucket workspace on each reconcile
+(paginated), filtered by `include` / `exclude` / `archived`; new
+repositories get a job, vanished ones leave the catalog after the grace.
+Users, teams and grants stay Org mode.
+
+A GitHub App installation gets 5,000 REST requests/h, +50/h per
 repository or user above 20, capped at 12,500/h; secondary limits 100
 concurrent and 900 points/min
 ([GitHub](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api));
@@ -928,13 +979,22 @@ off 10 min linearly to 120 min
 ([`queue.go`](https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/queue.go),
 [`main.go`](https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/main.go)).
 The reconciler runs in the updater. Four inputs write one thing, the
-`desired` map of `jobs/<repo-dir>.json`: webhook hints (§7.3, applied by
-the receiving indexer), adaptive polling (§7.4), inventory and
-configuration (§7.1), admin requests (§6.8). Each tick (5 s *(default)*) it compares
-desired commits with each ref's newest snapshot and sets `pending` with a
-priority where they differ: **0** never indexed, **1** default branch
-behind, **2** pull request head behind, **3** branch behind, **4** tag
-missing, **last** `failed` after `not_before`.
+`desired` map of `jobs/<repo-dir>.json`:
+
+- Webhook hints (§7.3, applied by the receiving indexer),
+- Adaptive polling (§7.4),
+- Inventory and configuration (§7.1),
+- Admin requests (§6.8).
+
+Each tick (5 s *(default)*) it compares desired commits with each ref's
+newest snapshot and sets `pending` with a priority where they differ:
+
+- **0** never indexed,
+- **1** default branch behind,
+- **2** pull request head behind,
+- **3** branch behind,
+- **4** tag missing,
+- **last** `failed` after `not_before`.
 
 ### 7.3 Webhooks
 
@@ -984,8 +1044,9 @@ Per repository, `git ls-remote <url> HEAD 'refs/heads/*' 'refs/tags/*'`
 (filtered by the globs) every half of the time since the repository last
 changed, clamped to **[45 s, 8 h]**: Sourcegraph polls "never more
 frequently than 45 seconds, and no less frequently than every 8 hours",
-and a last commit 8 h ago gives a next sync in 4 h (same source). The
-schedule lives in the job object (`poll`), so a new updater continues it.
+and a last commit 8 h ago gives a next sync in 4 h (same source).
+
+The schedule lives in the job object (`poll`), so a new updater continues it.
 Pull request heads (`refs/pull/*/head`, `refs/merge-requests/*/head`) are
 polled only with `pr_heads = true`: on an active repository the list is
 long and moves with every push to any pull request; webhooks are the
@@ -1042,7 +1103,9 @@ One job per repository at a time; its refs run **sequentially**, default
 branch first, so the facts cache is warm for the rest (RFC 0006 §9.3).
 `jobs = 1` per indexer: a job is already parallel (rayon,
 `crates/rueca-index/src/lib.rs:264-267`; writer threads
-`min(available_parallelism, 16)`, `writer.rs:188-191`). Zoekt pins
+`min(available_parallelism, 16)`, `writer.rs:188-191`).
+
+Zoekt pins
 repositories to indexers by consistent hashing only because its shards
 live on local disk ([Sourcegraph](https://sourcegraph.com/docs/admin/architecture));
 here any indexer takes any job, preferring the last holder
@@ -1067,10 +1130,13 @@ git -c protocol.version=2 -c protocol.allow=never \
   ([`git_cache.go`](https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/git_cache.go));
   with `Budget.max_bytes` = 2 MiB, `blob:limit=2097153`. Larger blobs are
   absent and become coverage gaps (`skipped.size`), Zoekt's "NOT-INDEXED".
+
   Wanting a commit by id needs the server's `uploadpack.allowReachableSHA1InWant`
   (or `allowAnySHA1InWant`, which Zoekt requires of its own gitserver,
   same source); the commit is a tip `ls-remote` just listed, so it is
-  reachable. Which of the three hosts accept a reachable commit want with
+  reachable.
+
+  Which of the three hosts accept a reachable commit want with
   a filter is *(unverified)*; a host that refuses gets the ref name
   fetched instead and the tip compared with the desired commit.
 - **`GIT_NO_LAZY_FETCH=1`** on every read (Git 2.45,
@@ -1214,6 +1280,7 @@ segment write shared between refs (RFC 0006 §12 open question 5, RFC 0001
 is the remaining 72% of a warm re-index, and Zoekt's delta builds need a
 shard-count fallback its source calls a "HACK … interim compaction
 strategy" ([`gitindex/index.go`](https://github.com/sourcegraph/zoekt/blob/main/gitindex/index.go)).
+
 Glean measured stacked increments at ≈ 7% storage and < 10% typical query
 overhead ([Glean](https://glean.software/blog/incremental/)), the
 reference if phase 4 builds them.
@@ -1278,16 +1345,21 @@ are goals ([Blackbird](https://github.blog/engineering/architecture-optimization
 `bench/src/rueca_bench/service.py` (`--suite service`) with fixtures in
 `bench/service/` (signed webhook templates for the three hosts, a compose
 file for the nightly S3-compatible store):
-it starts `rueca serve --role all` (scale rows: 1 query + N indexers) on
-the in-memory or `file://` store, nightly on an S3-compatible one; serves
-the organization suite's repositories from a local git HTTP server, so
-fetch time excludes the internet; pushes commits and posts signed `POST
-/webhooks/github` deliveries, polling an MCP query until each commit is
-served; runs the suite's queries through an MCP client over HTTP,
-recording server and client latency; and injects faults: a
-looping-parser fixture (a test-only language pack flag), a worker killed
-mid-job, a lease taken mid-job, duplicate and reordered webhooks, a
-bucket answering 409 and 503.
+
+- It starts `rueca serve --role all` (scale rows: 1 query + N indexers)
+  on the in-memory or `file://` store, nightly on an S3-compatible one;
+- Serves the organization suite's repositories from a local git HTTP
+  server, so fetch time excludes the internet;
+- Pushes commits and posts signed `POST /webhooks/github` deliveries,
+  polling an MCP query until each commit is served;
+- Runs the suite's queries through an MCP client over HTTP, recording
+  server and client latency;
+- Injects faults:
+  - A looping-parser fixture (a test-only language pack flag),
+  - A worker killed mid-job,
+  - A lease taken mid-job,
+  - Duplicate and reordered webhooks,
+  - A bucket answering 409 and 503.
 
 ### 8.3 Correctness floors
 
@@ -1419,52 +1491,74 @@ and `rueca-service` (per-repository catalogs, `publish_snapshot`,
   --ref` uses, so `update_org_with` and `Engine` need no change; a pulled
   generation is rewritten to those roots.
 - `SnapshotEntry.dirty` is recorded and dirty snapshots are never
-  "duplicates"; `publish_generation` refuses a generation whose segments
-  are not in the bucket; garbage collection re-reads the catalog or
-  pointer before each delete and **deletes in two rounds**: an
-  unreferenced object older than the grace is first recorded in
-  `gc/candidates.json` (CAS) and deleted only by a later round, at least
-  one grace after, if still unreferenced; a publish removes its objects
-  from that list before referencing them and re-uploads any pack a
-  collection removed, so the invariant holds for every publish that
-  completes within the grace (packs: referenced ⇒ present). `grace = 0`
-  deletes in one round. Idle-based pull request expiry (`reads/`) is
-  phase 2.
+  "duplicates";
+- `publish_generation` refuses a generation whose segments are not in
+  the bucket;
+- Garbage collection re-reads the catalog or pointer before each delete
+  and **deletes in two rounds**:
+  - An unreferenced object older than the grace is first recorded in
+    `gc/candidates.json` (CAS) and deleted only by a later round, at
+    least one grace after, if still unreferenced;
+  - A publish removes its objects from that list before referencing
+    them and re-uploads any pack a collection removed, so the invariant
+    holds for every publish that completes within the grace (packs:
+    referenced ⇒ present).
+  - `grace = 0` deletes in one round.
+- Idle-based pull request expiry (`reads/`) is phase 2.
 
 Measured (tests, in-memory backend; `cargo test --workspace`: 815 passed):
-round trip local → bucket → second mirror answers every tool byte-equal
-in local and organization mode (nothing masked); 4 × 20 concurrent
-publishes: 80 of 80 snapshots kept, 0 duplicate `(ref, commit)`, 16 CAS
-conflicts retried; two updaters from one base generation: one wins, one
-`Conflict`, the loser rebuilds; seeded garbage collection over 120 steps
-(24 collections, 23 generation builds, 6 refs expired, 116 unreferenced
-objects deleted at grace 0) and 226 collections concurrent with 30
-publishes: 0 live objects deleted; `rueca-storage` against MinIO: the
-ignored integration test (create, stale update, conditional get, list,
-multipart, delete) passes. Local-mode tests are unchanged; the bench was
-not re-run (the writer gained one JSON field).
+
+- Round trip local → bucket → second mirror answers every tool
+  byte-equal in local and organization mode (nothing masked);
+- 4 × 20 concurrent publishes: 80 of 80 snapshots kept, 0 duplicate
+  `(ref, commit)`, 16 CAS conflicts retried;
+- Two updaters from one base generation: one wins, one `Conflict`, the
+  loser rebuilds;
+- Seeded garbage collection over 120 steps (24 collections, 23
+  generation builds, 6 refs expired, 116 unreferenced objects deleted at
+  grace 0) and 226 collections concurrent with 30 publishes: 0 live
+  objects deleted;
+- `rueca-storage` against MinIO: the ignored integration test (create,
+  stale update, conditional get, list, multipart, delete) passes.
+
+Local-mode tests are unchanged; the bench was not re-run (the writer
+gained one JSON field).
 
 ### 10.2 Phase 1 — implemented
 
 `rueca serve --config rueca-service.toml [--role query|all]` in a new
-crate `rueca-serve`: the stateless `POST /mcp` on `axum` 0.8 calling
-`rueca-mcp`'s `handle` per request, the authentication layer, visibility
-rules, deadlines, rate limits, `/healthz` / `/readyz` / `/metrics` /
-`/status`, JSON logs, the generation watcher over the phase-0 store, the
-configuration file with `env:` secret references and
-`--check-config`; `Engine::respond_with` (cooperative deadline, visibility
-per call, also in local mode); a multi-stage `Dockerfile` with a
-container workflow (build and smoke, no push); and the `service` bench
-suite. Choices and deviations:
+crate `rueca-serve`:
 
-- **Dependencies** (all `cargo deny` clean, no advisory ignores): `axum`,
-  `tokio`, `tower`, `tower-http` (`limit`, `timeout`), `jsonwebtoken` 12
-  with `rust_crypto` (no aws-lc-sys), `globset`, `subtle`, `governor` 0.10
-  used directly (`tower_governor`'s IP extractor trusts forwarding headers
-  from any peer; Rueca honours them only from `[http].trusted_proxies`),
-  `metrics` 0.24 with the Prometheus text rendered from the app's own
-  registry (no `http-listener`), JWKS fetched with the `ureq` client
-  `rueca-storage` already has. OpenTelemetry (`opentelemetry` 0.33,
+- The stateless `POST /mcp` on `axum` 0.8 calling `rueca-mcp`'s
+  `handle` per request, the authentication layer, visibility rules,
+  deadlines, rate limits, `/healthz` / `/readyz` / `/metrics` /
+  `/status`, JSON logs, the generation watcher over the phase-0 store,
+  the configuration file with `env:` secret references and
+  `--check-config`;
+- `Engine::respond_with` (cooperative deadline, visibility per call,
+  also in local mode);
+- A multi-stage `Dockerfile` with a container workflow (build and
+  smoke, no push);
+- The `service` bench suite.
+
+Choices and deviations:
+
+- **Dependencies** (all `cargo deny` clean, no advisory ignores):
+  - `axum`,
+  - `tokio`,
+  - `tower`,
+  - `tower-http` (`limit`, `timeout`),
+  - `jsonwebtoken` 12 with `rust_crypto` (no aws-lc-sys),
+  - `globset`,
+  - `subtle`,
+  - `governor` 0.10 used directly (`tower_governor`'s IP extractor
+    trusts forwarding headers from any peer; Rueca honours them only
+    from `[http].trusted_proxies`),
+  - `metrics` 0.24 with the Prometheus text rendered from the app's own
+    registry (no `http-listener`),
+  - JWKS fetched with the `ureq` client `rueca-storage` already has.
+
+  OpenTelemetry (`opentelemetry` 0.33,
   `tracing-opentelemetry` 0.34) is an optional feature `otel`, OTLP/HTTP
   over `ureq`, tested against a fake collector only.
 - **Keys honoured**: `[store]` (plus `poll`, the watcher tick), `[org].name`,
@@ -1494,29 +1588,40 @@ suite. Choices and deviations:
   the slim variant (phase 2 decides).
 
 Measured (debug build, the `service` suite's `--small` organization —
-two small repositories, 52 queries): time to ready 0.38–0.41 s;
-differential 52 / 52 JSON and 52 / 52 text byte-equal against `rueca
-query` on the same mirror; server-side p50 / p95: `search_symbols`
-1.3 / 2.5 ms, `get_symbol` 0.5 / 1.0 ms, `trace` 0.5–0.6 / 1.4–2.0 ms
-(client-side within 1 ms of those; one cold `search_symbols` at 33 ms).
-Clients over HTTP: Claude Code (`--mcp-config` with `"type": "http"` and
-a bearer header, one-shot `claude -p`) completed `search_symbols` →
-`get_symbol` → `trace` against `rueca serve`, the server logging the
-three calls with `outcome: ok`; VS Code's and Cursor's flows (legacy
-`initialize` with `MCP-Protocol-Version` on later requests, `GET /mcp`
-answered 405) are covered by the HTTP tests and documented in
-`docs/tools.md`; Cursor itself was not installed on the test machine
-and VS Code was not driven interactively.
+two small repositories, 52 queries):
+
+- Time to ready 0.38–0.41 s;
+- Differential 52 / 52 JSON and 52 / 52 text byte-equal against `rueca
+  query` on the same mirror;
+- Server-side p50 / p95: `search_symbols` 1.3 / 2.5 ms, `get_symbol`
+  0.5 / 1.0 ms, `trace` 0.5–0.6 / 1.4–2.0 ms (client-side within 1 ms of
+  those; one cold `search_symbols` at 33 ms).
+
+Clients over HTTP:
+
+- Claude Code (`--mcp-config` with `"type": "http"` and a bearer header,
+  one-shot `claude -p`) completed `search_symbols` → `get_symbol` →
+  `trace` against `rueca serve`, the server logging the three calls with
+  `outcome: ok`;
+- VS Code's and Cursor's flows (legacy `initialize` with
+  `MCP-Protocol-Version` on later requests, `GET /mcp` answered 405) are
+  covered by the HTTP tests and documented in `docs/tools.md`;
+- Cursor itself was not installed on the test machine and VS Code was
+  not driven interactively.
 
 On 18 repositories of the organization suite (the cached members of the
 calibration split, 5 S1 queries × 3 passes, 20 derived `get_symbol` and
-`trace` calls each, debug build, one laptop): time to ready 8.8 s
-(download, verify, and warm the engine — before the warm-up landed the
-first query paid the segment opens, 2.2 s, which is why `/readyz` now
-means warmed); server-side p50 / p95: `search_symbols` 18 / 31 ms,
-`get_symbol` 0.5 / 1.0 ms, `trace` 0.5 / 1.0 ms (client-side 14 / 26
-ms, 0.7 / 1.5 ms, 0.8 / 1.7 ms); differential 45 / 45 JSON and 45 / 45
-text. The lexical p95 floor (≤ 100 ms) holds in a debug build; the
+`trace` calls each, debug build, one laptop):
+
+- Time to ready 8.8 s (download, verify, and warm the engine — before
+  the warm-up landed the first query paid the segment opens, 2.2 s,
+  which is why `/readyz` now means warmed);
+- Server-side p50 / p95: `search_symbols` 18 / 31 ms, `get_symbol`
+  0.5 / 1.0 ms, `trace` 0.5 / 1.0 ms (client-side 14 / 26 ms, 0.7 /
+  1.5 ms, 0.8 / 1.7 ms);
+- Differential 45 / 45 JSON and 45 / 45 text.
+
+The lexical p95 floor (≤ 100 ms) holds in a debug build; the
 20 ms target is to be measured in release.
 
 ### 10.3 Phase 2 — implemented
@@ -1534,14 +1639,17 @@ The indexer role: `rueca serve --role indexer|all` (`rueca-service`
   branch; a `failed` job is leasable again after `not_before`, ranked
   last. An `expired` tombstone keeps polling from re-adding a ref expired
   at the same commit.
-- **Reconciler and polling** as §7.2–§7.4: `git ls-remote` through the
-  existing runner with credentials passed as `GIT_CONFIG_COUNT` /
-  `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` (never on a command line or
-  in a mirror's configuration); a 429 pauses the host for 60 s (`git`
-  does not surface `Retry-After`); `[indexing].ls_remote_concurrency`,
-  `discover` and the test-only `allow_file_urls` (debug builds accept
-  `file://` and `git://` hosts; a release build rejects the key) were
-  added. The updater pulls every repository whose job object changed,
+- **Reconciler and polling** as §7.2–§7.4:
+  - `git ls-remote` through the existing runner with credentials passed
+    as `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`
+    (never on a command line or in a mirror's configuration);
+  - A 429 pauses the host for 60 s (`git` does not surface
+    `Retry-After`);
+  - `[indexing].ls_remote_concurrency`, `discover` and the test-only
+    `allow_file_urls` (debug builds accept `file://` and `git://` hosts;
+    a release build rejects the key) were added.
+
+  The updater pulls every repository whose job object changed,
   which also covers removals; an accepted webhook wakes job discovery and
   a finished job wakes the updater.
 - **Idle expiry** (§5.8, question 12): replicas write one `reads/` object
@@ -1591,17 +1699,24 @@ The generation step dominated: the updater's mirror had no facts cache,
 so every relink re-parsed the consumer and its dependencies from the
 content packs (a `psf/requests` push relinks `ruff`, `pylint`, `pytest`
 and `sphinx`: 60 of 62 s), and `publish_generation` opened every segment
-with a full checksum to list its packs. Now the `PackageLinker` reads the
-indexer's facts caches (`UpdaterOptions.facts_from`) and writes back what
-it had to extract, pack lists are remembered per segment on the
-`ServiceStore`, and `file://` refuses a `Create` before copying. What
-remains is linking itself (about 90% of a generation: a joint resolve of
-a large consumer such as `ruff`, 8.7k files, 6.3 s in debug) and the cold
-start rebuilding the hub consumers once per generation while
-repositories are still arriving — the reasons the cold-index floor is not
-met. Phase 4 candidates: incremental linking against the dependency that
-changed only, dependencies kept in memory within one update, profiles and
-links built in parallel.
+with a full checksum to list its packs.
+
+Now the `PackageLinker` reads the indexer's facts caches
+(`UpdaterOptions.facts_from`) and writes back what it had to extract,
+pack lists are remembered per segment on the `ServiceStore`, and
+`file://` refuses a `Create` before copying.
+
+What remains is linking itself (about 90% of a generation: a joint
+resolve of a large consumer such as `ruff`, 8.7k files, 6.3 s in debug)
+and the cold start rebuilding the hub consumers once per generation
+while repositories are still arriving — the reasons the cold-index floor
+is not met.
+
+Phase 4 candidates:
+
+- Incremental linking against the dependency that changed only,
+- Dependencies kept in memory within one update,
+- Profiles and links built in parallel.
 
 ## 11. Amendments
 
@@ -1755,13 +1870,21 @@ recommendation given; the "revisit if" notes stay.
 
 Code claims were located with Rueca's own tools on this repository at
 `c82029013c6d` (`rueca query … --text`, 10–130 ms per call with the segment open).
-Worked: `get_file_outline` (`org/mod.rs`, 1,658 lines, ~18 ms) replaced
-most file reads; `trace` callers of `Store.register`, `update_org_with`
-and `atomic_write` gave every writer path with call-site lines (§5.11's
-list); `trace` callers of `Engine.with_visibility`, none outside tests,
-is §2's "nothing sets it"; `search_code` grouped hits by enclosing symbol
-or section; `search_symbols` with `labels: ["EnvVar"]` listed every
-`RUECA_*` variable. Failures:
+
+Worked:
+
+- `get_file_outline` (`org/mod.rs`, 1,658 lines, ~18 ms) replaced most
+  file reads;
+- `trace` callers of `Store.register`, `update_org_with` and
+  `atomic_write` gave every writer path with call-site lines (§5.11's
+  list);
+- `trace` callers of `Engine.with_visibility`, none outside tests, is
+  §2's "nothing sets it";
+- `search_code` grouped hits by enclosing symbol or section;
+- `search_symbols` with `labels: ["EnvVar"]` listed every `RUECA_*`
+  variable.
+
+Failures:
 
 1. `search_code '{"query": …}'` is rejected (`unknown argument query …
    valid arguments: pattern, …`): its argument is `pattern`, unlike
@@ -1800,14 +1923,133 @@ or section; `search_symbols` with `labels: ["EnvVar"]` listed every
 
 All consulted on 2026-11-17.
 
-- **MCP and rmcp (the first draft's transport, §6.1):** https://rustsec.org/advisories/RUSTSEC-2026-0543 · https://modelcontextprotocol.io/specification/2026-07-28/basic/transports · https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http · https://modelcontextprotocol.io/specification/2026-07-28/changelog · https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization · https://modelcontextprotocol.io/specification/2025-11-25/basic/transports · https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization · https://modelcontextprotocol.io/specification/2025-11-25/changelog · https://modelcontextprotocol.io/specification/2025-06-18/changelog · https://crates.io/api/v1/crates/rmcp/versions · https://crates.io/api/v1/crates/rmcp/3.10.0/dependencies · https://docs.rs/rmcp/3.7.0/rmcp/transport/streamable_http_server/ · https://github.com/modelcontextprotocol/rust-sdk/blob/main/crates/rmcp/CHANGELOG.md · https://github.com/modelcontextprotocol/rust-sdk/blob/main/docs/OAUTH_SUPPORT.md · https://github.com/modelcontextprotocol/rust-sdk/tree/main/examples/servers/src · https://github.com/modelcontextprotocol/rust-sdk/blob/main/examples/servers/src/counter_streamhttp.rs · https://crates.io/crates/tower-http
-- **Authorization and JWT:** https://www.rfc-editor.org/rfc/rfc9728 · https://www.rfc-editor.org/rfc/rfc8707 · https://crates.io/crates/jsonwebtoken · https://github.com/Keats/jsonwebtoken/blob/master/CHANGELOG.md · https://crates.io/crates/jwt-simple · https://crates.io/crates/openidconnect
-- **Object storage:** https://crates.io/crates/object_store · https://github.com/apache/arrow-rs-object-store · https://docs.rs/object_store/0.14.2/object_store/enum.PutMode.html · https://docs.rs/object_store/0.14.2/object_store/aws/enum.S3ConditionalPut.html · https://github.com/apache/arrow-rs-object-store/blob/main/CHANGELOG.md · https://github.com/apache/arrow-rs-object-store/blob/main/CHANGELOG-old.md · https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html · https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html · https://aws.amazon.com/about-aws/whats-new/2024/08/amazon-s3-conditional-writes · https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-functionality-conditional-writes · https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-enforcement-conditional-write-operations-general-purpose-buckets/ · https://developers.cloudflare.com/r2/api/s3/extensions/ · https://github.com/minio/minio/issues/20346 · https://github.com/minio/minio/pull/19682 · https://crates.io/crates/opendal · https://github.com/apache/opendal · https://quickwit.io/docs/overview/architecture · https://github.com/quickwit-oss/quickwit/blob/main/quickwit/quickwit-storage/Cargo.toml · https://news.ycombinator.com/item?id=46326984 · https://github.com/localstack/localstack/pull/11941
-- **Leases and queues:** https://www.morling.dev/blog/leader-election-with-s3-conditional-writes/ · https://quanttype.net/posts/2025-02-25-leader-election-with-s3-and-if-match.html · https://github.com/apalis-dev/apalis · https://crates.io/crates/apalis-postgres · https://www.postgresql.org/docs/current/sql-select.html
-- **Observability and rate limits:** https://github.com/open-telemetry/opentelemetry-rust · https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-prometheus · https://crates.io/crates/tracing-opentelemetry · https://crates.io/crates/metrics-exporter-prometheus · https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/ · https://docs.rs/tower_governor/latest/tower_governor/ · https://crates.io/crates/governor
-- **Containers:** https://github.com/axodotdev/cargo-dist · https://github.com/GoogleContainerTools/distroless · https://hub.docker.com/r/nvidia/cuda/tags · https://hub.docker.com/_/debian · https://crates.io/crates/llama-cpp-2 · https://github.com/ggml-org/llama.cpp/blob/master/.devops/cuda.Dockerfile · https://crates.io/crates/aws-lc-sys · https://packages.ubuntu.com/noble/git · https://crates.io/crates/cargo-auditable · https://doc.rust-lang.org/std/fs/struct.File.html
-- **Zoekt and Sourcegraph:** https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/index.go · https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/git_cache.go · https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/queue.go · https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/main.go · https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/sg.go · https://github.com/sourcegraph/zoekt/blob/main/index/shard_builder.go · https://github.com/sourcegraph/zoekt/blob/main/gitindex/index.go · https://github.com/sourcegraph/zoekt/blob/main/doc/design.md · https://github.com/sourcegraph/zoekt/blob/main/doc/indexing.md · https://github.com/sourcegraph/zoekt/blob/main/doc/faq.md · https://sourcegraph.com/docs/admin/architecture · https://sourcegraph.com/docs/admin/repo/update_frequency · https://sourcegraph.com/docs/admin/permissions/syncing · https://sourcegraph.com/docs/admin/config/webhooks/incoming · https://sourcegraph.com/docs/admin/search · https://sourcegraph.com/docs/self-hosted/deploy/instance-size · https://sourcegraph.com/docs/admin/deploy/resource_estimator · https://github.com/sourcegraph/docs/blob/main/docs/self-hosted/deploy/scale.mdx · https://github.com/sourcegraph/resource-estimator/blob/master/internal/scaling/references.go · https://sourcegraph.com/blog/tackling-the-long-tail-of-tiny-repos-with-shard-merging
-- **Other systems:** https://github.blog/engineering/architecture-optimization/the-technology-behind-githubs-new-code-search/ · https://github.blog/engineering/architecture-optimization/a-brief-history-of-code-search-at-github/ · https://glean.software/docs/databases/ · https://glean.software/blog/incremental/ · https://engineering.fb.com/2024/12/19/developer-tools/glean-open-source-code-indexing/ · https://kythe.io/docs/kythe-overview.html · https://cursor.com/blog/secure-codebase-indexing · https://www.augmentcode.com/blog/a-real-time-index-for-your-codebase-secure-personal-scalable · https://www.greptile.com/docs/self-hosting/system-architecture.md · https://www.greptile.com/docs/self-hosting/deployment-options.md · https://github.com/DeusData/codebase-memory-mcp · https://docs.gitlab.com/integration/zoekt/
-- **Webhooks:** https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks · https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries · https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks · https://docs.github.com/en/webhooks/webhook-events-and-payloads · https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api · https://docs.gitlab.com/user/project/integrations/webhooks/ · https://docs.gitlab.com/user/gitlab_com/ · https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/ · https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/ · https://support.atlassian.com/bitbucket-cloud/kb/troubleshoot-webhooks/ · https://docs.stripe.com/webhooks · https://shopify.dev/docs/apps/build/webhooks/best-practices
-- **Git transport:** https://github.com/git/git/blob/master/Documentation/RelNotes/2.45.0.adoc · https://github.com/git/git/blob/master/Documentation/RelNotes/2.49.0.adoc · https://github.com/git/git/blob/master/Documentation/git.adoc · https://github.blog/open-source/git/get-up-to-speed-with-partial-clone-and-shallow-clone/ · https://jira.atlassian.com/browse/BCLOUD-19847 · https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md · https://github.com/GitoxideLabs/gitoxide/pull/2375 · https://github.com/GitoxideLabs/gitoxide/pull/3018 · https://github.com/libgit2/libgit2/issues/5564 · https://github.com/libgit2/libgit2/pull/7364
+- **MCP and rmcp (the first draft's transport, §6.1):**
+  - https://rustsec.org/advisories/RUSTSEC-2026-0543
+  - https://modelcontextprotocol.io/specification/2026-07-28/basic/transports
+  - https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
+  - https://modelcontextprotocol.io/specification/2026-07-28/changelog
+  - https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization
+  - https://modelcontextprotocol.io/specification/2025-11-25/basic/transports
+  - https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization
+  - https://modelcontextprotocol.io/specification/2025-11-25/changelog
+  - https://modelcontextprotocol.io/specification/2025-06-18/changelog
+  - https://crates.io/api/v1/crates/rmcp/versions
+  - https://crates.io/api/v1/crates/rmcp/3.10.0/dependencies
+  - https://docs.rs/rmcp/3.7.0/rmcp/transport/streamable_http_server/
+  - https://github.com/modelcontextprotocol/rust-sdk/blob/main/crates/rmcp/CHANGELOG.md
+  - https://github.com/modelcontextprotocol/rust-sdk/blob/main/docs/OAUTH_SUPPORT.md
+  - https://github.com/modelcontextprotocol/rust-sdk/tree/main/examples/servers/src
+  - https://github.com/modelcontextprotocol/rust-sdk/blob/main/examples/servers/src/counter_streamhttp.rs
+  - https://crates.io/crates/tower-http
+- **Authorization and JWT:**
+  - https://www.rfc-editor.org/rfc/rfc9728
+  - https://www.rfc-editor.org/rfc/rfc8707
+  - https://crates.io/crates/jsonwebtoken
+  - https://github.com/Keats/jsonwebtoken/blob/master/CHANGELOG.md
+  - https://crates.io/crates/jwt-simple
+  - https://crates.io/crates/openidconnect
+- **Object storage:**
+  - https://crates.io/crates/object_store
+  - https://github.com/apache/arrow-rs-object-store
+  - https://docs.rs/object_store/0.14.2/object_store/enum.PutMode.html
+  - https://docs.rs/object_store/0.14.2/object_store/aws/enum.S3ConditionalPut.html
+  - https://github.com/apache/arrow-rs-object-store/blob/main/CHANGELOG.md
+  - https://github.com/apache/arrow-rs-object-store/blob/main/CHANGELOG-old.md
+  - https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html
+  - https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html
+  - https://aws.amazon.com/about-aws/whats-new/2024/08/amazon-s3-conditional-writes
+  - https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-functionality-conditional-writes
+  - https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-enforcement-conditional-write-operations-general-purpose-buckets/
+  - https://developers.cloudflare.com/r2/api/s3/extensions/
+  - https://github.com/minio/minio/issues/20346
+  - https://github.com/minio/minio/pull/19682
+  - https://crates.io/crates/opendal
+  - https://github.com/apache/opendal
+  - https://quickwit.io/docs/overview/architecture
+  - https://github.com/quickwit-oss/quickwit/blob/main/quickwit/quickwit-storage/Cargo.toml
+  - https://news.ycombinator.com/item?id=46326984
+  - https://github.com/localstack/localstack/pull/11941
+- **Leases and queues:**
+  - https://www.morling.dev/blog/leader-election-with-s3-conditional-writes/
+  - https://quanttype.net/posts/2025-02-25-leader-election-with-s3-and-if-match.html
+  - https://github.com/apalis-dev/apalis
+  - https://crates.io/crates/apalis-postgres
+  - https://www.postgresql.org/docs/current/sql-select.html
+- **Observability and rate limits:**
+  - https://github.com/open-telemetry/opentelemetry-rust
+  - https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-prometheus
+  - https://crates.io/crates/tracing-opentelemetry
+  - https://crates.io/crates/metrics-exporter-prometheus
+  - https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/
+  - https://docs.rs/tower_governor/latest/tower_governor/
+  - https://crates.io/crates/governor
+- **Containers:**
+  - https://github.com/axodotdev/cargo-dist
+  - https://github.com/GoogleContainerTools/distroless
+  - https://hub.docker.com/r/nvidia/cuda/tags
+  - https://hub.docker.com/_/debian
+  - https://crates.io/crates/llama-cpp-2
+  - https://github.com/ggml-org/llama.cpp/blob/master/.devops/cuda.Dockerfile
+  - https://crates.io/crates/aws-lc-sys
+  - https://packages.ubuntu.com/noble/git
+  - https://crates.io/crates/cargo-auditable
+  - https://doc.rust-lang.org/std/fs/struct.File.html
+- **Zoekt and Sourcegraph:**
+  - https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/index.go
+  - https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/git_cache.go
+  - https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/queue.go
+  - https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/main.go
+  - https://github.com/sourcegraph/zoekt/blob/main/cmd/zoekt-sourcegraph-indexserver/sg.go
+  - https://github.com/sourcegraph/zoekt/blob/main/index/shard_builder.go
+  - https://github.com/sourcegraph/zoekt/blob/main/gitindex/index.go
+  - https://github.com/sourcegraph/zoekt/blob/main/doc/design.md
+  - https://github.com/sourcegraph/zoekt/blob/main/doc/indexing.md
+  - https://github.com/sourcegraph/zoekt/blob/main/doc/faq.md
+  - https://sourcegraph.com/docs/admin/architecture
+  - https://sourcegraph.com/docs/admin/repo/update_frequency
+  - https://sourcegraph.com/docs/admin/permissions/syncing
+  - https://sourcegraph.com/docs/admin/config/webhooks/incoming
+  - https://sourcegraph.com/docs/admin/search
+  - https://sourcegraph.com/docs/self-hosted/deploy/instance-size
+  - https://sourcegraph.com/docs/admin/deploy/resource_estimator
+  - https://github.com/sourcegraph/docs/blob/main/docs/self-hosted/deploy/scale.mdx
+  - https://github.com/sourcegraph/resource-estimator/blob/master/internal/scaling/references.go
+  - https://sourcegraph.com/blog/tackling-the-long-tail-of-tiny-repos-with-shard-merging
+- **Other systems:**
+  - https://github.blog/engineering/architecture-optimization/the-technology-behind-githubs-new-code-search/
+  - https://github.blog/engineering/architecture-optimization/a-brief-history-of-code-search-at-github/
+  - https://glean.software/docs/databases/
+  - https://glean.software/blog/incremental/
+  - https://engineering.fb.com/2024/12/19/developer-tools/glean-open-source-code-indexing/
+  - https://kythe.io/docs/kythe-overview.html
+  - https://cursor.com/blog/secure-codebase-indexing
+  - https://www.augmentcode.com/blog/a-real-time-index-for-your-codebase-secure-personal-scalable
+  - https://www.greptile.com/docs/self-hosting/system-architecture.md
+  - https://www.greptile.com/docs/self-hosting/deployment-options.md
+  - https://github.com/DeusData/codebase-memory-mcp
+  - https://docs.gitlab.com/integration/zoekt/
+- **Webhooks:**
+  - https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks
+  - https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries
+  - https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks
+  - https://docs.github.com/en/webhooks/webhook-events-and-payloads
+  - https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
+  - https://docs.gitlab.com/user/project/integrations/webhooks/
+  - https://docs.gitlab.com/user/gitlab_com/
+  - https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/
+  - https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/
+  - https://support.atlassian.com/bitbucket-cloud/kb/troubleshoot-webhooks/
+  - https://docs.stripe.com/webhooks
+  - https://shopify.dev/docs/apps/build/webhooks/best-practices
+- **Git transport:**
+  - https://github.com/git/git/blob/master/Documentation/RelNotes/2.45.0.adoc
+  - https://github.com/git/git/blob/master/Documentation/RelNotes/2.49.0.adoc
+  - https://github.com/git/git/blob/master/Documentation/git.adoc
+  - https://github.blog/open-source/git/get-up-to-speed-with-partial-clone-and-shallow-clone/
+  - https://jira.atlassian.com/browse/BCLOUD-19847
+  - https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md
+  - https://github.com/GitoxideLabs/gitoxide/pull/2375
+  - https://github.com/GitoxideLabs/gitoxide/pull/3018
+  - https://github.com/libgit2/libgit2/issues/5564
+  - https://github.com/libgit2/libgit2/pull/7364
 - **Rueca:** https://github.com/DevArKaDiA/rueca/pull/60 (bench organization suite)

@@ -82,20 +82,23 @@ The measurement fixed in the next entry, run as written there. **1,624 of
 entry after it was the rate on the files the parser was repaired against.
 SQL is `preview`.
 
-- **What ran.** `rueca-bench run --arm rueca --suite health --lang sql`
-  on the 25 repositories as `[[health.repos]]` of the manifest (source
+- **What ran.** `rueca-bench run --arm rueca --suite health --lang sql` on
+  the 25 repositories as `[[health.repos]]` of the manifest (source
   `held-out`, gated; `health.py` learns that one list, nothing else in the
   harness changed), with `rueca` built from `git archive 05ff770` (sha256
   `460fa3c27315…`; the published `678465c5b359…` was built in another
-  directory and is not bit-reproducible). The rebuilt binary gives the
-  published rows on six repositories of the first corpus (tSQLt 14 of 281,
-  mimic-code 8 of 469, Sakila 0 of 25, pgmq 0 of 101, bigquery-utils 1 of
-  105, First Responder Kit 1 of 23). No file of `rueca-lang-sql` changed.
-  No health rule excludes any of the 6,496 files, so the raw rate is the
-  same number. The index does not extract 14 more files (13 in UTF-16, one
-  over 2 MiB; `files_skipped`); with them, as the crate's `dialects`
-  example counts, 1,637 of 6,510 (25.1%, 24.1–26.2); lenient (head-only
-  statements not counted) 835 of 6,510 (12.8%, 12.0–13.7).
+  directory and is not bit-reproducible).
+
+  The rebuilt binary gives the published rows on six repositories of the
+  first corpus (tSQLt 14 of 281, mimic-code 8 of 469, Sakila 0 of 25, pgmq 0
+  of 101, bigquery-utils 1 of 105, First Responder Kit 1 of 23). No file of
+  `rueca-lang-sql` changed. No health rule excludes any of the 6,496 files,
+  so the raw rate is the same number.
+
+  The index does not extract 14 more files (13 in UTF-16, one over 2 MiB;
+  `files_skipped`); with them, as the crate's `dialects` example counts,
+  1,637 of 6,510 (25.1%, 24.1–26.2); lenient (head-only statements not
+  counted) 835 of 6,510 (12.8%, 12.0–13.7).
 - **By the dialect given to each file before measuring** (the files the
   index extracted):
 
@@ -120,20 +123,36 @@ SQL is `preview`.
   files were read as ANSI (397 with an error), 1,415 as T-SQL, 997 as
   PostgreSQL, 931 as MySQL, 796 as BigQuery, 270 as Oracle, 227 as
   Snowflake (of 647 Snowflake files), 188 as SQLite.
-- **By repository** (files extracted, with a strict error): supabase/postgres
-  264 / 36 (13.6%), synapse 301 / 1 (0.3%), supabase/auth 79 / 2 (2.5%),
-  pgvector 56 / 17 (30.4%), age 69 / 50 (72.5%), cloudstack 225 / 61
-  (27.1%), vitess 274 / 136 (49.6%), gh-ost 104 / 94 (90.4%),
-  dolphinscheduler 74 / 16 (21.6%), temporal 111 / 9 (8.1%), diesel 465 /
-  2 (0.4%), authelia 174 / 13 (7.5%), camunda-bpm-platform 546 / 24
-  (4.4%), actual 59 / 1 (1.7%), atuin 78 / 1 (1.3%), sql-server-samples
-  1,087 / 595 (54.7%), sqlwatch 337 / 39 (11.6%), cortex-data-foundation
-  595 / 127 (21.3%), ethereum-etl-airflow 86 / 3 (3.5%), dbt-ga4 72 / 1
-  (1.4%), sf-samples 647 / 287 (44.4%), dbt-adapters 409 / 10 (2.4%),
-  ra_data_warehouse 225 / 11 (4.9%), db-sample-schemas 89 / 76 (85.4%),
-  pljson 70 / 12 (17.1%). Five repositories are at or under 2%: the
-  migrations of applications (synapse, diesel, actual, atuin) and one dbt
-  package.
+- **By repository** (files extracted, with a strict error):
+
+  - supabase/postgres 264 / 36 (13.6%),
+  - synapse 301 / 1 (0.3%),
+  - supabase/auth 79 / 2 (2.5%),
+  - pgvector 56 / 17 (30.4%),
+  - age 69 / 50 (72.5%),
+  - cloudstack 225 / 61 (27.1%),
+  - vitess 274 / 136 (49.6%),
+  - gh-ost 104 / 94 (90.4%),
+  - dolphinscheduler 74 / 16 (21.6%),
+  - temporal 111 / 9 (8.1%),
+  - diesel 465 / 2 (0.4%),
+  - authelia 174 / 13 (7.5%),
+  - camunda-bpm-platform 546 / 24 (4.4%),
+  - actual 59 / 1 (1.7%),
+  - atuin 78 / 1 (1.3%),
+  - sql-server-samples 1,087 / 595 (54.7%),
+  - sqlwatch 337 / 39 (11.6%),
+  - cortex-data-foundation 595 / 127 (21.3%),
+  - ethereum-etl-airflow 86 / 3 (3.5%),
+  - dbt-ga4 72 / 1 (1.4%),
+  - sf-samples 647 / 287 (44.4%),
+  - dbt-adapters 409 / 10 (2.4%),
+  - ra_data_warehouse 225 / 11 (4.9%),
+  - db-sample-schemas 89 / 76 (85.4%),
+  - pljson 70 / 12 (17.1%).
+
+  Five repositories are at or under 2%: the migrations of applications
+  (synapse, diesel, actual, atuin) and one dbt package.
 - **Causes, by file** (a file with several is counted in each; categories
   written after the fact from the parser errors and the first words of
   head-only statements, `bench/datasets/heldout/sql_causes.py`;
@@ -164,20 +183,24 @@ SQL is `preview`.
   statements the pack recognizes by their first words and does not parse.
   The productions of `forms.rs` cover the utility statements that occurred
   in the first corpus; the held-out one has others.
-- **Decisions.** (1) The held-out repositories stay in the manifest as
-  gated health targets ("held-out, added 2026-11-25 after the tuning of
-  PR #87"), so the scorecard pools them: 1,650 of 9,915 files, 16.6%
-  (15.9–17.4), `preview`, failing floor "files with parse errors". The
-  two populations are reported apart wherever the number is quoted, since
-  the pooled one mixes a tuned corpus with an untuned one. (2) `rueca-bench
-  check` reports the row as a regression against the last publication
-  (0.76% → 16.6%); it is the population that changed, not the pack. No
-  other language's row moves. (3) Once the parser is repaired against
-  these 25 repositories they are a tuning corpus too: the next claim of
-  `stable` for SQL needs a third set chosen the same way, and the repairs
-  should be argued by construct (above), not by this list of files. (4)
-  Every other pack's parse-error rate is also measured on the repositories
-  the pack was developed against; only SQL has a held-out number today.
+- **Decisions.**
+
+  1. The held-out repositories stay in the manifest as gated health targets
+     ("held-out, added 2026-11-25 after the tuning of PR #87"), so the
+     scorecard pools them: 1,650 of 9,915 files, 16.6% (15.9–17.4),
+     `preview`, failing floor "files with parse errors". The two populations
+     are reported apart wherever the number is quoted, since the pooled one
+     mixes a tuned corpus with an untuned one.
+  2. `rueca-bench check` reports the row as a regression against the last
+     publication (0.76% → 16.6%); it is the population that changed, not the
+     pack. No other language's row moves.
+  3. Once the parser is repaired against these 25 repositories they are a
+     tuning corpus too: the next claim of `stable` for SQL needs a third set
+     chosen the same way, and the repairs should be argued by construct
+     (above), not by this list of files.
+  4. Every other pack's parse-error rate is also measured on the
+     repositories the pack was developed against; only SQL has a held-out
+     number today.
 - **Limits of this number.** One person's selection from metadata, not a
   random sample of SQL; test schemas (gh-ost, vitess) and vendor samples
   (sql-server-samples, sf-samples, db-sample-schemas) weigh more than they
@@ -196,34 +219,44 @@ pack has not seen. This entry fixes a second corpus **before any Rueca
 binary or the `dialects` example has read a file of it**; it is committed
 alone, and the measurement follows in a later commit.
 
-- **Rules of the measurement.** Binary: `fix/sql-stable@05ff770`, the
-  source of the published scorecard (the two later commits change two
-  loops for clippy; the build is from a `git archive` of `05ff770`). No
-  change to `rueca-lang-sql` during or after it. Strict count. Every file
-  with an SQL extension of the manifest at the pinned commit, tests and
-  fixtures included; the only files left out of the gated rate are those
-  the health rules already leave out (vendored directories, RFC 0004 §5
-  and `bench/README.md` *Health*), and the raw rate is reported next to
-  it. No file, directory or repository is dropped after seeing a result,
-  and none is added. The repositories then enter `bench/manifest.toml` as
-  gated health targets for SQL, and the scorecard computes the status from
-  the pooled number: above 2% SQL is `preview`.
-- **How the repositories were chosen**: from metadata only (GitHub
-  licence, stars, release tags and the file list of the pinned tree,
-  through the API; nothing was cloned). Public; permissive licence read
-  from the repository; SQL written for a product or by a vendor for its
-  users, not parser fixtures; at least 50 SQL files at the pin; not in
-  `bench/manifest.toml`, not in the mining lists
-  (`bench/datasets/mined/repos_sql.txt`, `repos_sql_extra.txt`, the mining
-  output), not among the repositories named in the two entries below, and
-  no copy of one of them in its tree (checked by file name). Pin: the
-  latest release, or the default branch's head on 2026-11-25 where there
-  is no release or the latest one is an asset holder older than the tree
-  (sql-server-samples, sf-samples, dbt-adapters, whose `v1.10.4` predates
-  the monorepo). Dialect mix after what developers use (PostgreSQL and
-  MySQL first, then SQLite and SQL Server, Oracle, then the warehouses and
-  dbt), with the engines the first corpus lacks (MySQL, SQLite, Oracle)
-  given real populations.
+- **Rules of the measurement.** Binary: `fix/sql-stable@05ff770`, the source
+  of the published scorecard (the two later commits change two loops for
+  clippy; the build is from a `git archive` of `05ff770`). No change to
+  `rueca-lang-sql` during or after it.
+
+  Strict count. Every file with an SQL extension of the manifest at the
+  pinned commit, tests and fixtures included; the only files left out of the
+  gated rate are those the health rules already leave out (vendored
+  directories, RFC 0004 §5 and `bench/README.md` *Health*), and the raw rate
+  is reported next to it.
+
+  No file, directory or repository is dropped after seeing a result, and
+  none is added. The repositories then enter `bench/manifest.toml` as gated
+  health targets for SQL, and the scorecard computes the status from the
+  pooled number: above 2% SQL is `preview`.
+- **How the repositories were chosen**: from metadata only (GitHub licence,
+  stars, release tags and the file list of the pinned tree, through the API;
+  nothing was cloned).
+
+  - Public;
+  - Permissive licence read from the repository;
+  - SQL written for a product or by a vendor for its users, not parser
+    fixtures;
+  - At least 50 SQL files at the pin;
+  - Not in `bench/manifest.toml`, not in the mining lists
+    (`bench/datasets/mined/repos_sql.txt`, `repos_sql_extra.txt`, the mining
+    output), not among the repositories named in the two entries below, and
+    no copy of one of them in its tree (checked by file name).
+
+  Pin: the latest release, or the default branch's head on 2026-11-25 where
+  there is no release or the latest one is an asset holder older than the
+  tree (sql-server-samples, sf-samples, dbt-adapters, whose `v1.10.4`
+  predates the monorepo).
+
+  Dialect mix after what developers use (PostgreSQL and MySQL first, then
+  SQLite and SQL Server, Oracle, then the warehouses and dbt), with the
+  engines the first corpus lacks (MySQL, SQLite, Oracle) given real
+  populations.
 
   | Repository | Pin | Licence | Dialect (a priori) | SQL files | What it is |
   |---|---|---|---|---:|---|
@@ -262,20 +295,26 @@ alone, and the measurement follows in a later commit.
   `sqlite3`; `mssql`, `sqlserver`; `oracle`; `db2`; `h2`) and a file with
   none is "unlabelled". The per-dialect table uses these labels, not the
   dialect the pack detects, so a wrong detection is not hidden.
-- **Looked at and left out, with the reason**: sqlfluff (2,809 files that
-  are parser fixtures, not SQL anybody runs), ory/kratos (5,158 migration
-  files, most of the corpus by itself), HTTPArchive/almanac (3,655 BigQuery
-  queries, more than a third), flowable-engine (1,321; the same lineage of
-  scripts as camunda, one of the two is enough), oracle-db-examples
-  (1,513) and tpt-oracle (1,075; either would make Oracle a quarter of the
-  files, and tpt-oracle's licence file is not a standard one),
-  alexandria-plsql-utils (no licence file), MadeiraToolbox and
-  tigertoolbox (T-SQL is already the largest group), mozilla/bigquery-etl
-  (MPL-2.0), datacharmer/test_db (CC BY-SA), mysql-sys (GPL-2.0), and
-  repositories under 50 SQL files (harbor, PostgREST, quartz, sqlean,
-  memos, jaffle-shop, chinook, pg_cron, schemachange). Oracle is therefore
-  a small group (about 240 files with camunda's), and its row will have a
-  wide interval.
+- **Looked at and left out, with the reason**:
+
+  - sqlfluff (2,809 files that are parser fixtures, not SQL anybody runs),
+  - ory/kratos (5,158 migration files, most of the corpus by itself),
+  - HTTPArchive/almanac (3,655 BigQuery queries, more than a third),
+  - flowable-engine (1,321; the same lineage of scripts as camunda, one of
+    the two is enough),
+  - oracle-db-examples (1,513) and tpt-oracle (1,075; either would make
+    Oracle a quarter of the files, and tpt-oracle's licence file is not a
+    standard one),
+  - alexandria-plsql-utils (no licence file),
+  - MadeiraToolbox and tigertoolbox (T-SQL is already the largest group),
+  - mozilla/bigquery-etl (MPL-2.0),
+  - datacharmer/test_db (CC BY-SA),
+  - mysql-sys (GPL-2.0),
+  - Repositories under 50 SQL files (harbor, PostgREST, quartz, sqlean,
+    memos, jaffle-shop, chinook, pg_cron, schemachange).
+
+  Oracle is therefore a small group (about 240 files with camunda's), and
+  its row will have a wide interval.
 
 ## 2026-11-25 — SQL: mined localization set, three more structural sets, the strict parse-error count; `stable`
 
@@ -290,17 +329,22 @@ with parse errors, a callees population of 281, and a code-backed gold.
 The parser work is the next entry. The rest:
 
 - **Localization set mined by the bench**, as for shell
-  (`[datasets.rueca_mined_sql]`; same miner, rules and date). Gated 78 on
-  twelve repositories fixed from the mining counts before any arm ran:
-  dbt-utils 8, dbt-project-evaluator 8, tuva-core 8, dbt-external-tables
-  5, dbt-date 4, dbt_artifacts 4, dbt-snowflake-monitoring 4 (dbt); First
-  Responder Kit 12 (T-SQL); pgmq 6, pg_partman 6 (PL/pgSQL); mimic-code 8,
-  bigquery-utils 5 (BigQuery / analytical). Calibration 15: dbt-codegen,
-  DarlingData, postgres_dba. The labeler needs a dialect for function
-  gold: `[[s1.repos]] dialects` gives it from what the repository is
-  (never from the pack), for the gold and for BM25's function documents
-  alike. 54 of the 78 patches change a callable; 53 of the 78 issues name
-  a gold file, reported apart.
+  (`[datasets.rueca_mined_sql]`; same miner, rules and date).
+
+  Gated 78 on twelve repositories fixed from the mining counts before any
+  arm ran:
+
+  - dbt-utils 8, dbt-project-evaluator 8, tuva-core 8, dbt-external-tables
+    5, dbt-date 4, dbt_artifacts 4, dbt-snowflake-monitoring 4 (dbt);
+  - First Responder Kit 12 (T-SQL);
+  - pgmq 6, pg_partman 6 (PL/pgSQL);
+  - mimic-code 8, bigquery-utils 5 (BigQuery / analytical).
+
+  Calibration 15: dbt-codegen, DarlingData, postgres_dba. The labeler needs
+  a dialect for function gold: `[[s1.repos]] dialects` gives it from what
+  the repository is (never from the pack), for the gold and for BM25's
+  function documents alike. 54 of the 78 patches change a callable; 53 of
+  the 78 issues name a gold file, reported apart.
 - **Three more structural sets** so callees pool ≥ 300 (RFC 0004 §7.2):
   pgmq v1.13.2, tSQLt `4a921d0`, mimic-code v3.0.1 PostgreSQL concepts,
   chosen from the labeler's own question counts (50, 107, 33 callees)
@@ -358,19 +402,20 @@ The parser work is the next entry. The rest:
      numbers. So the gated sets were scored twice by Rueca; the second
      pass changed no localization or structural number, only the parse
      errors.
-- **`rueca-bench check` flags the SQL structural rows, and why.** The
-  pooled numbers moved against the last publication (callers / callees
-  precision 99.8 / 99.6 → 99.5 / 98.8, recall 98.9 / 97.5 → 96.1 / 95.6,
-  definitions 100.0 → 99.2) because the pool grew from two sets to five:
-  dbt_hubspot is unchanged to the question, pgmq and tSQLt score lower
-  than the first two (pgmq callers recall 75.9, definitions 90.3). On
-  Sakila two questions of the SQL Server copy changed: `CREATE TABLE
+- **`rueca-bench check` flags the SQL structural rows, and why.** The pooled
+  numbers moved against the last publication (callers / callees precision
+  99.8 / 99.6 → 99.5 / 98.8, recall 98.9 / 97.5 → 96.1 / 95.6, definitions
+  100.0 → 99.2) because the pool grew from two sets to five: dbt_hubspot is
+  unchanged to the question, pgmq and tSQLt score lower than the first two
+  (pgmq callers recall 75.9, definitions 90.3).
+
+  On Sakila two questions of the SQL Server copy changed: `CREATE TABLE
   film_text (…)` is followed, without `GO` or `;`, by `CREATE TABLE
   inventory (… REFERENCES film …)`; the labeler reads the batch as one
-  statement and gives `film_text → film`, the pack now splits the batch
-  and gives `inventory → film`, so one gold edge that is the labeler's
-  artifact is no longer matched (Sakila callers recall 97.0 → 96.7). The
-  gold was not changed. No other language's row moves.
+  statement and gives `film_text → film`, the pack now splits the batch and
+  gives `inventory → film`, so one gold edge that is the labeler's artifact
+  is no longer matched (Sakila callers recall 97.0 → 96.7). The gold was not
+  changed. No other language's row moves.
 - **Where the issue names no gold file** (25 of 78; 23 with function
   gold): File Acc@5 56.0 vs BM25 72.0 vs cbm 28.0; Function Acc@10 56.5 vs
   60.9 vs 4.3. Rueca trails BM25 clearly on files there: the pass on the
@@ -397,15 +442,18 @@ statement, and Oracle / DB2 files were read as ANSI. Choices:
   sqlparser 0.64 is the latest release and already has an Oracle dialect
   (SQL only; no PL/SQL) and none for DB2; no other maintained pure-Rust
   parser covers procedural T-SQL or PL/SQL. So the pack now reads, itself:
-  T-SQL batches (statement boundaries without `;`, `BEGIN … END`, `TRY` /
-  `CATCH`, `IF` / `WHILE`, routine heads; `tsql` module) and
-  `;`-terminated procedural code (PL/SQL packages, routines, triggers,
-  type bodies, anonymous blocks; MySQL and DB2 SQL PL routines and
-  triggers; BigQuery scripts; `block` module). Every query, DML statement,
-  condition, assigned value and call inside is still parsed by sqlparser,
-  one at a time, with the routine as the enclosing definition — so a
-  10,000-line procedure with one exotic statement loses that statement
-  only, and procedure bodies now give column references too.
+
+  - T-SQL batches (statement boundaries without `;`, `BEGIN … END`, `TRY` /
+    `CATCH`, `IF` / `WHILE`, routine heads; `tsql` module)
+  - `;`-terminated procedural code (PL/SQL packages, routines, triggers,
+    type bodies, anonymous blocks; MySQL and DB2 SQL PL routines and
+    triggers; BigQuery scripts; `block` module).
+
+  Every query, DML statement, condition, assigned value and call inside is
+  still parsed by sqlparser, one at a time, with the routine as the
+  enclosing definition — so a 10,000-line procedure with one exotic
+  statement loses that statement only, and procedure bodies now give column
+  references too.
 - **A parse error is unchanged in meaning and finer in grain.** It is a
   statement — now also a statement *of a routine body* — that nothing
   parses and that only the token scanner reads. A file is `partial` when
@@ -417,32 +465,37 @@ statement, and Oracle / DB2 files were read as ANSI. Choices:
      a clause — blanked or replaced by an equivalent of the same length.
      Positions do not move; no relation, column or routine name is
      removed (storage names are);
-  3. **the pack's own grammars**: the procedural readers above, and
-     the productions of the `forms` module — one grammar per statement
-     form sqlparser lacks (T-SQL flow, transaction, cursor, `SET`, `EXEC`,
-     `DBCC`, `BACKUP`, security statements; `GRANT`; `DROP` kinds; type
-     and synonym definitions; non-column `ALTER TABLE` actions;
-     PostgreSQL `DO`, routine heads with a text body, `ALTER EXTENSION`;
-     MySQL `LOAD DATA`). A production must consume every token of the
-     statement — names, typed argument lists, option keywords from closed
-     sets — and every expression in it must parse with sqlparser's
-     expression parser. Each has accepted and rejected (malformed) cases
-     in `forms::tests`.
-  **Known by the head is not parsed (strict rate).** The first version of
-  this work also accepted statements by their first words and balanced
-  parentheses (`utility` module). That is not parsing, and the gated
-  health number does not count it: such a statement keeps the references
-  the token scanner reads but is a parse error (`FileFacts::parse_errors`,
-  `Stats::unparsed_strict`). The lenient rate, which leaves those out, is
-  printed next to the strict one by the `dialects` example (`--heads`
-  lists the forms still known by their head only). PL/SQL control
-  statements read by the block reader (`RAISE`, `FETCH … INTO`, `EXECUTE
-  IMMEDIATE`, …) have closed grammars too; what does not fit goes through
-  the same strict count.
-  Still not validated inside the procedural readers: parameter lists of
-  T-SQL and PL/SQL routine heads, declared types of PL/SQL variables,
-  `TYPE` / `SUBTYPE` / `PRAGMA` declarations, and the arguments of
-  chained member calls (`a.b(x).c(y)`), read by the token scanner.
+  3. **the pack's own grammars**: the procedural readers above, and the
+     productions of the `forms` module — one grammar per statement form
+     sqlparser lacks (T-SQL flow, transaction, cursor, `SET`, `EXEC`,
+     `DBCC`, `BACKUP`, security statements; `GRANT`; `DROP` kinds; type and
+     synonym definitions; non-column `ALTER TABLE` actions; PostgreSQL `DO`,
+     routine heads with a text body, `ALTER EXTENSION`; MySQL `LOAD DATA`).
+
+     A production must consume every token of the statement — names, typed
+     argument lists, option keywords from closed sets — and every expression
+     in it must parse with sqlparser's expression parser. Each has accepted
+     and rejected (malformed) cases in `forms::tests`.
+
+     **Known by the head is not parsed (strict rate).** The first version of
+     this work also accepted statements by their first words and balanced
+     parentheses (`utility` module). That is not parsing, and the gated
+     health number does not count it: such a statement keeps the references
+     the token scanner reads but is a parse error
+     (`FileFacts::parse_errors`, `Stats::unparsed_strict`).
+
+     The lenient rate, which leaves those out, is printed next to the strict
+     one by the `dialects` example (`--heads` lists the forms still known by
+     their head only).
+
+     PL/SQL control statements read by the block reader (`RAISE`, `FETCH …
+     INTO`, `EXECUTE IMMEDIATE`, …) have closed grammars too; what does not
+     fit goes through the same strict count.
+
+     Still not validated inside the procedural readers: parameter lists of
+     T-SQL and PL/SQL routine heads, declared types of PL/SQL variables,
+     `TYPE` / `SUBTYPE` / `PRAGMA` declarations, and the arguments of
+     chained member calls (`a.b(x).c(y)`), read by the token scanner.
 - **Not excluded, not relabelled.** No file was taken out of the health
   metric and no `[[health.not_language]]` entry was added. Client
   commands (SQL*Plus, sqlcmd, psql) were already masked as commands; the
@@ -508,34 +561,46 @@ statement, and Oracle / DB2 files were read as ANSI. Choices:
   `oracle/procedures_and_loops` and `db2/trigger_and_procedure` (32
   cases, 102 callables, 76 edges; the labeler agrees on 74, the 2 are the
   migration-order edges as before).
-- **Strict rate on the health corpus** (every SQL file of the gated S3
-  and S1 repositories at their pinned commits, 3,419 files; the bench's
-  file set, counted by the `dialects` example): 26 files with a strict
-  parse error (0.76%), 23 lenient (0.67%). It was 71 (2.08%) before the
-  last constructs were closed and 238 of 2,671 at repository heads when
-  head-only acceptance was first counted. Closed by parsing, each with
-  accepted and rejected cases in the tests: BigQuery `LOAD DATA … FROM
-  FILES`, Redshift `COPY` parameters, SAP HANA `IMPORT FROM CSV FILE`,
-  MySQL `PREPARE` / `CREATE SCHEMA … COLLATE`, `ALTER TABLE … CLUSTER
-  ON`, T-SQL `ALTER TABLE t ADD a INT, b INT` (each column parsed as its
-  own `ADD`), and repairs for a trailing comma in a T-SQL column list, CLR
-  static methods, BigQuery bit shifts, HANA column-store hints and table
-  options before a MySQL partitioning clause; Jinja: a macro alone after
-  the CTE list is the main query, a macro first in the statement before
-  `select` is the `WITH` list, and comments before a placeholder do not
-  change where it stands. `DELIMITER` is a client command only with a
-  symbol delimiter (`DELIMITER ','` of a PostgreSQL `COPY` and a
-  parameter named `delimiter` were cutting statements).
+- **Strict rate on the health corpus** (every SQL file of the gated S3 and
+  S1 repositories at their pinned commits, 3,419 files; the bench's file
+  set, counted by the `dialects` example): 26 files with a strict parse
+  error (0.76%), 23 lenient (0.67%).
+
+  It was 71 (2.08%) before the last constructs were closed and 238 of 2,671
+  at repository heads when head-only acceptance was first counted.
+
+  Closed by parsing, each with accepted and rejected cases in the tests:
+
+  - BigQuery `LOAD DATA … FROM FILES`,
+  - Redshift `COPY` parameters,
+  - SAP HANA `IMPORT FROM CSV FILE`,
+  - MySQL `PREPARE` / `CREATE SCHEMA … COLLATE`,
+  - `ALTER TABLE … CLUSTER ON`,
+  - T-SQL `ALTER TABLE t ADD a INT, b INT` (each column parsed as its own
+    `ADD`),
+  - Repairs for a trailing comma in a T-SQL column list, CLR static methods,
+    BigQuery bit shifts, HANA column-store hints and table options before a
+    MySQL partitioning clause;
+  - Jinja: a macro alone after the CTE list is the main query, a macro first
+    in the statement before `select` is the `WITH` list, and comments before
+    a placeholder do not change where it stands.
+
+  `DELIMITER` is a client command only with a symbol delimiter (`DELIMITER
+  ','` of a PostgreSQL `COPY` and a parameter named `delimiter` were cutting
+  statements).
+
   What is left is not valid SQL of any dialect, or not SQL the pack reads:
-  tSQLt 14 files (12 under `Experiments/` and `Snippets/`: unterminated
-  comments and brackets, sqlcmd `:!!`, Service Broker and event-session
-  statements, statements cut on purpose; two build templates with SSMS
-  `<login_name, sysname, …>` parameters), mimic-code 8 + 2 (six generated
-  files that end after `CREATE TABLE … AS`, one with `CREATE TABLE
-  .first_day_lab`, one with two `CREATE TABLE … AS` heads and no query;
-  the last two are in both pins), First Responder Kit 1 (two select items
-  with no comma between them in the 2005 script), bigquery-utils 1
-  (`syntax_error.sql`, an input of its query fixer).
+
+  - tSQLt 14 files (12 under `Experiments/` and `Snippets/`: unterminated
+    comments and brackets, sqlcmd `:!!`, Service Broker and event-session
+    statements, statements cut on purpose; two build templates with SSMS
+    `<login_name, sysname, …>` parameters),
+  - mimic-code 8 + 2 (six generated files that end after `CREATE TABLE …
+    AS`, one with `CREATE TABLE .first_day_lab`, one with two `CREATE TABLE
+    … AS` heads and no query; the last two are in both pins),
+  - First Responder Kit 1 (two select items with no comma between them in
+    the 2005 script),
+  - bigquery-utils 1 (`syntax_error.sql`, an input of its query fixer).
 - **A long statement is parsed in the file's dialect only.** Above 64 KiB
   a statement is a routine or a data load; when the file's dialect
   rejects it the pack's readers take it apart and every statement inside
@@ -563,29 +628,40 @@ its files kept a parse error, the interval crossing the floor. The second
 is the dialect work below. For the first:
 
 - **The bench mines its own S1 set** (`[datasets.rueca_mined_shell]`,
-  `bench/datasets/`, loader `datasets.py: _local_jsonl_rows`): merged
-  GitHub pull requests that close an issue, in SWE-bench's columns, with
-  the merge base as `base_commit` and the three-dot diff as the patch.
+  `bench/datasets/`, loader `datasets.py: _local_jsonl_rows`): merged GitHub
+  pull requests that close an issue, in SWE-bench's columns, with the merge
+  base as `base_commit` and the three-dot diff as the patch.
+
   Screening is mechanical (issue older than the pull request, ≥ 100
-  characters of prose, no diff in the issue, an existing non-test shell
-  file changed, shell the majority of the change, ≤ 10 shell files, patch
-  ≤ 100 KB, one pull request per issue); no LLM and no person rated the
-  issues, which is weaker than SWE-bench Multilingual's validation and
-  than SWE-rebench V2's LLM screen, and is said so wherever the row is
-  shown. Rejected: waiting for a dataset (none of the six checked has
-  shell), and an LLM screen (not reproducible from the manifest).
+  characters of prose, no diff in the issue, an existing non-test shell file
+  changed, shell the majority of the change, ≤ 10 shell files, patch ≤ 100
+  KB, one pull request per issue); no LLM and no person rated the issues,
+  which is weaker than SWE-bench Multilingual's validation and than
+  SWE-rebench V2's LLM screen, and is said so wherever the row is shown.
+
+  Rejected: waiting for a dataset (none of the six checked has shell), and
+  an LLM screen (not reproducible from the manifest).
 - **Repositories and quotas were fixed from the mining counts alone**,
-  before any arm ran on them (`bench/datasets/mined/PROVENANCE.md` has
-  every candidate and the count each rule dropped): shell is the
-  repository's content, permissive licence, ≥ 5 eligible pairs, more than
-  one script. Gated (72): ohmyzsh 12, spaceship-prompt 6, prezto 5 (zsh);
-  bash-it 10, docker-mailserver 10, asdf 8, sdkman-cli 5 (bash); linutil
-  8, shellspec 8 (POSIX sh). Calibration (15): zinit, oh-my-bash,
-  bats-core. Left out: single-script repositories (nvm, openvpn-install,
-  Homebrew/install), copyleft ones (pi-hole, RetroPie-Setup, acme.sh),
-  and those whose code is in extension-less scripts, outside the bench's
-  file set (pyenv, rbenv, dokku, git-extras). No ksh repository with
-  linked issue → fix pairs was found.
+  before any arm ran on them (`bench/datasets/mined/PROVENANCE.md` has every
+  candidate and the count each rule dropped): shell is the repository's
+  content, permissive licence, ≥ 5 eligible pairs, more than one script.
+
+  Gated (72):
+
+  - ohmyzsh 12, spaceship-prompt 6, prezto 5 (zsh);
+  - bash-it 10, docker-mailserver 10, asdf 8, sdkman-cli 5 (bash);
+  - linutil 8, shellspec 8 (POSIX sh).
+
+  Calibration (15): zinit, oh-my-bash, bats-core.
+
+  Left out:
+
+  - Single-script repositories (nvm, openvpn-install, Homebrew/install),
+  - Copyleft ones (pi-hole, RetroPie-Setup, acme.sh),
+  - Those whose code is in extension-less scripts, outside the bench's file
+    set (pyenv, rbenv, dokku, git-extras).
+
+  No ksh repository with linked issue → fix pairs was found.
 - **Issues that name the file are reported apart.** 34 of the 72 gated
   issues contain a gold file's name (or the name without its extension).
   That helps every lexical arm alike, so the gate stays on all 72, and the
@@ -598,22 +674,27 @@ is the dialect work below. For the first:
   sets ran once, with the binary built from the dialect commits
   (`fix/shell-stable@62caa40`), and nothing in the pack changed after it.
 - **Result** (gated, lexical mode): File Acc@5 72.2 (61.0–81.2) vs BM25
-  77.8, paired Δ −5.6 (−15.3 to +4.2); Function Acc@10 64.2 (50.7–75.7)
-  over 53 vs BM25 73.6, paired Δ −9.4 (−18.9 to +0.0); cbm 50.0 / 45.3.
+  77.8, paired Δ −5.6 (−15.3 to +4.2); Function Acc@10 64.2 (50.7–75.7) over
+  53 vs BM25 73.6, paired Δ −9.4 (−18.9 to +0.0); cbm 50.0 / 45.3.
+
   Both floors are met by the rule of §6.1 (the whole interval is not below
   zero) and both trail BM25 on the point estimate; the function interval
   ends at zero, so this is the narrowest pass on the scorecard and is
-  written that way in the README. Where the issue names no gold file (38;
-  28 with function gold): File Acc@5 68.4 vs BM25 71.1 vs cbm 44.7,
-  Function Acc@10 64.3 vs 71.4 vs 42.9. Structure after the dialect work:
-  callers / callees precision 100.0 / 100.0, recall 99.9 / 99.9 (n =
-  1,740 / 2,182; the labeler now reads each file as the pack does, which
-  moved the population by 2 and 12 questions), definition found 100.0,
-  micro F1 99.1. Files with parse errors over the 12 gated corpus
-  repositories (the three S3 ones and the nine S1 ones at the base commit
-  of their first instance): 15 of 1,851, 0.8% (0.5–1.3); by dialect, on
-  the same files with the pack's `dialects` example: sh 4 / 532, bash 6 /
-  762, zsh 5 / 446, bats 0 / 112, ksh none in the corpus.
+  written that way in the README.
+
+  Where the issue names no gold file (38; 28 with function gold): File Acc@5
+  68.4 vs BM25 71.1 vs cbm 44.7, Function Acc@10 64.3 vs 71.4 vs 42.9.
+
+  Structure after the dialect work: callers / callees precision 100.0 /
+  100.0, recall 99.9 / 99.9 (n = 1,740 / 2,182; the labeler now reads each
+  file as the pack does, which moved the population by 2 and 12 questions),
+  definition found 100.0, micro F1 99.1.
+
+  Files with parse errors over the 12 gated corpus repositories (the three
+  S3 ones and the nine S1 ones at the base commit of their first instance):
+  15 of 1,851, 0.8% (0.5–1.3); by dialect, on the same files with the pack's
+  `dialects` example: sh 4 / 532, bash 6 / 762, zsh 5 / 446, bats 0 / 112,
+  ksh none in the corpus.
 - **What `stable` does not say.** The structural gold is still the
   bench's code-backed labeler (it shares bash's lookup rules with the
   pack, and since the dialect work the pack's dialect rules and repairs
@@ -629,16 +710,26 @@ now has dialects the way SQL has (`rueca-lang-shell` `dialect.rs`):
 
 - **Dialects: `sh`, `bash`, `zsh`, `ksh`, `bats`**, one per file, a pure
   function of the path and the bytes; the first rule that answers wins:
-  the `.bats` extension; a ShellCheck `shell=` directive in the leading
-  comments (ShellCheck itself puts it above the `#!` line); the `#!` line
-  (`dash` / `ash` / busybox → `sh`, `ksh93` / `mksh` / `pdksh` → `ksh`);
-  zsh's `#compdef` / `#autoload`; the file name (`.zsh`, `.zsh-theme`,
-  `.zshrc`, `.bash`, `.bashrc`, `.ksh`, `.kshrc`, `.profile`, …); an editor
-  modeline; a directory named after one shell; content signals; else `sh`.
+
+  - The `.bats` extension;
+  - A ShellCheck `shell=` directive in the leading comments (ShellCheck
+    itself puts it above the `#!` line);
+  - The `#!` line (`dash` / `ash` / busybox → `sh`, `ksh93` / `mksh` /
+    `pdksh` → `ksh`);
+  - zsh's `#compdef` / `#autoload`;
+  - The file name (`.zsh`, `.zsh-theme`, `.zshrc`, `.bash`, `.bashrc`,
+    `.ksh`, `.kshrc`, `.profile`, …);
+  - An editor modeline;
+  - A directory named after one shell;
+  - Content signals;
+  - Else `sh`.
+
   The `#!` line wins over the extension (a `.sh` file that starts with
-  `#!/bin/zsh` is zsh). The dialect ends every function signature as a
-  comment (`deploy() # bash`), SQL's `-- postgres` for shell; there is no
-  store setting and no new field in the model.
+  `#!/bin/zsh` is zsh).
+
+  The dialect ends every function signature as a comment (`deploy() #
+  bash`), SQL's `-- postgres` for shell; there is no store setting and no
+  new field in the model.
 - **Content signals never make a multi-shell script zsh.** Each distinct
   signal counts once (zsh: `setopt`, `autoload`, `zstyle`, `${(f)x}`, …;
   bash: `shopt`, `BASH_SOURCE`, `mapfile`, …; ksh: `set -A`, `${.sh.…}`;
@@ -684,31 +775,37 @@ now has dialects the way SQL has (`rueca-lang-shell` `dialect.rs`):
   dialect's tree is kept: comparing error counts of two broken trees
   moved nvm.sh (23 errors as bash, 8 as zsh) to a grammar that was not
   written for it. Bats files are only read as bash.
-- **Extraction is the same code for both trees.** The zsh grammar names
-  some nodes differently (`variable_ref` for `$x`, `simple_variable_name`,
-  operator nodes under `expansion`, names declared without a value as
-  `word` arguments, `foreach` / short `for` loops, `integer` / `float`
+- **Extraction is the same code for both trees.** The zsh grammar names some
+  nodes differently (`variable_ref` for `$x`, `simple_variable_name`,
+  operator nodes under `expansion`, names declared without a value as `word`
+  arguments, `foreach` / short `for` loops, `integer` / `float`
   declarations); the walker and the locals table accept both, and the
-  bindings query has a zsh twin (`queries/locals-zsh.scm`). Checked by
-  extracting every file both grammars read without errors through each
-  (`examples/grammars.rs --facts`): ohmyzsh 6 of 266 files differ, prezto
-  0 of 9, spaceship-prompt 1 of 79, zsh-syntax-highlighting 1 of 288; in
-  the differing files the zsh tree is the better one (`integer x` is a
+  bindings query has a zsh twin (`queries/locals-zsh.scm`).
+
+  Checked by extracting every file both grammars read without errors through
+  each (`examples/grammars.rs --facts`): ohmyzsh 6 of 266 files differ,
+  prezto 0 of 9, spaceship-prompt 1 of 79, zsh-syntax-highlighting 1 of 288;
+  in the differing files the zsh tree is the better one (`integer x` is a
   declaration, not a call; `${(P)NAME}` reads `NAME`) except two themes
   whose multi-line prompt assignments the zsh grammar splits differently.
 - **Repairs per grammar** (`repair.rs`; same length, so spans stay exact;
-  signatures, value previews and docs now quote the file as written, not
-  the repaired text). New for the bash grammar: `;` in an expansion's
-  pattern, a here-string after an output redirection (`cat > f <<<"x"`,
-  12 bats files of pyenv, rbenv and asdf). For the zsh grammar: `$$` before more
-  text, the arguments of an anonymous function (`} "$1" &|`), commented-out
-  assignments (`#NAME=value words`: the grammar read an assignment and a
-  command), unquoted `%{` prompt escapes (`C=%{$fg[red]%}`: the grammar
-  ended the value at `%`). For both: `for x do`, `0x$h` in arithmetic,
-  `} 0<file`. Every rule is a construct, none names a file. The bench
-  labeler ports the dialect rules and the repairs (`shelldialect.py`) and
-  parses with the same grammar: on the 3,471 files its dialect, rule,
-  grammar, repaired text (hash) and error flag equal the pack's.
+  signatures, value previews and docs now quote the file as written, not the
+  repaired text).
+
+  - New for the bash grammar: `;` in an expansion's pattern, a here-string
+    after an output redirection (`cat > f <<<"x"`, 12 bats files of pyenv,
+    rbenv and asdf).
+  - For the zsh grammar: `$$` before more text, the arguments of an
+    anonymous function (`} "$1" &|`), commented-out assignments
+    (`#NAME=value words`: the grammar read an assignment and a command),
+    unquoted `%{` prompt escapes (`C=%{$fg[red]%}`: the grammar ended the
+    value at `%`).
+  - For both: `for x do`, `0x$h` in arithmetic, `} 0<file`.
+
+  Every rule is a construct, none names a file. The bench labeler ports the
+  dialect rules and the repairs (`shelldialect.py`) and parses with the same
+  grammar: on the 3,471 files its dialect, rule, grammar, repaired text
+  (hash) and error flag equal the pack's.
 - **Result** (files with a parse error / files, extension-less scripts
   and tests included, `examples/dialects.rs`; checkouts: acme.sh
   `5567d7f`, asdf v0.14.1, bash-it v3.2.0, bats-core v1.13.0, dokku
@@ -730,16 +827,21 @@ now has dialects the way SQL has (`rueca-lang-shell` `dialect.rs`):
   ohmyzsh alone: 9 / 572 (1.6%; zsh 8 / 556), from 303 / 586. zsh stays
   above 2% on this pool because of powerlevel10k (5 of 17: `p10k.zsh` is
   9,000 lines of nested expansions and glob flags) and
-  zsh-syntax-highlighting's parser tests. What is still unparsed, by
-  construct: short loops without `do` (`for x in a b` then one command),
-  `function {a,b}_x()`, dynamic function names (`f_$x() {…}`), `(#b)` /
-  `(#s)` glob flags in `[[ … ]]`, `$x:h/…`, `${x: : -1}` (zsh); `[ a '('
-  b ')' ]`, `[ "$a" "$@" ]`, case patterns such as `--*' '*)`, arithmetic
-  over several lines with subscripts, `${.sh.file}`, nvm.sh (bash; the
-  grammar's here-document scanner). A tree can carry tree-sitter's
-  `has_error` flag without any ERROR / MISSING node (an empty `word` the
-  zsh scanner emits: 7 of the 3,471 files); it counts as read, as in every
-  other pack (`rueca-extract` `count_errors`) and in the health metric.
+  zsh-syntax-highlighting's parser tests.
+
+  What is still unparsed, by construct:
+
+  - Short loops without `do` (`for x in a b` then one command), `function
+    {a,b}_x()`, dynamic function names (`f_$x() {…}`), `(#b)` / `(#s)` glob
+    flags in `[[ … ]]`, `$x:h/…`, `${x: : -1}` (zsh);
+  - `[ a '(' b ')' ]`, `[ "$a" "$@" ]`, case patterns such as `--*' '*)`,
+    arithmetic over several lines with subscripts, `${.sh.file}`, nvm.sh
+    (bash; the grammar's here-document scanner).
+
+  A tree can carry tree-sitter's `has_error` flag without any ERROR /
+  MISSING node (an empty `word` the zsh scanner emits: 7 of the 3,471
+  files); it counts as read, as in every other pack (`rueca-extract`
+  `count_errors`) and in the health metric.
 - **Cost.** tree-sitter-zsh's generated parser is 43 MB of C (the bash
   grammar's is 9.5 MB); ohmyzsh's 572 files are read in 0.37 s and
   acme.sh's 304 in 0.30 s (dialect, repairs, both grammars when needed).
@@ -880,36 +982,45 @@ generic ladder:
 
 **Gold.** scip-ruby 0.5.1 (Sourcegraph, on Sorbet) as a release binary
 pinned by sha256 for macOS arm64 and Linux x86-64, like scip-clang: it is
-static (no Ruby, Bundler or gems on the host), so no Docker image is
-needed. It indexes untyped code (also `# typed: false` files) with Sorbet's
+static (no Ruby, Bundler or gems on the host), so no Docker image is needed.
+
+It indexes untyped code (also `# typed: false` files) with Sorbet's
 inference: constants, `self` calls, `Foo.new` and locals resolve; untyped
 receivers, `super` (no occurrence at all), `prepend` dispatch and instance
-variables typed in `initialize` do not. The gold is defined as what Sorbet
-resolves, with the Python pack's scoring conventions: Rueca's by-name and
-`super` edges outside it count as false positives. The micro key (61
-snippets, Ruby semantics) agrees with scip-ruby on 70 of its 76 edges, one
-extra; the six differences are those blind spots. Repositories: jekyll
-4.4.1 (untyped) and ruby-lsp 0.26.11 (Sorbet / RBS typed) gated, rack
-3.2.9 and packwerk 3.3.1 calibration. S1: SWE-bench Multilingual is the
-only dataset with Ruby (SWE-rebench V2, Multi-SWE-bench and SWE-PolyBench
-have none): rubocop, fluentd, fastlane and jekyll gated (40 instances, 33
-change a function), faker and fpm calibration (4). Fastlane was first
-calibration; the first report showed 27 gated function instances, below
-RFC 0004 §7.2's 30, so it moved to the gated split (a population fix: no
-Ruby ranking weight is tuned). The S1 repositories wait in `[org]
-pending_languages`, as C#'s and Kotlin's.
+variables typed in `initialize` do not.
+
+The gold is defined as what Sorbet resolves, with the Python pack's scoring
+conventions: Rueca's by-name and `super` edges outside it count as false
+positives. The micro key (61 snippets, Ruby semantics) agrees with scip-ruby
+on 70 of its 76 edges, one extra; the six differences are those blind spots.
+
+Repositories: jekyll 4.4.1 (untyped) and ruby-lsp 0.26.11 (Sorbet / RBS
+typed) gated, rack 3.2.9 and packwerk 3.3.1 calibration.
+
+S1: SWE-bench Multilingual is the only dataset with Ruby (SWE-rebench V2,
+Multi-SWE-bench and SWE-PolyBench have none): rubocop, fluentd, fastlane and
+jekyll gated (40 instances, 33 change a function), faker and fpm calibration
+(4).
+
+Fastlane was first calibration; the first report showed 27 gated function
+instances, below RFC 0004 §7.2's 30, so it moved to the gated split (a
+population fix: no Ruby ranking weight is tuned). The S1 repositories wait
+in `[org] pending_languages`, as C#'s and Kotlin's.
 
 **Tuning** used rack, packwerk and the micro-benchmark only (the include
 nesting, the endless-method repair, the core-method list of the by-name
 rung). The gated sets were scored once, after that, and not tuned on.
 
-**Result** (binary `feat/lang-ruby` @ 2e353ab): `stable` — callers /
-callees precision 98.4 / 95.4 (jekyll's callees 91.1: by-name guesses on
-untyped receivers; ruby-lsp 98.7), recall 96.8 / 96.7, definition found
-100.0, micro F1 96.7, 0.2% of files with parse errors, p95 19 ms;
-localization not significantly below BM25 (File Acc@5 55.0 vs 55.0,
-Function Acc@10 24.2 vs 18.2 over 40 / 33 issues). cbm on the same
-questions: callers / callees precision 88.6 / 61.9, recall 49.6 / 57.0.
+**Result** (binary `feat/lang-ruby` @ 2e353ab): `stable` — callers / callees
+precision 98.4 / 95.4 (jekyll's callees 91.1: by-name guesses on untyped
+receivers; ruby-lsp 98.7), recall 96.8 / 96.7, definition found 100.0, micro
+F1 96.7, 0.2% of files with parse errors, p95 19 ms; localization not
+significantly below BM25 (File Acc@5 55.0 vs 55.0, Function Acc@10 24.2 vs
+18.2 over 40 / 33 issues).
+
+cbm on the same questions: callers / callees precision 88.6 / 61.9, recall
+49.6 / 57.0.
+
 Not done: metaprogramming beyond literal `define_method` / `alias_method`
 (Rails DSLs, `method_missing`, RSpec `let`), ActiveSupport `Concern` class
 methods, union types, `super` inside modules, shebang scripts (after the
@@ -938,17 +1049,23 @@ model — packages, classes with members, overload suffixes, implicit
   module); on a rebase with the C# pack, one implementation of
   `namespace_import_targets` stays.
 - **Kotlin-specific resolution sits behind `is_kotlin` checks** in
-  `rueca-resolve/src/jvm.rs`: companion members through their class,
-  extension functions (named `Recv.f`, so an extension of a project type
-  of the package is also its member), enum entry members, implicit
-  receivers of `apply` / `run` / `with` lambdas and of extension bodies
-  (`$with:T`), call results through the Rust pack's `$ret:` form, Kotlin
-  arity ranges (defaults, `vararg`) and overload choice by argument types
-  refined by the project's class hierarchy. Shared rules
-  (`overload_by_types`, the Java ladder) are untouched, so no other
-  language's numbers move. Ambiguous overloads keep Java's fan-out (×0.8):
-  on the calibration repository binding none instead gave callers recall
-  71.6 (precision 97.5) against 84.4 / 94.4.
+  `rueca-resolve/src/jvm.rs`:
+
+  - Companion members through their class,
+  - Extension functions (named `Recv.f`, so an extension of a project type
+    of the package is also its member),
+  - Enum entry members,
+  - Implicit receivers of `apply` / `run` / `with` lambdas and of extension
+    bodies (`$with:T`),
+  - Call results through the Rust pack's `$ret:` form,
+  - Kotlin arity ranges (defaults, `vararg`)
+  - Overload choice by argument types refined by the project's class
+    hierarchy.
+
+  Shared rules (`overload_by_types`, the Java ladder) are untouched, so no
+  other language's numbers move. Ambiguous overloads keep Java's fan-out
+  (×0.8): on the calibration repository binding none instead gave callers
+  recall 71.6 (precision 97.5) against 84.4 / 94.4.
 - **Constructors follow the gold's convention**: the primary constructor,
   written or implicit, spans the class header (where the supertype call
   and default arguments are written); `init` blocks belong to the class,
@@ -988,10 +1105,13 @@ model — packages, classes with members, overload suffixes, implicit
   Swift packages without Xcode; `swift build` with index-while-building in
   the official `swift:6.4.3` image pinned by digest, read through its
   libIndexStore (`indexstore_dump.py`, ctypes), is compiler-grade and runs
-  every third-party build step inside Docker. Implicit occurrences
-  (property accessors, memberwise initializers) are dropped; edges are
-  derived like every SCIP gold. Validated on the hand-labelled
-  micro-benchmark before use: 88 / 88 edges, 60 / 60 snippets identical.
+  every third-party build step inside Docker.
+
+  Implicit occurrences (property accessors, memberwise initializers) are
+  dropped; edges are derived like every SCIP gold. Validated on the
+  hand-labelled micro-benchmark before use: 88 / 88 edges, 60 / 60 snippets
+  identical.
+
   Gated repositories: Alamofire 5.12.2 and swift-algorithms 1.2.1 (pure
   SwiftPM, no plugins or macros); Plot 0.14.0 = calibration. S1: SWE-rebench
   V2 Swift rows rated `A` (55 gated, 15 calibration); SWE-bench Multilingual
@@ -1012,24 +1132,31 @@ model — packages, classes with members, overload suffixes, implicit
   without being significantly below it. Swift joins the organization
   scenario at its next full run (`[org] pending_languages`).
 
-**Gold.** scip-java 0.14.2's Kotlin indexer (Kotlin Analysis API 2.4.0,
-K2) runs without a build tool from a `scip-java.json` listing sources and
+**Gold.** scip-java 0.14.2's Kotlin indexer (Kotlin Analysis API 2.4.0, K2)
+runs without a build tool from a `scip-java.json` listing sources and
 sha256-pinned classpath jars, in the Temurin image the Java gold already
-pins, with no network; about 5 s per repository, nothing skipped. Two
-repairs in the derivation: a primary constructor written with
-`constructor` on its own line is defined on that keyword and now binds to
-the callable whose extent (the class header) holds it (kotlinpoet's
-builders, 68 edges); and the Rueca arm prefers a callable when a class and
-its constructor start on one line. Blind spots kept and disclosed:
-constructor delegation (`: this(…)`, `: super(…)`) has no occurrence and a
-supertype call references the class, so those true edges count against an
-arm. Repositories: moshi 2.0.0-alpha.1 and clikt 5.2.1 gated, kotlinpoet
-2.4.0 calibration (Kotlin Multiplatform `expect` / `actual` calls do not
-resolve in its gold). S1: SWE-bench Multilingual has no Kotlin;
-Multi-SWE-bench's Kotlin files give 46 gated instances (ktlint, detekt,
-ORT, TeXiFy-IDEA, DataFrame, OkHttp, Shadow) and SWE-rebench V2 15
-calibration ones; the S1 repositories wait in `[org] pending_languages`
-like C#'s.
+pins, with no network; about 5 s per repository, nothing skipped.
+
+Two repairs in the derivation:
+
+- A primary constructor written with `constructor` on its own line is
+  defined on that keyword and now binds to the callable whose extent (the
+  class header) holds it (kotlinpoet's builders, 68 edges);
+- The Rueca arm prefers a callable when a class and its constructor start on
+  one line.
+
+Blind spots kept and disclosed: constructor delegation (`: this(…)`, `:
+super(…)`) has no occurrence and a supertype call references the class, so
+those true edges count against an arm.
+
+Repositories: moshi 2.0.0-alpha.1 and clikt 5.2.1 gated, kotlinpoet 2.4.0
+calibration (Kotlin Multiplatform `expect` / `actual` calls do not resolve
+in its gold).
+
+S1: SWE-bench Multilingual has no Kotlin; Multi-SWE-bench's Kotlin files
+give 46 gated instances (ktlint, detekt, ORT, TeXiFy-IDEA, DataFrame,
+OkHttp, Shadow) and SWE-rebench V2 15 calibration ones; the S1 repositories
+wait in `[org] pending_languages` like C#'s.
 
 **Grammar.** `tree-sitter-kotlin-sg` 0.4.1 (fwcd's grammar, ast-grep's
 crates.io release) over `tree-sitter-kotlin-ng` 1.1.0: fewer files with
@@ -1064,15 +1191,17 @@ with three decisions specific to C#:
 
 - **Namespaces are module names, not paths.** A namespace spans files and
   directories freely, so `resolve_import` cannot map `using A.B;` to a
-  directory the way Java's on-demand imports do. A new opt-in hook,
-  `LanguagePack::namespace_imports`, tells the resolver that an import
-  names a module: it binds the package whose module name is `A.B`
-  (`IMPORTS` to the directory holding most of its files). Weighed: a
-  pack-side guess from `RootNamespace` + folder names (wrong whenever a
-  project departs from the convention) and emitting synthetic imports for
-  the enclosing namespaces (an `IMPORTS` edge per parent namespace, noise);
-  the hook is additive and no other pack sets it. Namespaces stay module
-  names, not `Module` definitions, as Java packages.
+  directory the way Java's on-demand imports do.
+
+  A new opt-in hook, `LanguagePack::namespace_imports`, tells the resolver
+  that an import names a module: it binds the package whose module name is
+  `A.B` (`IMPORTS` to the directory holding most of its files).
+
+  Weighed: a pack-side guess from `RootNamespace` + folder names (wrong
+  whenever a project departs from the convention) and emitting synthetic
+  imports for the enclosing namespaces (an `IMPORTS` edge per parent
+  namespace, noise); the hook is additive and no other pack sets it.
+  Namespaces stay module names, not `Module` definitions, as Java packages.
 - **One resolver module, `csharp`, entered once per reference.** Enclosing
   namespaces, `global using` per project (nearest `*.csproj`), `using
   static`, aliases, namespace-qualified receivers, partial types (their
@@ -1091,25 +1220,33 @@ with three decisions specific to C#:
   is kept when it has fewer errors: 0 files with parse errors over the 10
   corpus repositories.
 
-**Gold.** scip-dotnet 0.2.16 (Roslyn) runs in its official image pinned
-by digest, on a scratch copy with a generated solution of the listed
-projects, multi-targeting projects made single-target (`net8.0`;
-MSBuildWorkspace finds no `Compile` target in an outer multi-target
-build), NuGet audit off, packages restored from nuget.org into the
-bench cache. Its index has three shapes the derivation handles behind
-grammar flags only C# sets: `new T(…)` is a reference to the type (mapped
-to `T`'s constructors, one class when overloaded), local functions are
-`local` symbols (bound per document), and a call of a constructed generic
-method carries the first overload's symbol (`Write().` for `Write<T>(…)`,
-sent to the generic overloads that take the call's argument count; before
-that repair serilog's callees precision read 70.7). Blind spots kept and
-disclosed: constructor initializers, target-typed `new()` and explicit
-generic calls have no occurrence, so those true edges count against an
-arm. Repositories: serilog 4.4.0 (library) and eShopOnWeb (application)
-gated, YamlDotNet 18.1.0 calibration. S1: SWE-bench Multilingual and
-Multi-SWE-bench have no C#; SWE-rebench V2's `A`-screened rows give 39
-gated instances (kiota 25, moq 7, six small repositories) and 11
-calibration ones.
+**Gold.** scip-dotnet 0.2.16 (Roslyn) runs in its official image pinned by
+digest, on a scratch copy with a generated solution of the listed projects,
+multi-targeting projects made single-target (`net8.0`; MSBuildWorkspace
+finds no `Compile` target in an outer multi-target build), NuGet audit off,
+packages restored from nuget.org into the bench cache.
+
+Its index has three shapes the derivation handles behind grammar flags only
+C# sets:
+
+- `new T(…)` is a reference to the type (mapped to `T`'s constructors, one
+  class when overloaded),
+- Local functions are `local` symbols (bound per document),
+- A call of a constructed generic method carries the first overload's symbol
+  (`Write().` for `Write<T>(…)`, sent to the generic overloads that take the
+  call's argument count; before that repair serilog's callees precision read
+  70.7).
+
+Blind spots kept and disclosed: constructor initializers, target-typed
+`new()` and explicit generic calls have no occurrence, so those true edges
+count against an arm.
+
+Repositories: serilog 4.4.0 (library) and eShopOnWeb (application) gated,
+YamlDotNet 18.1.0 calibration.
+
+S1: SWE-bench Multilingual and Multi-SWE-bench have no C#; SWE-rebench V2's
+`A`-screened rows give 39 gated instances (kiota 25, moq 7, six small
+repositories) and 11 calibration ones.
 
 **Organization scenario.** Its pin rule makes every gated S1 repository a
 member; adding the eleven C# repositories would change the organization
@@ -1265,15 +1402,18 @@ Re-measured with the fixed engine (stores re-indexed):
   whose gold builds without Docker, except C++: its gold rebuilt here
   differs from the published one by two questions, so C++ stays the
   published run; its answers did not change either), compared with the
-  engine just before the fixes on the same sets: `trace` drops the
-  test-file callers nested in tests on four sets (hono callers returned
-  1,068 → 767, click 575 → 422, flask 302 → 242, jinja 800 → 779; every
-  dropped node is in a test file); every other set answers identically.
-  Scored precision / recall do not move (the scorer already left test
-  files out); the published C row moves by 0.1 point (Lua callers recall
-  96.5 → 96.6), which predates the fixes (the engine before them gives the
-  same answers). Java, PHP and C++ sets and every cbm / BM25 row are
-  carried from the published results.
+  engine just before the fixes on the same sets:
+
+  - `trace` drops the test-file callers nested in tests on four sets (hono
+    callers returned 1,068 → 767, click 575 → 422, flask 302 → 242, jinja
+    800 → 779; every dropped node is in a test file);
+  - Every other set answers identically.
+
+  Scored precision / recall do not move (the scorer already left test files
+  out); the published C row moves by 0.1 point (Lua callers recall 96.5 →
+  96.6), which predates the fixes (the engine before them gives the same
+  answers). Java, PHP and C++ sets and every cbm / BM25 row are carried from
+  the published results.
 - **Tokens per true edge** (`trace`, Rueca vs cbm's published rows):
   TS/JS 64 → 57 (cbm 54), Python 57 → 55 (cbm 48); the engine before the
   fixes gives 64.1 and 56.8 on the same sets, so this is the fix. Other
@@ -1398,16 +1538,21 @@ evidence below; they are the code's defaults.
 - **Opt-in locally.** Semantic search is off unless an argument or the
   environment enables it: `rueca index --embed[=PRESET]`, or `RUECA_EMBED=1`
   (`true`, `on`, `yes`) / `RUECA_EMBED=<preset>`; `RUECA_EMBED` unset,
-  empty, `0`, `false`, `off` or `no` leaves it off. **Precedence: argument >
-  environment > configuration**: `--no-embed` beats `RUECA_EMBED=1`,
-  `--embed` beats `RUECA_EMBED=0`, and `[retrieval]` in `<store>/rueca.toml`
-  only chooses the preset and parameters — it never enables embedding by
-  itself (the owner's wording: "off unless enabled by argument or
-  environment variable"). The preset, once enabled: `--embed=PRESET`, then
-  `RUECA_EMBED=<preset>`, then `RUECA_EMBED_PRESET`, then `[retrieval]
-  preset`, then `qwen3-0.6b-q8`. Without enablement nothing is downloaded
-  or embedded and every answer is today's lexical one (plus `retrieval:
-  {"mode": "lexical"}` in the envelope).
+  empty, `0`, `false`, `off` or `no` leaves it off.
+
+  **Precedence: argument > environment > configuration**: `--no-embed` beats
+  `RUECA_EMBED=1`, `--embed` beats `RUECA_EMBED=0`, and `[retrieval]` in
+  `<store>/rueca.toml` only chooses the preset and parameters — it never
+  enables embedding by itself (the owner's wording: "off unless enabled by
+  argument or environment variable").
+
+  The preset, once enabled: `--embed=PRESET`, then `RUECA_EMBED=<preset>`,
+  then `RUECA_EMBED_PRESET`, then `[retrieval] preset`, then
+  `qwen3-0.6b-q8`.
+
+  Without enablement nothing is downloaded or embedded and every answer is
+  today's lexical one (plus `retrieval: {"mode": "lexical"}` in the
+  envelope).
 - **Missing weights**: an enabled `rueca index` without the weights is an
   error naming `rueca models pull`, raised before anything is published;
   indexing never downloads (only `rueca models pull` does), so enabling it
@@ -1537,15 +1682,23 @@ Bench with the branch binary (Rust arm only; other languages carried):
 
 - **Cross-repository edges** (RFC 0006 §8): 12 pairs 98.3 / 74.9 → 99.4 /
   94.7; without Rust 99.8 / 96.2 → 100.0 / 96.2 (five wrong carbon edges
-  gone: edges written in a dependency's file); Rust alone 94.5 / 53.2 →
-  98.3 / 93.1. Per pair, P / R: axum → tokio 92.9 / 14.1 → 98.0 / 95.6,
-  axum → hyper 100 / 54.4 → 90.4 / 94.7, axum → tower 100 / 82.7 → 100 /
-  89.8, tokio → mio 81.0 / 87.5 → 99.4 / 93.8. The 19 Rust edges counted
-  wrong were read one by one: methods of values a library call returned
-  (`Server::bind(..).serve(..)`, `Client::builder().build(..)`,
-  `tokio::spawn(..).abort()`, `rt.block_on`), all right, which the labeler
-  cannot see. Of the 36 Rust uses still missed, 20 are methods of tower's
-  `ServiceExt` (blanket `impl<T: Service> ServiceExt for T`).
+  gone: edges written in a dependency's file); Rust alone 94.5 / 53.2 → 98.3
+  / 93.1.
+
+  Per pair, P / R:
+
+  - axum → tokio 92.9 / 14.1 → 98.0 / 95.6,
+  - axum → hyper 100 / 54.4 → 90.4 / 94.7,
+  - axum → tower 100 / 82.7 → 100 / 89.8,
+  - tokio → mio 81.0 / 87.5 → 99.4 / 93.8.
+
+  The 19 Rust edges counted wrong were read one by one: methods of values a
+  library call returned (`Server::bind(..).serve(..)`,
+  `Client::builder().build(..)`, `tokio::spawn(..).abort()`, `rt.block_on`),
+  all right, which the labeler cannot see.
+
+  Of the 36 Rust uses still missed, 20 are methods of tower's `ServiceExt`
+  (blanket `impl<T: Service> ServiceExt for T`).
 - **S3 Rust** (serde_json + ripgrep): callers / callees precision 98.5 /
   98.0 unchanged, recall 87.8 / 87.1 → 86.8 / 87.1 (inside the interval;
   `rueca-bench check` passes). Every lost edge (44, ripgrep) touches
@@ -1554,19 +1707,22 @@ Bench with the branch binary (Rust arm only; other languages carried):
   only skips test paths and inline `#[cfg(test)]` items. Rust micro F1
   99.2 unchanged; S1 Rust File Acc@5 62.8, Function Acc@10 39.0
   unchanged.
-- **tokio-rs demo** (8 repositories, published binary → branch): link
-  edges 6,199 → 9,550 (847 `DECORATES` from `tokio_macros`); `get_symbol`
-  finds `TcpListener`, `UdpSocket`, `spawn`, `AsyncReadExt` (none before);
-  callers of `sleep` / `timeout` / `interval` 0 / 0 / 0 → 32 / 12 / 4,
-  `tokio::spawn` 0 → 92 (514 with tests), `TcpListener.accept` 0 → 34;
-  hyper's `Bytes.from` as a call target 29 → 0; tokio → mio 200 → 158
-  edges, its 24 `type_resolved` calls all right (`self.registry`,
-  `self.poll`, `mio::event::Event`, `SourceFd`); edges written in a
-  dependency's file 19 (13 wrong) → 13 `IMPLEMENTS`, all `impl LocalTrait
-  for ForeignType`. Index 7.4 s → 8.0 s, store 134 → 138 MB. Re-indexing
-  the unchanged organization still replaces all 8 segments (the segment id
-  holds the time and a random suffix, `rueca-segment/src/writer.rs`): left
-  open.
+- **tokio-rs demo** (8 repositories, published binary → branch):
+
+  - Link edges 6,199 → 9,550 (847 `DECORATES` from `tokio_macros`);
+  - `get_symbol` finds `TcpListener`, `UdpSocket`, `spawn`, `AsyncReadExt`
+    (none before);
+  - Callers of `sleep` / `timeout` / `interval` 0 / 0 / 0 → 32 / 12 / 4,
+    `tokio::spawn` 0 → 92 (514 with tests), `TcpListener.accept` 0 → 34;
+  - hyper's `Bytes.from` as a call target 29 → 0;
+  - tokio → mio 200 → 158 edges, its 24 `type_resolved` calls all right
+    (`self.registry`, `self.poll`, `mio::event::Event`, `SourceFd`);
+  - Edges written in a dependency's file 19 (13 wrong) → 13 `IMPLEMENTS`,
+    all `impl LocalTrait for ForeignType`.
+
+  Index 7.4 s → 8.0 s, store 134 → 138 MB. Re-indexing the unchanged
+  organization still replaces all 8 segments (the segment id holds the time
+  and a random suffix, `rueca-segment/src/writer.rs`): left open.
 
 ## 2026-11-17 — Rust: value and type namespaces; types bind in scope, another crate's by name only as a guess; test doubles never bind
 
@@ -1582,25 +1738,30 @@ and `Bytes::from(…)` in tonic and axum called hyper's `impl
 From<ReasonPhrase> for Bytes`, the first impl attached to `Bytes`.
 
 - **Two namespaces.** A Rust lookup is for the type namespace (modules,
-  types: path segments, type references) or the value namespace
-  (functions, constants, statics, tuple / unit structs, variants: calls and
-  reads). Among a module's bindings, in their existing order, it takes the
-  first of its namespace, else the first of the other one, so nothing that
-  resolved before stops resolving. A `use` leaf binds both, so the
-  resolver keeps a second binding environment for values where they
-  differ; a bare name prefers an import of its namespace, then an item of
-  the module of its namespace (`mod x;` + `fn x`: `x()` is the function,
-  `x::Y` the module). `IMPORTS` of a leaf go to its type, else its value
-  when the type namespace has only a module. Rejected: a namespace per
-  definition in the pack (the resolver already knows labels; a tuple
-  struct is both).
+  types: path segments, type references) or the value namespace (functions,
+  constants, statics, tuple / unit structs, variants: calls and reads).
+  Among a module's bindings, in their existing order, it takes the first of
+  its namespace, else the first of the other one, so nothing that resolved
+  before stops resolving.
+
+  A `use` leaf binds both, so the resolver keeps a second binding
+  environment for values where they differ; a bare name prefers an import of
+  its namespace, then an item of the module of its namespace (`mod x;` + `fn
+  x`: `x()` is the function, `x::Y` the module). `IMPORTS` of a leaf go to
+  its type, else its value when the type namespace has only a module.
+
+  Rejected: a namespace per definition in the pack (the resolver already
+  knows labels; a tuple struct is both).
 - **Types bind in scope.** By name, a Rust type is first looked for in the
   file's own crate; another crate's type of that name is used only when the
   own crate has none, and then it is a guess: members found through it are
-  `heuristic` 0.50 (not `type_resolved`), so the link layer drops them as
-  it drops every name match, and a guessed trait or self type never gets an
-  `impl`'s items, `IMPLEMENTS` or `OVERRIDES`. A call result typed from a
-  callee of another crate matched by name is a guess the same way.
+  `heuristic` 0.50 (not `type_resolved`), so the link layer drops them as it
+  drops every name match, and a guessed trait or self type never gets an
+  `impl`'s items, `IMPLEMENTS` or `OVERRIDES`.
+
+  A call result typed from a callee of another crate matched by name is a
+  guess the same way.
+
   Rejected: no cross-crate match at all — inside one repository, test and
   bench crates whose import of the package's library does not resolve
   (bytes' bench crate `bytes` shadows the library) lost 30–40 calls each.
@@ -1630,14 +1791,17 @@ excluded, default budget); with tests and the whole budget, 80 of the 87
 `time::sleep(` lines of axum, hyper, tonic, tower and tracing lie in a
 resolved caller (the rest: doc comments, `select!` arms), 77 of 77
 `time::timeout(`, 4 of 4 `time::interval(`; `tokio::spawn` 339 of 355 (0
-before), `signal::ctrl_c` 2 of 2. The four mio `CompletionPort` edges into
-tokio's documentation stubs and the 29 calls of hyper's `Bytes.from` are
-gone (the 29 now reach `bytes`'s own `Bytes.from`). tokio → mio stays at
-158 edges, all right (the pack fix had removed the wrong ones: 200 with
-the published binary). Link edges 8,540 → 9,550. Single repositories:
-tokio references resolved 48.3 % → 50.2 %, tracing 49.5 % → 53.8 %;
-callers that now are test code (tonic's `#[cfg(test)] mod xds_e2e;`)
-leave the non-test counts (`watch::channel` 18 → 17).
+before), `signal::ctrl_c` 2 of 2.
+
+The four mio `CompletionPort` edges into tokio's documentation stubs and the
+29 calls of hyper's `Bytes.from` are gone (the 29 now reach `bytes`'s own
+`Bytes.from`). tokio → mio stays at 158 edges, all right (the pack fix had
+removed the wrong ones: 200 with the published binary).
+
+Link edges 8,540 → 9,550. Single repositories: tokio references resolved
+48.3 % → 50.2 %, tracing 49.5 % → 53.8 %; callers that now are test code
+(tonic's `#[cfg(test)] mod xds_e2e;`) leave the non-test counts
+(`watch::channel` 18 → 17).
 
 ## 2026-11-17 — Rust: items inside macro invocation bodies; attribute macros are decorators
 
@@ -1652,15 +1816,20 @@ tcp::listener::TcpListener; }`, `cfg_rt! { … }`, `cfg_if! { if #[cfg(…)]
   every branch) has its delimiters blanked and keeps an empty body
   (`cfg_net!{}`), before the file is walked; newlines stay, so offsets,
   lines and texts are the file's, as in the C/C++ pack's same-length
-  preprocessor. Its definitions, `use` / `pub use` and `mod` declarations
-  are then those of the enclosing file, inline module or function, with
-  every existing rule (prepass, local scopes, receiver typing) unchanged,
-  and the invocation is still a call of the macro. Rounds repeat for nested
-  macros (≤ 4); a round that adds parse errors is dropped. Rejected: a
-  separate parse of each body mapped back by an offset, like macro
-  arguments: every item rule, the prepass and type inference would have had
-  to read a second tree. `#[cfg]` stays ignored, so `cfg_if!` branches may
-  define one name twice, as `#[cfg]` items already did.
+  preprocessor.
+
+  Its definitions, `use` / `pub use` and `mod` declarations are then those
+  of the enclosing file, inline module or function, with every existing rule
+  (prepass, local scopes, receiver typing) unchanged, and the invocation is
+  still a call of the macro.
+
+  Rounds repeat for nested macros (≤ 4); a round that adds parse errors is
+  dropped.
+
+  Rejected: a separate parse of each body mapped back by an offset, like
+  macro arguments: every item rule, the prepass and type inference would
+  have had to read a second tree. `#[cfg]` stays ignored, so `cfg_if!`
+  branches may define one name twice, as `#[cfg]` items already did.
 - **`mod x;` inside inline modules** (`mod net { mod tcp; }`) is the file
   below their directories (`net/tcp.rs`), with or without a file for them.
 - **Attribute macros are decorators.** An attribute that is not built in
@@ -1674,80 +1843,95 @@ tcp::listener::TcpListener; }`, `cfg_rt! { … }`, `cfg_if! { if #[cfg(…)]
 - Extractor version 3: cached Rust facts are extracted again.
 
 Measured on tokio 1.54.1 (`tokio/src`, 380 files): definitions 6,245 →
-7,002, exported 3,921 → 4,459, imports 3,657 → 4,267; `pub` item lines
-with no definition or import at their line 622 → 52 of 3,349 (the rest are
-`macro_rules!` bodies, comments and bodies in a macro's own syntax);
-parse errors 0 → 0. Whole repository: 15,475 → 16,443 nodes, 44,723 →
-54,835 edges, references resolved 39.3 % → 48.3 % (26,290 / 66,823 →
-32,764 / 67,775). `get_symbol` finds `TcpListener`, `UdpSocket`, `spawn`,
-`AsyncReadExt` and `AsyncReadExt.read`, and `TcpListener.accept` gets its
-callers through `use tokio::net::TcpListener` (`type_resolved`). In the
-tokio-rs organization, 847 link edges are `DECORATES` from
-`tokio_macros::main` / `test` into hyper, tonic, axum, tower and tracing.
-Still open for the resolver: a module and a function with one name
-(`mod spawn; pub use spawn::spawn;`) bind the module, so `tokio::spawn(…)`
-calls stay unresolved.
+7,002, exported 3,921 → 4,459, imports 3,657 → 4,267; `pub` item lines with
+no definition or import at their line 622 → 52 of 3,349 (the rest are
+`macro_rules!` bodies, comments and bodies in a macro's own syntax); parse
+errors 0 → 0.
+
+Whole repository: 15,475 → 16,443 nodes, 44,723 → 54,835 edges, references
+resolved 39.3 % → 48.3 % (26,290 / 66,823 → 32,764 / 67,775).
+
+`get_symbol` finds `TcpListener`, `UdpSocket`, `spawn`, `AsyncReadExt` and
+`AsyncReadExt.read`, and `TcpListener.accept` gets its callers through `use
+tokio::net::TcpListener` (`type_resolved`). In the tokio-rs organization,
+847 link edges are `DECORATES` from `tokio_macros::main` / `test` into
+hyper, tonic, axum, tower and tracing.
+
+Still open for the resolver: a module and a function with one name (`mod
+spawn; pub use spawn::spawn;`) bind the module, so `tokio::spawn(…)` calls
+stay unresolved.
 
 ## 2026-11-18 — Indexer role: leased job objects, child processes per ref, webhooks as hints
 
-RFC 0008 phase 2. Indexing is level-triggered: a reconciler holds the
-desired commit of every configured ref from webhooks, adaptive
-`ls-remote` polling and admin requests, and writes one job object per
-repository in the bucket; indexers lease jobs by compare-and-swap (15 min
-leases with epochs, stealable when expired), fetch exact commits into a
-bare mirror with `--depth=1 --filter=blob:limit`, export from the mirror
-and index each ref in a `rueca index-worker` child under `RLIMIT_AS`,
-`RLIMIT_CPU` and a wall-clock kill, so a parser that loops or explodes
-fails only its ref; the job fails as a whole only when no ref reached its
-desired commit. Webhooks (GitHub, GitLab incl. Standard Webhooks,
-Bitbucket) are verified, deduplicated by delivery id and confirmed with
-`ls-remote` before they move the desired state; polling keeps
-correctness. One updater, elected by a lease object, publishes
-generations, collects garbage and expires pull requests by close and by
-idle reads that replicas record hourly. Credentials reach `git` only
-through `GIT_CONFIG_*` environment variables. `file://` and `git://`
-hosts are accepted by debug builds only, for tests.
+RFC 0008 phase 2. Indexing is level-triggered:
+
+- A reconciler holds the desired commit of every configured ref from
+  webhooks, adaptive `ls-remote` polling and admin requests, and writes one
+  job object per repository in the bucket;
+- Indexers lease jobs by compare-and-swap (15 min leases with epochs,
+  stealable when expired), fetch exact commits into a bare mirror with
+  `--depth=1 --filter=blob:limit`, export from the mirror and index each ref
+  in a `rueca index-worker` child under `RLIMIT_AS`, `RLIMIT_CPU` and a
+  wall-clock kill, so a parser that loops or explodes fails only its ref;
+- The job fails as a whole only when no ref reached its desired commit.
+
+Webhooks (GitHub, GitLab incl. Standard Webhooks, Bitbucket) are verified,
+deduplicated by delivery id and confirmed with `ls-remote` before they move
+the desired state; polling keeps correctness.
+
+One updater, elected by a lease object, publishes generations, collects
+garbage and expires pull requests by close and by idle reads that replicas
+record hourly. Credentials reach `git` only through `GIT_CONFIG_*`
+environment variables. `file://` and `git://` hosts are accepted by debug
+builds only, for tests.
 
 ## 2026-11-17 — Service query role: Rueca's own HTTP transport and auth layer, governor over tower_governor
 
-RFC 0008 phase 1. `rueca serve` answers MCP over a stateless `POST /mcp`
-on `axum`, calling the own MCP layer's `handle` once per request with a
-fresh or a legacy `Session` (no sessions, no SSE, JSON only), so any
-replica answers any request. The resource-server side of MCP
-authorization is Rueca's: static API tokens hashed in the file and OIDC
-bearer JWTs validated against the issuer's JWKS (`jsonwebtoken` with the
-pure-Rust `rust_crypto` backend; no aws-lc-sys), protected resource
-metadata, 401 / 403 challenges; a principal maps to the existing
-`Visibility` by configured rules, deny by default, and the engine runs
-every call with that visibility and a cooperative deadline
-(`Engine::respond_with`, checked inside the search, trace, scan and
-collapse loops). `governor` is used directly rather than
-`tower_governor`, whose IP key extractor trusts `X-Forwarded-For` from
-any peer; forwarding headers count only from `[http].trusted_proxies`.
-Prometheus text is rendered from the app's own `metrics` registry;
-OpenTelemetry is an optional feature. The image is distroless with `git`
-copied in; it has no shell or ssh. Verified: byte-equal answers against
-local mode, Claude Code over HTTP, sub-3 ms server p95 on the small
-organization in a debug build.
+RFC 0008 phase 1. `rueca serve` answers MCP over a stateless `POST /mcp` on
+`axum`, calling the own MCP layer's `handle` once per request with a fresh
+or a legacy `Session` (no sessions, no SSE, JSON only), so any replica
+answers any request.
+
+The resource-server side of MCP authorization is Rueca's: static API tokens
+hashed in the file and OIDC bearer JWTs validated against the issuer's JWKS
+(`jsonwebtoken` with the pure-Rust `rust_crypto` backend; no aws-lc-sys),
+protected resource metadata, 401 / 403 challenges; a principal maps to the
+existing `Visibility` by configured rules, deny by default, and the engine
+runs every call with that visibility and a cooperative deadline
+(`Engine::respond_with`, checked inside the search, trace, scan and collapse
+loops).
+
+`governor` is used directly rather than `tower_governor`, whose IP key
+extractor trusts `X-Forwarded-For` from any peer; forwarding headers count
+only from `[http].trusted_proxies`. Prometheus text is rendered from the
+app's own `metrics` registry; OpenTelemetry is an optional feature. The
+image is distroless with `git` copied in; it has no shell or ssh.
+
+Verified: byte-equal answers against local mode, Claude Code over HTTP,
+sub-3 ms server p95 on the small organization in a debug build.
 
 ## 2026-11-17 — Service store: rusty-s3 and own backends instead of object_store
 
 RFC 0008 phase 0. `object_store` 0.14.2, the crate RFC 0008 §5.10 chose,
-fails the required `cargo deny` check: `chrono` 0.4.45
-(RUSTSEC-2026-0543) and `humantime` 2.4.0 (RUSTSEC-2026-0542), both
-unmaintained with no patched release, are unconditional dependencies
-even of its in-memory backend, and its cloud features pull
-`webpki-root-certs` (CDLA-Permissive-2.0, not an allowed license)
-through `reqwest/rustls`. Ignoring the advisories was rejected, as for
-`rmcp`; OpenDAL needs MSRV 1.91 (Rueca: 1.90). Chosen: `rueca-storage`
-keeps the RFC's `Storage` trait and compare-and-swap semantics, with
-in-memory and `file://` backends of its own (the file backend locks
-`<root>/.lock` and uses BLAKE3 e-tags) and an S3 backend assembled from
-`rusty-s3` 0.11 (sans-IO SigV4 signing and request building, dates from
-`jiff`) over `ureq` 3.5 with `rustls` and the platform's native roots
-(`rustls-native-certs`). Request signing is not written in-house. GCS is
-served through its S3-compatible XML API when the generation headers can
-be signed; Azure Blob is deferred. The RFC's §5.10 carries the amendment.
+fails the required `cargo deny` check: `chrono` 0.4.45 (RUSTSEC-2026-0543)
+and `humantime` 2.4.0 (RUSTSEC-2026-0542), both unmaintained with no patched
+release, are unconditional dependencies even of its in-memory backend, and
+its cloud features pull `webpki-root-certs` (CDLA-Permissive-2.0, not an
+allowed license) through `reqwest/rustls`.
+
+Ignoring the advisories was rejected, as for `rmcp`; OpenDAL needs MSRV 1.91
+(Rueca: 1.90).
+
+Chosen: `rueca-storage` keeps the RFC's `Storage` trait and compare-and-swap
+semantics, with in-memory and `file://` backends of its own (the file
+backend locks `<root>/.lock` and uses BLAKE3 e-tags) and an S3 backend
+assembled from `rusty-s3` 0.11 (sans-IO SigV4 signing and request building,
+dates from `jiff`) over `ureq` 3.5 with `rustls` and the platform's native
+roots (`rustls-native-certs`).
+
+Request signing is not written in-house. GCS is served through its
+S3-compatible XML API when the generation headers can be signed; Azure Blob
+is deferred. The RFC's §5.10 carries the amendment.
 
 ## 2026-11-17 — Own MCP layer instead of rmcp
 
@@ -1801,149 +1985,189 @@ The behaviour reference is [`docs/mcp-protocol.md`](mcp-protocol.md).
 RFC 0006 phase 4. Contracts are **facts**, as RFC 0001 §6.4 planned: each
 pack emits `ContractHint`s (provides / consumes, HTTP / RPC / topic, a
 canonical key, the raw text, the owner definition, the framework), and
-`FACTS_FORMAT` goes to 3. Keys are canonical so matching is string work:
-HTTP `METHOD /path` with parameter segments as `{}`, the base URL
-stripped and `*` for an unknown method; RPC `pkg.Service/Method`, with
-package-less and `*/Method` keys from code that knows less. A code route
-is a row on its handler, not a route node: the handler is what an agent
-reads, one hop from the client. `.proto` files get a pack over
-`protox-parse` 0.10 (pure Rust, no `protoc` to install; MIT OR
-Apache-2.0, in the `deny.toml` allow list); OpenAPI operations, already
-`Route` nodes, provide their keys. Spec and code providers are both `CALLS` targets and
-are matched separately, so a call into a specified service is not
-ambiguous between the handler and the operation it implements; the
-handler gets `IMPLEMENTS` to the operation. Matching requires equal
-segment counts, with no prefix- or suffix-tolerant fallback: it would
-recover mount prefixes composed in other files, at the price of turning
-short routes into providers for many calls; the gap is recorded and
-measured as recall. Providers that are tests or in test files are never
-match candidates, inside one snapshot or across repositories, as package
-edges never point into a dependency's tests.
-Across repositories, contract keys go into each repository's `RepoDeps`,
-a match makes a dependency, and the edges come from the segments' contract
-tables alone (no joint resolve) into the same link sets as package edges,
-so refs, versioning, recomputation and visibility needed nothing new
-(`LINKER_VERSION` 2). S2 (*Cross-service edges*) is a gated suite with the
-edge floors, precision ≥ 90 / recall ≥ 75, targets 97 / 90, per kind, on
-ollama, qdrant, dapr and weaviate (openai diagnostic: its specs exceed the
-2 MiB extraction budget). `list_contracts` (CLI `rueca contracts`) is the
-eighth tool: RFC 0001 §11.4 lists it (provided / consumed / dangling), and
-dangling calls — the question "what calls an endpoint nobody provides" —
-cannot be asked of `trace`, which only follows edges that exist.
+`FACTS_FORMAT` goes to 3.
+
+Keys are canonical so matching is string work:
+
+- HTTP `METHOD /path` with parameter segments as `{}`, the base URL stripped
+  and `*` for an unknown method;
+- RPC `pkg.Service/Method`, with package-less and `*/Method` keys from code
+  that knows less.
+
+A code route is a row on its handler, not a route node: the handler is what
+an agent reads, one hop from the client. `.proto` files get a pack over
+`protox-parse` 0.10 (pure Rust, no `protoc` to install; MIT OR Apache-2.0,
+in the `deny.toml` allow list); OpenAPI operations, already `Route` nodes,
+provide their keys.
+
+Spec and code providers are both `CALLS` targets and are matched separately,
+so a call into a specified service is not ambiguous between the handler and
+the operation it implements; the handler gets `IMPLEMENTS` to the operation.
+
+Matching requires equal segment counts, with no prefix- or suffix-tolerant
+fallback: it would recover mount prefixes composed in other files, at the
+price of turning short routes into providers for many calls; the gap is
+recorded and measured as recall.
+
+Providers that are tests or in test files are never match candidates, inside
+one snapshot or across repositories, as package edges never point into a
+dependency's tests.
+
+Across repositories, contract keys go into each repository's `RepoDeps`, a
+match makes a dependency, and the edges come from the segments' contract
+tables alone (no joint resolve) into the same link sets as package edges, so
+refs, versioning, recomputation and visibility needed nothing new
+(`LINKER_VERSION` 2).
+
+S2 (*Cross-service edges*) is a gated suite with the edge floors, precision
+≥ 90 / recall ≥ 75, targets 97 / 90, per kind, on ollama, qdrant, dapr and
+weaviate (openai diagnostic: its specs exceed the 2 MiB extraction budget).
+
+`list_contracts` (CLI `rueca contracts`) is the eighth tool: RFC 0001 §11.4
+lists it (provided / consumed / dangling), and dangling calls — the question
+"what calls an endpoint nobody provides" — cannot be asked of `trace`, which
+only follows edges that exist.
 ## 2026-11-17 — Service mode: object storage as the store of record, compare-and-swap instead of a lock
 
-RFC 0008 (design; nothing implemented). Service mode is the same crates
-run as one image with roles (`rueca serve --role query|indexer|all`):
-stateless query replicas that download segments into a disk cache, and
-indexers that lease jobs. The store of record is object storage through
-`object_store` 0.14 (S3, GCS, Azure, local; OpenDAL rejected: MSRV 1.91
-and no GCS generation compare-and-swap), with the local layout plus two
-changes: a catalog per repository and packs per repository, so a
-snapshot lists the packs it reads and `index.rcpi` has no bucket form.
-Immutable objects are written with `PutMode::Create`, the few mutable
-ones (catalogs, the generation pointer, job and lease objects) with
-`PutMode::Update` in a retry loop; no lock and no database (RFC 0006
-§12 open question 9 closed; Postgres kept as a phase 4 option), and
-local mode gets an advisory file lock. Garbage collection is
-mark-and-sweep with a 24 h grace and per-kind retention (pull requests
-expire after close + 7 days or 14 days unread). MCP is served over
-Streamable HTTP by Rueca's own transport on `axum`, stateless and
-JSON-only — not `rmcp`'s server transport: `cargo deny` flagged `chrono`
-(RUSTSEC-2026-0543), reached only through `rmcp`, and the owner chose a
-minimal MCP layer of Rueca's own over ignoring the advisory;
+RFC 0008 (design; nothing implemented). Service mode is the same crates run
+as one image with roles (`rueca serve --role query|indexer|all`): stateless
+query replicas that download segments into a disk cache, and indexers that
+lease jobs.
+
+The store of record is object storage through `object_store` 0.14 (S3, GCS,
+Azure, local; OpenDAL rejected: MSRV 1.91 and no GCS generation
+compare-and-swap), with the local layout plus two changes: a catalog per
+repository and packs per repository, so a snapshot lists the packs it reads
+and `index.rcpi` has no bucket form.
+
+Immutable objects are written with `PutMode::Create`, the few mutable ones
+(catalogs, the generation pointer, job and lease objects) with
+`PutMode::Update` in a retry loop; no lock and no database (RFC 0006 §12
+open question 9 closed; Postgres kept as a phase 4 option), and local mode
+gets an advisory file lock.
+
+Garbage collection is mark-and-sweep with a 24 h grace and per-kind
+retention (pull requests expire after close + 7 days or 14 days unread).
+
+MCP is served over Streamable HTTP by Rueca's own transport on `axum`,
+stateless and JSON-only — not `rmcp`'s server transport: `cargo deny`
+flagged `chrono` (RUSTSEC-2026-0543), reached only through `rmcp`, and the
+owner chose a minimal MCP layer of Rueca's own over ignoring the advisory;
 authentication is a Rueca tower layer (OAuth 2.1 resource server for
 external OIDC issuers, plus static API tokens; no embedded authorization
 server), and a principal maps to the existing `Visibility` by configured
 rules, deny by default, the seam Org mode's mirrored grants will fill.
+
 Indexing is level-triggered after Zoekt: webhooks are hints, adaptive
-`ls-remote` polling (45 s – 8 h) is the safety net, one coalesced job
-object per repository, refs fetched with `--depth=1
---filter=blob:limit=…` from a bare mirror and read under
-`GIT_NO_LAZY_FETCH=1`, each ref indexed in a child process with resource
-limits. Three corrections to RFC 0001 §14 / RFC 0002 §7.1 were found on
-the way: Zoekt uses `blob:limit`, not `blob:none`; `GIT_NO_LAZY_FETCH`
-needs git 2.45, not 2.49; Bitbucket Cloud has supported clone filters
-since 2024-08-08. One organization per deployment. Hotcache and delta
-segments are deferred to a measured need.
+`ls-remote` polling (45 s – 8 h) is the safety net, one coalesced job object
+per repository, refs fetched with `--depth=1 --filter=blob:limit=…` from a
+bare mirror and read under `GIT_NO_LAZY_FETCH=1`, each ref indexed in a
+child process with resource limits.
+
+Three corrections to RFC 0001 §14 / RFC 0002 §7.1 were found on the way:
+
+- Zoekt uses `blob:limit`, not `blob:none`;
+- `GIT_NO_LAZY_FETCH` needs git 2.45, not 2.49;
+- Bitbucket Cloud has supported clone filters since 2024-08-08.
+
+One organization per deployment. Hotcache and delta segments are deferred to
+a measured need.
 
 ## 2026-11-16 — Refs are snapshots of their own, exported from the object database
 
-RFC 0006 phase 3. A branch, pull request, tag or commit indexed with
-`rueca index [PATH] --ref <name>` (or a member's `refs = [...]`) is one
-store root, one segment and one catalog entry under the repository's id,
-exactly like the working tree: its tree is written blob by blob from the
-object database with `gix` into `<store>/refs/<repo>/<ref>/` and indexed
-there. Not `git worktree` (it writes into the user's repository, locks the
-branch and leaves state behind), not `git archive` (`export-ignore`,
-`export-subst` and content filters change files and their blob ids, which
-loses facts-cache hits and makes the snapshot lie about the commit), and
-not delta segments over the base (RFC 0001's plan, which needs blob
-visibility in every reader; left to service mode). Measured on
-`pallets/click` (debug build): the second ref re-extracts 52 of 156 files,
-13 for the `stable` branch; the segment write is not shared, so its index
-time stays 0.9–1.05× the first's. `pr/<n>` is fetched into
+RFC 0006 phase 3. A branch, pull request, tag or commit indexed with `rueca
+index [PATH] --ref <name>` (or a member's `refs = [...]`) is one store root,
+one segment and one catalog entry under the repository's id, exactly like
+the working tree: its tree is written blob by blob from the object database
+with `gix` into `<store>/refs/<repo>/<ref>/` and indexed there.
+
+Not `git worktree` (it writes into the user's repository, locks the branch
+and leaves state behind), not `git archive` (`export-ignore`, `export-subst`
+and content filters change files and their blob ids, which loses facts-cache
+hits and makes the snapshot lie about the commit), and not delta segments
+over the base (RFC 0001's plan, which needs blob visibility in every reader;
+left to service mode).
+
+Measured on `pallets/click` (debug build): the second ref re-extracts 52 of
+156 files, 13 for the `stable` branch; the segment write is not shared, so
+its index time stays 0.9–1.05× the first's. `pr/<n>` is fetched into
 `refs/rueca/pr/<n>`, the only kind of ref Rueca writes.
 
 ## 2026-11-16 — A ref view is a selection of segments of the one organization index
 
 RFC 0006 phase 3. The organization index lists every repository's default
 **and** ref segments; a call selects one (or, with a `ref` list, several)
-per repository and BM25 statistics, routing and visibility are computed
-over the selection, which the phase 1 collector already did. RFC 0006 §4's
-"organization statistics with A filtered out plus A's ref scored through a
-second `Bm25StatisticsProvider`" is that selection; a separate overlay
-would have been a second scoring path to keep equal to the first.
+per repository and BM25 statistics, routing and visibility are computed over
+the selection, which the phase 1 collector already did.
+
+RFC 0006 §4's "organization statistics with A filtered out plus A's ref
+scored through a second `Bm25StatisticsProvider`" is that selection; a
+separate overlay would have been a second scoring path to keep equal to the
+first.
+
 `repo: A, ref: X` reads A at X and every other repository at its default;
 `ref: X` without `repo` reads every repository that has X at it and the
 others at their default (the organization "as of" a release branch); with
 `repo`, a selected repository without the ref is an error listing its
-indexed refs. Measured: reading a ref costs what reading the default does
-(99 vs 97 ms for an organization search, debug CLI).
+indexed refs.
+
+Measured: reading a ref costs what reading the default does (99 vs 97 ms for
+an organization search, debug CLI).
 
 ## 2026-11-16 — Link sets per ref against the defaults, remapped on read
 
 RFC 0006 phase 3. A ref's outgoing link set is computed when it is indexed,
-its imports resolved jointly against its dependencies' **default**
-entries, and versioned like a default's; a ref never re-links another
-repository. Edges into a repository read at a ref are remapped on read to
-the ref's nodes by (label, qualified name, path), through a
-correspondence built per (repository, ref) on first use, and dropped when
-the ref no longer has the target (click `7.1.2` drops flask's call to
-`Context.with_resource`, added in click 8.0). Resolving imports on the fly
-at query time (§4's plan) was rejected: it runs the joint resolver inside a
-query. Measured: the organization layer per added ref is 0.18–0.63× the
-ref's own indexing (floor ≤ 2×), linking being its largest part.
+its imports resolved jointly against its dependencies' **default** entries,
+and versioned like a default's; a ref never re-links another repository.
+
+Edges into a repository read at a ref are remapped on read to the ref's
+nodes by (label, qualified name, path), through a correspondence built per
+(repository, ref) on first use, and dropped when the ref no longer has the
+target (click `7.1.2` drops flask's call to `Context.with_resource`, added
+in click 8.0).
+
+Resolving imports on the fly at query time (§4's plan) was rejected: it runs
+the joint resolver inside a query. Measured: the organization layer per
+added ref is 0.18–0.63× the ref's own indexing (floor ≤ 2×), linking being
+its largest part.
 
 ## 2026-11-16 — Collapse across refs by file blob
 
 RFC 0005 §6 over refs: a symbol is matched across the snapshots of one
-repository by (label, qualified name, path) and its versions are compared
-by file blob. Facts are extracted per blob, so an equal blob is an equal
-symbol for certain and costs no comparison; the price is that a symbol of
-a changed file is `changed` even when its own text is the same. Hashing
-each symbol's span was left open (RFC 0006 §12). `search_symbols`
-collapses before the `limit`; `get_symbol` and `get_file_outline` list
-other versions in `versions`; `trace` returns the union graph with `in`
-on nodes and a trailing `{in, changed}` on edges. Measured (10 queries,
-`limit` 50): 473 items for 648 per-ref items on click `main` / `8.5.1`,
-500 for 678 on flask `main` / `pr/5918`.
+repository by (label, qualified name, path) and its versions are compared by
+file blob.
+
+Facts are extracted per blob, so an equal blob is an equal symbol for
+certain and costs no comparison; the price is that a symbol of a changed
+file is `changed` even when its own text is the same. Hashing each symbol's
+span was left open (RFC 0006 §12).
+
+`search_symbols` collapses before the `limit`; `get_symbol` and
+`get_file_outline` list other versions in `versions`; `trace` returns the
+union graph with `in` on nodes and a trailing `{in, changed}` on edges.
+Measured (10 queries, `limit` 50): 473 items for 648 per-ref items on click
+`main` / `8.5.1`, 500 for 678 on flask `main` / `pr/5918`.
 
 ## 2026-11-16 — Organization suite: pinned members, gold at the pin, BM25 as the floor arm
 
-The organization scenario had 21 instances, one per repository: one
-instance was 4.8 points and, with the discordance measured today, a paired
-File Acc@5 comparison could not detect less than 29.0 points. It is rebuilt to be big enough to trust. Members are
-every gated S1 repository (42), each **pinned** at the base commit of its
-first gated S1 instance and indexed one at a time into one organization;
-the calibration organization adds the 8 calibration members pinned the
-same way, the gated members as distractors. **Issue** instances: per
-member the first 3 (calibration: 5) S1 instances whose gold — files and
-functions of the real fix patch — is present at the pin, the gold
-**carried to the pin** (functions re-resolved there), the issue's keyword
-query unchanged. An instance whose fix is already at the pin
-(`patch_at_pin == reverse`) is left out: its question has no answer to
-find. Gated: 120 issue instances over 42 members (`patch_at_pin` base 42 /
-applies 22 / neither 56); calibration: 29, never gated.
+The organization scenario had 21 instances, one per repository: one instance
+was 4.8 points and, with the discordance measured today, a paired File Acc@5
+comparison could not detect less than 29.0 points.
+
+It is rebuilt to be big enough to trust. Members are every gated S1
+repository (42), each **pinned** at the base commit of its first gated S1
+instance and indexed one at a time into one organization; the calibration
+organization adds the 8 calibration members pinned the same way, the gated
+members as distractors.
+
+**Issue** instances: per member the first 3 (calibration: 5) S1 instances
+whose gold — files and functions of the real fix patch — is present at the
+pin, the gold **carried to the pin** (functions re-resolved there), the
+issue's keyword query unchanged. An instance whose fix is already at the pin
+(`patch_at_pin == reverse`) is left out: its question has no answer to find.
+
+Gated: 120 issue instances over 42 members (`patch_at_pin` base 42 / applies
+22 / neither 56); calibration: 29, never gated.
 
 A second kind, **impact**: an issue of a library member (tokio for axum;
 carbon, monolog, commonmark for laravel/framework; gson for dubbo and
@@ -1972,65 +2196,84 @@ packages and module trees) and are pooled over all pairs, without Rust and
 Rust alone, so the Rust gaps do not hide in an average.
 
 Measured (gated, `docs/bench/alpha-results.md`): File Acc@5 56.7 vs 66.7
-single (0.85×, 0.74–0.96: at the floor, interval crossing it); Rueca −
-BM25 +4.2 (−4.2…+12.5, MDE 12.1) on File Acc@5 and +11.3 (+4.3…+19.1, MDE
-11.2) on Function Acc@10; tokens per correct answer 1.29× single;
-calibration 0.78×. Impact: consumer hit@10 12.5% vs 37.5% for BM25 —
-the organization ranking does not surface consumers of a changed library
-symbol. Cross-repository edges: 98.3 / 74.9 all, 99.8 / 96.2 without
-Rust, 94.5 / 53.2 Rust alone; the Rust gaps (attribute macros, items
-inside macro invocation bodies, method resolution by type name across
-crates, Cargo dependencies matched by name only) are findings about
-Rueca, listed in RFC 0006 §9.2 and §12. cbm (per project + rank fusion, no
-cross-project search): File Acc@5 11.7 against 56.7 alone; Rueca − cbm
-+45.0 (+35.8…+54.2).
+single (0.85×, 0.74–0.96: at the floor, interval crossing it); Rueca − BM25
++4.2 (−4.2…+12.5, MDE 12.1) on File Acc@5 and +11.3 (+4.3…+19.1, MDE 11.2)
+on Function Acc@10; tokens per correct answer 1.29× single; calibration
+0.78×.
+
+Impact: consumer hit@10 12.5% vs 37.5% for BM25 — the organization ranking
+does not surface consumers of a changed library symbol.
+
+Cross-repository edges: 98.3 / 74.9 all, 99.8 / 96.2 without Rust, 94.5 /
+53.2 Rust alone; the Rust gaps (attribute macros, items inside macro
+invocation bodies, method resolution by type name across crates, Cargo
+dependencies matched by name only) are findings about Rueca, listed in RFC
+0006 §9.2 and §12.
+
+cbm (per project + rank fusion, no cross-project search): File Acc@5 11.7
+against 56.7 alone; Rueca − cbm +45.0 (+35.8…+54.2).
 
 ## 2026-11-16 — Semantic search: top-tier embeddings in presets, vectors by content hash, convex fusion, reranker gated by measurement
 
 [RFC 0007](rfcs/0007-semantic-search.md): semantic retrieval is a mode of
 `search_symbols` (and of the organization ranking), not a new tool;
 `search_code` is untouched. Static embeddings (`model2vec-rs`, RFC 0002
-§6.2) are dropped: embedding quality must be top-tier. Models come as
-presets — Qwen3-Embedding 0.6B / 4B / 8B in several quantizations,
-CodeRankEmbed, opt-in `remote:` APIs — downloaded on first use and
-sha256-pinned, never in the binary; Rueca hosts the conversions Qwen does
-not publish. Runtime: llama.cpp through `llama-cpp-2` behind
-`Embedder` / `Reranker` traits in a new `rueca-embed` crate, `fastembed`
-(candle) as fallback, `ort` rejected. One vector per symbol, keyed by a
-hash of the model and the embedded text, cached in the store like facts
-and packs, so branches, worktrees and repositories share embeddings;
-segments carry int8 vectors (optional components, no format bump),
-rescored from f16. Stage 1 fuses BM25, dense and graph-neighbour
-candidates by a convex combination of normalized scores (beats RRF, whose
-flat head RFC 0006 measured), times today's priors; stage 2 is an optional
-reranker. Every default is set by a stated rule on the calibration split
-or CoIR; the gate is pooled S1 File Acc@5 on the issue text at least 5
-points above BM25 with the interval above zero. Two owner decisions: the
-default quantization (int4 chosen; the owner's own rule gives Q8 on Metal
-and x86, so `qwen3-0.6b-q8` is the default) and the reranker
-(Qwen3-Reranker-0.6B chosen; it scores below the embedder alone on code in
-Qwen's table and costs seconds per query locally, so it ships off by
-default locally, on only if it adds ≥ 3 points of Function Acc@10 on the
-calibration split). Confirmed by the owner on 2026-11-17: Q8 default
-decided in phase 0 by the rule; reranker off by default locally, 4B and
-mxbai measured first; the remaining open questions were closed
-provisionally (RFC §15).
+§6.2) are dropped: embedding quality must be top-tier.
+
+Models come as presets — Qwen3-Embedding 0.6B / 4B / 8B in several
+quantizations, CodeRankEmbed, opt-in `remote:` APIs — downloaded on first
+use and sha256-pinned, never in the binary; Rueca hosts the conversions Qwen
+does not publish.
+
+Runtime: llama.cpp through `llama-cpp-2` behind `Embedder` / `Reranker`
+traits in a new `rueca-embed` crate, `fastembed` (candle) as fallback, `ort`
+rejected.
+
+One vector per symbol, keyed by a hash of the model and the embedded text,
+cached in the store like facts and packs, so branches, worktrees and
+repositories share embeddings; segments carry int8 vectors (optional
+components, no format bump), rescored from f16.
+
+Stage 1 fuses BM25, dense and graph-neighbour candidates by a convex
+combination of normalized scores (beats RRF, whose flat head RFC 0006
+measured), times today's priors; stage 2 is an optional reranker.
+
+Every default is set by a stated rule on the calibration split or CoIR; the
+gate is pooled S1 File Acc@5 on the issue text at least 5 points above BM25
+with the interval above zero.
+
+Two owner decisions:
+
+- The default quantization (int4 chosen; the owner's own rule gives Q8 on
+  Metal and x86, so `qwen3-0.6b-q8` is the default)
+- The reranker (Qwen3-Reranker-0.6B chosen; it scores below the embedder
+  alone on code in Qwen's table and costs seconds per query locally, so it
+  ships off by default locally, on only if it adds ≥ 3 points of Function
+  Acc@10 on the calibration split).
+
+Confirmed by the owner on 2026-11-17: Q8 default decided in phase 0 by the
+rule; reranker off by default locally, 4B and mxbai measured first; the
+remaining open questions were closed provisionally (RFC §15).
 
 ## 2026-11-16 — Rust: call results typed from signatures; methods by name only when unique
 
-Dogfooding showed name-matched edges where the receiver's type was
-knowable: `let store = Store::open(p).context(…)?; store.register(…)` and
+Dogfooding showed name-matched edges where the receiver's type was knowable:
+`let store = Store::open(p).context(…)?; store.register(…)` and
 `Index::open(dir).map_err(…)?.tokenizers().register(…)` bound the only
-project trait method named `register`. The pack now writes such receivers
-as `$ret:<receiver>#<name>` (`?` when unwrapped by `?`, `unwrap()`,
-`expect()`; `.context()`, `.map_err()`, `.clone()` seen through), also for
-`let` bindings, and the resolver resolves the callee like a call, reads the
-return type of its signature (`Self` → its impl's type or trait,
-`Result<T, _>` / `Option<T>` → `T` when unwrapped, references and smart
-pointers seen through), resolves it in the callee's file and looks the
-member up there (`type_resolved` 0.85); a callee or return type outside
-the project (tantivy's `Index::open`) makes the call external. Same-file
-inference also learned `HashMap` / `BTreeMap` `get` / `values` / `keys`.
+project trait method named `register`.
+
+The pack now writes such receivers as `$ret:<receiver>#<name>` (`?` when
+unwrapped by `?`, `unwrap()`, `expect()`; `.context()`, `.map_err()`,
+`.clone()` seen through), also for `let` bindings, and the resolver resolves
+the callee like a call, reads the return type of its signature (`Self` → its
+impl's type or trait, `Result<T, _>` / `Option<T>` → `T` when unwrapped,
+references and smart pointers seen through), resolves it in the callee's
+file and looks the member up there (`type_resolved` 0.85); a callee or
+return type outside the project (tantivy's `Index::open`) makes the call
+external.
+
+Same-file inference also learned `HashMap` / `BTreeMap` `get` / `values` /
+`keys`.
 
 By-name method calls on receivers of unknown type now bind a **unique**
 candidate only (a trait method's implementations still count as it), as
@@ -2052,32 +2295,37 @@ several `impl From<X>` binds the first `from` it sees.
 
 ## 2026-11-16 — Rust pack: module paths, `Type.method`, impl items outside their type
 
-Rust (`rueca-lang-rust`, `tree-sitter-rust` 0.24.2, vendored
-nvim-treesitter `locals.scm`) names definitions the way the bench
-labeler does: a file's module name is its **module path**, crate name
-first (`rueca_index::link`, from `Cargo.toml` targets and the file
-layout; separator `::`), and local names join items with `.` — `f`,
-`outer.inner` for a nested function, `m.f` for an item of an inline
-module (a `Module` definition that owns its items, like a TS namespace),
-`Tr.m` for a trait item, `Type.m` for an `impl` item (the last segment of
-the self type, generics and references stripped). File modules are not
-part of local names, as Go packages are not. Traits are `Interface`s,
-structs and unions `Struct`s, variants `Constant`s, `macro_rules!` a
-callable `Function` so that invocations of the repository's macros are
-`CALLS`.
+Rust (`rueca-lang-rust`, `tree-sitter-rust` 0.24.2, vendored nvim-treesitter
+`locals.scm`) names definitions the way the bench labeler does:
 
-`impl` items are **not children of their type**: an `impl` block may sit
-in another file (often another module) than the type, and only the
-resolver can find the type through imports. They are top level (or
-children of their inline module) and carry the self type as written in
-`bases` and the trait in `implements`; the new `rust` module of
-`rueca-resolve` attaches them to the type wherever it is declared, adds
-`IMPLEMENTS` type → trait (also from the type's own `implements` when an
-`impl Tr for T {}` without items is in the type's file) and `OVERRIDES`
-item → trait item. Rejected: an `Impl` label or definition per block (a
-new label for every tool and the bench to learn, and impl nodes competing
-with the type in name lookups) and a facts-format change (every pack
-touched).
+- A file's module name is its **module path**, crate name first
+  (`rueca_index::link`, from `Cargo.toml` targets and the file layout;
+  separator `::`),
+- Local names join items with `.` — `f`, `outer.inner` for a nested
+  function, `m.f` for an item of an inline module (a `Module` definition
+  that owns its items, like a TS namespace), `Tr.m` for a trait item,
+  `Type.m` for an `impl` item (the last segment of the self type, generics
+  and references stripped).
+
+File modules are not part of local names, as Go packages are not. Traits are
+`Interface`s, structs and unions `Struct`s, variants `Constant`s,
+`macro_rules!` a callable `Function` so that invocations of the repository's
+macros are `CALLS`.
+
+`impl` items are **not children of their type**: an `impl` block may sit in
+another file (often another module) than the type, and only the resolver can
+find the type through imports.
+
+They are top level (or children of their inline module) and carry the self
+type as written in `bases` and the trait in `implements`; the new `rust`
+module of `rueca-resolve` attaches them to the type wherever it is declared,
+adds `IMPLEMENTS` type → trait (also from the type's own `implements` when
+an `impl Tr for T {}` without items is in the type's file) and `OVERRIDES`
+item → trait item.
+
+Rejected: an `Impl` label or definition per block (a new label for every
+tool and the bench to learn, and impl nodes competing with the type in name
+lookups) and a facts-format change (every pack touched).
 
 Module lookups follow Rust, not the Python / ECMAScript defaults: a name
 in a module is an item, else what `mod`, `use` (leaves, re-exports, globs,
@@ -2090,155 +2338,195 @@ go to the file each `use` leaf is found in (not to the crate root of
 `serde_json::to_string`) get synthetic imports (`type_only`), which make
 no `IMPORTS`.
 
-Measured: the fixture workspace resolves as labelled (`rueca-resolve`
-`tests/rust.rs`); the Rust micro-benchmarks of `bench/micro/rust` (58
-cases on this date) give 132 of their 133 call edges with 1 extra (a
-method on an `impl Trait` return value resolves to the trait, not the
-concrete type); 0 files with parse errors on rueca (251 files), tokio
-(816) and ripgrep (102), 1 of 72 on serde_json (a deliberately invalid
-`trybuild` UI test). Resolution (references resolved / external /
-unresolved): ripgrep 59.1 / 35.5 / 4.5 %, serde_json 60.4 / 37.4 / 1.9 %,
-the rueca workspace itself 45.2 / 52.7 / 0.3 % (`rueca_reads_itself`, a
-test), tokio 39.9 / 45.1 / 14.6 % — tokio declares many items inside
-`cfg_*!` macros, which are not expanded (a known gap; a child module file
-that only a macro declares is still found).
+Measured:
+
+- The fixture workspace resolves as labelled (`rueca-resolve`
+  `tests/rust.rs`);
+- The Rust micro-benchmarks of `bench/micro/rust` (58 cases on this date)
+  give 132 of their 133 call edges with 1 extra (a method on an `impl Trait`
+  return value resolves to the trait, not the concrete type);
+- 0 files with parse errors on rueca (251 files), tokio (816) and ripgrep
+  (102), 1 of 72 on serde_json (a deliberately invalid `trybuild` UI test).
+
+Resolution (references resolved / external / unresolved):
+
+- ripgrep 59.1 / 35.5 / 4.5 %,
+- serde_json 60.4 / 37.4 / 1.9 %,
+- the rueca workspace itself 45.2 / 52.7 / 0.3 % (`rueca_reads_itself`, a
+  test),
+- tokio 39.9 / 45.1 / 14.6 % — tokio declares many items inside `cfg_*!`
+  macros, which are not expanded (a known gap; a child module file that only
+  a macro declares is still found).
 
 ## 2026-11-16 — Rust: macro arguments are code, macro bodies are not
 
-tree-sitter keeps a macro's arguments as a flat token tree, yet most of
-them are expressions that rust-analyzer resolves at their real positions
+tree-sitter keeps a macro's arguments as a flat token tree, yet most of them
+are expressions that rust-analyzer resolves at their real positions
 (`println!("{}", total())`, `assert_eq!(v.len(), 3)`, `vec![make()]`,
 `write!(f, "{}", self.name())`), and its SCIP index is the Rust S3 gold.
+
 The pack parses each argument list again on its own, wrapped so that it is
-valid Rust (`(…)` as a tuple, `[…]` as an array, `{…}` as a block), the
-text copied byte for byte so a node maps back to the file by one fixed
-offset; the re-parsed text gets its own local scopes (closures inside
-`json!` / `assert!`), nesting is bounded (4 levels, four times the file's
-bytes plus 64 KiB per file) and its parse errors do not count as the
-file's. Not re-parsed: `stringify!`, `concat!`, `include*!` and
-`quote!`-style token builders (their tokens are data, not references), and
-the bodies of `macro_rules!` rules: they are token patterns, rust-analyzer
-records no references in them, and the bench's micro-benchmark agrees
-(an invocation calls the macro, not what its body calls; unlike the C/C++
-pack, whose macro expansion follows `#define` bodies). Standard macros are
-not references unless the file defines a `macro_rules!` of the same name;
-a bare invocation no rung resolves binds the only `macro_rules!` of that
-name in the snapshot (`#[macro_use]` needs no import), `unique_name` 0.60.
+valid Rust (`(…)` as a tuple, `[…]` as an array, `{…}` as a block), the text
+copied byte for byte so a node maps back to the file by one fixed offset;
+the re-parsed text gets its own local scopes (closures inside `json!` /
+`assert!`), nesting is bounded (4 levels, four times the file's bytes plus
+64 KiB per file) and its parse errors do not count as the file's.
+
+Not re-parsed: `stringify!`, `concat!`, `include*!` and `quote!`-style token
+builders (their tokens are data, not references), and the bodies of
+`macro_rules!` rules: they are token patterns, rust-analyzer records no
+references in them, and the bench's micro-benchmark agrees (an invocation
+calls the macro, not what its body calls; unlike the C/C++ pack, whose macro
+expansion follows `#define` bodies).
+
+Standard macros are not references unless the file defines a `macro_rules!`
+of the same name; a bare invocation no rung resolves binds the only
+`macro_rules!` of that name in the snapshot (`#[macro_use]` needs no
+import), `unique_name` 0.60.
 
 ## 2026-11-16 — Rust: trait dispatch and methods called by name
 
-A call on a receiver typed `T: Trait`, `impl Trait` or `dyn Trait` binds
-the trait's method (`type_resolved` 0.85), as rust-analyzer does;
-`trace` then reaches the implementations through `OVERRIDES`. With an
-unknown receiver, the implementations of one trait method count as that
-method: a name that only one trait declares binds the trait's method
-(`heuristic` 0.50) however many types implement it; two or three distinct
-candidates are all linked at × 0.8, as C++ overloads the arguments cannot
-tell apart; more is no edge (amended the same day: a unique candidate
-only, see the entry on call results above). A blanket impl (`impl<T: Bound> Tr for T`,
-items named `T.m`) applies to every type, so its items are the by-name
-targets. Rust types are open: a member missing from a project type comes
-from a derive or a blanket implementation outside the project
-(`Clone::clone`, `ToString::to_string`) and is external, never a guess;
-so is a method call on an unknown receiver when no project method has the
-name, or when the name is a common standard-library method (`unwrap`,
-`iter`, `insert`, `len`, …: such calls are overwhelmingly on standard
-types).
+A call on a receiver typed `T: Trait`, `impl Trait` or `dyn Trait` binds the
+trait's method (`type_resolved` 0.85), as rust-analyzer does; `trace` then
+reaches the implementations through `OVERRIDES`.
+
+With an unknown receiver, the implementations of one trait method count as
+that method:
+
+- A name that only one trait declares binds the trait's method (`heuristic`
+  0.50) however many types implement it;
+- Two or three distinct candidates are all linked at × 0.8, as C++ overloads
+  the arguments cannot tell apart;
+- More is no edge (amended the same day: a unique candidate only, see the
+  entry on call results above).
+
+A blanket impl (`impl<T: Bound> Tr for T`, items named `T.m`) applies to
+every type, so its items are the by-name targets.
+
+Rust types are open: a member missing from a project type comes from a
+derive or a blanket implementation outside the project (`Clone::clone`,
+`ToString::to_string`) and is external, never a guess; so is a method call
+on an unknown receiver when no project method has the name, or when the name
+is a common standard-library method (`unwrap`, `iter`, `insert`, `len`, …:
+such calls are overwhelmingly on standard types).
 
 ## 2026-11-16 — Cargo packages in the organization layer
 
-A Cargo package with a library publishes `rust:<crate name>` (`[lib]
-name`, else the package name with `-` → `_`); its dependency tables
+A Cargo package with a library publishes `rust:<crate name>` (`[lib] name`,
+else the package name with `-` → `_`); its dependency tables
 (`[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`, their
 `[target.*]` forms and `[workspace.dependencies]`) are `cargo:<package>`
-requirements. An import a repository's own pack cannot resolve is keyed
-by its first path segment (`serde::de::Visitor` → `rust:serde`; `crate`,
-`self`, `super` and the standard library never), so `use acme_kit::Retry`
-in one repository links to the repository whose package builds the
-`acme_kit` crate, resolved by its own module model. Inside one snapshot a
-crate is found by name (a `path` / `workspace = true` dependency of the
-file's package first, renames followed; else any library crate with that
-name, the same workspace first).
+requirements.
+
+An import a repository's own pack cannot resolve is keyed by its first path
+segment (`serde::de::Visitor` → `rust:serde`; `crate`, `self`, `super` and
+the standard library never), so `use acme_kit::Retry` in one repository
+links to the repository whose package builds the `acme_kit` crate, resolved
+by its own module model.
+
+Inside one snapshot a crate is found by name (a `path` / `workspace = true`
+dependency of the file's package first, renames followed; else any library
+crate with that name, the same workspace first).
 
 ## 2026-10-27 — An ambiguous overload call never targets its caller
 
-The Java benchmark showed self-loop `CALLS` edges on overloads that
-delegate to a sibling of the same name: gson `Gson.fromJson(String,
-Class)` calls `fromJson(json, TypeToken.get(classOfT))`, javapoet
-`ArrayTypeName.of(Type)` calls `of(TypeName.get(componentType))`. The
-argument built by a call has no static type, so several overloads fit
+The Java benchmark showed self-loop `CALLS` edges on overloads that delegate
+to a sibling of the same name:
+
+- gson `Gson.fromJson(String, Class)` calls `fromJson(json,
+  TypeToken.get(classOfT))`,
+- javapoet `ArrayTypeName.of(Type)` calls `of(TypeName.get(componentType))`.
+
+The argument built by a call has no static type, so several overloads fit
 and the fan-out (× 0.8) linked all of them — the caller included.
 `Resolver::expand_overloads` now leaves the caller out of a fan-out when
 another candidate remains; a call whose arity or argument types pick the
-caller alone is still a recursive self-loop. Measured on gson and
-javapoet: 11 + 8 wrong self-loops go, the other overloads keep their
-edges; 2 true recursions through an untyped argument (javapoet
-`TypeName.get(Type, Map)`, `ClassName.get(Class)`) lose their self-loop
-— telling them apart needs the argument's type (the return type of the
-call that builds it), which the packs do not report.
+caller alone is still a recursive self-loop.
+
+Measured on gson and javapoet: 11 + 8 wrong self-loops go, the other
+overloads keep their edges; 2 true recursions through an untyped argument
+(javapoet `TypeName.get(Type, Map)`, `ClassName.get(Class)`) lose their
+self-loop — telling them apart needs the argument's type (the return type of
+the call that builds it), which the packs do not report.
 
 ## 2026-10-27 — Quality gate: ephemeral SonarQube Community, for merges and releases
 
-Static analysis gates both merging to `main` (required `SonarQube` check) and
-publishing (the release job needs it). It runs on a SonarQube Community
+Static analysis gates both merging to `main` (required `SonarQube` check)
+and publishing (the release job needs it). It runs on a SonarQube Community
 server started as a service container in the job and thrown away after it,
-configured by `scripts/sonar-gate.sh` through the Web API. Rejected:
-SonarCloud / a hosted SonarQube, which need an account and a token secret
-(and secrets are not available to PRs from forks, where the gate matters
-most), and keeping a server running, which is infrastructure to maintain for
-a volunteer project. Consequences of the ephemeral server: no history and no
-"new code" period, so the gate applies to the overall code and asks for
-zero issues rather than "no new issues"; findings are waived per line with
-`NOSONAR` and a reason, never by loosening the profile. The server and
-scanner images are pinned by digest so the rule set changes only in a PR.
-Rust gets every rule the analyzer has, cognitive complexity at 15 per
-function. When introduced the gate failed only on that rule (204
-functions), fixed by the follow-up refactor PRs; Python (bench) passed after
-small fixes (private runtime directory, linear-time parsers, `math.isclose`,
-a waived seeded PRNG). A cold run (server start, configuration, scan,
-report) takes about a minute locally.
+configured by `scripts/sonar-gate.sh` through the Web API.
+
+Rejected: SonarCloud / a hosted SonarQube, which need an account and a token
+secret (and secrets are not available to PRs from forks, where the gate
+matters most), and keeping a server running, which is infrastructure to
+maintain for a volunteer project.
+
+Consequences of the ephemeral server: no history and no "new code" period,
+so the gate applies to the overall code and asks for zero issues rather than
+"no new issues"; findings are waived per line with `NOSONAR` and a reason,
+never by loosening the profile.
+
+The server and scanner images are pinned by digest so the rule set changes
+only in a PR. Rust gets every rule the analyzer has, cognitive complexity at
+15 per function.
+
+When introduced the gate failed only on that rule (204 functions), fixed by
+the follow-up refactor PRs; Python (bench) passed after small fixes (private
+runtime directory, linear-time parsers, `math.isclose`, a waived seeded
+PRNG). A cold run (server start, configuration, scan, report) takes about a
+minute locally.
 
 ## 2026-10-26 — Repository routing as a prior; package links by joint resolution
 
-RFC 0006 phase 2. A query in organization mode also ranks the
-repositories — CORI over the organization index (where its terms occur,
-one dictionary lookup per term and repository segment) plus BM25 over a
-per-repository profile (names, packages, README head, most referenced
-symbols, path vocabulary) — and multiplies every symbol score by
-`((0.25 + r) / 1.25)²` inside the top-k. A prior rather than a filter, and
-organization-wide statistics rather than per-repository ones: both
-alternatives were measured on the calibration split and lost or tied.
-Calibration: organization File Acc@5 0.64× → 0.92× of the
-single-repository value, tokens per correct answer 1.69× → 1.25×; gated:
-0.77× → 0.69× (21 instances; the right repository is now routed for fmt
-and code-server but their files still rank lower under organization
-statistics; micropython is lost to fmt). Cross-repository edges reuse the
-whole resolver: a consumer and the repositories publishing what it imports
-(package registry from manifests) are resolved together, each pack
-wrapped so a dependency keeps its own module model and the consumer's
-package imports resolve with the publishing repository's pack and
-project. Edges keep their ladder strategy and confidence; name matching
-never crosses repositories. Link sets are stored per (consumer segment,
-dependency segments) and recomputed only for changed consumers and the
-reverse dependencies of changed repositories. Precision / recall on seven
-labelled consumer–library pairs: 99.7 / 95.3.
+RFC 0006 phase 2. A query in organization mode also ranks the repositories —
+CORI over the organization index (where its terms occur, one dictionary
+lookup per term and repository segment) plus BM25 over a per-repository
+profile (names, packages, README head, most referenced symbols, path
+vocabulary) — and multiplies every symbol score by `((0.25 + r) / 1.25)²`
+inside the top-k.
+
+A prior rather than a filter, and organization-wide statistics rather than
+per-repository ones: both alternatives were measured on the calibration
+split and lost or tied.
+
+Calibration: organization File Acc@5 0.64× → 0.92× of the single-repository
+value, tokens per correct answer 1.69× → 1.25×; gated: 0.77× → 0.69× (21
+instances; the right repository is now routed for fmt and code-server but
+their files still rank lower under organization statistics; micropython is
+lost to fmt).
+
+Cross-repository edges reuse the whole resolver: a consumer and the
+repositories publishing what it imports (package registry from manifests)
+are resolved together, each pack wrapped so a dependency keeps its own
+module model and the consumer's package imports resolve with the publishing
+repository's pack and project.
+
+Edges keep their ladder strategy and confidence; name matching never crosses
+repositories. Link sets are stored per (consumer segment, dependency
+segments) and recomputed only for changed consumers and the reverse
+dependencies of changed repositories. Precision / recall on seven labelled
+consumer–library pairs: 99.7 / 95.3.
 
 ## 2026-10-26 — Organization index from the repositories' own segments
 
 RFC 0006 phase 1. The organization symbol index is a tantivy index whose
-segments are the repository segments' embedded symbol-index segments,
-copied unchanged: no second document format, no re-tokenization, and an
-update of one repository is a file copy plus a generation file and an atomic
-pointer swap (≈ 0.1 s on the benchmark's 21-repository organization, 0.05×
-the repository's own index time). The repository of a document is an
-attribute of its tantivy segment, so the `repo` filter and the visibility
-filter are segment filters inside tantivy (before top-k), and BM25
-statistics are summed over the visible segments only, so permissions never
-change scores. Rank fusion is gone everywhere: roots ranked together
-without an organization use summed statistics, which give the same scores.
+segments are the repository segments' embedded symbol-index segments, copied
+unchanged: no second document format, no re-tokenization, and an update of
+one repository is a file copy plus a generation file and an atomic pointer
+swap (≈ 0.1 s on the benchmark's 21-repository organization, 0.05× the
+repository's own index time).
+
+The repository of a document is an attribute of its tantivy segment, so the
+`repo` filter and the visibility filter are segment filters inside tantivy
+(before top-k), and BM25 statistics are summed over the visible segments
+only, so permissions never change scores.
+
+Rank fusion is gone everywhere: roots ranked together without an
+organization use summed statistics, which give the same scores.
+
 Measured: organization File Acc@5 47.6% vs 61.9% on the right repository
-alone (0.77×, floor 0.85×; rank fusion gave 9.5%); tokens per correct
-answer 1.67× single-repository. Repository routing is the next lever.
+alone (0.77×, floor 0.85×; rank fusion gave 9.5%); tokens per correct answer
+1.67× single-repository. Repository routing is the next lever.
 
 ## 2026-10-26 — C/C++: test heads as blocks, errors searched inside, the remaining C++ precision gap is the gold's
 
@@ -2291,19 +2579,24 @@ Toward the last C++ floors of [RFC 0004](rfcs/0004-quality-and-benchmark.md)
   questions with an answer (macro precision 89.0):
   - **262 (3.6 points) share their SCIP symbol with a gold neighbour.**
     scip-clang gives same-signature overloads and function template
-    specializations one symbol, and the gold binds it to one definition
-    (the first bound), so the others are indistinguishable from it in the
-    gold yet count as wrong. fmt's three SFINAE `copy(InputIt, InputIt,
-    OutputIt)` (`base.h` 2083 / 2095 / 2108) are all
-    `fmt/v12/detail/copy(5151da2f42c51758).`, bound to 2083 (60 false
-    positives); `num_bits()` (430) and its explicit specializations
-    `num_bits<int128_opt>` … `num_bits<uint128_fallback>` (434–436) are all
-    `num_bits(b126dc7c1de90089).`, bound to 436, so the correct edge from
-    `num_bits<unsigned short>()` to the primary template is a false
-    positive (11); the two-argument `write(OutputIt, T)` overloads
-    (`format.h` 3503 / 3570 / 3599 / …) share `write(131888e4bbdcf483).`
-    (125 of the `write` false positives). Excluding these undecidable edges
-    the precision is 92.2 (92.6 counting them as matches).
+    specializations one symbol, and the gold binds it to one definition (the
+    first bound), so the others are indistinguishable from it in the gold
+    yet count as wrong.
+
+    - fmt's three SFINAE `copy(InputIt, InputIt, OutputIt)` (`base.h` 2083 /
+      2095 / 2108) are all `fmt/v12/detail/copy(5151da2f42c51758).`, bound
+      to 2083 (60 false positives);
+    - `num_bits()` (430) and its explicit specializations
+      `num_bits<int128_opt>` … `num_bits<uint128_fallback>` (434–436) are
+      all `num_bits(b126dc7c1de90089).`, bound to 436, so the correct edge
+      from `num_bits<unsigned short>()` to the primary template is a false
+      positive (11);
+    - The two-argument `write(OutputIt, T)` overloads (`format.h` 3503 /
+      3570 / 3599 / …) share `write(131888e4bbdcf483).` (125 of the `write`
+      false positives).
+
+    Excluding these undecidable edges the precision is 92.2 (92.6 counting
+    them as matches).
   - **25 (0.5 points)**: scip-clang records the reference inside the
     caller, but the bench's tree-sitter call-site filter (only
     `call_expression.function` and `new_expression.type`) drops it:
@@ -2399,17 +2692,19 @@ Toward the RFC 0004 C and C++ floors (`rueca-lang-cpp` extractor version
 [how-it-works](how-it-works.md) have the details):
 
 - **Macro expansion in the resolver, body calls in the pack.** The calls a
-  macro's replacement list makes are read lexically and reported as calls
-  of the macro's definition; a definition that uses the macro (`CALLS` or
-  `REFERENCES` edge) also calls them, through nested macros. The macro is
-  usually defined in a header and used in another file, so expanding at
-  extraction (one file) could not see it; expanding edges after
+  macro's replacement list makes are read lexically and reported as calls of
+  the macro's definition; a definition that uses the macro (`CALLS` or
+  `REFERENCES` edge) also calls them, through nested macros.
+
+  The macro is usually defined in a header and used in another file, so
+  expanding at extraction (one file) could not see it; expanding edges after
   resolution keeps extraction per file and resolves each body name in the
-  macro's own file, as the preprocessor's output would. A macro defined
-  once per `#if` branch expands as one configuration: its first
-  definition that is not for release builds (`NDEBUG`), since a
-  compilation database describes a development build. The macro use
-  stays a `REFERENCES` edge (macros are still uses, not callables).
+  macro's own file, as the preprocessor's output would.
+
+  A macro defined once per `#if` branch expands as one configuration: its
+  first definition that is not for release builds (`NDEBUG`), since a
+  compilation database describes a development build. The macro use stays a
+  `REFERENCES` edge (macros are still uses, not callables).
 - **Same-parameter overloads are distinct definitions.** cv-qualified
   members (`get()` / `get() const`), SFINAE overloads and one body per
   `#if` branch used to merge into one node (the later ones vanished). They
@@ -2431,20 +2726,25 @@ Toward the RFC 0004 C and C++ floors (`rueca-lang-cpp` extractor version
   macros around declarations, `asm` macros, access macros, and a few
   C++ shapes (the table in `repair.rs`). Two masking rules were too eager
   (a subscripted macro call in a body, a `const NAME` after a pointer).
-- **Measured** (RFC 0004 scorecard, S3 scip-clang gold and health
-  corpus; before → after): C callers / callees recall 81.0 / 65.8 →
-  96.3 / 98.5 (Lua callees 62.0 → 99.0) at precision 98.1 / 98.9;
-  C++ callers / callees recall 73.9 / 71.1 → 85.6 / 83.0, callers /
-  callees precision 91.7 / 86.3 → 95.4 / 89.4, definition found 94.4 →
-  98.9; files with parse errors C 12.0 → 3.1%, C++ 11.3 → 7.0%. The C
-  micro-benchmark's `macros/macro_body_calls` key still says a macro's
-  body calls are not the caller's (scip-clang says they are): C micro
-  callee F1 100 → 99.0. What remains
-  below the floors: C++ callee precision is held down by the gold on
-  dependent template calls (scip-clang lists one representative per
-  same-signature overload group, or none through a dependent base), and
-  the parse errors are a long tail (vendored GoogleTest, Objective-C
-  headers, non-C `qstrdefs.h`, token pasting).
+- **Measured** (RFC 0004 scorecard, S3 scip-clang gold and health corpus;
+  before → after):
+
+  - C callers / callees recall 81.0 / 65.8 → 96.3 / 98.5 (Lua callees 62.0 →
+    99.0) at precision 98.1 / 98.9;
+  - C++ callers / callees recall 73.9 / 71.1 → 85.6 / 83.0, callers /
+    callees precision 91.7 / 86.3 → 95.4 / 89.4, definition found 94.4 →
+    98.9;
+  - Files with parse errors C 12.0 → 3.1%, C++ 11.3 → 7.0%.
+
+  The C micro-benchmark's `macros/macro_body_calls` key still says a macro's
+  body calls are not the caller's (scip-clang says they are): C micro callee
+  F1 100 → 99.0.
+
+  What remains below the floors: C++ callee precision is held down by the
+  gold on dependent template calls (scip-clang lists one representative per
+  same-signature overload group, or none through a dependent base), and the
+  parse errors are a long tail (vendored GoogleTest, Objective-C headers,
+  non-C `qstrdefs.h`, token pasting).
 
 ## 2026-10-25 — Structure floors: members by kind, overloads by type, receiver types from assignments
 
@@ -2516,13 +2816,15 @@ and [how-it-works](how-it-works.md) have the details):
 - **`#if` groups: keep when the grammar can, collapse when it cannot.** A
   group stays with all its branches (the old behaviour, and what keeps
   platform-specific code in the index) unless a branch is unbalanced, ends
-  mid-statement or the group sits where the grammar takes none
-  (expressions, initializer lists, after `if (…)`); then it collapses to
-  one branch, chosen in three-valued logic with a fixed define set
-  (`__cplusplus` per language, GCC / Clang defined, Windows undefined) and
-  one configuration per file. Only dead code (`#if 0`, C++-only code in C)
-  is dropped otherwise. Project `-D` flags are not used: they would need a
-  project context at extraction time, which the contract does not give.
+  mid-statement or the group sits where the grammar takes none (expressions,
+  initializer lists, after `if (…)`); then it collapses to one branch,
+  chosen in three-valued logic with a fixed define set (`__cplusplus` per
+  language, GCC / Clang defined, Windows undefined) and one configuration
+  per file.
+
+  Only dead code (`#if 0`, C++-only code in C) is dropped otherwise. Project
+  `-D` flags are not used: they would need a project context at extraction
+  time, which the contract does not give.
 - **Error-driven repair, never worse.** Rewrites that would be risky
   before parsing (a lower-case specifier macro, a statement macro without
   `;`, a type as a call argument) run only where tree-sitter reports an
@@ -2737,15 +3039,17 @@ code ([RFC 0003](rfcs/0003-structured-data-and-languages.md) §9.2, §9.3,
 Before the first public release, languages land in this order: PHP,
 Markdown, JSON, YAML, the other structured config formats (TOML, `.env`,
 INI, `.properties`, XML kinds, HCL/Terraform, Dockerfile), Go, C++, C, Java.
+
 Structured data is indexed as `Key` nodes with qualified names
 `path:key.path`, file kinds (compose, Kubernetes, GitHub Actions, OpenAPI,
 Terraform, Dockerfile) add `Resource` / `Image` / `Route` / `EnvVar` nodes,
 and code that reads env vars or config keys is linked to them with `READS`
-(providers with `WRITES`). A language is "supported" only when it meets the
-release gate (extraction, import resolution, tests, bench entry, published
-parity row vs cbm v0.12.0, docs). The design, parsers, phasing and the
-release point are in
-[RFC 0003](rfcs/0003-structured-data-and-languages.md). **The first public
+(providers with `WRITES`).
+
+A language is "supported" only when it meets the release gate (extraction,
+import resolution, tests, bench entry, published parity row vs cbm v0.12.0,
+docs). The design, parsers, phasing and the release point are in [RFC
+0003](rfcs/0003-structured-data-and-languages.md). **The first public
 release ships after Java**, with every language above `supported` (none as
 `preview`).
 
@@ -2789,13 +3093,16 @@ not tuned: tantivy 0.27 fixes them unless a custom scorer is written.
 ## 2026-10-24 — Markdown: sections and links, parsed with pulldown-cmark
 
 Markdown documents join the code graph (`rueca-lang-markdown`): headings are
-`Section` nodes nested by `DEFINES` (local name = heading chain joined by
-` > `, duplicates suffixed ` (2)`), module name = path with extension, and
-links / images to repository paths are imports that resolve to `IMPORTS`
-File→File edges. Parser: `pulldown-cmark` 0.13 (MIT, pure Rust, offset
-iterator) rather than `tree-sitter-md`, following RFC 0002 §3.3 (pure-Rust
-parsers for data kinds on untrusted input); the pack does not need a syntax
-tree, only headings, paragraphs and link destinations with byte ranges.
+`Section` nodes nested by `DEFINES` (local name = heading chain joined by ` >
+`, duplicates suffixed ` (2)`), module name = path with extension, and links
+/ images to repository paths are imports that resolve to `IMPORTS` File→File
+edges.
+
+Parser: `pulldown-cmark` 0.13 (MIT, pure Rust, offset iterator) rather than
+`tree-sitter-md`, following RFC 0002 §3.3 (pure-Rust parsers for data kinds
+on untrusted input); the pack does not need a syntax tree, only headings,
+paragraphs and link destinations with byte ranges.
+
 Inline code spans are deliberately not emitted as references: the resolver's
 unique-name fallback would turn prose into 0.6-confidence noise edges.
 Anchor → section references, front-matter titles and MDX are future work.

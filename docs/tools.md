@@ -33,22 +33,31 @@ Contents:
 - **Refs.** Every indexed ref of a repository is a snapshot of its own. The
   default is the indexed root: its working tree, i.e. the checked-out
   branch (`main`; `HEAD` when detached; `worktree` outside git) plus
-  uncommitted changes. Other refs are indexed with `rueca index [PATH] --ref
+  uncommitted changes.
+
+  Other refs are indexed with `rueca index [PATH] --ref
   <name>` (a branch, `pr/<n>`, a tag or a commit; in an organization also
   the member's `refs = [...]` and `rueca index --org <file> <member> --ref
   <name>`) and read with `ref`, which accepts the ref's name, the default's
-  branch, `HEAD`, `worktree`, or a snapshot's commit. `ref` applies to the
-  repositories `repo` selects: with `repo` (one or a list), every one of
-  them must have every ref named; without `repo` (organization mode) or
-  with `"*"`, each repository is read at the refs it has and the others at
-  their default — the organization "as of" a release branch. Pull request
-  numbers are per repository: `pr/<n>` without `repo` (or with `"*"`) is
-  accepted only when exactly one selected repository you can read has it;
-  otherwise name `repo`. In
-  organization mode the other repositories stay in the call's view at their
-  default (RFC 0006 §4: `repo: A, ref: pr/7` is the organization with A
-  replaced by A at `pr/7`): search statistics, routing and `trace`'s link
-  edges see that view. A ref that is not indexed is an error that lists the
+  branch, `HEAD`, `worktree`, or a snapshot's commit.
+
+  `ref` applies to the repositories `repo` selects:
+
+  - With `repo` (one or a list), every one of them must have every ref
+    named;
+  - Without `repo` (organization mode) or with `"*"`, each repository is
+    read at the refs it has and the others at their default — the
+    organization "as of" a release branch.
+
+  Pull request numbers are per repository: `pr/<n>` without `repo` (or
+  with `"*"`) is accepted only when exactly one selected repository you can
+  read has it; otherwise name `repo`. In organization mode the other
+  repositories stay in the call's view at their default (RFC 0006 §4:
+  `repo: A, ref: pr/7` is the organization with A replaced by A at
+  `pr/7`): search statistics, routing and `trace`'s link edges see that
+  view.
+
+  A ref that is not indexed is an error that lists the
   indexed refs of the repository (`ref` without `repo`: of every selected
   repository) and how to index one; a repository the caller cannot read is
   never named, nor are its refs.
@@ -56,61 +65,75 @@ Contents:
   (`rueca_model::symbol_id`), with the first 12 hex digits of the commit and
   `+` when the indexed working tree has uncommitted changes (the overlay):
   `github.com/acme/billing@7696364aef89+:src/invoices/service.py#InvoiceService.issue`.
-  Outside git the commit is `worktree`. Tools accept the full commit, any
+  Outside git the commit is `worktree`.
+
+  Tools accept the full commit, any
   prefix of ≥ 7 hex digits, the 12-digit form (with or without `+`) or a ref
   name (`@main`). An id whose commit is that of a ref snapshot reads that
   snapshot without `ref`. An id whose commit is no longer indexed resolves
   against the repository's current snapshot (its default), so ids survive a
   re-index.
+
   For PHP the local qualified name is the fully qualified name
   (`app/Models/User.php#App\Models\User::save`); for C/C++ too
   (`src/foo.cpp#ns::Foo::bar`). Canonical env vars have no file and use the
   pseudo-path `$env`: `local/shop@abc:$env#DATABASE_URL`. Files have no `#`
-  part. Tools accept an `id`, a global `qualified_name`, or a suffix of it
+  part.
+
+  Tools accept an `id`, a global `qualified_name`, or a suffix of it
   (`Session.request`, `User::save`, `server.port`, `["DATABASE_URL"]`), in
   that order of precedence. For Java and C/C++ an overload's parameter
   suffix is optional: `Parser.parse` matches `Parser.parse(String)` and
   `Parser.parse(Reader)` (one is returned, the others as `candidates`).
-- **Qualified names**: Python `pkg.mod.Class.method`; ECMAScript
-  `src/util/index:Class.method` (module path, colon, local name); PHP
-  `App\Models\User::save` (namespace, backslash, local name); Markdown
-  `docs/guide.md:Install > Linux` (path, colon, heading chain); structured
-  data `config/app.yaml:database.host` (path, colon, key path; quoted
-  segments `paths."/v1/users.{format}".get`, list elements `steps[2]`,
-  identity-keyed elements `env["DATABASE_URL"]`, documents of a YAML stream
-  `{1}.spec`, Kubernetes objects `k8s/web.yaml:Deployment/web.spec.replicas`,
-  Terraform `infra/main.tf:aws_s3_bucket.logs`, `var.region`); Laravel
-  config keys of `config/<file>.php` are PHP definitions, so their name is
-  the key path alone (`name`, id `config/app.php#name`); canonical env vars
-  `$env:DATABASE_URL`; Go `github.com/gin-gonic/gin.Engine.ServeHTTP`
-  (package import path, dot, local name; methods are `Type.Method`, the
-  symbol id is `gin.go#Engine.ServeHTTP`); Java
-  `com.example.Owner.getPets` (package, dot, local name; nested types
-  `Owner.Pet.getName`; constructors named like their class, `Owner.Owner`;
-  overloads carry their parameter types, `Parser.parse(String)`,
-  `Parser.parse(String,int)`; anonymous classes are named after their base
-  under the enclosing definition, `Gson.fromJson.TypeAdapter$1.read`); C/C++ `geo::Circle::area` (namespace and
-  class path, no module; overloads in one file carry their parameter types,
-  `geo::scale(double, double)`; macros `GEO_PI`; GoogleTest `Suite::Name`);
-  Rust `rueca_index::link::PackageLinker.analyze` (module path with `::`,
-  crate name first; then the local name joined with `.`: an `impl` item is
-  `Type.method` after the last segment of the impl's self type, a trait
-  item `Trait.method`, an item of an inline module `tests.helper`, a nested
-  function `outer.inner`, a `macro_rules!` its name; the symbol id is
-  `crates/rueca-index/src/link.rs#PackageLinker.analyze`); shell
-  `scripts/deploy.sh:deploy` (path with extension, colon, function name —
-  functions are file-level whatever their nesting; `bin/deploy:main` for an
-  extension-less script found by its `#!` line; env providers inside a
-  function `deploy.sh:setup.DATABASE_URL`); SQL `users`,
-  `billing.invoices`, `users.email` (normalized object names, no module:
-  a database namespace is global; a trigger `film.last_updated`, a dbt
-  model its file stem, a CTE `view.cte`; the signature ends with the
-  file's dialect, `CREATE TABLE users ( -- postgres`); Swift
-  `Core.Point.draw(at:_:)` (the SwiftPM target, then the local name with
-  the callable's selector: `Point.init(x:y:)`, `Point.subscript(_:)`; a
-  member of `extension Point` in any file is `Point.m`; the selector is
-  optional when looking a name up, `Core.Point.init` finds every
-  initializer).
+- **Qualified names**:
+
+  - Python `pkg.mod.Class.method`;
+  - ECMAScript `src/util/index:Class.method` (module path, colon, local
+    name);
+  - PHP `App\Models\User::save` (namespace, backslash, local name);
+  - Markdown `docs/guide.md:Install > Linux` (path, colon, heading chain);
+  - Structured data `config/app.yaml:database.host` (path, colon, key path;
+    quoted segments `paths."/v1/users.{format}".get`, list elements
+    `steps[2]`, identity-keyed elements `env["DATABASE_URL"]`, documents of
+    a YAML stream `{1}.spec`, Kubernetes objects
+    `k8s/web.yaml:Deployment/web.spec.replicas`, Terraform
+    `infra/main.tf:aws_s3_bucket.logs`, `var.region`);
+  - Laravel config keys of `config/<file>.php` are PHP definitions, so their
+    name is the key path alone (`name`, id `config/app.php#name`);
+  - Canonical env vars `$env:DATABASE_URL`;
+  - Go `github.com/gin-gonic/gin.Engine.ServeHTTP` (package import path,
+    dot, local name; methods are `Type.Method`, the symbol id is
+    `gin.go#Engine.ServeHTTP`);
+  - Java `com.example.Owner.getPets` (package, dot, local name; nested types
+    `Owner.Pet.getName`; constructors named like their class,
+    `Owner.Owner`; overloads carry their parameter types,
+    `Parser.parse(String)`, `Parser.parse(String,int)`; anonymous classes
+    are named after their base under the enclosing definition,
+    `Gson.fromJson.TypeAdapter$1.read`);
+  - C/C++ `geo::Circle::area` (namespace and class path, no module;
+    overloads in one file carry their parameter types,
+    `geo::scale(double, double)`; macros `GEO_PI`; GoogleTest
+    `Suite::Name`);
+  - Rust `rueca_index::link::PackageLinker.analyze` (module path with `::`,
+    crate name first; then the local name joined with `.`: an `impl` item
+    is `Type.method` after the last segment of the impl's self type, a
+    trait item `Trait.method`, an item of an inline module `tests.helper`, a
+    nested function `outer.inner`, a `macro_rules!` its name; the symbol id
+    is `crates/rueca-index/src/link.rs#PackageLinker.analyze`);
+  - Shell `scripts/deploy.sh:deploy` (path with extension, colon, function
+    name — functions are file-level whatever their nesting;
+    `bin/deploy:main` for an extension-less script found by its `#!` line;
+    env providers inside a function `deploy.sh:setup.DATABASE_URL`);
+  - SQL `users`, `billing.invoices`, `users.email` (normalized object
+    names, no module: a database namespace is global; a trigger
+    `film.last_updated`, a dbt model its file stem, a CTE `view.cte`; the
+    signature ends with the file's dialect,
+    `CREATE TABLE users ( -- postgres`);
+  - Swift `Core.Point.draw(at:_:)` (the SwiftPM target, then the local name
+    with the callable's selector: `Point.init(x:y:)`, `Point.subscript(_:)`;
+    a member of `extension Point` in any file is `Point.m`; the selector is
+    optional when looking a name up, `Core.Point.init` finds every
+    initializer).
 - **Errors**: MCP tool errors use `isError: true` with a message; the CLI
   prints `{"error": "..."}` to stdout and exits with status 2.
 
@@ -136,10 +159,14 @@ Every response (default `format: compact`) is:
   over several repositories lists only those its items come from (none for
   an empty answer); a request on one snapshot always lists it. Items refer to one by `s`
   (an index valid within the response); their ids stay fully pinned, so an
-  id copied out of a response is valid on its own. `ref` is the snapshot's
+  id copied out of a response is valid on its own.
+
+  `ref` is the snapshot's
   ref (`main`, `pr/7`; a ref snapshot never has an overlay); `commit` is the
   full id (`worktree` outside git); `overlay: true` means the working tree had
-  uncommitted changes when indexed (ids carry `+`). `url` is a template for
+  uncommitted changes when indexed (ids carry `+`).
+
+  `url` is a template for
   links on the repository's host (`{path}`, `{start}`, `{end}`), present for
   `github.com`, `gitlab.com`, `bitbucket.org` and hosts named `github.*` /
   `gitlab.*`; with an overlay it points at the base commit, whose lines may
@@ -203,10 +230,13 @@ in several snapshots and ` changed` when it is not identical in all of them
 organization mode), `search_symbols` returns **one ranking**: BM25
 statistics are those of every selected repository together, so scores are
 comparable and the order is the one a single index would give (RFC 0006 §6;
-the rank fusion of RFC 0005 §5 is gone). In organization mode the ranking
+the rank fusion of RFC 0005 §5 is gone).
+
+In organization mode the ranking
 comes from the organization symbol index; locally indexed roots without an
 organization are scored with summed statistics, which gives the same
 scores. `search_code` lists matches in snapshot (repository) order.
+
 `get_symbol`, `get_snippet` and `trace` resolve an `id` in its own
 snapshot, and a name in every selected snapshot (the best match wins; the
 best match of each other snapshot is listed in `candidates`).
@@ -225,31 +255,43 @@ qualified name, path), its versions are collapsed by file blob, and it is
 - An item identical in several snapshots is **one item** with `"in": [s, …]`
   (snapshot indexes); its `s` and id are those of the first. A symbol whose
   file differs appears once per distinct version, each with its own `in`
-  (its lines, edges and id differ). Every item of such a repository
+  (its lines, edges and id differ).
+
+  Every item of such a repository
   carries `in`; `"changed": true` marks a symbol whose **own text** (the
   bytes of its span) is not the same in every requested ref, or that is
-  absent from one (added or deleted on a ref). A symbol of a changed file
+  absent from one (added or deleted on a ref).
+
+  A symbol of a changed file
   whose text did not change — moved by lines added above it — is listed per
   version but not `changed`; `in` still tells the file-level story (the
   snapshots whose file blob the version shares). Repositories read at one
   snapshot get neither, so their items are exactly the single-ref ones.
 - `search_symbols` collapses before cutting at `limit` (an identical symbol
-  counts once; `next_cursor` counts collapsed items). `get_symbol` answers
+  counts once; `next_cursor` counts collapsed items).
+
+  `get_symbol` answers
   the best match's version with its `in` / `changed` and lists the other
   versions in `"versions": [{"s", "in", "changed", "symbol", "callers",
-  "callees"}]` (not as candidates). `get_file_outline` is grouped per ref:
+  "callees"}]` (not as candidates).
+
+  `get_file_outline` is grouped per ref:
   the first listed ref's outline with its `in` / `changed` (of the **file**),
   then each other distinct version of the file in `"versions": [{"s", "in",
   "changed", "line_count", "symbols"}]`, the cursor counting symbols over
   all of them; each symbol of each version is `"changed": true` by the rule
   above, so "which functions of this file differ between the refs" is one
-  call. `trace` walks from every version of the root and returns the **union
+  call.
+
+  `trace` walks from every version of the root and returns the **union
   graph**: a node per symbol (its `in`: the snapshots it was reached in;
   `changed` by the rule above) and
   an edge per (source, destination, kind), whose `in` (the snapshots whose
   walk found it) ends the edge array as `{"in": [s, …], "changed": true}`
   (see [`trace`](#trace)), so "who calls `f` on the PR but not on `main`"
-  is one response. `search_code` lists the matches of each snapshot and
+  is one response.
+
+  `search_code` lists the matches of each snapshot and
   `get_snippet` reads the first listed ref that has the file; neither
   collapses. `format: "verbose"` never collapses.
 - Text: an item, node or symbol line ends with ` [0,1]` when it is in
@@ -276,7 +318,9 @@ generation (a call reads one generation even while the organization is
 updated). `repo` omitted means the whole organization; one repository or a
 list narrows it — the filter is applied inside the organization index
 before top-k, with organization-wide statistics, so a repository's results
-score the same whether it is searched alone or with the others. Callers see
+score the same whether it is searched alone or with the others.
+
+Callers see
 only the repositories they may read: the visible set is applied before
 top-k, before counts and before BM25 statistics, and a repository that is
 not visible is reported exactly like one that does not exist (local mode
@@ -292,7 +336,9 @@ descriptions and README head, most referenced symbols, path vocabulary) —
 and every symbol score of a repository is multiplied by its prior
 `((0.25 + r) / 1.25)²`, `r` ∈ [0, 1] being its relevance relative to the
 best visible repository, each scored at the ref the call reads (a ref
-routes with its own profile). The prior reorders, it never drops a result;
+routes with its own profile).
+
+The prior reorders, it never drops a result;
 with one selected repository it does nothing. `list_repositories` with `query`
 returns the same repository ranking with `score`s. `RUECA_ORG_ROUTE`
 overrides the parameters for experiments (`off`, `prior,alpha=2,mu=0.5`,
@@ -312,24 +358,35 @@ can read both repositories.
 **Contract edges** (the link layer, contracts; RFC 0006 phase 4): every
 segment keeps a contract table — the HTTP routes, OpenAPI operations and
 `.proto` RPC methods its code provides and the HTTP / RPC calls it makes,
-each with a canonical key (`GET /users/{}`, `pkg.Service/Method`). A
-repository also depends on the repositories providing a key it calls, or
+each with a canonical key (`GET /users/{}`, `pkg.Service/Method`).
+
+A repository also depends on the repositories providing a key it calls, or
 publishing a spec its server code implements, and its link set gets
 `strategy: "contract"` edges: the calling definition → the handler or the
 spec operation (`CALLS`), the server handler → the spec operation it
 implements (`IMPLEMENTS`), with the call site (or route declaration) as
-evidence. Confidence follows the match: 0.9 same key, 0.85 template (a
-`{}` segment matched a literal one, or a package-less RPC key), 0.7 method
-wildcard, and 0.5 each when several providers match one call equally well
-— counted over the caller's own repository and every other one, so a call
-that a handler of its own repository and one of another repository both
-match is ambiguous, and a better match in its own repository leaves no
-cross-repository edge. Code handlers and spec operations are matched
+evidence.
+
+Confidence follows the match:
+
+- 0.9 same key,
+- 0.85 template (a `{}` segment matched a literal one, or a package-less
+  RPC key),
+- 0.7 method wildcard,
+- 0.5 each when several providers match one call equally well — counted
+  over the caller's own repository and every other one, so a call that a
+  handler of its own repository and one of another repository both match
+  is ambiguous, and a better match in its own repository leaves no
+  cross-repository edge.
+
+Code handlers and spec operations are matched
 separately (reaching a handler and the operation it implements is not
 ambiguous); provider tests are never targets. `trace` follows them like any
 link edge (`edge_types: ["CALLS", "IMPLEMENTS"]` for both kinds);
 [`list_contracts`](#list_contracts) lists the tables and the calls nothing
-provides; `rueca links --org` marks them `via: "contract"`. On a view that
+provides; `rueca links --org` marks them `via: "contract"`.
+
+On a view that
 reads a provider at another ref, an edge whose target node (the handler,
 the `Route` or `RpcMethod`) the ref no longer has is dropped; a handler
 kept under a changed route keeps its edges until the consumer's link set
@@ -344,7 +401,9 @@ paths and each symbol's source code, with camelCase / snake_case / path
 splitting; when the repository was indexed with vectors (opt-in: `rueca
 index --embed` or `RUECA_EMBED=1 rueca index`), fused with embedding
 similarity (`mode`, below), so questions and issue text in plain words are
-welcome. A one-word query is a name lookup (exact names first); dotted
+welcome.
+
+A one-word query is a name lookup (exact names first); dotted
 parts (`Session.request`, `util:formatAmount`) and adjacent word pairs
 (`session request`) match qualified-name suffixes; multi-word queries also
 match the code itself. Fields, variables, constants and tests rank below
@@ -367,12 +426,16 @@ other definitions with the same text score. Ranking details:
 `hybrid` or `semantic` on snapshots without vectors is an error naming
 `rueca index --embed`, and one whose model is not available locally an
 error naming `rueca models pull`; without `mode` both cases rank lexically
-(the second with a warning). In `hybrid` the score is
+(the second with a warning).
+
+In `hybrid` the score is
 `(α·b̂ + (1 − α)·d̂) × prior × routing`, BM25 and cosine each min-max
 normalized over its own top 100, α = 0.5 (the defaults; `[retrieval]` in
 `<store>/rueca.toml` tunes them); a snapshot without vectors (an
 organization member indexed without `--embed`) is ranked by BM25 alone and
-named in `retrieval.lexical`. `semantic` ranks by the cosine alone and
+named in `retrieval.lexical`.
+
+`semantic` ranks by the cosine alone and
 leaves such snapshots out. Older binaries reject `mode` (arguments are
 validated strictly).
 
@@ -407,15 +470,20 @@ best result ranks):
 a repository read at several refs carry `"in"` and `"changed"` ([Several
 refs](#several-refs-of-one-repository)).
 
-**Language names** (`search_symbols`, `search_code`): `python`,
-`typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`, `java`, `cpp`, `c` (a `.h` header is `cpp` when the
-repository has C++ sources), `rust`, `proto`, `shell` (sh, bash, zsh, ksh, bats;
-extension-less scripts by their `#!` line), `csharp`, `kotlin` (`.kt`, `.kts`),
-`ruby` (`.rb`, `.rake`, `.gemspec`, `.ru`, `Rakefile`, `Gemfile`), `sql` (`preview`;
-`.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq`; every dialect), `swift`, the data languages
-`json` (JSONC included), `yaml`, `toml`, `dotenv`, `ini`, `properties`,
-`xml` (`pom.xml`, `*.csproj`, `AndroidManifest.xml` only), `hcl`
-(Terraform / OpenTofu included) and `dockerfile`. A language whose pack is not in
+**Language names** (`search_symbols`, `search_code`):
+
+- `python`, `typescript`, `tsx`, `javascript`, `php`, `markdown`, `go`,
+  `java`, `cpp`, `c` (a `.h` header is `cpp` when the repository has C++
+  sources), `rust`, `proto`, `shell` (sh, bash, zsh, ksh, bats;
+  extension-less scripts by their `#!` line), `csharp`, `kotlin` (`.kt`,
+  `.kts`), `ruby` (`.rb`, `.rake`, `.gemspec`, `.ru`, `Rakefile`,
+  `Gemfile`), `sql` (`preview`; `.sql`, `.psql`, `.pgsql`, `.plpgsql`,
+  `.mysql`, `.tsql`, `.bq`; every dialect), `swift`,
+- The data languages `json` (JSONC included), `yaml`, `toml`, `dotenv`,
+  `ini`, `properties`, `xml` (`pom.xml`, `*.csproj`, `AndroidManifest.xml`
+  only), `hcl` (Terraform / OpenTofu included) and `dockerfile`.
+
+A language whose pack is not in
 this build is accepted and matches nothing (its files are
 content-searchable without a language filter).
 
@@ -480,7 +548,9 @@ Results:
 organization mode, cross-repository link edges are not counted (`trace`
 follows them). `readers` / `writers` answer "is this env var / config key
 used, and is it set anywhere?" before a `trace`. A canonical env var (`$env:NAME`) has no
-`path` or `lines`. Over budget, the lists are cut (children, then bases,
+`path` or `lines`.
+
+Over budget, the lists are cut (children, then bases,
 subtypes, candidates), `truncated` is set and `"omitted": {"children": n, …}`
 says what was left out; there is no cursor (use `get_file_outline` or
 `trace` for the rest). With a `ref` list the result also has `"in"` /
@@ -541,7 +611,9 @@ Results:
 In organization mode the walk also follows cross-repository link edges
 (callers of a library function in the repositories that import it, a
 consumer's calls into its dependencies), only between repositories the
-caller can read. Link edges are computed between default refs (a ref's own
+caller can read.
+
+Link edges are computed between default refs (a ref's own
 imports are linked against its dependencies' defaults); when the call reads
 a repository at another ref, the edges into it are **remapped** to that
 ref's nodes by (label, qualified name, path), and an edge whose target the
@@ -549,10 +621,14 @@ ref no longer has is dropped: `trace` from a consumer's function with
 `ref: "7.1.2"` (a tag only the library has, no `repo`) shows its calls
 into the library as of that tag, and `repo: <consumer>, ref: "pr/7"`
 traces the pull request's own calls, linked against the libraries'
-defaults. Contract link edges ([above](#the-envelope), *Contract edges*)
+defaults.
+
+Contract link edges ([above](#the-envelope), *Contract edges*)
 come back like the others, with strategy `contract` and the call site:
 `1 [1] out d1 Route GET /users/{id}  openapi.yaml L7-11  ←0 CALLS 0.9
-contract @5`. Every node names its `repo` and `ref`; when the answer
+contract @5`.
+
+Every node names its `repo` and `ref`; when the answer
 spans several snapshots, every node also carries its snapshot `"s"` (the
 result's `"s"` is the root's), the
 envelope lists the snapshots touched, and the text prefixes such nodes with
@@ -597,27 +673,36 @@ some requested ref did not find it); text:
 `next_cursor` is the number of non-root nodes already returned; a later
 page repeats the root as node 0 and any earlier node an edge needs.
 
-Edge types beyond calls: `["INHERITS"]` walks a class hierarchy,
-`["IMPORTS"]` file dependencies (`File` → `File`, and `File` → `Folder` for
-imports of a directory: a Go or Java package, a Terraform module; for Rust,
-`mod` declarations and the module files `use` items come from), `["TESTS"]`
-the tests of a function, `["OVERRIDES"]` the methods an override replaces
-(callers: the overrides of a method; Java and C/C++, Rust trait-impl items
-and the trait items they implement, and Go methods that
-implicitly implement an interface method, heuristic 0.5). Go types also
+Edge types beyond calls:
+
+- `["INHERITS"]` walks a class hierarchy,
+- `["IMPORTS"]` file dependencies (`File` → `File`, and `File` → `Folder`
+  for imports of a directory: a Go or Java package, a Terraform module; for
+  Rust, `mod` declarations and the module files `use` items come from),
+- `["TESTS"]` the tests of a function,
+- `["OVERRIDES"]` the methods an override replaces (callers: the overrides
+  of a method; Java and C/C++, Rust trait-impl items and the trait items
+  they implement, and Go methods that implicitly implement an interface
+  method, heuristic 0.5).
+
+Go types also
 get heuristic `IMPLEMENTS` edges to the interfaces whose methods they
 cover, so `get_symbol` `subtypes` of a Go interface lists its implementers;
-a Rust `impl Trait for Type` gives `IMPLEMENTS` `Type` → `Trait`. In
-shell, `source` / `.` are `IMPORTS`, a script run by path (`./deploy.sh`,
+a Rust `impl Trait for Type` gives `IMPLEMENTS` `Type` → `Trait`.
+
+In shell, `source` / `.` are `IMPORTS`, a script run by path (`./deploy.sh`,
 `bash x.sh`) is a `CALLS` edge to the script's `File` node (so `trace` on
 `bin/deploy` with `direction: "callers"` lists who runs it), and a `trap`
-handler is a `REFERENCES` edge to the function it names. In
-SQL, the tables and views a definition reads are `REFERENCES` edges, the
+handler is a `REFERENCES` edge to the function it names.
+
+In SQL, the tables and views a definition reads are `REFERENCES` edges, the
 ones it writes (`INSERT` … `DROP`) `WRITES` edges and the routines it
 calls `CALLS` edges, so the dependents of a table are `trace` with
 `direction: "callers"` and `edge_types: ["REFERENCES", "WRITES",
 "CALLS"]`; file-level statements (a migration's `ALTER TABLE`) come from
-the `File` node. The code ↔ config
+the `File` node.
+
+The code ↔ config
 bridge (RFC 0003 §7) uses `READS` / `WRITES`:
 
 ```json
@@ -629,7 +714,9 @@ lists the code that reads the variable and the manifests that set it
 `{"qualified_name": "app.main", "direction": "callees", "edge_types": ["READS"]}`
 lists the env vars and config keys a function depends on. Bridge edges have
 strategy `contract` (0.90–0.95), `unique_name` (0.60) or `syntactic` (1.0,
-a manifest setting a variable). Neighbour labels other than
+a manifest setting a variable).
+
+Neighbour labels other than
 functions and methods are real call sites: a `File` caller is module-level
 code, a `Class` / `Variable` / `Constant` / `Field` caller is code in a class
 body or initializer, and a `Class` callee is a constructor call (its
@@ -644,7 +731,9 @@ body or initializer, and a `Class` callee is a constructor call (its
 Results: `{"s", "path", "lang", "line_count", "symbols": [ {"id", "name", "local", "qn", "label", "lines", "sig", "repo", "ref", "children" (opt): [ … ]} ] }`
 (nested by containment, ordered by line). `next_cursor` is the number of
 symbols already returned in pre-order; a later page nests what it can and
-lists the rest at the top level. With a `ref` list: `"in"` / `"changed"`
+lists the rest at the top level.
+
+With a `ref` list: `"in"` / `"changed"`
 and `"versions": [{"s", "in", "changed", "line_count", "symbols"}]`, one
 per other distinct version of the file (text: `version [1] changed:
 pkg/service.py (python, 18 lines)` and its symbols); there `changed` is the
@@ -664,19 +753,26 @@ describes).
 | `query` | string: rank the repositories for this text (organization mode; see *Repository routing*) | — |
 
 Results: `[{"s", "repo", "default_ref", "refs": [{"ref", "commit"}, …], "languages": {"python": files, …}, "files", "symbols", "edges", "packages" (opt), "packages_more" (opt), "depends_on" (opt), "score" (opt)}]`
-(`refs`: every indexed snapshot of the repository — the default ref first,
-then its ref snapshots — with the first 12 hex digits of its commit;
-`ref` reads any of them)
-(`packages`: up to 8 package names the repository publishes, `packages_more`
-the rest's count; `depends_on`: visible repositories it imports packages
-from or whose contracts it calls or implements; `score`: relevance for `query`, 1 = best, results then ordered by it)
-(`s` is the snapshot of the default ref; `symbols` counts nodes that are not
-files, folders, modules or packages), plus `"org"` (the organization name,
-or `null`) next to `next_cursor`. `next_cursor` is the number of
+
+- `refs`: every indexed snapshot of the repository — the default ref
+  first, then its ref snapshots — with the first 12 hex digits of its
+  commit; `ref` reads any of them;
+- `packages`: up to 8 package names the repository publishes,
+  `packages_more` the rest's count;
+- `depends_on`: visible repositories it imports packages from or whose
+  contracts it calls or implements;
+- `score`: relevance for `query`, 1 = best, results then ordered by it;
+- `s` is the snapshot of the default ref;
+- `symbols` counts nodes that are not files, folders, modules or packages;
+- Plus `"org"` (the organization name, or `null`) next to `next_cursor`.
+
+`next_cursor` is the number of
 repositories already returned. Verbose: `{"org", "repositories": [{"repo",
 "root", "default_ref", "commit", "refs", "languages", "files", "symbols",
 "edges", "packages" (all), "depends_on", "score"}]}` (`refs` as above,
-`commit` the default's full commit). Text (`refs` as `name@commit12`, at
+`commit` the default's full commit).
+
+Text (`refs` as `name@commit12`, at
 most 8 then `(+n)`; `packages …`, `depends on …` and `(score)` follow when
 present):
 
@@ -707,19 +803,29 @@ narrows the listing; locally, the selected roots only).
 
 Results: one flat list sorted by (kind, key, repository, path, line):
 `[{"s", "repo", "ref", "path", "line", "symbol", "id", "local", "label",
-"kind", "side", "key", "framework", "raw", "matches"}]` — `symbol` the
-global qualified name of the declaring / calling definition (the file for
-file-level code), `id` its symbol id, `local` its file-local name (the
-id's `#` part; the path for file-level code), `side` `provides` / `consumes`, `key` the canonical key,
-`framework` the framework or spec (`flask`, `requests`, `openapi`,
-`proto`, `grpc-python`, …), `raw` the text as written (≤ 200 characters),
-`matches` the number of counterpart rows: providers matching a consumed key
-(code and spec), consumers of a provided key (a row never counts itself).
+"kind", "side", "key", "framework", "raw", "matches"}]`:
+
+- `symbol` the global qualified name of the declaring / calling definition
+  (the file for file-level code),
+- `id` its symbol id,
+- `local` its file-local name (the id's `#` part; the path for file-level
+  code),
+- `side` `provides` / `consumes`,
+- `key` the canonical key,
+- `framework` the framework or spec (`flask`, `requests`, `openapi`,
+  `proto`, `grpc-python`, …),
+- `raw` the text as written (≤ 200 characters),
+- `matches` the number of counterpart rows: providers matching a consumed
+  key (code and spec), consumers of a provided key (a row never counts
+  itself).
+
 Dangling entries are computed at query time, nothing is stored.
 `next_cursor` is the number of entries already returned. Verbose:
 `{"contracts": [{"repo", "ref", "path", "line", "symbol", "id", "label",
 "kind", "side", "key", "framework", "raw", "matches"}], "truncated",
-"next_offset"}`. Text, one line per entry (`key  side  framework
+"next_offset"}`.
+
+Text, one line per entry (`key  side  framework
 repo:path#local-name Lline  (matches)`, `[s]` first with several
 snapshots):
 
@@ -843,15 +949,21 @@ no `load`).
 
 **Sandbox caveats.** Scripts run inside the `rueca mcp` process; the
 limits protect a session from runaway scripts, not the machine from a
-hostile user (RFC 0009 §7.3). JavaScript's memory limit is enforced on
+hostile user (RFC 0009 §7.3).
+
+JavaScript's memory limit is enforced on
 every allocation and its deadline is polled by the interpreter (generic
 `Array.prototype` methods refuse array-likes longer than 2^22 elements,
-the one non-polling case found). **Starlark's memory limit is best-effort
+the one non-polling case found).
+
+**Starlark's memory limit is best-effort
 in-process**: the heap is checked every 1,000 steps, not on allocation, so
 one large operation can use far more than 64 MB before it is stopped
 (`"x" * (1 << 30)` peaked at 3 GiB), memory a value keeps outside the
 Starlark heap (dictionary tables) is not counted, and an impossible
-allocation (`("x" * 131072) * 2147483647`) aborts the process. A single
+allocation (`("x" * 131072) * 2147483647`) aborts the process.
+
+A single
 long Starlark operation also runs past the deadline (3.1 s for a 2 s
 limit). Containing these needs a child process with OS limits (RFC 0009
 §7.3, §13).

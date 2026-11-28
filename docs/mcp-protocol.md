@@ -336,17 +336,23 @@ Advertised and accepted: `2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25,
 Public API kept for `rueca-cli`: `ServerOptions`, `RuecaServer::{new,
 with_index_gate}`, `tools()`, `serve_stdio`, `INSTRUCTIONS`, `INDEX_WAIT`,
 `root_to_index`, `index_root`, `ensure_indexed`, `spawn_auto_index`,
-`spawn_org_index`, `IndexGate`. `tools()` now returns Rueca's own
+`spawn_org_index`, `IndexGate`.
+
+`tools()` now returns Rueca's own
 `Vec<Tool>` (was `Vec<rmcp::model::Tool>`); `serve` is synchronous over
-`std::io` (was async over a tokio stream). Added: `RuecaServer::from_options`
-(what `serve_stdio` serves, usable by other transports), `RuecaServer::handle`
-and the types below; `RuecaServer::with_visibility` (the same server for a
-caller who may read only some repositories: the engine is cloned cheaply,
-sharing its opened segments and organization index); `ToolCall::run_with`
-(a call with `rueca_query::RespondOptions`: a visibility and a cooperative
-deadline, without cloning the engine) and `DEADLINE_EXCEEDED` (-32001),
-which the HTTP transport (`rueca-serve`, `rueca serve`) uses per tool
-call.
+`std::io` (was async over a tokio stream).
+
+Added:
+
+- `RuecaServer::from_options` (what `serve_stdio` serves, usable by other
+  transports), `RuecaServer::handle` and the types below;
+- `RuecaServer::with_visibility` (the same server for a caller who may
+  read only some repositories: the engine is cloned cheaply, sharing its
+  opened segments and organization index);
+- `ToolCall::run_with` (a call with `rueca_query::RespondOptions`: a
+  visibility and a cooperative deadline, without cloning the engine) and
+  `DEADLINE_EXCEEDED` (-32001), which the HTTP transport (`rueca-serve`,
+  `rueca serve`) uses per tool call.
 
 ```text
 crates/rueca-mcp/src/

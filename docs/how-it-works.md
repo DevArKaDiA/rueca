@@ -2,15 +2,17 @@
 
 This document explains the method: what Rueca extracts from source code, how
 it turns that into a graph, what the graph contains, and exactly which parts
-of it each tool reads. It describes the alpha as implemented. The *why* lives
-in the [RFCs](rfcs/) and the [decisions log](decisions.md); the exact tool
-arguments and result shapes live in [tools.md](tools.md); byte-level formats
-live in the crate docs (`rueca-segment`). Structured data (config keys,
-env vars, the code ↔ config bridge) and the extension to Go, C/C++ and Java
-are designed in [RFC 0003](rfcs/0003-structured-data-and-languages.md); this
-document changes as each part lands. Structured data and the bridge are
-implemented (§4.2–§4.4, §5); Go, Java, C# and C/C++ are built on the shared
-resolver rules.
+of it each tool reads. It describes the alpha as implemented.
+
+The *why* lives in the [RFCs](rfcs/) and the [decisions log](decisions.md);
+the exact tool arguments and result shapes live in [tools.md](tools.md);
+byte-level formats live in the crate docs (`rueca-segment`).
+
+Structured data (config keys, env vars, the code ↔ config bridge) and the
+extension to Go, C/C++ and Java are designed in [RFC
+0003](rfcs/0003-structured-data-and-languages.md); this document changes as
+each part lands. Structured data and the bridge are implemented (§4.2–§4.4,
+§5); Go, Java, C# and C/C++ are built on the shared resolver rules.
 
 Contents:
 
@@ -169,318 +171,393 @@ What packs deliberately do and don't do:
   receiver. The pack does not know it is a class.
 - **PHP names are qualified at extraction.** PHP resolves every class,
   function and constant name at compile time from two things in the file
-  itself: the current `namespace` and its `use` imports. The PHP pack applies
-  those rules, so `new User` under `use App\Models\User` is reported as the
-  name `User` in namespace `\App\Models\`, `strlen()` inside
-  `namespace App` as "`App\strlen`, else global `strlen`", and `User::find()`
-  as member `find` of class `\App\Models\User`. This is still one-file
-  knowledge; which file defines `App\Models\User` is the resolver's job. The
-  pack also types receivers from declarations in the same file: `$user` in
-  `$user->save()` holds a `User` when every binding of `$user` in its scope
-  says so (typed parameter, `catch (User $e)`, `$user = new User`, docblock
-  `@param User $user`), and `$this->repo` has the declared type of property
-  `$repo` (typed, promoted or `@var`). Variable scopes come from a vendored
-  `locals.scm`; variables themselves are never references.
+  itself: the current `namespace` and its `use` imports.
+
+  The PHP pack applies those rules, so `new User` under `use
+  App\Models\User` is reported as the name `User` in namespace
+  `\App\Models\`, `strlen()` inside `namespace App` as "`App\strlen`, else
+  global `strlen`", and `User::find()` as member `find` of class
+  `\App\Models\User`. This is still one-file knowledge; which file defines
+  `App\Models\User` is the resolver's job.
+
+  The pack also types receivers from declarations in the same file: `$user`
+  in `$user->save()` holds a `User` when every binding of `$user` in its
+  scope says so (typed parameter, `catch (User $e)`, `$user = new User`,
+  docblock `@param User $user`), and `$this->repo` has the declared type of
+  property `$repo` (typed, promoted or `@var`). Variable scopes come from a
+  vendored `locals.scm`; variables themselves are never references.
 - **Go receivers are typed from the file's declarations.** A Go method is
-  declared outside its type (`func (s *Server) Start()`, possibly in
-  another file of the package), so the pack names it `Server.Start` at top
-  level and rewrites its receiver variable to the reserved `$self`. Calls on
-  other variables carry what the file declares about them as `$type:T`: a
-  typed parameter (`c *gin.Context`, also in function literals), `var x
-  T`, `x := T{}` / `&T{}` / `new(T)`, the named result of a function of the
-  same file, the constructor convention `x := NewT()` (a heuristic), a type
-  assertion, a type-switch `case`, a struct field of a type declared in the
-  file (`s.store.Get()` with `store *store.Store`). Chains that reach a
-  package-qualified type (`c.Request.Header.Set()` with `Request
-  *http.Request`) are written relative to that type, so a third-party type
-  makes the call external rather than a name guess. Type parameters are
-  scoped by the locals query and never become references.
-- **Java receivers are typed from declarations.** Parameters, locals
-  (`var x = new T()` included), pattern variables, `catch` parameters and
-  fields of the enclosing classes are declared with a type, so `x.m()`
-  is reported with the receiver `$type:T` (§4.4, typed receiver), written
-  as in the source; a bounded type parameter (`F extends Figure`) stands
-  for its bound, and a call on the result of a method of the file's own
-  types (`getAsSingleElement().getAsBoolean()`) for its declared return
-  type. Locals come from a vendored `locals.scm` and are never references.
+  declared outside its type (`func (s *Server) Start()`, possibly in another
+  file of the package), so the pack names it `Server.Start` at top level and
+  rewrites its receiver variable to the reserved `$self`.
+
+  Calls on other variables carry what the file declares about them as `$type:T`:
+
+  - A typed parameter (`c *gin.Context`, also in function literals),
+  - `var x T`,
+  - `x := T{}` / `&T{}` / `new(T)`,
+  - The named result of a function of the same file,
+  - The constructor convention `x := NewT()` (a heuristic),
+  - A type assertion,
+  - A type-switch `case`,
+  - A struct field of a type declared in the file (`s.store.Get()` with
+    `store *store.Store`).
+
+  Chains that reach a package-qualified type (`c.Request.Header.Set()` with
+  `Request *http.Request`) are written relative to that type, so a
+  third-party type makes the call external rather than a name guess. Type
+  parameters are scoped by the locals query and never become references.
+- **Java receivers are typed from declarations.** Parameters, locals (`var x
+  = new T()` included), pattern variables, `catch` parameters and fields of
+  the enclosing classes are declared with a type, so `x.m()` is reported
+  with the receiver `$type:T` (§4.4, typed receiver), written as in the
+  source; a bounded type parameter (`F extends Figure`) stands for its
+  bound, and a call on the result of a method of the file's own types
+  (`getAsSingleElement().getAsBoolean()`) for its declared return type.
+
+  Locals come from a vendored `locals.scm` and are never references.
   Overloaded methods and constructors get a parameter suffix in their
   qualified name (`Parser.parse(String)`, `Parser.parse(String,int)`; a
   method that is not overloaded stays bare), calls carry their argument
-  count and, in the name, the static types of the arguments the file
-  knows (`value$args:long`: literals, typed locals, parameters and fields,
-  `new T()`, casts), and constructors are members named like their class.
-  Anonymous classes (`new TypeAdapter<Foo>() {…}`) and enum constant
-  bodies are classes named after their base (`TypeAdapter$1`, children of
-  the enclosing definition), so their methods are definitions with their
-  own callers and `OVERRIDES`. Fully qualified type names
-  (`com.acme.Owner`) and static on-demand imports are recorded as extra
-  single imports so they resolve like explicit ones.
-- **Shell functions are file-level, whatever their nesting.** A shell
-  (sh, bash; zsh and ksh read with the bash grammar, best effort) function
-  is global once its definition runs, so `f() {…}`, `function f {…}` and
-  a function defined inside another function or an `if` are all `Function`
-  definitions named `f` at file level (two definitions of one name in a
-  file are one node, the first). The module name is the path
-  (`scripts/deploy.sh:deploy`). File-level assignments are `Variable`s
-  (`readonly` / `declare -r`: `Constant`), and `export NAME=…`, `declare
-  -x NAME`, `local -x` and a command's `NAME=value cmd` prefix are
-  `EnvVar` providers (children of the enclosing function, values never
-  shown). Calls are command words that are literal names, wherever the
-  command sits (pipelines, `&&` / `||` lists, subshells, `$(…)`, `<(…)`,
-  conditions, `time` / `!`, `eval 'literal'`); `command f`, `exec f`,
-  `xargs f`, `sudo f` never run a shell function and give nothing; a
-  `trap` handler names a callback (a `Read`, so a `REFERENCES` edge, not
-  `CALLS`); a command word that is a path or a script name (`./deploy.sh`,
-  `bash scripts/x.sh`, `"$DIR/x.sh"`) is a `Call` with the `$script`
-  receiver, which the resolver links to the script's `File` node.
+  count and, in the name, the static types of the arguments the file knows
+  (`value$args:long`: literals, typed locals, parameters and fields, `new
+  T()`, casts), and constructors are members named like their class.
+
+  Anonymous classes (`new TypeAdapter<Foo>() {…}`) and enum constant bodies
+  are classes named after their base (`TypeAdapter$1`, children of the
+  enclosing definition), so their methods are definitions with their own
+  callers and `OVERRIDES`. Fully qualified type names (`com.acme.Owner`) and
+  static on-demand imports are recorded as extra single imports so they
+  resolve like explicit ones.
+- **Shell functions are file-level, whatever their nesting.** A shell (sh,
+  bash; zsh and ksh read with the bash grammar, best effort) function is
+  global once its definition runs, so `f() {…}`, `function f {…}` and a
+  function defined inside another function or an `if` are all `Function`
+  definitions named `f` at file level (two definitions of one name in a file
+  are one node, the first). The module name is the path
+  (`scripts/deploy.sh:deploy`).
+
+  File-level assignments are `Variable`s (`readonly` / `declare -r`:
+  `Constant`), and `export NAME=…`, `declare -x NAME`, `local -x` and a
+  command's `NAME=value cmd` prefix are `EnvVar` providers (children of the
+  enclosing function, values never shown).
+
+  - Calls are command words that are literal names, wherever the command
+    sits (pipelines, `&&` / `||` lists, subshells, `$(…)`, `<(…)`,
+    conditions, `time` / `!`, `eval 'literal'`);
+  - `command f`, `exec f`, `xargs f`, `sudo f` never run a shell function
+    and give nothing;
+  - A `trap` handler names a callback (a `Read`, so a `REFERENCES` edge, not
+    `CALLS`);
+  - A command word that is a path or a script name (`./deploy.sh`, `bash
+    scripts/x.sh`, `"$DIR/x.sh"`) is a `Call` with the `$script` receiver,
+    which the resolver links to the script's `File` node.
 - **One shell dialect per file, a grammar per dialect.** The pack decides
   `sh`, `bash`, `zsh`, `ksh` or `bats` from the path and the bytes alone
   (the `.bats` extension, a ShellCheck `shell=` directive, the `#!` line,
   zsh's `#compdef` / `#autoload`, the file name, an editor modeline, a
   directory named after a shell, content signals, else `sh`) and writes it
-  at the end of every function signature (`deploy() # bash`). zsh files
-  are parsed with tree-sitter-zsh, the others with tree-sitter-bash; when
-  the dialect's grammar leaves errors and the other one reads the whole
-  file without any, that tree is extracted. A few constructs a grammar
-  rejects although the shell accepts them are rewritten before parsing
-  with same-length text (spans stay exact; signatures and docs quote the
-  file as written): for the bash grammar `${s:$i:1}`, `&` / `<` / `>` / `;`
-  in an expansion's pattern, a line-start `\.` (nvm's alias bypass), zsh
-  parameter flags, a here-string after an output redirection; for the zsh
-  grammar `$$` before more text, the arguments of an anonymous function,
-  commented-out assignments and unquoted `%{` prompt escapes; for both
-  `for x do`, `0x$h` in arithmetic and `} 0<file`. What a grammar still
-  cannot read stays an ERROR node, counted as a parse error.
+  at the end of every function signature (`deploy() # bash`).
+
+  zsh files are parsed with tree-sitter-zsh, the others with
+  tree-sitter-bash; when the dialect's grammar leaves errors and the other
+  one reads the whole file without any, that tree is extracted.
+
+  A few constructs a grammar rejects although the shell accepts them are
+  rewritten before parsing with same-length text (spans stay exact;
+  signatures and docs quote the file as written):
+
+  - For the bash grammar `${s:$i:1}`, `&` / `<` / `>` / `;` in an
+    expansion's pattern, a line-start `\.` (nvm's alias bypass), zsh
+    parameter flags, a here-string after an output redirection;
+  - For the zsh grammar `$$` before more text, the arguments of an anonymous
+    function, commented-out assignments and unquoted `%{` prompt escapes;
+  - For both `for x do`, `0x$h` in arithmetic and `} 0<file`.
+
+  What a grammar still cannot read stays an ERROR node, counted as a parse
+  error.
 - **C# names follow the namespace.** The module name of a file is the
   namespace its types share (block `namespace A.B { … }`, nested blocks or
   file-scoped `namespace A.B;`), so the global name of a method is
   `Acme.Shop.Store.Add`; files of one namespace are one package wherever
-  they live (§4.3). Classes and records are `Class`, structs and record
-  structs `Struct`, interfaces `Interface`, enums `Enum` (members
-  `Constant`s), delegates `TypeAlias`; methods, constructors (named like
-  their type), destructors, operators and explicit interface
-  implementations (`Store.IStore.Run`) are `Method`s, local functions
-  `Function`s under their method, fields, properties, events, indexers and
-  record parameters `Field`s, `const` fields `Constant`s. Receivers are
-  typed from declarations as in Java (parameters, locals, `var x = new
-  T()`, casts, `as`, patterns, `out` declarations, `foreach` and `catch`
-  variables, primary-constructor parameters, fields and properties of the
-  enclosing types; a constrained type parameter stands for its first class
-  constraint), and a call on the result of a call the file cannot type is
-  `$ret:<receiver>#<name>` (`?` when awaited), which the resolver types
+  they live (§4.3).
+
+  Classes and records are `Class`, structs and record structs `Struct`,
+  interfaces `Interface`, enums `Enum` (members `Constant`s), delegates
+  `TypeAlias`; methods, constructors (named like their type), destructors,
+  operators and explicit interface implementations (`Store.IStore.Run`) are
+  `Method`s, local functions `Function`s under their method, fields,
+  properties, events, indexers and record parameters `Field`s, `const`
+  fields `Constant`s.
+
+  Receivers are typed from declarations as in Java (parameters, locals, `var
+  x = new T()`, casts, `as`, patterns, `out` declarations, `foreach` and
+  `catch` variables, primary-constructor parameters, fields and properties
+  of the enclosing types; a constrained type parameter stands for its first
+  class constraint), and a call on the result of a call the file cannot type
+  is `$ret:<receiver>#<name>` (`?` when awaited), which the resolver types
   from the callee's declared return type (`Task<T>` awaited is `T`).
+
   Overloads get Java's parameter suffix (`Add(Item)`, `Add(string,int)`,
   `params object[]` written `object...`), calls carry their arity and
   argument types. A file whose `#if` blocks split a declaration is read in
   its first-branch configuration when that parses better.
 - **Kotlin names follow Java's.** The module name is the `package`; local
-  names join containers with `.` (`Order.Companion.create`,
-  `main.local`), constructors (primary, secondary and the implicit one of
-  a class without parameters) are members named like their class, and
-  overloads get a parameter suffix (`Order(Long,Int)`; `vararg` as
-  `T...`). A top-level extension function is named after its receiver type
+  names join containers with `.` (`Order.Companion.create`, `main.local`),
+  constructors (primary, secondary and the implicit one of a class without
+  parameters) are members named like their class, and overloads get a
+  parameter suffix (`Order(Long,Int)`; `vararg` as `T...`).
+
+  A top-level extension function is named after its receiver type
   (`String.shout`), which makes an extension of a project type of the same
   package one of its members for the resolver; same-named top-level
-  functions of a file get suffixes too. `object`s and companion objects are
-  `Class`es (a companion `Order.Companion` unless named), `val` / `var`
-  constructor parameters are properties (`Field`), anonymous objects are
-  classes named after their base (`Runnable$1`). The primary constructor
-  spans the class header, where the calls of the supertype list and
-  default arguments are written; `init` blocks belong to the class.
+  functions of a file get suffixes too.
+
+  `object`s and companion objects are `Class`es (a companion
+  `Order.Companion` unless named), `val` / `var` constructor parameters are
+  properties (`Field`), anonymous objects are classes named after their base
+  (`Runnable$1`). The primary constructor spans the class header, where the
+  calls of the supertype list and default arguments are written; `init`
+  blocks belong to the class.
 - **Swift names carry their selector.** The module name is the SwiftPM
   target (§4.3); local names join types and members with `.` and every
   callable but `deinit` ends with its argument labels, Swift's own full name
   (`Point.draw(at:_:)`, `Point.init(x:y:)`, `Point.subscript(_:)`,
   `parse()`), so `init(x:)` and `init(y:)` are two overloads; callables of
   one scope that share labels and differ by type add their parameter types
-  after a `|` (`element(named:nodes:|String,[Node])`). Members of
-  `extension T` are top-level definitions named `T.m`, so the resolver
-  makes them members of `T` wherever `T` is declared — another file of the
-  target, or another target of the snapshot. Structs, enums (cases are
-  `Constant`s), classes and actors, protocols (`Interface`, their
-  requirements are its members), `init` / `deinit` / `subscript` /
-  operators (`Method`s named by keyword or operator), properties (`Field`)
-  and `typealias` / `associatedtype` (`TypeAlias`). Property accessors
-  and closures are not definitions: their calls belong to the property or
-  to the function that writes the closure.
+  after a `|` (`element(named:nodes:|String,[Node])`).
+
+  Members of `extension T` are top-level definitions named `T.m`, so the
+  resolver makes them members of `T` wherever `T` is declared — another file
+  of the target, or another target of the snapshot.
+
+  Structs, enums (cases are `Constant`s), classes and actors, protocols
+  (`Interface`, their requirements are its members), `init` / `deinit` /
+  `subscript` / operators (`Method`s named by keyword or operator),
+  properties (`Field`) and `typealias` / `associatedtype` (`TypeAlias`).
+
+  Property accessors and closures are not definitions: their calls belong to
+  the property or to the function that writes the closure.
 - **Rust names follow the module tree, items join with `.`.** The module
-  name of a file is its module path, crate name first
-  (`rueca_index::link`, from `Cargo.toml` and the file layout, §4.3); the
-  local name of an item joins its containers with `.`: a function `f`, a
-  nested function `outer.inner`, an item of an inline module `m.f` (the
-  module is a `Module` definition owning its items), a trait item `Tr.m`.
-  Items of an `impl` block are named after the last segment of the self
-  type (`impl<T> Vec<T>` → `Vec.push`, `impl Display for &Foo<'a>` →
-  `Foo.fmt`) and are top level (or children of their inline module), not
-  children of the type: the block may be in another file than the type.
-  They carry the self type as written in `bases` and the trait in
-  `implements`, which the resolver turns into membership, `IMPLEMENTS` and
-  `OVERRIDES` (§4.4). Structs and unions are `Struct` (named fields are
-  `Field`s), enums `Enum` (variants `Constant`s), traits `Interface`,
-  `macro_rules!` a callable `Function` (an invocation of a repository macro
-  is a call). Receivers are typed from the file (`self` → `$self`,
-  annotations, `T { … }` / `T::new()` / `T(…)`, return types of the file's
-  functions and methods, `?` / `unwrap()`, `for` elements, `Some(x)`
-  patterns, struct fields, a generic parameter's bound, `impl Tr` / `dyn
-  Tr`, smart pointers seen through); `self.a.b.m()` with `a` declared in
-  another file is `$member:a.b`, and the result of a call the file cannot
-  type (a function or method of another file) is `$ret:<receiver>#<name>`
-  (`?` when unwrapped), which the resolver types from the callee's
-  signature. **Macro arguments are code**: a macro's
-  argument list is a flat token tree to tree-sitter, so the pack parses it
-  again on its own — wrapped as a tuple, an array or a block, the text copied
-  byte for byte so every node maps back to the file by one offset — and
-  visits it like the file's own code (`println!("{}", total())`,
-  `assert_eq!(v.len(), 3)`, `vec![make()]`, `write!(f, …)`), with its own
-  local scopes for closures inside the arguments. Standard macros are not
-  references; `stringify!`, `concat!`, `include*!` and `quote!`-style token
-  builders are not re-parsed, and `macro_rules!` bodies are token patterns,
-  not code (rust-analyzer records no references in them either). **Macro
-  bodies that are items are items**: crates gate groups of items behind
-  pass-through macros (tokio's `cfg_net! { pub mod tcp; pub use
-  tcp::listener::TcpListener; }`, `cfg_if! { if #[cfg(unix)] { … } else {
-  … } }`), so an invocation in item or statement position whose body
-  parses on its own as items (every branch of a `cfg_if!`-shaped body) is
-  opened in place before the walk: a same-length rewrite blanks its
-  delimiters and leaves `name!{}`, so its definitions, `use` and `mod`
-  declarations are those of the enclosing file, inline module or function
-  at their real positions, and the invocation is still a call of the
-  macro. Rounds repeat for nested macros; a round that adds parse errors is
-  dropped. **Attribute macros are decorators**: an attribute that is not
-  built in (`#[tokio::main]`, `#[tracing::instrument]`, `#[rstest]`; not
-  `#[derive]`, `#[cfg]`, `#[test]`, tool attributes or derive helpers such
-  as `#[serde(…)]`) is a `Decorator` reference of the item, which the
-  resolver turns into `DECORATES` from the `#[proc_macro_attribute]`
-  function to the item, also across repositories.
+  name of a file is its module path, crate name first (`rueca_index::link`,
+  from `Cargo.toml` and the file layout, §4.3); the local name of an item
+  joins its containers with `.`: a function `f`, a nested function
+  `outer.inner`, an item of an inline module `m.f` (the module is a `Module`
+  definition owning its items), a trait item `Tr.m`.
+
+  Items of an `impl` block are named after the last segment of the self type
+  (`impl<T> Vec<T>` → `Vec.push`, `impl Display for &Foo<'a>` → `Foo.fmt`)
+  and are top level (or children of their inline module), not children of
+  the type: the block may be in another file than the type. They carry the
+  self type as written in `bases` and the trait in `implements`, which the
+  resolver turns into membership, `IMPLEMENTS` and `OVERRIDES` (§4.4).
+
+  Structs and unions are `Struct` (named fields are `Field`s), enums `Enum`
+  (variants `Constant`s), traits `Interface`, `macro_rules!` a callable
+  `Function` (an invocation of a repository macro is a call).
+
+  Receivers are typed from the file (`self` → `$self`, annotations, `T { …
+  }` / `T::new()` / `T(…)`, return types of the file's functions and
+  methods, `?` / `unwrap()`, `for` elements, `Some(x)` patterns, struct
+  fields, a generic parameter's bound, `impl Tr` / `dyn Tr`, smart pointers
+  seen through); `self.a.b.m()` with `a` declared in another file is
+  `$member:a.b`, and the result of a call the file cannot type (a function
+  or method of another file) is `$ret:<receiver>#<name>` (`?` when
+  unwrapped), which the resolver types from the callee's signature.
+
+  **Macro arguments are code**: a macro's argument list is a flat token tree
+  to tree-sitter, so the pack parses it again on its own — wrapped as a
+  tuple, an array or a block, the text copied byte for byte so every node
+  maps back to the file by one offset — and visits it like the file's own
+  code (`println!("{}", total())`, `assert_eq!(v.len(), 3)`, `vec![make()]`,
+  `write!(f, …)`), with its own local scopes for closures inside the
+  arguments.
+
+  Standard macros are not references; `stringify!`, `concat!`, `include*!`
+  and `quote!`-style token builders are not re-parsed, and `macro_rules!`
+  bodies are token patterns, not code (rust-analyzer records no references
+  in them either).
+
+  **Macro bodies that are items are items**: crates gate groups of items
+  behind pass-through macros (tokio's `cfg_net! { pub mod tcp; pub use
+  tcp::listener::TcpListener; }`, `cfg_if! { if #[cfg(unix)] { … } else { …
+  } }`), so an invocation in item or statement position whose body parses on
+  its own as items (every branch of a `cfg_if!`-shaped body) is opened in
+  place before the walk:
+
+  - A same-length rewrite blanks its delimiters and leaves `name!{}`, so its
+    definitions, `use` and `mod` declarations are those of the enclosing
+    file, inline module or function at their real positions,
+  - The invocation is still a call of the macro.
+
+  Rounds repeat for nested macros; a round that adds parse errors is
+  dropped.
+
+  **Attribute macros are decorators**: an attribute that is not built in
+  (`#[tokio::main]`, `#[tracing::instrument]`, `#[rstest]`; not `#[derive]`,
+  `#[cfg]`, `#[test]`, tool attributes or derive helpers such as
+  `#[serde(…)]`) is a `Decorator` reference of the item, which the resolver
+  turns into `DECORATES` from the `#[proc_macro_attribute]` function to the
+  item, also across repositories.
 - **Ruby names are constant paths.** Ruby constants are global and classes
   open, so a Ruby file has no module name and a definition is named by its
-  constant path: the enclosing `module` / `class` bodies joined with
-  their compact paths (`module A; class B::C` → `A::B::C`, `class ::D` →
-  `D`), instance methods after `#` (`A::B#m`), singleton methods after `.`
-  (`def self.m`, a `def` inside `class << self`, a `module_function`
-  method: `A::B.m`), top-level `def`s by name (`Function`). A class
-  reopened in another file is another node with the same name. Accessors
-  (`attr_reader :a`) are `Field`s, `alias` / `alias_method` and a literal
-  `define_method(:m)` are methods, `X = Struct.new(…) do … end` is a
+  constant path:
+  - The enclosing `module` / `class` bodies joined with their compact paths
+    (`module A; class B::C` → `A::B::C`, `class ::D` → `D`),
+  - Instance methods after `#` (`A::B#m`),
+  - Singleton methods after `.` (`def self.m`, a `def` inside `class <<
+    self`, a `module_function` method: `A::B.m`),
+  - Top-level `def`s by name (`Function`).
+
+  A class reopened in another file is another node with the same name.
+  Accessors (`attr_reader :a`) are `Field`s, `alias` / `alias_method` and a
+  literal `define_method(:m)` are methods, `X = Struct.new(…) do … end` is a
   class. Superclasses and mixins are `bases` (`Base`, `include:M`,
-  `extend:M`, `prepend:M`). A bare identifier is a call with an implicit
-  `self` unless the vendored `locals.scm` says it is a local variable
-  (assigned earlier in its `def`, or a parameter). Receivers are written
-  for the resolver: `self`, `self.class`, constant paths, `$type:Foo` for
-  a variable every assignment of which builds `Foo` (`Foo.new`), a Sorbet
-  `sig`, an RBS comment (`#: (Foo a) -> Bar`) or `T.let`, `$ret:<receiver>#<name>`
-  for the result of a call, and `$super`; a declared return type is kept
-  in the signature after ` #: -> ` for the resolver (§4.4).
+  `extend:M`, `prepend:M`).
+
+  A bare identifier is a call with an implicit `self` unless the vendored
+  `locals.scm` says it is a local variable (assigned earlier in its `def`,
+  or a parameter).
+
+  Receivers are written for the resolver: `self`, `self.class`, constant
+  paths, `$type:Foo` for a variable every assignment of which builds `Foo`
+  (`Foo.new`), a Sorbet `sig`, an RBS comment (`#: (Foo a) -> Bar`) or
+  `T.let`, `$ret:<receiver>#<name>` for the result of a call, and `$super`;
+  a declared return type is kept in the signature after ` #: -> ` for the
+  resolver (§4.4).
 - **Receiver types from declarations and assignments** (TS/JS, Python;
   "strategy 5"). A per-file pre-pass records what every binding of a name
   says about its type, per function (and for module-level names and class
-  fields): an annotation (`c: Context`, `let x: Foo = …`,
-  `opt?: Foo | undefined`, Python `req: Request`, `Optional[Foo]`,
-  `"Foo"`), or a value that constructs one (`new T()`, `v as T`, `<T>v`;
-  Python `x = Foo(…)`, or a call of a function or method of the same file
-  with a return annotation, `ctx = self.request_context(env)`). A name is
-  typed when its annotations agree, or, without one, when every binding
-  and assignment of it constructs the same type; anything else — a
+  fields): an annotation (`c: Context`, `let x: Foo = …`, `opt?: Foo |
+  undefined`, Python `req: Request`, `Optional[Foo]`, `"Foo"`), or a value
+  that constructs one (`new T()`, `v as T`, `<T>v`; Python `x = Foo(…)`, or
+  a call of a function or method of the same file with a return annotation,
+  `ctx = self.request_context(env)`).
+
+  A name is typed when its annotations agree, or, without one, when every
+  binding and assignment of it constructs the same type; anything else — a
   reassignment to another or an unknown value, destructuring, `for` /
   `catch` / `with` targets, a parameter without annotation — leaves it
-  untyped. Class fields work the same way (`#node: Node`,
-  `private cache = new Cache()`, TS parameter properties,
-  `this.x = new T()`; Python `self.x = Foo()`, class-body annotations), and
-  so do module-level bindings used in functions
-  (`const app = new Hono(); … app.get()`). TS/JS also types a name by the
-  bound of its type parameter (`d: D` with `D extends Dog`), the element
-  of an annotated array for an array-method callback parameter and a
-  `for … of` variable (`xs: T[]; xs.map((x) => x.m())`), and a call of a
-  module-level function or of a method of the file's classes by its
-  declared return type (`b.map(f).get()`, `Registry.create().m()`); a
-  function whose every `return` is an object literal types its result as
-  itself, its object-literal methods being its members
-  (`const c = makeCounter(); c.next()`). The call is then reported with
-  the receiver `$type:T`. Types are file-local: a callback parameter typed
-  only by context (`app.use((c, next) => …)`) or a value returned by a
-  function of another file stays untyped. PHP does the same from its own
-  declarations (`(new Foo())->m()`, inline `/** @var Foo $x */` included).
+  untyped.
+
+  Class fields work the same way (`#node: Node`, `private cache = new
+  Cache()`, TS parameter properties, `this.x = new T()`; Python `self.x =
+  Foo()`, class-body annotations), and so do module-level bindings used in
+  functions (`const app = new Hono(); … app.get()`).
+
+  TS/JS also types a name by the bound of its type parameter (`d: D` with `D
+  extends Dog`), the element of an annotated array for an array-method
+  callback parameter and a `for … of` variable (`xs: T[]; xs.map((x) =>
+  x.m())`), and a call of a module-level function or of a method of the
+  file's classes by its declared return type (`b.map(f).get()`,
+  `Registry.create().m()`); a function whose every `return` is an object
+  literal types its result as itself, its object-literal methods being its
+  members (`const c = makeCounter(); c.next()`).
+
+  The call is then reported with the receiver `$type:T`. Types are
+  file-local: a callback parameter typed only by context (`app.use((c, next)
+  => …)`) or a value returned by a function of another file stays untyped.
+  PHP does the same from its own declarations (`(new Foo())->m()`, inline
+  `/** @var Foo $x */` included).
 - **C and C++ names carry their namespace and class path**
   (`geo::Circle::area`), like PHP's: code never refers to files, so the
   module name is empty. Prototypes and in-class method declarations are
-  definitions marked `is_declaration`; an out-of-line body
-  (`double Circle::area() const {…}` inside `namespace geo`) is a top-level
-  `Method` with the same qualified name, which is how the resolver pairs
-  the two. When a file declares several callables with one name and
-  different parameters, all of them get the parameter types as a suffix
+  definitions marked `is_declaration`; an out-of-line body (`double
+  Circle::area() const {…}` inside `namespace geo`) is a top-level `Method`
+  with the same qualified name, which is how the resolver pairs the two.
+
+  When a file declares several callables with one name and different
+  parameters, all of them get the parameter types as a suffix
   (`geo::scale(double)`, `geo::scale(double, double)`); callables with the
   same parameters are told apart by a comment the lookups ignore: their
   qualifiers (`get()` and `get(/*const*/)`) or, for another body (a SFINAE
   overload, one body per `#if` branch), its ordinal (`write(OutputIt,
-  T/*#2*/)`). A function template's explicit specialization is named with
-  its arguments (`num_bits<int128_opt>`), so calls bind the primary
-  template. Macros are definitions (`#define GEO_PI 3.14` → `Constant`,
-  `#define GEO_SQ(x) …` → `Function`), and their invocations are **uses**
-  (`Read`, so `REFERENCES` edges), not calls; the calls a macro's body
-  makes (read lexically: `#define lua_pop(L,n) lua_settop(L, -(n)-1)`)
-  are calls of the macro's definition, which the resolver passes on to
-  every user of the macro (*macro expansion* below), as the code after
-  preprocessing does. C++ calls carry the static types of literal, cast
-  and local-variable arguments (`Write$args:char`) for overload choice.
-  A class template specialization is its own class, named with its
-  arguments (`formatter<std::error_code>`).
+  T/*#2*/)`).
+
+  A function template's explicit specialization is named with its arguments
+  (`num_bits<int128_opt>`), so calls bind the primary template.
+
+  Macros are definitions (`#define GEO_PI 3.14` → `Constant`, `#define
+  GEO_SQ(x) …` → `Function`), and their invocations are **uses** (`Read`, so
+  `REFERENCES` edges), not calls; the calls a macro's body makes (read
+  lexically: `#define lua_pop(L,n) lua_settop(L, -(n)-1)`) are calls of the
+  macro's definition, which the resolver passes on to every user of the
+  macro (*macro expansion* below), as the code after preprocessing does.
+
+  C++ calls carry the static types of literal, cast and local-variable
+  arguments (`Write$args:char`) for overload choice. A class template
+  specialization is its own class, named with its arguments
+  (`formatter<std::error_code>`).
+
   There is no C preprocessor; the pack prepares the text the grammar parses
   with **same-length rewrites** (offsets, lines and the text read for names
-  stay the original's): macro tokens whose position allows no other reading
-  are blanked (`FMT_API`, `FMT_ENABLE_IF(…)` in a template head); an `#if`
-  group keeps all its branches when the grammar can take them together and
-  otherwise collapses to one branch, as a preprocessor with one
-  configuration would (a function header written once per branch, a group
-  inside an expression), with Objective-C and C++/CLI branches dropped
-  (no grammar parses them); test heads become blocks (`TEST(Suite, Name) {`
-  in C, Catch2 / doctest `TEST_CASE("title") {` in C++, as `if (…)`); and
-  at each remaining parse error a targeted repair is tried (`va_arg(ap,
-  char*)`, a loop macro before a block, a statement macro without `;`, an
-  unknown specifier macro such as `static redisAtomic size_t n`, …), kept
-  only when the file's error count drops (`rueca-lang-cpp` crate docs,
-  *Macros and conditional compilation*). A namespace macro (`FMT_BEGIN_NAMESPACE` …
-  `FMT_END_NAMESPACE`) leaves the segment `${FMT_BEGIN_NAMESPACE}` in the
-  qualified names inside, which the resolver expands from the macro's
-  definition anywhere in the snapshot (`fmt::v12::format_to`). Receivers
-  are typed from declarations in the file: `obj.m()` / `p->m()` is reported
-  with the receiver `$type:Foo` when `obj` is a parameter, local, field of
-  the enclosing class or global declared `Foo`, `Foo*`, `const Foo&`, or
-  `auto obj = new Foo`, or the result of a callable of the file declared
-  to return `Foo` (`Conn::open()->close()`). A member chain whose type the
-  file does not know (`member_.m()` in an out-of-line body whose class is
-  declared in a header) is `$member:member_`, typed by the resolver; a
-  namespace-qualified name `ns::f()` is `$ns:ns`.
-- **Tests are definitions too**: `test_*` functions and `Test*` classes in
-  Python; `describe` / `it` / `test` blocks in JS/TS and Pest become `Test`
-  nodes whose qualified name is the describe chain; PHPUnit `test*`,
-  `@test` and `#[Test]` methods of `*Test` / `*TestCase` subclasses are
-  tests; Go `Test…`, `Benchmark…`, `Fuzz…` and `Example…` functions of
-  `_test.go` files are tests;
-  in Java, JUnit 4 / 5 and TestNG `@Test` (and parameterized,
-  repeated, factory) methods, their fixture methods, JUnit 3 `test*`
-  methods, and classes named `*Test` / `*Tests` / `*IT` or declaring tests
-  (`Method` / `Class` with `is_test: true`);
-  GoogleTest `TEST(Suite, Name)` / `TEST_F` / `TEST_P`
-  (`Suite::Name`) and Catch2 / doctest `TEST_CASE("title")` blocks; in
-  Rust, functions with a test attribute (`#[test]`, `#[tokio::test]`,
-  `#[bench]`, `#[rstest]`, …), everything in a `#[cfg(test)]` module and
-  every definition under `tests/` or `benches/`; in shell, bats `@test
-  "name" { … }` blocks (`Test` definitions; the grammar reads them as
-  commands, the pack rebuilds the blocks), every definition of a test file
-  (test directories, `*.bats`, `test_*.sh`, `*_test.sh`, `*_spec.sh`) and,
-  in a file that sources shunit2, its `test*` functions and hooks; in C#, xUnit `[Fact]` /
-  `[Theory]`, NUnit `[Test]` / `[TestCase]` / `[TestCaseSource]` and MSTest
-  `[TestMethod]` / `[DataTestMethod]` methods, fixture methods of test
-  classes, classes with `[TestClass]` / `[TestFixture]` or a test, and
-  every definition of a test project (`Foo.Tests/`, `Foo.UnitTests/`, …)
-  or under `test/` / `tests/`; in Kotlin, `@Test`
-  functions (JUnit 4 / 5, kotlin.test, TestNG), fixtures of test classes,
-  and classes named `*Test` / `*Tests` / `*Spec` / `*IT`, annotated
-  `@Nested` / `@RunWith` / `@ExtendWith`, extending a Kotest spec or
-  declaring tests; in Swift, classes
-  inheriting `XCTestCase` (or Quick's `QuickSpec` / `AsyncSpec`), types
-  annotated `@Suite` and `*Tests` types declaring `@Test` functions, with
-  their members, and `@Test` functions (Swift Testing).
+  stay the original's):
+
+  - Macro tokens whose position allows no other reading are blanked
+    (`FMT_API`, `FMT_ENABLE_IF(…)` in a template head);
+  - An `#if` group keeps all its branches when the grammar can take them
+    together and otherwise collapses to one branch, as a preprocessor with
+    one configuration would (a function header written once per branch, a
+    group inside an expression), with Objective-C and C++/CLI branches
+    dropped (no grammar parses them);
+  - Test heads become blocks (`TEST(Suite, Name) {` in C, Catch2 / doctest
+    `TEST_CASE("title") {` in C++, as `if (…)`);
+  - At each remaining parse error a targeted repair is tried (`va_arg(ap,
+    char*)`, a loop macro before a block, a statement macro without `;`, an
+    unknown specifier macro such as `static redisAtomic size_t n`, …), kept
+    only when the file's error count drops (`rueca-lang-cpp` crate docs,
+    *Macros and conditional compilation*).
+
+  A namespace macro (`FMT_BEGIN_NAMESPACE` … `FMT_END_NAMESPACE`) leaves the
+  segment `${FMT_BEGIN_NAMESPACE}` in the qualified names inside, which the
+  resolver expands from the macro's definition anywhere in the snapshot
+  (`fmt::v12::format_to`).
+
+  Receivers are typed from declarations in the file: `obj.m()` / `p->m()` is
+  reported with the receiver `$type:Foo` when `obj` is a parameter, local,
+  field of the enclosing class or global declared `Foo`, `Foo*`, `const
+  Foo&`, or `auto obj = new Foo`, or the result of a callable of the file
+  declared to return `Foo` (`Conn::open()->close()`).
+
+  A member chain whose type the file does not know (`member_.m()` in an
+  out-of-line body whose class is declared in a header) is
+  `$member:member_`, typed by the resolver; a namespace-qualified name
+  `ns::f()` is `$ns:ns`.
+- **Tests are definitions too**:
+  - `test_*` functions and `Test*` classes in Python;
+  - `describe` / `it` / `test` blocks in JS/TS and Pest become `Test` nodes
+    whose qualified name is the describe chain;
+  - PHPUnit `test*`, `@test` and `#[Test]` methods of `*Test` / `*TestCase`
+    subclasses are tests;
+  - Go `Test…`, `Benchmark…`, `Fuzz…` and `Example…` functions of `_test.go`
+    files are tests;
+  - In Java, JUnit 4 / 5 and TestNG `@Test` (and parameterized, repeated,
+    factory) methods, their fixture methods, JUnit 3 `test*` methods, and
+    classes named `*Test` / `*Tests` / `*IT` or declaring tests (`Method` /
+    `Class` with `is_test: true`);
+  - GoogleTest `TEST(Suite, Name)` / `TEST_F` / `TEST_P` (`Suite::Name`) and
+    Catch2 / doctest `TEST_CASE("title")` blocks;
+  - In Rust, functions with a test attribute (`#[test]`, `#[tokio::test]`,
+    `#[bench]`, `#[rstest]`, …), everything in a `#[cfg(test)]` module and
+    every definition under `tests/` or `benches/`;
+  - In shell, bats `@test "name" { … }` blocks (`Test` definitions; the
+    grammar reads them as commands, the pack rebuilds the blocks), every
+    definition of a test file (test directories, `*.bats`, `test_*.sh`,
+    `*_test.sh`, `*_spec.sh`) and, in a file that sources shunit2, its
+    `test*` functions and hooks;
+  - In C#, xUnit `[Fact]` / `[Theory]`, NUnit `[Test]` / `[TestCase]` /
+    `[TestCaseSource]` and MSTest `[TestMethod]` / `[DataTestMethod]`
+    methods, fixture methods of test classes, classes with `[TestClass]` /
+    `[TestFixture]` or a test, and every definition of a test project
+    (`Foo.Tests/`, `Foo.UnitTests/`, …) or under `test/` / `tests/`;
+  - In Kotlin, `@Test` functions (JUnit 4 / 5, kotlin.test, TestNG),
+    fixtures of test classes, and classes named `*Test` / `*Tests` / `*Spec`
+    / `*IT`, annotated `@Nested` / `@RunWith` / `@ExtendWith`, extending a
+    Kotest spec or declaring tests;
+  - In Swift, classes inheriting `XCTestCase` (or Quick's `QuickSpec` /
+    `AsyncSpec`), types annotated `@Suite` and `*Tests` types declaring
+    `@Test` functions, with their members, and `@Test` functions (Swift
+    Testing).
 - **Named function expressions are definitions** in JS/TS wherever they
   appear (`app.use(function handler() {})`, `defineGetter(req, "query",
   function query() {})`, `return function timing() {}`): a `Function` child
@@ -521,8 +598,11 @@ INI, `.properties` and Dockerfile:
   (`paths."/v1/a.{b}".get`); mapping elements of arrays are `[N]`
   (`jobs.test.steps[2]`) or keyed by an identity field where the file kind
   has one (`containers["web"].env["DATABASE_URL"]`); documents of a
-  multi-document YAML stream are `{N}`. The module name is the path with
-  extension, so the global name is `k8s/web.yaml:Deployment/web.spec.replicas`.
+  multi-document YAML stream are `{N}`.
+
+  The module name is the path with extension, so the global name is
+  `k8s/web.yaml:Deployment/web.spec.replicas`.
+
   TOML tables and arrays of tables, INI sections, `.properties` keys
   (`server.port` split into a key path) and XML elements of known kinds
   (`pom.xml`, `*.csproj`, `AndroidManifest.xml`) map to the same shape, so
@@ -532,153 +612,187 @@ INI, `.properties` and Dockerfile:
   above a key (plus a trailing one) as its doc. Values of env var providers
   and of secret-looking keys (`password`, `token`, `api_key`, …) are never
   copied into signatures: `DATABASE_URL=•••`.
-- **File kinds** add meaning chosen by path and shape: `package.json`
-  entry points and tsconfig `extends` → imports; `pyproject.toml` scripts →
-  references to the Python function; compose services → `Resource`,
-  `environment` → `EnvVar` providers, `build` → `Image` plus imports of the
-  context and Dockerfile, `depends_on` / `extends` → references / bases;
-  Kubernetes documents → `Resource` `Kind/name`, container `env` →
-  providers, `configMapKeyRef` / `secretKeyRef` / `envFrom` → references to
-  the ConfigMap or Secret in any manifest; GitHub Actions jobs (with their
-  `runs-on`), steps keyed by `id`, `needs` → references, local `uses: ./…`
-  → imports from the repository root, `env` → providers; OpenAPI operations
-  → `Route` `GET /users/{id}`; Terraform `resource` / `data` / `module` →
-  `Resource` (`aws_s3_bucket.logs`), `variable` / `locals` → `Variable`
-  (`var.x`, `local.x`), module `source` → an import of the folder, and
-  `var.x` / `aws_s3_bucket.logs.arn` traversals → references within the
-  module directory; Dockerfile stages → `Image`, `FROM <stage>` → base,
-  `COPY --from` → reference, `ENV` → providers.
+- **File kinds** add meaning chosen by path and shape:
+  - `package.json` entry points and tsconfig `extends` → imports;
+  - `pyproject.toml` scripts → references to the Python function;
+  - Compose services → `Resource`, `environment` → `EnvVar` providers,
+    `build` → `Image` plus imports of the context and Dockerfile,
+    `depends_on` / `extends` → references / bases;
+  - Kubernetes documents → `Resource` `Kind/name`, container `env` →
+    providers, `configMapKeyRef` / `secretKeyRef` / `envFrom` → references
+    to the ConfigMap or Secret in any manifest;
+  - GitHub Actions jobs (with their `runs-on`), steps keyed by `id`, `needs`
+    → references, local `uses: ./…` → imports from the repository root,
+    `env` → providers;
+  - OpenAPI operations → `Route` `GET /users/{id}`;
+  - Terraform `resource` / `data` / `module` → `Resource`
+    (`aws_s3_bucket.logs`), `variable` / `locals` → `Variable` (`var.x`,
+    `local.x`), module `source` → an import of the folder, and `var.x` /
+    `aws_s3_bucket.logs.arn` traversals → references within the module
+    directory;
+  - Dockerfile stages → `Image`, `FROM <stage>` → base, `COPY --from` →
+    reference, `ENV` → providers.
 - **Pointers** are exact: `$ref` (JSON Pointer), YAML aliases and merge
   keys (never expanded: an alias is one reference, so a "billion laughs"
   file costs nothing), and the kind pointers above.
 - **Not indexed** (the file stays listed and searchable, status
-  `skipped:<reason>`): lockfiles (by the walk), minified / notebook / HAR /
-  GeoJSON files and data under `fixtures/`, `testdata/`, `__snapshots__/`
-  (`data`), generated files (`generated`), Helm templates (`template`),
-  data files over 256 KiB that are not a known kind (`data-size`), and
-  data dumps — long root arrays, more than 5,000 keys, mostly array
-  elements (`data-shape`). Inside a file, keys stop at depth 32, arrays at
-  64 mapping elements and files at 5,000 keys (`partial`). An OpenAPI /
-  Swagger document is a known kind wherever its root `openapi` / `swagger`
-  key sits (JSON emitters that sort keys write it last), and its operations
-  stay `Route`s past the key cap.
+  `skipped:<reason>`):
+  - Lockfiles (by the walk),
+  - Minified / notebook / HAR / GeoJSON files and data under `fixtures/`,
+    `testdata/`, `__snapshots__/` (`data`),
+  - Generated files (`generated`),
+  - Helm templates (`template`),
+  - Data files over 256 KiB that are not a known kind (`data-size`),
+  - Data dumps — long root arrays, more than 5,000 keys, mostly array
+    elements (`data-shape`).
 
-**Env var and config reads in code** (the code side of the bridge) are
-facts of the code packs, recognized only with file-local evidence and
-literal names: Python `os.environ["X"]`, `os.environ.get("X")`,
-`os.getenv("X")` (with `import os` / `from os import …`); TS/JS
-`process.env.X`, `process.env["X"]`, `const { X } = process.env`,
-`import.meta.env.X`, `Deno.env.get("X")`, and `config.get("a.b")` with
-`config` imported from the `config` package (node-config); PHP
-`getenv('X')`, `$_ENV['X']`, `$_SERVER['X']`, Laravel `env('X')`,
-`config('app.name')` and `Config::get(…)`; Rust `std::env::var("X")`,
-`env::var("X")` / `var("X")` with `std::env` / `std::env::var` imported (and
-`var_os`), `env!("X")` and `option_env!("X")`; shell `$NAME`, `${NAME}`,
-`${NAME:-default}`, `${NAME:?msg}` (also in strings and here-documents)
-when the file binds `NAME` nowhere (no assignment, `local`, `export`,
-`read`, `for`, …), the name is upper case and not a shell variable
-(`BASH_SOURCE`, `LINENO`, …); C#
-`Environment.GetEnvironmentVariable("X")`, and on an `IConfiguration`
-receiver (or a `Configuration` property) `config["A:B"]`,
-`GetValue<T>("A:B")`, `GetSection("A:B")` and `GetConnectionString("Db")`
-(`ConnectionStrings:Db`), namespace `dotnet` (`appsettings*.json`, `:`
-read as `.`); Kotlin `System.getenv("X")`,
-Spring `@Value("\${a.b}")` and `env.getProperty("a.b")` on an `Environment`,
-as in Java; Ruby `ENV["X"]`,
-`ENV.fetch("X")` (with or without a default) and `ENV.key?("X")`; Swift
-`ProcessInfo.processInfo.environment["X"]` and `getenv("X")`. Laravel config files are PHP:
-the array a `config/<file>.php` returns becomes `Key`s (`name`,
-`providers.cache.driver`), and `env()` calls inside an entry are reads by
-that key.
+  Inside a file, keys stop at depth 32, arrays at 64 mapping elements and
+  files at 5,000 keys (`partial`). An OpenAPI / Swagger document is a known
+  kind wherever its root `openapi` / `swagger` key sits (JSON emitters that
+  sort keys write it last), and its operations stay `Route`s past the key
+  cap.
+
+**Env var and config reads in code** (the code side of the bridge) are facts
+of the code packs, recognized only with file-local evidence and literal
+names:
+
+- Python `os.environ["X"]`, `os.environ.get("X")`, `os.getenv("X")` (with
+  `import os` / `from os import …`);
+- TS/JS `process.env.X`, `process.env["X"]`, `const { X } = process.env`,
+  `import.meta.env.X`, `Deno.env.get("X")`, and `config.get("a.b")` with
+  `config` imported from the `config` package (node-config);
+- PHP `getenv('X')`, `$_ENV['X']`, `$_SERVER['X']`, Laravel `env('X')`,
+  `config('app.name')` and `Config::get(…)`;
+- Rust `std::env::var("X")`, `env::var("X")` / `var("X")` with `std::env` /
+  `std::env::var` imported (and `var_os`), `env!("X")` and
+  `option_env!("X")`;
+- Shell `$NAME`, `${NAME}`, `${NAME:-default}`, `${NAME:?msg}` (also in
+  strings and here-documents) when the file binds `NAME` nowhere (no
+  assignment, `local`, `export`, `read`, `for`, …), the name is upper case
+  and not a shell variable (`BASH_SOURCE`, `LINENO`, …);
+- C# `Environment.GetEnvironmentVariable("X")`, and on an `IConfiguration`
+  receiver (or a `Configuration` property) `config["A:B"]`,
+  `GetValue<T>("A:B")`, `GetSection("A:B")` and `GetConnectionString("Db")`
+  (`ConnectionStrings:Db`), namespace `dotnet` (`appsettings*.json`, `:`
+  read as `.`);
+- Kotlin `System.getenv("X")`, Spring `@Value("\${a.b}")` and
+  `env.getProperty("a.b")` on an `Environment`, as in Java;
+- Ruby `ENV["X"]`, `ENV.fetch("X")` (with or without a default) and
+  `ENV.key?("X")`;
+- Swift `ProcessInfo.processInfo.environment["X"]` and `getenv("X")`.
+
+Laravel config files are PHP: the array a `config/<file>.php` returns
+becomes `Key`s (`name`, `providers.cache.driver`), and `env()` calls inside
+an entry are reads by that key.
 
 **Contract hints in code** (`FileFacts::contracts`, §4.4 *Contracts*) are
 found by each code pack in one pass after its definitions, so a provider
-names its handler and a consumer its enclosing definition. A URL is
-rendered from literals, interpolations and concatenations (a gap is a
-hole; a leading interpolated base URL is dropped by the key), and from a
-local assigned once in the function. **Python**: Flask / FastAPI /
-aiohttp route decorators (composed with a `Blueprint` / `APIRouter`
-prefix of the file), `add_url_rule`, Django `path()` / `re_path()`
-(method `*`), aiohttp and Starlette route tables provide; calls whose
-callee is an HTTP verb (`get`, `_post`, `get_api_list`) or `request` /
-`_request` / `urlopen` with a path-like argument consume (method from the
-callee, a literal method argument or `method=self._conn.get`); `x.Method`
-on a name the file binds to a `<mod>.XStub` (assignment, annotation,
-parameter, return type) consumes `X/Method` (`*/Method` on an unbound
-holder named `…stub`, a stub handed in as a parameter), and the PascalCase
-methods of a `…XServicer` subclass provide it; kafka producers' `send("t")` consume
-and consumers' topics provide a topic. **TS / JS**: `app.get("/x", h)`,
-`app.route("/x").get(h)`, `fastify.route({…})` (in a file importing a
-server framework, or on `app` / `router` / `server` with an inline
-handler) and NestJS `@Controller` + `@Get` (composed) provide; `fetch`,
-`axios`, `got`, verb wrappers and `request` with a path-like argument
-consume, and a wrapper whose URL interpolates its own parameter
-(`` `${host}/api/${endpoint}` ``) adds a consumer at each caller passing a
-literal there (one hop); `new GreeterClient(…)` from generated gRPC code
-and `server.addService(GreeterService, {…})` give `Greeter/SayHello`.
-**PHP**: Laravel `Route::get(…)` (also chained, `match`, `any`,
-`resource`, inside `Route::prefix(…)->group(…)` closures), Symfony
-`#[Route]` attributes (class prefix composed) and Slim / Lumen
-`$app->get('/x', handler)` provide; Guzzle-style `->get('/x')` /
-`->request('POST', …)`, the `Http::` facade and `CURLOPT_URL` consume.
-**Go** (router or client imported in the file; generated files skipped):
-`net/http` `HandleFunc` / `Handle("GET /x")`, gin / echo `r.GET`, chi /
-fiber `r.Get`, gorilla `.HandleFunc(…).Methods(…)` provide (group,
-sub-router and chi `Route` prefixes of the file composed; the handler is
-the last function value among the arguments, looked for inside wrapping
-calls), `http.Get` / `http.NewRequest`, resty and SDK wrappers called with
-a method then a path (`c.do(ctx, http.MethodPost, "/api/generate")`)
-consume; a type embedding `pb.Unimplemented<S>Server` or the server
-interface `pb.<S>Server` (a delegating wrapper), or registered with
-`pb.Register<S>Server(s, x)` (`x` a `&T{}`, the method's receiver or a
-local assigned `&T{}`), provides `S/Method` for its handler-shaped methods
-(a context and a pointer, or a stream) — in the file, and through a
-service marker `S/*` on the type that the resolver expands over its
-methods in the other files of the package — a stream parameter
-`pb.<S>_<M>Server` gives `S/M`, and a unary server signature taking
-`*pb.<M>Request` (a version suffix may be dropped or follow `Request`)
-gives `*/M` (service unknown in the file), while
-calls on names bound to `pb.<S>Client` consume `S/M` (`*/M` through a
-`protoClient` field typed in another file). **Java**: Spring
-`@GetMapping` / `@RequestMapping`, JAX-RS `@GET` + `@Path` and Micronaut
-`@Get` provide (class prefix composed) — consume on a `@FeignClient` /
-`@RegisterRestClient` / Micronaut `@Client` type, for `@GetExchange` and
-Feign `@RequestLine` — and `RestTemplate`, `WebClient` / `RestClient`,
-`HttpRequest.newBuilder` and OkHttp `Request.Builder` consume; a class
-extending `XGrpc.XImplBase` provides `X/Method` for its public
-`StreamObserver` methods and calls on `XGrpc` stubs consume it.
-**Rust**: actix-web / rocket `#[get("/x")]` attributes (prefixed by the
-file's `web::scope` registering the function), actix `.route("/x",
-web::get().to(h))` / `web::resource`, and axum `.route("/x",
-get(h).post(g))` (with `.nest` of a router built in the same expression)
-provide, `reqwest` calls consume; the methods of a tonic service trait
-impl (`impl Points for S`, `Request<…>` → `Response<…>`) provide
-`Points/Upsert` (snake_case back to the proto's PascalCase) and calls on
-names bound to a `PointsClient` consume it.
-**C#**: no contract hints yet (ASP.NET routes and `HttpClient` calls are
-future work).
+names its handler and a consumer its enclosing definition. A URL is rendered
+from literals, interpolations and concatenations (a gap is a hole; a leading
+interpolated base URL is dropped by the key), and from a local assigned once
+in the function.
 
-**SQL** (`rueca-lang-sql`) is read with sqlparser, not tree-sitter: one
-dialect per file (a `-- dialect:` comment, else the path — extension,
-dialect words in file or directory names — else content signals such as
-`AUTO_INCREMENT`, `SERIAL` / `$$`, `GO` / `NVARCHAR`, `PRAGMA`,
-`` `project.dataset.table` ``), the text cut into statements (`GO`
-batches, `DELIMITER` regions, `;` outside `BEGIN … END`), each statement
-parsed in the file's dialect, then in the others, and what none parses
-read by a token scanner (its `CREATE`, the names after `FROM` / `JOIN` /
-`INTO` / `UPDATE`, calls) and counted as a parse error. Tables, views and
-dbt models are `Struct`s with `Field` columns; functions, procedures,
-triggers (`table.trigger`), dbt macros and `-- name:` queries are
-`Function`s; names are normalized (unquoted lower case, default schema
-dropped: `public.users` is `users`) and the module name is empty, since
-a database namespace is global. Relations read become `Read` references
-(`REFERENCES`), DML / `ALTER` / `DROP` targets `Write`s (`WRITES`),
-columns `Read` / `Write` with a `$type:<table>` receiver when the table
-is certain, routines `Call`s. dbt Jinja is masked in place (`{{ ref('m')
-}}` becomes the identifier `m`), and `ref` / `source` / macro calls are
-also read from the Jinja itself. PostgreSQL `$$` bodies are scanned for
-relations and calls; the dialect ends every top-level signature
-(`CREATE TABLE users ( -- postgres`).
+- **Python**:
+  - Flask / FastAPI / aiohttp route decorators (composed with a `Blueprint`
+    / `APIRouter` prefix of the file), `add_url_rule`, Django `path()` /
+    `re_path()` (method `*`), aiohttp and Starlette route tables provide;
+  - Calls whose callee is an HTTP verb (`get`, `_post`, `get_api_list`) or
+    `request` / `_request` / `urlopen` with a path-like argument consume
+    (method from the callee, a literal method argument or
+    `method=self._conn.get`);
+  - `x.Method` on a name the file binds to a `<mod>.XStub` (assignment,
+    annotation, parameter, return type) consumes `X/Method` (`*/Method` on
+    an unbound holder named `…stub`, a stub handed in as a parameter), and
+    the PascalCase methods of a `…XServicer` subclass provide it;
+  - Kafka producers' `send("t")` consume and consumers' topics provide a
+    topic.
+- **TS / JS**:
+  - `app.get("/x", h)`, `app.route("/x").get(h)`, `fastify.route({…})` (in a
+    file importing a server framework, or on `app` / `router` / `server`
+    with an inline handler) and NestJS `@Controller` + `@Get` (composed)
+    provide;
+  - `fetch`, `axios`, `got`, verb wrappers and `request` with a path-like
+    argument consume, and a wrapper whose URL interpolates its own parameter
+    (`` `${host}/api/${endpoint}` ``) adds a consumer at each caller passing
+    a literal there (one hop);
+  - `new GreeterClient(…)` from generated gRPC code and
+    `server.addService(GreeterService, {…})` give `Greeter/SayHello`.
+- **PHP**:
+  - Laravel `Route::get(…)` (also chained, `match`, `any`, `resource`,
+    inside `Route::prefix(…)->group(…)` closures), Symfony `#[Route]`
+    attributes (class prefix composed) and Slim / Lumen `$app->get('/x',
+    handler)` provide;
+  - Guzzle-style `->get('/x')` / `->request('POST', …)`, the `Http::` facade
+    and `CURLOPT_URL` consume.
+- **Go** (router or client imported in the file; generated files skipped):
+  - `net/http` `HandleFunc` / `Handle("GET /x")`, gin / echo `r.GET`, chi /
+    fiber `r.Get`, gorilla `.HandleFunc(…).Methods(…)` provide (group,
+    sub-router and chi `Route` prefixes of the file composed; the handler is
+    the last function value among the arguments, looked for inside wrapping
+    calls),
+  - `http.Get` / `http.NewRequest`, resty and SDK wrappers called with a
+    method then a path (`c.do(ctx, http.MethodPost, "/api/generate")`)
+    consume;
+  - A type embedding `pb.Unimplemented<S>Server` or the server interface
+    `pb.<S>Server` (a delegating wrapper), or registered with
+    `pb.Register<S>Server(s, x)` (`x` a `&T{}`, the method's receiver or a
+    local assigned `&T{}`), provides `S/Method` for its handler-shaped
+    methods (a context and a pointer, or a stream) — in the file, and
+    through a service marker `S/*` on the type that the resolver expands
+    over its methods in the other files of the package;
+  - A stream parameter `pb.<S>_<M>Server` gives `S/M`,
+  - A unary server signature taking `*pb.<M>Request` (a version suffix may
+    be dropped or follow `Request`) gives `*/M` (service unknown in the
+    file), while calls on names bound to `pb.<S>Client` consume `S/M` (`*/M`
+    through a `protoClient` field typed in another file).
+- **Java**:
+  - Spring `@GetMapping` / `@RequestMapping`, JAX-RS `@GET` + `@Path` and
+    Micronaut `@Get` provide (class prefix composed) — consume on a
+    `@FeignClient` / `@RegisterRestClient` / Micronaut `@Client` type, for
+    `@GetExchange` and Feign `@RequestLine`;
+  - `RestTemplate`, `WebClient` / `RestClient`, `HttpRequest.newBuilder` and
+    OkHttp `Request.Builder` consume;
+  - A class extending `XGrpc.XImplBase` provides `X/Method` for its public
+    `StreamObserver` methods and calls on `XGrpc` stubs consume it.
+- **Rust**:
+  - actix-web / rocket `#[get("/x")]` attributes (prefixed by the file's
+    `web::scope` registering the function), actix `.route("/x",
+    web::get().to(h))` / `web::resource`, and axum `.route("/x",
+    get(h).post(g))` (with `.nest` of a router built in the same expression)
+    provide, `reqwest` calls consume;
+  - The methods of a tonic service trait impl (`impl Points for S`,
+    `Request<…>` → `Response<…>`) provide `Points/Upsert` (snake_case back
+    to the proto's PascalCase) and calls on names bound to a `PointsClient`
+    consume it.
+- **C#**: no contract hints yet (ASP.NET routes and `HttpClient` calls are
+  future work).
+
+**SQL** (`rueca-lang-sql`) is read with sqlparser, not tree-sitter:
+
+- One dialect per file (a `-- dialect:` comment, else the path — extension,
+  dialect words in file or directory names — else content signals such as
+  `AUTO_INCREMENT`, `SERIAL` / `$$`, `GO` / `NVARCHAR`, `PRAGMA`,
+  `` `project.dataset.table` ``),
+- The text cut into statements (`GO` batches, `DELIMITER` regions, `;`
+  outside `BEGIN … END`),
+- Each statement parsed in the file's dialect, then in the others,
+- What none parses read by a token scanner (its `CREATE`, the names after
+  `FROM` / `JOIN` / `INTO` / `UPDATE`, calls) and counted as a parse error.
+
+Tables, views and dbt models are `Struct`s with `Field` columns; functions,
+procedures, triggers (`table.trigger`), dbt macros and `-- name:` queries
+are `Function`s; names are normalized (unquoted lower case, default schema
+dropped: `public.users` is `users`) and the module name is empty, since a
+database namespace is global.
+
+Relations read become `Read` references (`REFERENCES`), DML / `ALTER` /
+`DROP` targets `Write`s (`WRITES`), columns `Read` / `Write` with a
+`$type:<table>` receiver when the table is certain, routines `Call`s.
+
+dbt Jinja is masked in place (`{{ ref('m') }}` becomes the identifier `m`),
+and `ref` / `source` / macro calls are also read from the Jinja itself.
+PostgreSQL `$$` bodies are scanned for relations and calls; the dialect ends
+every top-level signature (`CREATE TABLE users ( -- postgres`).
 
 Facts are cached at
 `<store>/facts/<sha>-<lang>-v<extractor version>-f<facts format>.bin`.
@@ -690,17 +804,20 @@ name) add a hash of the path to the key. A pack may also decline a file with
 a reason (`skipped:data-shape`): the file stays listed and searchable.
 
 **Detection** is by extension (`.rs` is Rust, `.sh` / `.bash` / `.zsh` /
-`.ksh` / `.bats` shell, `.cs` C#, `.kt` / `.kts` Kotlin, `.rb` / `.rake` / `.gemspec` / `.ru` Ruby;
-`.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`, `.tsql`, `.bq` SQL; `.swift` Swift), then by file name (`Dockerfile`,
-`Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`, `Rakefile`, `Gemfile`,
-`AndroidManifest.xml`, the shell start-up files `.bashrc`, `.profile`,
-`.zshrc`, …; other XML stays text); a C header
-(`.h`) is C++ when the snapshot has C++ sources; a file name without an
-extension is shell when its `#!` line names a shell (`#!/bin/sh`,
-`#!/usr/bin/env bash`, `#!/usr/bin/env -S zsh -f`), which the indexer reads
-from the bytes it already loaded. A file gets a language in
-the graph only when a pack for it is registered; otherwise it is plain text
-(listed, content-searchable).
+`.ksh` / `.bats` shell, `.cs` C#, `.kt` / `.kts` Kotlin, `.rb` / `.rake` /
+`.gemspec` / `.ru` Ruby; `.sql`, `.psql`, `.pgsql`, `.plpgsql`, `.mysql`,
+`.tsql`, `.bq` SQL; `.swift` Swift), then by file name (`Dockerfile`,
+`Dockerfile.*`, `Containerfile`, `.env`, `.env.*`, `pom.xml`, `Rakefile`,
+`Gemfile`, `AndroidManifest.xml`, the shell start-up files `.bashrc`,
+`.profile`, `.zshrc`, …; other XML stays text):
+
+- A C header (`.h`) is C++ when the snapshot has C++ sources;
+- A file name without an extension is shell when its `#!` line names a shell
+  (`#!/bin/sh`, `#!/usr/bin/env bash`, `#!/usr/bin/env -S zsh -f`), which
+  the indexer reads from the bytes it already loaded.
+
+A file gets a language in the graph only when a pack for it is registered;
+otherwise it is plain text (listed, content-searchable).
 
 ### 4.3 Module names and import targets
 
@@ -708,123 +825,136 @@ Two per-language hooks, still without guessing symbols:
 
 - `module_name(path)` (the resolver calls `module_name_for(path, facts)`,
   which defaults to it, so a pack can read the module from the file itself —
-  a Java `package` clause, a Go `package x_test`): Python walks up `__init__.py` packages and source
-  roots (`src/`, `pyproject` package dirs) → `shop.http`. ECMAScript strips
-  the extension → `src/util/index`. PHP returns nothing (definitions already
-  carry their declared namespace, which may differ from the path). Go
-  returns the package's **import path**: the `module` of the nearest
-  `go.mod` plus the directory (`github.com/gin-gonic/gin/binding`), with
-  `_test` appended for an external test package (`package gin_test`, read
-  from the file's facts); every file of a directory with one module name is
-  one package (`module_scope` = `Package`).
-  Java
-  reads the `package` clause (`com.acme.core`; the default package is
-  empty), and all files of one package form one module; Kotlin reads its
-  `package` header the same way, and Kotlin and Java files of one package
-  are one package (the JVM family). Rust returns the
-  file's **module path**: every `Cargo.toml` with a `[package]` is a
-  package whose targets are crates (the library, `[lib] path` or
-  `src/lib.rs`, named by `[lib] name` or the package name with `-` → `_`;
-  binaries `src/main.rs`, `src/bin/*`, `[[bin]]`; `tests/`, `examples/`,
-  `benches/` crates; `build.rs`), a file belongs to the crate whose root
-  it is or whose directory holds it (else the library), and its module path
-  is the crate name plus the directories and stem below the crate root
-  (`rueca_index::link`; `mod.rs` names its directory). Swift returns the
-  file's **target**: a `path:` a target declares in the nearest
-  `Package.swift` (read with the Swift grammar, never evaluated:
-  `.target(name: "Alamofire", path: "Source")`), else the directory after
-  the last `Sources` / `Source` / `src` / `Tests` / `Plugins` segment
-  (`Sources/ArgumentParser/Parsing/Parser.swift` → `ArgumentParser`), else
-  the top-level directory (an Xcode project without `Package.swift`, best
-  effort); every file of a target is one package (`module_scope` =
-  `Package`), and `import Foo` binds the target named `Foo` wherever its
-  files are (`namespace_imports`). Every file is its
-  own module. Shell keeps the path with its extension (`bin/deploy`,
-  `lib/util.sh`); a shell library has no package identity.
-  C# reads the namespace its types share (recorded by the
-  pack, as Java's `package`; the global namespace is empty): every file of
-  one namespace is one package, wherever it lives.
+  a Java `package` clause, a Go `package x_test`):
+  - Python walks up `__init__.py` packages and source roots (`src/`,
+    `pyproject` package dirs) → `shop.http`.
+  - ECMAScript strips the extension → `src/util/index`.
+  - PHP returns nothing (definitions already carry their declared namespace,
+    which may differ from the path).
+  - Go returns the package's **import path**: the `module` of the nearest
+    `go.mod` plus the directory (`github.com/gin-gonic/gin/binding`), with
+    `_test` appended for an external test package (`package gin_test`, read
+    from the file's facts); every file of a directory with one module name
+    is one package (`module_scope` = `Package`).
+  - Java reads the `package` clause (`com.acme.core`; the default package is
+    empty), and all files of one package form one module; Kotlin reads its
+    `package` header the same way, and Kotlin and Java files of one package
+    are one package (the JVM family).
+  - Rust returns the file's **module path**:
+    - Every `Cargo.toml` with a `[package]` is a package whose targets are
+      crates (the library, `[lib] path` or `src/lib.rs`, named by `[lib]
+      name` or the package name with `-` → `_`; binaries `src/main.rs`,
+      `src/bin/*`, `[[bin]]`; `tests/`, `examples/`, `benches/` crates;
+      `build.rs`),
+    - A file belongs to the crate whose root it is or whose directory holds
+      it (else the library),
+    - Its module path is the crate name plus the directories and stem below
+      the crate root (`rueca_index::link`; `mod.rs` names its directory).
+  - Swift returns the file's **target**: a `path:` a target declares in the
+    nearest `Package.swift` (read with the Swift grammar, never evaluated:
+    `.target(name: "Alamofire", path: "Source")`), else the directory after
+    the last `Sources` / `Source` / `src` / `Tests` / `Plugins` segment
+    (`Sources/ArgumentParser/Parsing/Parser.swift` → `ArgumentParser`), else
+    the top-level directory (an Xcode project without `Package.swift`, best
+    effort); every file of a target is one package (`module_scope` =
+    `Package`), and `import Foo` binds the target named `Foo` wherever its
+    files are (`namespace_imports`). Every file is its own module.
+  - Shell keeps the path with its extension (`bin/deploy`, `lib/util.sh`); a
+    shell library has no package identity.
+  - C# reads the namespace its types share (recorded by the pack, as Java's
+    `package`; the global namespace is empty): every file of one namespace
+    is one package, wherever it lives.
 - `resolve_import(from, import)`: maps a specifier to a project file or to
-  *nothing* (third-party, builtin). Python follows relative levels and source
-  roots (`from .http` in `shop/api.py` → `shop/http.py`). TS/JS uses
-  [`oxc_resolver`](https://github.com/oxc-project/oxc-resolver) over a virtual
-  file system built from the snapshot: extension probing, `index` files,
-  `.js` → `.ts` aliasing, `tsconfig` `paths` / `baseUrl` / `extends`,
-  `package.json` `exports`, and workspace packages mounted by name.
-  Markdown keeps the path as the module name (`README.md:Usage` never
-  collides with `README.py`) and resolves a link relative to the document
-  (`/x` from the repository root): `#anchor` and `?query` are dropped, the
-  path is percent-decoded and tried as written, with `.md`, `x.html` →
-  `x.md`, and as a directory (`README.md`, `index.md`, …); a bare path that
-  misses is retried from the root.
-  PHP maps
-  a `use App\Models\User` to its file through Composer `autoload` /
-  `autoload-dev` (`psr-4`, `psr-0`, `classmap`) of every `composer.json`
-  (monorepos included), falling back to the unique `User.php` whose
-  directories match the namespace; `require` / `include` with static paths
-  (`__DIR__ . '/x.php'`) resolve relative to the file. Go maps an import
-  path to the package **directory** through every `go.mod` (longest module
-  path wins) and the local `replace` directives of `go.mod` / `go.work`;
-  standard library and third-party paths resolve to nothing. An unaliased
-  import binds the conventional name (last path element without `/vN`,
-  `go-`, `.vN`); since Go rejects unused imports, an import whose
-  conventional name is never used is re-bound to the qualifier the file
-  does use (`jsoniter` for `github.com/json-iterator/go`).
-  Java maps `import com.acme.Owner` (and `Owner.Pet`, static
-  `Owner.find`) to `Owner.java` in the package directory under a source
-  root — Maven / Gradle `…/src/<set>/java` at any depth (every module of a
-  multi-module build), `<sourceDirectory>` of a `pom.xml`, literal
-  `srcDirs` of a `build.gradle` — else under any directory whose path ends
-  with the package path; `import com.acme.*` resolves to the package
-  directory. JDK and dependency classes are not in the snapshot: external.
-  C and C++ files return nothing as module name (definitions carry their
-  namespace). An `#include "x.h"` resolves relative to the including file,
-  then through the `-iquote` / `-I` directories of every
-  `compile_commands.json` and `compile_flags.txt` in the snapshot
-  (`-isystem` and directories outside the repository ignored), then
-  `include/`, `src/` and the repository root, then the only project file
-  whose path ends with `/x.h`; `#include <x.h>` is a system header unless a
-  project include directory (or `include/`) has it.
-  C# `using`s name namespaces, not files: the pack opts into
-  `namespace_imports`, and the resolver binds `using A.B;` to the package
-  whose module name is `A.B` (its `IMPORTS` edge goes to the directory
-  holding most of its files); `using static`, aliases and project-wide
-  `global using`s are described with the C# rules (§4.4).
-  Kotlin imports name packages, not paths (a Kotlin file may declare any
-  package wherever it lives): with the `namespace_imports` hook,
-  `import a.b.C` binds the package `a.b` of the JVM family by name, Java
-  files included, and links `IMPORTS` to the directory holding most of its
-  files; a Java import of a class resolves to `C.kt` when no `C.java`
-  matches.
-  Rust imports are module paths normalized at their site (`self::` and
-  `super::` inside inline modules folded into the file's module, see the
-  crate docs, *Imports*): `mod x;` is `<dir>/x.rs` or `<dir>/x/mod.rs` of
-  the declaring file's module directory (`#[path]` honoured); `crate::a::b`
-  starts at the crate root, `super::` at the parent module, a first segment
-  that is a module the file declares or a **crate of the snapshot** (a
-  dependency of the file's package — renames, `path` and `workspace = true`
-  entries followed — else any crate with that name, same workspace first)
-  continues from there, and each further segment is a module file; the
-  walk returns the deepest module file. `std`, `core`, `alloc` and
-  third-party crates resolve to nothing. `resolve_import` maps module
-  paths to files; the resolver walks the rest of a `use` path itself
-  (inline modules, re-exports, types, §4.4).
-  Shell `source P` / `. P` (bats: `load NAME` → `NAME.bash` next to the
-  test) are star imports of the path the file determines: literal paths
-  (tried against the file's directory, then the repository root), the
-  script's directory through `$(dirname "$0")`, `${BASH_SOURCE%/*}`,
-  `$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)` or zsh `${0:A:h}`, a
-  variable the file assigns one of those (`ROOT=…; . "$ROOT/lib/x.sh"`),
-  and, for an unknown prefix (`"$NVM_DIR/nvm.sh"`), the only file whose
-  path ends with the literal tail; dynamic paths (`source "$f"`) import
-  nothing.
-  Ruby files have an empty module name (constants are global). `require
-  "a/b"` (also `load`, `autoload`) is `<ancestor>/lib/a/b.rb` for the
-  nearest ancestor of the requiring file that has it (then `test/` and
-  `spec/` roots, then the only `…/lib/a/b.rb` of the snapshot), and
-  `require_relative "x"` is `x.rb` next to the file; anything else is a
-  gem or the standard library. A `require` binds no names: it only gives
-  `IMPORTS`.
+  *nothing* (third-party, builtin).
+  - Python follows relative levels and source roots (`from .http` in
+    `shop/api.py` → `shop/http.py`).
+  - TS/JS uses [`oxc_resolver`](https://github.com/oxc-project/oxc-resolver)
+    over a virtual file system built from the snapshot: extension probing,
+    `index` files, `.js` → `.ts` aliasing, `tsconfig` `paths` / `baseUrl` /
+    `extends`, `package.json` `exports`, and workspace packages mounted by
+    name.
+  - Markdown keeps the path as the module name (`README.md:Usage` never
+    collides with `README.py`) and resolves a link relative to the document
+    (`/x` from the repository root): `#anchor` and `?query` are dropped, the
+    path is percent-decoded and tried as written, with `.md`, `x.html` →
+    `x.md`, and as a directory (`README.md`, `index.md`, …); a bare path
+    that misses is retried from the root.
+  - PHP maps a `use App\Models\User` to its file through Composer `autoload`
+    / `autoload-dev` (`psr-4`, `psr-0`, `classmap`) of every `composer.json`
+    (monorepos included), falling back to the unique `User.php` whose
+    directories match the namespace; `require` / `include` with static paths
+    (`__DIR__ . '/x.php'`) resolve relative to the file.
+  - Go maps an import path to the package **directory** through every
+    `go.mod` (longest module path wins) and the local `replace` directives
+    of `go.mod` / `go.work`; standard library and third-party paths resolve
+    to nothing.
+
+    An unaliased import binds the conventional name (last path element
+    without `/vN`, `go-`, `.vN`); since Go rejects unused imports, an import
+    whose conventional name is never used is re-bound to the qualifier the
+    file does use (`jsoniter` for `github.com/json-iterator/go`).
+  - Java maps `import com.acme.Owner` (and `Owner.Pet`, static `Owner.find`)
+    to `Owner.java` in the package directory under a source root — Maven /
+    Gradle `…/src/<set>/java` at any depth (every module of a multi-module
+    build), `<sourceDirectory>` of a `pom.xml`, literal `srcDirs` of a
+    `build.gradle` — else under any directory whose path ends with the
+    package path; `import com.acme.*` resolves to the package directory. JDK
+    and dependency classes are not in the snapshot: external.
+  - C and C++ files return nothing as module name (definitions carry their
+    namespace).
+
+    An `#include "x.h"` resolves relative to the including file, then
+    through the `-iquote` / `-I` directories of every
+    `compile_commands.json` and `compile_flags.txt` in the snapshot
+    (`-isystem` and directories outside the repository ignored), then
+    `include/`, `src/` and the repository root, then the only project file
+    whose path ends with `/x.h`; `#include <x.h>` is a system header unless
+    a project include directory (or `include/`) has it.
+  - C# `using`s name namespaces, not files: the pack opts into
+    `namespace_imports`, and the resolver binds `using A.B;` to the package
+    whose module name is `A.B` (its `IMPORTS` edge goes to the directory
+    holding most of its files); `using static`, aliases and project-wide
+    `global using`s are described with the C# rules (§4.4).
+  - Kotlin imports name packages, not paths (a Kotlin file may declare any
+    package wherever it lives): with the `namespace_imports` hook, `import
+    a.b.C` binds the package `a.b` of the JVM family by name, Java files
+    included, and links `IMPORTS` to the directory holding most of its
+    files; a Java import of a class resolves to `C.kt` when no `C.java`
+    matches.
+  - Rust imports are module paths normalized at their site (`self::` and
+    `super::` inside inline modules folded into the file's module, see the
+    crate docs, *Imports*):
+    - `mod x;` is `<dir>/x.rs` or `<dir>/x/mod.rs` of the declaring file's
+      module directory (`#[path]` honoured);
+    - `crate::a::b` starts at the crate root, `super::` at the parent
+      module, a first segment that is a module the file declares or a
+      **crate of the snapshot** (a dependency of the file's package —
+      renames, `path` and `workspace = true` entries followed — else any
+      crate with that name, same workspace first) continues from there, and
+      each further segment is a module file; the walk returns the deepest
+      module file.
+
+    `std`, `core`, `alloc` and third-party crates resolve to nothing.
+    `resolve_import` maps module paths to files; the resolver walks the rest
+    of a `use` path itself (inline modules, re-exports, types, §4.4).
+  - Shell `source P` / `. P` (bats: `load NAME` → `NAME.bash` next to the
+    test) are star imports of the path the file determines:
+    - Literal paths (tried against the file's directory, then the repository
+      root),
+    - The script's directory through `$(dirname "$0")`, `${BASH_SOURCE%/*}`,
+      `$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)` or zsh `${0:A:h}`,
+    - A variable the file assigns one of those (`ROOT=…; .
+      "$ROOT/lib/x.sh"`),
+    - For an unknown prefix (`"$NVM_DIR/nvm.sh"`), the only file whose path
+      ends with the literal tail; dynamic paths (`source "$f"`) import
+      nothing.
+  - Ruby files have an empty module name (constants are global). `require
+    "a/b"` (also `load`, `autoload`) is `<ancestor>/lib/a/b.rb` for the
+    nearest ancestor of the requiring file that has it (then `test/` and
+    `spec/` roots, then the only `…/lib/a/b.rb` of the snapshot), and
+    `require_relative "x"` is `x.rb` next to the file; anything else is a
+    gem or the standard library. A `require` binds no names: it only gives
+    `IMPORTS`.
 
 Every resolved import becomes an `IMPORTS` File→File edge (confidence 1.0);
 for documents that means "links to" (docs → docs, code files, images).
@@ -844,18 +974,26 @@ confidence 1.0: `CONTAINS` (repository → folders → files) and `DEFINES`
 (file → top-level definitions, parent → child).
 
 **Binding environments.** For every file, the resolver computes which names
-its imports bind: `from .http import Session` binds `Session` to the node
-`shop.http.Session`; `import a.b` binds `a`; `import * as ns` binds a
-module; star imports bind every exported name. Looking up a name in a module
-checks its own definitions, then its re-exports (`export { x } from`,
-`export *`), then the names its own imports bind (barrel files, package
-`__init__.py`), transitively and cycle-safe up to depth 10. An ECMAScript
-`default` import binds a definition named `default`, else the module's
-explicit `default` re-export (`export default x`), else a heuristic (the
-exported class or function named after the file, else the only export). PHP files have
-no binding environment: their names arrive qualified (§4.2), and the
-resolver looks them up in an index of PHP classes, functions and constants
-by fully qualified name (case-insensitive where PHP is).
+its imports bind:
+
+- `from .http import Session` binds `Session` to the node
+  `shop.http.Session`;
+- `import a.b` binds `a`;
+- `import * as ns` binds a module;
+- Star imports bind every exported name.
+
+Looking up a name in a module checks its own definitions, then its
+re-exports (`export { x } from`, `export *`), then the names its own imports
+bind (barrel files, package `__init__.py`), transitively and cycle-safe up
+to depth 10.
+
+An ECMAScript `default` import binds a definition named `default`, else the
+module's explicit `default` re-export (`export default x`), else a heuristic
+(the exported class or function named after the file, else the only export).
+
+PHP files have no binding environment: their names arrive qualified (§4.2),
+and the resolver looks them up in an index of PHP classes, functions and
+constants by fully qualified name (case-insensitive where PHP is).
 
 **The strategy ladder.** Each reference is resolved by trying strategies in
 order; the first one that succeeds wins and stamps the edge:
@@ -875,24 +1013,29 @@ order; the first one that succeeds wins and stamps the edge:
 | 6 | unique method (`heuristic`) | call with an unknown receiver; exactly one method with that name (≥ 4 chars, not a common builtin method like `keys`, `then`) | 0.50 |
 
 **Members by kind.** A type's members are kept in separate slots by kind:
-callables, nested types and values (fields, properties, constants). A
-call looks for a callable first (then a nested type, then a value), a
-read or write for a value first (then a callable that is not a
-constructor, then a type), a type reference or a receiver path for a type
-first; each slot is searched through the whole base hierarchy before the
-next. So a Java field `code` and method `code()` do not hide each other,
-and a constructor — a Java or C++ method named like its class — is reached
-by calls only: a type named like an enclosing class or its superclass is
-that type, never its constructor. An ECMAScript function that owns
-methods (`View.prototype.render = function render() {}`) counts as a type
-for `this` and `$type:View` receivers, and so does a function or variable
-owning object-literal methods (`const api = { get() {} }`,
-`return { next() {} }`, `export default { start() {} }`, which the pack
-records as a `default` variable): `api.get()`, also through an import,
-finds the member, and a bare call inside such a method never finds a
-sibling method by local scope. A name bound to a whole module
-(`const Queue = require("./queue")`) that is called, constructed or used
-as a type is the module's default export (`module.exports = Queue`).
+callables, nested types and values (fields, properties, constants).
+
+A call looks for a callable first (then a nested type, then a value), a read
+or write for a value first (then a callable that is not a constructor, then
+a type), a type reference or a receiver path for a type first; each slot is
+searched through the whole base hierarchy before the next.
+
+So a Java field `code` and method `code()` do not hide each other, and a
+constructor — a Java or C++ method named like its class — is reached by
+calls only: a type named like an enclosing class or its superclass is that
+type, never its constructor.
+
+An ECMAScript function that owns methods (`View.prototype.render = function
+render() {}`) counts as a type for `this` and `$type:View` receivers, and so
+does a function or variable owning object-literal methods (`const api = {
+get() {} }`, `return { next() {} }`, `export default { start() {} }`, which
+the pack records as a `default` variable): `api.get()`, also through an
+import, finds the member, and a bare call inside such a method never finds a
+sibling method by local scope.
+
+A name bound to a whole module (`const Queue = require("./queue")`) that is
+called, constructed or used as a type is the module's default export
+(`module.exports = Queue`).
 
 Rungs and rules that the RFC 0003 packs opt into (Python, ECMAScript, PHP
 and Markdown resolve exactly as above; Terraform uses directory scope; Go
@@ -922,17 +1065,21 @@ own module rules, below):
 
 A C++ example: in `double Circle::area() const { return GEO_PI * GEO_SQ(r_); }`
 (in `src/shape.cpp`, which includes `geo/shape.h`), `r_` is a member of
-`geo::Circle` found through the body's qualified name (implicit self,
-0.90), and `GEO_SQ` / `GEO_PI` are the header's macros bound by the include
-(`REFERENCES`, 0.95: a macro is used, not called). In `geo::Circle c(2.0);
-c.area();`, the receiver `$type:geo::Circle` finds the in-class
-declaration of `area`, which is replaced by its unique body in
-`shape.cpp` (0.85); the construction calls the class and its constructor
-(× 0.95). `geo::scale(a, 2.0)` has the receiver `$ns:geo` (namespaces are
-not nodes): `geo::scale` is found by its exact qualified name, and the two
-arguments pick `geo::scale(double, double)`. In `double
-geo::Circle::reach() const { return center_.norm(); }` (`center_` is a
-`Point` field declared in the header), `$member:center_` types the call
+`geo::Circle` found through the body's qualified name (implicit self, 0.90),
+and `GEO_SQ` / `GEO_PI` are the header's macros bound by the include
+(`REFERENCES`, 0.95: a macro is used, not called).
+
+In `geo::Circle c(2.0); c.area();`, the receiver `$type:geo::Circle` finds
+the in-class declaration of `area`, which is replaced by its unique body in
+`shape.cpp` (0.85); the construction calls the class and its constructor (×
+0.95).
+
+`geo::scale(a, 2.0)` has the receiver `$ns:geo` (namespaces are not nodes):
+`geo::scale` is found by its exact qualified name, and the two arguments
+pick `geo::scale(double, double)`.
+
+In `double geo::Circle::reach() const { return center_.norm(); }` (`center_`
+is a `Point` field declared in the header), `$member:center_` types the call
 through the field's declaration and reaches `geo::Point::norm`.
 
 A reference to a builtin, a name bound to an external module, or a
@@ -981,24 +1128,30 @@ overloaded (`type_resolved` 0.90), so `trace` on an interface method with
 anonymous classes included. JDK and dependency types are external; `java.lang`
 names are builtins.
 
-Kotlin references go through Java's rungs (package scope, implicit
-`this`, typed receivers, overloads, overrides), plus (`rueca-resolve`,
-`src/jvm.rs`): a member missing from a Kotlin class is looked up in its
-companion object (`Order.create()`); a call on a receiver that has no such
-member, or whose type is outside the project (`"x".shout()`), reaches a
-top-level extension function in scope, imported or of the package,
-`type_resolved` 0.85 when its receiver type matches (also a base or a type
-parameter), else a single imported one `import_resolved` 0.80 or a single
-one of the package `heuristic` 0.60, several unmatched candidates no edge;
-`Color.RED.hex()` finds `hex` in the enum; a call written without receiver
-inside `x.apply { … }`, `x.run { … }` or `with(x) { … }` (`$with:T`) is a
-member of `T` first, then resolves as written; a call on a value the file
-cannot type (`Factory.create().build()`, `val b = A.builder()`) uses the
-callee's declared return type (`$ret:`, the Rust pack's form). Kotlin
-callables get their arity range from the signature (defaults optional,
-`vararg` open), and among overloads the argument types the pack knows
-choose (value types rule out others; a spread argument needs a `vararg`;
-a call result takes the callee's declared return type).
+Kotlin references go through Java's rungs (package scope, implicit `this`,
+typed receivers, overloads, overrides), plus (`rueca-resolve`,
+`src/jvm.rs`):
+
+- A member missing from a Kotlin class is looked up in its companion object
+  (`Order.create()`);
+- A call on a receiver that has no such member, or whose type is outside the
+  project (`"x".shout()`), reaches a top-level extension function in scope,
+  imported or of the package, `type_resolved` 0.85 when its receiver type
+  matches (also a base or a type parameter), else a single imported one
+  `import_resolved` 0.80 or a single one of the package `heuristic` 0.60,
+  several unmatched candidates no edge;
+- `Color.RED.hex()` finds `hex` in the enum;
+- A call written without receiver inside `x.apply { … }`, `x.run { … }` or
+  `with(x) { … }` (`$with:T`) is a member of `T` first, then resolves as
+  written;
+- A call on a value the file cannot type (`Factory.create().build()`, `val b
+  = A.builder()`) uses the callee's declared return type (`$ret:`, the Rust
+  pack's form).
+
+Kotlin callables get their arity range from the signature (defaults
+optional, `vararg` open), and among overloads the argument types the pack
+knows choose (value types rule out others; a spread argument needs a
+`vararg`; a call result takes the callee's declared return type).
 
 Ruby references go through their own rules (`rueca-resolve` crate docs,
 *Ruby*): constants are looked up as Ruby does — the lexical nesting of the
@@ -1024,16 +1177,21 @@ method it does not define is external, never a guess.
 
 Rust references go through the same ladder with Rust's module semantics
 (`rueca-resolve` crate docs, *Rust*): a name in a module is one of its
-items, else what its `mod`, `use` (leaves, re-exports, globs) and
-`extern crate` declarations bind, and a `use` path is walked from its
-anchor (`crate`, `self` / `super`, a name in scope, a crate) through module
-files, inline modules, types and re-export chains. Path qualifiers used in
-code (`crate::a::f()`, `super::g()`, `serde_json::to_string(…)`) are bound
-by synthetic imports the pack adds for them. Names have Rust's two
-namespaces: a call or a read looks for a function, constant or constructor,
-a type reference and a path segment for a module or type, so `mod sleep;
-pub use sleep::sleep;` binds the module for `time::sleep::Sleep` and the
-function for `time::sleep(d)` or `sleep(d)` after `use tokio::time::sleep`.
+items, else what its `mod`, `use` (leaves, re-exports, globs) and `extern
+crate` declarations bind, and a `use` path is walked from its anchor
+(`crate`, `self` / `super`, a name in scope, a crate) through module files,
+inline modules, types and re-export chains.
+
+Path qualifiers used in code (`crate::a::f()`, `super::g()`,
+`serde_json::to_string(…)`) are bound by synthetic imports the pack adds for
+them.
+
+Names have Rust's two namespaces: a call or a read looks for a function,
+constant or constructor, a type reference and a path segment for a module or
+type, so `mod sleep; pub use sleep::sleep;` binds the module for
+`time::sleep::Sleep` and the function for `time::sleep(d)` or `sleep(d)`
+after `use tokio::time::sleep`.
+
 Types bind in scope — declared, imported or named by path; by name alone
 only in the file's own crate — so a same-named type of another crate (mio's
 `TcpStream` for tokio's) is never a guess, and test code (`#[cfg(test)]`
@@ -1093,32 +1251,40 @@ In the example: `self.send` matches rung 2 → 0.90; `Session` matches rung 3
 → 0.95; `Session().request` has the receiver `$type:Session`, so rung 5
 applies → 0.85.
 
-Shell references are resolved by the `shell` module (`rueca-resolve`
-crate docs, *Shell*): bash looks a function up by name when the command
-runs, so a name is the file's own file-level definition (`same_module`,
-0.90), else the only definition among the files it sources, transitively
-(`import_resolved`, 0.95; definitions in two sourced files: nothing,
-which one runs depends on the order), else the only non-test shell
-function of that name in the snapshot (`unique_name`, 0.60: a library
-calling a sibling library its entry script sources). A `$script` call
-(`./deploy.sh`) is a `CALLS` edge to the script's `File` node
-(`import_resolved`, 0.90), so `trace` on `bin/deploy` lists who runs it;
-an env read of a variable a sourced file assigns is a `REFERENCES` edge
+Shell references are resolved by the `shell` module (`rueca-resolve` crate
+docs, *Shell*): bash looks a function up by name when the command runs, so a
+name is:
+
+- The file's own file-level definition (`same_module`, 0.90),
+- Else the only definition among the files it sources, transitively
+  (`import_resolved`, 0.95; definitions in two sourced files: nothing, which
+  one runs depends on the order),
+- Else the only non-test shell function of that name in the snapshot
+  (`unique_name`, 0.60: a library calling a sibling library its entry script
+  sources).
+
+A `$script` call (`./deploy.sh`) is a `CALLS` edge to the script's `File`
+node (`import_resolved`, 0.90), so `trace` on `bin/deploy` lists who runs
+it; an env read of a variable a sourced file assigns is a `REFERENCES` edge
 to that variable instead of a `READS` of `$env:NAME`.
 
-SQL references are resolved by the `sql` module (`rueca-resolve` crate
-docs, *SQL*): a name matches every SQL definition with that normalized
-qualified name, and the candidates are narrowed by place — one earlier in
-the same file (`same_module`, 0.95), else the effective definition by
-migration order (Flyway `V1_2__`, timestamps, numeric prefixes: the latest
-at or before the referencing migration, 0.90, or the latest overall from
-outside the set, 0.85), else one later in the file, else the nearest
-directory when it holds one file of candidates (0.85; Sakila's six
-dialect copies of `actor` each resolve to their own directory). A name
-written with fewer or more qualifiers (`users` ↔ `app.users`) is a
-`unique_name` guess at 0.60; anything still ambiguous resolves to
-nothing. A name without receiver first matches the CTEs of the enclosing
-definitions; `$type:T` receivers are columns of `T`.
+SQL references are resolved by the `sql` module (`rueca-resolve` crate docs,
+*SQL*): a name matches every SQL definition with that normalized qualified
+name, and the candidates are narrowed by place:
+
+- One earlier in the same file (`same_module`, 0.95),
+- Else the effective definition by migration order (Flyway `V1_2__`,
+  timestamps, numeric prefixes: the latest at or before the referencing
+  migration, 0.90, or the latest overall from outside the set, 0.85),
+- Else one later in the file,
+- Else the nearest directory when it holds one file of candidates (0.85;
+  Sakila's six dialect copies of `actor` each resolve to their own
+  directory).
+
+A name written with fewer or more qualifiers (`users` ↔ `app.users`) is a
+`unique_name` guess at 0.60; anything still ambiguous resolves to nothing. A
+name without receiver first matches the CTEs of the enclosing definitions;
+`$type:T` receivers are columns of `T`.
 
 **From reference kind to edge kind.**
 
@@ -1168,25 +1334,33 @@ be fuzzy-matched to a code symbol.
   `extends`, Dockerfile `FROM <stage>`) resolve the same way into
   `INHERITS`.
 
-**Contracts** ([RFC 0006](rfcs/0006-org-graph.md) phase 4). Packs also
-emit contract hints (`FileFacts::contracts`): a route or spec operation a
-file *provides* (an OpenAPI `Route`, a `.proto` `rpc`), an endpoint it
-*consumes* (an HTTP or RPC call), each with a canonical key
-(`rueca_model::contract`: `GET /users/{}` — every parameter segment `{}`,
-host, query and trailing `/` dropped — or `pkg.Service/Method`). Every hint
-becomes a row of the segment's contract table on its owner's node (the
-handler, `Route` or `RpcMethod`; else the file), and keys that match within
-the snapshot become `contract` edges: consumer → provider `CALLS`, code
-provider → spec provider `IMPLEMENTS`, at 0.9 (same key), 0.85 (a provider
-`{}` segment stands for a literal one, or an RPC key without package) or
-0.7 (a `*` method, or an RPC key `*/Method` whose service the code does not
-name), 0.5 each when several providers tie. Code-to-code and
-spec-to-spec providers never link; unmatched consumers stay in the table
-(dangling). Providers that are tests or in test files (a test path, or a
-Go `_test.go` file: `rueca_model::contract::is_test_source`) keep their
-rows but are never match candidates, here and across repositories, so a
-fake sidecar does not take a client's calls from the real server. A
-`*/M` provider row of a node that also provides `S/M` is dropped.
+**Contracts** ([RFC 0006](rfcs/0006-org-graph.md) phase 4). Packs also emit
+contract hints (`FileFacts::contracts`): a route or spec operation a file
+*provides* (an OpenAPI `Route`, a `.proto` `rpc`), an endpoint it *consumes*
+(an HTTP or RPC call), each with a canonical key (`rueca_model::contract`:
+`GET /users/{}` — every parameter segment `{}`, host, query and trailing `/`
+dropped — or `pkg.Service/Method`).
+
+Every hint becomes a row of the segment's contract table on its owner's node
+(the handler, `Route` or `RpcMethod`; else the file), and keys that match
+within the snapshot become `contract` edges: consumer → provider `CALLS`,
+code provider → spec provider `IMPLEMENTS`, at:
+
+- 0.9 (same key),
+- 0.85 (a provider `{}` segment stands for a literal one, or an RPC key
+  without package),
+- 0.7 (a `*` method, or an RPC key `*/Method` whose service the code does
+  not name),
+- 0.5 each when several providers tie.
+
+Code-to-code and spec-to-spec providers never link; unmatched consumers stay
+in the table (dangling).
+
+Providers that are tests or in test files (a test path, or a Go `_test.go`
+file: `rueca_model::contract::is_test_source`) keep their rows but are never
+match candidates, here and across repositories, so a fake sidecar does not
+take a client's calls from the real server. A `*/M` provider row of a node
+that also provides `S/M` is dropped.
 
 Duplicate edges `(src, dst, kind)` are merged keeping the best strategy, the
 highest confidence and the first evidence. **Evidence** is the file and span
@@ -1219,11 +1393,13 @@ The store directory holds `catalog.json`, `segments/<id>.rcseg`,
 `refs/`, `tmp/` and `.lock`. Segment ids are
 `<repo-slug>-<commit12>-<unix seconds>-<16 hex digits>` and pack ids
 `<unix seconds>-<16 hex digits>`: 64 random bits, so two indexers writing
-one commit in the same second never collide. A segment's meta lists the
-packs holding its blobs (`packs`: the pack it added plus the packs its
-known blobs came from), so a service store can copy exactly what a
-snapshot needs ([RFC 0008 §5.9](rfcs/0008-service-mode.md)). Several
-indexers may write one store at once: every read-modify-write of
+one commit in the same second never collide.
+
+A segment's meta lists the packs holding its blobs (`packs`: the pack it
+added plus the packs its known blobs came from), so a service store can copy
+exactly what a snapshot needs ([RFC 0008 §5.9](rfcs/0008-service-mode.md)).
+
+Several indexers may write one store at once: every read-modify-write of
 `catalog.json`, `packs/index.rcpi` and an organization's `org.json`, and
 organization garbage collection, runs under an exclusive file lock on
 `.lock` (a writer waiting more than 60 s fails, naming the lock file);
@@ -1245,23 +1421,28 @@ worktrees, branches and repositories of one store embed a text once (§10).
 
 **Ref snapshots** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--implemented)).
 `rueca index [PATH] --ref <name>` indexes a branch, pull request (`pr/<n>`),
-tag or commit of PATH's repository without touching its working tree: the
-name is resolved with `gix` (a branch or pull request missing locally is
-fetched from `origin`; a tag or commit too), the commit's tree is written blob by blob to
-`<store>/refs/<repo-slug>[--<path-slug>]-<hash>/<ref-slug>/` (the hash of the
-repository id and the root's path inside its repository, so neither ids with
-one slug nor two subdirectory roots of one repository share an export), and that export is indexed like any
-root, its snapshot pinned to the ref (`ref` = the name, `commit`, never
-dirty) under the repository's own id. The catalog entry carries `ref_name`,
-so one repository id groups its working tree and its ref snapshots; tools
-read the working tree unless `ref` names another snapshot, and a `ref` list
-(`["main", "feature/x"]`) reads several side by side, collapsing what is
-identical (§6, *Responses*). The facts cache
-is keyed by blob, so a second ref only re-extracts the files that differ
-(its walk, resolution and segment write are paid in full: in a debug
-build a second ref of a small repository costs about as much as the
-first, RFC 0006 §9.3); re-indexing a ref at the same commit does nothing, and `--ref <name>
---remove` drops the snapshot and its export.
+tag or commit of PATH's repository without touching its working tree:
+
+- The name is resolved with `gix` (a branch or pull request missing locally
+  is fetched from `origin`; a tag or commit too),
+- The commit's tree is written blob by blob to
+  `<store>/refs/<repo-slug>[--<path-slug>]-<hash>/<ref-slug>/` (the hash of
+  the repository id and the root's path inside its repository, so neither
+  ids with one slug nor two subdirectory roots of one repository share an
+  export),
+- That export is indexed like any root, its snapshot pinned to the ref
+  (`ref` = the name, `commit`, never dirty) under the repository's own id.
+
+The catalog entry carries `ref_name`, so one repository id groups its
+working tree and its ref snapshots; tools read the working tree unless `ref`
+names another snapshot, and a `ref` list (`["main", "feature/x"]`) reads
+several side by side, collapsing what is identical (§6, *Responses*).
+
+The facts cache is keyed by blob, so a second ref only re-extracts the files
+that differ (its walk, resolution and segment write are paid in full: in a
+debug build a second ref of a small repository costs about as much as the
+first, RFC 0006 §9.3); re-indexing a ref at the same commit does nothing,
+and `--ref <name> --remove` drops the snapshot and its export.
 
 ### 4.6 The organization layer (`rueca-segment` `org`)
 
@@ -1303,66 +1484,81 @@ index**, so a question asked of the whole organization gets one ranking.
   before scoring, so results, totals and scores never depend on a repository
   the caller cannot see, and narrowing `repo` keeps organization-wide scores.
 
-- **Repository routing.** Each repository of a generation has a
-  **profile** (`orgs/<name>/profiles/<segment>.json`): its id and the
-  names of the packages it publishes, manifest descriptions and the head of
-  its README, the names of its 64 most referenced symbols (distinct callers,
-  referrers, subclasses) and its 64 most frequent directory names and file
-  stems. A query in organization mode also scores the visible repositories
-  with two signals, each min-max normalized over them and mixed half and
-  half: where the query's terms occur (CORI, the classic resource-selection
-  score, read off the organization index: the number of a repository's
-  symbols holding a term in their name, path or source is one dictionary
-  lookup per term and repository segment) and BM25 over the profiles
-  (name × 3, about × 1, symbols × 1, paths × 0.5). The best repository gets
-  relevance 1; every symbol score of a repository is multiplied, inside
-  the top-k, by `((0.25 + r) / 1.25)²` — a prior, so a strong match in
-  another repository still surfaces. `list_repositories` with `query`
-  returns that ranking. On the benchmark's earlier 35-instance calibration
-  split this lifted organization File Acc@5 from 0.64× to 0.92× the
-  single-repository value; on today's organization suite the same default
-  gives 0.85× on the 120 gated issues and 0.78× on the 29 calibration ones
-  (`bench/README.md`, *Org scenarios*; RFC 0006 §9.2).
-- **The link layer: packages.** `rueca index --org` also builds a
-  **package registry** from each repository's manifests (`package.json`
-  names, Python distributions and their top-level packages, `go.mod`
-  modules, Composer PSR-4 namespaces, Maven / Gradle artifacts with their
-  Java packages, C / C++ `include/` directories, Cargo packages with their
-  library crate name, C# projects (`*.csproj`: NuGet `PackageId` /
-  `AssemblyName`) with their namespaces) and records the imports
-  each repository's own pack could not resolve inside it. A repository
-  that imports (or, by its manifests, requires) a package another one
-  publishes depends on it; the consumer and its dependencies are then
-  resolved **together** by the normal resolver (`rueca-index` `link`): the
-  dependencies' files are mounted under a private prefix, each keeps its
-  own module names and resolves its own imports with its repository's
-  configuration, and an import the consumer could not resolve is resolved
-  by the **publishing repository's pack against that repository's
-  project** (its workspaces and `exports`, source roots, `go.mod`, PSR-4
-  map). The strategy ladder does the rest, so `import { renderButton } from
+- **Repository routing.** Each repository of a generation has a **profile**
+  (`orgs/<name>/profiles/<segment>.json`): its id and the names of the
+  packages it publishes, manifest descriptions and the head of its README,
+  the names of its 64 most referenced symbols (distinct callers, referrers,
+  subclasses) and its 64 most frequent directory names and file stems.
+
+  A query in organization mode also scores the visible repositories with two
+  signals, each min-max normalized over them and mixed half and half:
+
+  - Where the query's terms occur (CORI, the classic resource-selection
+    score, read off the organization index: the number of a repository's
+    symbols holding a term in their name, path or source is one dictionary
+    lookup per term and repository segment);
+  - BM25 over the profiles (name × 3, about × 1, symbols × 1, paths × 0.5).
+
+  The best repository gets relevance 1; every symbol score of a repository
+  is multiplied, inside the top-k, by `((0.25 + r) / 1.25)²` — a prior, so a
+  strong match in another repository still surfaces. `list_repositories`
+  with `query` returns that ranking.
+
+  On the benchmark's earlier 35-instance calibration split this lifted
+  organization File Acc@5 from 0.64× to 0.92× the single-repository value;
+  on today's organization suite the same default gives 0.85× on the 120
+  gated issues and 0.78× on the 29 calibration ones (`bench/README.md`, *Org
+  scenarios*; RFC 0006 §9.2).
+- **The link layer: packages.** `rueca index --org` also builds a **package
+  registry** from each repository's manifests (`package.json` names, Python
+  distributions and their top-level packages, `go.mod` modules, Composer
+  PSR-4 namespaces, Maven / Gradle artifacts with their Java packages, C /
+  C++ `include/` directories, Cargo packages with their library crate name,
+  C# projects (`*.csproj`: NuGet `PackageId` / `AssemblyName`) with their
+  namespaces) and records the imports each repository's own pack could not
+  resolve inside it.
+
+  A repository that imports (or, by its manifests, requires) a package
+  another one publishes depends on it; the consumer and its dependencies are
+  then resolved **together** by the normal resolver (`rueca-index` `link`):
+
+  - The dependencies' files are mounted under a private prefix,
+  - Each keeps its own module names and resolves its own imports with its
+    repository's configuration,
+  - An import the consumer could not resolve is resolved by the **publishing
+    repository's pack against that repository's project** (its workspaces
+    and `exports`, source roots, `go.mod`, PSR-4 map).
+
+  The strategy ladder does the rest, so `import { renderButton } from
   "@acme/ui"`, `acmelib.charge(…)`, `kit.Retry(3)`, `Money::of(3)` and
   `Strings.shout("x")` become `IMPORTS` and `CALLS` / `INHERITS` /
   `REFERENCES` / `DECORATES` edges into the other repository, with the
-  strategy, confidence and evidence they would have inside one. Kept are
-  edges between a consumer node and a dependency node, never through the
-  name-matching rungs (`unique_name`, `heuristic`), never into a
+  strategy, confidence and evidence they would have inside one.
+
+  Kept are edges between a consumer node and a dependency node, never
+  through the name-matching rungs (`unique_name`, `heuristic`), never into a
   dependency's tests or into a name the consumer defines itself, and never
   written in a dependency's file (a dependency cannot name its consumer).
 - **The link layer: contracts** (RFC 0006 phase 4). The analysis also
   records the distinct keys of each repository's **contract table** (the
   routes, OpenAPI operations and `.proto` RPC methods it provides, the HTTP
-  and RPC calls it makes; §4.4, *Contracts*). A repository depends on
-  another when one of its consumed keys matches a key the other provides,
-  or its server code provides a key matching a spec the other publishes;
-  such a dependency is not mounted for the joint resolve (no packages are
-  involved): its edges come from the contract tables alone, with the same
-  matcher as inside one snapshot (`rueca_model::contract::best_matches`).
+  and RPC calls it makes; §4.4, *Contracts*).
+
+  A repository depends on another when one of its consumed keys matches a
+  key the other provides, or its server code provides a key matching a spec
+  the other publishes; such a dependency is not mounted for the joint
+  resolve (no packages are involved): its edges come from the contract
+  tables alone, with the same matcher as inside one snapshot
+  (`rueca_model::contract::best_matches`).
+
   The calling definition gets `CALLS` to the handler and to the spec
   operation, a server handler `IMPLEMENTS` to the spec operation of another
   repository, all `strategy: contract` with the call site as evidence, in
   the **same link set** as the package edges — so versioning, recompute on
   change, refs, the remap of incoming edges at a ref and visibility apply
-  unchanged. Ambiguity is decided over the caller's own providers and every
+  unchanged.
+
+  Ambiguity is decided over the caller's own providers and every
   dependency's: two handlers matching equally well, one in the caller's
   repository and one in another, give the cross-repository edge 0.5; a
   better match in its own repository leaves none. Calls matched by no
@@ -1378,28 +1574,37 @@ index**, so a question asked of the whole organization gets one ranking.
 - **Refs in the organization** ([RFC 0006 §9.3](rfcs/0006-org-graph.md#93-phase-3--implemented)).
   A member's ref snapshots — the `refs = [...]` of its `[[repo]]` in
   `rueca-org.toml`, and any `rueca index <member> --ref <name>` — are
-  **entries of its repository** in the generation, next to the default
-  entry (the member root): an export belongs to the member whose
-  repository id it carries. Each entry has its own store segment, tantivy
-  segment (the organization index lists the default **and** the ref
-  segments), profile (`profiles/<segment>.json`) and link set
-  (`links/<segment>-<hash>.bin`); a generation written before refs reads
-  unchanged. An update reuses every entry by (root, segment) on its own, so
-  refreshing a ref copies, profiles and links that ref only. A ref's link
-  set comes from its own imports and points into its dependencies'
-  **default** entries, so a ref never re-links another repository; a view
-  that reads a library at a ref sees the consumers' edges remapped to the
-  ref's nodes by (label, qualified name, path), and loses those whose
-  target the ref no longer has. `rueca index --org <file>` syncs the file's
-  refs and refreshes the ones indexed earlier (a `url` member's branches
-  are fetched from the remote first), `rueca index --org <file> <member>
-  --ref <name> [--remove]` handles one, a plain `rueca index <path> --ref
-  <name>` updates the organizations holding the repository, `rueca status`
-  lists `main@… + feature/x@…` per repository and `rueca links --org <org>
-  --repo <id> --ref <name>` prints one ref's link set. At query time `ref`
-  picks the entries a call reads — `repo: A, ref: pr/7` is the organization
-  with A at `pr/7` and every other repository at its default — and search
-  statistics, routing and `trace`'s link edges are computed over that view.
+  **entries of its repository** in the generation, next to the default entry
+  (the member root): an export belongs to the member whose repository id it
+  carries.
+
+  Each entry has its own store segment, tantivy segment (the organization
+  index lists the default **and** the ref segments), profile
+  (`profiles/<segment>.json`) and link set (`links/<segment>-<hash>.bin`); a
+  generation written before refs reads unchanged. An update reuses every
+  entry by (root, segment) on its own, so refreshing a ref copies, profiles
+  and links that ref only.
+
+  A ref's link set comes from its own imports and points into its
+  dependencies' **default** entries, so a ref never re-links another
+  repository; a view that reads a library at a ref sees the consumers' edges
+  remapped to the ref's nodes by (label, qualified name, path), and loses
+  those whose target the ref no longer has.
+
+  - `rueca index --org <file>` syncs the file's refs and refreshes the ones
+    indexed earlier (a `url` member's branches are fetched from the remote
+    first),
+  - `rueca index --org <file> <member> --ref <name> [--remove]` handles one,
+  - A plain `rueca index <path> --ref <name>` updates the organizations
+    holding the repository,
+  - `rueca status` lists `main@… + feature/x@…` per repository,
+  - `rueca links --org <org> --repo <id> --ref <name>` prints one ref's link
+    set.
+
+  At query time `ref` picks the entries a call reads — `repo: A, ref: pr/7`
+  is the organization with A at `pr/7` and every other repository at its
+  default — and search statistics, routing and `trace`'s link edges are
+  computed over that view.
 - **Across repositories at query time.** `trace` follows link edges in
   both directions: callers of a library function include its callers in
   other repositories, each node carrying its snapshot (`s`). A link edge is
@@ -1417,173 +1622,224 @@ repositories.
 
 ### 4.7 The service store (`rueca-storage`, `rueca-service`)
 
-[RFC 0008](rfcs/0008-service-mode.md) phase 0. A service keeps the store
-of record in object storage and every process keeps a **mirror**: a local
-store directory with the layout above. `rueca-storage` is the object
-layer behind a `Storage` trait (`get`, `get_if_changed`, `get_range`,
-`get_to_file`, `put_new`, `put_new_file`, `put_if`, `list`, `delete`) with
-three backends — `memory://<name>` (shared by name inside a process),
-`file:///dir` (an exclusive lock on `<dir>/.lock`, BLAKE3 e-tags) and
-`s3://bucket/prefix` / `gs://bucket/prefix` (`rusty-s3` signing over
-`ureq` with the platform's TLS roots; `If-None-Match: *` for a create,
-`If-Match` or `x-goog-if-generation-match` for an update) — and
-`cas_update`, a read-modify-write loop over a JSON object that retries on
-a lost race. The bucket holds `store.json`, one `repos/<repo-dir>/catalog.json`
-per repository (its refs, each with its snapshots newest first:
-commit, segment id, packs, bytes, version), that repository's
-`segments/` and `packs/`, and the organization's `orgs/<name>/` exactly
-as on disk (`org.json` pointer, immutable generations, index, profile and
-link files). Immutable objects are only ever created; the catalogs and
-the pointer are written by compare-and-swap, so two indexers never lose a
-registration and no lock exists in the bucket.
+[RFC 0008](rfcs/0008-service-mode.md) phase 0. A service keeps the store of
+record in object storage and every process keeps a **mirror**: a local store
+directory with the layout above.
 
-`rueca-service` moves things between the two: **publish** uploads the
-packs a snapshot lists (`SegmentMeta.packs`) and its segment, then adds
-the snapshot to the repository catalog — idempotent by `(ref, commit)`,
-trimmed to the retention of its ref kind — and re-uploads any listed pack
-a concurrent collection removed; **pull** downloads a repository's
-snapshots into the mirror and registers them under synthetic roots
-(`<mirror>/repos/<repo-dir>` for the default ref, `<mirror>/refs/<repo-dir>/<ref-slug>`
-for the others, the same places `rueca index --ref` would use) so the
-organization layer and the query engine open them as in local mode;
-**publish_generation** uploads a generation built on the mirror and swaps
-`org.json` by compare-and-swap (a second updater loses and rebuilds);
-**pull_generation** does the reverse behind a conditional GET and writes
-the local pointer last; **collect_garbage** marks every object a catalog
-or a kept generation names, records the rest as candidates once older
-than a grace period (24 h) and deletes a candidate only in a later round,
-a grace after it was recorded, if nothing references it by then —
-publishes take their objects off the candidate list first — expiring
-closed pull requests and over-retention snapshots on the way. `rueca status --store-url <url>` reads a bucket
-directly.
+`rueca-storage` is the object layer behind a `Storage` trait (`get`,
+`get_if_changed`, `get_range`, `get_to_file`, `put_new`, `put_new_file`,
+`put_if`, `list`, `delete`) with three backends:
 
-**The query role** (`rueca serve`, crate `rueca-serve`, RFC 0008 phase 1)
-is a replica: its disk cache (`[store].cache_dir`) is such a mirror. A
-watcher calls `pull_generation` every `[store].poll` (5 s) with the
+- `memory://<name>` (shared by name inside a process),
+- `file:///dir` (an exclusive lock on `<dir>/.lock`, BLAKE3 e-tags),
+- `s3://bucket/prefix` / `gs://bucket/prefix` (`rusty-s3` signing over
+  `ureq` with the platform's TLS roots; `If-None-Match: *` for a create,
+  `If-Match` or `x-goog-if-generation-match` for an update),
+
+and `cas_update`, a read-modify-write loop over a JSON object that retries
+on a lost race.
+
+The bucket holds:
+
+- `store.json`,
+- One `repos/<repo-dir>/catalog.json` per repository (its refs, each with
+  its snapshots newest first: commit, segment id, packs, bytes, version),
+- That repository's `segments/` and `packs/`,
+- The organization's `orgs/<name>/` exactly as on disk (`org.json` pointer,
+  immutable generations, index, profile and link files).
+
+Immutable objects are only ever created; the catalogs and the pointer are
+written by compare-and-swap, so two indexers never lose a registration and
+no lock exists in the bucket.
+
+`rueca-service` moves things between the two:
+
+- **publish** uploads the packs a snapshot lists (`SegmentMeta.packs`) and
+  its segment, then adds the snapshot to the repository catalog — idempotent
+  by `(ref, commit)`, trimmed to the retention of its ref kind — and
+  re-uploads any listed pack a concurrent collection removed;
+- **pull** downloads a repository's snapshots into the mirror and registers
+  them under synthetic roots (`<mirror>/repos/<repo-dir>` for the default
+  ref, `<mirror>/refs/<repo-dir>/<ref-slug>` for the others, the same places
+  `rueca index --ref` would use) so the organization layer and the query
+  engine open them as in local mode;
+- **publish_generation** uploads a generation built on the mirror and swaps
+  `org.json` by compare-and-swap (a second updater loses and rebuilds);
+- **pull_generation** does the reverse behind a conditional GET and writes
+  the local pointer last;
+- **collect_garbage** marks every object a catalog or a kept generation
+  names, records the rest as candidates once older than a grace period (24
+  h) and deletes a candidate only in a later round, a grace after it was
+  recorded, if nothing references it by then — publishes take their objects
+  off the candidate list first — expiring closed pull requests and
+  over-retention snapshots on the way.
+
+`rueca status --store-url <url>` reads a bucket directly.
+
+**The query role** (`rueca serve`, crate `rueca-serve`, RFC 0008 phase 1) is
+a replica: its disk cache (`[store].cache_dir`) is such a mirror.
+
+A watcher calls `pull_generation` every `[store].poll` (5 s) with the
 version of `org.json` it last read — one conditional request when nothing
 changed — and a new generation is downloaded whole, installed, warmed, and
 segments the generation no longer names are evicted above
-`[store].cache_bytes`. Ready means warmed: `/readyz` answers 200 (and names
-a new generation) only after a `list_repositories` and a one-result
-`search_symbols` through the serving engine have opened the organization
-index, its routing profiles and every default segment into the engine's
-caches (`rueca_generation_warm_seconds`), so the first call opens nothing.
-The engine re-reads the local pointer on every call, so a request arriving
-during a later generation's warm-up already reads it and opens what it
-needs itself. `POST /mcp` runs Rueca's own MCP core
-(`RuecaServer::handle`, synchronous) once per request with a fresh
-session; a tool call runs on a blocking thread with the caller's
-`Visibility` — the union of the repository globs its static token or OIDC
-rules grant, matched against the generation's repository ids (none: an
-empty organization) — under the query deadline: the call gets
-`deadline = now + [http].query_deadline` through
-`Engine::respond_with`, and the engine checks it cooperatively where work
-loops (per tantivy segment and over-fetch round of a symbol search, per
-file of a content scan, every 64 items of `trace`'s traversal, outlines
-and the multi-ref collapse), returning `DeadlineExceeded`, which the
-transport answers as JSON-RPC -32001; a blocking thread cannot be
-cancelled from outside, so a `tokio` timeout of the same length is only a
-backstop. Authentication (static
-`rueca_` tokens, OIDC with JWKS discovery), `Host` / `Origin` checks, rate
-limits per IP and per principal, Prometheus metrics and JSON logs sit in
-front of it ([tools.md, *Over HTTP*](tools.md#over-http)).
+`[store].cache_bytes`.
 
-**The indexer role** (`rueca serve --role indexer`, or `all` with the
-query role in one process; RFC 0008 phase 2) keeps the store current
-without a queue or a database: everything is an object written by
-compare-and-swap. Each repository has a **job object**
-(`jobs/<repo-dir>.json`) holding its *desired state* — ref → commit — a
-state (`pending`, `leased`, `done`, `failed`), a priority (0 never
-indexed, 1 default branch behind, 2 pull request behind, 3 branch
-behind, 4 tag missing) and a lease. One indexer holds
-`leases/org-updater.json` (60 s, renewed every 20 s, taken over 30 s
-after it ends) and runs the **updater**: every `[indexing].updater_tick`
-(5 s) the reconciler gives every `[[repo]]` a catalog and a job, lists
-each repository whose poll is due with `git ls-remote --symref` (the next
-poll comes after half the time since its refs last changed, between 45 s
-and 8 h; at most 8 per host at once; a `429` pauses the host) and merges
-the default branch, the branches and tags matching the configured globs
-and, when enabled, pull request heads into the job — a branch the host
-stopped listing leaves the job and the catalog, a vanished pull request
-gets `closed_at`. Then the updater pulls every repository whose job
-changed into its own mirror, rebuilds the organization with
-`update_org_with` and publishes the next generation (a second updater
-loses the pointer's compare-and-swap and rebuilds on the winner's);
-hourly it expires pull requests and on-demand refs unread for
-`[retention].pr_idle` (query replicas write one `reads/<day>/<hour>-<replica>.json`
-per hour naming the refs their calls read) and collects garbage. Every
-indexer, every `[indexing].discover` (5 s), lists `jobs/`, re-reads the
-objects whose e-tag changed and **leases** the most urgent leasable job
-(pending, a failed one past its back-off of `min(10 min × attempts, 120
-min)`, or a lease that ended more than 30 s ago — the epoch increments)
-with a conditional write; it runs the job's refs, default first, into
-its staging store (`[indexing].facts_dir`, whose `facts/` is the facts
-cache) and publishes each snapshot, renewing the 15-minute lease every 5
-minutes, then finishes the job (`done`, or `pending` again when the
-desired state moved meanwhile; a ref that fails alone backs off alone) or
-fails it when refs failed and none is at its desired commit (so a looping
-on-demand ref never holds back the default branch). A lease another indexer took makes every
-later write of the old holder fail; what it already published is
-idempotent by `(ref, commit)`. Each ref runs in three steps. **Fetch**:
-the repository's bare mirror (`[indexing].mirror_dir/<repo-dir>.git`)
-gets exactly the desired commit, `git fetch --depth=1 --no-tags --atomic
---no-auto-maintenance --filter=blob:limit=<max_bytes + 1> <url>
-+<commit>:refs/rueca/commit/<commit>` with protocol v2, only `https` and
-`ssh` allowed, `GIT_NO_LAZY_FETCH=1` and no prompt; a host that refuses a
-commit by id gets the ref name fetched instead, and a tip that is no
-longer the desired commit means "moved, retry later". Blobs over the
-budget stay on the host; a mirror is never repacked and is re-created
-after `[indexing].mirror_max_age` (7 days). **Export**: the commit's tree
-is read with `gix` from the bare mirror into a scratch directory of the
-staging store; a blob the filter left out is not an error but a gap,
-listed in the file table as `skipped:size` with its blob id and no
-content. **Index**: a child process of the same binary, the hidden
-`rueca index-worker`, reads one JSON request on stdin (the
-`IndexOptions`, the budget, the gaps), indexes into the staging store
-(sharing its facts cache) and writes `{"ok": <report>}` or `{"error":
-{"stage", "message"}}` on stdout, logging JSON lines on stderr that the
-parent forwards. The parent sets `RLIMIT_AS` (24 GiB; not enforced on
-macOS), `RLIMIT_CPU` (4 h) and `RLIMIT_CORE = 0` before `exec` and kills
-the child after `[indexing].worker.wall_time` (30 min): a crash, an
-abort, an allocation storm or a parser that loops fails that ref alone,
-with the signal or limit and the child's last log lines as the reason,
-and the indexer carries on.
-`POST /admin/index {"repo", "ref"}` resolves a tag, branch, `pr/<n>` or
-full commit on the host and adds it to the desired state,
-`DELETE /admin/refs` removes a ref, `GET /admin/jobs` lists the jobs
-(admin role); `/status` adds jobs by state and the queue, `/readyz` of an
-indexer checks the store and `git` ≥ 2.45. Repository URLs must be
-`https` or `ssh` on an `[indexing].hosts` host (private addresses refused
-unless `allow_private_networks`); credentials reach `git` as an
-`http.extraHeader` in its environment, never on its command line.
+Ready means warmed: `/readyz` answers 200 (and names a new generation) only
+after a `list_repositories` and a one-result `search_symbols` through the
+serving engine have opened the organization index, its routing profiles and
+every default segment into the engine's caches
+(`rueca_generation_warm_seconds`), so the first call opens nothing. The
+engine re-reads the local pointer on every call, so a request arriving
+during a later generation's warm-up already reads it and opens what it needs
+itself.
+
+`POST /mcp` runs Rueca's own MCP core (`RuecaServer::handle`, synchronous)
+once per request with a fresh session:
+
+- A tool call runs on a blocking thread with the caller's `Visibility` — the
+  union of the repository globs its static token or OIDC rules grant,
+  matched against the generation's repository ids (none: an empty
+  organization) — under the query deadline: the call gets `deadline = now +
+  [http].query_deadline` through `Engine::respond_with`;
+- The engine checks it cooperatively where work loops (per tantivy segment
+  and over-fetch round of a symbol search, per file of a content scan, every
+  64 items of `trace`'s traversal, outlines and the multi-ref collapse),
+  returning `DeadlineExceeded`, which the transport answers as JSON-RPC
+  -32001;
+- A blocking thread cannot be cancelled from outside, so a `tokio` timeout
+  of the same length is only a backstop.
+
+Authentication (static `rueca_` tokens, OIDC with JWKS discovery), `Host` /
+`Origin` checks, rate limits per IP and per principal, Prometheus metrics
+and JSON logs sit in front of it ([tools.md, *Over
+HTTP*](tools.md#over-http)).
+
+**The indexer role** (`rueca serve --role indexer`, or `all` with the query
+role in one process; RFC 0008 phase 2) keeps the store current without a
+queue or a database: everything is an object written by compare-and-swap.
+
+Each repository has a **job object** (`jobs/<repo-dir>.json`) holding its
+*desired state* — ref → commit — a state (`pending`, `leased`, `done`,
+`failed`), a priority (0 never indexed, 1 default branch behind, 2 pull
+request behind, 3 branch behind, 4 tag missing) and a lease.
+
+One indexer holds `leases/org-updater.json` (60 s, renewed every 20 s, taken
+over 30 s after it ends) and runs the **updater**: every
+`[indexing].updater_tick` (5 s) the reconciler:
+
+- Gives every `[[repo]]` a catalog and a job,
+- Lists each repository whose poll is due with `git ls-remote --symref` (the
+  next poll comes after half the time since its refs last changed, between
+  45 s and 8 h; at most 8 per host at once; a `429` pauses the host);
+- Merges the default branch, the branches and tags matching the configured
+  globs and, when enabled, pull request heads into the job — a branch the
+  host stopped listing leaves the job and the catalog, a vanished pull
+  request gets `closed_at`.
+
+Then the updater pulls every repository whose job changed into its own
+mirror, rebuilds the organization with `update_org_with` and publishes the
+next generation (a second updater loses the pointer's compare-and-swap and
+rebuilds on the winner's); hourly it expires pull requests and on-demand
+refs unread for `[retention].pr_idle` (query replicas write one
+`reads/<day>/<hour>-<replica>.json` per hour naming the refs their calls
+read) and collects garbage.
+
+Every indexer, every `[indexing].discover` (5 s):
+
+- Lists `jobs/`,
+- Re-reads the objects whose e-tag changed,
+- **Leases** the most urgent leasable job (pending, a failed one past its
+  back-off of `min(10 min × attempts, 120 min)`, or a lease that ended more
+  than 30 s ago — the epoch increments) with a conditional write;
+- It runs the job's refs, default first, into its staging store
+  (`[indexing].facts_dir`, whose `facts/` is the facts cache) and publishes
+  each snapshot, renewing the 15-minute lease every 5 minutes,
+- Then finishes the job (`done`, or `pending` again when the desired state
+  moved meanwhile; a ref that fails alone backs off alone) or fails it when
+  refs failed and none is at its desired commit (so a looping on-demand ref
+  never holds back the default branch).
+
+A lease another indexer took makes every later write of the old holder fail;
+what it already published is idempotent by `(ref, commit)`.
+
+Each ref runs in three steps:
+
+- **Fetch**: the repository's bare mirror
+  (`[indexing].mirror_dir/<repo-dir>.git`) gets exactly the desired commit,
+  `git fetch --depth=1 --no-tags --atomic --no-auto-maintenance
+  --filter=blob:limit=<max_bytes + 1> <url>
+  +<commit>:refs/rueca/commit/<commit>` with protocol v2, only `https` and
+  `ssh` allowed, `GIT_NO_LAZY_FETCH=1` and no prompt; a host that refuses a
+  commit by id gets the ref name fetched instead, and a tip that is no
+  longer the desired commit means "moved, retry later".
+
+  Blobs over the budget stay on the host; a mirror is never repacked and is
+  re-created after `[indexing].mirror_max_age` (7 days).
+- **Export**: the commit's tree is read with `gix` from the bare mirror
+  into a scratch directory of the staging store; a blob the filter left out
+  is not an error but a gap, listed in the file table as `skipped:size`
+  with its blob id and no content.
+- **Index**: a child process of the same binary, the hidden `rueca
+  index-worker`, reads one JSON request on stdin (the `IndexOptions`, the
+  budget, the gaps), indexes into the staging store (sharing its facts
+  cache) and writes `{"ok": <report>}` or `{"error": {"stage", "message"}}`
+  on stdout, logging JSON lines on stderr that the parent forwards.
+
+  The parent sets `RLIMIT_AS` (24 GiB; not enforced on macOS), `RLIMIT_CPU`
+  (4 h) and `RLIMIT_CORE = 0` before `exec` and kills the child after
+  `[indexing].worker.wall_time` (30 min): a crash, an abort, an allocation
+  storm or a parser that loops fails that ref alone, with the signal or
+  limit and the child's last log lines as the reason, and the indexer
+  carries on.
+
+`POST /admin/index {"repo", "ref"}` resolves a tag, branch, `pr/<n>` or full
+commit on the host and adds it to the desired state, `DELETE /admin/refs`
+removes a ref, `GET /admin/jobs` lists the jobs (admin role); `/status` adds
+jobs by state and the queue, `/readyz` of an indexer checks the store and
+`git` ≥ 2.45.
+
+Repository URLs must be `https` or `ssh` on an `[indexing].hosts` host
+(private addresses refused unless `allow_private_networks`); credentials
+reach `git` as an `http.extraHeader` in its environment, never on its
+command line.
 
 **Webhooks** cut the latency polling leaves; they are hints, never the
 truth. Each host with a secret in `[indexing].webhooks` gets `POST
 /webhooks/github`, `/webhooks/gitlab` or `/webhooks/bitbucket` on the
-indexer's main listener (a configured route whose secret is not set
-refuses to start). The handler answers within milliseconds and never
-waits on the network: a body over 25 MB is `413`; the signature is
-checked in constant time (GitHub `X-Hub-Signature-256` and Bitbucket
-`X-Hub-Signature`, HMAC-SHA256 of the body; GitLab's Standard Webhooks
-`webhook-signature` over `id.timestamp.body` with a `whsec_` signing
-token, or the legacy `X-Gitlab-Token`, accepted but flagged as weaker at
-start-up), else `401`; a delivery id seen in the last 24 h (100,000 ids)
-is `200 duplicate`; an event that changes nothing indexed or a
-repository not in `[[repo]]` is `202 ignored`; anything else is `202
-accepted` and a background task asks the host with `git ls-remote` what
-the named refs point to now and merges that into the job by
-compare-and-swap, then wakes the indexer's discovery. Payload commits are
-never indexed as such, so duplicated, reordered or truncated deliveries
-converge on the host's state and polling covers a delivery that never
-came (GitHub sends none past 3 tags pushed at once, GitLab none past 3
-refs). Branch pushes set the default branch or a globbed branch (a
-deleted one leaves the job and the catalog), tag pushes a globbed tag
-(tags never expire), pull request openings and updates `pr/<n>` (from
-`refs/pull/<n>/head`, `refs/merge-requests/<n>/head` or, on Bitbucket,
-the source branch), and closings remove `pr/<n>` from the job and set
-its `closed_at`: the snapshot stays served until `[retention].pr_after_close`
-(7 days) and is then expired by the updater's garbage collection. A
-delivery whose confirmation failed (an unreachable host or store) is
+indexer's main listener (a configured route whose secret is not set refuses
+to start).
+
+The handler answers within milliseconds and never waits on the network:
+
+- A body over 25 MB is `413`;
+- The signature is checked in constant time (GitHub `X-Hub-Signature-256`
+  and Bitbucket `X-Hub-Signature`, HMAC-SHA256 of the body; GitLab's
+  Standard Webhooks `webhook-signature` over `id.timestamp.body` with a
+  `whsec_` signing token, or the legacy `X-Gitlab-Token`, accepted but
+  flagged as weaker at start-up), else `401`;
+- A delivery id seen in the last 24 h (100,000 ids) is `200 duplicate`;
+- An event that changes nothing indexed or a repository not in `[[repo]]` is
+  `202 ignored`;
+- Anything else is `202 accepted` and a background task asks the host with
+  `git ls-remote` what the named refs point to now and merges that into the
+  job by compare-and-swap, then wakes the indexer's discovery.
+
+Payload commits are never indexed as such, so duplicated, reordered or
+truncated deliveries converge on the host's state and polling covers a
+delivery that never came (GitHub sends none past 3 tags pushed at once,
+GitLab none past 3 refs).
+
+- Branch pushes set the default branch or a globbed branch (a deleted one
+  leaves the job and the catalog),
+- Tag pushes a globbed tag (tags never expire),
+- Pull request openings and updates `pr/<n>` (from `refs/pull/<n>/head`,
+  `refs/merge-requests/<n>/head` or, on Bitbucket, the source branch),
+- Closings remove `pr/<n>` from the job and set its `closed_at`: the
+  snapshot stays served until `[retention].pr_after_close` (7 days) and is
+  then expired by the updater's garbage collection.
+
+A delivery whose confirmation failed (an unreachable host or store) is
 forgotten, so the host's redelivery is heard. `rueca status --store-url`
 lists every ref with its kind, commit, age and `closed_at`.
 
@@ -1612,19 +1868,24 @@ Every symbol node carries: name, qualified name, file, span, language,
 signature, docstring, `exported`, `is_test`. Canonical env vars have no
 file, span or language.
 
-**Edge kinds**: `CONTAINS`, `DEFINES`, `IMPORTS` (structural, 1.0; `IMPORTS`
-also File → Folder for directory imports); `CALLS`, `REFERENCES`,
-`INHERITS`, `IMPLEMENTS`, `DECORATES`, `THROWS`, `WRITES`, `TESTS`
-(resolved, with strategy and confidence). `READS` (env var and config key
-reads by code and by config that reads env) and `WRITES` from env var
-providers form the code ↔ config bridge; `REFERENCES` also carries data
-pointers (`$ref`, aliases, `depends_on`, Terraform traversals), and
-`INHERITS` YAML merges, compose `extends` and Dockerfile `FROM <stage>`.
-`OVERRIDES` come from Java, Kotlin and C++ overrides, Rust trait impls and Go's
-implicit interfaces (heuristic). Go embedding (struct fields and
+**Edge kinds**:
+
+- `CONTAINS`, `DEFINES`, `IMPORTS` (structural, 1.0; `IMPORTS` also File →
+  Folder for directory imports);
+- `CALLS`, `REFERENCES`, `INHERITS`, `IMPLEMENTS`, `DECORATES`, `THROWS`,
+  `WRITES`, `TESTS` (resolved, with strategy and confidence).
+
+`READS` (env var and config key reads by code and by config that reads env)
+and `WRITES` from env var providers form the code ↔ config bridge;
+`REFERENCES` also carries data pointers (`$ref`, aliases, `depends_on`,
+Terraform traversals), and `INHERITS` YAML merges, compose `extends` and
+Dockerfile `FROM <stage>`.
+
+`OVERRIDES` come from Java, Kotlin and C++ overrides, Rust trait impls and
+Go's implicit interfaces (heuristic). Go embedding (struct fields and
 interfaces) and type aliases are `INHERITS`; Go `IMPLEMENTS` edges are
-inferred (heuristic 0.5).
-Python, ECMAScript, PHP and Java reads of ordinary names stay `REFERENCES`.
+inferred (heuristic 0.5). Python, ECMAScript, PHP and Java reads of ordinary
+names stay `REFERENCES`.
 
 **Edge metadata**: `confidence` (0–1), `strategy`, and `evidence` (file +
 span of the reference that produced it; absent for structural edges).
@@ -1705,25 +1966,34 @@ On top of that:
 - **Priors**: the score is multiplied by 0.5 for fields, variables and
   constants, and by 0.5 for tests (test functions, `describe`/`it` blocks,
   files under `test`/`tests`/`__tests__`/`spec` or named `test_*.py`,
-  `*.spec.ts`, …), so code an agent navigates to comes first. Three more
-  factors of 0.5 keep copies of code from crowding the code itself:
-  C/C++ **declarations without a body** (a prototype in `config.h` ranks
-  below `parse_config`'s body in `config.c`; the segment marks them at index
-  time), definitions in an **amalgamated copy** (a single header such as
-  `single_include/nlohmann/json.hpp`, recognised because most of its
-  definitions reappear, same name, signature and length, spread over many
-  other files), and **vendored** directories (`third_party`, `deps`, …).
+  `*.spec.ts`, …), so code an agent navigates to comes first.
+
+  Three more factors of 0.5 keep copies of code from crowding the code itself:
+
+  - C/C++ **declarations without a body** (a prototype in `config.h` ranks
+    below `parse_config`'s body in `config.c`; the segment marks them at
+    index time),
+  - Definitions in an **amalgamated copy** (a single header such as
+    `single_include/nlohmann/json.hpp`, recognised because most of its
+    definitions reappear, same name, signature and length, spread over many
+    other files),
+  - **Vendored** directories (`third_party`, `deps`, …).
+
   Demoted symbols are still listed — an exact name match still finds a
   prototype — they just come after the code they declare or copy.
 
 Filters (`labels`, `language`) are exact terms; `path_glob` filters after
-ranking. Over several repositories there is **one ranking**: in an
-organization the organization symbol index scores every repository with
-organization-wide statistics (§4.6); locally indexed roots without an
-organization are scored with BM25 statistics summed over the selected
-segments, which gives the same scores. (RFC 0005 merged per-repository
-rankings by reciprocal rank fusion; every repository's first hit then tied,
-and the right repository's answer was lost among 21 — RFC 0006 §2.) Default labels exclude `File`, `Folder`, `Module` and `Repository`, so
+ranking.
+
+Over several repositories there is **one ranking**: in an organization the
+organization symbol index scores every repository with organization-wide
+statistics (§4.6); locally indexed roots without an organization are scored
+with BM25 statistics summed over the selected segments, which gives the same
+scores. (RFC 0005 merged per-repository rankings by reciprocal rank fusion;
+every repository's first hit then tied, and the right repository's answer
+was lost among 21 — RFC 0006 §2.)
+
+Default labels exclude `File`, `Folder`, `Module` and `Repository`, so
 document sections are found alongside code (`install linux` →
 `README.md:Install > Linux`); they also exclude structured-data `Key` and
 `Document` nodes unless `language` is a data language, because a repository
@@ -1747,11 +2017,13 @@ regex) is parsed; required literals are extracted and turned into an AND/OR
 query over trigram postings, which yields candidate files. Candidates are
 decompressed from the content packs in path order and verified with the real
 regex, stopping at `limit` or the scan budget (`truncated: true`). Patterns
-with no usable literal scan every text file. Each match is then **placed in
-the graph**: the file's symbols (sorted by position) give the innermost
-definition containing that line, returned as `symbol`. In the example,
-searching `self.send` returns line 5 of `shop/http.py` with symbol
-`Session.request`; a match in a document is placed in its section.
+with no usable literal scan every text file.
+
+Each match is then **placed in the graph**: the file's symbols (sorted by
+position) give the innermost definition containing that line, returned as
+`symbol`. In the example, searching `self.send` returns line 5 of
+`shop/http.py` with symbol `Session.request`; a match in a document is
+placed in its section.
 
 ### `get_symbol` — "tell me about this symbol and its neighbourhood"
 
@@ -1943,18 +2215,20 @@ Known gaps behind low-confidence or missing edges, in rough order of impact:
 - `search_symbols` ranks symbols, not files: a file is found through its
   best-matching definition. Module-level code that is not inside a
   definition is only reachable through `search_code`.
-- C and C++ without a preprocessor: definitions generated by macros are
-  invisible (only the calls in a macro's body are passed on to its users),
-  `#if` groups the grammar can take keep all their branches, and files the
-  grammars still cannot fully parse lose the definitions and references
-  inside the broken region (about 3% of the C and 0.5% of the C++ files of
-  the benchmark corpus, 3.4% of the C++ files with vendored GoogleTest,
-  amalgamations and Objective-C headers included). Conditions are not
-  evaluated with the project's `-D` flags. Overloads are chosen by
-  argument count and by the types of literal, cast and local-variable
-  arguments; overloads that differ only by template constraints are all
-  linked; ADL, calls through function pointers and virtual dispatch are
-  not followed.
+- C and C++ without a preprocessor:
+  - Definitions generated by macros are invisible (only the calls in a
+    macro's body are passed on to its users),
+  - `#if` groups the grammar can take keep all their branches,
+  - Files the grammars still cannot fully parse lose the definitions and
+    references inside the broken region (about 3% of the C and 0.5% of the
+    C++ files of the benchmark corpus, 3.4% of the C++ files with vendored
+    GoogleTest, amalgamations and Objective-C headers included).
+
+  Conditions are not evaluated with the project's `-D` flags. Overloads are
+  chosen by argument count and by the types of literal, cast and
+  local-variable arguments; overloads that differ only by template
+  constraints are all linked; ADL, calls through function pointers and
+  virtual dispatch are not followed.
 
 The benchmark ([alpha results](bench/alpha-results.md)) measures how these
 gaps show up on real repositories.
@@ -2024,11 +2298,12 @@ trait, `Embedder` (`embed` of a batch of documents and queries into
 L2-normalized vectors, `model_key`, `dims`, `meta`, `token_count`).
 `hashing::HashingEmbedder` is a deterministic bag-of-words embedder for
 tests (no weights, keys from a fake model hash, optional query synonyms).
+
 The runtime is llama.cpp through `llama-cpp-2` (pinned exactly), behind the
-`embeddings` feature, on by default in `rueca-embed` and `rueca`: it
-builds llama.cpp from source (CMake, a C/C++ compiler, libclang for the
-bindings), uses Metal on Apple silicon, and `--no-default-features` builds
-a lexical-only binary. `cuda` is an opt-in feature for service builds.
+`embeddings` feature, on by default in `rueca-embed` and `rueca`: it builds
+llama.cpp from source (CMake, a C/C++ compiler, libclang for the bindings),
+uses Metal on Apple silicon, and `--no-default-features` builds a
+lexical-only binary. `cuda` is an opt-in feature for service builds.
 
 **Presets.** A manifest compiled into the binary (`rueca models list`), the
 Qwen3-Embedding family (Apache-2.0, official GGUF files):
@@ -2063,31 +2338,38 @@ place and writes the sidecar; a hand-placed file is hashed once on first
 use. A missing file is an error naming the preset, the URL,
 `rueca models pull` and `RUECA_MODEL_DIR`.
 
-**Embedding.** Inputs are tokenized with the tokenizer inside the GGUF
-file and cut to their budget, special tokens included: documents at the
-token budget (`--max-tokens`, 512 by default, RFC 0007 §5.2), queries at
-their own budget, 512 capped by the preset's context, whatever the
-documents' budget. Qwen3 ends every input with `<|endoftext|>`, which
-last-token pooling reads. Inputs are packed into batches of 512 tokens by
-default (`--batch`; every input fits one micro-batch: 512 tokens keep the
-default model near 1.0 GB of memory where 2,048 took 2.2 GB, for about 4%
-less throughput, measured in phase 0), pooled, L2-normalized and, with
-`--dims`, truncated and re-normalized. The batch order is fixed by
-content: inputs are sorted by token length, then BLAKE3 of the text, and
-results are returned in input order. Threads default to the performance
-cores (on Apple silicon the efficiency cores slow a CPU run down by half).
+**Embedding.** Inputs are tokenized with the tokenizer inside the GGUF file
+and cut to their budget, special tokens included: documents at the token
+budget (`--max-tokens`, 512 by default, RFC 0007 §5.2), queries at their own
+budget, 512 capped by the preset's context, whatever the documents' budget.
+Qwen3 ends every input with `<|endoftext|>`, which last-token pooling reads.
 
-**Identity and audit** (RFC 0007 §5.4, §9). The *embed key* is BLAKE3 of
-the model file's sha256, the pooling, the document prefix, the text
-builder version and the token budget; the *vector key* adds the text; the
-*model key* adds the output width and the vector encoding to the embed
-key. The query instruction and the query budget are in no key (no query
-vector is stored), nor are the runtime, its version, the backend or the
-CPU level: those go to the audit record that `rueca embed --info` prints
-without loading the model (`model_sha256`, `quantization`, `dims`,
-`pooling`, `token_budget`, `query_token_budget`, `runtime`,
-`runtime_version`, `backend` = `metal` | `cpu` | `cuda`, `cpu_level` =
-`neon` or the x86-64 psABI level, batch and micro-batch sizes, threads).
+Inputs are packed into batches of 512 tokens by default (`--batch`; every
+input fits one micro-batch: 512 tokens keep the default model near 1.0 GB of
+memory where 2,048 took 2.2 GB, for about 4% less throughput, measured in
+phase 0), pooled, L2-normalized and, with `--dims`, truncated and
+re-normalized.
+
+The batch order is fixed by content: inputs are sorted by token length, then
+BLAKE3 of the text, and results are returned in input order. Threads default
+to the performance cores (on Apple silicon the efficiency cores slow a CPU
+run down by half).
+
+**Identity and audit** (RFC 0007 §5.4, §9).
+
+- The *embed key* is BLAKE3 of the model file's sha256, the pooling, the
+  document prefix, the text builder version and the token budget;
+- The *vector key* adds the text;
+- The *model key* adds the output width and the vector encoding to the embed
+  key.
+
+The query instruction and the query budget are in no key (no query vector is
+stored), nor are the runtime, its version, the backend or the CPU level:
+those go to the audit record that `rueca embed --info` prints without
+loading the model (`model_sha256`, `quantization`, `dims`, `pooling`,
+`token_budget`, `query_token_budget`, `runtime`, `runtime_version`,
+`backend` = `metal` | `cpu` | `cuda`, `cpu_level` = `neon` or the x86-64
+psABI level, batch and micro-batch sizes, threads).
 
 **Configuration.** `[retrieval] preset` in `<store>/rueca.toml` names the
 preset `rueca embed` and `rueca models pull` use when none is given
@@ -2146,16 +2428,23 @@ vectors pass after resolution:
    the store vector cache answers which are already embedded.
 4. **Publication.** If every key hits (a re-index after a small change, a
    second worktree, another repository with the same files), the segment is
-   written once with its vectors and the model is never loaded. Otherwise
-   the lexical segment is published and registered first (queries are
-   lexical meanwhile), the misses are embedded in batches of 256 texts in
-   key order — each batch appended to the cache as it finishes, so an
-   interrupted run resumes — and the snapshot is published again: the
-   bundle's components copied byte for byte, `meta` with a new segment id,
-   plus the `vectors.*` components; the catalog entry is swapped to it and
-   the lexical file deleted. Copying beats appending to the file: a
-   published segment is never modified (readers map it), and the copy of a
-   20 MB bundle costs tens of milliseconds next to minutes of embedding.
+   written once with its vectors and the model is never loaded.
+
+   Otherwise:
+
+   - The lexical segment is published and registered first (queries are
+     lexical meanwhile);
+   - The misses are embedded in batches of 256 texts in key order (each
+     batch appended to the cache as it finishes, so an interrupted run
+     resumes);
+   - The snapshot is published again: the bundle's components copied byte
+     for byte, `meta` with a new segment id, plus the `vectors.*`
+     components; the catalog entry is swapped to it and the lexical file
+     deleted.
+
+   Copying beats appending to the file: a published segment is never
+   modified (readers map it), and the copy of a 20 MB bundle costs tens of
+   milliseconds next to minutes of embedding.
 
 `IndexReport.vectors` (and the `vectors:` line of `rueca index`) gives the
 units, how many were cached and embedded, tokens, time and the number of
@@ -2199,18 +2488,22 @@ removed yet (like content packs).
 | no | — | `hybrid` / `semantic` | error naming `rueca index --embed` |
 | any | — | `lexical` | lexical, unchanged |
 
-The query model is the one recorded in the segment's `vectors.meta`
-(preset, token budget, text builder version; its embed key is checked), not
-the configured preset; it is loaded once per process (a `rueca query`
-process pays it on every call, about 0.25 s per query including the load
-for the default model on an M1 Pro; the MCP server once) and never
-downloaded: absent weights make the call lexical, with a warning. The query is embedded with the preset's
-instruction, truncated to each segment's width. Candidates are the BM25 top
-N (today's ranking; its raw score is recovered by dividing out the prior and
-routing boost) and the dense top N of an exhaustive int8 scan of each
-selected snapshot under the same label, language, `path_glob` and scope
-filters (N = 100, at least the requested page). Every candidate with a vector gets its cosine,
-rescored from the cache's f16 rows when the cache is there. Then
+The query model is the one recorded in the segment's `vectors.meta` (preset,
+token budget, text builder version; its embed key is checked), not the
+configured preset; it is loaded once per process (a `rueca query` process
+pays it on every call, about 0.25 s per query including the load for the
+default model on an M1 Pro; the MCP server once) and never downloaded:
+absent weights make the call lexical, with a warning.
+
+The query is embedded with the preset's instruction, truncated to each
+segment's width. Candidates are the BM25 top N (today's ranking; its raw
+score is recovered by dividing out the prior and routing boost) and the
+dense top N of an exhaustive int8 scan of each selected snapshot under the
+same label, language, `path_glob` and scope filters (N = 100, at least the
+requested page).
+
+Every candidate with a vector gets its cosine, rescored from the cache's f16
+rows when the cache is there. Then
 
 ```text
 s = (α · b̂ + (1 − α) · d̂) · prior · route
@@ -2218,27 +2511,32 @@ s = (α · b̂ + (1 − α) · d̂) · prior · route
 
 with `b̂`, `d̂` min-max normalized over each list's top N (a list of equal
 scores normalizes to 1; BM25 is 0 outside its top N, a cosine below the
-dense list's range 0) and α = 0.5 (the owner's defaults: convex
-combination, min-max, α 0.5, N 100; [decisions](decisions.md)). A snapshot
-without vectors for the model (an organization member indexed without
-`--embed`) is scored `b̂ · prior · route` and listed in `retrieval.lexical`;
-`semantic` leaves it out with a warning. Ties break by (snapshot, node),
-so pages are exact. Knobs: `RUECA_FUSION_ALPHA`, `RUECA_FUSION_N`,
-`RUECA_FUSION_NORM` (`minmax`, or `theoretical`: RFC 0007 §7.2's division
-by the theoretical minimum), over `[retrieval]` in the store's
-`rueca.toml`.
+dense list's range 0) and α = 0.5 (the owner's defaults: convex combination,
+min-max, α 0.5, N 100; [decisions](decisions.md)).
 
-**Search: an exhaustive scan.** The dense list is an exact scan of every
-row (an f32 query against int8 rows with a per-row scale), parallel across
+A snapshot without vectors for the model (an organization member indexed
+without `--embed`) is scored `b̂ · prior · route` and listed in
+`retrieval.lexical`; `semantic` leaves it out with a warning. Ties break by
+(snapshot, node), so pages are exact.
+
+Knobs: `RUECA_FUSION_ALPHA`, `RUECA_FUSION_N`, `RUECA_FUSION_NORM`
+(`minmax`, or `theoretical`: RFC 0007 §7.2's division by the theoretical
+minimum), over `[retrieval]` in the store's `rueca.toml`.
+
+**Search: an exhaustive scan.** The dense list is an exact scan of every row
+(an f32 query against int8 rows with a per-row scale), parallel across
 snapshots, with no index to build: segments stay immutable and nothing is
-rebuilt when one is published. A benchmark outside the repository
-(synthetic clustered 1,024-dimension vectors, 200 queries, top 10, M1 Pro)
-measured the scan at 0.26 ms for 10k vectors, 1.3 ms for 100k and 8.3 ms
-for 1M, exact (recall 0.99 against f32); HNSW (`usearch`, f16) answered in
-0.15 / 0.36 / 0.6–0.8 ms but with recall 0.61–0.81 at 1M and a 16-minute
-build, and `hnsw_rs` took 137 s to build 100k. Embedding the query (about
-40 ms) dominates either way, so HNSW is deferred to organizations of
-several million vectors in service mode (RFC 0007 §6.4).
+rebuilt when one is published.
+
+A benchmark outside the repository (synthetic clustered 1,024-dimension
+vectors, 200 queries, top 10, M1 Pro) measured the scan at 0.26 ms for 10k
+vectors, 1.3 ms for 100k and 8.3 ms for 1M, exact (recall 0.99 against f32);
+HNSW (`usearch`, f16) answered in 0.15 / 0.36 / 0.6–0.8 ms but with recall
+0.61–0.81 at 1M and a 16-minute build, and `hnsw_rs` took 137 s to build
+100k.
+
+Embedding the query (about 40 ms) dominates either way, so HNSW is deferred
+to organizations of several million vectors in service mode (RFC 0007 §6.4).
 
 **Enabling it.** Semantic search is **off unless an argument or the
 environment enables it**:

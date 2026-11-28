@@ -35,7 +35,9 @@ fails: with `repo: "*"`, File Acc@5 drops to **9.5%** against **61.9%** when
 the right repository is queried alone, and 94% of the top 10 comes from
 other repositories. Rank fusion gives every repository's best hit the same
 weight, so the 21 first places tie; BM25 scores from separate indexes cannot
-be compared because each index has its own term statistics. The
+be compared because each index has its own term statistics.
+
+The
 organization suite that replaced that scenario (§8; 120 issues over 42
 repositories) measures the same failure: per-repository search merged by
 rank fusion keeps **24.2%** against **66.7%** alone, with 91.7% of the top
@@ -104,14 +106,18 @@ Cross-repository edges, stored as edges between pinned symbol ids (or
    repository, plus the evidence.
 2. **Contracts.** HTTP routes, RPC methods, topics, env vars and
    config keys (RFC 0001 §9.4, RFC 0003 §7) matched across repositories: the
-   original org linker, now one producer of the link layer. Implemented
+   original org linker, now one producer of the link layer.
+
+   Implemented
    (§9.4) for HTTP routes and calls, OpenAPI operations and protobuf /
    gRPC services (topics: Kafka clients in Python only): every segment
    keeps a contract table of canonical keys; a repository that calls a key
    another one provides, or whose server code implements a spec another
    one publishes, depends on it, and the `CALLS` / `IMPLEMENTS` edges
    between them (strategy `contract`) go into the same link sets as the
-   package edges. Env vars and config keys stay within one repository (the
+   package edges.
+
+   Env vars and config keys stay within one repository (the
    code ↔ config bridge).
 
 The link layer is recomputed only for repositories whose snapshot changed
@@ -215,23 +221,34 @@ The suite's population (`bench/README.md`, *Org scenarios*). Members are
 every gated S1 repository (42, eight languages), each **pinned** at the
 base commit of its first gated S1 instance and indexed one at a time into
 one organization; the calibration organization adds 8 calibration members
-pinned the same way, the gated members acting as distractors. **Issue**
+pinned the same way, the gated members acting as distractors.
+
+**Issue**
 instances: per member, the first 3 S1 instances (calibration: 5) whose gold
 — the files and functions of the real fix patch — is present at the pin
 and whose fix is not already there (`patch_at_pin != reverse`); the gold is
 carried to the pin and the query is the issue's keyword query. Gated: 120
 issue instances over 42 members (python 14, ts/js 15, php 21, go 15, java
-15, c 12, cpp 10, rust 18); calibration: 29, never gated. **Impact**
+15, c 12, cpp 10, rust 18); calibration: 29, never gated.
+
+**Impact**
 instances (16 gated) ask the issue of a library member (tokio for axum;
 carbon, monolog and commonmark for laravel/framework; gson for dubbo and
 apollo) and score, besides its own gold, the consumer files that use a
 symbol the fix changes, labelled at the pins by the independent
 cross-repository labeler: they measure whether one organization ranking
 surfaces the consumers of a changed library symbol (consumer hit@10 /
-hit@20, recall@20). Every arm answers the same questions natively and per
+hit@20, recall@20).
+
+Every arm answers the same questions natively and per
 repository merged by rank fusion, against its own single-repository answer
-in the same run: Rueca (`--org`), BM25 over the union of the members (the
-plain-text floor arm) and cbm (per project + rank fusion). Rates
+in the same run:
+
+- Rueca (`--org`),
+- BM25 over the union of the members (the plain-text floor arm),
+- cbm (per project + rank fusion).
+
+Rates
 carry Wilson intervals; Rueca − BM25 and the other pairs are paired
 bootstraps that also state the discordance and the minimum detectable
 effect (RFC 0004 §7.6): at n = 120 a File Acc@5 difference below 12.1
@@ -267,7 +284,9 @@ The organization symbol index, the scope API and local `--org` landed in
   re-index documents with extra `repo` / snapshot fields: every repository
   segment already embeds a tantivy index of one tantivy segment with doc id
   = node id, and the organization index lists those segments, copied
-  unchanged (same schema, tokenizer, `body` text, priors). The repository,
+  unchanged (same schema, tokenizer, `body` text, priors).
+
+  The repository,
   snapshot and store segment of a document are attributes of its tantivy
   segment, recorded in the generation; the hit is (repository, node id).
   "Delete by `repo` term, add the new documents" (§3.2) is therefore
@@ -342,16 +361,22 @@ repositories) and the CLI (`rueca links --org`). Choices and deviations:
   has a profile (`profiles/<segment>.json`): repository and package
   names, manifest descriptions and the README head, the 64 most referenced
   symbols and the 64 most frequent path components, plus its package
-  registry entries. A query scores the visible repositories by (a) CORI
+  registry entries.
+
+  A query scores the visible repositories by (a) CORI
   over the organization index — the documents of each repository holding
   each query term are a dictionary lookup in its tantivy segment, so the
   term-distribution signal needs no extra index — and (b) BM25 over the
   profiles; both are min-max normalized and averaged (`mu` 0.5), then
   divided by the best. Each symbol score is multiplied inside the top-k by
-  `((0.25 + r) / 1.25)²`. A prior keeps a strong match in another
+  `((0.25 + r) / 1.25)²`.
+
+  A prior keeps a strong match in another
   repository reachable; the two-stage alternative (`top`: only the best
   repositories) and per-repository statistics (`stats=local`) were
-  evaluated and not kept. Profiles are documents of the generation, not
+  evaluated and not kept.
+
+  Profiles are documents of the generation, not
   documents of the symbol index: the per-repository documents are tokenized
   once per opened generation (≈ 28 repositories: milliseconds) instead of
   being added to the tantivy index, so the repositories' segments stay
@@ -392,16 +417,22 @@ repositories) and the CLI (`rueca links --org`). Choices and deviations:
   resolution (its project: workspaces, `exports`, source roots, `go.mod`,
   PSR-4), and a consumer import nobody resolved inside its own repository
   is resolved by the publishing repository's pack against that
-  repository's project. The whole ladder then applies across repositories
+  repository's project.
+
+  The whole ladder then applies across repositories
   (imported bindings, re-exports, typed receivers, inherited members,
   PHP's fully qualified names, includes), so link edges carry the
   strategy, confidence and evidence they would have inside one
-  repository. Kept: edges between a consumer node and a dependency node,
+  repository.
+
+  Kept: edges between a consumer node and a dependency node,
   of every kind but `CONTAINS` / `DEFINES` — `DECORATES` points into the
   consumer (a library decorator on its function) — never through the
   name-matching rungs, never into a dependency's tests or into a name the
   consumer defines itself (Carbon ships `Illuminate\…` test stubs that
-  would otherwise capture Laravel's own classes). Nodes are mapped back to
+  would otherwise capture Laravel's own classes).
+
+  Nodes are mapped back to
   the repositories' own segments by (label, qualified name, path).
 - **Versioned with the generation, recomputed for reverse dependencies.**
   A consumer's link set is one file named by its segment, its
@@ -452,19 +483,27 @@ the single-repository File Acc@5, with an interval (0.74–0.96) that
 crosses it (⚠), and the 0.95× target not met. On the calibration split,
 where routing was tuned, the same default gives 0.78× (0.60–0.95) over 29
 instances of a 50-member organization: the 0.92× of the earlier
-35-instance calibration organization did not carry over. Routing does its
+35-instance calibration organization did not carry over.
+
+Routing does its
 part — 11.3% of the top 10 comes from other repositories, against 28.7%
 for BM25 over the same union — so the lead to check on the misses stays
 the one phase 2 found: the right file ranking lower inside a routed
-repository under organization-wide statistics than alone. Against the
+repository under organization-wide statistics than alone.
+
+Against the
 plain-text floor arm, Rueca is ahead on Function Acc@10 (+11.3, interval
 above zero) and not distinguishable on File Acc@5 (+4.2; a true difference
 under 12.1 points can go undetected at this n). The per-step maximum over
-the floor (3.62×) is one small repository whose own index is fast. The
+the floor (3.62×) is one small repository whose own index is fast.
+
+The
 impact kind is a loss: the organization ranking returns the library's own
 files (own File Acc@5 81.2%) and almost never the consumers that use the
 changed symbol (consumer hit@10 12.5%), which BM25 over the union reaches
-more often (37.5%) (§12, question 6). The next levers stay per-repository
+more often (37.5%) (§12, question 6).
+
+The next levers stay per-repository
 ranking within a routed repository without losing comparable scores (a
 score transplant: the organization score distribution, the repository's
 own order) and, for impact, signals from the link layer.
@@ -517,15 +556,20 @@ while building it and the measurements follow.
 
 - **A ref is a snapshot.** Every indexed ref of a repository is one store
   root, one segment and one catalog entry, exactly like the repository's
-  own root: `rueca index [PATH] --ref <name>` exports the tree of the
-  commit the ref names (blobs written byte for byte from the object
-  database with gix — not `git archive`, whose `export-ignore` /
-  `export-subst` and filters would change blob ids and lose facts-cache
-  hits; no checkout, nothing written into the user's repository except
-  fetched objects) under `<store>/refs/<repo-dir>/<ref-slug>/`, indexes that
-  tree with the repository's id, the commit and the ref name recorded in
-  `SnapshotInfo` (`branch` holds the ref name; `dirty` is always false),
-  and registers it. The facts cache is keyed by blob, so a second ref
+  own root: `rueca index [PATH] --ref <name>`:
+
+  - exports the tree of the commit the ref names (blobs written byte for
+    byte from the object database with gix — not `git archive`, whose
+    `export-ignore` / `export-subst` and filters would change blob ids and
+    lose facts-cache hits; no checkout, nothing written into the user's
+    repository except fetched objects) under
+    `<store>/refs/<repo-dir>/<ref-slug>/`,
+  - indexes that tree with the repository's id, the commit and the ref
+    name recorded in `SnapshotInfo` (`branch` holds the ref name; `dirty`
+    is always false),
+  - registers it.
+
+  The facts cache is keyed by blob, so a second ref
   costs the walk, the hashing and the resolution plus extraction of the
   blobs that differ. `--ref <name> --remove` drops the snapshot and its
   export. The catalog stays keyed by root; the repository id groups the
@@ -553,11 +597,17 @@ while building it and the measurements follow.
   (segment copy, profile, link set), nothing else of the generation is
   rebuilt. Garbage collection treats ref entries like repository entries.
 - **A query selects one segment per repository**, the default unless `ref`
-  names another: `repo: A, ref: pr/123` is §4's view (A replaced by A at
-  that ref, every other repository at its default); `ref` without `repo`
-  applies to every repository that has the ref and leaves the others at
-  their default (the organization "as of" a release branch); a ref no
-  selected repository has is an error that lists the indexed refs. BM25
+  names another:
+
+  - `repo: A, ref: pr/123` is §4's view (A replaced by A at that ref, every
+    other repository at its default);
+  - `ref` without `repo` applies to every repository that has the ref and
+    leaves the others at their default (the organization "as of" a release
+    branch);
+  - a ref no selected repository has is an error that lists the indexed
+    refs.
+
+  BM25
   statistics are summed over the **selected** segments (the organization as
   seen from that ref), which is what the phase 1 collector already does;
   §4's "org statistics with A filtered out, plus A's ref segment" is this
@@ -596,10 +646,14 @@ Choices and deviations:
   at `<store>/refs/<repo-dir>/<ref-slug>/`; symlinks and submodules are
   skipped (the working-tree walk skips them too). A commit with no file
   under the root's path (a subdirectory root that does not exist at that
-  ref) is an error, not an empty snapshot. A `git worktree` would
+  ref) is an error, not an empty snapshot.
+
+  A `git worktree` would
   write into the user's repository and lock the branch; `git archive`
   applies `export-ignore`, `export-subst` and content filters, which change
-  files and their blob ids and so lose the facts-cache hits. The only
+  files and their blob ids and so lose the facts-cache hits.
+
+  The only
   writes into the repository are fetched objects, remote-tracking refs,
   tags fetched by name and `refs/rueca/…`; a shallow repository is fetched
   with `--depth 1`, and `git` runs with `GIT_TERMINAL_PROMPT=0` and no
@@ -625,7 +679,9 @@ Choices and deviations:
   of ≥ 7 hex digits, recorded under its 12-digit form); a name found
   nowhere is fetched from `origin` (a full commit id into
   `refs/rueca/commit/<id>`, else a branch, else a tag), so tags and
-  commits work in the shallow clone of a `url` member. `pr/<n>` is always fetched,
+  commits work in the shallow clone of a `url` member.
+
+  `pr/<n>` is always fetched,
   `refs/pull/<n>/head` then `refs/merge-requests/<n>/head`, into
   `refs/rueca/pr/<n>`, which keeps its objects reachable and is the offline
   fallback. A ref whose commit, repository id and Rueca version did not
@@ -634,16 +690,22 @@ Choices and deviations:
 - **Generation format unchanged.** `OrgRepo` is `{repo, url, default:
   OrgEntry, refs: [OrgRef {ref_name, entry}]}` with `default` flattened
   into the repository object, so `format` 1 generations read and write as
-  before. A ref export belongs to the member whose repository id it
+  before.
+
+  A ref export belongs to the member whose repository id it
   carries (member roots are canonicalized first, so a path through a
   symbolic link derives the same id); a ref `rueca index --org` indexed
   whose id is no indexed member's is reported in `OrgUpdate::unowned_refs`
-  and the CLI summary, not dropped silently. Entries are reused by (root, segment); `OrgUpdate` reports
+  and the CLI summary, not dropped silently.
+
+  Entries are reused by (root, segment); `OrgUpdate` reports
   `refs_added` / `refs_replaced` / `refs_removed` / `refs_unchanged` and,
   per entry, the copy, profile and link costs.
 - **Link sets per ref, against the defaults.** A ref's outgoing link set is
   its own imports resolved against its dependencies' default entries, one
-  file named by the segments it was computed from, like a default's. The
+  file named by the segments it was computed from, like a default's.
+
+  The
   incoming side is remapped at read time: `OrgIndex::link_edges(at, node,
   dir, kind, visible, view)` maps the default's endpoints to the ref's
   nodes by (label, qualified name, path) — several nodes with one key, a
@@ -651,7 +713,9 @@ Choices and deviations:
   order — through a correspondence built on
   first use per (repository, ref) slot, for the nodes link edges target
   only, and cached with the opened generation; an endpoint the ref no
-  longer has drops the edge. Resolving a consumer's imports against a
+  longer has drops the edge.
+
+  Resolving a consumer's imports against a
   library ref on the fly was not built: it would run the joint resolver
   (§9.2) inside a query.
 - **`find_ref` precedence:** a ref entry with that name (a commit by any
@@ -665,35 +729,48 @@ Choices and deviations:
 - **`ref` with and without `repo`.** With `repo` (one or a list) every
   selected repository must have every named ref; without it (or `"*"`)
   each repository is read at the refs it has and the others at their
-  default, and naming a ref no repository has is an error. Pull request
+  default, and naming a ref no repository has is an error.
+
+  Pull request
   numbers are per repository, so `pr/<n>` without `repo` (or with `"*"`)
   is accepted only when exactly one selected repository has it; otherwise
   the error lists the visible ones that do (`` `pr/7` exists in several
-  repositories (A, B): name `repo` ``). Errors list the
+  repositories (A, B): name `repo` ``).
+
+  Errors list the
   indexed refs (`main@08b803cf32ce, 7.1.2@1784558ed7c7, …`, per repository
   when `repo` is omitted) and the command that indexes another one; a
   repository the caller cannot read is never named, nor are its refs.
 - **Collapse per tool.** A symbol is matched across the snapshots of one
   repository by (label, qualified name, path), by position in source order
   among nodes sharing that key, and its versions (the items, with their
-  `in`) collapsed by file blob. `search_symbols` fetches `limit` per snapshot, collapses, then
-  cuts at `limit` (the cursor counts collapsed items); `get_symbol` answers
-  the best match's version and lists the others in `versions` (`{s, in,
-  changed, symbol, callers, callees}`), not as candidates;
-  `get_file_outline` returns the first listed ref's outline and every other
-  distinct version of the file in `versions`; `trace` walks from every
-  version of the root and returns the union graph, `in` on nodes and a
-  trailing `{in, changed}` object on the edges of that repository.
+  `in`) collapsed by file blob.
+
+  - `search_symbols` fetches `limit` per snapshot, collapses, then cuts at
+    `limit` (the cursor counts collapsed items);
+  - `get_symbol` answers the best match's version and lists the others in
+    `versions` (`{s, in, changed, symbol, callers, callees}`), not as
+    candidates;
+  - `get_file_outline` returns the first listed ref's outline and every
+    other distinct version of the file in `versions`;
+  - `trace` walks from every version of the root and returns the union
+    graph, `in` on nodes and a trailing `{in, changed}` object on the edges
+    of that repository.
+
   `search_code`, `get_snippet` and `format: "verbose"` do not collapse;
   single-snapshot responses are unchanged.
 - **`changed` is per symbol** *(2026-11-24; it was per file blob)*. A
   symbol is `changed` when its own text — the bytes of its span — is not
   the same in every requested snapshot of its repository, or it is absent
   from one; equal blobs are equal without reading, and a changed file is
-  read once per call. A symbol whose file changed elsewhere (moved by lines
+  read once per call.
+
+  A symbol whose file changed elsewhere (moved by lines
   added above it) still comes back once per version — its lines differ —
   but not `changed` (`click.types.ParamType.split_envvar_value`, lines
-  205–213 in both `main` and `8.5.1`, used to be flagged). `trace` nodes
+  205–213 in both `main` and `8.5.1`, used to be flagged).
+
+  `trace` nodes
   are `changed` by the same rule (where the walk reached them is their
   `in`; edges keep `changed` = not found in every ref); `get_file_outline`
   marks each symbol of each version the same way, and its own `changed`
@@ -725,7 +802,9 @@ from GitHub; its head is based on an older `main`).
 The facts cache removes extraction, not the rest: a ref costs its walk,
 resolution and above all the segment write (symbol index, content packs:
 ≈ 70% of the time in the debug build), so a second snapshot costs about
-as much as the first here (0.91–1.05×) and 0.74× on this repository. The organization layer stays
+as much as the first here (0.91–1.05×) and 0.74× on this repository.
+
+The organization layer stays
 well under the floor for every added ref; linking (a consumer ref's joint
 resolve) is its largest part. A ref adds no query cost: reading a ref
 instead of the default is the same segment selection. Collapse saves about
@@ -738,14 +817,16 @@ The demonstration showed a `trace` across repositories at a ref: from
 `Context.invoke` and `Context.with_resource` in click at `main`; with
 `ref: "7.1.2"` the first two are remapped to the tag's lines
 (`src/click/core.py` L525-532 instead of L779-786) and `with_resource`
-(added in click 8.0) is dropped. It also found two problems, open for the
-next change: an `index --org <file> <member> --ref` whose member path goes
-through a symbolic link (macOS `/tmp`) records the ref under
-`local/<dir>` instead of the origin's id, so the organization silently
-leaves it out; and `rueca index --org <file>` with nothing changed writes
-new default segments, which replaces every default entry and re-links
-every consumer ref (1.7 s of organization layer for two repositories and
-five refs).
+(added in click 8.0) is dropped.
+
+It also found two problems, open for the next change:
+
+- An `index --org <file> <member> --ref` whose member path goes through a
+  symbolic link (macOS `/tmp`) records the ref under `local/<dir>` instead
+  of the origin's id, so the organization silently leaves it out;
+- `rueca index --org <file>` with nothing changed writes new default
+  segments, which replaces every default entry and re-links every consumer
+  ref (1.7 s of organization layer for two repositories and five refs).
 
 ### 9.4 Phase 4 — implemented
 
@@ -759,36 +840,50 @@ CLI (`rueca contracts`, contract edges in `rueca links`). What was built:
 
 - **Contract hints are facts**, as RFC 0001 §6.4 planned. A pack emits a
   `ContractHint { side, kind, key, raw, span, owner, framework }` per route
-  declaration, spec operation or call site: `side` `Provides` /
-  `Consumes`, `kind` `Http` / `Rpc` / `Topic`, `key` the canonical key,
-  `raw` the text as written (≤ 200 characters, the evidence), `owner` the
-  handler, `Route` or `RpcMethod` of a provider and the enclosing
-  definition of a consumer (none: file level), `framework` a short name
-  (`flask`, `requests`, `openapi`, `proto`, `grpc-go`, …).
+  declaration, spec operation or call site:
+
+  - `side` `Provides` / `Consumes`,
+  - `kind` `Http` / `Rpc` / `Topic`,
+  - `key` the canonical key,
+  - `raw` the text as written (≤ 200 characters, the evidence),
+  - `owner` the handler, `Route` or `RpcMethod` of a provider and the
+    enclosing definition of a consumer (none: file level),
+  - `framework` a short name (`flask`, `requests`, `openapi`, `proto`,
+    `grpc-go`, …).
+
   `FileFacts.contracts` is appended last; `FACTS_FORMAT` 2 → 3 invalidates
   every facts-cache entry once, and every pack that emits hints bumped its
   extractor version.
-- **Canonical keys** (`rueca_model::contract`, pure functions). HTTP:
-  `METHOD /path`, the method upper-cased, `*` when it is unknown, not a
-  literal or not an HTTP method. The scheme, host and port of an absolute
-  URL are dropped, and so is anything before the first `/` that looks like
-  a base URL (an interpolation, or text with `.` or `:`: `${host}/api/x` →
-  `/api/x`; `f"{base}/x"` and `localhost:8080/x` → `/x`), so a client's
-  base URL never becomes a segment; the query string, fragment, empty segments and a
-  trailing `/` are dropped. Every parameter segment becomes `{}`: `:id`,
-  `{id}`, `<id>`, `<int:id>`, `[id]`, `${x}`, `%s` / `%d`, `*` / `**`,
-  a concatenation or interpolation gap, and a segment only partly a
-  parameter (`sha256:{digest}`). Literal segments stay literal (`GET
-  /users/42`), keys are case-sensitive, and a path made only of gaps has
-  no key. RPC: `pkg.Service/Method` from `.proto`; code that does not know
-  the package writes `Service/Method`, and code that knows only the method
-  writes `*/Method` (a Go unary server method taking `*pb.<Method>Request`,
-  a call through a client field typed in another file). Topic: the name.
+- **Canonical keys** (`rueca_model::contract`, pure functions).
+
+  - HTTP: `METHOD /path`, the method upper-cased, `*` when it is unknown,
+    not a literal or not an HTTP method.
+
+    The scheme, host and port of an absolute
+    URL are dropped, and so is anything before the first `/` that looks like
+    a base URL (an interpolation, or text with `.` or `:`: `${host}/api/x` →
+    `/api/x`; `f"{base}/x"` and `localhost:8080/x` → `/x`), so a client's
+    base URL never becomes a segment; the query string, fragment, empty
+    segments and a trailing `/` are dropped.
+
+    Every parameter segment becomes `{}`: `:id`,
+    `{id}`, `<id>`, `<int:id>`, `[id]`, `${x}`, `%s` / `%d`, `*` / `**`,
+    a concatenation or interpolation gap, and a segment only partly a
+    parameter (`sha256:{digest}`). Literal segments stay literal (`GET
+    /users/42`), keys are case-sensitive, and a path made only of gaps has
+    no key.
+  - RPC: `pkg.Service/Method` from `.proto`; code that does not know
+    the package writes `Service/Method`, and code that knows only the method
+    writes `*/Method` (a Go unary server method taking `*pb.<Method>Request`,
+    a call through a client field typed in another file).
+  - Topic: the name.
 - **Matching** (`match_keys`, `best_matches`, shared by the resolver, the
   linker and `list_contracts`): exact (the same key; `{}` against `{}` is
   exact) > template (a provider `{}` segment stands for a literal consumer
   segment; for RPC, a key without a package on either side) > method
-  wildcard (either HTTP method `*`, either RPC service `*`). Segment counts
+  wildcard (either HTTP method `*`, either RPC service `*`).
+
+  Segment counts
   must be equal and a consumer's `{}` never matches a provider's literal
   segment (`GET /users/{}` does not reach `GET /users/me`). Confidence 0.9 /
   0.85 / 0.7; when several distinct providers share the best quality, 0.5
@@ -814,13 +909,20 @@ CLI (`rueca contracts`, contract edges in `rueca links`). What was built:
 - **Specifications.** OpenAPI 3 and Swagger 2 operations
   (`paths.<path>.<method>`) were already `Route` nodes named `GET
   /users/{id}`; each also provides its key now (framework `openapi`).
+
   `.proto` files are a language of their own (`Language::Proto`, not a
   data file kind), read by `rueca-lang-proto` over
   `protox-parse` 0.10 — pure Rust, no `protoc`, MIT OR Apache-2.0; types
-  are not resolved and imported files are not read: `service` →
-  `Interface` `pkg.Service`, `rpc` → `RpcMethod` `pkg.Service.Method` with
-  signature `rpc Method(Req) returns (Resp)`, messages → `Struct` with
-  `Field`s, enums → `Enum` with `Constant`s, `import` → `IMPORTS`. Every
+  are not resolved and imported files are not read:
+
+  - `service` → `Interface` `pkg.Service`,
+  - `rpc` → `RpcMethod` `pkg.Service.Method` with signature
+    `rpc Method(Req) returns (Resp)`,
+  - messages → `Struct` with `Field`s,
+  - enums → `Enum` with `Constant`s,
+  - `import` → `IMPORTS`.
+
+  Every
   `rpc` provides `pkg.Service/Method` (framework `proto`).
 - **What the packs recognize**, from file-local evidence (the router,
   client or stub module the file imports or binds; prefixes composed when
@@ -840,16 +942,22 @@ CLI (`rueca contracts`, contract edges in `rueca links`). What was built:
 - **The organization linker.** `RepoDeps`, the analysis stored with each
   profile, gains `contracts: [ContractKey {side, kind, key, spec}]`, the
   distinct keys of the contract table (serde default: an older profile has
-  none). `RepoDeps::depends_on` adds `depends_on_contracts`: a repository
+  none).
+
+  `RepoDeps::depends_on` adds `depends_on_contracts`: a repository
   depends on another when one of its consumed keys matches a key the other
   provides, or one of its code-provided keys matches a spec key of the
   other (a server implementing a spec published elsewhere); a provider
   never depends on a consumer, and two servers or two specs never depend
-  on each other. A consumer's contract edges come from the contract tables
+  on each other.
+
+  A consumer's contract edges come from the contract tables
   alone (`rueca-index` `contract_link`), without the joint resolve of
   §9.2: a dependency reached only through contracts is not mounted, and
   contract edges of the joint graph are dropped there, so they are not
-  counted twice. Each row of the consumer is matched against the provider
+  counted twice.
+
+  Each row of the consumer is matched against the provider
   rows of its dependencies' default entries and of its own segment, with
   the matcher of the resolver; only edges into a dependency are kept. They
   go into the **same link set** as the package edges (`LinkEdge`,
@@ -874,12 +982,16 @@ CLI (`rueca contracts`, contract edges in `rueca links`). What was built:
   keeps its edge until the consumer's link set is recomputed.
 - **Surfaces.** `trace` follows contract link edges like any link edge
   (`edge_types: ["CALLS", "IMPLEMENTS"]`), strategy `contract`, the call
-  site as `call_site`. `list_contracts` (MCP) and `rueca contracts` (CLI,
+  site as `call_site`.
+
+  `list_contracts` (MCP) and `rueca contracts` (CLI,
   every page merged) list the contract tables of the selected repositories
   with `side` `provided` / `consumed` / `dangling`, `kind`, `query` and
   `limit`; each entry carries `matches`, its counterparts among the visible
   repositories, and a dangling entry is a consumed row with none, computed
-  per query and not stored. `rueca links --org` ends contract edges with
+  per query and not stored.
+
+  `rueca links --org` ends contract edges with
   `[contract <key>]`; its JSON adds `via` (`package` / `contract`), `key`
   (the calling row's key) and `dst_name` (the target's name, an OpenAPI
   operation's `GET /users/{id}`). `list_repositories`' `depends_on` names
@@ -971,16 +1083,20 @@ gated; RFC 0004 §5):
   "organization generation + optional ref replacement" (§4).
 - **RFC 0005 §5** — remove rank fusion across repositories; `repo` semantics
   per §6.
-- **2026-11-16 — organization suite** (§8, §9.2). The 21-instance
-  scenario (one issue per repository) is replaced by 42 gated members
-  pinned at the base commit of their first gated S1 instance, up to 3
-  issue instances each whose real-fix gold is present at the pin and whose
-  fix is not already there (120 gated; a calibration organization of 50
-  members with 29 instances, never gated), plus 16 impact instances
-  scored on the consumers of the changed library symbols; BM25 over the
-  union of the members joins as the floor arm; every rate carries a Wilson
-  interval and every paired comparison its discordance and minimum
-  detectable effect (RFC 0004 §7.6). Cross-repository edges grow to 12
+- **2026-11-16 — organization suite** (§8, §9.2).
+
+  - The 21-instance scenario (one issue per repository) is replaced by 42
+    gated members pinned at the base commit of their first gated S1
+    instance, up to 3 issue instances each whose real-fix gold is present
+    at the pin and whose fix is not already there (120 gated; a calibration
+    organization of 50 members with 29 instances, never gated), plus 16
+    impact instances scored on the consumers of the changed library
+    symbols;
+  - BM25 over the union of the members joins as the floor arm;
+  - every rate carries a Wilson interval and every paired comparison its
+    discordance and minimum detectable effect (RFC 0004 §7.6).
+
+  Cross-repository edges grow to 12
   labelled pairs (Rust included) and are reported over all pairs, without
   Rust and Rust alone. The earlier 21-instance numbers are another
   population and are no longer carried.

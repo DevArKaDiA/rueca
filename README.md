@@ -264,7 +264,9 @@ rueca mcp --org rueca-org.toml                    # serve the organization (buil
 In an organization, `repo` omitted means every repository and `repo: "…"`
 narrows the same ranking; the query also ranks the repositories (names,
 packages, README, central symbols, where its words occur) and weighs each
-repository's results by that relevance. Repositories that import a package
+repository's results by that relevance.
+
+Repositories that import a package
 another one publishes (npm, PyPI, Go modules, Composer, Maven / Gradle,
 C / C++ headers, Cargo) are linked: imports, calls, inheritance and references
 across repositories, resolved with the publishing repository's own module
@@ -272,7 +274,9 @@ model, which `trace` follows. So are a client's HTTP calls and gRPC stub
 calls and the routes, OpenAPI operations or `.proto` RPC methods another
 repository provides, matched by canonical key (`GET /users/{}`,
 `pkg.Service/Method`); `rueca contracts` lists them and the calls nothing
-provides. A ref of one repository (`repo: A, ref:
+provides.
+
+A ref of one repository (`repo: A, ref:
 "pr/7"`) is the organization with A replaced by A at that ref; `ref`
 alone reads every repository that has it (a release branch across
 repositories) and the others at their default, and the cross-repository
@@ -307,11 +311,17 @@ rueca index --embed               # or: RUECA_EMBED=1 rueca index
 ```
 
 Precedence is argument > environment > `[retrieval]` in
-`<store>/rueca.toml`: `--no-embed` overrides `RUECA_EMBED=1`; `RUECA_EMBED`
-= `0`, empty, `false` or `off` leaves it off; `RUECA_EMBED=<preset>` or
-`--embed=<preset>` picks another preset; the file chooses the preset and
-fusion parameters but never turns embedding on by itself. Missing weights
+`<store>/rueca.toml`:
+
+- `--no-embed` overrides `RUECA_EMBED=1`;
+- `RUECA_EMBED` = `0`, empty, `false` or `off` leaves it off;
+- `RUECA_EMBED=<preset>` or `--embed=<preset>` picks another preset;
+- The file chooses the preset and fusion parameters but never turns
+  embedding on by itself.
+
+Missing weights
 are an error naming `rueca models pull` (indexing never downloads).
+
 Queries need nothing: a snapshot indexed with vectors is searched in
 `hybrid` mode automatically, falls back to lexical (and says so in the
 answer's `retrieval`) when its model cannot load, and `mode` (`lexical`,
@@ -447,23 +457,34 @@ working tree ──walk──▶ files ──tree-sitter──▶ facts ──re
    references (including env var and config key reads), and imports. Local
    scopes come from adapted `locals.scm` queries. Facts are cached by git
    blob SHA.
-2. **Resolve** — references are linked across files through imports
-   (TS/JS module resolution by [`oxc_resolver`](https://github.com/oxc-project/oxc-resolver),
-   including `tsconfig` paths and workspace packages; PHP names through
-   `namespace` / `use` and Composer autoload; Go import paths through
-   `go.mod`; Java packages and imports through Maven / Gradle source roots; C/C++
-   `#include` through `compile_commands.json` include directories; Rust
-   `mod` / `use` through the Cargo workspace model; shell `source` paths; C# `using`s through
-   namespaces, wherever their files are; Kotlin imports through
-   packages, wherever their files are, shared with Java; Ruby constants through
-   the lexical nesting and the ancestors, `require` through `lib/` load paths;
-   SQL names over a global namespace, by migration order and nearest directory;
-   Swift imports through SwiftPM targets),
-   re-export chains, `self`/`this` with base classes and traits,
-   receiver types the file declares or constructs (every code language:
-   `c: Context`, `const app = new Hono()`, `x = Session()`), declarations to
-   bodies (C/C++), overloads by argument count and type, package and
-   same-module scope (implicit `this` in Java), each with a confidence.
+2. **Resolve** — references are linked across files through
+
+   - imports:
+     - TS/JS module resolution by [`oxc_resolver`](https://github.com/oxc-project/oxc-resolver),
+       including `tsconfig` paths and workspace packages;
+     - PHP names through `namespace` / `use` and Composer autoload;
+     - Go import paths through `go.mod`;
+     - Java packages and imports through Maven / Gradle source roots;
+     - C/C++ `#include` through `compile_commands.json` include directories;
+     - Rust `mod` / `use` through the Cargo workspace model;
+     - shell `source` paths;
+     - C# `using`s through namespaces, wherever their files are;
+     - Kotlin imports through packages, wherever their files are, shared
+       with Java;
+     - Ruby constants through the lexical nesting and the ancestors,
+       `require` through `lib/` load paths;
+     - SQL names over a global namespace, by migration order and nearest
+       directory;
+     - Swift imports through SwiftPM targets,
+   - re-export chains,
+   - `self`/`this` with base classes and traits,
+   - receiver types the file declares or constructs (every code language:
+     `c: Context`, `const app = new Hono()`, `x = Session()`),
+   - declarations to bodies (C/C++),
+   - overloads by argument count and type,
+   - package and same-module scope (implicit `this` in Java),
+
+   each with a confidence.
 3. **Store** — the graph is written as one immutable segment file: CSR
    adjacency, an embedded [tantivy](https://github.com/quickwit-oss/tantivy)
    symbol index with code-aware tokenization, and a trigram index over
@@ -491,14 +512,22 @@ Design documents:
 ## Benchmark
 
 Every language is measured against the absolute floors of
-[RFC 0004](docs/rfcs/0004-quality-and-benchmark.md) — issue localization
-(SWE-bench family, ≥ 30 issues per language), callers / callees over every
-function of two or more SCIP / PHPStan gold repositories per language, own
-hand-labelled micro-benchmarks, parse-error rate (vendored, copied and
-misdetected files left out; the raw rate is published next to it), latency,
-and configuration key recall and env-var bridge — with 95% intervals;
+[RFC 0004](docs/rfcs/0004-quality-and-benchmark.md):
+
+- issue localization (SWE-bench family, ≥ 30 issues per language),
+- callers / callees over every function of two or more SCIP / PHPStan gold
+  repositories per language,
+- own hand-labelled micro-benchmarks,
+- parse-error rate (vendored, copied and misdetected files left out; the
+  raw rate is published next to it),
+- latency,
+- configuration key recall and env-var bridge,
+
+with 95% intervals;
 [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
-v0.12.0 and a BM25 baseline are published alongside as reference. Current
+v0.12.0 and a BM25 baseline are published alongside as reference.
+
+Current
 scorecard (`stable` = every floor met; full tables in
 [docs/bench/alpha-results.md](docs/bench/alpha-results.md), method in
 [bench/README.md](bench/README.md)):
@@ -524,14 +553,18 @@ measured on what an agent reads, same queries as codebase-memory-mcp;
 target ≤ 50% of cbm): with the RFC 0005 responses, `search_symbols` costs
 0.33–0.89× cbm's tokens until the first gold hit (target met for Python,
 TS/JS, PHP and Java) and `trace` 0.48–1.74× cbm's tokens per true call
-edge (target met for Rust only; Rueca also returns more true edges). In an
+edge (target met for Rust only; Rueca also returns more true edges).
+
+In an
 organization of 42 pinned repositories (120 gated issues), one ranking
 over the organization index weighed by repository routing keeps the right
 repository's file in the top 5 for 56.7% of the issues vs 66.7% when
 asking that repository alone (0.85×, at the floor with its interval
 crossing it; per-repository rank fusion gives 24.2%; BM25 over the union
 of the repositories 52.5%); it does not yet surface the consumers of a
-changed library symbol (12.5% vs 37.5% for BM25). Cross-repository edges
+changed library symbol (12.5% vs 37.5% for BM25).
+
+Cross-repository edges
 on 12 labelled consumer–library pairs have 99.4% precision and 94.7%
 recall (100.0 / 96.2 without the Rust pairs, 98.3 / 93.1 Rust alone);
 re-indexing one repository of 42 updates the organization layer in 0.5 s,
