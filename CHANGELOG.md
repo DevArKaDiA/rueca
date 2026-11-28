@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0-alpha.2](https://github.com/DevArKaDiA/rueca/compare/v0.2.0-alpha.1...v0.2.0-alpha.2) - 2026-11-28
+
+### Other
+
+- polish docs and RFC formatting ahead of the first public post ([#95](https://github.com/DevArKaDiA/rueca/pull/95))
+- *(readme)* polish README formatting ahead of the first public post ([#93](https://github.com/DevArKaDiA/rueca/pull/93))
+
 ## [0.2.0-alpha.1](https://github.com/DevArKaDiA/rueca/compare/v0.1.0-alpha.2...v0.2.0-alpha.1) - 2026-11-26
 
 ### Added
